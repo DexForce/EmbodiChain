@@ -277,8 +277,8 @@ not orchestrate multiple experiments or qualify kinematic playback.
 `EmbodiedEnv` can record per-object kinematic trajectories and replay them later.
 
 - **Recording**: set `cfg.record_trajectory = True`. `env.observation_manager.history` is an
-  optional observation-manager history that consumes canonical field values
-  and owns row-local cursors. Standard state fields use observation functors; the host
+  optional view over raw fields in the host's shared rollout storage. Policy
+  and raw cursors keep their accepted-versus-diagnostic semantics. Standard state fields use observation functors; the host
   does not perform a separate physics read in its write hook. Full robot state,
   articulations and selected rigid objects retain their existing action schema.
   `cfg.trajectory_uids` restricts non-robot replay fields. Raw channels, T+1
@@ -303,7 +303,9 @@ not orchestrate multiple experiments or qualify kinematic playback.
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than
   being used as a substitute for physical state. Learner-owned rollout storage
-  keeps its own cursor and layout.
+  keeps its own cursor and layout. Internally allocated expert policy observations
+  include the terminal T+1 slot in the backing store; the public T-transition
+  view and existing dataset action/annotation alignment stay compatible.
 - **Fixed action layout**: an ActionManager-backed trajectory uses the batched
   policy action space; a controller/expert trajectory uses the private
   `ExpertActionSpec` layout. One trajectory cannot mix these schemas.

@@ -33,12 +33,12 @@ from embodichain.lab.gym.envs.managers.observation_manager import ObservationMan
 from types import SimpleNamespace
 
 
-def _recording():
+def _recording(storage=None):
     context = EpisodeContext(2)
     context._begin_episode([0, 1])
     context._finish_initialization([0, 1])
     recording = ObservationManager({}, SimpleNamespace(episode_context=context))
-    recording.enable_history(fields={}, actions=torch.zeros(2, 2, 1))
+    recording.enable_history(fields={}, actions=torch.zeros(2, 2, 1), storage=storage)
     return context, recording
 
 
@@ -356,3 +356,79 @@ def test_temporal_buffer_accepts_values_without_observation_descriptors():
     result = history.read([0], fields=["field:17"], episode_ids=[0])
     assert result.values["field:17"].item() == 4.0
     assert result.valid["field:17"].tolist() == [True]
+
+
+def test_raw_history_is_a_view_of_host_rollout_storage():
+    from tensordict import TensorDict
+
+    storage = TensorDict({}, batch_size=[2], device="cpu")
+    context, manager = _recording(storage)
+    manager.seed_history(_frame(context, 4), [0, 1])
+    manager.append_history(_frame(context, 7, revision=1), torch.ones(2, 1))
+    snapshot = manager.read_history([1, 1], fields=["measurement"], episode_ids=[0, 0])
+    torch.testing.assert_close(
+        storage["raw_obs", "measurement"][:, 1], snapshot.values["measurement"]
+    )
+    assert storage["raw_steps"].data_ptr() == manager.history.steps.data_ptr()
+    assert storage["raw_actions"].data_ptr() == manager.history.actions.data_ptr()
+    storage["raw_obs", "measurement"][:, 1] = 9.0
+    assert manager.read_history(
+        [1, 1], fields=["measurement"], episode_ids=[0, 0]
+    ).values["measurement"].flatten().tolist() == [9.0, 9.0]
+    assert snapshot.values["measurement"].flatten().tolist() == [7.0, 7.0]
+
+
+@pytest.mark.parametrize("training_device", ["cpu", "meta"])
+def test_training_window_reuse_preserves_episode_observation_history(training_device):
+    from tensordict import TensorDict
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    storage = TensorDict(
+        {"policy": TensorDict({"obs": torch.zeros(2, 4, 1)}, batch_size=[2, 4])},
+        batch_size=[2],
+    )
+    context, manager = _recording(storage)
+    manager.seed_history(_frame(context, 1), [0, 1])
+    manager.append_history(_frame(context, 5, revision=1), torch.ones(2, 1))
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        _rollout_storage=storage,
+        _expert_obs_buffer=storage["policy", "obs"],
+        rollout_steps=torch.ones(2, dtype=torch.long),
+    )
+    env._infer_rollout_buffer_mode = (
+        lambda value: EmbodiedEnv._infer_rollout_buffer_mode(env, value)
+    )
+    window = TensorDict(
+        {
+            name: torch.zeros(2, 2, 1, device=training_device)
+            for name in (
+                "obs",
+                "action",
+                "reward",
+                "done",
+                "value",
+                "terminated",
+                "truncated",
+            )
+        },
+        batch_size=[2, 2],
+        device=training_device,
+    )
+    EmbodiedEnv.set_rollout_buffer(env, window)
+    assert env._rollout_buffer_mode == "rl"
+    assert env._max_rollout_steps == 1
+    assert "policy" not in storage.keys()
+    assert env._expert_obs_buffer is None
+    assert storage["training"].device == torch.device(training_device)
+    if training_device == "cpu":
+        window.zero_()
+        storage["training", "obs"][0, 0] = 3.0
+        assert window["obs"][0, 0].item() == 3.0
+    else:
+        assert storage["training", "obs"] is window["obs"]
+    assert manager.history.steps.tolist() == [1, 1]
+    assert manager.read_history(
+        [1, 1], fields=["measurement"], episode_ids=[0, 0]
+    ).values["measurement"].flatten().tolist() == [5.0, 5.0]

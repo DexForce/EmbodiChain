@@ -111,8 +111,9 @@ another `SceneEntityCfg` during each step. Explicit boundaries
 share its original acquisition across aliases and existing pose functors.
 Policy transformations receive separate tensors; zero-filled missing sources
 retain false validity and reasons. Preserve configured policy functor/RNG order.
-Optional `ObservationManager.history` stores only numeric values, validity,
-reasons and temporal row identities. It never binds semantic aliases or
+Optional `ObservationManager.history` is a view of the host's shared rollout
+TensorDict: raw values, validity, clocks, errors and cursors live in that storage.
+It has no separate dense cache. It never binds semantic aliases or
 interprets UID/quantity/pose descriptors. Evidence adapters resolve fields from
 `manager.schema` and query `read_history`; schema and alias drift are rejected
 by the manager. `export_observation_history` in `utils/trajectory_state.py`

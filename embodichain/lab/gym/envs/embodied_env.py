@@ -524,6 +524,9 @@ class EmbodiedEnv(BaseEnv):
                 self.cfg.init_rollout_buffer = True
                 self._record_raw_actions |= self.dataset_manager.requires_raw_actions
 
+            # One storage owner; policy, raw-state and training windows are views.
+            self._rollout_storage = TensorDict({}, batch_size=[self.num_envs])
+            self._expert_obs_buffer: TensorDict | None = None
             self.rollout_buffer: TensorDict | None = None
             self._max_rollout_steps = 0
             self._rollout_buffer_mode: str | None = None
@@ -534,14 +537,17 @@ class EmbodiedEnv(BaseEnv):
                     if self._record_raw_actions
                     else self._expert_action_space
                 )
-                self.rollout_buffer = init_rollout_buffer_from_gym_space(
+                policy_storage = init_rollout_buffer_from_gym_space(
                     obs_space=self.observation_space,
                     action_space=rollout_action_space,
-                    max_episode_steps=self.max_episode_steps,
+                    max_episode_steps=self.max_episode_steps + 1,
                     num_envs=self.num_envs,
                     device=self.device,
                 )
-                self._max_rollout_steps = self.rollout_buffer.shape[1]
+                self._rollout_storage["policy"] = policy_storage
+                self._expert_obs_buffer = policy_storage["obs"]
+                self.rollout_buffer = policy_storage[:, : self.max_episode_steps]
+                self._max_rollout_steps = self.max_episode_steps
                 self._rollout_buffer_mode = "expert"
                 self._rollout_action_semantics = (
                     "policy_request"
@@ -571,6 +577,7 @@ class EmbodiedEnv(BaseEnv):
                     uids=self.cfg.trajectory_uids,
                     action_space=self._trajectory_action_space(),
                 )
+                self._rollout_storage["trajectory"] = self._traj_buffer
                 fields = {
                     "/".join(path): values
                     for path, values in self._traj_buffer["states"].items(
@@ -580,6 +587,7 @@ class EmbodiedEnv(BaseEnv):
                 self.observation_manager.enable_history(
                     fields=fields,
                     actions=self._traj_buffer["actions"][:, : self.max_episode_steps],
+                    storage=self._rollout_storage,
                 )
                 # Private aliases preserve existing replay/persistence adapters;
                 # acquisition, cursors and lifetime belong to the recorder.
@@ -588,6 +596,7 @@ class EmbodiedEnv(BaseEnv):
             self.rollout_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
             )
+            self._rollout_storage["policy_steps"] = self.rollout_steps
             self._demo_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
             )
@@ -739,19 +748,20 @@ class EmbodiedEnv(BaseEnv):
             or env_ids.numel() == 0
         ):
             return
-        eligible = self.rollout_steps[env_ids] < self._max_rollout_steps
+        target = getattr(self, "_expert_obs_buffer", None)
+        if target is None:
+            target = self.rollout_buffer["obs"]
+        eligible = self.rollout_steps[env_ids] < target.shape[1]
         env_ids = env_ids[eligible]
         if env_ids.numel() == 0:
             return
         step_ids = self.rollout_steps[env_ids]
-        buffer_device = self.rollout_buffer.device
+        buffer_device = target.device
         buffer_env_ids = env_ids.to(buffer_device)
         buffer_step_ids = step_ids.to(buffer_device)
         obs_device = getattr(obs, "device", None) or self.device
         obs_env_ids = env_ids.to(obs_device)
-        self.rollout_buffer["obs"][buffer_env_ids, buffer_step_ids] = obs[
-            obs_env_ids
-        ].to(buffer_device)
+        target[buffer_env_ids, buffer_step_ids] = obs[obs_env_ids].to(buffer_device)
 
     def _record_initial_observation(
         self, frame: ObservationFrame, env_ids: torch.Tensor
@@ -759,6 +769,23 @@ class EmbodiedEnv(BaseEnv):
         manager = getattr(self, "observation_manager", None)
         if manager is not None and manager.history is not None:
             manager.seed_history(frame, env_ids)
+            storage = getattr(self, "_rollout_storage", None)
+            if (
+                storage is not None
+                and "policy" in storage.keys()
+                and self._rollout_buffer_mode == "expert"
+            ):
+                policy = storage["policy"]
+                if policy.shape[1] == manager.history.capacity + 1:
+                    for key in (
+                        "raw_obs",
+                        "raw_valid",
+                        "raw_revision",
+                        "raw_timestamp",
+                    ):
+                        policy[key] = storage[key]
+                    # Existing consumers retain their transition-length view.
+                    self.rollout_buffer = policy[:, : self._max_rollout_steps]
 
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
@@ -803,6 +830,18 @@ class EmbodiedEnv(BaseEnv):
                     f"Invalid rollout buffer shape: {rollout_buffer.shape}. The expected shape is (num_envs, max_episode_steps) for each key."
                 )
             self._max_rollout_steps = self.rollout_buffer.shape[1]
+        storage = getattr(self, "_rollout_storage", None)
+        if storage is not None:
+            if self._rollout_buffer_mode == "rl":
+                storage["training"] = rollout_buffer
+                if "policy" in storage.keys():
+                    del storage["policy"]
+                self._expert_obs_buffer = None
+            else:
+                storage["policy"] = rollout_buffer
+                self._expert_obs_buffer = rollout_buffer["obs"]
+                if "training" in storage.keys():
+                    del storage["training"]
         self.rollout_steps.zero_()
         self.current_rollout_step = 0
         if self._rollout_buffer_mode != "rl":
@@ -2128,8 +2167,7 @@ class EmbodiedEnv(BaseEnv):
             )
 
         self.rollout_steps[env_ids] += 1
-        next_env_ids = env_ids[self.rollout_steps[env_ids] < self._max_rollout_steps]
-        self._seed_expert_observations(obs, next_env_ids)
+        self._seed_expert_observations(obs, env_ids)
         self.current_rollout_step = int(self.rollout_steps.max().item())
 
     def _write_trajectory_step(

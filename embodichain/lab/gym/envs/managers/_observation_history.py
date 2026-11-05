@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
+from tensordict import TensorDict, TensorDictBase
 
 from .observation_types import ObservationHistorySnapshot
 
@@ -56,14 +57,17 @@ class _Channel:
 
 
 class _ObservationHistory:
-    """Own raw state frames, transition actions and row-local recording cursors.
+    """Access raw observation history in the host's shared rollout storage.
 
     Args:
         episode_context: Exact host lifecycle owner, shared with consumers.
         fields: Optional preallocated fields with shape ``(B, T+1, ...)``.
             The recorder takes ownership; supplied buffers must not be reused.
         actions: Owned action buffer with shape ``(B, T, ...)``. Action semantics
-            remain a host contract; this component does not reinterpret them.
+            remain a host contract; this view does not reinterpret them.
+        storage: Shared TensorDict with an environment-only batch axis. Raw
+            values, validity, clocks, errors and counters are attached here;
+            the view owns no independent dense history allocation.
 
     Only seed/append advance history. A query copies recorded values without
     touching simulation objects. Legacy trajectory exports may project the same
@@ -76,6 +80,7 @@ class _ObservationHistory:
         episode_context: EpisodeContext,
         fields: Mapping[str, torch.Tensor],
         actions: torch.Tensor,
+        storage: TensorDictBase | None = None,
     ) -> None:
         if not isinstance(actions, torch.Tensor) or actions.ndim < 2:
             raise ValueError(
@@ -84,26 +89,55 @@ class _ObservationHistory:
         if len(episode_context.episode_ids) != actions.shape[0]:
             raise ValueError("Recording rows must match the episode lifecycle owner.")
         self._context = episode_context
+        if storage is None:
+            storage = TensorDict(
+                {}, batch_size=[actions.shape[0]], device=actions.device
+            )
+        if tuple(storage.batch_size) != (actions.shape[0],) or storage.device not in (
+            None,
+            actions.device,
+        ):
+            raise ValueError(
+                "Shared rollout storage must have the environment batch axis and recording device."
+            )
+        if "raw_obs" in storage.keys():
+            raise ValueError("Shared rollout storage already has raw observations.")
+        self.storage = storage
         self._buffers = dict(fields)
         self._channels: dict[str, _Channel] = {}
         self._layout: tuple[_Channel, ...] | None = None
-        self.actions = actions
         self.capacity = actions.shape[1]
         self.num_envs = actions.shape[0]
-        self.steps = torch.zeros(self.num_envs, dtype=torch.long, device=actions.device)
+        storage["raw_actions"] = actions
+        storage["raw_obs"] = TensorDict(
+            dict(fields),
+            batch_size=[self.num_envs, self.capacity + 1],
+            device=actions.device,
+        )
+        storage["raw_valid"] = TensorDict(
+            {}, batch_size=[self.num_envs, self.capacity + 1], device=actions.device
+        )
+        storage["raw_steps"] = torch.zeros(
+            self.num_envs, dtype=torch.long, device=actions.device
+        )
+        self.actions = storage["raw_actions"]
+        self.steps = storage["raw_steps"]
         self._episodes = (-1,) * self.num_envs
-        self._revisions = torch.full(
+        storage["raw_revision"] = torch.full(
             (self.num_envs, self.capacity + 1),
             -1,
             dtype=torch.long,
             device=actions.device,
         )
-        self._timestamps = torch.full(
+        storage["raw_timestamp"] = torch.full(
             (self.num_envs, self.capacity + 1),
             float("nan"),
             dtype=torch.float64,
             device=actions.device,
         )
+        self._revisions = storage["raw_revision"]
+        self._timestamps = storage["raw_timestamp"]
+        storage.set_non_tensor("raw_acquisition_errors", {})
         self._closed = False
         self._latest_revision = -1
         for values in self._buffers.values():
@@ -177,14 +211,19 @@ class _ObservationHistory:
                 or storage.dtype != values.dtype
             ):
                 raise ValueError(f"History values differ from storage for {name!r}.")
+            self.storage["raw_obs"][name] = storage
+            self.storage["raw_valid"][name] = torch.zeros(
+                (self.num_envs, self.capacity + 1),
+                dtype=torch.bool,
+                device=self.actions.device,
+            )
+            errors = self.storage.get_non_tensor("raw_acquisition_errors")
+            errors[name] = {}
             self._channels[name] = _Channel(
                 name,
-                storage,
-                torch.zeros(
-                    (self.num_envs, self.capacity + 1),
-                    dtype=torch.bool,
-                    device=self.actions.device,
-                ),
+                self.storage["raw_obs"][name],
+                self.storage["raw_valid"][name],
+                errors[name],
             )
         self._layout = tuple(self._channels.values())
         self._buffers.clear()

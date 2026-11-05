@@ -28,6 +28,7 @@ import torch
 from collections.abc import Sequence, Mapping
 from copy import deepcopy
 from prettytable import PrettyTable
+from tensordict import TensorDictBase
 from typing import TYPE_CHECKING, Union, Any
 
 from embodichain.utils import logger
@@ -197,18 +198,27 @@ class ObservationManager(ManagerBase):
         return frame
 
     def enable_history(
-        self, *, fields: Mapping[str, torch.Tensor], actions: torch.Tensor
+        self,
+        *,
+        fields: Mapping[str, torch.Tensor],
+        actions: torch.Tensor,
+        storage: TensorDictBase | None = None,
     ) -> None:
         """Attach optional temporal storage to this observation manager.
 
         Args:
             fields: Owned preallocated state buffers with T+1 slots.
             actions: Owned transition buffer with T slots.
+            storage: Host rollout storage; history exposes its raw observation
+                fields rather than allocating a separate cache.
         """
         if self.history is not None:
             raise RuntimeError("Observation history is already enabled.")
         self.history = _ObservationHistory(
-            episode_context=self._env.episode_context, fields=fields, actions=actions
+            episode_context=self._env.episode_context,
+            fields=fields,
+            actions=actions,
+            storage=storage,
         )
 
     def snapshot_history(

@@ -1680,8 +1680,11 @@ embodichain.lab.gym.envs.managers.observation_types
 
 The observation manager owns source acquisition and the single raw-field schema.
 Policy views receive separate tensors before in-place normalization/noise;
-ordinary queries do not advance history. Raw history uses canonical field IDs,
-with no second semantic schema or entity-specific reader. Contact histories
+ordinary queries do not advance history. Raw history uses canonical field IDs in shared rollout storage,
+with no second dense cache, semantic schema or entity-specific reader. Internal
+expert policy observations keep T+1 states; the public rollout remains a
+compatible T-transition view and also exposes raw views when enabled. Learner
+windows retain their own horizon/device, and reuse does not erase episode data. Contact histories
 retain their sensor physics clocks and complete-window contracts.
 
 .. currentmodule:: embodichain.lab.gym.envs.managers.observation_types

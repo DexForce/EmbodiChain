@@ -1976,3 +1976,81 @@ def test_close_incomplete_execution_cleans_runtime_before_sim_without_stepping()
     EmbodiedEnv.close(env, exit_process=False)
     assert order == ["discard", "finalize", "runtime", "report", "destroy"]
     assert env._active_task_program_bridge.is_complete is False
+
+
+def test_expert_rollout_keeps_terminal_observation_in_shared_backing_storage():
+    env = _RolloutWriterStub()
+    full = _make_rollout_buffer(2, 6)
+    env._rollout_storage = TensorDict({"policy": full}, batch_size=[2])
+    env._expert_obs_buffer = full["obs"]
+    env.rollout_buffer = full[:, :5]
+    env.rollout_steps[:] = 4
+    final = TensorDict(
+        {"state": torch.tensor([[7.0, 8.0], [9.0, 10.0]])}, batch_size=[2]
+    )
+    EmbodiedEnv._write_episode_rollout_step(
+        env,
+        obs=final,
+        action=torch.ones(2, 2),
+        rewards=torch.ones(2),
+        terminateds=torch.ones(2, dtype=torch.bool),
+        truncateds=torch.zeros(2, dtype=torch.bool),
+    )
+    assert env.rollout_steps.tolist() == [5, 5]
+    assert env.rollout_buffer.shape == (2, 5)
+    torch.testing.assert_close(full["obs", "state"][:, 5], final["state"])
+    assert env.rollout_buffer["valid"][:, 4].all()
+    assert not full["valid"][:, 5].any()
+    assert (
+        env.rollout_buffer["obs", "state"].untyped_storage().data_ptr()
+        == full["obs", "state"].untyped_storage().data_ptr()
+    )
+
+
+def test_expert_rollout_exposes_raw_observation_views_from_the_same_store():
+    from embodichain.lab.gym.envs.managers import ObservationManager
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationDescriptor,
+        ObservationSample,
+        ObservationFrame,
+    )
+
+    env = _RolloutWriterStub()
+    env.episode_context._begin_episode([0, 1])
+    env.episode_context._finish_initialization([0, 1])
+    full = _make_rollout_buffer(2, 6)
+    env._rollout_storage = TensorDict({"policy": full}, batch_size=[2])
+    env._expert_obs_buffer = full["obs"]
+    env.rollout_buffer = full[:, :5]
+    env._rollout_buffer_mode = "expert"
+    env.observation_manager = ObservationManager({}, env)
+    env.observation_manager.enable_history(
+        fields={}, actions=torch.zeros(2, 5, 2), storage=env._rollout_storage
+    )
+    descriptor = ObservationDescriptor(
+        "probe", "value", "sensor", "scalar", ("unit",), (1,), torch.float32
+    )
+    frame = ObservationFrame(
+        None,
+        {
+            "probe": ObservationSample(
+                descriptor,
+                torch.tensor([[4.0], [5.0]]),
+                torch.ones(2, dtype=torch.bool),
+                (None, None),
+            )
+        },
+        env.episode_context.episode_ids,
+        0,
+        episode_owner=env.episode_context,
+    )
+    EmbodiedEnv._record_initial_observation(env, frame, torch.tensor([0, 1]))
+    assert env.rollout_buffer.shape == (2, 5)
+    assert (
+        env.rollout_buffer["raw_obs", "probe"].untyped_storage().data_ptr()
+        == env._rollout_storage["raw_obs", "probe"].untyped_storage().data_ptr()
+    )
+    torch.testing.assert_close(
+        env.rollout_buffer["raw_obs", "probe"][:, 0], frame.fields["probe"].values
+    )
+    assert env.rollout_buffer["raw_valid", "probe"][:, 0].all()

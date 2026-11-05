@@ -109,6 +109,14 @@ resolution and optional numeric history. Standard replay fields are declared by
 buffers, without interpreting source functions or maintaining another schema.
 See [manager functors](../manager-functor/manager-functor.md#raw-observations-and-consumer-views).
 
+The host's `_rollout_storage` is the common TensorDict owner. Its leading batch
+axis is environment-only so policy state slots, trajectory state slots and
+learner windows can retain their own time axes and devices without implicit
+copies. Internal expert policy storage keeps T+1 observations; the public
+`rollout_buffer` remains its T-transition view. With trajectory recording, that
+view also exposes raw observation/validity/time views from the same storage.
+`_traj_buffer` and observation history reference the shared raw tensors.
+
 An explicit observation boundary follows physics and interval events, before
 reward/action-postprocessing hooks and autoreset. Reset seeds S0 after
 `episode_prepare`; T transitions retain T+1 raw states, including terminal ST.
@@ -119,7 +127,7 @@ history rows for a diagnostic settling tail.
 
 Historical consumers bind fields using `observation_manager.schema`, then use
 `read_history` with exact row-local frame indices and episode IDs. The private
-history buffer stores field IDs and tensors only; it checks actual episode
+history view accesses shared rollout fields by ID; it checks actual episode
 ownership, initialized rows and lifetime before/after copying. It never queries
 live state or substitutes a previous frame. Results own values, validity,
 reasons and temporal identities, without another descriptor model.
@@ -128,7 +136,11 @@ reasons and temporal identities, without another descriptor model.
 snapshot. Legacy trajectory state views and raw history share that snapshot's
 storage. The default snapshot is CPU; file export can retain its device for
 existing replay compatibility. `_traj_buffer`/`_traj_steps` remain projection
-aliases for existing persistence/replay adapters.
+aliases for existing persistence/replay adapters. Attaching/reusing an external
+RL rollout never truncates or clears episode history. Policy acceptance and raw
+diagnostic recording retain separate named cursors/masks in the same owner;
+normalization, noise, projection and different lifetimes prevent arbitrary
+aliasing of raw values with transformed policy values.
 
 ## Lifecycle and boundaries
 
