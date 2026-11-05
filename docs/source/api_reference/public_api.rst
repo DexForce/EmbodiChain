@@ -1529,6 +1529,7 @@ embodichain.lab.gym.envs.managers.actions
    JointPositionToLimitsAction
    JointVelocityAction
    ParallelGripperAction
+   RelativeEefDlsAction
    RelativeEefPoseAction
    RelativeJointPositionAction
 
@@ -1542,6 +1543,24 @@ embodichain.lab.gym.envs.managers.action_types
    ActionDescriptor
    ActionTermDescriptor
    ActionTrace
+
+embodichain.lab.gym.envs.managers.observation_manager
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observation_manager
+
+.. autosummary::
+
+   ObservationManager
+
+embodichain.lab.gym.envs.managers.reward_manager
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.reward_manager
+
+.. autosummary::
+
+   RewardManager
 
 embodichain.lab.gym.envs.objectives
 ----------------------------------

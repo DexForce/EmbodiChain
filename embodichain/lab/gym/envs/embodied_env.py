@@ -2473,6 +2473,10 @@ class EmbodiedEnv(BaseEnv):
         """
 
         if isinstance(action, ControllerAction):
+            if getattr(self, "_step_uses_action_manager", False):
+                self.action_manager.apply_action()
+                self._last_action_trace = self.action_manager.action_trace()
+                return action.value
             return EmbodiedEnv._apply_controller_action(self, action.value)
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -2480,6 +2484,33 @@ class EmbodiedEnv(BaseEnv):
             self._last_action_trace = action_manager.action_trace()
             return action
         return EmbodiedEnv._apply_controller_action(self, action)
+
+    def _advance_physics(self) -> None:
+        """Connect manager callbacks to physics and sensor sampling."""
+        manager = getattr(self, "action_manager", None)
+        if not getattr(self, "_step_uses_action_manager", False) or manager is None:
+            return super()._advance_physics()
+        refresh_actions = manager.get_substep_callback(self.cfg.sim_steps_per_control)
+        if refresh_actions is None:
+            return super()._advance_physics()
+
+        sensors = [
+            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+        ]
+        for sensor in sensors:
+            sensor.begin_control_step()
+
+        def observe_substep(dt: float) -> None:
+            for sensor in sensors:
+                sensor.update_physics_step(dt)
+            refresh_actions(dt)
+
+        self.sim.update(
+            self.physics_dt,
+            self.cfg.sim_steps_per_control,
+            after_substep=observe_substep,
+            render_final_step=False,
+        )
 
     @property
     def last_action_trace(self) -> ActionTrace | None:
@@ -2618,6 +2649,17 @@ class EmbodiedEnv(BaseEnv):
         self._last_action_manager_qpos = None
         self._last_action_trace = None
         is_controller_action = isinstance(action, ControllerAction)
+        expert_cfg = getattr(getattr(self, "cfg", None), "expert_trajectory", None)
+        managed_expert = is_controller_action and bool(
+            getattr(expert_cfg, "use_action_manager", False)
+        )
+        if managed_expert and self.action_manager is None:
+            raise ValueError(
+                "ActionManager expert execution requires configured action terms."
+            )
+        self._step_uses_action_manager = self.action_manager is not None and (
+            not is_controller_action or managed_expert
+        )
         controller_metadata = action.metadata if is_controller_action else None
         policy_trajectory = self._traj_buffer is not None and (
             getattr(self, "_trajectory_action_kind", None) == "policy"
@@ -2653,7 +2695,9 @@ class EmbodiedEnv(BaseEnv):
             if retain_raw_action
             else action
         )
-        if self.action_manager is not None and not is_controller_action:
+        if self.action_manager is not None and (
+            not is_controller_action or managed_expert
+        ):
             if policy_recording:
                 explicit_policy = getattr(self, "_explicit_policy_rollout", False)
                 if explicit_policy:
@@ -2664,7 +2708,16 @@ class EmbodiedEnv(BaseEnv):
                     raise RuntimeError(
                         "Policy action recording requires an initialized DatasetManager."
                     )
-            self.action_manager.process_action(action)
+            if managed_expert:
+                action = self._prepare_controller_action(action)
+                if getattr(self, "_demo_no_auto_reset", False):
+                    action = self._mask_controller_demo_action(action)
+                qpos = action if isinstance(action, torch.Tensor) else action["qpos"]
+                full_targets = self.robot.get_qpos().clone()
+                full_targets[:, self.active_joint_ids] = self._active_qpos_command(qpos)
+                self.action_manager.process_joint_targets(full_targets)
+            else:
+                self.action_manager.process_action(action)
             if getattr(self, "_demo_no_auto_reset", False):
                 self.action_manager.mask_inactive(self._demo_active_mask)
             if self.dataset_manager is not None and not policy_recording:
