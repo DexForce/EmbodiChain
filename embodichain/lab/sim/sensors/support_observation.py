@@ -673,6 +673,45 @@ class NativeSupportObservation:
                 "Native support acquisition/environment clock mapping changed."
             )
 
+    def observe_current(
+        self,
+        *,
+        support_contract_revision: int | None = None,
+        com_tolerance: float | None = None,
+        clock: SupportControlClock | None = None,
+    ) -> NativeSupportResult:
+        """Read current pair poses and acquire support through this existing owner.
+
+        Args:
+            support_contract_revision: Existing explicit support qualification mode.
+            com_tolerance: Optional declared policy tolerance, as for ``observe``.
+            clock: Expected host control clock when this owner participates in a
+                runtime. A bound strong clock must be that exact object.
+
+        Returns:
+            Owned current physical values and source metadata. Historical poses
+            must use their recorded evidence rather than this acquisition path.
+
+        Raises:
+            RuntimeError: This observer is closed.
+            ValueError: A clock or native owner changed before live pose reads.
+        """
+        if self._closed:
+            raise RuntimeError("Native support observer is closed.")
+        if self._clock is not None and clock is not self._clock:
+            raise ValueError("Native support belongs to another bound runtime clock.")
+        try:
+            self._refresh_identity()
+        except _ERRORS as error:
+            self._unavailable(error)
+            raise ValueError(self._error) from error
+        return self.observe(
+            self.object.get_local_pose(to_matrix=True),
+            self.reference.get_local_pose(to_matrix=True),
+            support_contract_revision=support_contract_revision,
+            com_tolerance=com_tolerance,
+        )
+
     def observe(
         self,
         object_pose: torch.Tensor,

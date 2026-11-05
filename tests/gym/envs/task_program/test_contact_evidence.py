@@ -565,7 +565,10 @@ def test_public_base_env_step_drives_actual_sensor_observer_port():
 
     sensor.update = forbid_refresh
     sensor.add_sampling_observer("physical_contacts", timeline)
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
     env = BaseEnv.__new__(BaseEnv)
+    env.episode_context = EpisodeContext(1)
     env.cfg = SimpleNamespace(sim_steps_per_control=4)
     env.sim_cfg = SimpleNamespace(physics_dt=0.01)
     env.sensors = {"contacts": sensor}

@@ -875,6 +875,33 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.task_engine.evidence
+----------------------------------------
+
+The Task Engine adapter projects frozen role/lineage declarations and explicit
+compiled occurrence descriptors into TaskSpec bindings. It verifies source
+content identities and retains declared preset/occurrence IDs. Missing compiled
+capabilities fail explicitly; projection reads no simulation or physical trace
+and decides no predicate outcome.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.evidence
+
+.. autosummary::
+
+   project_placement_evidence_binding
+   project_configured_placement_evidence_binding
+
+.. autofunction:: project_placement_evidence_binding
+
+New bundles use ``project_configured_placement_evidence_binding`` with a detached
+condition from the configured owner's named settle preset. It requires no
+``constraints.json`` or constraints digest and does not write either artifact.
+The original projection remains only a frozen B0 source-comparison adapter,
+checking that source payload's identity before sharing the same projection.
+Neither entry point derives numerical policy values from task or object names.
+
+.. autofunction:: project_configured_placement_evidence_binding
+
 embodichain.gen_sim.task_spec
 -----------------------------
 
@@ -960,6 +987,59 @@ and semantic hash; it does not qualify a partial binding or physical evidence.
 .. autosummary::
 
    RoleSpec
+
+embodichain.gen_sim.task_spec.evidence
+--------------------------------------
+
+Placement evidence binds the frozen serialized-program/TaskSpec digests to exact
+release, support and boundary occurrences. Binding schema version 2 also seals
+``evidence_format``: new runtime snapshots use ``raw_snapshot`` and historical
+B0 re-evaluation explicitly selects ``historical_record``. Existing instances
+are re-decoded and their content hash is checked, including nested JSON data.
+Older binding versions must be rebuilt; the TaskSpec v0.1 identity is unchanged.
+
+Raw snapshots require the complete ``support.com_patch`` acquisition channel,
+including values, validity/errors, timestamp, environment IDs, observation
+revision and clock domain. Values must agree with the native measurements.
+Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
+raw/historical input contracts. Raw sampled-timeline collection is not yet
+implemented and cannot be substituted with the COM-patch channel.
+
+This slice supports rigid ``on`` relations with legacy ``native_contact_support``
+or the explicitly selected ``native_stable_reference_support/v2`` sampled window.
+It rejects revision-1 and full-footprint region declarations instead of evaluating
+them through a weaker scope. Import is standard-library-only; numerical proof
+re-evaluation lazily loads the shared Torch/NumPy/Shapely implementation.
+
+The verifier distinguishes unavailable acquisition from measured negatives and
+checks measured release receipts independently of plan/segment success. Raw Lab
+snapshots require an explicit episode binding and carry no accepted/released
+conclusion; TaskSpec computes those results. Historical B0 claims are checked
+when supplied. Legacy scope remains legacy even when a timeline is present. Its instantaneous
+final observation needs the exact measured release and actual final runtime
+boundary, not an unexecuted later wait/park policy. This preserves measured final
+negatives when execution stops early, while recorded milestones still require
+the full successful prefix and their original support receipt.
+
+``evaluate_placement_evidence_report`` preserves goal/final and milestone/recorded
+separation, verifies declared execution prefixes and orders exact boundary slots.
+Sparse segment snapshots cannot certify complete temporal windows or continuous
+invariants. The ordinary TaskSpec evaluator remains the certificate authority.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.evidence
+
+.. autosummary::
+
+   SupportedPlacementEvidenceBinding
+   evaluate_supported_placement_evidence
+   evaluate_placement_evidence_report
+
+.. autoclass:: SupportedPlacementEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_supported_placement_evidence
+
+.. autofunction:: evaluate_placement_evidence_report
 
 embodichain.gen_sim.task_spec.expressions
 -----------------------------------------
@@ -1401,6 +1481,33 @@ embodichain.lab.task_program.integrations.simulation.handover
 
    ConfiguredHandOverPoseProvider
 
+embodichain.lab.task_program.integrations.simulation.observations
+-----------------------------------------------------------------
+
+Bind the physical collector to an initialized environment and its actual bridge
+before the first bridge control step. It uses the bridge's policy session and episode
+IDs; later episodes, closed resources and superseded current clock bindings are
+rejected. Independent runtime owners retain independent state.
+
+Current capture selects the registered pair/scope and uses the native
+rest-envelope COM tolerance. Recorded capture preserves the original policy
+parameters and reads the exact seeded end-step slots through an explicitly
+injected ``ObservationManager``. The collector binds pose fields from its schema,
+reads original values and masks, and converts only qualified arena poses.
+Omitting observation history keeps current capture available but rejects historical capture. It never resamples current contacts for
+a historical pose or falls back to a live pose/previous frame.
+The result owns physical metadata and availability only; TaskSpec and Task Engine
+are not dependencies of this Lab collector.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
+
+.. autosummary::
+
+   SimulationSupportObservationCollector
+
+.. autoclass:: SimulationSupportObservationCollector
+   :members:
+
 embodichain.lab.task_program.integrations.simulation.stability
 --------------------------------------------------------------
 
@@ -1529,6 +1636,7 @@ embodichain.lab.gym.envs.managers.actions
    JointPositionToLimitsAction
    JointVelocityAction
    ParallelGripperAction
+   RelativeEefDlsAction
    RelativeEefPoseAction
    RelativeJointPositionAction
 
@@ -1542,6 +1650,24 @@ embodichain.lab.gym.envs.managers.action_types
    ActionDescriptor
    ActionTermDescriptor
    ActionTrace
+
+embodichain.lab.gym.envs.managers.observation_manager
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observation_manager
+
+.. autosummary::
+
+   ObservationManager
+
+embodichain.lab.gym.envs.managers.reward_manager
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.reward_manager
+
+.. autosummary::
+
+   RewardManager
 
 embodichain.lab.gym.envs.objectives
 ----------------------------------
@@ -1652,8 +1778,51 @@ embodichain.lab.gym.utils.profiler
    EnvProfilerCfg
    EnvProfiler
 
+embodichain.lab.gym.envs.managers.observation_types
+---------------------------------------------------
+
+The observation manager owns source acquisition and the single raw-field schema.
+Policy views receive separate tensors before in-place normalization/noise;
+ordinary queries do not advance history. The existing rollout writer stores raw observations by canonical field ID.
+Indexed reads use those tensors and episode/frame metadata directly, with no
+history instance, separate write lifecycle or entity-specific reader. Internal
+expert policy observations keep T+1 states; the public rollout remains a
+compatible T-transition view and also exposes raw views when enabled. Learner
+windows retain their own horizon/device, and reuse does not erase episode data. Contact histories
+retain their sensor physics clocks and complete-window contracts.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observation_types
+
+.. autosummary::
+
+   ObservationDescriptor
+   ObservationSample
+   ObservationFrame
+   ObservationHistorySnapshot
+
+.. autoclass:: ObservationDescriptor
+   :members:
+
+.. autoclass:: ObservationSample
+   :members:
+
+.. autoclass:: ObservationFrame
+   :members:
+
+.. autoclass:: ObservationHistorySnapshot
+   :members:
+
 embodichain.lab.gym.utils.trajectory_state
 ------------------------------------------
+
+Capture/restore helpers retain the standalone replay surface.
+``export_observation_history`` combines numeric history with the observation
+manager's schema for file output. Alias state views share the same owned tensor
+snapshot. ``trajectory_observation_cfgs`` declares replay state fields as raw observation
+functors, preserving full robot/mimic joint order, articulation root states and
+rigid velocities. Declaration assembly performs no physical acquisition.
+The standard environment recorder uses these functors and shares pose acquisition
+with policy ``get_object_pose`` / ``get_rigid_object_pose`` within a boundary.
 
 .. currentmodule:: embodichain.lab.gym.utils.trajectory_state
 
@@ -1661,6 +1830,12 @@ embodichain.lab.gym.utils.trajectory_state
 
    capture_trajectory_state
    restore_trajectory_state
+   trajectory_observation_cfgs
+   export_observation_history
+
+.. autofunction:: trajectory_observation_cfgs
+
+.. autofunction:: export_observation_history
 
 embodichain.lab.scripts.analyze_workspace
 -----------------------------------------
@@ -2500,6 +2675,7 @@ embodichain.lab.sim.motion.planners.utils
    PlanState
    PlanResult
    RejectedMotionCandidate
+   MotionRecoveryTrace
    normalize_success_mask
    calculate_point_allocations
    interpolate_xpos
