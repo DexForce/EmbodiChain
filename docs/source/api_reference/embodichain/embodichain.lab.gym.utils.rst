@@ -58,6 +58,18 @@ Gymnasium Utilities
 
 .. automodule:: embodichain.lab.gym.utils.gym_utils
 
+.. autofunction:: embodichain.lab.gym.utils.gym_utils.robot_config_from_dict
+
+.. autofunction:: embodichain.lab.gym.utils.gym_utils.robot_config_asset_files
+
+This configuration-only decoder uses the same robot/preset owner as the Gym
+parser. It resolves effective default asset declarations while preserving
+caller-owned control-part names, without registering a Gym ID or constructing
+runtime objects. ``robot_config_asset_files`` delegates source declarations to
+Data while excluding the future assembled-URDF output. It inventories serialized
+source inputs; model-owned files read outside those declarations require an
+explicit inventory from that model owner.
+
 
 Miscellaneous
 ~~~~~~~~~~~~~

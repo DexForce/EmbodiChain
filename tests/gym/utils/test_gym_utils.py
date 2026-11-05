@@ -67,6 +67,70 @@ CUBE_ROBOT_PROFILE_ID = "ur5_dh_pgi_140_80"
 CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
 
 
+@pytest.mark.parametrize("preset", [False, True])
+def test_public_robot_config_decoder_resolves_assets_without_runtime_or_registration(
+    tmp_path, monkeypatch, preset
+):
+    from gymnasium.envs.registration import registry
+    from embodichain.lab.gym.utils.gym_utils import (
+        robot_config_asset_files,
+        robot_config_from_dict,
+    )
+    from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.motion.solvers.base_solver import BaseSolver
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Configuration-only decoding constructed a runtime resource.")
+
+    for cls in (SimulationManager, Robot, MotionGenerator, BaseSolver):
+        if "__new__" in cls.__dict__:
+            monkeypatch.setattr(cls, "__new__", staticmethod(forbidden))
+        else:
+            monkeypatch.setattr(cls, "__init__", forbidden)
+    control_parts = {"custom_arm": ["shoulder_pan_joint"]}
+    if preset:
+        declaration = {
+            "class_type": "URRobot",
+            "robot_type": "ur5",
+            "uid": "InventoryUR5",
+            "control_parts": control_parts,
+        }
+    else:
+        source = tmp_path / "robot.urdf"
+        source.write_text('<robot name="inventory"><link name="base"/></robot>')
+        declaration = {
+            "uid": "InventoryInline",
+            "control_parts": control_parts,
+            "urdf_cfg": {
+                "components": [{"component_type": "body", "urdf_path": str(source)}]
+            },
+        }
+    original = deepcopy(declaration)
+    ids = set(registry)
+    cfg = robot_config_from_dict(declaration)
+    assets = robot_config_asset_files(declaration, base_dir=tmp_path)
+    assert any(path.suffix == ".urdf" for path in assets)
+    assert cfg.control_parts["custom_arm"] == control_parts["custom_arm"]
+    assert Path(cfg.urdf_cfg.fpath) not in assets
+    assert declaration == original
+    assert set(registry) == ids
+    if preset:
+        assert isinstance(cfg, URRobotCfg)
+        assert cfg.robot_type == "ur5"
+        assert cfg.control_parts["arm"] == [
+            "joint1",
+            "joint2",
+            "joint3",
+            "joint4",
+            "joint5",
+            "joint6",
+        ]
+    else:
+        assert cfg.control_parts == control_parts
+
+
 def test_env_launcher_args_include_physics():
     """Test that launcher args expose the physics backend config selector."""
     parser = argparse.ArgumentParser()

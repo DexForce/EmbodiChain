@@ -89,6 +89,13 @@ helper calls the base decoder, so routing it back through the subclass build/
 merge sequence recurses. The skill owns the scaffold; inspect a neighboring
 robot config for the current implementation pattern.
 
+Standard `TianjiMarvinCfg.declared_asset_files()` explicitly advertises model
+input inventory through the structural declared-asset provider contract. Its
+effective physical `fpath` and FK source are the same owner selection; explicit
+solver/component source overrides are included and assembly output is excluded.
+This static query creates no Robot, simulation or solver and does not grant
+physical qualification to a configuration.
+
 Keep the simulation asset and `build_pk_serial_chain()` source aligned. The
 specified configs use `_pk_urdf_path` as the kinematic source; validate chain
 DOFs against the selected control parts after changing assets or variants.

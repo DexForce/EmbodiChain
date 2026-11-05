@@ -25,6 +25,7 @@ from enum import Enum
 import hashlib
 import json
 import math
+from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 from ._configured_services import (
@@ -3069,6 +3070,10 @@ class _ConfiguredTaskProgramAdapterFactory:
     def registration(self) -> SimulationTaskProgramRegistration:
         """Return the immutable registration owned by the delegate."""
         return self.delegate.registration
+
+    def declared_asset_files(self) -> tuple[Path, ...]:
+        """Return effective service asset files through the public delegate API."""
+        return self.delegate.declared_asset_files()
 
     def create_adapter(
         self,

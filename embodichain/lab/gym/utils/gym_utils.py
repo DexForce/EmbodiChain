@@ -445,6 +445,54 @@ def _robot_cfg_from_dict(config: dict) -> RobotCfg:
     return RobotCfg.from_dict(robot_config)
 
 
+def robot_config_from_dict(config: dict[str, Any]) -> RobotCfg:
+    """Resolve the same effective robot configuration as the Gym parser.
+
+    This config-only entry preserves the existing generic/preset decoder and
+    caller input ownership. It does not register a Gym ID or construct a Robot,
+    simulator, kinematic solver, or runtime service.
+
+    Args:
+        config: Physical robot declaration, including an optional registered
+            ``class_type`` selector and its ordinary model-specific fields.
+
+    Returns:
+        Fresh effective robot configuration with preset-owned defaults resolved.
+    """
+    return _robot_cfg_from_dict(config)
+
+
+def robot_config_asset_files(
+    config: dict[str, Any], *, base_dir: str | Path
+) -> tuple[Path, ...]:
+    """Enumerate effective robot source declarations without URDF assembly.
+
+    This resolves preset defaults through :func:`robot_config_from_dict` and
+    delegates declared input references to the shared Data inventory. The
+    configured URDF assembly destination is an output; component sources remain
+    inputs. Model-owned files read outside serialized configuration need their
+    own explicit inventory provider and are outside this source-only entry.
+
+    Args:
+        config: The same physical robot declaration consumed by the Gym parser.
+        base_dir: Owner directory for relative source references.
+
+    Returns:
+        Sorted unique files declared by the effective source configuration,
+        excluding the future assembled-URDF destination. No runtime resource or
+        URDF assembly manager is created.
+    """
+    from embodichain.data.asset_dependencies import collect_declared_asset_files
+
+    declaration = robot_config_from_dict(config).to_dict()
+    urdf = declaration.get("urdf_cfg")
+    if isinstance(urdf, dict):
+        urdf.pop("fpath", None)
+    return tuple(
+        sorted(collect_declared_asset_files(declaration, base_dir=Path(base_dir)))
+    )
+
+
 def _collect_sensor_cfgs(
     robot_cfg: RobotCfg | None, sensors: Sequence[SensorCfg]
 ) -> list[SensorCfg]:
@@ -1952,6 +2000,8 @@ __all__ = [
     "map_qpos_to_eef_pose",
     "merge_args_with_gym_config",
     "register_manager_modules",
+    "robot_config_from_dict",
+    "robot_config_asset_files",
     "to_cpu_tensor",
     "to_tensor",
 ]

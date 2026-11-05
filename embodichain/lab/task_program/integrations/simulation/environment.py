@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass, fields
 import math
+from pathlib import Path
 from weakref import ReferenceType, ref
 from types import MappingProxyType
 from typing import Literal, Protocol, TYPE_CHECKING
@@ -91,6 +92,7 @@ from embodichain.lab.gym.envs.task_program.bridge import (
     GymPlanningObservationProvider,
 )
 from ..catalog import SimulationTaskProgramRegistration
+from ..extensions import DeclaredAssetFileProvider
 from ..environment import (
     TaskProgramEnvironmentAdapter,
     TaskProgramEnvironmentFactory,
@@ -1311,6 +1313,63 @@ class SimulationTaskProgramAdapterFactory:
     def registration(self) -> SimulationTaskProgramRegistration:
         """Return the exact static registration owned by this factory."""
         return self._registration
+
+    def declared_asset_files(self) -> tuple[Path, ...]:
+        """Enumerate declared service assets without creating runtime services.
+
+        Grasp and hand-calibration factories must explicitly implement
+        :class:`~embodichain.lab.task_program.integrations.DeclaredAssetFileProvider`
+        when this inventory is requested. Other registration extensions can
+        contribute assets through that same protocol. Physical robot/scene
+        inputs and motion-source manifests retain their separate owners.
+
+        Returns:
+            Sorted unique absolute local files from the effective providers.
+
+        Raises:
+            TypeError: A service factory lacks the explicit declaration contract
+                or a provider returns values outside its file tuple contract.
+            ValueError: A provider declares a directory instead of an asset file.
+        """
+        self._registration.assert_unchanged()
+        required = (
+            *self._grasp_pose_generator_factories.values(),
+            *self._hand_geometry_cfg_factories.values(),
+        )
+        for provider in required:
+            if not isinstance(provider, DeclaredAssetFileProvider):
+                raise TypeError(
+                    "Service asset inventory requires an explicit "
+                    "DeclaredAssetFileProvider for every grasp and hand factory."
+                )
+        registration = self._registration
+        optional = (
+            *registration.relation_grounders,
+            *registration.handover_pose_providers,
+            *registration.endpoint_adapters,
+            *registration.runtime_transports,
+            registration.parallel_safety_factory,
+            registration.control_part_evidence_factory,
+            *registration.registered_semantic_lowerer_factories,
+        )
+        providers = (
+            *required,
+            *(item for item in optional if isinstance(item, DeclaredAssetFileProvider)),
+        )
+        paths: set[Path] = set()
+        for provider in providers:
+            declared = provider.declared_asset_files()
+            if type(declared) is not tuple or any(
+                not isinstance(path, Path) for path in declared
+            ):
+                raise TypeError("Declared asset files must be a tuple of Path values.")
+            for path in declared:
+                resolved = path.expanduser().resolve(strict=True)
+                if not resolved.is_file():
+                    raise ValueError(f"Declared asset is not a local file: {resolved}.")
+                paths.add(resolved)
+        self._registration.assert_unchanged()
+        return tuple(sorted(paths))
 
     def create_adapter(
         self,

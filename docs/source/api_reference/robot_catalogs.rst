@@ -81,6 +81,10 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 
    Configure Tianji Marvin with or without its parallel-jaw grippers.
 
+   ``declared_asset_files()`` inventories the effective physical source, the
+   same-source FK input and explicit source overrides through Data. It creates
+   no Robot, simulator or solver and does not qualify native execution.
+
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
@@ -398,9 +402,16 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 
    Configure Tianji Marvin with or without its parallel-jaw grippers.
 
+   ``declared_asset_files()`` inventories the effective physical source, the
+   same-source FK input and explicit source overrides through Data. It creates
+   no Robot, simulator or solver and does not qualify native execution.
+
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
+
+
+.. automethod:: embodichain_robots.tianji.marvin.cfg.TianjiMarvinCfg.declared_asset_files
 
 
 embodichain_robots.universal_robots.ur_robot
