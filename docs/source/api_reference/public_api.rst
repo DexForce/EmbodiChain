@@ -1146,6 +1146,31 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
+embodichain.lab.sim.sensors.contact.observation
+-----------------------------------------------
+
+Standard sensor observers can collect a selected joint alongside native contact
+facts in explicit B=1 windows. Substeps reuse the completed contact sample;
+initial prepare acquisitions explicitly request one refresh. Joint channels use
+actual simulation time and retain independent validity and acquisition errors.
+Only valid contact slots are retained, with native loss diagnostics preserved.
+Window generations reject delayed callbacks across reset/reuse; completed copies
+remain independent. Integrations own invocation/episode binding and action-effect
+interpretation. The observer neither computes success nor advances simulation.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.observation
+
+.. autosummary::
+
+   JointContactObservation
+   JointContactObserver
+
+.. autoclass:: JointContactObservation
+   :members:
+
+.. autoclass:: JointContactObserver
+   :members:
+
 embodichain.lab.sim.sensors.contact.sampling
 ---------------------------------------------------------------------
 
@@ -1172,10 +1197,17 @@ observation was produced. The common frame has no invocation field.
    CONTACT_NORMALS
    CONTACT_IMPULSES
    CONTACT_POSITIONS
+   CONTACT_DISTANCES
+   DEFAULT_CHANNELS
    ContactEvidenceSample
    ContactEvidenceSampler
    ContactSourceStamp
    native_contact_revision
+
+Signed contact distances require explicit channel selection. Empty requests
+retain the original five ``DEFAULT_CHANNELS``; a missing or nonfinite active
+distance keeps that requested channel unavailable without invalidating unrelated
+contact channels.
 
 embodichain.lab.sim.sensors.contact.timeline
 ---------------------------------------------------------------------

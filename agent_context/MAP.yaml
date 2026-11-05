@@ -151,7 +151,7 @@ topics:
 - id: sensor-system
   title: Sensor System
   aliases: [sensor system, camera attachment, 传感器, 相机挂载]
-  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, ContactSamplingObserver, ContactEvidenceSampler, ContactTimeline, Newton contact, SensorCfg,
+  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, ContactSamplingObserver, ContactEvidenceSampler, ContactTimeline, JointContactObserver, Newton contact, SensorCfg,
     get_sensor_obs, resolve_parent_nodes, scatter_contact_data, tiled image, quaternion, xyzw]
   paths: [topics/sensor-system/sensor-system.md]
   source_of_truth:
@@ -162,6 +162,7 @@ topics:
   - embodichain/lab/sim/sensors/contact/sensor.py
   - embodichain/lab/sim/sensors/contact/sampling.py
   - embodichain/lab/sim/sensors/contact/timeline.py
+  - embodichain/lab/sim/sensors/contact/observation.py
   - embodichain/lab/sim/sensors/support_observation.py
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py
