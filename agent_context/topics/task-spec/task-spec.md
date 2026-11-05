@@ -107,3 +107,10 @@ this does not qualify fluid transfer. Missing acquisition remains unavailable.
 Lab reads recorded values through the canonical ObservationManager schema/raw
 history, never live poses or a second trajectory buffer. Historical control
 receipts remain qualified by the separate `control_evidence.py` owner.
+
+Historical Press/Twist control proof lives in `control_evidence.py`. Bindings
+seal explicit predicate/joint/direction/resource and compiled occurrence identity.
+TaskSpec replays the original acceptance receipt and complete execution prefix;
+program success alone cannot certify a physical control effect. Missing acquisition
+remains unavailable, and an original measured rejection remains rejected. This
+verifier collects no state and changes no physics or acceptance thresholds.
