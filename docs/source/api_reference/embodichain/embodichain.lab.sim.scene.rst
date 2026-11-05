@@ -712,3 +712,36 @@ none. It selects no task program, motion goal or execution/recovery budget.
    revolute_setting_attributes
 
 .. autofunction:: revolute_setting_attributes
+
+Static source declarations
+--------------------------
+
+These APIs generate detached physical declarations and source geometry labels.
+They reuse the existing Spawn and authored-geometry readers without creating a
+World or evaluating task success. Frozen pose validation precedes descriptor
+conversion; source scale retains its configured precision. Passive prismatic
+calibration remains explicit and retains other drive/mass owners.
+
+.. currentmodule:: embodichain.lab.sim.scene.frozen_declarations
+
+.. autofunction:: effective_articulation_declaration
+
+.. autofunction:: validate_frozen_pose_fields
+
+.. currentmodule:: embodichain.lab.sim.scene.component_declarations
+
+.. autofunction:: source_scene_component_declaration
+
+.. currentmodule:: embodichain.lab.sim.scene.source_contact
+
+.. autofunction:: source_grasp_contact_clearances
+
+.. currentmodule:: embodichain.lab.sim.scene.prismatic_declarations
+
+.. autofunction:: source_prismatic_physics_declarations
+
+.. currentmodule:: embodichain.lab.sim.scene.articulation_inputs
+
+.. autofunction:: prismatic_reset_state
+
+.. autofunction:: prismatic_handle_center_world

@@ -10,6 +10,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Request | Owner |
 |---|---|
 | Explicit source property/pose/scale ingress | `source_physics.py`, `source_transforms.py`; owned declarations only, no physical acquisition or host lifecycle |
+| Static source component/pose/contact/prismatic declarations | `component_declarations.py`, `frozen_declarations.py`, `source_contact.py`, `prismatic_declarations.py`; explicit owned configuration only |
 | Compose existing configurations and anchors | `embodichain/lab/sim/scene/composition.py` |
 | Seeded proposals and measured XY layout checks | `embodichain/lab/sim/scene/procedural.py` |
 | UID-based support geometry and group placement | `embodichain/lab/sim/scene/geometry.py`, `placement.py` |
@@ -85,6 +86,18 @@ Spawn `LinkMesh` type, preserving source order and scaling origins/vertices once
 It rejects unresolved URIs and visual-only links. Vertex-envelope mode remains
 explicit and supplies no triangle-surface certificate. These generic readers
 construct no Robot, simulator or IK solver and select no concrete robot preset.
+
+Static source declarations reuse Spawn's USD translator without creating a
+World. `frozen_declarations` checks raw matrix/position/intrinsic-XYZ redundancy
+before descriptor conversion and retains configured scale precision in override
+and overlay modes. `component_declarations` serializes source poses and collider
+choices into owned component mappings; it selects no physics backend.
+`source_contact` exposes Default descriptor contact margins for static fitting.
+`prismatic_declarations` applies the existing passive source calibration only to
+explicit selected UIDs while preserving declared drive and separate mass owners.
+The optional prismatic reset label and authored handle-center readers remain in
+`articulation_inputs`; neither is an observed or settled physical state. Task
+Engine may bind these public descriptions, but owns no implementation here.
 
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
 recreate it after replacing either object or changing its model/scale. Queries
