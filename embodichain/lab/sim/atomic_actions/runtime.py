@@ -42,6 +42,7 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
 
 from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
 from .released_continuation import ReleasedHandContinuationProvider
+from .twist_planning import TwistPlanningProvider
 from .planning_probes import (
     HeldStagingProvider,
     RetainedCommandProvider,
@@ -116,6 +117,7 @@ class ActionPlanningServices:
         held_staging_provider: HeldStagingProvider | None = None,
         retained_command_provider: RetainedCommandProvider | None = None,
         released_hand_provider: ReleasedHandContinuationProvider | None = None,
+        twist_planning_provider: TwistPlanningProvider | None = None,
     ) -> None:
         """Retain shared services and snapshot caller-owned calibration data.
 
@@ -136,6 +138,7 @@ class ActionPlanningServices:
             held_staging_provider: Same-robot staging declarations and geometry.
             retained_command_provider: Same-robot retained-command provenance.
             released_hand_provider: Same-robot released suffix authority.
+            twist_planning_provider: Explicit same-robot bounded Twist query service.
         """
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
@@ -253,6 +256,12 @@ class ActionPlanningServices:
                 "released_hand_provider must own this engine's exact robot."
             )
         self._released_hand_provider = released_hand_provider
+        if twist_planning_provider is not None and (
+            not isinstance(twist_planning_provider, TwistPlanningProvider)
+            or twist_planning_provider.robot is not self._robot
+        ):
+            raise TypeError("twist_planning_provider must own this engine's robot.")
+        self._twist_planning_provider = twist_planning_provider
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,
             TrackingRuntime,
@@ -334,6 +343,11 @@ class ActionPlanningServices:
     def released_hand_provider(self) -> ReleasedHandContinuationProvider | None:
         """Return the exact engine-owned cleanup/Park continuation service."""
         return self._released_hand_provider
+
+    @property
+    def twist_planning_provider(self) -> TwistPlanningProvider | None:
+        """Return the explicit occurrence-bound Twist planning service."""
+        return self._twist_planning_provider
 
     @property
     def robot(self) -> Robot:

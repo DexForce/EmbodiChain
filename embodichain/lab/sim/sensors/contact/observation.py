@@ -104,6 +104,11 @@ class JointContactObserver:
         return self._generation
 
     @property
+    def record_count(self) -> int:
+        """Return the current window's retained count without copying or sampling."""
+        return len(self._records)
+
+    @property
     def overflow(self) -> bool:
         """Whether an explicit window limit prevented a complete acquisition."""
         return self._overflow

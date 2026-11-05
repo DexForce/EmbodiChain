@@ -254,3 +254,16 @@ provides a physical-effect certificate.
 
    fk_pose_error_mask
    sampled_pose_path_matches
+
+
+Articulation event measurements
+-------------------------------
+
+Pure scalar rules consume caller-supplied joint/contact values and explicit
+press or revolute target parameters. They preserve unavailable observations,
+contact-backed travel, startup stability and distinct coarse-turn versus calibrated
+setting criteria. Acquisition, robot/sensor ownership and task acceptance remain
+outside Compute.
+
+.. automodule:: embodichain.compute.articulation
+   :members:

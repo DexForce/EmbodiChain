@@ -807,3 +807,34 @@ Released continuation authority
 
 .. autoclass:: ReleasedHandContinuationProvider
    :members:
+
+
+Bounded Twist planning and measured feedback
+--------------------------------------------
+
+``TwistPlanningRecovery`` retains the fixed B1/env0, float32, fixed-grid sequential
+IK route. The skill reads an explicit ``TwistPlanningProvider`` session for the
+same robot, observation, invocation and revision, selects the original ordered
+contact candidates and closes the borrowed query on every exit. Final command
+qualification and parent dependency proofs reject without changing the source
+budget or issuing a physical command. Missing providers do not select a fallback.
+
+The recovery cursor separates planning outcome commit, installed-plan adoption
+and measured feedback. Preview forks own separate cursor identities. Geometric
+qualification and successful planning do not establish measured contact or task
+success; event rules retain incomplete evidence and release failures explicitly.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.twist_planning
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.twist_recovery
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.articulation_evidence
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.control_validation
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.twist_feedback
+   :members:

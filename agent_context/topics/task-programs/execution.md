@@ -284,3 +284,12 @@ checks. Without observation history, current capture remains available and
 historical capture rejects. Raw history and T+1 timing belong to
 [environment recording](../env-framework/env-framework.md#expert-trajectory-contract).
 It never combines current contacts with old poses or accesses Env's private buffers.
+
+
+`simulation/twist_session.py` binds declared program/operation/episode occurrences
+to the Atomic Twist cursor and real Motion query factory. Its registry implements
+the existing lifecycle factory; queries close on failed construction, stale
+scope or completion. `control_observation.py` projects the canonical contact
+observer's exact generation with `record_count` and `snapshot(start)`, preserving
+raw clock identities and missing/capacity errors without fetching contacts.
+Standard post-policy producer assembly remains a separate integration owner.

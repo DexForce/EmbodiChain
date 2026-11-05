@@ -42,6 +42,7 @@ from .plans import (
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .released_continuation import ReleasedHandContinuationProvider
+from .twist_planning import TwistPlanningProvider
 from .planning_probes import (
     HeldStagingProvider,
     RetainedCommandProvider,
@@ -96,6 +97,7 @@ class AtomicActionEngine:
         held_staging_provider: HeldStagingProvider | None = None,
         retained_command_provider: RetainedCommandProvider | None = None,
         released_hand_provider: ReleasedHandContinuationProvider | None = None,
+        twist_planning_provider: TwistPlanningProvider | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -125,6 +127,7 @@ class AtomicActionEngine:
                 distal geometry for explicitly selected held-path recovery.
             retained_command_provider: Same-robot verified command provenance and
                 same-observation command snapshots; no physical success is implied.
+            twist_planning_provider: Explicit same-robot bounded Twist query service.
             released_hand_provider: Same-robot authority for the exact cleanup
                 and following Park occurrences.
             load_builtins: Whether to instantiate and register every built-in
@@ -154,6 +157,7 @@ class AtomicActionEngine:
             held_staging_provider=held_staging_provider,
             retained_command_provider=retained_command_provider,
             released_hand_provider=released_hand_provider,
+            twist_planning_provider=twist_planning_provider,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}
