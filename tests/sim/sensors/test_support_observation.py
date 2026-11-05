@@ -236,6 +236,24 @@ def test_positive_witness_survives_sleep_but_not_either_body_motion(moving):
     )  # New completed physics step can establish fresh support.
 
 
+@pytest.mark.parametrize("moving", ["payload", "support"])
+def test_callback_sample_cannot_reestablish_support_after_same_step_body_motion(moving):
+    sim, _, observer, _, _ = _setup()
+    _substep(sim, observer)
+    assert sim.query.fetches == 1
+
+    sim.objects[moving].pose[0, 0, 3] = 0.001
+    moved = _observe(observer)
+    assert moved.support.valid.tolist() == [True, True]
+    assert moved.support.values.tolist() == [False, True]
+    assert sim.query.fetches == 1
+    assert _observe(observer).support.values.tolist() == [False, True]
+
+    _substep(sim, observer)
+    assert _observe(observer).support.values.tolist() == [True, True]
+    assert sim.query.fetches == 2
+
+
 def test_strong_support_requires_clock_complete_window_and_positive_witness():
     sim, _, observer, clock, _ = _setup()
     unavailable = _observe(observer, 1)

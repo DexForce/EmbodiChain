@@ -323,6 +323,12 @@ class NativeSupportObservation:
             ),
         )
 
+    def _physics_step(self) -> int:
+        step = self._simulation.physics_step_index
+        if type(step) is not int or step < 0:
+            raise ValueError("Native support requires a valid physics-step identity.")
+        return step
+
     def _revision_or_none(self) -> int | None:
         if self._clock is None:
             return None
@@ -513,6 +519,7 @@ class NativeSupportObservation:
                         "Native support interval exceeds the control cadence."
                     )
             self._refresh_identity()
+            legacy_step = self._physics_step() if self._clock is None else None
             sample = self._sampler.sample(
                 PhysicalEvidenceRequest(
                     token.timestamp,
@@ -527,6 +534,13 @@ class NativeSupportObservation:
                 self.object.get_local_pose(to_matrix=True),
                 self.reference.get_local_pose(to_matrix=True),
             )
+            if legacy_step is not None:
+                if self._physics_step() != legacy_step:
+                    raise ValueError(
+                        "Native support physics step changed during capture."
+                    )
+                self._legacy_sample_step = legacy_step
+
         except _ERRORS as error:
             self._unavailable(error)
 
@@ -692,11 +706,7 @@ class NativeSupportObservation:
                         timestamp, self._capture_revision, torch.arange(count)
                     )
                 )
-                step = self._simulation.physics_step_index
-                if type(step) is not int or step < 0:
-                    raise ValueError(
-                        "Native support requires a valid physics-step identity."
-                    )
+                step = self._physics_step()
                 if (
                     self._last_sample is None
                     or self._legacy_sample_step != step
