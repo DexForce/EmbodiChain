@@ -201,6 +201,13 @@ workflow builds one WM and Replay, then injects that WM, motion library, task an
 Replay start provider into the registered learning environment. The model is
 frozen throughout each policy update.
 
+When collection and evaluation resolve to the same environment file, evaluation
+uses the resolved collection motion settings, including workflow and CLI overrides.
+For a separate evaluation file, explicit motion-tracking settings take precedence;
+omitted settings inherit collection defaults, except `clips`. An omitted `clips`
+field or explicit `clips: null` evaluates all clips in the selected motion archive.
+The resolved evaluation configuration is saved in the checkpoint.
+
 `workflow` also owns measured batch size, replay, WM fitting, update ratio and run
 budget. `trainer.num_envs` is the imagined rollout batch size. The saved
 `config.yaml` contains the complete resolved recipe; `run-manifest.json` records

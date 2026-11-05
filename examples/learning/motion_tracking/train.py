@@ -123,9 +123,21 @@ class MotionTraining:
         )
         self.gym_config = gym
         self.evaluation_gym_config = load_config(config["evaluation_env"])
-        self.evaluation_gym_config["env"]["extensions"]["motion_tracking"].update(
-            gym["env"]["extensions"]["motion_tracking"]
-        )
+        evaluation_options = self.evaluation_gym_config["env"]["extensions"][
+            "motion_tracking"
+        ]
+        collection_options = gym["env"]["extensions"]["motion_tracking"]
+        if (
+            resolve_config_path(config["evaluation_env"]).resolve()
+            == resolve_config_path(config["collection_env"]).resolve()
+        ):
+            evaluation_options.update(deepcopy(collection_options))
+        else:
+            # Independent evaluation selects its own clips, including all clips
+            # when the selection is omitted. Explicit options take precedence.
+            for name, value in collection_options.items():
+                if name != "clips":
+                    evaluation_options.setdefault(name, deepcopy(value))
         cfg = config_to_cfg(gym)
         cfg.episode_context_in_info = config.setdefault(
             "episode_context_in_info", False
