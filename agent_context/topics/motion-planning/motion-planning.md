@@ -100,6 +100,12 @@ share an outer caller-owned deadline across nested previews and isolate separate
 contexts. They do not replace `_budget.py`'s existing automatic planning hooks,
 preempt native work, or certify physical task success.
 
+Atomic policy propagation keeps whole-request sample alternatives separate from
+the direct Cartesian helper's segment alternatives. Required final speed
+qualification checks emitted full-robot samples after transforms/recovery; it
+never treats zero-speed rejected holds as original candidate evidence. The
+ordinary automatic planning/cancellation hooks remain on AtomicAction.plan.
+
 Normalization must preserve the meaning of timing, derivatives, failure rows
 and backend diagnostics together. Read the
 [result contract](planner-details.md#normalization-and-capabilities) before

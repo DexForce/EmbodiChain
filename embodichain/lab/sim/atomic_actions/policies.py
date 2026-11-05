@@ -96,7 +96,85 @@ class MotionPolicy:
     )
     """Select batched IK or previous-valid-posture waypoint seeding."""
 
+    sample_count_retries: tuple[int, ...] = field(default=(), kw_only=True)
+    """Explicit denser whole-plan alternatives after successful-row overspeed.
+
+    The engine tries only counts above the current count, in declared order,
+    after action composition and any plan transform. This best-effort retry
+    policy alone retains the original plan when alternatives are exhausted;
+    it does not certify final velocity or enable external nominal motion.
+    """
+
+    segment_sample_count_retries: tuple[int, ...] = field(default=(), kw_only=True)
+    """Ordered denser alternatives within one sampled Cartesian segment request.
+
+    These counts are independent of complete-action retries. The first count
+    also bounds eligibility of the original request, preserving the source
+    coarse-grid boundary. Only the explicit Cartesian segment helper consumes
+    them; ordinary ``generate`` calls reject non-default segment recovery.
+    """
+
+    segment_continuous_ik_recovery: bool = field(default=False, kw_only=True)
+    """Try unchanged-target/time continuous IK after segment samples fail.
+
+    Dense attempts advance the existing random stream. The continuous resolver
+    retains its own Torch-only fork; no outer action counter is reused.
+    """
+
+    require_final_velocity: bool = field(default=False, kw_only=True)
+    """Require authored/runtime speed validity of final full-robot commands.
+
+    This separate opt-in gate runs after any declared sampling retries and plan
+    transforms. Unknown command-only qualification is unsupported. Rejected rows
+    cannot dispatch; their representation is explicit. This is planned evidence,
+    not physical success.
+    """
+
+    final_velocity_rejection: Literal["hold", "mask_only"] = field(
+        default="hold", kw_only=True
+    )
+    """Represent rejected final-velocity rows as holds or retain their proposal.
+
+    ``hold`` preserves shared command authorization and rejected-candidate storage.
+    Explicit ``mask_only`` waits for the complete action request, including its
+    owned candidate recovery and continuations, then changes validity/classification
+    without changing public command or trajectory tensors. Candidate masks stay
+    untouched until that boundary; execution still cannot dispatch failed rows.
+    """
+
     def __post_init__(self) -> None:
+        if self.final_velocity_rejection not in {"hold", "mask_only"}:
+            raise ValueError("final_velocity_rejection must be hold or mask_only.")
+        segment_retries = self.segment_sample_count_retries
+        if (
+            type(segment_retries) is not tuple
+            or any(type(value) is not int or value < 2 for value in segment_retries)
+            or any(a >= b for a, b in zip(segment_retries, segment_retries[1:]))
+        ):
+            raise ValueError(
+                "segment_sample_count_retries must be a strictly increasing tuple of integer counts >=2."
+            )
+        if type(self.segment_continuous_ik_recovery) is not bool:
+            raise TypeError("segment_continuous_ik_recovery must be a boolean.")
+        if (segment_retries or self.segment_continuous_ik_recovery) and (
+            self.strategy != "ik_interp"
+            or self.interpolation_mode != "fixed_grid"
+            or self.ik_seed_mode != "sequential"
+        ):
+            raise ValueError(
+                "Cartesian segment recovery requires fixed-grid sequential ik_interp."
+            )
+        if type(self.require_final_velocity) is not bool:
+            raise TypeError("require_final_velocity must be a boolean.")
+        retries = self.sample_count_retries
+        if (
+            type(retries) is not tuple
+            or any(type(value) is not int or value < 2 for value in retries)
+            or any(first >= second for first, second in zip(retries, retries[1:]))
+        ):
+            raise ValueError(
+                "sample_count_retries must be a strictly increasing tuple of integer counts >=2."
+            )
         if self.interpolation_mode not in {"adaptive", "fixed_grid"}:
             raise ValueError("interpolation_mode must be adaptive or fixed_grid.")
         if self.ik_seed_mode not in {"batched", "sequential"}:
@@ -217,6 +295,8 @@ class MotionPolicy:
             cartesian_path_sampler=cartesian_path_sampler,
             interpolation_mode=self.interpolation_mode,
             ik_seed_mode=self.ik_seed_mode,
+            segment_sample_count_retries=self.segment_sample_count_retries,
+            segment_continuous_ik_recovery=self.segment_continuous_ik_recovery,
         )
 
 
