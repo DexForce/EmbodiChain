@@ -137,3 +137,28 @@ the architecture explorer. Shared viewport controls and theme tokens live in
 API embeds committed build outputs, so installed offline rendering has no Node
 runtime requirement. Vector SVG export serializes the current task layout and
 retains the original evidence status rather than generating a new verdict.
+
+
+Normal source physical declarations
+-----------------------------------
+
+These frontend adapters compose PreparedScene, public model descriptions and
+shared Scene/Compute services into a new frozen physical declaration. Control
+subjects and semantic resource eligibility remain explicit. Asset fitting, source
+geometry, physical calibration and reset/cadence declarations retain their
+independent owners. Existing snapshots bypass preparation and keep their identity.
+This surface neither publishes a runtime bundle nor constructs a simulator.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.control_physical_preparation
+
+.. autoclass:: PreparedControlPhysicalSources
+   :members:
+
+.. autofunction:: prepare_source_control_physics
+
+.. currentmodule:: embodichain.gen_sim.task_engine.source_physical_input
+
+.. autoclass:: SourcePhysicalPreparation
+   :members:
+
+.. autofunction:: prepare_source_physical_input

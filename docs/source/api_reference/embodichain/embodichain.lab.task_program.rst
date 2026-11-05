@@ -424,3 +424,16 @@ MLLM frontend
 .. autofunction:: embodichain.agents.mllm.decode_mllm_task_program
 
 .. autofunction:: embodichain.agents.mllm.compile_mllm_task_program
+
+
+Static source environment declarations
+--------------------------------------
+
+Declare the original single-environment Default physics, control cadence,
+CCD and complete rigid-scene reset settling contract from explicit identities.
+This helper returns owned configuration only; no runtime service or simulation
+object is created. Episode bounds and reset identities are validated.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.source_deployment
+
+.. autofunction:: source_task_program_environment_declaration

@@ -17,6 +17,8 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Source export discovery and pure scene declarations | `orchestration/source_scene.py` |
 | Explicit frozen physical-owner components and drift identity | `physical_input.py` |
 | Semantic part positions/ranks from public Scene descriptions | `orchestration/part_catalog.py` |
+| Normal scene-to-frozen physical declaration composition | `source_physical_input.py` |
+| Semantic control selection and physical-owner receipts | `control_physical_preparation.py` |
 
 TaskSpec identity and predicate evaluation belong to
 [Task specification](../task-spec/task-spec.md). Both mappings and instances must
@@ -83,11 +85,22 @@ See [`web/README.md`](../../../web/README.md) for both frontend build paths.
 Model declaration binding uses `embodiment_declarations.py` and `robot_profiles.py`.
 These consume public `embodichain_robots.task_program` descriptions and component
 services; they emit declarations and provenance hashes rather than skills,
-physical facts or acceptance. This standalone descriptor surface does not yet
-connect Source physical-input preparation, bundle publication or CLI routing.
+physical facts or acceptance. Normal Source physical preparation consumes this descriptor surface; bundle
+publication and CLI routing retain their separate integration layer.
 
 `resolve_source_hand_services()` includes the effective registered grasp-model
 asset inventory in its returned hand-input hashes. It delegates model/side and
 archive-reference selection to GraspKit's public model owner; component fallback
 calibration files remain in the same hand-services provenance group. It creates
 no sampler or Robot and does not add another bundle input group.
+
+`prepare_source_physical_input` composes the explicit existing model component,
+shared Scene declarations, Scene Engine normalization and optional source-control
+preparation into a fresh `FrozenPhysicalInput`. Original source files and newly
+derived provenance remain inventoried, with before/after drift checks. It never
+reprocesses an existing frozen input or constructs Robot, simulation, IK or
+skills. `control_physical_preparation` selects semantic subjects/resources and
+records shared control-resize/mass/calibration receipts; those numerical and
+authored-geometry algorithms stay in Scene/Compute/model owners. The selected
+`dual_arm_trajectory_verified.yaml` component retains source tracking/recovery
+values; Lab owns the pure source reset/cadence declaration helper.
