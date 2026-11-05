@@ -252,10 +252,31 @@ def test_sampler_owns_masked_frames_in_requested_environment_order():
         == [[True, True, False, False]] * 2
     )
     assert all(batch.valid.all() for batch in sample.frame.batches.values())
+    sample.frame.batches[CONTACT_NORMALS].env_ids[0] = 1
+    assert sample.frame.get(CONTACT_IMPULSES).env_ids.tolist() == [2, 0]
+    assert sample.frame.env_ids.tolist() == [2, 0]
+    sample.frame.batches[CONTACT_NORMALS].env_ids[0] = 2
     old = sample.frame.get(CONTACT_NORMALS).values.clone()
     source.data["normal"].zero_()
     assert torch.equal(sample.frame.get(CONTACT_NORMALS).values, old)
+    request.env_ids[0] = 1
+    assert sample.frame.env_ids.tolist() == [2, 0]
+    sample.frame.env_ids[0] = 99
+    assert sample.frame.batches[CONTACT_NORMALS].env_ids.tolist() == [2, 0]
+    sample.frame.env_ids[0] = 2
+    sample.frame.batches[CONTACT_NORMALS].values[0, 0, 0] = float("nan")
+    with pytest.raises(ValueError, match="finite"):
+        sample.frame.snapshot()
     assert source.update_count == 1
+
+
+def test_sampler_revalidates_request_scope_before_touching_the_source():
+    source = ContactSource(count=3)
+    request = PhysicalEvidenceRequest(2.0, 7, torch.tensor([2, 0]))
+    request.env_ids[1] = 2
+    with pytest.raises(ValueError, match="unique"):
+        ContactEvidenceSampler(source).sample(request)
+    assert source.update_count == 0
 
 
 @pytest.mark.parametrize(
@@ -509,27 +530,25 @@ def test_empty_contact_timeline_does_not_retain_sensor_padding():
 
 
 def test_public_base_env_step_drives_actual_sensor_observer_port():
-    source = ContactSource()
-    clock = SimpleNamespace(step_index=0)
-    sensor = ContactSensor.__new__(ContactSensor)
-    sensor._sample_ready_stream = None
-    sensor._last_update_key = None
-    sensor._last_history_key = None
-    sensor._last_contact_buffer = None
-    sensor.device = torch.device("cpu")
-    sensor._entities = [None]
-    sensor._num_instances = 1
-    sensor._query = SimpleNamespace(
-        capabilities=source.contact_capabilities, actors=(), selected_actor_ids=()
+    from importlib.util import module_from_spec, spec_from_file_location
+    from pathlib import Path
+
+    # Reuse the complete real-sensor fixture rather than mirror its private buffers.
+    fixture_path = (
+        Path(__file__).parents[3] / "sim/sensors/test_contact_query_sensor.py"
     )
-    sensor._data_buffer = source.data
-    sensor._histories = {}
-    sensor._sampling_observers = {}
-    sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
-    sensor._scatter_dropped_count = torch.zeros(1, dtype=torch.int32)
+    spec = spec_from_file_location("contact_query_fixture", fixture_path)
+    fixture = module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    _FakeQuery, _sensor_for_query = fixture._FakeQuery, fixture._sensor_for_query
+    import warp as wp
+
+    wp.init()
+    source = ContactSource()
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    clock = SimpleNamespace(step_index=0)
     sampled = []
-    sensor._read_contacts = lambda: object()
-    sensor._sample_physics_contacts = lambda buffer, dt: sampled.append(dt)
     sampler = ContactEvidenceSampler(
         sensor,
         native_revision_reader=lambda: source.revision,
@@ -554,14 +573,12 @@ def test_public_base_env_step_drives_actual_sensor_observer_port():
     def update(dt, steps, **kwargs):
         for step in range(steps):
             source.revision += 1
-            env.sim.physics_step_index += 1
-            source.data["impulse"].fill_((step + 1) * 0.01)
+            query.buffer.data[:2, 9].fill_((step + 1) * 0.01)
+            sensor._sim.physics_step_index += 1
+            sampled.append(dt)
             kwargs["after_substep"](dt)
 
-    env.sim = SimpleNamespace(
-        update=update, render_frame=lambda: nullcontext(), physics_step_index=0
-    )
-    sensor._sim = env.sim
+    env.sim = SimpleNamespace(update=update, render_frame=lambda: nullcontext())
     env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
     env._elapsed_steps = torch.zeros(1, dtype=torch.long)
     for name in ("_preprocess_action", "_step_action", "_postprocess_action"):
@@ -848,15 +865,13 @@ def test_timeline_reset_matches_sensor_indices_without_double_generation(
     before = timeline.snapshot()
     sensor = ContactSensor.__new__(ContactSensor)
     sensor._sample_ready_stream = None
-    sensor._last_update_key = None
-    sensor._last_history_key = None
-    sensor._last_contact_buffer = None
     sensor.device = torch.device("cpu")
     sensor._data_buffer = source.data
     sensor._num_contacts_per_env = source.data["is_valid"].sum(1).to(torch.int32)
     sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
     sensor._scatter_dropped_count = torch.zeros(3, dtype=torch.int32)
     sensor._sample_scatter_dropped_count = torch.zeros(3, dtype=torch.int32)
+    sensor._latest_contact_buffer = None
     sensor._histories = {}
     sensor._sampling_observers = {}
     sensor.add_sampling_observer("timeline", timeline)

@@ -10,8 +10,9 @@ topics:
   title: Simulation System
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
   keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
-    NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
+    NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, simulation_time, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
+    UsdSourceSnapshot, read_usd_source, LinkMesh,
     PhysicalCollisionGeometry, capture_physical_collision_geometry,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, quaternion, xyzw]
@@ -161,6 +162,7 @@ topics:
   - embodichain/lab/sim/sensors/contact/sensor.py
   - embodichain/lab/sim/sensors/contact/sampling.py
   - embodichain/lab/sim/sensors/contact/timeline.py
+  - embodichain/lab/sim/sensors/support_observation.py
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
@@ -250,6 +252,7 @@ topics:
   title: Scene Services
   aliases: [sim.scene, scene services, procedural scene, 场景服务, 程序化场景, 场景布局, 场景快照]
   keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
+    RigidMeshSnapshot, capture_rigid_mesh,
     NativeHandGeometry, capture_native_hand_geometry, capture_native_rigid_obstacles, native hand capture,
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
     SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
@@ -257,7 +260,7 @@ topics:
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
     aabb_overlap_depth, aabb_containment_violation, transform_aabbs, triangle_geometry,
-    geometry kernels, RobotSceneWorkspace, SceneWorkspaceCandidate, robot_workspace demo, 场景几何核]
+    geometry kernels, support_from_contacts, RobotSceneWorkspace, SceneWorkspaceCandidate, robot_workspace demo, 场景几何核]
   paths: [topics/scene-services/scene-services.md]
   source_of_truth:
   - embodichain/lab/sim/scene/
@@ -448,6 +451,8 @@ topics:
     hand_geometries,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
+    joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies,
+
     joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies, ContactEvidenceSampler, ContactTimeline, NativeGripEvidenceFactory,
     ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
   paths: [topics/task-programs/task-programs.md]
@@ -456,8 +461,8 @@ topics:
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
-  - embodichain/lab/task_program/integrations/simulation/grip_evidence.py
 
+  - embodichain/lab/task_program/integrations/simulation/grip_evidence.py
   - embodichain/lab/task_program/integrations/invocation_policy.py
   - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
@@ -469,6 +474,25 @@ topics:
     extensions/embodichain_tasks/configs/components/expansion_policies/,
     extensions/embodichain_tasks/configs/tasks/manipulation/, tests/lab/task_program/]
   related_topics: [atomic-actions, env-framework, simulation-system, motion-planning, sensor-system, data-pipeline]
+  status: active
+- id: task-engine
+  title: Task Engine
+  aliases: [Task Engine, task engine, 任务引擎, 任务理解]
+  keywords: [TaskAgent, TaskDraft, TaskCandidateSet, InstructionIntent, TaskSpecGenerator,
+    SemanticTaskGraph, validate_semantic_task_graph, validate_graph_coverage]
+  paths: [topics/task-engine/task-engine.md]
+  source_of_truth:
+  - embodichain/gen_sim/task_engine/__init__.py
+  - embodichain/gen_sim/task_engine/agent.py
+  - embodichain/gen_sim/task_engine/interpretation.py
+  - embodichain/gen_sim/task_engine/contracts.py
+  - embodichain/gen_sim/task_engine/ontology.py
+  - embodichain/gen_sim/task_engine/task_spec.py
+  - embodichain/gen_sim/task_engine/semantic_graph.py
+  - embodichain/gen_sim/task_engine/semantic_graph_validation.py
+  - embodichain/gen_sim/task_engine/orchestration/contracts.py
+  watch_paths: [embodichain/gen_sim/task_engine/, tests/gen_sim/task_engine/]
+  related_topics: [task-spec, task-programs, gen-sim]
   status: active
 - id: task-spec
   title: Task Specification
@@ -483,7 +507,7 @@ topics:
   - embodichain/gen_sim/task_spec/registry.py
   - embodichain/gen_sim/task_spec/canonicalization.py
   watch_paths: [embodichain/gen_sim/task_spec/, tests/gen_sim/task_spec/]
-  related_topics: [gen-sim, task-programs]
+  related_topics: [gen-sim, task-programs, task-engine]
   status: active
 - id: gen-sim
   title: Gen Sim

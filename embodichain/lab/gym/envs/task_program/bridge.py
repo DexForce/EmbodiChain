@@ -997,6 +997,26 @@ class BufferedGymCommandSink:
             metadata={"bridge_action_kind": "runtime_wait_hold"},
         )
 
+    def encode_post_policy_hold(self, qpos: torch.Tensor) -> EnvAction:
+        """Encode a policy's captured full-position hold in the controller mode.
+
+        Args:
+            qpos: Finite floating positions shaped ``(batch_size, robot_dof)``.
+
+        Returns:
+            An owned position action, including zero velocity targets when the
+            configured encoder uses ``position_velocity`` commands.
+        """
+        if (
+            not isinstance(qpos, torch.Tensor)
+            or qpos.ndim != 2
+            or not all(qpos.shape)
+            or not qpos.is_floating_point()
+            or not torch.isfinite(qpos).all().item()
+        ):
+            raise ValueError("Post-policy holds require finite full-position rows.")
+        return self._encoder._action_from_qpos(qpos)
+
 
 @dataclass(slots=True)
 class _SegmentLifecycle:
@@ -1260,6 +1280,9 @@ class TaskProgramDemoBridge:
         self._active_segment_id: str | None = None
         self._eligible_mask: torch.Tensor | None = None
         self._program_completed = False
+        self._segment_iterator_started = False
+        self._segment_iterator_closed = False
+        self._last_segment_lifecycle: _SegmentLifecycle | None = None
         self._sequential_workflows: dict[int, tuple[SemanticWorkflow, int]] = {}
         self._execution_trace: list[dict[str, object]] | None = None
 
@@ -1267,6 +1290,26 @@ class TaskProgramDemoBridge:
     def clock(self) -> EnvironmentStepClock:
         """Return the environment-step clock used by this bridge."""
         return self._clock
+
+    @property
+    def execution_finished(self) -> bool:
+        """Return whether segment iteration ended with no outstanding action owner.
+
+        Closing iteration does not certify success or acknowledge a pending
+        command. An active action generator retains ownership until consumed or
+        explicitly aborted by the normal executor handshake.
+        """
+        lifecycle = self._last_segment_lifecycle
+        settled = (
+            lifecycle is None
+            or lifecycle.abort_complete
+            or (lifecycle.complete and lifecycle.validation is not None)
+        )
+        return (
+            self._segment_iterator_closed
+            and self._active_segment_id is None
+            and settled
+        )
 
     @property
     def program_completed(self) -> bool:
@@ -1357,9 +1400,21 @@ class TaskProgramDemoBridge:
         raises :class:`TaskProgramBridgeError` instead of silently carrying stale row
         eligibility into downstream execution.
         """
+        if self._segment_iterator_started:
+            raise TaskProgramBridgeError(
+                "This bridge's segment iterator is already started or closed."
+            )
+        self._segment_iterator_started = True
+        try:
+            yield from self._iter_segments()
+        finally:
+            self._segment_iterator_closed = True
+
+    def _iter_segments(self) -> Iterator[DemoSegment]:
         for segment in self._program.iter_segments():
             metadata = self._segment_metadata(segment)
             lifecycle = _SegmentLifecycle(metadata=metadata)
+            self._last_segment_lifecycle = lifecycle
             validator = self._segment_validator(segment, lifecycle)
             yield DemoSegment(
                 actions=self._segment_actions(segment, lifecycle),
@@ -1948,6 +2003,11 @@ class TaskProgramDemoBridge:
                         result=result,
                         action_kind="program_post_policy",
                     )
+                    if isinstance(processed.value, torch.Tensor):
+                        processed = ControllerAction(
+                            value=self._sink.encode_post_policy_hold(processed.value),
+                            metadata=processed.metadata,
+                        )
                     yield from self._yield_and_advance(processed, lifecycle)
             except BaseException as exc:
                 iteration_error = exc

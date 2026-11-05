@@ -86,3 +86,34 @@ def test_shared_angle_samples_broadcast_over_rigid_grasp_batch() -> None:
     assert rotated.shape == (3, 2, 4, 4)
     torch.testing.assert_close(rotated, carried)
     torch.testing.assert_close(rotated[:, 0], poses)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_support_mesh_envelope_preserves_world_axes_and_explicit_inset(dtype):
+    from embodichain.compute.geometry.rigid import support_mesh_envelope
+
+    corners = torch.tensor(
+        [[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)], dtype=dtype
+    ).repeat(2, 1, 1)
+    object_pose = torch.eye(4, dtype=dtype).repeat(2, 1, 1)
+    object_pose[:, 2, 3] = torch.tensor([5, 7], dtype=dtype)
+    reference_pose = torch.eye(4, dtype=dtype).repeat(2, 1, 1)
+    reference_pose[:, :3, :3] = torch.tensor(
+        [[0, -1, 0], [1, 0, 0], [0, 0, 1]], dtype=dtype
+    )
+    reference_pose[:, :3, 3] = torch.tensor([[10, 20, 1], [30, 40, 2]], dtype=dtype)
+    bottom, top, lower, upper = support_mesh_envelope(
+        corners,
+        corners * corners.new_tensor([2, 3, 1]),
+        object_pose,
+        reference_pose,
+        inset_xy=0.002,
+    )
+    torch.testing.assert_close(bottom, corners.new_tensor([4, 6]))
+    torch.testing.assert_close(top, corners.new_tensor([2, 3]))
+    torch.testing.assert_close(
+        lower, corners.new_tensor([[7.002, 18.002], [27.002, 38.002]])
+    )
+    torch.testing.assert_close(
+        upper, corners.new_tensor([[12.998, 21.998], [32.998, 41.998]])
+    )

@@ -21,6 +21,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from scipy.spatial import ConvexHull
 from scipy.spatial.transform import Rotation
 import torch
@@ -130,7 +131,13 @@ def test_native_open_hand_mesh_rejects_real_collision_without_false_palm_collisi
     assert legacy.collision_geometry.provenance["parts"]
 
 
-def test_benchmark_pgi_uses_bound_solver_tcp_without_offsetting_native_panda() -> None:
+@pytest.mark.parametrize(
+    "model_id, expected_tcp_z, expected_offset",
+    [("dh_pgi_140_80", 0.17, 0.02), ("robotiq_arg2f_140", 0.20, 0.0)],
+)
+def test_benchmark_mounted_hand_uses_bound_solver_tcp(
+    model_id: str, expected_tcp_z: float, expected_offset: float
+) -> None:
     from embodichain_benchmarks.motion_generation._atomic_fixtures import (
         create_ur5_gripper_robot_cfg,
     )
@@ -139,10 +146,22 @@ def test_benchmark_pgi_uses_bound_solver_tcp_without_offsetting_native_panda() -
     )
 
     scenario = AtomicSkillScenario()
-    scenario.robot = SimpleNamespace(cfg=create_ur5_gripper_robot_cfg())
-    scenario.grasp_model = lambda: get_parallel_jaw_gripper_model("dh_pgi_140_80")
+    if model_id == "dh_pgi_140_80":
+        cfg = create_ur5_gripper_robot_cfg()
+    else:
+        from embodichain_benchmarks.motion_generation import load_suite
+        from embodichain_benchmarks.motion_generation.registry import (
+            create_robot_provider,
+        )
+
+        cfg = create_robot_provider(
+            load_suite("atomic_dual_franka_robotiq_hand_over").robot
+        ).build_cfg()
+        scenario.control_part = "left_arm"
+    scenario.robot = SimpleNamespace(cfg=cfg)
+    scenario.grasp_model = lambda: get_parallel_jaw_gripper_model(model_id)
     actual_tcp = scenario.grasp_root_from_tcp()
-    assert actual_tcp[2][3] == 0.17  # Actual UR5-PGI default, not contact centre .15.
+    assert actual_tcp[2][3] == expected_tcp_z
     sampler = create_parallel_jaw_grasp_pose_generator(
         n_sample=32,
         force_refresh=False,
@@ -150,6 +169,49 @@ def test_benchmark_pgi_uses_bound_solver_tcp_without_offsetting_native_panda() -
         root_from_tcp=actual_tcp,
     )
     offset = np.array(sampler.collision_geometry.provenance["grasp_from_tcp"])
-    np.testing.assert_allclose(offset[:3, 3], [0, 0, 0.02], atol=1e-9)
+    np.testing.assert_allclose(offset[:3, 3], [0, 0, expected_offset], atol=1e-9)
     scenario.grasp_model = lambda: get_parallel_jaw_gripper_model("franka_panda_hand")
     assert scenario.grasp_root_from_tcp() is None  # Native uses its named hand TCP.
+
+
+def test_grasp_depth_moves_contact_toward_hand_and_rebases_collision_surfaces() -> None:
+    """Depth changes physical contact, rather than only relabelling the TCP."""
+    tcp = np.eye(4)
+    tcp[:3, :3] = Rotation.from_euler("z", 90, degrees=True).as_matrix()
+    tcp[2, 3] = 0.20
+    arguments = dict(
+        n_sample=32,
+        force_refresh=False,
+        gripper_model=get_parallel_jaw_gripper_model("robotiq_arg2f_140"),
+        root_from_tcp=tcp,
+    )
+    original = create_parallel_jaw_grasp_pose_generator(**arguments).collision_geometry
+    deeper = create_parallel_jaw_grasp_pose_generator(
+        **arguments, grasp_depth_offset_m=0.01
+    ).collision_geometry
+    # Moving the contact origin 1 cm toward the root moves all hand surfaces
+    # 1 cm forward in contact coordinates, before candidate collision checks.
+    torch.testing.assert_close(
+        deeper.points,
+        original.points + original.points.new_tensor([0, 0, 0.01]),
+        atol=1e-7,
+        rtol=0,
+    )
+    world_contact = torch.eye(4, dtype=torch.float64)
+    world_contact[:3, :3] = torch.tensor(
+        Rotation.from_euler("xyz", [0.3, -0.4, 0.2]).as_matrix()
+    )
+    world_contact[:3, 3] = torch.tensor([0.1, -0.2, 0.6])
+    for geometry, expected_depth in ((original, 0.20), (deeper, 0.19)):
+        world_tcp = geometry.canonical_to_tcp_poses(world_contact)
+        world_hand = world_tcp @ torch.tensor(np.linalg.inv(tcp))
+        hand_contact = torch.linalg.inv(world_hand) @ world_contact
+        torch.testing.assert_close(
+            hand_contact[:3, 3],
+            torch.tensor([0, 0, expected_depth], dtype=torch.float64),
+            atol=1e-9,
+            rtol=0,
+        )
+        np.testing.assert_allclose(
+            geometry.provenance["root_from_contact_frame"][2][3], expected_depth
+        )

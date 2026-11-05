@@ -28,6 +28,11 @@ retain their separate configuration objects. Marvin requires an explicit
 `side="left"` or `side="right"` because its two hands have different meshes.
 A runtime TCP calibration can be supplied explicitly with `root_from_tcp`;
 this changes the returned TCP poses without moving the physical geometry.
+`root_from_contact_frame` independently calibrates the canonical grasp origin and
+axes in the hand root. It re-expresses surface samples and candidate poses while
+preserving the URDF geometry. Configured grasp services accept the same field;
+keep it with the embodiment's grasp calibration rather than using a TCP offset
+to stand in for contact calibration.
 
 For a custom hand, construct `FixedGripperCollisionGeometry.from_urdf` with
 its root/TCP, collision links, actual open joint positions, canonical-to-TCP

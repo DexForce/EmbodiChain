@@ -224,7 +224,7 @@ class ContactEvidenceSampler:
                 dtype=dtype,
                 device=request.env_ids.device,
             )
-            batches[channel] = PhysicalEvidenceBatch(
+            batches[channel] = PhysicalEvidenceBatch._from_owned_channel(
                 channel,
                 values,
                 torch.zeros(
@@ -233,12 +233,10 @@ class ContactEvidenceSampler:
                     device=request.env_ids.device,
                 ),
                 (error,) * len(request.env_ids),
-                request.timestamp,
-                request.env_ids,
-                request.observation_revision,
+                request=request,
             )
         return ContactEvidenceSample(
-            PhysicalEvidenceFrame(
+            PhysicalEvidenceFrame._from_owned_batches(
                 request.timestamp,
                 request.observation_revision,
                 request.env_ids,
@@ -275,6 +273,10 @@ class ContactEvidenceSampler:
             raise TypeError("request must be exactly PhysicalEvidenceRequest.")
         if type(refresh) is not bool:
             raise TypeError("refresh must be a bool.")
+        # Public requests contain mutable tensors. Validate/snapshot the scope
+        # once before native acquisition, then transfer only freshly computed
+        # channels; no per-channel identity cache or public validation bypass.
+        request = request.snapshot()
         channels = request.channels or tuple(_CHANNELS)
         if CONTACT_VALID_MASK not in channels:
             channels = (CONTACT_VALID_MASK, *channels)
@@ -388,17 +390,15 @@ class ContactEvidenceSampler:
                     )
                     for ok in finite.tolist()
                 )
-                batches[channel] = PhysicalEvidenceBatch(
+                batches[channel] = PhysicalEvidenceBatch._from_owned_channel(
                     channel,
                     values,
                     valid,
                     row_errors,
-                    request.timestamp,
-                    ids,
-                    request.observation_revision,
+                    request=request,
                 )
             return ContactEvidenceSample(
-                PhysicalEvidenceFrame(
+                PhysicalEvidenceFrame._from_owned_batches(
                     request.timestamp, request.observation_revision, ids, batches
                 ),
                 before.native_revision,

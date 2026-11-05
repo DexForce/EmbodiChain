@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from enum import Enum
 import hashlib
 import json
@@ -49,10 +49,22 @@ from ._configured_hand_geometry import (
 from .catalog import (
     SimulationTaskProgramRegistration,
 )
+from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
+from .simulation.policies import SimulationSettleMonitorCfg
+from .simulation.stability import (
+    SimulationStabilityConditionCfg,
+    SimulationJointStabilityConditionCfg,
+    SupportSensorDeclarationCfg,
+)
 from .composition import (
     ConfiguredTaskProgramIntegration as _ConfiguredTaskProgramIntegration,
 )
 from .nominal import _ConfiguredPrototypeSource
+from .simulation.targets import AbsolutePoseTarget, SceneEntityTarget
+from .simulation.transport import (
+    HeldObjectTransportRoute,
+    RoutedMoveHeldObjectLowererFactory,
+)
 from .simulation import (
     AntipodalGraspAffordanceBinding,
     ContainerAffordanceBinding,
@@ -2061,6 +2073,7 @@ def _decode_grasp_generator(
                 "point_spacing",
                 "side",
                 "root_from_tcp",
+                "root_from_contact_frame",
             }
         ),
     )
@@ -2100,6 +2113,14 @@ def _decode_grasp_generator(
         ),
         side=side,
         root_from_tcp=root_from_tcp,
+        root_from_contact_frame=(
+            _geometry_pose(
+                config["root_from_contact_frame"],
+                path=f"{path}.root_from_contact_frame",
+            )
+            if "root_from_contact_frame" in config
+            else None
+        ),
         sample_count=(
             _integer(config["sample_count"], path=f"{path}.sample_count", minimum=1)
             if "sample_count" in config
@@ -2182,6 +2203,74 @@ def _decode_handover_pose_provider(
     )
 
 
+def _decode_goal_pose(
+    value: object, *, path: str
+) -> AbsolutePoseTarget | SceneEntityTarget:
+    """Decode one closed absolute or scene-relative target declaration."""
+    common = _mapping(
+        value,
+        path=path,
+        required=frozenset({"kind"}),
+        optional=frozenset(
+            {
+                "position",
+                "quaternion_xyzw",
+                "entity_id",
+                "relative_pose",
+                "world_orientation",
+            }
+        ),
+    )
+    kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind == "pose":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "position", "quaternion_xyzw"}),
+        )
+        return AbsolutePoseTarget(
+            _finite_tuple(
+                config["position"], path=f"{path}.position", expected_length=3
+            ),
+            _finite_tuple(
+                config["quaternion_xyzw"],
+                path=f"{path}.quaternion_xyzw",
+                expected_length=4,
+            ),
+        )
+    if kind == "scene_entity":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "entity_id"}),
+            optional=frozenset({"relative_pose", "world_orientation"}),
+        )
+        return SceneEntityTarget(
+            _identifier(config["entity_id"], path=f"{path}.entity_id"),
+            world_orientation=(
+                None
+                if "world_orientation" not in config
+                else _finite_tuple(
+                    config["world_orientation"],
+                    path=f"{path}.world_orientation",
+                    expected_length=9,
+                )
+            ),
+            relative_pose=(
+                None
+                if "relative_pose" not in config
+                else _finite_tuple(
+                    config["relative_pose"],
+                    path=f"{path}.relative_pose",
+                    expected_length=16,
+                )
+            ),
+        )
+    raise ValueError(
+        f"Unsupported {path}.kind {kind!r}; expected pose or scene_entity."
+    )
+
+
 def _decode_registered_lowerer(
     value: object,
     *,
@@ -2192,6 +2281,7 @@ def _decode_registered_lowerer(
     | _CoordinatedTransportLowererFactory
     | _MoveHeldObjectLowererFactory
     | _ParkLowererFactory
+    | RoutedMoveHeldObjectLowererFactory
     | _PourLowererFactory
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
@@ -2278,6 +2368,30 @@ def _decode_registered_lowerer(
             ),
             target_pose_mode=target_pose_mode,
         )
+    if kind == "move_held_object" and "routes" in value:
+        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+        routes = []
+        for index, item in enumerate(
+            _sequence(config["routes"], path=f"{path}.routes")
+        ):
+            route_path = f"{path}.routes[{index}]"
+            route = _mapping(
+                item,
+                path=route_path,
+                required=frozenset({"object_id", "target_id", "pose"}),
+            )
+            routes.append(
+                HeldObjectTransportRoute(
+                    object_id=_identifier(
+                        route["object_id"], path=f"{route_path}.object_id"
+                    ),
+                    target_id=_identifier(
+                        route["target_id"], path=f"{route_path}.target_id"
+                    ),
+                    pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
+                )
+            )
+        return RoutedMoveHeldObjectLowererFactory(routes=tuple(routes))
     if kind == "move_held_object":
         config = _mapping(
             value,
@@ -2577,6 +2691,7 @@ class _DecodedRuntimeServices:
         | _CoordinatedTransportLowererFactory
         | _MoveHeldObjectLowererFactory
         | _ParkLowererFactory
+        | RoutedMoveHeldObjectLowererFactory
         | _PourLowererFactory
         | _PushObjectLowererFactory
         | _RelativePlaceLowererFactory,
@@ -2584,6 +2699,101 @@ class _DecodedRuntimeServices:
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
+    settle_presets: (
+        tuple[
+            tuple[
+                str,
+                DynamicSettleMonitorCfg
+                | SimulationStabilityConditionCfg
+                | SimulationJointStabilityConditionCfg,
+            ],
+            ...,
+        ]
+        | None
+    ) = None
+
+
+def _decode_settle_presets(value: object, *, path: str) -> tuple[
+    tuple[
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
+    ],
+    ...,
+]:
+    """Decode a complete closed named table for the existing registration owner."""
+    if not isinstance(value, Mapping) or not value:
+        raise ValueError(f"{path} must be a nonempty mapping.")
+    result = []
+    for name, item in value.items():
+        name = _identifier(name, path=f"{path} keys")
+        item_path = f"{path}.{name}"
+        if not isinstance(item, Mapping):
+            raise TypeError(f"{item_path} must be a mapping.")
+        if item.get("kind") == "joint_position_and_stability":
+            config = _mapping(
+                item,
+                path=item_path,
+                required=frozenset({"kind", "entity", "joint", "target", "tolerance"}),
+                optional=frozenset(
+                    {
+                        "duration",
+                        "timeout",
+                        "position_drift",
+                        "invalid_observation_policy",
+                        "max_observation_samples",
+                    }
+                ),
+            )
+            preset = SimulationJointStabilityConditionCfg(
+                **{
+                    name: deepcopy(value)
+                    for name, value in config.items()
+                    if name != "kind"
+                }
+            ).snapshot()
+        elif "kind" in item:
+            config = _mapping(
+                item,
+                path=item_path,
+                required=frozenset({"kind", "entity"}),
+                optional=frozenset(
+                    field.name for field in fields(SimulationStabilityConditionCfg)
+                )
+                - {"kind", "entity"},
+            )
+            kwargs = deepcopy(dict(config))
+            sensor = kwargs.get("support_sensor")
+            if sensor is not None:
+                sensor = _mapping(
+                    sensor,
+                    path=f"{item_path}.support_sensor",
+                    required=frozenset({"uid"}),
+                    optional=frozenset({"max_contacts_per_env"}),
+                )
+                kwargs["support_sensor"] = SupportSensorDeclarationCfg(
+                    **sensor
+                ).snapshot()
+            preset = SimulationStabilityConditionCfg(**kwargs).snapshot()
+        else:
+            config = _mapping(
+                item,
+                path=item_path,
+                required=frozenset(),
+                optional=frozenset(
+                    field.name for field in fields(DynamicSettleMonitorCfg)
+                )
+                | {"measurement"},
+            )
+            cfg_type = (
+                SimulationSettleMonitorCfg
+                if "measurement" in config
+                else DynamicSettleMonitorCfg
+            )
+            preset = cfg_type(**deepcopy(dict(config))).snapshot()
+        result.append((name, preset))
+    return tuple(result)
 
 
 def _decode_runtime_services(
@@ -2605,6 +2815,7 @@ def _decode_runtime_services(
                 "registered_semantic_lowerers",
                 "control_part_evidence",
                 "nominal_motion_sources",
+                "settle_presets",
             }
         ),
     )
@@ -2791,6 +3002,13 @@ def _decode_runtime_services(
         registered_semantic_lowerers=lowerers,
         control_part_evidence=evidence,
         nominal_motion_sources=tuple(nominal),
+        settle_presets=(
+            None
+            if "settle_presets" not in config
+            else _decode_settle_presets(
+                config["settle_presets"], path=f"{path}.settle_presets"
+            )
+        ),
     )
 
 
@@ -2859,6 +3077,11 @@ def _decode_configured_task_program_integration(
         handover_pose_providers=services.handover_pose_providers,
         control_part_evidence_factory=services.control_part_evidence,
         registered_semantic_lowerer_factories=(services.registered_semantic_lowerers),
+        **(
+            {}
+            if services.settle_presets is None
+            else {"settle_presets": dict(services.settle_presets)}
+        ),
     )
     grasp_fingerprint = tuple(
         {

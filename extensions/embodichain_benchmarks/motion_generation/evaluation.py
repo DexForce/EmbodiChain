@@ -42,13 +42,14 @@ __all__ = [
     "validate_standard_evaluation",
 ]
 
-STANDARD_VERSION = "atomic-skill-v2"
+STANDARD_VERSION = "atomic-skill-v3"
 TOLERANCES: Mapping[str, float] = MappingProxyType(
     {
         "primitive_position_m": 0.01,
         "primitive_joint_l2_rad": 0.1,
         "task_position_m": 0.01,
         "task_rotation_rad": 0.1,
+        "grasp_contact_distance_m": 0.005,
         "pick_min_lift_m": 0.04,
         "press_min_stroke_ratio": 0.80,
         "drop_margin_m": 0.15,

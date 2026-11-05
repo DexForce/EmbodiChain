@@ -653,6 +653,7 @@ def test_sim_update_owns_physics_and_visualization_time(step: int) -> None:
     assert sim._visualization_sim_step == step
     assert sim.physics_step_index == step
     assert sim._visualization_sim_time == pytest.approx(step * physics_dt)
+    assert sim.simulation_time == pytest.approx(step * physics_dt)
 
 
 def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> None:
@@ -668,6 +669,7 @@ def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> N
     assert sim._world.physics_updates == []
     assert sim._visualization_sim_step == 0
     assert sim._visualization_sim_time == 0.0
+    assert sim.simulation_time == 0.0
     assert runtime.capture_calls[-1]["sim_step"] == 0
     assert runtime.capture_calls[-1]["sim_time"] == 0.0
 
@@ -2963,6 +2965,7 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
     sim._rigid_object_groups = {}
     sim._lights = {}
     sim._sensors = {}
+    sim._visualization_sim_time = 1.25
     sim._deformable_objects = {
         "soft": MagicMock(),
         "cloth": MagicMock(),
@@ -2972,6 +2975,7 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
 
     sim._deformable_objects["soft"].reset.assert_called_once_with([1])
     sim._deformable_objects["cloth"].reset.assert_called_once_with([1])
+    assert sim.simulation_time == 1.25
 
 
 def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> None:
@@ -3222,15 +3226,20 @@ def test_after_substep_observer_preserves_manager_and_camera_boundaries(
     sim.update(
         0.01,
         steps,
-        after_substep=lambda dt: observed.append((dt, len(sim._world.physics_updates))),
+        after_substep=lambda dt: observed.append(
+            (dt, len(sim._world.physics_updates), sim.simulation_time)
+        ),
     )
     assert len(prepare_calls) == 1
-    assert observed == [(0.01, i + 1) for i in range(steps)]
+    assert observed == [
+        (0.01, i + 1, pytest.approx((i + 1) * 0.01)) for i in range(steps)
+    ]
     assert [item["capture_camera_images"] for item in runtime.capture_calls] == [
         False
     ] * max(0, steps - 1) + ([True] if steps else [])
     sim.update(0.01, 1)
     assert len(observed) == steps  # The observer is not retained for later calls.
+    assert sim.simulation_time == pytest.approx((steps + 1) * 0.01)
 
 
 @pytest.mark.parametrize("process_renderer", ["no-render", "hybrid", "fast-rt", "rt"])
