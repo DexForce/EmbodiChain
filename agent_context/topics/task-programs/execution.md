@@ -329,8 +329,11 @@ TaskSpec independently checks that recomputed geometry matches the bound proof.
 
 `simulation.observations.SimulationStateObservationCollector` binds the exact
 pre-execution bridge, sealed registration and initialized episode. Current pose
-and joint queries validate the selected native owner and observation clock.
+and joint queries validate the selected native owner before and after acquisition
+and validate the observation clock.
 Historical pose reads require an explicitly supplied ObservationManager and
 reuse its semantic schema/raw store, including unavailable rows and original
-boundary/revision/timestamp metadata. It does not evaluate TaskSpec conditions,
+boundary/revision/timestamp metadata. A missing original timestamp leaves only
+its affected row unavailable; the read timestamp cannot substitute for it.
+It does not evaluate TaskSpec conditions,
 resample past state or alter execution targets.
