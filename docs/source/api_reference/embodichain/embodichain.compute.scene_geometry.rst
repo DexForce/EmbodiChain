@@ -1,5 +1,5 @@
 Geometry arrays and tensor kernels
-===========================
+==================================
 
 ``embodichain.compute.geometry`` provides reusable Torch operations on dense
 float32/float64 tensors. Inputs share dtype and device; outputs stay on that
