@@ -50,7 +50,7 @@ def _pose(value: tuple[float, ...]) -> tuple[float, ...]:
     if any(
         isinstance(item, bool) or not isinstance(item, (int, float)) for item in value
     ):
-        raise TypeError(f"{field_name} must contain three real numbers.")
+        raise TypeError("relative_pose must contain sixteen real numbers.")
     normalized = tuple(float(item) for item in value)
     if not all(math.isfinite(item) for item in normalized):
         raise ValueError("relative_pose must contain only finite values.")

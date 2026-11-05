@@ -173,6 +173,11 @@ and duplicate target IDs are rejected. The optional
 `RegisteredSemanticLowererSceneValidator` contract lets an immutable factory
 preflight its references against `SceneManifest` before runtime assembly; routed
 transport uses it for canonical object/reference checks.
+The routed-2 factory uses named transport goals and verified retention-only
+phases: grounding checks the exact object and every eligible input-hold row,
+then guards `transport` and requests terminal attachment verification. Projected
+presets reject this contract before motion planning or dispatch. The legacy
+single-target factory keeps its existing effectless behavior and identity.
 
 
 Container affordances may declare a local-z release clearance while retaining

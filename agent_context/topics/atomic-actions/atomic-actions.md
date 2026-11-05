@@ -55,7 +55,11 @@ that commits or invalidates observed effects.
 
 `MoveHeldObject` accepts ordered object-pose waypoints without rebasing the
 verified grasp. Its goal optionally frees only the final world yaw; default
-goals remain exact. Heading alternatives are checked as complete motion paths,
+goals remain exact. An explicit `HeldObjectPoseGoal.object_id` requires that exact
+input object before native or nominal planning and reports retained attachment
+through the existing terminal effect-verification boundary. Omission keeps the
+original effectless transport behavior and numerical path. Heading alternatives
+are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
 Held-object transport and Pour keep the binding's configured grasp command; a
 contact-blocked measured aperture does not retain closing effort.

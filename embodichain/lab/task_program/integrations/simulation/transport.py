@@ -132,7 +132,9 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
             )
         route = self._route(call)
         return SemanticLowering(
-            goal=HeldObjectPoseGoal(resolve_pose_target(route.pose)),
+            goal=HeldObjectPoseGoal(
+                resolve_pose_target(route.pose), object_id=route.object_id
+            ),
             registered_effect=RegisteredSemanticEffect(
                 effect_kind=SemanticEffectKind.ATTACH,
                 held_objects=(
@@ -141,6 +143,7 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
                         relation=HeldObjectRelation.ATTACHED,
                         object_id=route.object_id,
                         slot_id="primary",
+                        retain_during_segments=("transport",),
                     ),
                 ),
             ),
@@ -181,7 +184,7 @@ class RoutedMoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
     """
 
     call_id: ClassVar[str] = _MOVE_HELD_OBJECT_CALL_ID
-    revision: ClassVar[str] = "routed-1"
+    revision: ClassVar[str] = "routed-2"
     target_descriptor: ClassVar[SkillDescriptor] = MoveHeldObject.descriptor()
     routes: tuple[HeldObjectTransportRoute, ...]
 

@@ -3173,3 +3173,13 @@ def test_routed_transport_missing_entities_reject_before_runtime_assembly(missin
     lowerers[index] = {"kind": "move_held_object", "routes": routes}
     with pytest.raises(ValueError, match="missing"):
         _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize("value", [(True,) * 16, ("invalid",) * 16])
+def test_public_scene_target_rejects_non_numeric_matrix_with_type_error(value):
+    from embodichain.lab.task_program.integrations.simulation.targets import (
+        SceneEntityTarget,
+    )
+
+    with pytest.raises(TypeError, match="relative_pose.*sixteen|relative_pose.*16"):
+        SceneEntityTarget("cup", relative_pose=value)

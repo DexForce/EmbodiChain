@@ -155,9 +155,12 @@ its call ID, revision, and target Atomic Skill descriptor. Use this extension
 to expose shared Atomic Skills; do not place task-local motion generators in a
 lowerer.
 Registered held effects use compiler-owned expectations, monitor grounding,
-acquisition gates and retention guards. A lowerer may explicitly preserve
-
-acquisition/release gates and retention guards. A registered release may retain
+acquisition/release gates and retention guards. An attached retention-only
+contract consumes an exact verified input hold for every eligible row, requires
+a verified monitor, and guards the declared segments without a new acquisition
+gate. Routed held-object transport uses this contract and its named Atomic goal
+requests terminal retained-attachment verification.
+A registered release may retain
 its incoming verified hold through declared approach phases and require measured
 detachment before retracting. Relative Place declares the same checks as ordinary
 Place. Runtime validates every guard phase against each successful final plan,

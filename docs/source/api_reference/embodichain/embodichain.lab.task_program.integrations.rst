@@ -414,6 +414,16 @@ Pick lookahead targets. Lowering reads no live state and performs no IK or
 planning. Existing single-target configurations keep their factory and effect
 contract. The route form is mutually exclusive with the legacy selector fields.
 
+The routed-2 contract supplies the route's exact ``object_id`` through
+``HeldObjectPoseGoal``. Grounding requires the selected resource to hold that
+object in every eligible row before planning. A verified monitor is required;
+projected presets reject before dispatch. The existing verified input relation
+is guarded during ``transport`` without a new acquisition gate. Named transport
+plans additionally request terminal retained-attachment verification. Observed
+loss invalidates only the affected resource rows; unresolved terminal evidence
+cannot complete those rows successfully. The legacy single-target form keeps its
+original effectless default and registration fingerprint.
+
 .. code-block:: yaml
 
    kind: move_held_object
