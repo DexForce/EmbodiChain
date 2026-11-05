@@ -2381,3 +2381,71 @@ def test_occurrence_policy_rejects_unknown_preset_and_assurance_changes(
             (Pick(object=SceneObjectRef("cube")),), preset_ids=(preset_id,)
         )
     assert all(provider.calls == 0 for provider in providers)
+
+
+def test_registered_lowering_receives_actual_execution_occurrence_and_revision():
+    class OccurrenceLowerer(_InspectLowerer):
+        def __init__(self):
+            super().__init__()
+            self.occurrences = []
+
+        def lower_occurrence(self, call, *, invocation_id, revision, **kwargs):
+            self.occurrences.append((invocation_id, revision))
+            return super().lower_occurrence(
+                call, invocation_id=invocation_id, revision=revision, **kwargs
+            )
+
+    registry, _ = _scene_registry()
+    lowerer = OccurrenceLowerer()
+    compiler, _ = _compiler(registry, registered=True, registered_lowerers=(lowerer,))
+    workflow = compiler.analyze((RegisteredSemanticCall(call_id=lowerer.call_id),))
+    context = _context(registry)
+    identities = (
+        ("program/repeat_a:0", 0),
+        ("program/repeat_a:0", 1),
+        ("program/repeat_b:0", 0),
+        (None, 0),
+    )
+    for identity, revision in identities:
+        grounded = compiler.ground(
+            workflow, 0, context, invocation_id=identity, revision=revision
+        )
+        assert lowerer.occurrences[-1] == (
+            grounded.invocation.invocation_id,
+            grounded.invocation.revision,
+        )
+        assert grounded.invocation.invocation_id == (
+            identity if identity is not None else f"{workflow.workflow_id}:0"
+        )
+    assert len(lowerer.option_templates) == len(identities)
+    assert lowerer.occurrences[0][0] != lowerer.occurrences[2][0]
+
+
+def test_pick_downstream_deferral_is_typed_and_does_not_change_shared_default():
+    registry, _ = _scene_registry()
+    calls = (
+        Pick(SceneObjectRef("cube"), resources={"primary": "manipulator"}),
+        Place(
+            SceneObjectRef("cube"),
+            on=SceneAffordanceRef("table_top"),
+            resources={"primary": "manipulator"},
+        ),
+    )
+    context = _context(registry)
+    normal, _ = _compiler(registry)
+    assert normal.ground(
+        normal.analyze(calls), 0, context
+    ).invocation.skill_options.downstream_object_target_poses
+    templates = {
+        **_action_option_templates(),
+        "pick": PickUpOptions(qualify_downstream_targets=False),
+    }
+    deferred, _ = _compiler(
+        registry,
+        profile=_profile(preset=_preset("safe", action_option_templates=templates)),
+    )
+    options = deferred.ground(
+        deferred.analyze(calls), 0, context
+    ).invocation.skill_options
+    assert options.qualify_downstream_targets is False
+    assert options.downstream_object_target_poses == ()

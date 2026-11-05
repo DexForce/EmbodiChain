@@ -361,11 +361,16 @@ EEF pose or an ordered set of pose waypoints.
 | Motion | EEF planning from observed arm qpos; output expanded to full robot DoF |
 | Completion | `EEF_GOAL_REACHED` |
 | Effect | none |
-| Skill options | none; reusable motion choices are in `MotionPolicy` |
+| Skill options | `MoveEndEffectorOptions.linear_segments` selects the explicit Cartesian grid; motion choices remain in `MotionPolicy` |
 
 Use an explicit pose for a fixed target, `SceneEntityPose` for a tracked target,
 or `(B, N, 4, 4)` for intermediate waypoints. The action does not command an end
 effector/hand resource.
+
+Explicit released-hand cleanup uses `ReleasedHandClearanceRecovery` plus exact
+following Park authority and a free-motion query. It checks the cleanup and the
+one or two following Parks using the same complete planning/preview pipeline.
+Previews execute no commands and grant no physical effects.
 
 **Example:** `examples/sim/atomic_action/move_end_effector.py`
 
@@ -403,6 +408,13 @@ engine = AtomicActionEngine(
 explicit_goal = JointPositionGoal(target=home_qpos)
 named_goal = JointPositionGoal(target="home")
 ```
+
+`JointOffsetTarget` declares one exact bound model joint and an observed-state
+relative displacement. `MoveJointsOptions(require_free_motion=True)` is required
+for this goal and checks the full emitted command grid, passive joints and the
+original limits/scene geometry. Its optional protected-link search belongs to
+Motion. Released Park recovery additionally requires its declared suffix
+occurrence; it never selects resources from their names.
 
 **Example:** `examples/sim/atomic_action/move_joint.py`
 
@@ -478,6 +490,14 @@ live pose does not create an automatic scene dependency.
 deprecated entity-only fallback. For canonical snapshot grounding and moving
 target recovery, see
 `examples/sim/atomic_action/moving_target_recovery.py`.
+
+Explicit `PickUpOptions` can select qualified fixed, constrained, adaptive or
+native closing geometry. These options require their declared planning ports;
+missing inputs fail rather than disabling a required check. Candidate/path
+recovery is independently enabled with
+`RecoveryPolicy(planning_recovery=PickPlanningRecovery(...))`. The shared default
+uses the original sampling path. `AxisAlignOptions` rejects Pick-only options
+that its planner does not implement.
 
 ### Picking articulated targets
 
@@ -623,6 +643,12 @@ marked unsuccessful and held in place.
 cube scene (`--skill move_held_object`);
 `examples/sim/atomic_action/move_held_object_cup.py` preserves the paper-cup sequence.
 
+Explicit `MoveHeldObjectPlanningRecovery` enables preserved bounded heading and
+staging alternatives. The action borrows declared staging geometry and command
+observations; provenance and command continuity do not certify physical retention.
+`hand_hold="observed"` is an explicit behavior, and drawer transport remains
+unavailable until its separate implementation is installed.
+
 (builtin-pour)=
 
 ## `Pour`
@@ -654,6 +680,11 @@ planner can chain the outbound and return legs.
 
 **Example:** `examples/sim/atomic_action/pour.py` compiles a horizontal
 `PickUp` followed by `Pour`.
+
+`JawPourGoal` and `RetainedPourGoal` provide explicit ordered-pad and retained
+arc constructions alongside `PourGoal`. They use the declared hand calibration,
+current scene poses and shared Motion validation, retaining the original default
+Pour behavior when those goals are absent.
 
 (builtin-push-object)=
 
@@ -728,6 +759,13 @@ The bound `primary.grasp` endpoint must provide `open` and `grasp`. Important
 | `preserve_current_object_orientation` | Keep the observed object orientation while using the target translation |
 
 **Example:** `examples/sim/atomic_action/place.py`
+
+Explicit Place recovery uses `PlacePlanningRecovery` and a typed scene provider
+with declared floor/support identities. The bounded waypoint, lateral,
+retained-grip and inside-yaw variants preserve required release poses. Measured
+inside geometry and complete Pick-to-Place previews are separate explicit
+services; a preview never establishes a physical release. Drawer-specific Place
+is unavailable in this layer and rejects before planning.
 
 (builtin-assemble)=
 
@@ -1009,10 +1047,10 @@ both hands -> lift -> move object -> hold**.
 | Verification | coordinated attachment must be externally verified |
 
 The left/right grasp poses are not supplied by the caller. At planning time the
-action calls `AntipodalAffordance.get_dual_arm_valid_grasp_poses` with the
+action calls its engine-owned parallel-jaw grasp-pose service with the
 `approach_direction`, `left_to_right_arm_direction`, and `middle_empty_ratio`
-options to partition the object into left/right grasp regions and select the
-lowest-cost grasp on each side. Each derived `object_to_eef` transform is stored
+options. The existing paired-grasp service retains its qualification, candidate
+order and selected left/right grasp pair. Each derived `object_to_eef` transform is stored
 in the corresponding projected `HeldObjectState`. Later object-centric skills
 can inspect those per-manipulator entries directly; sharing the same
 `ObjectSemantics` instance identifies the common object. Single-arm transport
@@ -1042,6 +1080,12 @@ corresponding participant slots. Coordinated dual-arm planning with
 `strategy="motion_gen"` is not
 supported by the cuRobo backend; use the supported IK/interpolation path for
 this primitive.
+
+Explicit `continue_verified_holds=True` consumes the two incoming verified
+attachments and keeps their grasp transforms instead of sampling another pickup.
+`prefer_cargo_clearance=True` uses declared static cargo envelopes and current
+observations as a paired-candidate preference. Missing observations retain the
+base costs; the envelope test never certifies physical cargo retention.
 
 **Example:** `examples/sim/atomic_action/coordinated_pickment.py`
 
@@ -1139,6 +1183,15 @@ interval between them as a likely path- or collision-planning failure.
 
 As with the other coordinated primitive, cuRobo does not currently support its
 dual-arm `strategy="motion_gen"` path.
+
+The explicit adaptive receiver mode pairs `HandOverPlanningRecovery` with
+`HandOverOptions(adaptive_receive=True, release_at_target=False,
+arm_selection="bound", existing_hold_hand_source="grasp_command")`. Optional
+native receiver screening borrows the same-robot `HandOverSceneProvider`.
+Direction/exchange budgets, closing commands and source retreat remain bounded
+by their declared policy. Queries close after planning; actual grip transfer
+still requires runtime effect evidence. Default nearest-arm and paired planning
+keep their existing behavior.
 
 **Example:** `examples/sim/atomic_action/handover.py`
 

@@ -25,7 +25,7 @@ shared semantic compiler, runtime, and Gym bridge.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 import math
@@ -73,6 +73,10 @@ from embodichain.lab.task_program.semantics.profiles import (
     RobotSkillProfile,
 )
 from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
+from embodichain.lab.task_program.runtime.lifecycle import (
+    TaskProgramPlanLifecycleFactory,
+)
+from .runtime_services import TaskProgramRuntimeServiceContext
 from embodichain.lab.task_program.runtime.expansion import (
     TaskProgramNominalSourceFactory,
     TaskProgramPlanTransformFactory,
@@ -80,6 +84,10 @@ from embodichain.lab.task_program.runtime.expansion import (
 from embodichain.lab.task_program.semantics.scene import SceneRegistry
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from .simulation.observation_services import SimulationObservationServices
+    from .simulation.environment import _ControlBridgeServices
     from .invocation_policy import BoundInvocationPolicies, InvocationPolicyBinding
     from .nominal import TracingTaskProgramNominalSources
     from .simulation.real2sim_collision import TabletopCollisionGuardFactory
@@ -203,6 +211,7 @@ class TaskProgramEnvironmentFactory(Protocol):
         scene_registry: SceneRegistry,
         engine: AtomicActionEngine,
         clock: EnvironmentStepClock,
+        runtime_scope_guard: Callable[[], None] | None = None,
     ) -> PlanningObservationPort:
         """Create fresh planning observations and aligned full-qpos reads.
 
@@ -210,6 +219,7 @@ class TaskProgramEnvironmentFactory(Protocol):
             scene_registry: Exact registry selected for this runtime.
             engine: Exact atomic engine selected for this runtime.
             clock: Shared environment-step execution clock.
+            runtime_scope_guard: Optional host epoch/lifetime validation callback.
 
         Returns:
             Combined planning-observation and qpos provider.
@@ -266,6 +276,7 @@ class _RegistrationOwningTaskProgramFactory(Protocol):
         *,
         scene_registry: SceneRegistry,
         engine: AtomicActionEngine,
+        runtime_services: TaskProgramRuntimeServiceContext | None = None,
     ) -> tuple[RegisteredSemanticLowerer, ...]:
         """Create fresh lowerers owned by the exact task registration."""
 
@@ -598,21 +609,38 @@ class TaskProgramEnvironmentAdapter:
     def assemble_runtime(
         self,
         integration: TaskProgramIntegrationCfg,
+        *,
+        runtime_scope_guard: Callable[[], None] | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Create a fresh fully connected semantic runtime.
 
         Args:
             integration: Exact scene, profile, and runtime-preset selection.
+            runtime_scope_guard: Optional host-owned runtime epoch validator.
 
         Returns:
             Owned assembly containing every validated runtime boundary.
         """
+        if runtime_scope_guard is not None and not callable(runtime_scope_guard):
+            raise TypeError("runtime_scope_guard must be callable or None.")
+        if (
+            self._registration is not None
+            and self._registration.requires_scoped_control_services
+        ):
+            raise ValueError(
+                "Source controls require create_bridge with a compiled program scope."
+            )
         semantic = self._assemble_semantic_components(integration)
-        return self._assemble_execution_runtime(semantic)
+        return self._assemble_execution_runtime(
+            semantic, runtime_scope_guard=runtime_scope_guard
+        )
 
     def _assemble_semantic_components(
         self,
         integration: TaskProgramIntegrationCfg,
+        *,
+        control_services: _ControlBridgeServices | None = None,
+        planning_program: CompiledTaskProgram | None = None,
     ) -> SemanticExecutorComponents:
         """Bind compiler dependencies without observation or evidence ports."""
         self._require_open()
@@ -641,7 +669,42 @@ class TaskProgramEnvironmentAdapter:
         if self._registration is not None:
             self._registration.validate_robot_profile(profile)
 
-        engine = self._factory.create_atomic_action_engine(profile)
+        planning_services = (
+            None if self._registration is None else self._registration.planning_services
+        )
+        planning_kwargs = {}
+        if planning_services is not None and (
+            planning_services.place_continuation_bindings
+            or planning_services.released_hand_continuations
+        ):
+            planning_kwargs["planning_program"] = planning_program
+        pour_routes = ()
+        if (
+            self._registration is not None
+            and self._registration.planning_services is not None
+            and self._registration.planning_services.pour_projection_bindings
+        ):
+            if planning_program is None:
+                raise ValueError(
+                    "Configured Pour projection requires an exact compiled program scope."
+                )
+            pour_routes = self._registration.catalog.resolve_pour_projection_routes(
+                planning_program
+            )
+        if pour_routes:
+            planning_kwargs["pour_projection_routes"] = pour_routes
+        engine = self._factory.create_atomic_action_engine(
+            profile,
+            **planning_kwargs,
+            **(
+                {
+                    "twist_planning_provider": control_services.twist_registry,
+                    "articulation_continuation_provider": control_services.articulation_registry,
+                }
+                if control_services is not None
+                else {}
+            ),
+        )
         self._validate_registration_ownership()
         if not isinstance(engine, AtomicActionEngine):
             raise TypeError(
@@ -665,6 +728,11 @@ class TaskProgramEnvironmentAdapter:
                 registration_owner.create_registered_semantic_lowerers(
                     scene_registry=registry,
                     engine=engine,
+                    **(
+                        {"runtime_services": control_services.runtime_context}
+                        if control_services is not None
+                        else {}
+                    ),
                 )
             )
             self._validate_registration_ownership()
@@ -681,6 +749,9 @@ class TaskProgramEnvironmentAdapter:
             handover_pose_providers=self._handover_pose_providers,
             effect_monitor_registry=self._effect_monitor_registry,
         )
+        bind_planning = getattr(self._factory, "bind_compiler_planning_services", None)
+        if callable(bind_planning):
+            bind_planning(engine, semantic.compiler)
         if self._registration is not None:
             self._validate_registration_ownership()
             bound_profile = semantic.compiler.integration.robot_profile
@@ -699,6 +770,9 @@ class TaskProgramEnvironmentAdapter:
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+        runtime_scope_guard: Callable[[], None] | None = None,
+        clock: EnvironmentStepClock | None = None,
+        plan_lifecycle_factory: TaskProgramPlanLifecycleFactory | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
         self._require_open()
@@ -722,11 +796,16 @@ class TaskProgramEnvironmentAdapter:
             )
         self._validate_registration_ownership()
 
-        clock = EnvironmentStepClock(self._step_dt)
+        clock = EnvironmentStepClock(self._step_dt) if clock is None else clock
         observation_provider = self._factory.create_planning_observation_provider(
             scene_registry=semantic.scene_registry,
             engine=semantic.engine,
             clock=clock,
+            **(
+                {"runtime_scope_guard": runtime_scope_guard}
+                if runtime_scope_guard is not None
+                else {}
+            ),
         )
         self._validate_registration_ownership()
         if not isinstance(observation_provider, PlanningObservationPort):
@@ -806,6 +885,7 @@ class TaskProgramEnvironmentAdapter:
             runner_cfg=deepcopy(selected_runner_cfg),
             plan_transform_factory=plan_transform_factory,
             nominal_source_factory=nominal_source_factory,
+            plan_lifecycle_factory=plan_lifecycle_factory,
         )
         parallel_safety_validator = self._parallel_safety_validator
         if (
@@ -895,6 +975,36 @@ class TaskProgramEnvironmentAdapter:
         )
         return TracingTaskProgramNominalSources(program, delegate)
 
+    def create_observation_services(
+        self,
+        environment: EmbodiedEnv,
+        bridge: TaskProgramDemoBridge,
+        *,
+        observations: ObservationManager,
+    ) -> SimulationObservationServices:
+        """Assemble the standard factory's real per-episode physical collectors.
+
+        Args:
+            environment: Initialized host whose actual bridge is already active.
+            bridge: Actual bridge returned by this adapter, before execution.
+            observations: Explicit canonical observation manager owned by the host.
+
+        Returns:
+            Owned declared collectors borrowing this runtime and raw history.
+
+        Raises:
+            TypeError: This integration has no observation-service factory.
+            RuntimeError: This adapter or its factory has closed.
+        """
+        self._require_open()
+        self._validate_registration_ownership()
+        create = getattr(self._factory, "create_observation_services", None)
+        if not callable(create):
+            raise TypeError(
+                "This integration has no standard observation service factory."
+            )
+        return create(environment, bridge, observations=observations)
+
     def create_bridge(
         self,
         program: CompiledTaskProgram,
@@ -905,11 +1015,13 @@ class TaskProgramEnvironmentAdapter:
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+        runtime_scope_guard: Callable[[], None] | None = None,
     ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
 
         Args:
             program: Program compiled for this adapter's exact integration IDs.
+            runtime_scope_guard: Optional host scope validator bound to this bridge.
             invocation_policy_bindings: Named preset selections for exact sequential
                 occurrences, sealed to this compiled program's fingerprint.
 
@@ -917,8 +1029,21 @@ class TaskProgramEnvironmentAdapter:
             Lazy bridge sharing one newly assembled runtime, clock, and sink.
         """
         self._require_open()
+        if runtime_scope_guard is not None and not callable(runtime_scope_guard):
+            raise TypeError("runtime_scope_guard must be callable or None.")
         if type(program) is not CompiledTaskProgram:
             raise TypeError("program must be exactly CompiledTaskProgram.")
+        configured_bindings = (
+            ()
+            if self._registration is None
+            else self._registration.invocation_policy_bindings
+        )
+        if configured_bindings:
+            if invocation_policy_bindings:
+                raise ValueError(
+                    "Configured and explicit invocation policy bindings cannot be combined."
+                )
+            invocation_policy_bindings = configured_bindings
         if type(invocation_policy_bindings) is not tuple:
             raise TypeError("invocation_policy_bindings must be an exact tuple.")
         policies = None
@@ -966,74 +1091,158 @@ class TaskProgramEnvironmentAdapter:
             validate_program(program)
         self._validate_selection(program.integration)
         self._preflight_program_surfaces(program)
-        semantic = self._assemble_semantic_components(program.integration)
-        if policies is not None:
-            policies.validate_manifest(program, semantic.compiler.integration.manifest)
-        self._preflight_program(
-            program,
-            semantic.compiler,
-            **({"invocation_policies": policies} if policies is not None else {}),
-        )
-        if expansion_profile is not None and not isinstance(
-            expansion_profile, CombinedExpansionProfile
+        control_services = None
+        control_clock = None
+        if (
+            self._registration is not None
+            and self._registration.requires_scoped_control_services
         ):
-            raise TypeError(
-                "expansion_profile must be a CombinedExpansionProfile or None."
+            if nominal_source_factory is not None or plan_transform_factory is not None:
+                raise ValueError(
+                    "Source controls do not support external nominal plans or transforms."
+                )
+            if expansion_profile is not None:
+                raise ValueError(
+                    "Source control operations do not support expansion profiles."
+                )
+            create_services = getattr(
+                self._factory, "create_control_bridge_services", None
             )
-        if type(candidate_index) is not int or candidate_index < 0:
-            raise ValueError("candidate_index must be a non-negative integer.")
-        if expansion_profile is None and candidate_index != 0:
-            raise ValueError("candidate_index requires an expansion_profile.")
-        if expansion_profile is None and recipe_indices is not None:
-            raise ValueError("recipe_indices requires an expansion_profile.")
-        if isinstance(expansion_profile, CombinedExpansionProfile):
-            expansion = CombinedTaskProgramExpansionFactory(
-                expansion_profile,
-                candidate_index=candidate_index,
-                recipe_indices=recipe_indices,
-                program_id=program.program_id,
-                integration_id=self._scene_registry_id,
-                robot_profile_id=self._robot_profile_id,
+            if not callable(create_services):
+                raise TypeError(
+                    "Declared controls require their standard per-bridge service factory."
+                )
+            control_clock = EnvironmentStepClock(self._step_dt)
+            control_services = create_services(
+                program,
+                control_clock,
+                **(
+                    {"invocation_policy_bindings": policies.bindings}
+                    if policies is not None
+                    else {}
+                ),
             )
-        else:
-            expansion = None
-        if expansion_profile is not None:
-            self._program_skill_ids(program, semantic.compiler)
-        if expansion is not None and plan_transform_factory is not None:
-            raise ValueError(
-                "an Expansion Profile and an explicit plan transform cannot both own a bridge"
-            )
-        validate_owner = getattr(
-            self._factory, "validate_runtime_bridge_creation", None
-        )
-        if callable(validate_owner):
-            validate_owner()
-        assembly = self._assemble_execution_runtime(
-            semantic,
-            plan_transform_factory=(
-                expansion if expansion is not None else plan_transform_factory
-            ),
-            expansion_trace_provider=expansion,
-            nominal_source_factory=nominal_source_factory,
-        )
-        bridge = TaskProgramDemoBridge(
-            program,
-            assembly.runtime,
-            assembly.command_sink,
-            assembly.clock,
-            post_policy_port=self._post_policy_port,
-            validator_port=self._validator_port,
-            runner_cfg=assembly.runner_cfg,
-            parallel_safety_validator=assembly.parallel_safety_validator,
-            expansion_trace_provider=assembly.expansion_trace_provider,
-            isolate_policy_sessions=True,
-            **({"invocation_policies": policies} if policies is not None else {}),
-        )
+        bound_scope_guard = runtime_scope_guard
+        if control_services is not None:
 
-        bind_owner = getattr(self._factory, "bind_runtime_bridge", None)
-        if callable(bind_owner):
-            bind_owner(bridge)
-        return bridge
+            def bound_scope_guard() -> None:
+                if runtime_scope_guard is not None:
+                    runtime_scope_guard()
+                control_services.validate_scope()
+
+        try:
+            semantic = self._assemble_semantic_components(
+                program.integration,
+                control_services=control_services,
+                planning_program=program,
+            )
+            if policies is not None:
+                policies.validate_manifest(
+                    program, semantic.compiler.integration.manifest
+                )
+            self._preflight_program(
+                program,
+                semantic.compiler,
+                **({"invocation_policies": policies} if policies is not None else {}),
+            )
+            if expansion_profile is not None and not isinstance(
+                expansion_profile, CombinedExpansionProfile
+            ):
+                raise TypeError(
+                    "expansion_profile must be a CombinedExpansionProfile or None."
+                )
+            if type(candidate_index) is not int or candidate_index < 0:
+                raise ValueError("candidate_index must be a non-negative integer.")
+            if expansion_profile is None and candidate_index != 0:
+                raise ValueError("candidate_index requires an expansion_profile.")
+            if expansion_profile is None and recipe_indices is not None:
+                raise ValueError("recipe_indices requires an expansion_profile.")
+            if isinstance(expansion_profile, CombinedExpansionProfile):
+                expansion = CombinedTaskProgramExpansionFactory(
+                    expansion_profile,
+                    candidate_index=candidate_index,
+                    recipe_indices=recipe_indices,
+                    program_id=program.program_id,
+                    integration_id=self._scene_registry_id,
+                    robot_profile_id=self._robot_profile_id,
+                )
+            else:
+                expansion = None
+            if expansion_profile is not None:
+                self._program_skill_ids(program, semantic.compiler)
+            if expansion is not None and plan_transform_factory is not None:
+                raise ValueError(
+                    "an Expansion Profile and an explicit plan transform cannot both own a bridge"
+                )
+            validate_owner = getattr(
+                self._factory, "validate_runtime_bridge_creation", None
+            )
+            if callable(validate_owner):
+                validate_owner()
+            assembly = self._assemble_execution_runtime(
+                semantic,
+                plan_transform_factory=(
+                    expansion if expansion is not None else plan_transform_factory
+                ),
+                expansion_trace_provider=expansion,
+                nominal_source_factory=nominal_source_factory,
+                runtime_scope_guard=bound_scope_guard,
+                clock=control_clock,
+                plan_lifecycle_factory=(
+                    None
+                    if control_services is None
+                    else control_services.plan_lifecycle_factory
+                ),
+            )
+            close_planning = (
+                getattr(self._factory, "close_compiler_planning_services", None)
+                if semantic.engine.planning_services.released_hand_provider is not None
+                else None
+            )
+
+            def close_bridge_resources() -> None:
+                try:
+                    if control_services is not None:
+                        control_services.close()
+                finally:
+                    if callable(close_planning):
+                        close_planning(semantic.engine)
+
+            bridge = TaskProgramDemoBridge(
+                program,
+                assembly.runtime,
+                assembly.command_sink,
+                assembly.clock,
+                post_policy_port=(
+                    self._post_policy_port
+                    if control_services is None
+                    else control_services.policy_port
+                ),
+                validator_port=(
+                    self._validator_port
+                    if control_services is None
+                    else control_services.policy_port
+                ),
+                runner_cfg=assembly.runner_cfg,
+                parallel_safety_validator=assembly.parallel_safety_validator,
+                expansion_trace_provider=assembly.expansion_trace_provider,
+                isolate_policy_sessions=control_services is None,
+                runtime_resource_cleanup=(
+                    close_bridge_resources
+                    if control_services is not None or callable(close_planning)
+                    else None
+                ),
+                **({"invocation_policies": policies} if policies is not None else {}),
+            )
+
+            bind_owner = getattr(self._factory, "bind_runtime_bridge", None)
+            if callable(bind_owner):
+                bind_owner(bridge)
+            return bridge
+        except Exception:
+            if control_services is not None:
+                control_services.close_host_resources()
+            raise
 
     @staticmethod
     def _program_skill_ids(

@@ -1,0 +1,250 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "scope": "Complete source MeasuredRigidPolicy._place over canonical generic base pipeline; robot mesh qualification port controlled, rest-FCL real",
+  "cases": [
+    {
+      "mode": "accepted",
+      "success": [
+        true
+      ],
+      "positions": "c14af5fc5a2028c79315ba742e27ab700f113ff774f1b8fbe2969abb84e86ac8",
+      "dt": "d2cd5670ae01be2745542c29c32bf4543f520a63ccadc4c4c7872607c55f3de6",
+      "velocities": "ddb6ba46ffa01ee7a7986a3deb84d634f4f7133e263305715b1588c6052c0ce8",
+      "segments": [
+        [
+          "approach",
+          0,
+          85
+        ],
+        [
+          "release",
+          85,
+          97
+        ],
+        [
+          "retract",
+          97,
+          148
+        ]
+      ],
+      "metadata": {
+        "measured_rigid": {
+          "accepted": true,
+          "landing": {
+            "observed_contents": []
+          },
+          "candidates": [
+            {
+              "lift_height_m": 0.05,
+              "qualification": {
+                "valid": true,
+                "observed_hold_hand": {
+                  "valid": true,
+                  "frames": 85,
+                  "queries": 0,
+                  "scope": "discrete_native_pair_rest_not_continuous_contact_or_task_success"
+                },
+                "emitted_hand": {
+                  "valid": true,
+                  "frames": 148,
+                  "queries": 0,
+                  "scope": "discrete_native_pair_rest_not_continuous_contact_or_task_success"
+                },
+                "operated_arm_scene": {
+                  "valid": true,
+                  "frames": 148,
+                  "queries": 0,
+                  "scope": "discrete_native_pair_rest_not_continuous_contact_or_task_success"
+                },
+                "rigid_cargo_approach": {
+                  "valid": true,
+                  "frames": 85,
+                  "queries": 0,
+                  "scope": "discrete_native_pair_rest_not_continuous_contact_or_task_success"
+                },
+                "robot_self_proxy": {
+                  "valid": true,
+                  "frames": 148,
+                  "scope": "discrete_robot_meshes"
+                },
+                "full_robot_velocity_valid": true
+              }
+            }
+          ],
+          "release_clearance_m_unchanged": 0.12,
+          "scope": "discrete_observed_geometry_not_continuous_or_physical_success"
+        }
+      },
+      "failure": null,
+      "events": [
+        "inside",
+        "closing",
+        "scene",
+        "arm"
+      ],
+      "after_rng": [
+        "4864f28273e93404ed441b03147427354613c478f472ad92e558002bac6b7a9a",
+        0.36669556939777637,
+        0.6052398804018957
+      ],
+      "calls_sha256": "7d0056d75c70de7877a0ab6a4c1bedadd667ae6cdb106d199a6736cb30aa8199",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "mode": "occupied",
+      "success": [
+        true
+      ],
+      "positions": "2e3a85de1a4c981348b0066876ca929c2175bd3c07d0a13a7cbe88bedb0ca566",
+      "dt": "d2cd5670ae01be2745542c29c32bf4543f520a63ccadc4c4c7872607c55f3de6",
+      "velocities": "a49d2be3effb598ec9eb4c9318111aeb40a41122735a44d844cf3906e41cdef6",
+      "segments": [
+        [
+          "approach",
+          0,
+          85
+        ],
+        [
+          "release",
+          85,
+          97
+        ],
+        [
+          "retract",
+          97,
+          148
+        ]
+      ],
+      "metadata": {
+        "measured_rigid": {
+          "accepted": true,
+          "landing": {
+            "observed_contents": [
+              "content"
+            ],
+            "selected_root_xy": [
+              -0.08762267276209723,
+              6.024469860577836e-06
+            ],
+            "floor_boundary_gap_m": 0.18499397884564775,
+            "content_gaps_m": {
+              "content": 0.19268740445927945
+            },
+            "required_reservation_m": 0.005,
+            "release_height_unchanged": true
+          },
+          "candidates": [
+            {
+              "lift_height_m": 0.05,
+              "qualification": {
+                "valid": true,
+                "observed_hold_hand": {
+                  "valid": true,
+                  "frames": 85,
+                  "queries": 0,
+                  "scope": "discrete_native_pair_rest_not_continuous_contact_or_task_success"
+                },
+                "emitted_hand": {
+                  "valid": true,
+                  "frames": 148,
+                  "queries": 0,
+                  "scope": "discrete_native_pair_rest_not_continuous_contact_or_task_success"
+                },
+                "operated_arm_scene": {
+                  "valid": true,
+                  "frames": 148,
+                  "queries": 0,
+                  "scope": "discrete_native_pair_rest_not_continuous_contact_or_task_success"
+                },
+                "rigid_cargo_approach": {
+                  "valid": true,
+                  "frames": 85,
+                  "queries": 0,
+                  "scope": "discrete_native_pair_rest_not_continuous_contact_or_task_success"
+                },
+                "robot_self_proxy": {
+                  "valid": true,
+                  "frames": 148,
+                  "scope": "discrete_robot_meshes"
+                },
+                "full_robot_velocity_valid": true
+              }
+            }
+          ],
+          "release_clearance_m_unchanged": 0.12,
+          "scope": "discrete_observed_geometry_not_continuous_or_physical_success"
+        }
+      },
+      "failure": null,
+      "events": [
+        "inside",
+        "closing",
+        "scene",
+        "arm"
+      ],
+      "after_rng": [
+        "4864f28273e93404ed441b03147427354613c478f472ad92e558002bac6b7a9a",
+        0.36669556939777637,
+        0.6052398804018957
+      ],
+      "calls_sha256": "acdfa4cd56d4ef49addaa5292bc775cb5515a910753510c1a768b1cb8b4f7fa3",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "mode": "blocked",
+      "success": [
+        false
+      ],
+      "positions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "velocities": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "segments": [],
+      "metadata": {},
+      "failure": {
+        "code": "measured_rigid_unqualified",
+        "retryable": false
+      },
+      "events": [
+        "inside",
+        "closing",
+        "scene",
+        "arm"
+      ],
+      "after_rng": [
+        "4864f28273e93404ed441b03147427354613c478f472ad92e558002bac6b7a9a",
+        0.36669556939777637,
+        0.6052398804018957
+      ],
+      "calls_sha256": "c2649490a9a23035d923ca58ebe8272286f7712d7bb3631334333d1b61dbf4ab",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "mode": "unavailable",
+      "success": [
+        false
+      ],
+      "positions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "velocities": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "segments": [],
+      "metadata": {},
+      "failure": {
+        "code": "measured_rigid_unqualified",
+        "retryable": false
+      },
+      "events": [
+        "inside",
+        "closing",
+        "scene"
+      ],
+      "after_rng": [
+        "4864f28273e93404ed441b03147427354613c478f472ad92e558002bac6b7a9a",
+        0.36669556939777637,
+        0.6052398804018957
+      ],
+      "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ],
+  "full_records_sha256": "c771ed70bffee426e596e71585a32040daa1e863a55ab9b80ac1267c14a35c2a"
+}

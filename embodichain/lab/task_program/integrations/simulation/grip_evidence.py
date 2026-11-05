@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import MISSING, dataclass
 from typing import Any, ClassVar
 
@@ -28,7 +28,7 @@ from embodichain.lab.sim.sensors.contact.sensor import (
     ContactSensorCfg,
     ArticulationContactFilterCfg,
 )
-from embodichain.lab.sim.evidence import PhysicalEvidenceRequest
+from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
 from embodichain.lab.sim.atomic_actions.grip_evidence import (
     GripContactObserver,
     DriverOpeningBinding,
@@ -120,7 +120,12 @@ class NativeGripEvidenceProvider(ControlPartSimulationEvidenceProvider):
     """Standard control-part provider exposing its owned grip observer for audits."""
 
     def __init__(
-        self, robot: object, observer: NativeGripObserver, *, scene_provider: object
+        self,
+        robot: object,
+        observer: NativeGripObserver,
+        *,
+        scene_provider: object,
+        observation_guard: Callable[[], None] | None = None,
     ) -> None:
         """Construct through the public observer-injection boundary.
 
@@ -128,11 +133,47 @@ class NativeGripEvidenceProvider(ControlPartSimulationEvidenceProvider):
             robot: Exact assembled robot evidence source.
             observer: Instance-owned native grip observer.
             scene_provider: Shared scene observation source.
+            observation_guard: Optional actual native-source ownership validator.
         """
         super().__init__(
             robot, scene_provider=scene_provider, constraint_observer=observer
         )
+        if observation_guard is not None and not callable(observation_guard):
+            raise TypeError("observation_guard must be callable or None.")
         self._grip_observer = observer
+        self._observation_guard = observation_guard
+
+    def capture_grip_observation(
+        self, request: PhysicalEvidenceRequest, *, object_id: str, control_part: str
+    ) -> tuple[PhysicalEvidenceBatch, dict[str, Any]]:
+        """Return one bilateral acquisition and its exact owned raw query.
+
+        Args:
+            request: Actual current observation identity and native row selection.
+            object_id: Explicit target bound by this provider.
+            control_part: Explicit hand whose pad actors were declared.
+
+        Returns:
+            Owned batch and snapshot from the same single observer acquisition.
+            This adds no collect, refresh, or secondary acquisition.
+        """
+        if self._observation_guard is not None:
+            self._observation_guard()
+        try:
+            query_index = self._grip_observer.cumulative_query_count + 1
+            batch = self._grip_observer.observe(
+                request,
+                object_id=object_id,
+                control_part=control_part,
+                expected_contact=True,
+            )
+            sample = self._grip_observer.snapshot_latest_query(
+                object_id=object_id, control_part=control_part, query_index=query_index
+            )
+            return batch.snapshot(), sample
+        finally:
+            if self._observation_guard is not None:
+                self._observation_guard()
 
     @property
     def grip_observer(self) -> NativeGripObserver:
@@ -226,6 +267,31 @@ class NativeGripEvidenceFactory:
             ("trace_capacity", cfg.trace_capacity),
         ):
             object.__setattr__(self, name, value)
+
+    def contact_sensor_cfg(self, robot_uid: str) -> ContactSensorCfg:
+        """Describe the exact ordinary sensor scope without native resource creation.
+
+        Args:
+            robot_uid: Explicit selected physical robot identity.
+
+        Returns:
+            Standard contact configuration with ordered declared rigid owners,
+            both pad sets, the declared capacity and match-both filtering.
+        """
+        _identifier(robot_uid, "robot_uid")
+        return ContactSensorCfg(
+            uid=self.sensor_uid,
+            rigid_uid_list=[uid for _, uid in self.object_bindings],
+            articulation_cfg_list=[
+                ArticulationContactFilterCfg(
+                    articulation_uid=robot_uid,
+                    link_name_list=[
+                        name for _, names in self.pad_bindings for name in names
+                    ],
+                )
+            ],
+            max_contacts_per_env=self.max_contacts_per_env,
+        )
 
     def create(
         self,
@@ -326,6 +392,19 @@ class NativeGripEvidenceFactory:
             trace_capacity=self.trace_capacity,
             release_opening=reader,
         )
+
+        def require_observation_owner() -> None:
+            if (
+                simulation.get_sensor(self.sensor_uid) is not sensor
+                or engine.robot is not robot
+            ):
+                raise ValueError(
+                    "Native grip observation ownership changed; rebind the provider."
+                )
+
         return NativeGripEvidenceProvider(
-            robot, observer, scene_provider=scene_provider
+            robot,
+            observer,
+            scene_provider=scene_provider,
+            observation_guard=require_observation_owner,
         )

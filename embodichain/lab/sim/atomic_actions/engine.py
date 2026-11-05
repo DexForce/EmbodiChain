@@ -24,6 +24,7 @@ from types import MappingProxyType
 from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
 import torch
+from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
 
 from .affordance_sampling import AffordanceSamplingContext
 from .bindings import ActionBinding
@@ -41,6 +42,24 @@ from .plans import (
 )
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
+from .released_continuation import ReleasedHandContinuationProvider
+from .twist_planning import TwistPlanningProvider
+
+from .drawer_planning import DrawerPlanningProvider
+from .articulation_continuation import ArticulationContinuationProvider
+from .planning_probes import (
+    SlideHandClearanceProvider,
+    HandOverSceneProvider,
+    HeldStagingProvider,
+    RetainedCommandProvider,
+    JointPrefixPlanner,
+    PourGraspProjectionProvider,
+    PickClosingQueryProvider,
+    PlaceSceneProvider,
+)
+from .place_continuation import PlaceContinuationProvider
+from .measured_rigid import MeasuredRigidPlanningProvider
+from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
 from .scene import SceneProvider
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 from .tracking import TrackingPolicy, TrackingRuntime
@@ -74,6 +93,24 @@ class AtomicActionEngine:
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
+        free_motion_query: FreeMotionQuery | None = None,
+        pour_grasp_projection_provider: PourGraspProjectionProvider | None = None,
+        joint_prefix_planner: JointPrefixPlanner | None = None,
+        pick_closing_query_provider: PickClosingQueryProvider | None = None,
+        place_scene_provider: PlaceSceneProvider | None = None,
+        place_continuation_provider: PlaceContinuationProvider | None = None,
+        measured_rigid_provider: MeasuredRigidPlanningProvider | None = None,
+        held_staging_provider: HeldStagingProvider | None = None,
+        retained_command_provider: RetainedCommandProvider | None = None,
+        released_hand_provider: ReleasedHandContinuationProvider | None = None,
+        twist_planning_provider: TwistPlanningProvider | None = None,
+        slide_hand_clearance_provider: SlideHandClearanceProvider | None = None,
+        drawer_planning_provider: DrawerPlanningProvider | None = None,
+        articulation_continuation_provider: (
+            ArticulationContinuationProvider | None
+        ) = None,
+        handover_scene_provider: HandOverSceneProvider | None = None,
+        coordinated_cargo_geometry: SceneMeshSnapshot | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -88,6 +125,32 @@ class AtomicActionEngine:
                 control-part name.
             hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint
                 target ID. Settings are copied; construction performs no hand FK.
+            free_motion_query: Optional borrowed same-robot collision queries.
+            pour_grasp_projection_provider: Read-only numeric grasp constraints
+                for explicitly selected pouring grasps.
+            joint_prefix_planner: Optional same-robot observed motion adapter.
+            pick_closing_query_provider: Fresh owned closing queries for the
+                explicitly selected native Pick screen.
+            place_scene_provider: Owned geometry and declared support identities.
+            place_continuation_provider: Same-robot occurrence-bound release
+                predictions; predictions authorize no physical effects.
+            measured_rigid_provider: Same-robot measured preshape and inside
+                geometry, acquired only by explicitly selected action options.
+            held_staging_provider: Same-robot staging bindings and late owned
+                distal geometry for explicitly selected held-path recovery.
+            retained_command_provider: Same-robot verified command provenance and
+                same-observation command snapshots; no physical success is implied.
+            twist_planning_provider: Explicit same-robot bounded Twist query service.
+
+            slide_hand_clearance_provider: Explicit same-robot slide hand clearance service.
+            drawer_planning_provider: Explicit same-robot drawer planning service.
+            articulation_continuation_provider: Explicit same-robot articulation continuation service.
+            released_hand_provider: Same-robot authority for the exact cleanup
+                and following Park occurrences.
+            handover_scene_provider: Same-robot native hand/scene query port for
+                explicitly selected bounded receiving.
+            coordinated_cargo_geometry: Static owned cargo envelopes for explicit
+                coordinated-grasp preference; no success certificate is implied.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             tracking_runtime: Optional exact-version feedback, projector, and
@@ -105,6 +168,22 @@ class AtomicActionEngine:
             tracking_runtime=tracking_runtime,
             grasp_pose_generators=grasp_pose_generators,
             hand_geometry_cfgs=hand_geometry_cfgs,
+            free_motion_query=free_motion_query,
+            pour_grasp_projection_provider=pour_grasp_projection_provider,
+            joint_prefix_planner=joint_prefix_planner,
+            pick_closing_query_provider=pick_closing_query_provider,
+            place_scene_provider=place_scene_provider,
+            place_continuation_provider=place_continuation_provider,
+            measured_rigid_provider=measured_rigid_provider,
+            held_staging_provider=held_staging_provider,
+            retained_command_provider=retained_command_provider,
+            released_hand_provider=released_hand_provider,
+            twist_planning_provider=twist_planning_provider,
+            slide_hand_clearance_provider=slide_hand_clearance_provider,
+            drawer_planning_provider=drawer_planning_provider,
+            articulation_continuation_provider=articulation_continuation_provider,
+            handover_scene_provider=handover_scene_provider,
+            coordinated_cargo_geometry=coordinated_cargo_geometry,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}

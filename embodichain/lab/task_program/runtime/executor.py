@@ -102,6 +102,7 @@ from .results import (
     _snapshot_event,
     _snapshot_task_state,
 )
+from .lifecycle import TaskProgramPlanLifecycleFactory
 from .expansion import (
     TaskProgramNominalSourceFactory,
     TaskProgramPlanRequest,
@@ -244,14 +245,7 @@ class _PrimedObservationProvider:
                 affordance_sampling=self._affordance_sampling,
             )
         self._context = None
-        return PlanningContext(
-            robot=context.robot,
-            task=task_state,
-            scene=context.scene,
-            env_ids=context.env_ids,
-            control_dt=context.control_dt,
-            affordance_sampling=context.affordance_sampling,
-        )
+        return replace(context, task=task_state)
 
 
 class SemanticCallExecutor:
@@ -275,6 +269,7 @@ class SemanticCallExecutor:
         runner_cfg: ExecutionRunnerCfg | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+        plan_lifecycle_factory: TaskProgramPlanLifecycleFactory | None = None,
     ) -> None:
         if not isinstance(compiler, SemanticCallCompiler):
             raise TypeError("compiler must be a SemanticCallCompiler.")
@@ -304,6 +299,12 @@ class SemanticCallExecutor:
             raise TypeError(
                 "nominal_source_factory must implement TaskProgramNominalSourceFactory or be None."
             )
+        if plan_lifecycle_factory is not None and not isinstance(
+            plan_lifecycle_factory, TaskProgramPlanLifecycleFactory
+        ):
+            raise TypeError(
+                "plan_lifecycle_factory must implement TaskProgramPlanLifecycleFactory or be None."
+            )
         integration = compiler.integration
         engine = integration.engine
         if not isinstance(engine, AtomicActionEngine):
@@ -327,6 +328,7 @@ class SemanticCallExecutor:
         self._runner_cfg_override = runner_cfg
         self._plan_transform_factory = plan_transform_factory
         self._nominal_source_factory = nominal_source_factory
+        self._plan_lifecycle_factory = plan_lifecycle_factory
         self._step_observer: Callable[[RunnerStep], None] | None = None
         self._last_sent_plan_reference: tuple[int, str | None, int] | None = None
         self._task_state = _snapshot_task_state(initial_task)
@@ -389,6 +391,11 @@ class SemanticCallExecutor:
         return self._observation_provider
 
     @property
+    def evidence_collector(self) -> EffectEvidenceCollectorPort:
+        """Return the evidence port owned by this execution runtime."""
+        return self._evidence_collector
+
+    @property
     def clock(self) -> ExecutionClock:
         """Return the shared execution clock used by this runtime.
 
@@ -438,6 +445,10 @@ class SemanticCallExecutor:
         Returns:
             A new idle semantic runtime for one independent lane.
         """
+        if self._plan_lifecycle_factory is not None:
+            raise ValueError(
+                "Plan lifecycle factories do not yet support parallel execution."
+            )
         if self._nominal_source_factory is not None:
             raise ValueError(
                 "nominal source factories do not yet support parallel execution"
@@ -983,14 +994,7 @@ class SemanticCallExecutor:
             raise TypeError(
                 "ObservationProvider.observe() must return PlanningContext."
             )
-        normalized = PlanningContext(
-            robot=context.robot,
-            task=self._task_state,
-            scene=context.scene,
-            env_ids=context.env_ids,
-            control_dt=context.control_dt,
-            affordance_sampling=context.affordance_sampling,
-        )
+        normalized = replace(context, task=self._task_state)
         if normalized.batch_size != self._task_state.batch_size:
             raise ValueError(
                 "Observation batch size changed during semantic execution."
@@ -1127,9 +1131,11 @@ class SemanticCallExecutor:
                 )
         plan_transform = None
         nominal_source = None
+        plan_lifecycle = None
         if (
             self._plan_transform_factory is not None
             or self._nominal_source_factory is not None
+            or self._plan_lifecycle_factory is not None
         ):
             if self._workflow_id is None:
                 raise RuntimeError("A grounded call requires an active workflow ID.")
@@ -1173,6 +1179,10 @@ class SemanticCallExecutor:
                 nominal_source = self._nominal_source_factory.create_nominal_source(
                     plan_request, engine=self._engine
                 )
+            if self._plan_lifecycle_factory is not None:
+                plan_lifecycle = self._plan_lifecycle_factory.create_plan_lifecycle(
+                    plan_request, engine=self._engine
+                )
         if effect_guards:
             external_plan_transform = plan_transform
 
@@ -1213,15 +1223,24 @@ class SemanticCallExecutor:
             eligible_mask=active_mask,
             plan_transform=plan_transform,
             nominal_source=nominal_source,
+            **(
+                {"plan_lifecycle": plan_lifecycle} if plan_lifecycle is not None else {}
+            ),
         )
         primed = _PrimedObservationProvider(context, self._observation_provider)
-        runner = ExecutionRunner(
-            session,
-            primed,
-            self._command_sink,
-            clock=self._clock,
-            cfg=runner_cfg,
-        )
+        try:
+            runner = ExecutionRunner(
+                session,
+                primed,
+                self._command_sink,
+                clock=self._clock,
+                cfg=runner_cfg,
+            )
+        except Exception as error:
+            cleanup = session.abort_plan_lifecycle(str(error) or type(error).__name__)
+            if cleanup:
+                raise RuntimeError(f"{error} {cleanup}") from error
+            raise
         self._current_call_index = workflow_call_index
         self._runner = runner
         self._active_call = call

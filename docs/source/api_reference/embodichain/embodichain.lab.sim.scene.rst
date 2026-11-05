@@ -629,3 +629,244 @@ this separate API.
    :members:
 
 .. autofunction:: capture_rigid_mesh
+
+Authored robot mounting frames
+------------------------------
+
+These readers consume exact source identities and declared control parts without
+constructing a robot or solving IK. Fixed attachment chains retain URDF transform
+order; moving/cyclic mounts reject. Explicit assembly component transforms take
+precedence over a single-file shoulder lookup. No model or hand is selected.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_robot_geometry
+
+.. autofunction:: source_fixed_frame_pose
+
+.. autofunction:: source_arm_base_position
+
+Same-observation native hand and motion queries
+-----------------------------------------------
+
+The explicit native query modules retain the Default backend's B=1/env0 shape
+coverage and observation ownership. Capture does not step simulation. Replacing
+physical owners or advancing the supplied native revision invalidates an open
+query; context-manager exit releases only its owned collision resources.
+
+``native_hand_scene`` keeps complete collision-only hand links, rigid bodies,
+articulation links and planes in their captured order. Its discrete checks use
+native contact/rest offsets. ``native_motion_scene`` keeps the original ordered
+moving-part/rest-offset checks and full named-joint FK adaptation. Neither query
+establishes continuous collision freedom, measured grasp acquisition or task
+success. FCL is an explicit optional backend; install
+``embodichain[planning-geometry]`` to request these paths.
+
+.. currentmodule:: embodichain.lab.sim.scene.native_hand_scene
+
+.. autosummary::
+
+   NativeScenePlane
+   NativeSceneBody
+   NativeHandSceneQuery
+   capture_native_hand_scene
+
+.. autoclass:: NativeScenePlane
+   :members:
+
+.. autoclass:: NativeSceneBody
+   :members:
+
+.. autoclass:: NativeHandSceneQuery
+   :members:
+
+.. autofunction:: capture_native_hand_scene
+
+.. currentmodule:: embodichain.lab.sim.scene.native_motion_scene
+
+.. autosummary::
+
+   NativeRestCollisionPart
+   NativeRestSceneBody
+   NativeRestSceneQuery
+   capture_native_rest_scene
+   capture_native_arm_parts
+   native_path_link_poses
+
+.. autoclass:: NativeRestCollisionPart
+   :members:
+
+.. autoclass:: NativeRestSceneBody
+   :members:
+
+.. autoclass:: NativeRestSceneQuery
+   :members:
+
+.. autofunction:: capture_native_rest_scene
+
+.. autofunction:: capture_native_arm_parts
+
+.. autofunction:: native_path_link_poses
+
+Conservative input-solid clearance
+----------------------------------
+
+``convex_input_clearance`` consumes already-scaled input vertices and explicit
+observed poses. It tests selected discrete frames in their supplied order,
+including repeats, and stops at the first rejection. Convex solids also reject
+complete containment. This is a conservative input-envelope query, separate from
+native cooked-shape and physical contact evidence. Margins and numerical
+allowance are explicit; missing FCL or unavailable geometry raises.
+
+.. currentmodule:: embodichain.lab.sim.scene.convex_clearance
+
+.. autofunction:: convex_input_clearance
+
+Owned planar proposal inputs
+----------------------------
+
+``NativePlanarPlacement.source_geometry()`` returns independent scaled subject
+vertices and per-row planar floor copies for numeric proposal generation. It
+checks the original physical object bindings without reading live poses.
+``capture_planar_contents`` reads explicit source-ordered rigid-object vertices
+for B=1 consumers. These snapshots do not establish containment, retention or
+physical task success; projection uses the caller's current observed poses.
+
+.. currentmodule:: embodichain.lab.sim.scene.planar_observation
+
+.. autofunction:: capture_planar_contents
+
+Observed distal robot input meshes
+----------------------------------
+
+The explicit distal adapter captures source-ordered collision-input points and
+world TCP/root frames for one active and one disjoint passive arm. It validates
+the actual full joint observation and arm FK, while preserving hand-owner frame
+discrepancies as diagnostics. Snapshots own read-only numerical data; they do not
+select a staging route or certify native collision freedom.
+
+.. currentmodule:: embodichain.lab.sim.scene.robot_distal
+
+.. autosummary::
+
+   RobotDistalMeshSnapshot
+   capture_robot_distal_meshes
+
+.. autoclass:: RobotDistalMeshSnapshot
+   :members:
+
+.. autofunction:: capture_robot_distal_meshes
+
+Authored revolute setting attributes
+------------------------------------
+
+This adapter exposes only qualified authored setting labels and their exact joint
+and source identities. A source without fixed-base setting annotations advertises
+none. It selects no task program, motion goal or execution/recovery budget.
+
+.. currentmodule:: embodichain.lab.sim.scene.revolute_inputs
+
+.. autosummary::
+   :nosignatures:
+
+   revolute_setting_attributes
+
+.. autofunction:: revolute_setting_attributes
+
+Physical planning inputs
+------------------------
+
+These adapters read existing Default/B1 owners for source-qualified planning.
+Gravity comes from the actual assembled physics configuration, with no missing
+value fallback. Pour vertices retain the original native dtype/order and apply
+body scale once; faces retain original topology. The active arm origin comes
+from its explicitly selected solver root. Capture reads no object poses and
+returns owned arrays; consumers supply current observed poses separately.
+
+``PourRegionGeometry`` owns immutable source/receiver inputs and delegates the
+numeric staging rule to Compute. These inputs and targets do not establish
+collision freedom, physical contact or task acceptance. Existing simulation
+resources are borrowed and never created, stepped or destroyed.
+
+.. currentmodule:: embodichain.lab.sim.scene.physical_parameters
+
+.. autosummary::
+
+   observed_gravity
+
+.. autofunction:: observed_gravity
+
+.. currentmodule:: embodichain.lab.sim.scene.pour_inputs
+
+.. autosummary::
+
+   capture_pour_vertices
+   capture_pour_faces
+   configured_pour_gravity
+   observed_pour_arm_origin
+
+.. autofunction:: capture_pour_vertices
+
+.. autofunction:: capture_pour_faces
+
+.. autofunction:: configured_pour_gravity
+
+.. autofunction:: observed_pour_arm_origin
+
+.. currentmodule:: embodichain.lab.sim.scene.pour_region
+
+.. autosummary::
+
+   PourRegionGeometry
+   PourGeometryProvider
+
+.. autoclass:: PourRegionGeometry
+   :members: staging_pose
+
+.. autoclass:: PourGeometryProvider
+
+Prismatic native observations and source limits
+-----------------------------------------------
+
+``DrawerPayloadObservation`` borrows explicitly declared native owners and keeps
+payload geometry while refreshing poses on each guarded read. Planning-only
+containment and exposed-floor proposals do not establish execution evidence.
+Prismatic helpers verify scaled source/native joint identity, preserve the
+qualified public limit-cache repair, and measure declared support geometry.
+
+.. automodule:: embodichain.lab.sim.scene.drawer_observation
+   :members:
+
+.. automodule:: embodichain.lab.sim.scene.prismatic_control
+   :members:
+
+
+Authored source mesh inputs
+---------------------------
+
+These readers retain authored scene-node transforms and face order, convert the
+source glTF Y-up basis to object-local Z-up and apply body scale once. They read
+files without native simulation. The top estimator preserves unavailable input
+as None; it is not a cooked-collider observation or physical clearance proof.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autosummary::
+
+   read_gltf_z_up_mesh
+   estimate_source_mesh_top_z
+
+.. autofunction:: read_gltf_z_up_mesh
+
+.. autofunction:: estimate_source_mesh_top_z
+
+Local source vertices
+----------------------
+
+``read_source_vertices`` retains source-local ordering and one body scale for
+mesh and articulation geometry. Explicit local overrides already own their scale.
+It reads no native state and applies no world pose. Missing mesh geometry is an
+error, including primitive configurations without an explicit local override;
+this does not qualify cooked collision shapes or physical containment.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autofunction:: read_source_vertices

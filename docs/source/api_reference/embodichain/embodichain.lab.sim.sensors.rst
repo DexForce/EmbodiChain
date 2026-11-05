@@ -195,6 +195,27 @@ returns owned full or incremental history. Callers retain the window generation
 when reusing an incremental offset.
 
 
+Native command observations
+---------------------------
+
+These opt-in helpers read actual qpos/qvel, then native position/velocity drive
+targets in the original order. Capture requires one explicit measured row and
+an unchanged host-provided source stamp before/after the reads. Verification
+reads again only to reject identity or array changes; fresh values never replace
+the captured observation. Neither helper steps physics, writes commands, grants
+retained-command authority or interprets task success. Unsupported batches reject
+before acquisition.
+
+.. currentmodule:: embodichain.lab.sim.sensors.command_sampling
+
+.. autosummary::
+
+   capture_robot_commands
+   verify_robot_commands
+
+.. automodule:: embodichain.lab.sim.sensors.command_sampling
+   :members:
+
 Import migration
 ----------------
 
@@ -205,3 +226,27 @@ keep their existing names. The old flat ``sensors.contact_sensor`` and
 Sampling and timeline APIs use ``contact.sampling`` and ``contact.timeline``.
 Regenerate declarations that explicitly seal implementation-qualified type names;
 old identities are not silently rewritten.
+
+
+Owned Cargo envelope facts and calibrated openings
+---------------------------------------------------
+
+Cargo capture retains initial source-local meshes, row/episode identities and
+native poses. Terminal and recorded-prefix observations report necessary envelope
+facts and original first-failure indices. A valid envelope boolean does not
+certify a cavity, physical retention or task acceptance. Missing rows retain
+availability and acquisition errors. The shared Compute owner checks every
+original recorded frame in chunks of 64.
+
+.. automodule:: embodichain.lab.sim.sensors.cargo_envelope
+   :members:
+
+``create_joint_opening_reader`` calls the supplied canonical binding's ``bind``
+method. It installs no sampler, reads no joints during binding and preserves the
+strict measured-driver threshold. The existing ``DriverOpeningBinding`` remains
+owned by ``atomic_actions.grip_evidence``; the sensor helper consumes a structural
+port without importing that upper layer or defining another data type.
+
+.. currentmodule:: embodichain.lab.sim.sensors.joint_opening
+
+.. autofunction:: create_joint_opening_reader

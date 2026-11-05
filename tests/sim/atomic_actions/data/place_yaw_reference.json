@@ -1,0 +1,1071 @@
+{
+  "accepted": {
+    "success": [
+      true
+    ],
+    "endpoint": [
+      [
+        [
+          6.123234262925839e-17,
+          -0.9396926164627075,
+          0.3420201539993286,
+          0.019999999552965164
+        ],
+        [
+          1.0,
+          5.753958338169506e-17,
+          -2.094269606059924e-17,
+          0.029999999329447746
+        ],
+        [
+          0.0,
+          0.3420201539993286,
+          0.9396926164627075,
+          0.23000000417232513
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    ],
+    "metadata": {
+      "inside_world_yaw": {
+        "attempts": [
+          {
+            "angle_deg": 45.0,
+            "landing_footprint_valid": false,
+            "footprint": {
+              "scope": "measured_planar_landing_region",
+              "object_pose": [
+                [
+                  [
+                    0.7071067690849304,
+                    -0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05000000447034836
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "full_footprint_inside": [
+                false
+              ],
+              "support_gap_m": [
+                3.725290298461914e-09
+              ],
+              "footprint_area_m2": [
+                0.04000000790316527
+              ],
+              "support_tolerance_m": 0.05,
+              "penetration_tolerance_m": 0.01
+            }
+          },
+          {
+            "angle_deg": -45.0,
+            "landing_footprint_valid": false,
+            "footprint": {
+              "scope": "measured_planar_landing_region",
+              "object_pose": [
+                [
+                  [
+                    0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    -0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05000000447034836
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "full_footprint_inside": [
+                false
+              ],
+              "support_gap_m": [
+                3.725290298461914e-09
+              ],
+              "footprint_area_m2": [
+                0.04000000790316527
+              ],
+              "support_tolerance_m": 0.05,
+              "penetration_tolerance_m": 0.01
+            }
+          },
+          {
+            "angle_deg": 90.0,
+            "landing_footprint_valid": true,
+            "plan_success": [
+              true
+            ],
+            "inspection": {
+              "valid": true,
+              "physical_evidence": false,
+              "scope": "controlled_emitted_oracle"
+            },
+            "failure": null
+          }
+        ],
+        "accepted": true,
+        "release_clearance_m": 0.12,
+        "lift_height_m": 0.05,
+        "heights_unchanged": true,
+        "physical_evidence": false
+      }
+    },
+    "builds": [
+      {
+        "target": [
+          [
+            [
+              6.123234262925839e-17,
+              -0.9396926164627075,
+              0.3420201539993286,
+              0.019999999552965164
+            ],
+            [
+              1.0,
+              5.753958338169506e-17,
+              -2.094269606059924e-17,
+              0.029999999329447746
+            ],
+            [
+              0.0,
+              0.3420201539993286,
+              0.9396926164627075,
+              0.23000000417232513
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ],
+        "draws": [
+          0.43424123525619507,
+          0.2946650026871097,
+          0.5219839097124932
+        ]
+      }
+    ],
+    "counters": {
+      "inside_place_yaw_candidate": 1
+    },
+    "after_rng": [
+      "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      0.2946650026871097,
+      0.5219839097124932
+    ]
+  },
+  "late": {
+    "success": [
+      true
+    ],
+    "endpoint": [
+      [
+        [
+          6.123234262925839e-17,
+          0.9396926164627075,
+          -0.3420201539993286,
+          -0.019999999552965164
+        ],
+        [
+          -1.0,
+          5.753958338169506e-17,
+          -2.094269606059924e-17,
+          -0.029999999329447746
+        ],
+        [
+          0.0,
+          0.3420201539993286,
+          0.9396926164627075,
+          0.23000000417232513
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    ],
+    "metadata": {
+      "inside_world_yaw": {
+        "attempts": [
+          {
+            "angle_deg": 45.0,
+            "landing_footprint_valid": false,
+            "footprint": {
+              "scope": "measured_planar_landing_region",
+              "object_pose": [
+                [
+                  [
+                    0.7071067690849304,
+                    -0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05000000447034836
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "full_footprint_inside": [
+                false
+              ],
+              "support_gap_m": [
+                3.725290298461914e-09
+              ],
+              "footprint_area_m2": [
+                0.04000000790316527
+              ],
+              "support_tolerance_m": 0.05,
+              "penetration_tolerance_m": 0.01
+            }
+          },
+          {
+            "angle_deg": -45.0,
+            "landing_footprint_valid": false,
+            "footprint": {
+              "scope": "measured_planar_landing_region",
+              "object_pose": [
+                [
+                  [
+                    0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    -0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05000000447034836
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "full_footprint_inside": [
+                false
+              ],
+              "support_gap_m": [
+                3.725290298461914e-09
+              ],
+              "footprint_area_m2": [
+                0.04000000790316527
+              ],
+              "support_tolerance_m": 0.05,
+              "penetration_tolerance_m": 0.01
+            }
+          },
+          {
+            "angle_deg": 90.0,
+            "landing_footprint_valid": true,
+            "plan_success": [
+              true
+            ],
+            "inspection": {
+              "valid": false,
+              "physical_evidence": false,
+              "scope": "controlled_emitted_oracle"
+            },
+            "failure": null
+          },
+          {
+            "angle_deg": -90.0,
+            "landing_footprint_valid": true,
+            "plan_success": [
+              true
+            ],
+            "inspection": {
+              "valid": true,
+              "physical_evidence": false,
+              "scope": "controlled_emitted_oracle"
+            },
+            "failure": null
+          }
+        ],
+        "accepted": true,
+        "release_clearance_m": 0.12,
+        "lift_height_m": 0.05,
+        "heights_unchanged": true,
+        "physical_evidence": false
+      }
+    },
+    "builds": [
+      {
+        "target": [
+          [
+            [
+              6.123234262925839e-17,
+              -0.9396926164627075,
+              0.3420201539993286,
+              0.019999999552965164
+            ],
+            [
+              1.0,
+              5.753958338169506e-17,
+              -2.094269606059924e-17,
+              0.029999999329447746
+            ],
+            [
+              0.0,
+              0.3420201539993286,
+              0.9396926164627075,
+              0.23000000417232513
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ],
+        "draws": [
+          0.43424123525619507,
+          0.2946650026871097,
+          0.5219839097124932
+        ]
+      },
+      {
+        "target": [
+          [
+            [
+              6.123234262925839e-17,
+              0.9396926164627075,
+              -0.3420201539993286,
+              -0.019999999552965164
+            ],
+            [
+              -1.0,
+              5.753958338169506e-17,
+              -2.094269606059924e-17,
+              -0.029999999329447746
+            ],
+            [
+              0.0,
+              0.3420201539993286,
+              0.9396926164627075,
+              0.23000000417232513
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ],
+        "draws": [
+          0.43424123525619507,
+          0.2946650026871097,
+          0.5219839097124932
+        ]
+      }
+    ],
+    "counters": {
+      "inside_place_yaw_candidate": 2
+    },
+    "after_rng": [
+      "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      0.2946650026871097,
+      0.5219839097124932
+    ]
+  },
+  "rejected": {
+    "success": [
+      false
+    ],
+    "endpoint": null,
+    "metadata": {
+      "inside_world_yaw": {
+        "attempts": [
+          {
+            "angle_deg": 45.0,
+            "landing_footprint_valid": false,
+            "footprint": {
+              "scope": "measured_planar_landing_region",
+              "object_pose": [
+                [
+                  [
+                    0.7071067690849304,
+                    -0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05000000447034836
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "full_footprint_inside": [
+                false
+              ],
+              "support_gap_m": [
+                3.725290298461914e-09
+              ],
+              "footprint_area_m2": [
+                0.04000000790316527
+              ],
+              "support_tolerance_m": 0.05,
+              "penetration_tolerance_m": 0.01
+            }
+          },
+          {
+            "angle_deg": -45.0,
+            "landing_footprint_valid": false,
+            "footprint": {
+              "scope": "measured_planar_landing_region",
+              "object_pose": [
+                [
+                  [
+                    0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    -0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05000000447034836
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "full_footprint_inside": [
+                false
+              ],
+              "support_gap_m": [
+                3.725290298461914e-09
+              ],
+              "footprint_area_m2": [
+                0.04000000790316527
+              ],
+              "support_tolerance_m": 0.05,
+              "penetration_tolerance_m": 0.01
+            }
+          },
+          {
+            "angle_deg": 90.0,
+            "landing_footprint_valid": true,
+            "plan_success": [
+              false
+            ],
+            "inspection": {
+              "valid": false,
+              "physical_evidence": false,
+              "scope": "controlled_emitted_oracle"
+            },
+            "failure": null
+          },
+          {
+            "angle_deg": -90.0,
+            "landing_footprint_valid": true,
+            "plan_success": [
+              false
+            ],
+            "inspection": {
+              "valid": false,
+              "physical_evidence": false,
+              "scope": "controlled_emitted_oracle"
+            },
+            "failure": null
+          },
+          {
+            "angle_deg": 135.0,
+            "landing_footprint_valid": false,
+            "footprint": {
+              "scope": "measured_planar_landing_region",
+              "object_pose": [
+                [
+                  [
+                    -0.7071067690849304,
+                    -0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.7071067690849304,
+                    -0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05000000447034836
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "full_footprint_inside": [
+                false
+              ],
+              "support_gap_m": [
+                3.725290298461914e-09
+              ],
+              "footprint_area_m2": [
+                0.04000000790316527
+              ],
+              "support_tolerance_m": 0.05,
+              "penetration_tolerance_m": 0.01
+            }
+          },
+          {
+            "angle_deg": -135.0,
+            "landing_footprint_valid": false,
+            "footprint": {
+              "scope": "measured_planar_landing_region",
+              "object_pose": [
+                [
+                  [
+                    -0.7071067690849304,
+                    0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    -0.7071067690849304,
+                    -0.7071067690849304,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05000000447034836
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "full_footprint_inside": [
+                false
+              ],
+              "support_gap_m": [
+                3.725290298461914e-09
+              ],
+              "footprint_area_m2": [
+                0.04000000790316527
+              ],
+              "support_tolerance_m": 0.05,
+              "penetration_tolerance_m": 0.01
+            }
+          },
+          {
+            "angle_deg": 180.0,
+            "landing_footprint_valid": false,
+            "footprint": {
+              "scope": "measured_planar_landing_region",
+              "object_pose": [
+                [
+                  [
+                    -1.0,
+                    -1.2246468525851679e-16,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.2246468525851679e-16,
+                    -1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05000000447034836
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "reference_pose": [
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ],
+              "full_footprint_inside": [
+                false
+              ],
+              "support_gap_m": [
+                3.725290298461914e-09
+              ],
+              "footprint_area_m2": [
+                0.040000001192092904
+              ],
+              "support_tolerance_m": 0.05,
+              "penetration_tolerance_m": 0.01
+            }
+          }
+        ],
+        "accepted": false,
+        "release_clearance_m": 0.12,
+        "lift_height_m": 0.05,
+        "heights_unchanged": true,
+        "physical_evidence": false
+      }
+    },
+    "builds": [
+      {
+        "target": [
+          [
+            [
+              6.123234262925839e-17,
+              -0.9396926164627075,
+              0.3420201539993286,
+              0.019999999552965164
+            ],
+            [
+              1.0,
+              5.753958338169506e-17,
+              -2.094269606059924e-17,
+              0.029999999329447746
+            ],
+            [
+              0.0,
+              0.3420201539993286,
+              0.9396926164627075,
+              0.23000000417232513
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ],
+        "draws": [
+          0.43424123525619507,
+          0.2946650026871097,
+          0.5219839097124932
+        ]
+      },
+      {
+        "target": [
+          [
+            [
+              6.123234262925839e-17,
+              0.9396926164627075,
+              -0.3420201539993286,
+              -0.019999999552965164
+            ],
+            [
+              -1.0,
+              5.753958338169506e-17,
+              -2.094269606059924e-17,
+              -0.029999999329447746
+            ],
+            [
+              0.0,
+              0.3420201539993286,
+              0.9396926164627075,
+              0.23000000417232513
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ],
+        "draws": [
+          0.43424123525619507,
+          0.2946650026871097,
+          0.5219839097124932
+        ]
+      }
+    ],
+    "counters": {
+      "inside_place_yaw_candidate": 2
+    },
+    "after_rng": [
+      "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      0.2946650026871097,
+      0.5219839097124932
+    ]
+  },
+  "preview": {
+    "success": [
+      false
+    ],
+    "endpoint": null,
+    "metadata": {},
+    "builds": [],
+    "counters": {},
+    "after_rng": [
+      "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      0.2946650026871097,
+      0.5219839097124932
+    ]
+  },
+  "nominal": {
+    "success": [
+      true
+    ],
+    "endpoint": null,
+    "metadata": {},
+    "builds": [],
+    "counters": {},
+    "after_rng": [
+      "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      0.2946650026871097,
+      0.5219839097124932
+    ]
+  }
+}

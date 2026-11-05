@@ -1,0 +1,20 @@
+{
+  "mode": "unavailable",
+  "success": [
+    false
+  ],
+  "positions_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "dt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "segments": [],
+  "metadata": {},
+  "failure": "held_alignment_collision_unavailable",
+  "held_keys": [],
+  "rng": [
+    "c27b58ca1de8d22987675cb1eb8921685571f49cee02313a4bf8108043c5adef",
+    0.5305867556052941,
+    0.8066907771186791
+  ],
+  "calls_sha256": "60e5d814a2c480967a0cf4515a558ad2e6bfb8b24b32d1aeba6be9b6b0d35a5a",
+  "checks_sha256": "abcf9d67dbde4cf17820cc50c4fd7ff9d30c53fddd924eaf8a09641fc4e41db1",
+  "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+}

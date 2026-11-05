@@ -1621,6 +1621,534 @@ def test_joint_window_trace_capacity_never_silently_certifies_full_record():
     assert window["steps"] == [23, 24, 25]
 
 
+def _press_control_port(*, program_fingerprint="program", episode_id="episode"):
+    from dataclasses import asdict
+    from embodichain.lab.sim.scene.press_inputs import PressBinding
+    from embodichain.lab.sim.sensors.contact.sampling import ContactEvidenceSampler
+    from embodichain.lab.task_program.integrations.simulation.control_observation import (
+        ControlContactActors,
+    )
+    from embodichain.lab.task_program.integrations.simulation.control_policy import (
+        ControlOperationRuntime,
+        SimulationControlConditionCfg,
+    )
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    art = _Articulation(torch.zeros(1, 1))
+    art.num_instances = 1
+    art.uid = "native_drawer"
+    art.get_qpos_limits = lambda: torch.tensor([[[0.0, 0.01]]])
+    robot = _Robot(torch.full((1, 2), 0.2), torch.full((1, 2), 0.7))
+    robot.num_instances = 1
+    clock = EnvironmentStepClock(0.04)
+    time = [0.0]
+    hooks = {}
+    fetches = [0]
+    data = {
+        "is_valid": torch.ones(1, 1, dtype=torch.bool),
+        "user_ids": torch.tensor([[[1, 2]]]),
+        "impulse": torch.zeros(1, 1),
+        "position": torch.zeros(1, 1, 3),
+        "normal": torch.zeros(1, 1, 3),
+        "distance": torch.zeros(1, 1),
+    }
+
+    def update():
+        fetches[0] += 1
+
+    def add(name, observer):
+        assert name not in hooks
+        hooks[name] = observer
+
+    def remove(name, *, expected):
+        if hooks.get(name) is expected:
+            hooks.pop(name)
+
+    sensor = SimpleNamespace(
+        uid="contact",
+        num_instances=1,
+        contact_capabilities=SimpleNamespace(geometry=True, impulse=True),
+        dropped_contacts=0,
+        update=update,
+        get_data=lambda: data,
+        add_sampling_observer=add,
+        remove_sampling_observer=remove,
+    )
+    binding = PressBinding(
+        "native_drawer",
+        "cabinet_to_drawer",
+        "button",
+        "base",
+        "/frozen/button.usda",
+        "a" * 64,
+        "/button/mesh",
+        1.0,
+        (0.0, 0.0, -1.0),
+        (0.0, 0.01),
+        (0.0, 0.0, 0.0),
+        0.0,
+        0.01,
+    )
+    payload = {
+        "binding": asdict(binding),
+        "operation_id": "press0",
+        "arm": "right",
+        "variant": "source",
+        "moving_mass": 0.1,
+        "extra_press_distance": 0.004,
+    }
+    payload["binding"].pop("source_path")
+    geometry = SimpleNamespace(
+        robot=robot,
+        articulation=art,
+        press_clearances=lambda *, terminal: {
+            "retreat_clearance": 0.05,
+            "tcp_clearance": 0.06,
+            "terminal_clearance": 0.05 if terminal else None,
+        },
+    )
+    sampler = ContactEvidenceSampler(
+        sensor,
+        native_revision_reader=lambda: round(time[0] / 0.004),
+        topology_revision_reader=lambda: 0,
+    )
+    operation = ControlOperationRuntime(
+        robot,
+        art,
+        binding,
+        geometry,
+        sampler,
+        ControlContactActors(1, 4, (2,)),
+        entity_id="drawer",
+        operation_id="press0",
+        program_fingerprint=program_fingerprint,
+        episode_id=episode_id,
+        observer_id="press",
+        route_payload=payload,
+        control_dt=0.04,
+        physics_dt=0.004,
+        simulation_time=lambda: time[0],
+        validate_scope=lambda: None,
+    )
+    presets = {
+        name: SimulationControlConditionCfg(
+            entity="drawer",
+            operation_id="press0",
+            family="press",
+            phase=phase,
+            terminal=terminal,
+        )
+        for name, phase, terminal in (
+            ("ready", "ready", False),
+            ("released", "released", False),
+            ("park", "released", True),
+        )
+    }
+    port = SimulationSegmentPolicyPort(
+        _Simulation(articulation=art),
+        robot,
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            articulations=(
+                SimulationArticulationBinding(
+                    entity_id="drawer", simulation_uid="native_drawer"
+                ),
+            ),
+        ),
+        settle_presets=presets,
+        step_dt=0.04,
+        control_operations={"press0": operation},
+    )
+    port.bind_clock(clock)
+
+    def advance():
+        for _ in range(10):
+            time[0] += 0.004
+            for observer in tuple(hooks.values()):
+                token = observer.before_sample()
+                sensor.update()
+                observer.after_sample(0.004, token)
+        clock.advance_after_env_step()
+
+    return SimpleNamespace(
+        port=port,
+        operation=operation,
+        robot=robot,
+        art=art,
+        clock=clock,
+        data=data,
+        advance=advance,
+        fetches=fetches,
+        hooks=hooks,
+        sensor=sensor,
+        sampler=sampler,
+        time=time,
+        geometry=geometry,
+        segments={},
+    )
+
+
+def _run_control_policy(system, name):
+    segment = (
+        next(
+            segment
+            for segment in system.compiled.iter_segments()
+            if segment.name == name
+        )
+        if getattr(system, "compiled", None) is not None
+        else _compiled_articulation_segment(settle_preset=name)
+    )
+    policy = segment.post_policies[0]
+    system.segments[name] = (segment, policy)
+    commands = []
+    for command in system.port.actions(
+        policy, segment=segment, active_mask=torch.tensor([True])
+    ):
+        commands.append(command)
+        system.advance()
+    return commands, system.port.post_policy_metadata(policy, segment=segment)
+
+
+def test_standard_control_port_preserves_press_holds_event_retreat_and_terminal_receipt():
+    system = _press_control_port()
+    commands, ready = _run_control_policy(system, "ready")
+    assert len(commands) == 13 and all(
+        torch.equal(command, torch.full((1, 2), 0.2)) for command in commands
+    )
+    assert ready["accepted"] and ready["phase"] == "released_stable"
+    assert (
+        system.fetches[0] == 132
+    )  # 130 native substeps plus the original two arm refreshes.
+    system.data["impulse"].fill_(0.1)
+    system.advance()
+    system.art._qpos.fill_(0.00006)
+    system.advance()
+    system.data["impulse"].zero_()
+    commands, released = _run_control_policy(system, "released")
+    assert len(commands) == 5 and all(
+        torch.equal(command, torch.full((1, 2), 0.7)) for command in commands
+    )
+    assert (
+        released["accepted"]
+        and released["retreat_verified"]
+        and not released["terminal"]
+    )
+    commands, terminal = _run_control_policy(system, "park")
+    assert len(commands) == 5 and terminal["accepted"] and terminal["terminal"]
+    assert terminal["activation_verified"] is False
+    assert terminal["control"]["operation_id"] == "press0"
+    assert terminal["control"]["sample_count"] == 121
+    retained = system.operation.recorded_window()
+    system.art.get_qpos = lambda: (_ for _ in ()).throw(
+        AssertionError("historical reads must be detached")
+    )
+    assert system.operation.recorded_window().samples == retained.samples
+    segment, policy = system.segments["park"]
+    services = system.port.runtime_service_context(
+        program_fingerprint="program", episode_id="episode"
+    )
+    assert services.control_operation("press0") is system.operation
+    with pytest.raises(ValueError, match="another program/episode"):
+        system.port.runtime_service_context(
+            program_fingerprint="other", episode_id="episode"
+        )
+    with pytest.raises(TypeError):
+        services.control_operations["wrong"] = system.operation
+    scope = system.port.control_policy_scope(policy, segment=segment)
+    facts = system.port.control_policy_measurements(policy, segment=segment)
+    assert facts.phase == "released" and facts.terminal
+    assert (
+        facts.sample_count == len(retained.samples)
+        and facts.generation == retained.generation
+    )
+    assert facts.clearance.batches["control.terminal_clearance"].values.tolist() == [
+        0.05
+    ]
+    ready_segment, ready_policy = system.segments["ready"]
+    ready_facts = system.port.control_policy_measurements(
+        ready_policy, segment=ready_segment
+    )
+    assert len(ready_facts.hold_frames) == 13
+    assert ready_facts.hold_end_step - ready_facts.hold_start_step == 13
+    assert torch.equal(
+        ready_facts.joint_limits.batches["articulation.joint_limits"].values,
+        torch.tensor([[0.0, 0.01]]),
+    )
+    ready_facts.hold_frames[0].batches["articulation.joint_position"].values.fill_(99)
+    assert system.port.control_policy_measurements(
+        ready_policy, segment=ready_segment
+    ).hold_frames[0].batches["articulation.joint_position"].values.tolist() == [0.0]
+
+    assert (
+        scope["program_fingerprint"] == "program" and scope["episode_id"] == "episode"
+    )
+    assert scope["contact_actors"] == {"target": 1, "parent": 4, "hand": [2]}
+    assert (
+        system.port.control_policy_window(policy, segment=segment).samples
+        == retained.samples
+    )
+    earlier, earlier_policy = system.segments["released"]
+    with pytest.raises(ValueError, match="another post-policy"):
+        system.port.control_policy_window(earlier_policy, segment=earlier)
+    system.port.close_runtime_resources()
+    assert not system.hooks
+    with pytest.raises(RuntimeError, match="closed"):
+        services.control_operation("press0")
+    assert (
+        system.port.control_policy_window(policy, segment=segment).samples
+        == retained.samples
+    )
+
+
+def test_control_port_cancellation_and_foreign_clock_cannot_reuse_success():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    system = _press_control_port()
+    _, ready = _run_control_policy(system, "ready")
+    assert ready["accepted"]
+    with pytest.raises(ValueError, match="fresh service"):
+        system.port.new_task_program_session().bind_clock(EnvironmentStepClock(0.04))
+    assert system.port.observation_clock is system.clock
+    segment = _compiled_articulation_segment(settle_preset="released")
+    policy = segment.post_policies[0]
+    actions = system.port.actions(
+        policy, segment=segment, active_mask=torch.tensor([True])
+    )
+    next(actions)
+    other = system.port.actions(
+        policy, segment=segment, active_mask=torch.tensor([True])
+    )
+    with pytest.raises(ValueError, match="executing post-policy"):
+        next(other)
+    system.advance()
+    next(actions)  # Rejected overlap did not cancel the actual owner.
+    actions.close()
+    with pytest.raises(RuntimeError, match="unavailable"):
+        system.port.post_policy_result(policy, segment=segment)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        system.operation.receipt()
+
+
+def _twist_control_case(
+    *, program_fingerprint="program", compiled=None, initialize=None, retain=False
+):
+    from dataclasses import asdict
+    from embodichain.lab.sim.scene.revolute_inputs import RevoluteControlBinding
+    from embodichain.lab.sim.atomic_actions import (
+        ActionPlan,
+        EndpointCommand,
+        JointPositionTarget,
+        JointPositionPayload,
+        RuntimeCommandFrame,
+        TimedCommandSequence,
+        RecoveryPolicy,
+        TrackingPolicy,
+        PlannerDiagnostics,
+        TimedTrajectory,
+    )
+    from embodichain.lab.sim.atomic_actions.primitives.twist_recovery import (
+        TwistRecoveryScope,
+        TwistPlanningRecovery,
+        TwistPlanningOutcome,
+    )
+    from embodichain.lab.task_program.integrations.simulation.twist_session import (
+        TwistOperationSession,
+    )
+    from embodichain.lab.task_program.integrations.simulation.control_observation import (
+        ControlContactActors,
+    )
+    from embodichain.lab.task_program.integrations.simulation.control_policy import (
+        ControlOperationRuntime,
+        SimulationControlConditionCfg,
+    )
+
+    system = _press_control_port(program_fingerprint=program_fingerprint)
+    if compiled is not None:
+        system.compiled = compiled
+    system.port.close_runtime_resources()
+    art, robot = system.art, system.robot
+    art._qpos = torch.tensor([[0.0, 0.17]])
+    art.joint_names = ("cabinet_to_drawer", "other_joint")
+    art.cfg = SimpleNamespace(
+        fpath="/frozen/native.usda", body_scale_mass_policy="native"
+    )
+    art.get_qvel = lambda: torch.zeros_like(art._qpos)
+    system.geometry.park_clearance = lambda: 0.05
+    binding = RevoluteControlBinding(
+        "native_drawer",
+        "cabinet_to_drawer",
+        "button",
+        "base",
+        "a" * 64,
+        1.0,
+        (0.0, 0.0, 1.0),
+        1.0,
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.02),
+        0.01,
+        0.02,
+        (-1.0, 1.0),
+        1,
+        0.3,
+        calibration_sha256="b" * 64,
+    )
+    scope = TwistRecoveryScope(program_fingerprint, "twist0", "episode", 0)
+    cursor = TwistOperationSession(
+        robot,
+        SimpleNamespace(robot=robot),
+        scope,
+        invocation_ids=("chunk",),
+        parent_entity_id="drawer",
+        child_entity_id="button",
+        joint_name=binding.joint,
+        validate_execution_scope=lambda: None,
+        validate_observation=lambda context: None,
+    )
+    payload = {
+        "binding": asdict(binding),
+        "operation_id": "twist0",
+        "success_criterion": "contact_backed_coarse_turn",
+    }
+    operation = ControlOperationRuntime(
+        robot,
+        art,
+        binding,
+        system.geometry,
+        system.sampler,
+        ControlContactActors(1, 4, (2,)),
+        entity_id="drawer",
+        operation_id="twist0",
+        program_fingerprint=program_fingerprint,
+        episode_id="episode",
+        observer_id="twist",
+        route_payload=payload,
+        control_dt=0.04,
+        physics_dt=0.004,
+        simulation_time=lambda: system.time[0],
+        validate_scope=lambda: None,
+        twist_session=cursor,
+        table_actor=10,
+        robot_actors=(2, 3),
+    )
+    operation.start_startup()  # Reuses the actual completed query; no new fetch.
+    assert system.fetches[0] == 1
+    presets = {
+        name: SimulationControlConditionCfg(
+            entity="drawer",
+            operation_id="twist0",
+            family="twist",
+            phase=phase,
+            terminal=terminal,
+        )
+        for name, phase, terminal in (
+            ("ready", "ready", False),
+            ("chunk", "chunk", False),
+            ("park", "released", True),
+        )
+    }
+    system.port = SimulationSegmentPolicyPort(
+        _Simulation(articulation=art),
+        robot,
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            articulations=(
+                SimulationArticulationBinding(
+                    entity_id="drawer", simulation_uid="native_drawer"
+                ),
+            ),
+        ),
+        settle_presets=presets,
+        step_dt=0.04,
+        control_operations={"twist0": operation},
+    )
+    system.port.bind_clock(system.clock)
+    system.operation = operation
+    if initialize is not None:
+        initialize(system)
+    commands, ready = _run_control_policy(system, "ready")
+    assert len(commands) == 13 and ready["accepted"]
+    assert ready["startup_check"]["sample_count"] == 131
+    assert system.fetches[0] == 133
+    state = cursor.snapshot()
+    outcome = TwistPlanningOutcome(
+        "twist",
+        "chunk",
+        0,
+        "plan",
+        replace(
+            state,
+            version=state.version + 1,
+            selected_index=0,
+            selected_roll=0.0,
+            selected_bite_depth=0.005,
+            order=(0,),
+            candidates=((0, 0.0, 0.0),),
+        ),
+    )
+    ids = torch.tensor([0])
+    positions = torch.zeros(1, 2)
+    command = EndpointCommand(
+        JointPositionTarget("arm", (0, 1)), JointPositionPayload(positions)
+    )
+    frame = RuntimeCommandFrame(
+        (command,), torch.tensor([True]), ids, torch.tensor([0.04])
+    )
+    plan = ActionPlan(
+        skill_id="twist",
+        plan_success=torch.tensor([True]),
+        commands=TimedCommandSequence((frame,), ids),
+        recovery_policy=RecoveryPolicy(planning_recovery=TwistPlanningRecovery()),
+        tracking_policy=TrackingPolicy.timed(),
+        planned_scene_version=0,
+        planned_collision_world_revision=(0,),
+        diagnostics=PlannerDiagnostics("fixture"),
+        joint_trajectory=TimedTrajectory.from_uniform_step(
+            positions[:, None], env_ids=ids, step_dt=0.04
+        ),
+        invocation_id="chunk",
+        invocation_revision=0,
+        planning_recovery_outcome=outcome,
+    )
+    cursor.commit_planning(plan)
+    cursor.adopt_plan(plan)
+    system.data["impulse"].fill_(0.1)
+    system.advance()
+    art._qpos[:, 0].fill_(0.3)
+    system.advance()
+    system.data["impulse"].zero_()
+    commands, chunk = _run_control_policy(system, "chunk")
+    assert len(commands) == 13 and chunk["accepted"] and chunk["goal_complete"]
+    commands, terminal = _run_control_policy(system, "park")
+    assert all(torch.equal(value, torch.full((1, 2), 0.7)) for value in commands)
+    assert len(commands) == 13 and terminal["accepted"] and terminal["terminal"]
+    assert (
+        terminal["stable"] and terminal["others_unchanged"] and terminal["early_stop"]
+    )
+    terminal_segment, terminal_policy = system.segments["park"]
+    facts = system.port.control_policy_measurements(
+        terminal_policy, segment=terminal_segment
+    )
+    assert torch.equal(
+        facts.reference_qpos.batches["articulation.joint_positions"].values,
+        torch.tensor([[0.0, 0.17]]),
+    )
+    assert torch.equal(
+        facts.current_qpos.batches["articulation.joint_positions"].values,
+        torch.tensor([[0.3, 0.17]]),
+    )
+    assert len(facts.hold_frames) == 13
+    assert operation.recorded_window(startup=True).available
+    assert operation.recorded_window().available
+    if retain:
+        return system
+    system.port.close_runtime_resources()
+    assert not system.hooks
+
+
+def test_standard_control_port_runs_twist_startup_chunk_and_park_through_shared_cursor():
+    _twist_control_case()
+
+
 def test_support_height_uses_highest_qualified_contact_without_averaging():
     from embodichain.compute.geometry.contact_support import (
         contact_support_heights as _contact_support_heights,
@@ -1640,3 +2168,150 @@ def test_support_height_uses_highest_qualified_contact_without_averaging():
     )
     assert heights[0].item() == pytest.approx(0.12)
     assert torch.isnan(heights[1])
+
+
+def _full_control_program(names=("ready", "released", "park")):
+    payload = dict(
+        program_id="raw_control_test",
+        integration=dict(
+            robot_profile="test_robot",
+            scene_registry="test_scene",
+            runtime_preset="safe",
+        ),
+        targets={},
+        program=dict(
+            kind="sequence",
+            items=[
+                dict(
+                    kind="segment",
+                    name=name,
+                    steps=dict(
+                        kind="invoke",
+                        call=dict(
+                            kind="registered", call_id="example.control", arguments={}
+                        ),
+                    ),
+                    post=[dict(kind="wait_stable", entity="drawer", preset=name)],
+                )
+                for name in names
+            ],
+        ),
+    )
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneArticulationRef("drawer"),
+                state_provider=_StaticStateProvider(),
+            ),
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
+        decode_task_program(payload)
+    )
+    return payload, compiled
+
+
+def _raw_press_observation(*, empty_initial=False):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.task_program.bridge import (
+        TaskProgramDemoBridge,
+        BufferedGymCommandSink,
+        RuntimeCommandFrameEncoder,
+    )
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        task_program_fingerprint,
+    )
+    from embodichain.lab.task_program.integrations.simulation.control_observations import (
+        SimulationControlObservationCollector,
+    )
+
+    payload, compiled = _full_control_program()
+    system = _press_control_port(
+        program_fingerprint=task_program_fingerprint(compiled), episode_id="0"
+    )
+    system.compiled = compiled
+    runtime = SimpleNamespace(
+        result=None,
+        status=None,
+        start=lambda *a, **k: None,
+        step=lambda: None,
+        cancel=lambda reason: None,
+        adopt_verified_task_state=lambda state: None,
+    )
+    sink = BufferedGymCommandSink(
+        RuntimeCommandFrameEncoder(
+            SimpleNamespace(current_qpos=lambda ids: system.robot.get_qpos())
+        ),
+        system.clock,
+    )
+    bridge = TaskProgramDemoBridge(
+        compiled,
+        runtime,
+        sink,
+        system.clock,
+        post_policy_port=system.port,
+        isolate_policy_sessions=False,
+    )
+    epochs = EpisodeContext(1)
+    epochs._begin_episode(torch.tensor([0]))
+    epochs._finish_initialization(torch.tensor([0]))
+    env = SimpleNamespace(
+        sim=system.port._simulation, robot=system.robot, episode_context=epochs
+    )
+    collector = SimulationControlObservationCollector(env, bridge, "press0")
+    segments = []
+    selectors = []
+    for name in ("ready", "released", "park"):
+        if name == "released":
+            if empty_initial:
+                system.data["is_valid"].zero_()
+                system.advance()
+                system.data["is_valid"].fill_(True)
+            system.data["impulse"].fill_(0.1)
+            system.advance()
+            system.art._qpos.fill_(0.00006)
+            system.advance()
+            system.data["impulse"].zero_()
+        _, result = _run_control_policy(system, name)
+        segment, policy = system.segments[name]
+        scope = system.port.control_policy_scope(policy, segment=segment)
+        selector = dict(
+            segment_id=segment.segment_id,
+            segment_name=segment.name,
+            source_path=list(segment.source_path),
+            policy_index=0,
+            preset=name,
+            phase=scope["phase"],
+            terminal=scope["terminal"],
+        )
+        selectors.append(selector)
+        segments.append(
+            dict(
+                name=segment.name,
+                active=[True],
+                successes=[True],
+                end_steps=[system.clock.step_index],
+                metadata=dict(
+                    task_program_id=compiled.program_id,
+                    program_segment_id=segment.segment_id,
+                    program_segment_source_path=list(segment.source_path),
+                    runtime=dict(env_ids=[0]),
+                    post_policies=[
+                        dict(
+                            kind="wait_stable",
+                            policy_index=0,
+                            source_path=list(policy.source_path),
+                            result_mask=[True],
+                            result=result,
+                        )
+                    ],
+                ),
+            )
+        )
+    system.operation.close()
+    system.art.get_qpos = lambda: (_ for _ in ()).throw(
+        AssertionError("Control evidence capture cannot read live-later state")
+    )
+    raw = collector.capture(selectors, terminal_policy=selectors[-1])
+    return system, collector, payload, segments, selectors, raw

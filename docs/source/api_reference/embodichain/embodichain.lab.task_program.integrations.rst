@@ -383,7 +383,14 @@ preset selection.
 Bindings targeting parallel branches are explicitly rejected. Unbound parallel
 calls remain supported. The compiled-program fingerprint uses the same format as
 nominal motion sources; it includes the instruction and integration selection.
-These declarations do not add YAML fields, execute providers, or mutate an engine.
+Configured integrations may declare the same tuple under
+``runtime_services.invocation_policy_bindings``. Its entries contain exactly
+``program_fingerprint``, ``invocation_id``, and ``preset_id``. The public deployment
+loader validates them against the compiled program before returning its lazy
+factory. The bridge uses these sealed bindings; an explicit second binding tuple
+is rejected. Named execution-policy ``presets`` patch policy groups, while
+``profile.preset_options`` owns action-option and monitor additions for those
+names. Neither path executes providers or mutates an engine.
 ``validate_manifest`` checks profile identity, runtime-preset selection and each
 selected call's policy contract. A scene manifest carries entity metadata rather
 than the host's scene-registry selection ID; the standard adapter validates that
@@ -479,3 +486,585 @@ must not construct resources or read live state during this preflight.
 .. autoclass:: RegisteredSemanticLowererSceneValidator
    :members:
 
+
+
+Scoped Twist observation and execution sessions
+-----------------------------------------------
+
+``TwistOperationSession`` binds exact declared occurrences, robot, program and
+physical episode to one shared Atomic cursor and the real Motion query factory.
+Planning, installation, adoption and feedback remain separate guarded boundaries.
+The registry selects only exact declared occurrence IDs and implements the
+existing plan-lifecycle factory; preview forks change cursor identity without
+changing the borrowed physical owners.
+
+``ControlObservationWindow`` projects only newly appended records from an exact
+canonical ``JointContactObserver`` generation. Raw frames retain simulation time;
+source-relative scalar time is explicitly declared. It preserves missing channel,
+loss, capacity and cadence errors and never performs another sensor fetch.
+``record_count`` reads the retained prefix length without copying that prefix.
+These interfaces install no standard post-policy producer or control factory.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_observation
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.twist_session
+   :members:
+
+Declared articulation continuation and drawer services
+------------------------------------------------------
+
+Prismatic lowerers ground explicit source-qualified joint targets, withdrawal
+frames and PARK commands into the shared skills. The continuation registry owns
+actual ``ExecutionPlanAttempt`` installation history for exact declared
+program/episode occurrences. A preview is not an installation and cannot grant
+withdrawal or PARK recovery authority.
+
+Drawer and preshape adapters validate original source stamps and native owners
+around reads. They provide observed geometry and typed command provenance,
+select no alternate skill registry, and import no Task Engine state. These
+interfaces do not install the standard Press/Twist post-policy producer.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.prismatic_lowering
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.articulation_session
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.drawer_planning
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.slide_preshape
+   :members:
+
+Configured geometry planning
+----------------------------
+
+``runtime_services.planning_services`` is a closed, explicitly enabled geometry
+service declaration. Composition snapshots and fingerprints it without starting
+Sim, reading native state, performing IK or constructing collision queries.
+It selects discrete input-mesh collision queries and optional native receiver
+geometry from the shared Motion and Scene owners. Native receiver geometry
+requires an ordered collision roster covering all declared rigid owners, actual
+root observations, and Default contact revisions. The host checks backend and
+batch eligibility before simulation; these geometry queries retain their B=1
+scope. Unconfigured calls retain their defaults and registration fingerprints.
+
+The observation provider reads the actual native source stamp before and after
+capturing robot and scene state; drift rejects the observation. Native HandOver
+preparation checks that full stamp, observed start, explicit receiver resources
+and physical owner inventory. It captures a fresh borrowed-scene query whose
+Atomic caller closes. A closed factory cannot authorize further native reads.
+HandOver's bounded recovery is selected explicitly by its typed options and
+``handover_bounded`` declaration. Unpublished planning-service fields fail the
+closed decoder; this interface does not imply that every source capability is
+already available from configuration.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.planning_services
+
+.. autosummary::
+
+   CollisionSceneRosterCfg
+   SimulationPlanningServicesCfg
+
+.. autoclass:: CollisionSceneRosterCfg
+   :members: snapshot
+
+.. autoclass:: SimulationPlanningServicesCfg
+   :members: snapshot, validate_num_envs, validate_physics
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.handover_scene
+
+.. autosummary::
+
+   SimulationHandOverSceneProvider
+
+.. autoclass:: SimulationHandOverSceneProvider
+   :members: prepare
+
+
+Registered motion aliases
+-------------------------
+
+The closed registered-lowerer declarations ``align_held``, ``clear_released`` and
+``idle_arm_clearance`` retain the existing call IDs ``gen_sim.align_held``,
+``gen_sim.clear_released`` and ``gen_sim.clear_idle_arm``. They bind explicit route,
+resource and geometry operands into ordinary ``MoveHeldObject``,
+``MoveEndEffector`` and ``MoveJoints`` goals. Numerical target construction belongs
+to Compute; the Atomic and Motion owners plan and qualify emitted commands.
+
+Held alignment requires the declared object to be exclusively held and currently
+observed. Its optional retention contract requests verification rather than
+establishing a physical fact. Released clearance requires an empty resource and
+exact hand-model reserves. Idle clear/restore routes bind an ordered pair of
+sequential segments, their resource and a declared joint offset; both calls
+require explicit discrete free-motion qualification. The original shared
+``simulation.park`` call remains the restore entry point.
+
+Configured linear Cartesian modes require their existing fixed-grid/sequential
+IK policies and B=1 scope. Missing services or incompatible policy values reject
+before simulation. Bounded staging and compiler-bound released continuations
+remain unavailable until their runtime providers are installed; ordinary calls
+retain their policies and fingerprints.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.held_alignment
+
+.. autosummary::
+
+   HeldAlignmentRoute
+   HeldAlignmentLowererFactory
+
+.. autoclass:: HeldAlignmentRoute
+   :members: selector
+
+.. autoclass:: HeldAlignmentLowererFactory
+   :members: create, validate_scene_declaration
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.release_clearance
+
+.. autosummary::
+
+   ReleasedHandRoute
+   NominalHandBinding
+   ClearReleasedLowererFactory
+
+.. autoclass:: ReleasedHandRoute
+
+.. autoclass:: NominalHandBinding
+
+.. autoclass:: ClearReleasedLowererFactory
+   :members: create, validate_scene_declaration
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.idle_clearance
+
+.. autosummary::
+
+   IdleClearanceRoute
+   IdleClearanceFactory
+
+.. autoclass:: IdleClearanceRoute
+
+.. autoclass:: IdleClearanceFactory
+   :members: create
+
+Declared articulation continuation and drawer services
+------------------------------------------------------
+
+Explicit runtime observation scope
+----------------------------------
+
+``TaskProgramEnvironmentAdapter.assemble_runtime`` and ``create_bridge`` accept
+an optional ``runtime_scope_guard`` for a host-owned session, episode or physical
+owner epoch. The standard factory forwards it to the planning observation port
+and shared scene cache. ``validate_runtime_scope()`` checks factory lifetime and
+this explicit authority without acquiring robot/sensor state or stepping physics.
+A scope change during acquisition rejects the result. Cached qpos also rejects
+closed factory resources; a live factory does not imply that a previous bridge
+still has authority.
+
+The default ``None`` keeps legacy custom factory calls unchanged: no new keyword
+is passed to them. Explicit scope requests require a factory supporting the
+optional keyword. The validator must not acquire observations or mutate physical
+state. Control-service construction and evidence collection remain separate.
+
+
+Scoped control producers and runtime-bound lowerers
+---------------------------------------------------
+
+The standard factory creates a fresh operation for every compiled bridge, using
+its real program fingerprint, initialized episode, contact sensor and acknowledged
+clock. The same operation is supplied to the registered lowerer and physical
+post-policy. Ordinary factories continue using ``create``; the optional runtime
+factory protocol explicitly requests the bridge's actual service context.
+
+Press preserves observed preparation holds, source tip geometry, bounded physical
+release windows and terminal receipts. Twist shares one cursor between Atomic
+planning, installed-plan lifecycle and measured chunk feedback. Prismatic
+continuation registries reuse the published Atomic recovery owners. This assembly
+keeps B1 source qualification and rejects external nominal plans or expansion for
+control bridges. Software assembly checks do not establish physical qualification.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.extensions
+
+.. autoclass:: RuntimeBoundSemanticLowererFactory
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.runtime_services
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_assembly
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_lowering
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_policy
+   :members:
+   :exclude-members: ControlOperationRuntime
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.control_policy
+
+.. autoclass:: ControlOperationRuntime
+   :members:
+   :exclude-members: observation_scope
+
+.. py:attribute:: ControlOperationRuntime.observation_scope
+   :type: dict[str, builtins.object]
+
+   Owned JSON provenance for the declared program, episode, operation, native
+   actors, observer and clock. Reading this metadata performs no acquisition;
+   the declarations do not establish current physical evidence availability.
+
+Control observers opt into retaining the actual before-fetch source stamp. Their
+``capture(refresh=False)`` reuses the completed buffer; this does not add a sensor
+refresh or repeat the post-policy's physical acquisition. Bridge cleanup detaches
+owned hooks and closes cursors/queries without acknowledging pending commands.
+The borrowed observation owner remains available for final collectors until host
+teardown, while a changed episode invalidates that bridge's live observations.
+
+
+Native planning deployment services
+-----------------------------------
+
+The standard factory resolves explicit planning declarations after the physical
+host exists. It supplies shared collision, observed cuRobo, Pick closing, measured
+rigid, Place-scene, held staging/command, Pour projection and paired-grasp services
+to the ordinary Atomic engine. Static composition creates none of those live
+queries. Default service absence retains the existing shared behavior.
+
+Every occurrence permission is checked against the actual compiled program and
+selected preset. Place/released-hand continuations bind the same existing
+compiler, engine, robot and program; they use the normal complete-plan preview
+pipeline. Released authorities additionally guard the actual episode and close
+through the bridge's existing cleanup callback. They never create a second
+compiler or commit a preview's physical effects.
+
+Public inline composition accepts explicit declarations under ``inline`` and
+retains independently owned program data. ``program_source`` and ``load_program``
+provide the same strict decoding/preflight for file and inline sources.
+``compile_configured_task_program`` computes provider-free occurrence identities
+before their final runtime-service bindings exist; full deployment preflight is
+still required afterwards. Backend/batch, missing services, incompatible modes,
+foreign roles, external nominal incompatibilities and declaration drift reject
+without starting simulation. Measurements and physical acceptance remain with
+their separate evidence and TaskSpec owners.
+
+.. autofunction:: embodichain.lab.task_program.integrations.composition.compile_configured_task_program
+
+.. autoclass:: embodichain.lab.task_program.integrations.simulation.planning_services.ObservedCuroboServicesCfg
+   :members: snapshot
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.collision_observation
+
+.. autosummary::
+
+   SimulationCollisionObservationProvider
+
+.. autoclass:: SimulationCollisionObservationProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.coordinated
+
+.. autosummary::
+
+   CoordinatedHoldLowererFactory
+   CoordinatedTargetRoute
+   CoordinatedPlacementLowererFactory
+
+.. autoclass:: CoordinatedHoldLowererFactory
+   :members:
+
+.. autoclass:: CoordinatedTargetRoute
+   :members:
+
+.. autoclass:: CoordinatedPlacementLowererFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.coordinated_grasp
+
+.. autosummary::
+
+   CoordinatedGraspServiceCfg
+   ConfiguredCoordinatedGraspServices
+
+.. autoclass:: CoordinatedGraspServiceCfg
+   :members:
+
+.. autoclass:: ConfiguredCoordinatedGraspServices
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.effect_contracts
+
+.. autosummary::
+
+   PlacementEffectContract
+   TransportEffectContract
+
+.. autoclass:: PlacementEffectContract
+   :members:
+
+.. autoclass:: TransportEffectContract
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.held_planning
+
+.. autosummary::
+
+   SimulationHeldPlanningProvider
+   resolve_retained_command_authorities
+
+.. autoclass:: SimulationHeldPlanningProvider
+   :members:
+
+.. autofunction:: resolve_retained_command_authorities
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.jaw_pour
+
+.. autosummary::
+
+   JawPourFactory
+
+.. autoclass:: JawPourFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.measured_rigid
+
+.. autosummary::
+
+   MeasuredRigidInvocationBinding
+   SimulationMeasuredRigidProvider
+
+.. autoclass:: MeasuredRigidInvocationBinding
+   :members:
+
+.. autoclass:: SimulationMeasuredRigidProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pick_closing
+
+.. autosummary::
+
+   PickClosingBinding
+   SimulationPickClosingProvider
+
+.. autoclass:: PickClosingBinding
+   :members:
+
+.. autoclass:: SimulationPickClosingProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pick_targets
+
+.. autosummary::
+
+   PickTargetRoute
+   ConfiguredPickLowererFactory
+   make_pick_alias_factory
+
+.. autoclass:: PickTargetRoute
+   :members:
+
+.. autoclass:: ConfiguredPickLowererFactory
+   :members:
+
+.. autofunction:: make_pick_alias_factory
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.place_continuation
+
+.. autosummary::
+
+   PlaceContinuationBinding
+   HeldAlignmentContinuationBinding
+   SimulationPlaceContinuationProvider
+
+.. autoclass:: PlaceContinuationBinding
+   :members:
+
+.. autoclass:: HeldAlignmentContinuationBinding
+   :members:
+
+.. autoclass:: SimulationPlaceContinuationProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.place_scene
+
+.. autosummary::
+
+   PlaceSceneBinding
+   SimulationPlaceSceneProvider
+
+.. autoclass:: PlaceSceneBinding
+   :members:
+
+.. autoclass:: SimulationPlaceSceneProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.placement
+
+.. autosummary::
+
+   ObservedRelativePlaceBinding
+   ObservedRelativePlaceLowererFactory
+   UprightPlaceLowererFactory
+
+.. autoclass:: ObservedRelativePlaceBinding
+   :members:
+
+.. autoclass:: ObservedRelativePlaceLowererFactory
+   :members:
+
+.. autoclass:: UprightPlaceLowererFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pour_binding
+
+.. autosummary::
+
+   PourProjectionBinding
+   resolve_pour_projection_routes
+
+.. autoclass:: PourProjectionBinding
+   :members:
+
+.. autofunction:: resolve_pour_projection_routes
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pour_projection
+
+.. autosummary::
+
+   ResolvedPourProjectionRoute
+   SimulationPourProjectionProvider
+
+.. autoclass:: ResolvedPourProjectionRoute
+   :members:
+
+.. autoclass:: SimulationPourProjectionProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.pour_transport
+
+.. autosummary::
+
+   PourStageRoute
+   PourTransportFactory
+   PourRegionTransportFactory
+
+.. autoclass:: PourStageRoute
+   :members:
+
+.. autoclass:: PourTransportFactory
+   :members:
+
+.. autoclass:: PourRegionTransportFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.released_continuation
+
+.. autosummary::
+
+   ReleasedHandContinuationBinding
+   SimulationReleasedHandContinuationProvider
+
+.. autoclass:: ReleasedHandContinuationBinding
+   :members:
+
+.. autoclass:: SimulationReleasedHandContinuationProvider
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.retained_pour
+
+.. autosummary::
+
+   RetainedPourFactory
+
+.. autoclass:: RetainedPourFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.stack_placement
+
+.. autosummary::
+
+   StackPlaceLowererFactory
+
+.. autoclass:: StackPlaceLowererFactory
+   :members:
+
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.transport
+
+.. autosummary::
+
+   TerminalAttachmentTransportLowererFactory
+   DrawerTransportLowererFactory
+
+.. autoclass:: TerminalAttachmentTransportLowererFactory
+   :members:
+
+.. autoclass:: DrawerTransportLowererFactory
+
+Physical observation services for an actual execution
+------------------------------------------------------
+
+After binding the actual active bridge, call the standard adapter or simulation
+factory's ``create_observation_services(environment, bridge, observations=...)``.
+``SimulationObservationServices`` creates real collectors from the sealed
+registration before the first execution step. Unselected services add no sensor
+hook or acquisition. It reuses the public State/support collectors and borrowed
+control runtime; cleanup closes only its contact hook and Cargo owner. Closed
+service sets are released from the factory's active resource list. Factory
+teardown also closes live service sets without closing the borrowed raw manager.
+
+The actual environment-owned ObservationManager supplies selected raw pose fields,
+exact inclusive windows and cheap per-row completed counts. Original validity,
+acquisition errors, revisions and timestamps remain visible; missing finite raw
+values or timestamps cannot become valid geometry. Neither an old trajectory
+reader nor another policy/substep sampling chain is constructed.
+
+``SimulationControlObservationCollector`` copies already completed exact compiled
+policy occurrences, preserving window generations, physical channels, startup
+windows and receipts. It performs no current-state fallback and can copy retained
+facts after control hooks close. The supplied actual program/episode/native
+identity remains separate from task interpretation.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_observations
+   :members:
+
+``SimulationRecordedContactCfg`` selects an existing ordinary substep-suite sensor,
+complete single-sided native roster, 1024-contact query and bounded timeline.
+The collector registers its observer before stepping and reads pose windows only
+from the raw owner. Contact-only capture uses completed counts and copies no pose
+history. Closing detaches only the exact owned subscription; replacement, reset,
+episode and clock drift are rejected.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.recorded_contacts
+   :members:
+
+``SimulationCargoEnvelopeCfg`` selects source carriers and exclusions explicitly.
+The Cargo collector reads initial source meshes once per required selection, then
+checks complete original recorded prefixes and current terminal poses. Recorded
+acquisition metadata retains the native simulation clock, while report boundaries
+name the execution-step clock. The collector reports facts without evaluating a
+TaskSpec, and imports no Task Engine implementation.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.cargo_observation
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.observation_services
+   :members:

@@ -22,7 +22,12 @@ semantic scene graph, generation model client or task lifecycle.
 | Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
 | Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
 | Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
+| Declared local source vertices | `source_geometry.read_source_vertices`; authored mesh/articulation data or an explicitly scaled local override, with no native observation |
+| Read-only source glTF basis/top inputs | `source_geometry.py`; original scene transforms, scale and topology, with no native acquisition |
 | Shared authored source reads and link-local collider inputs | `embodichain/lab/sim/spawn/source_geometry.py`; Scene retains its `LinkMesh` import |
+| Explicit robot mounting frames and URDF collision inputs | `source_robot_geometry.py`, `utility/urdf_collision.py` |
+
+| Explicit Default/B1 gravity, native Pour inputs and immutable receiver snapshots | `embodichain/lab/sim/scene/physical_parameters.py`, `pour_inputs.py`, `pour_region.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
 | CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
 | Robot-aware object proposals and full-pose IK/FK checks | `embodichain/lab/sim/scene/workspace.py` |
@@ -38,11 +43,19 @@ triangle-union floor and silhouette measurements. Scene CPU strategies own
 support selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
 Pure grasp samples, release clearances, ordered footprint proposals, source-axis
-adaptation and distal staging also live in `compute.geometry`. They consume
-explicit arrays, tensors or mesh/polygon inputs and retain no scene, Robot or
-semantic graph. Runtime acquisition, policy selection, ownership and physical
-acceptance remain with their consuming subsystems. `pose_checks.as_rigid_matrix`
-only validates one input transform; it neither repairs it nor invokes FK/IK.
+adaptation, held-object alignment targets and distal staging also live in
+`compute.geometry`. They consume explicit arrays, tensors or mesh/polygon inputs
+and retain no scene, Robot or semantic graph. `alignment.py` takes supplied poses,
+axes and held/root transforms. Runtime acquisition, policy selection, ownership
+and physical acceptance remain with their consuming subsystems.
+`pose_checks.as_rigid_matrix` only validates one input transform; it neither
+repairs it nor invokes FK/IK.
+
+`physical_parameters.observed_gravity` reads actual configured Default/B1 gravity,
+without inventing missing values. `pour_inputs` captures native local mesh data
+and the selected solver root; `pour_region` owns immutable arrays and delegates
+staging arithmetic to Compute using fresh caller-supplied poses. These planning
+inputs do not create native resources or establish physical acceptance.
 
 `rigid_mesh.capture_rigid_mesh` snapshots scaled native input vertices and
 matching triangles as owned CPU data with the environment axis intact. It reads
@@ -62,6 +75,17 @@ belongs to [GraspKit](../motion-planning/motion-planning.md); query composition 
 cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
 Captured shapes and nominal queries do not establish physical acquisition/release.
 
+`native_hand_scene.py` and `native_motion_scene.py` expose opt-in FCL queries
+on the same physical observation. Hand capture retains collision-only links,
+planes and native contact/rest offsets; motion capture retains ordered rigid and
+articulation obstacles, arm parts and named-joint FK. Both preserve the original
+Default/B1/env0 coverage and reject stale or replaced owners rather than refresh.
+Callers supply the observation guard and close each owned query. These are
+discrete geometric checks, not continuous-path or physical-effect evidence.
+`convex_clearance.py` checks conservative input-mesh solids at explicit frame
+indices, preserving order and first rejection; it also catches full containment.
+It takes explicit margins and never substitutes for a native contact witness.
+
 Static control readers consume explicit authored roles, keep source mesh frames
 and identity, and never build semantic graphs or select execution/recovery
 budgets. Acceptance thresholds and semantic link IDs belong to their callers.
@@ -75,13 +99,24 @@ in a content-addressed derived source; it never edits the original asset.
 `control_source` rejects source/sidecar drift, including newly present optional
 sidecars. Source mesh proofs do not certify native cooked shapes or paths.
 
+`source_robot_geometry.py` resolves declared fixed mounting chains and arm-base
+anchors from source configuration; explicit component transforms take precedence.
+`utility.urdf_collision` reads exact selected mesh/box colliders into the existing
+Spawn `LinkMesh` type, preserving source order and scaling origins/vertices once.
+It rejects unresolved URIs and visual-only links. Vertex-envelope mode remains
+explicit and supplies no triangle-surface certificate. These generic readers
+construct no Robot, simulator or IK solver and select no concrete robot preset.
+
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
 recreate it after replacing either object or changing its model/scale. Queries
 take explicit observed poses and return footprint containment, area and vertical
 gap, without accepting a task or inferring contact support. Exact silhouette mode
-retains concavities and holes; convex-hull mode remains explicit. Acquisition
-errors remain unavailable evidence. Callers own thresholds, invocation/episode
-association, observation timing and evidence publication.
+retains concavities and holes; convex-hull mode remains explicit. `source_geometry()` returns independent subject vertices and floor copies after
+checking the original bindings. `capture_planar_contents` reads explicitly ordered
+logical/native rigid contents at B=1; both supply geometry without reading poses
+or certifying retention. Acquisition errors remain unavailable evidence. Callers
+own thresholds, invocation/episode association, observation timing and evidence
+publication.
 
 `mesh_snapshot.py` captures scaled rigid visual vertices and ordered articulation
 collision-input components from explicit UID/link mappings. It reads no live

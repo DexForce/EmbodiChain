@@ -824,20 +824,16 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
                     ),
                 )
             ),
-            registered_effect=RegisteredSemanticEffect(
-                effect_kind=SemanticEffectKind.RELEASE,
-                held_objects=(
-                    RegisteredHeldObjectEffect(
-                        expectation_id="primary",
-                        relation=HeldObjectRelation.DETACHED,
-                        object_id=route.object_id,
-                        slot_id="primary",
-                        release_before_segment="retract",
-                        retain_during_segments=("approach",),
-                    ),
-                ),
-            ),
+            registered_effect=self._release_effect(route.object_id),
         )
+
+    def _release_effect(self, object_id: str) -> RegisteredSemanticEffect:
+        from .simulation.effect_contracts import (
+            PlacementEffectContract,
+            _release_effect,
+        )
+
+        return _release_effect(object_id, PlacementEffectContract.PHASED_RELEASE)
 
     def pick_lookahead_targets(
         self,
@@ -1068,6 +1064,7 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
     call_id: ClassVar[str] = _COORDINATED_TRANSPORT_CALL_ID
     target_descriptor: ClassVar[SkillDescriptor] = CoordinatedPickment.descriptor()
     effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.RELEASE
+    release: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -1105,12 +1102,18 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
                 "Configured coordinated transport requires an exact "
                 "CoordinatedPickmentOptions template."
             )
-        if not option_template.release:
+        if option_template.release is not self.release:
             raise ValueError(
                 "Configured coordinated transport must enable coordinated release."
+                if self.release
+                else "Configured coordinated hold must retain both grasps."
             )
         arguments = dict(call.arguments)
-        if set(arguments) != {"object", "target"}:
+        if set(arguments) not in (
+            {"object", "target"},
+            {"object", "target", "world_displacement"},
+            {"object", "target", "reference", "relation"},
+        ):
             raise ValueError(
                 f"{self.call_id} arguments must contain only 'object' and 'target'."
             )
@@ -1121,6 +1124,28 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
                 f"{self.call_id} does not declare object-target route {route!r}."
             )
         route_cfg, semantics = resolved
+        relation = getattr(route_cfg, "relation", None)
+        if relation is not None:
+            if (
+                not self.release
+                or arguments.get("reference") != route_cfg.reference_entity_id
+                or arguments.get("relation") != relation
+            ):
+                raise ValueError(
+                    "Coordinated placement must match its configured support relation."
+                )
+        elif "reference" in arguments:
+            raise ValueError(
+                "Coordinated placement has no configured support relation."
+            )
+        if (
+            "world_displacement" in arguments
+            and tuple(float(value) for value in arguments["world_displacement"])
+            != route_cfg.world_displacement
+        ):
+            raise ValueError(
+                "Coordinated world_displacement differs from the declared route."
+            )
         if route_cfg.world_displacement is not None:
             try:
                 observed = context.scene.entities[route_cfg.object_id]
@@ -1150,7 +1175,14 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
                 dtype=object_target_pose.dtype,
                 device=object_target_pose.device,
             )
-            object_target_pose[:, :3, 3] += displacement
+            if relation == "on":
+                object_target_pose = SceneEntityPose(
+                    route_cfg.reference_entity_id,
+                    world_displacement=displacement,
+                    world_orientation=object_pose[:, :3, :3],
+                )
+            else:
+                object_target_pose[:, :3, 3] += displacement
         else:
             assert route_cfg.reference_entity_id is not None
             assert route_cfg.relative_pose is not None
@@ -1167,14 +1199,22 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
                 object_target_pose=object_target_pose,
             ),
             registered_effect=RegisteredSemanticEffect(
-                effect_kind=SemanticEffectKind.RELEASE,
+                effect_kind=(
+                    SemanticEffectKind.RELEASE
+                    if self.release
+                    else SemanticEffectKind.ATTACH
+                ),
                 held_objects=tuple(
                     RegisteredHeldObjectEffect(
                         expectation_id=slot_id,
-                        relation=HeldObjectRelation.DETACHED,
+                        relation=(
+                            HeldObjectRelation.DETACHED
+                            if self.release
+                            else HeldObjectRelation.ATTACHED
+                        ),
                         object_id=route_cfg.object_id,
                         slot_id=slot_id,
-                        allow_missing_detached_baseline=True,
+                        allow_missing_detached_baseline=self.release,
                     )
                     for slot_id in ("left", "right")
                 ),
@@ -1189,6 +1229,9 @@ class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
     call_id: ClassVar[str] = _COORDINATED_TRANSPORT_CALL_ID
     revision: ClassVar[str] = "1"
     target_descriptor: ClassVar[SkillDescriptor] = CoordinatedPickment.descriptor()
+    lowerer_type: ClassVar[type[_CoordinatedTransportLowerer]] = (
+        _CoordinatedTransportLowerer
+    )
 
     routes: tuple[
         _CoordinatedTransportRoute | tuple[str, str, str, tuple[float, ...]],
@@ -1260,7 +1303,7 @@ class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
                     affordance=grasp_ref,
                 )
             )
-        return _CoordinatedTransportLowerer(
+        return self.lowerer_type(
             tuple(canonical_routes),
             tuple(semantics),
         )

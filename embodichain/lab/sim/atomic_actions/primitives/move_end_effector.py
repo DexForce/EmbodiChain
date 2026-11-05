@@ -18,8 +18,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
+from ..articulation_continuation import ArticulationWithdrawalPlanningRecovery
+from collections.abc import Callable
+from embodichain.lab.sim.atomic_actions.policies import PlanningRecovery
+from embodichain.lab.sim.atomic_actions.released_continuation import (
+    ReleasedHandClearanceRecovery,
+)
+from embodichain.lab.sim.atomic_actions.core import CompletePlanBuilder
 
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.core import AtomicAction
@@ -63,6 +70,13 @@ class EndEffectorPoseGoal:
 class MoveEndEffectorOptions(ActionOptions):
     """Per-invocation behavior for :class:`MoveEndEffector`."""
 
+    linear_segments: bool = field(default=False, kw_only=True)
+    """Select source fixed-grid Cartesian sampling for a free end-effector move."""
+
+    def __post_init__(self) -> None:
+        if type(self.linear_segments) is not bool:
+            raise TypeError("linear_segments must be bool.")
+
 
 class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions]):
     """Plan a free-space move for a bound manipulator."""
@@ -78,11 +92,135 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
         ),
     )
     OptionsType: ClassVar[type] = MoveEndEffectorOptions
+    PlanningRecoveryType: ClassVar[tuple[type[PlanningRecovery], ...]] = (
+        ArticulationWithdrawalPlanningRecovery,
+        ReleasedHandClearanceRecovery,
+    )
+
+    def plan_complete_request(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, MoveEndEffectorOptions],
+        context: PlanningContext,
+        *,
+        build: CompletePlanBuilder,
+        external_nominal: bool = False,
+    ) -> ActionPlan:
+        """Qualify the entire cleanup and its exact declared future Park sequence."""
+        if (
+            type(request.recovery_policy.planning_recovery)
+            is not ReleasedHandClearanceRecovery
+        ):
+            return build(request)
+        if external_nominal:
+            raise ValueError(
+                "Released cleanup does not support external nominal motion."
+            )
+        provider = self.planning_services.released_hand_provider
+        query = self.planning_services.free_motion_query
+        if provider is None or query is None:
+            raise ValueError(
+                "Released cleanup requires declared suffix and collision services."
+            )
+        session = provider.prepare(request, context)
+        if session is None:
+            raise ValueError("Released cleanup has no exact declared occurrence.")
+        from embodichain.lab.sim.atomic_actions.primitives._released_clearance import (
+            recover,
+        )
+
+        def complete(selected, current):
+            if current is not context:
+                raise ValueError("Cleanup alternatives changed their observed context.")
+            return build(
+                selected,
+                planner=lambda exact, observed: self._plan_nominal(exact, observed),
+            )
+
+        original = complete(request, context)
+        return recover(
+            request,
+            context,
+            original,
+            build=complete,
+            session=session,
+            robot=self.robot,
+            query=query,
+            plan_preview=build.plan_preview,
+        )
+
+    def _validate_segment_motion_recovery(self, request, context) -> None:
+        if request.skill_options.linear_segments:
+            if (
+                context.batch_size != 1
+                or context.env_ids.tolist() != [0]
+                or (
+                    request.recovery_policy.planning_recovery is not None
+                    and type(request.recovery_policy.planning_recovery)
+                    is not ReleasedHandClearanceRecovery
+                )
+                or request.motion_policy.dynamic_collision_mode != "off"
+                or request.motion_policy.segment_sample_count_retries != (260, 320)
+                or request.motion_policy.segment_continuous_ik_recovery
+            ):
+                raise ValueError(
+                    "Free Cartesian end-effector segments require the source B1 grid without articulation recovery."
+                )
+            return
+        if (
+            type(request.recovery_policy.planning_recovery)
+            is not ArticulationWithdrawalPlanningRecovery
+            or context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or request.motion_policy.segment_sample_count_retries != (260, 320)
+            or request.motion_policy.segment_continuous_ik_recovery
+        ):
+            raise ValueError(
+                "Source articulation segments require their typed B1 recovery and exact declared retry grid."
+            )
 
     def _plan(
         self,
         request: ResolvedActionRequest[EndEffectorPoseGoal, MoveEndEffectorOptions],
         context: PlanningContext,
+    ) -> ActionPlan:
+        if (
+            request.recovery_policy.planning_recovery is None
+            and self.planning_services.articulation_continuation_provider is None
+        ):
+            return self._plan_nominal(request, context)
+        from embodichain.lab.sim.atomic_actions.primitives._articulation_recovery import (
+            plan_articulation,
+        )
+
+        return plan_articulation(
+            self,
+            request,
+            context,
+            lambda selected, generate: self._plan_nominal(
+                selected, context, generate=generate
+            ),
+            kind="withdraw",
+        )
+
+    def _qualify_final_plan(self, request, context, plan):
+        if (
+            type(request.recovery_policy.planning_recovery)
+            is ReleasedHandClearanceRecovery
+        ):
+            return None
+        from embodichain.lab.sim.atomic_actions.primitives._articulation_recovery import (
+            reject_articulation_transform,
+        )
+
+        return reject_articulation_transform(self, request, plan)
+
+    def _plan_nominal(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, MoveEndEffectorOptions],
+        context: PlanningContext,
+        *,
+        generate: Callable | None = None,
     ) -> ActionPlan:
         """Plan an end-effector pose goal from the observed joint state."""
         goal = request.goal
@@ -97,14 +235,32 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
             device=self.device,
         )
         start_qpos = context.robot.qpos[:, joint_ids]
-        result = self.motion_generator.generate(
-            build_pose_plan_states(move_xpos),
-            options=request.motion_policy.to_motion_gen_options(
-                start_qpos=start_qpos,
-                control_part=control_part,
-                interpolation_dt=context.control_dt,
-            ),
+        targets = build_pose_plan_states(move_xpos)
+        motion_options = request.motion_policy.to_motion_gen_options(
+            start_qpos=start_qpos,
+            control_part=control_part,
+            interpolation_dt=context.control_dt,
+            cartesian_keyframes=request.skill_options.linear_segments
+            or generate is not None,
         )
+        if request.skill_options.linear_segments:
+            if (
+                context.batch_size != 1
+                or generate is not None
+                or (
+                    request.recovery_policy.planning_recovery is not None
+                    and type(request.recovery_policy.planning_recovery)
+                    is not ReleasedHandClearanceRecovery
+                )
+            ):
+                raise ValueError(
+                    "Free Cartesian end-effector segments require B1 without articulation recovery."
+                )
+            result = self.motion_generator.generate(targets, options=motion_options)
+        else:
+            result = (self.motion_generator.generate if generate is None else generate)(
+                targets, options=motion_options
+            )
         success, trajectory = to_full_robot_trajectory(
             result,
             base_qpos=context.robot.qpos,

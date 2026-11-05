@@ -1,0 +1,93 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "scope": "actual FCL convex-solid clearance with original hull/plane and frame order",
+  "cases": [
+    {
+      "name": "clear",
+      "extent": [
+        0.2,
+        0.2,
+        0.2
+      ],
+      "offset": 0.8,
+      "steps": [
+        0.0,
+        0.1,
+        0.2
+      ],
+      "result": {
+        "valid": true,
+        "scope": "discrete_source_convex_solids_not_native_contact",
+        "required_clearance_m": 0.002,
+        "numerical_allowance_m": 1e-06,
+        "minimum_distance_m": 0.4,
+        "checked_frames": 3
+      }
+    },
+    {
+      "name": "touch",
+      "extent": [
+        0.2,
+        0.2,
+        0.2
+      ],
+      "offset": 0.5,
+      "steps": [
+        0.0,
+        0.2,
+        0.3
+      ],
+      "result": {
+        "valid": false,
+        "scope": "discrete_source_convex_solids_not_native_contact",
+        "required_clearance_m": 0.002,
+        "numerical_allowance_m": 1e-06,
+        "minimum_distance_m": 0.0,
+        "checked_frames": 3,
+        "frame": 2
+      }
+    },
+    {
+      "name": "contained",
+      "extent": [
+        2.0,
+        2.0,
+        2.0
+      ],
+      "offset": 0.0,
+      "steps": [
+        0.0
+      ],
+      "result": {
+        "valid": false,
+        "scope": "discrete_source_convex_solids_not_native_contact",
+        "required_clearance_m": 0.002,
+        "numerical_allowance_m": 1e-06,
+        "minimum_distance_m": 0.0,
+        "checked_frames": 1,
+        "frame": 0
+      }
+    },
+    {
+      "name": "margin",
+      "extent": [
+        0.2,
+        0.2,
+        0.2
+      ],
+      "offset": 0.202,
+      "steps": [
+        0.0
+      ],
+      "result": {
+        "valid": false,
+        "scope": "discrete_source_convex_solids_not_native_contact",
+        "required_clearance_m": 0.002,
+        "numerical_allowance_m": 1e-06,
+        "minimum_distance_m": 0.0020000000000000018,
+        "checked_frames": 1,
+        "frame": 0
+      }
+    }
+  ]
+}

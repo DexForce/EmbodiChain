@@ -1,0 +1,102 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "scope": "actual source adaptive Pick, full command certificate and contact reconstruction; deterministic kinematics/motion/collision oracles, no native physics claim",
+  "calls": [],
+  "ik": [],
+  "success": [
+    false
+  ],
+  "positions_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "dt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "segments": [],
+  "metadata": {
+    "pick_candidate_retry": {
+      "budget": 4,
+      "attempts": [],
+      "accepted": false
+    },
+    "pick_raw_candidate_retry": {
+      "budget": 4,
+      "attempts": [
+        {
+          "strategy": 0,
+          "candidate_id": 0,
+          "roll_variant": 0,
+          "selected_pose": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "trajectory": {
+            "valid": false,
+            "reason": "approach_continuity_rejected"
+          }
+        },
+        {
+          "strategy": 0,
+          "candidate_id": 0,
+          "roll_variant": 1,
+          "selected_pose": [
+            [
+              [
+                -1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "trajectory": {
+            "valid": false,
+            "reason": "approach_continuity_rejected"
+          }
+        }
+      ],
+      "accepted": false,
+      "source": "geometry_before_endpoint_ik",
+      "qualification_scope": "continuous_pick_full_robot_limits_and_approach_scene_discrete_meshes"
+    }
+  },
+  "rng": "4864f28273e93404ed441b03147427354613c478f472ad92e558002bac6b7a9a"
+}

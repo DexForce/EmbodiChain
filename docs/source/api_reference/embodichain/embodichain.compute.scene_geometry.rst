@@ -1,6 +1,5 @@
 Geometry arrays and tensor kernels
 ==================================
-
 ``embodichain.compute.geometry`` provides reusable Torch operations on dense
 float32/float64 tensors. Inputs share dtype and device; outputs stay on that
 CPU or CUDA device. The kernels do not accept entity UIDs, asset paths, mesh
@@ -385,11 +384,56 @@ uses explicit TCP/root geometry to produce the ordered outward translations;
 rejected geometry or bounds remain unavailable proposals. Robot kinematics,
 collision queries and execution policy are outside these numeric operations.
 
+The FK and sampled-path residual helpers preserve their distinct source
+precision and rounding margins. They compare numeric transforms only; solver
+limits and observed Robot state are supplied by the Motion owner.
+
 .. automodule:: embodichain.compute.geometry.pose_checks
    :members:
 
 .. automodule:: embodichain.compute.geometry.staging
    :members:
+
+
+Drawer proposal and containment arithmetic
+------------------------------------------
+
+Drawer algorithms consume explicit payload vertices, observed poses and declared
+region bounds. Entry proposals and containment reports preserve source order,
+world-up proposals and exposed-floor rules. They neither acquire native state
+nor select complete motion plans or establish physical retention.
+
+.. automodule:: embodichain.compute.geometry.drawer
+   :members:
+
+.. automodule:: embodichain.compute.geometry.drawer_path
+   :members:
+
+Carrier envelope geometry
+-------------------------
+
+The pure tensor envelope test transforms object points into a carrier frame and
+checks horizontal extent and the lowest point with the preserved tolerance. The
+upper vertical extent is unconstrained. This is neither a cavity test nor a
+physical retention certificate and reads no simulation or task objects.
+
+.. currentmodule:: embodichain.compute.geometry.cargo
+
+.. autosummary::
+   :nosignatures:
+
+   inside_carrier_envelope
+   first_carrier_envelope_failure
+
+.. autofunction:: inside_carrier_envelope
+
+
+Recorded prefixes are checked in the original ordered chunks of at most 64
+frames. Empty/incomplete or nonfinite prefixes remain unavailable; the function
+returns the first original frame index without resampling or changing the grid.
+
+.. autofunction:: first_carrier_envelope_failure
+
 
 Qualified contact heights
 -------------------------
@@ -401,6 +445,30 @@ produce NaN and preserve the caller's conservative envelope. The sensor-facing
 uses it without importing Lab or acquiring physical state.
 
 .. autofunction:: embodichain.compute.geometry.contact_support.contact_support_heights
+
+
+Declared alignment targets
+--------------------------
+
+These functions consume already observed numerical poses and object-local axes.
+``alignment_target_axis`` selects an upright vertical direction or the nearest
+vertical pole when direction is free. ``held_alignment_targets`` preserves the
+source heading/lift order, optional explicit destination, and supplied arm-root
+and object-to-end-effector transforms. It returns owned target poses without IK,
+scene queries, collision checks or physical acceptance. Callers own acquisition,
+resource identity and motion/recovery policy.
+
+.. currentmodule:: embodichain.compute.geometry.alignment
+
+.. autosummary::
+
+   alignment_target_axis
+   held_alignment_targets
+
+.. autofunction:: alignment_target_axis
+
+.. autofunction:: held_alignment_targets
+
 
 Recorded rigid Pour measurements
 --------------------------------
@@ -417,3 +485,11 @@ fluid-transfer conclusions.
 
 .. autofunction:: measure_pour_receiver
    :no-index:
+
+Drawer proposal and containment arithmetic
+------------------------------------------
+
+Drawer algorithms consume explicit payload vertices, observed poses and declared
+region bounds. Entry proposals and containment reports preserve source order,
+world-up proposals and exposed-floor rules. They neither acquire native state
+nor select complete motion plans or establish physical retention.

@@ -1425,3 +1425,112 @@ def test_env_spec_derives_registration_and_injects_runtime_factory() -> None:
                 registration
             ),
         )
+
+
+@pytest.mark.parametrize("last_phase", ["chunk", "released"])
+def test_twist_final_occurrence_can_use_its_single_release_window(last_phase):
+    """Validate phase budgets without introducing an extra physical post-policy."""
+    from dataclasses import replace
+    from embodichain.lab.task_program.compiler import TaskProgramCompiler
+    from embodichain.lab.task_program.integrations.simulation.control_assembly import (
+        ControlOperationDeclaration,
+    )
+    from embodichain.lab.task_program.integrations.simulation.control_lowering import (
+        TwistCallDeclaration,
+    )
+    from embodichain.lab.sim.scene.revolute_inputs import RevoluteControlBinding
+
+    initial = _registration().catalog
+    binding = RevoluteControlBinding(
+        "cube",
+        "joint",
+        "cap",
+        "base",
+        "a" * 64,
+        1.0,
+        (0.0, 0.0, 1.0),
+        1.0,
+        (0.0, 0.0, 0.0),
+        (0.04, 0.0, 0.0),
+        0.008,
+        0.04,
+        (-1.0, 1.0),
+        1,
+        0.4,
+        calibration_sha256="b" * 64,
+    )
+    operation = ControlOperationDeclaration(
+        TwistCallDeclaration("operation", "cap"),
+        binding,
+        "contacts",
+        "eef",
+        ("finger_a", "finger_b"),
+        "explicit",
+        table_uid="native_table",
+        chunk_count=3,
+    )
+    call_id = "gen_sim.twist.operation"
+    prepare_id = "gen_sim.twist_prepare.operation"
+    catalog = replace(
+        initial,
+        control_calls=((prepare_id, operation, True), (call_id, operation, False)),
+        control_presets={
+            "ready": ("operation", "ready"),
+            "chunk": ("operation", "chunk"),
+            "released": ("operation", "released"),
+        },
+    )
+    payload = _program_payload()
+    payload["program"] = {
+        "kind": "sequence",
+        "items": [
+            {
+                "kind": "segment",
+                "name": f"phase_{index}",
+                "steps": {
+                    "kind": "invoke",
+                    "call": {
+                        "kind": "registered",
+                        "call_id": prepare_id if index == 0 else call_id,
+                        "arguments": {"object": "cube", "setting": 1},
+                    },
+                },
+                "post": [{"kind": "wait_stable", "entity": "cube", "preset": phase}],
+            }
+            for index, phase in enumerate(("ready", "chunk", "chunk", last_phase))
+        ],
+    }
+    compiled = TaskProgramCompiler(catalog.scene).compile(decode_task_program(payload))
+    assert len(tuple(compiled.iter_segments())) == 4
+    assert sum(len(segment.post_policies) for segment in compiled.iter_segments()) == 4
+    catalog.validate_control_program(compiled)
+    early = deepcopy(payload)
+    early["program"]["items"][1]["post"][0]["preset"] = "released"
+    with pytest.raises(ValueError, match="matching physical post-policy"):
+        catalog.validate_control_program(
+            TaskProgramCompiler(catalog.scene).compile(decode_task_program(early))
+        )
+
+
+def test_native_service_extension_preserves_public_default_values_and_capabilities() -> (
+    None
+):
+    """The prior public owner baseline includes true derived handler capability."""
+    import json
+    from pathlib import Path
+    from embodichain.lab.sim import atomic_actions
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    frozen = json.loads(
+        (
+            Path(__file__).parent / "data/native_public_defaults_base42bd.json"
+        ).read_text()
+    )["values"]
+    actual = {}
+    for name in frozen:
+        if name.endswith(".descriptor"):
+            value = getattr(atomic_actions, name[: -len(".descriptor")]).descriptor()
+        else:
+            value = getattr(atomic_actions, name)()
+        actual[name] = _canonical_value(value)
+    assert actual == frozen

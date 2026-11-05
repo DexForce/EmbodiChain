@@ -62,6 +62,14 @@ and per-row availability belong to the [contact boundary](../sensor-system/conta
 Raw traces are observations, while report serialization and TaskSpec verdicts
 remain frontend responsibilities.
 
+Fresh grip capture uses `SimulationStateObservationCollector` with the explicit
+`ObservationManager` owner. Its cheap `read_history_step_counts` query qualifies
+the current row boundaries without copying the full history. The runtime's
+`GripEvidenceObservationPort` performs one acquisition and owns that exact query;
+the standard factory preserves sensor, robot and runtime-scope checks around it.
+Collectors check episode, object, provider and clock identity before and after
+the read. Query time is not a claim of a native impulse refresh or task success.
+
 Stateful segment validators capture their incoming evidence through the optional
 `begin_segment` port immediately before runtime planning starts. Lift checks use
 that segment's measured baseline, including for lazy and repeated segments;
@@ -224,6 +232,23 @@ explicitly; source-specific lowerers and services remain with their owning
 integration layers. Semantic preflight checks planning recovery against the
 actual target SkillDescriptor before grounding or physical acquisition.
 
+## Explicit runtime observation scope
+
+`TaskProgramEnvironmentAdapter.assemble_runtime()` and `create_bridge()` accept
+an optional `runtime_scope_guard`. The standard factory forwards this host-owned
+validator to `SimulationPlanningObservationProvider` and its shared scene cache.
+`validate_runtime_scope()` checks both the factory lifetime and that explicit
+scope without reading robot state, sensors or simulation samples. Hosts bind
+actual session/episode/owner epochs; a factory-open check alone cannot establish
+that an earlier bridge is still current.
+
+Explicit scopes are checked before and after cached or live reads. A scope change
+during joint/root or scene acquisition cannot publish a context or snapshot.
+Cached qpos also rejects a closed factory. The default `None` performs no scope
+callback and leaves legacy custom factory calls unchanged; callers requesting a
+scope must use a factory implementing the optional keyword. These checks do not
+acquire evidence, create control services or select atomic skills.
+
 ## Evidence ownership across integrations
 
 Task Engine selects declared evidence requirements and named policies from skill,
@@ -305,3 +330,66 @@ exact inclusive source slots and receiver slots at the first maximum tilt.
 Raw validity/errors, episode and written-boundary identity remain authoritative.
 Geometry functions live in Compute and choose no Pour thresholds or release
 verdicts. The collector does not read live poses or acquire new sensor samples.
+
+
+
+
+`simulation/twist_session.py` binds declared program/operation/episode occurrences
+to the Atomic Twist cursor and real Motion query factory. Its registry implements
+the existing lifecycle factory; queries close on failed construction, stale
+scope or completion. `control_observation.py` projects the canonical contact
+observer's exact generation with `record_count` and `snapshot(start)`, preserving
+raw clock identities and missing/capacity errors without fetching contacts.
+Standard post-policy producer assembly remains a separate integration owner.
+
+
+
+`SimulationSupportObservationCollector` receives the host's actual
+`ObservationManager` for historical reads. Full-footprint geometry is recomputed
+through the existing policy session's `measure_support_geometry` using exact
+recorded poses and original support metadata. It does not resample contacts or
+read current poses. Invalid raw history remains unavailable before reprojection;
+TaskSpec independently checks that recomputed geometry matches the bound proof.
+
+`simulation.observations.SimulationStateObservationCollector` binds the exact
+pre-execution bridge, sealed registration and initialized episode. Current pose
+and joint queries validate the selected native owner before and after acquisition
+and validate the observation clock.
+Historical pose reads require an explicitly supplied ObservationManager and
+reuse its semantic schema/raw store, including unavailable rows and original
+boundary/revision/timestamp metadata. A missing original timestamp leaves only
+its affected row unavailable; the read timestamp cannot substitute for it.
+It does not evaluate TaskSpec conditions,
+resample past state or alter execution targets.
+
+`capture_held_poses` uses one canonical history read for the exact rigid pose and
+full robot joint vector. It retains the original fixed-base, calibrated named
+TCP FK contract, source joint dtype/device, float64 reported matrices and final
+current-state agreement. Raw validity/time and episode/native ownership are
+checked before publication. The packet also preserves original recorded field,
+row, revision and time identities. Missing history never substitutes a live
+joint read; moving bases and changing chain mounts remain unsupported.
+
+`SimulationStateObservationCollector.capture_recorded_pour_geometry` reads one
+owned snapshot from the explicitly supplied ObservationManager, then selects
+exact inclusive source slots and receiver slots at the first maximum tilt.
+Raw validity/errors, episode and written-boundary identity remain authoritative.
+Geometry functions live in Compute and choose no Pour thresholds or release
+verdicts. The collector does not read live poses or acquire new sensor samples.
+
+
+`simulation/observation_services.py` owns the explicit standard factory/adapter
+`create_observation_services(environment, bridge, observations=...)` entry. Bind
+an initialized environment's actual active bridge before its first step. The
+service set reuses public State/support and completed control owners; selected
+RecordedContact/Cargo collectors consume the actual ObservationManager, not an
+old trajectory reader. Contact hooks attach before stepping and detach on close,
+failed assembly or host teardown. The raw manager and control runtime remain
+borrowed. No declaration adds no hook/acquisition.
+
+Recorded-contact pose windows preserve raw validity, errors and original
+revision/time metadata. Cargo reads source-local vertices through Scene and all
+recorded frames through the same raw owner; Compute retains ordered 64-frame
+chunks and first failure. Historical reads never resample a native pose or treat
+missing timestamps as capture time. Task Engine consumes this public service set
+and owns task-specific binding/evaluation outside Lab.

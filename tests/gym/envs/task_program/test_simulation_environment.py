@@ -205,7 +205,7 @@ class _CountingJointProvider:
         }
 
 
-def _shared_scene_provider() -> tuple[
+def _shared_scene_provider(*, runtime_scope_guard=None) -> tuple[
     SharedTickSceneProvider,
     _CountingEntityProvider,
     _CountingJointProvider,
@@ -225,7 +225,9 @@ def _shared_scene_provider() -> tuple[
     delegate = registry.make_scene_provider(batch_size=_BATCH_SIZE)
     full_env_ids = torch.arange(_BATCH_SIZE, dtype=torch.long)
     return (
-        SharedTickSceneProvider(delegate, full_env_ids),
+        SharedTickSceneProvider(
+            delegate, full_env_ids, runtime_scope_guard=runtime_scope_guard
+        ),
         entity_provider,
         joint_provider,
     )
@@ -722,6 +724,8 @@ class _Simulation:
         rigid_objects: dict[str, _RigidObject] | None = None,
     ) -> None:
         self.robot = robot
+        self.num_envs = _BATCH_SIZE
+        self.physics_backend = "default"
         self.rigid_objects = {} if rigid_objects is None else dict(rigid_objects)
 
     def get_robot(self, uid: str) -> _Robot | None:
@@ -1429,7 +1433,8 @@ def test_simulation_observation_owns_gym_control_cadence() -> None:
     assert context.control_dt == pytest.approx(_STEP_DT)
 
 
-def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock() -> None:
+@pytest.mark.parametrize("scoped", [False, True])
+def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock(scoped) -> None:
     """Reusing a compiled program must not reuse a previous scene's tick cache."""
     adapter, _, robot, cube = _evidence_adapter_runtime()
     compiled = adapter.compile(
@@ -1439,7 +1444,18 @@ def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock() -> None:
             program=InvokeCfg(call=PickCfg(object="cube")),
         )
     )
-    first_bridge = adapter.create_bridge(compiled)
+    epoch = [0]
+
+    def guard(expected):
+        def validate():
+            if epoch[0] != expected:
+                raise ValueError("runtime scope replaced")
+
+        return validate
+
+    first_bridge = adapter.create_bridge(
+        compiled, **({"runtime_scope_guard": guard(0)} if scoped else {})
+    )
     first_policy = first_bridge._post_policy_port
     assert first_policy.observation_clock is first_bridge.clock
     first_runtime = first_bridge._runtime
@@ -1448,7 +1464,14 @@ def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock() -> None:
     initial_pose = initial.scene.entities["cube"].pose.clone()
 
     cube.pose[:, 0, 3] = 0.35  # Layout changes between episodes, before stepping.
-    second_bridge = adapter.create_bridge(compiled)
+    epoch[0] = 1
+    second_bridge = adapter.create_bridge(
+        compiled, **({"runtime_scope_guard": guard(1)} if scoped else {})
+    )
+    if scoped:
+        with pytest.raises(ValueError, match="runtime scope replaced"):
+            first_provider.current_qpos(initial.env_ids)
+
     second_policy = second_bridge._post_policy_port
     assert first_policy is not second_policy
     assert second_policy.observation_clock is second_bridge.clock
@@ -2179,6 +2202,8 @@ def test_closed_factory_rejects_new_observation_and_assembly_without_native_read
     with pytest.raises(RuntimeError, match="closed"):
         observation.observe(state)
     with pytest.raises(RuntimeError, match="closed"):
+        observation.current_qpos(torch.arange(_BATCH_SIZE, device=robot.device))
+    with pytest.raises(RuntimeError, match="closed"):
         factory.create_scene_registry()
     with pytest.raises(RuntimeError, match="closed"):
         factory.create_adapter()
@@ -2392,3 +2417,1357 @@ def test_returned_effect_providers_and_live_scene_reject_reads_after_close(
         live_scene.snapshot(timestamp=1.0, env_ids=context.env_ids)
     with pytest.raises(RuntimeError, match="closed"):
         observation.hold_qpos(context.env_ids)
+
+
+def test_standard_bridge_consumes_registration_owned_occurrence_bindings():
+    from dataclasses import replace
+    from embodichain.lab.task_program.integrations import (
+        InvocationPolicyBinding,
+        task_program_fingerprint,
+    )
+
+    original, _, robot, _ = _evidence_adapter_runtime()
+    config = TaskProgramCfg(
+        program_id="configured_occurrence",
+        integration=_evidence_integration(),
+        program=InvokeCfg(call=PickCfg(object="cube")),
+    )
+    compiled = original.compile(config)
+    segment = next(compiled.iter_segments())
+    binding = InvocationPolicyBinding(
+        task_program_fingerprint(compiled),
+        f"{compiled.program_id}/{segment.segment_id}:0",
+        compiled.integration.runtime_preset,
+    )
+    registration = replace(
+        original._registration, invocation_policy_bindings=(binding,)
+    )
+    factory = SimulationTaskProgramFactory(
+        original._factory._simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    adapter = factory.create_adapter()
+    bridge = adapter.create_bridge(compiled)
+    assert bridge._invocation_policies.bindings == (binding,)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        adapter.create_bridge(compiled, invocation_policy_bindings=(binding,))
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_native_world_stamp_is_explicit_and_detects_changes_during_capture(
+    monkeypatch, changed
+):
+    from embodichain.lab.sim.sensors.contact import sampling as contact_sampling
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    simulation.simulation_time = 0.03
+    values = iter((7, 8 if changed else 7))
+    monkeypatch.setattr(
+        contact_sampling, "native_contact_revision", lambda selected: next(values)
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(capture_native_revision=True),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    provider = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    if changed:
+        with pytest.raises(RuntimeError, match="changed during"):
+            provider.observe(state)
+    else:
+        context = provider.observe(state)
+        assert context.world_source_stamp.revision == 7
+        assert context.world_source_stamp.simulation_time == 0.03
+        assert context.robot.timestamp == 0.0
+        assert context.world_source_stamp.source_kind == "default.contacts"
+        projected = context.project(qpos=context.robot.qpos + 0.1, task=state)
+        assert projected.world_source_stamp == context.world_source_stamp
+
+
+def test_registered_geometry_services_use_standard_engine_and_owned_observation(
+    monkeypatch,
+):
+    import sys
+    from embodichain.lab.sim.motion import mesh_collision
+    from embodichain.lab.sim.motion.mesh_collision import MotionCollisionReport
+    from embodichain.lab.sim.sensors.contact import sampling as contact_sampling
+    from embodichain.lab.task_program.integrations.simulation.handover_scene import (
+        SimulationHandOverSceneProvider,
+    )
+    from embodichain.lab.task_program.integrations.simulation import handover_scene
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        CollisionSceneRosterCfg,
+        SimulationPlanningServicesCfg,
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    simulation.num_envs = 1
+    simulation.rigid_objects["native-item"] = _RigidObject()
+    simulation.simulation_time = 0.03
+    monkeypatch.setattr(contact_sampling, "native_contact_revision", lambda selected: 7)
+    monkeypatch.setattr(
+        handover_scene,
+        "capture_native_hand_scene",
+        lambda *args, **kwargs: pytest.fail(
+            "Factory captured native geometry eagerly."
+        ),
+    )
+    root_pose = torch.eye(4).unsqueeze(0)
+    monkeypatch.setattr(
+        robot, "get_local_pose", lambda **kwargs: root_pose, raising=False
+    )
+    created = []
+
+    class Query:
+        def __init__(self, selected_robot, selected_simulation):
+            self.robot = selected_robot
+            created.append((selected_robot, selected_simulation))
+
+        def inspect(self, positions, *, control_part):
+            return MotionCollisionReport(True, frames=len(positions))
+
+    monkeypatch.setattr(mesh_collision, "SimulationFreeMotionQuery", Query)
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            registry_id="scene",
+            rigid_objects=(SimulationRigidObjectBinding("item", "native-item"),),
+        ),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            free_motion_query="discrete_mesh",
+            capture_root_pose=True,
+            native_handover_scene=True,
+            capture_native_revision=True,
+            collision_roster=CollisionSceneRosterCfg(
+                rigid_objects=(("item", "native-item"),)
+            ),
+        ),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    assert created == []
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    assert type(engine) is AtomicActionEngine
+    assert engine.planning_services.free_motion_query.robot is robot
+    assert created == [(robot, simulation)]
+    assert (
+        type(engine.planning_services.handover_scene_provider)
+        is SimulationHandOverSceneProvider
+    )
+    assert engine.planning_services.handover_scene_provider.robot is robot
+    assert factory.world_source_stamp() == factory.world_source_stamp()
+    provider = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    context = provider.observe(TaskState.empty(1, robot.device))
+    torch.testing.assert_close(context.robot.root_pose, root_pose)
+    with pytest.raises(ValueError, match="constructor overrides"):
+        SimulationTaskProgramFactory(
+            simulation, robot, registration, step_dt=_STEP_DT, capture_root_pose=False
+        )
+    simulation.num_envs = 2
+    with pytest.raises(ValueError, match="B=1"):
+        SimulationTaskProgramFactory(simulation, robot, registration, step_dt=_STEP_DT)
+    assert len(created) == 1
+    factory.close_runtime_resources()
+    with pytest.raises(RuntimeError, match="closed"):
+        factory.world_source_stamp()
+
+
+@pytest.mark.parametrize("accessor", ["observe", "current_qpos", "hold_qpos", "scene"])
+def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_access(
+    monkeypatch, accessor
+):
+    factory, robot = _factory(hold_qpos_source="drive_target")
+    registry = factory.create_scene_registry()
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    epoch = [0]
+
+    def guard():
+        if epoch[0] != 0:
+            raise ValueError("runtime scope replaced")
+
+    observation = factory.create_planning_observation_provider(
+        scene_registry=registry,
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+        runtime_scope_guard=guard,
+    )
+    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    context = observation.observe(state)
+    # A separate factory and provider retain their own valid scope.
+    other_factory, other_robot = _factory()
+    other = other_factory.create_planning_observation_provider(
+        scene_registry=other_factory.create_scene_registry(),
+        engine=other_factory.create_atomic_action_engine(
+            other_factory.create_robot_skill_profile()
+        ),
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    epoch[0] = 1
+    monkeypatch.setattr(
+        robot, "get_qpos", lambda *a, **kw: pytest.fail("stale scope read robot")
+    )
+    with pytest.raises(ValueError, match="runtime scope replaced"):
+        if accessor == "observe":
+            observation.observe(state)
+        elif accessor == "scene":
+            observation.scene_provider.snapshot(timestamp=0.0, env_ids=context.env_ids)
+        else:
+            getattr(observation, accessor)(context.env_ids)
+    torch.testing.assert_close(other.observe(state).robot.qpos, other_robot.qpos)
+    factory.close_runtime_resources()
+    other_factory.close_runtime_resources()
+
+
+def test_runtime_scope_changed_during_root_capture_cannot_publish_context(monkeypatch):
+    factory, robot = _factory(capture_root_pose=True)
+    epoch = [0]
+
+    def guard():
+        if epoch[0] != 0:
+            raise ValueError("runtime scope changed during acquisition")
+
+    observation = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=factory.create_atomic_action_engine(
+            factory.create_robot_skill_profile()
+        ),
+        clock=EnvironmentStepClock(_STEP_DT),
+        runtime_scope_guard=guard,
+    )
+
+    def replaced(*, to_matrix):
+        assert to_matrix
+        epoch[0] = 1
+        return torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
+
+    monkeypatch.setattr(robot, "get_local_pose", replaced, raising=False)
+    with pytest.raises(ValueError, match="during acquisition"):
+        observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+    factory.close_runtime_resources()
+
+
+def test_shared_scene_scope_changed_during_acquisition_cannot_publish_snapshot(
+    monkeypatch,
+):
+    epoch = [0]
+
+    def guard():
+        if epoch[0] != 0:
+            raise ValueError("runtime scene scope changed")
+
+    provider, entity, joints = _shared_scene_provider(runtime_scope_guard=guard)
+    original = entity.observe
+
+    def replaced(**kwargs):
+        value = original(**kwargs)
+        epoch[0] = 1
+        return value
+
+    monkeypatch.setattr(entity, "observe", replaced)
+    with pytest.raises(ValueError, match="runtime scene scope changed"):
+        provider.snapshot(timestamp=0.0, env_ids=torch.arange(_BATCH_SIZE))
+    assert len(entity.calls) == len(joints.calls) == 1
+
+
+def test_adapter_rejects_noncallable_scope_before_live_assembly(monkeypatch):
+    factory, _ = _factory()
+    adapter = factory.create_adapter()
+    monkeypatch.setattr(
+        factory,
+        "create_scene_registry",
+        lambda: pytest.fail("invalid scope assembled scene"),
+    )
+    with pytest.raises(TypeError, match="runtime_scope_guard"):
+        adapter.assemble_runtime(
+            TaskProgramIntegrationCfg(
+                robot_profile="robot_profile",
+                scene_registry="scene",
+                runtime_preset="safe",
+            ),
+            runtime_scope_guard=object(),
+        )
+    adapter.close()
+
+
+def test_deferred_collision_observation_preserves_roster_and_excludes_before_read():
+    from embodichain.lab.sim.evidence import PhysicalObservationStamp
+    from embodichain.lab.sim.atomic_actions import (
+        RobotObservation,
+        SceneSnapshot,
+        EntityState,
+    )
+    from embodichain.lab.task_program.integrations.simulation.collision_observation import (
+        SimulationCollisionObservationProvider,
+    )
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        CollisionSceneRosterCfg,
+    )
+
+    pose = torch.eye(4).unsqueeze(0)
+    reads = []
+    rigid = SimpleNamespace(
+        get_local_pose=lambda **kwargs: (reads.append("rigid") or pose)
+    )
+    cargo = SimpleNamespace(
+        get_local_pose=lambda **kwargs: pytest.fail("excluded payload pose was read")
+    )
+    articulated = SimpleNamespace(
+        get_link_pose=lambda name, **kwargs: (reads.append(name) or pose)
+    )
+    bodies = {"rigid_native": rigid, "cargo_native": cargo}
+    sim = SimpleNamespace(
+        get_rigid_object=lambda uid: bodies.get(uid),
+        get_articulation=lambda uid: articulated,
+    )
+    stamp = PhysicalObservationStamp("owner", "default.contacts", 9, 0.07)
+    current = [stamp]
+    declaration = CollisionSceneRosterCfg(
+        rigid_objects=(("seen", "rigid_native"), ("cargo", "cargo_native")),
+        articulation_links=(("collision_only", "art", "hidden_link"),),
+    )
+    provider = SimulationCollisionObservationProvider(
+        sim, declaration, lambda: current[0]
+    )
+    context = PlanningContext(
+        robot=RobotObservation(
+            timestamp=0.04, qpos=torch.zeros(1, 2), qvel=torch.zeros(1, 2)
+        ),
+        task=TaskState.empty(1, "cpu"),
+        scene=SceneSnapshot(
+            timestamp=0.04, version=3, entities={"seen": EntityState(pose[0])}
+        ),
+        env_ids=torch.tensor([0]),
+        world_source_stamp=stamp,
+    )
+    observed = provider.capture(context, excluded_entity_ids=("cargo",))
+    assert tuple(observed.poses) == ("seen", "collision_only")
+    assert reads == ["rigid", "hidden_link"]
+    assert (observed.timestamp, observed.scene_version, observed.native_revision) == (
+        0.04,
+        3,
+        9,
+    )
+    pose[:, 0, 3] = 0.1
+    assert observed.poses["seen"][0, 0, 3] == 0
+    pose[:, 0, 3] = 0.0
+    current[0] = PhysicalObservationStamp("other_owner", "default.contacts", 9, 0.07)
+    with pytest.raises(ValueError, match="no longer matches"):
+        provider.capture(context, excluded_entity_ids=("cargo",))
+    assert reads == ["rigid", "hidden_link"]
+    current[0] = stamp
+    bodies["rigid_native"] = SimpleNamespace()
+    with pytest.raises(ValueError, match="owner was replaced"):
+        provider.capture(context, excluded_entity_ids=("cargo",))
+
+
+def test_deferred_collision_observation_rejects_source_change_during_capture():
+    from embodichain.lab.sim.evidence import PhysicalObservationStamp
+    from embodichain.lab.sim.atomic_actions import (
+        RobotObservation,
+        SceneSnapshot,
+        EntityState,
+    )
+    from embodichain.lab.task_program.integrations.simulation.collision_observation import (
+        SimulationCollisionObservationProvider,
+    )
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        CollisionSceneRosterCfg,
+    )
+
+    pose = torch.eye(4).unsqueeze(0)
+    body = SimpleNamespace(get_local_pose=lambda **kwargs: pose)
+    sim = SimpleNamespace(
+        get_rigid_object=lambda uid: body, get_articulation=lambda uid: None
+    )
+    before = PhysicalObservationStamp("owner", "default.contacts", 9, 0.07)
+    after = PhysicalObservationStamp("owner", "default.contacts", 10, 0.08)
+    stamps = iter((before, after))
+    provider = SimulationCollisionObservationProvider(
+        sim,
+        CollisionSceneRosterCfg(rigid_objects=(("body", "native"),)),
+        lambda: next(stamps),
+    )
+    context = PlanningContext(
+        robot=RobotObservation(
+            timestamp=0.04, qpos=torch.zeros(1, 2), qvel=torch.zeros(1, 2)
+        ),
+        task=TaskState.empty(1, "cpu"),
+        scene=SceneSnapshot(timestamp=0.04, version=3, entities={}),
+        env_ids=torch.tensor([0]),
+        world_source_stamp=before,
+    )
+    with pytest.raises(ValueError, match="changed while"):
+        provider.capture(context)
+
+
+def test_place_scene_roles_are_explicit_occurrence_bindings(monkeypatch):
+    from embodichain.lab.task_program.integrations.simulation import place_scene
+    from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
+
+    captured = []
+    geometry = SceneMeshSnapshot(
+        {
+            name: torch.zeros(1, 3, 3)
+            for name in ("floor_alias", "support_alias", "payload")
+        }
+    )
+
+    def capture(sim, **kwargs):
+        captured.append(kwargs)
+        return geometry
+
+    monkeypatch.setattr(place_scene, "capture_scene_meshes", capture)
+    provider = place_scene.SimulationPlaceSceneProvider(
+        SimpleNamespace(num_envs=1),
+        rigid_uids={
+            "floor_alias": "not_named_table",
+            "support_alias": "native_pad",
+            "payload": "object",
+        },
+        bindings=(
+            place_scene.PlaceSceneBinding(
+                "program/segment:0", "floor_alias", "support_alias"
+            ),
+        ),
+    )
+    context = SimpleNamespace(batch_size=1, env_ids=torch.tensor([0]))
+    with pytest.raises(ValueError, match="no declared"):
+        provider.prepare(
+            SimpleNamespace(skill_id="place", invocation_id="foreign"), context
+        )
+    assert captured == []
+    result = provider.prepare(
+        SimpleNamespace(skill_id="place", invocation_id="program/segment:0"), context
+    )
+    assert (result.floor_entity_id, result.support_owner_id) == (
+        "floor_alias",
+        "support_alias",
+    )
+    assert list(captured[0]["rigid_uids"]) == [
+        "floor_alias",
+        "support_alias",
+        "payload",
+    ]
+    geometry["floor_alias"].fill_(99)
+    assert not result.geometry["floor_alias"].any()
+
+
+def test_native_receiver_provider_is_installed_by_standard_factory(monkeypatch):
+    import sys
+    from embodichain.lab.task_program.integrations.simulation.handover_scene import (
+        SimulationHandOverSceneProvider,
+    )
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        CollisionSceneRosterCfg,
+        SimulationPlanningServicesCfg,
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    simulation.num_envs = 1
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            native_handover_scene=True,
+            capture_root_pose=True,
+            capture_native_revision=True,
+            collision_roster=CollisionSceneRosterCfg(
+                rigid_objects=(("object", "native-object"),)
+            ),
+        ),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    assert type(engine) is AtomicActionEngine
+    provider = engine.planning_services.handover_scene_provider
+    assert type(provider) is SimulationHandOverSceneProvider
+    assert provider.robot is robot
+
+
+def test_inside_landing_provider_acquires_native_geometry_only_on_recovery(monkeypatch):
+    import trimesh
+    from embodichain.lab.task_program.integrations.simulation import place_scene
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        ContainerAffordanceBinding,
+    )
+    from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
+
+    reads = []
+    natives = {}
+    for name, size in (
+        ("native_payload", (0.1, 0.1, 0.1)),
+        ("native_parent", (1.0, 1.0, 0.1)),
+    ):
+        mesh = trimesh.creation.box(extents=size)
+        vertices = torch.tensor(mesh.vertices.copy()).float()[None]
+        triangles = torch.tensor(mesh.faces.copy()).long()[None]
+
+        def read_vertices(*, to_numpy=False, scale=True, name=name, vertices=vertices):
+            reads.append(name)
+            return vertices.clone()
+
+        natives[name] = SimpleNamespace(
+            get_vertices=read_vertices,
+            get_triangles=lambda triangles=triangles: triangles.clone(),
+        )
+    simulation = SimpleNamespace(num_envs=1, get_rigid_object=natives.get)
+    monkeypatch.setattr(
+        place_scene,
+        "capture_scene_meshes",
+        lambda *a, **k: SceneMeshSnapshot(
+            {key: torch.zeros(1, 3, 3) for key in ("payload", "parent")}
+        ),
+    )
+    provider = place_scene.SimulationPlaceSceneProvider(
+        simulation,
+        rigid_uids={"payload": "native_payload", "parent": "native_parent"},
+        containers=(
+            ContainerAffordanceBinding(
+                "inside_frame", "parent", "inside", release_clearance=0.12
+            ),
+        ),
+        bindings=(
+            place_scene.PlaceSceneBinding(
+                "program/segment:0", "parent", "parent", "payload", "inside_frame"
+            ),
+        ),
+    )
+    request = SimpleNamespace(skill_id="place", invocation_id="program/segment:0")
+    context = SimpleNamespace(batch_size=1, env_ids=torch.tensor([0]))
+    assert provider.prepare(request, context).inside_landing is None
+    assert reads == []
+    first = provider.prepare_inside_landing(request, context).inside_landing
+    second = provider.prepare_inside_landing(request, context).inside_landing
+    assert first.geometry is second.geometry
+    assert reads == ["native_payload", "native_parent"]
+    assert (
+        first.subject_id,
+        first.container_id,
+        first.parent_id,
+        first.release_clearance,
+    ) == ("payload", "inside_frame", "parent", 0.12)
+    with pytest.raises(ValueError, match="no declared"):
+        provider.prepare_inside_landing(
+            SimpleNamespace(skill_id="place", invocation_id="other"), context
+        )
+    natives["native_parent"] = object()
+    with pytest.raises(ValueError, match="native bindings"):
+        first.geometry.measure(torch.eye(4)[None], torch.eye(4)[None])
+
+
+@pytest.mark.parametrize("mode", ["disabled", "available", "unavailable"])
+def test_standard_factory_captures_declared_cargo_geometry_only_when_enabled(
+    monkeypatch, mode
+):
+    import sys
+    from embodichain.lab.sim.scene import mesh_snapshot
+    from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    simulation = _Simulation(
+        robot, {"native_carrier": _RigidObject(), "native_content": _RigidObject()}
+    )
+    calls = []
+    vertices = torch.ones(1, 3, 3)
+    captured = (
+        SceneMeshSnapshot({"carrier": vertices, "content": vertices})
+        if mode != "unavailable"
+        else SceneMeshSnapshot({}, unavailable="source unavailable")
+    )
+
+    def capture(actual, *, rigid_uids):
+        assert actual is simulation
+        calls.append(dict(rigid_uids))
+        return captured
+
+    monkeypatch.setattr(mesh_snapshot, "capture_scene_meshes", capture)
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            "scene",
+            rigid_objects=(
+                SimulationRigidObjectBinding("carrier", "native_carrier"),
+                SimulationRigidObjectBinding("content", "native_content"),
+            ),
+        ),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            capture_coordinated_cargo=mode != "disabled"
+        ),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    assert calls == []
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    actual = engine.planning_services.coordinated_cargo_geometry
+    if mode == "disabled":
+        assert actual is None and calls == []
+    else:
+        assert calls == [{"carrier": "native_carrier", "content": "native_content"}]
+        assert actual is not captured
+        if mode == "available":
+            captured["carrier"].fill_(7)
+            assert torch.equal(actual["carrier"], vertices)
+        else:
+            assert actual.unavailable == "source unavailable" and not actual
+
+
+def test_standard_factory_installs_shared_held_planning_ports_without_native_reads(
+    monkeypatch,
+):
+    import sys
+    from embodichain.lab.task_program.integrations.simulation.held_planning import (
+        HeldStagingInvocationBinding,
+        SimulationHeldPlanningProvider,
+    )
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        InvocationPolicyBinding,
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    simulation = _Simulation(robot, {"native_payload": _RigidObject()})
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            "scene",
+            rigid_objects=(SimulationRigidObjectBinding("payload", "native_payload"),),
+        ),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            capture_root_pose=True,
+            capture_native_revision=True,
+            held_staging_bindings=(
+                HeldStagingInvocationBinding("p/stage:0", "payload"),
+            ),
+        ),
+        invocation_policy_bindings=(
+            InvocationPolicyBinding("a" * 64, "p/stage:0", "safe"),
+        ),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    provider = engine.planning_services.held_staging_provider
+    assert type(provider) is SimulationHeldPlanningProvider
+    assert engine.planning_services.retained_command_provider is provider
+    assert provider.robot is robot
+    request = SimpleNamespace(invocation_id="p/stage:0", skill_id="move_held_object")
+    assert provider.binding(request).rigid_entity_id == "payload"
+    assert provider.authority(request) is None
+
+
+def test_standard_factory_installs_native_pick_provider_without_query_capture(
+    monkeypatch,
+):
+    import sys
+    from embodichain.lab.task_program.integrations.simulation.pick_closing import (
+        PickClosingBinding,
+        SimulationPickClosingProvider,
+    )
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        InvocationPolicyBinding,
+    )
+    from embodichain.lab.task_program.integrations.simulation import pick_closing
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    simulation = _Simulation(robot, {"native_payload": _RigidObject()})
+    simulation.physics_backend = "default"
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            "scene",
+            rigid_objects=(SimulationRigidObjectBinding("payload", "native_payload"),),
+        ),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            capture_root_pose=True,
+            capture_native_revision=True,
+            pick_closing_bindings=(PickClosingBinding("p/acquire:0", "payload"),),
+        ),
+        invocation_policy_bindings=(
+            InvocationPolicyBinding("a" * 64, "p/acquire:0", "safe"),
+        ),
+    )
+
+    def no_capture(*a, **kw):
+        raise AssertionError("Factory assembly must not create native queries.")
+
+    monkeypatch.setattr(pick_closing, "build_native_closing_query", no_capture)
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    assert (
+        type(engine.planning_services.pick_closing_query_provider)
+        is SimulationPickClosingProvider
+    )
+    assert engine.planning_services.pick_closing_query_provider.robot is robot
+
+
+def test_standard_factory_installs_source_preshape_provider_in_profile_hand_order(
+    monkeypatch,
+):
+    import sys
+    from embodichain.lab.sim.evidence import PhysicalObservationStamp
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+    from embodichain.lab.task_program.integrations.simulation import slide_preshape
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+    from embodichain.lab.task_program.integrations import InvocationPolicyBinding
+    from embodichain.toolkits.graspkit.pg_grasp.preshape import PreshapeHandClearance
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _DualRobot()
+    table = SimpleNamespace(
+        get_local_pose=lambda **kw: torch.eye(4)[None],
+        get_vertices=lambda **kw: torch.tensor([[[-1.0, -1.0, -0.1], [1.0, 1.0, 0.0]]]),
+    )
+    simulation = _Simulation(robot, {"native_table": table})
+    simulation.physics_backend = "default"
+    profile = _handover_profile_binding()
+    binding = slide_preshape.SlidePreshapeBinding(
+        "p/slide:0", "right_hand", "native_table"
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            "scene",
+            rigid_objects=(SimulationRigidObjectBinding("table", "native_table"),),
+        ),
+        profile,
+        planning_services=SimulationPlanningServicesCfg(
+            capture_native_revision=True, slide_preshape_bindings=(binding,)
+        ),
+        invocation_policy_bindings=(
+            InvocationPolicyBinding("a" * 64, "p/slide:0", "safe"),
+        ),
+        handover_pose_providers=(_ForwardedHandOverPoseProvider(),),
+    )
+    cfgs = {
+        f"{side}_hand": RobotHandGeometryCfg(
+            motion_part=f"{side}_arm",
+            hand_part=f"{side}_hand",
+            hand_root_link=f"{side}_root",
+            pad_link_names=(f"{side}_pad_a", f"{side}_pad_b"),
+            open_qpos=(0.0,),
+            closed_qpos=(0.8,),
+            sample_count=65,
+            body_max_edge=0.01,
+            pad_max_edge=0.004,
+            max_subdivisions=10,
+        )
+        for side in ("right", "left")
+    }
+    captures = []
+
+    def capture(actual, *, cfg, expected_qpos, table_z, preshape_fraction):
+        assert actual is robot and torch.equal(expected_qpos, robot.qpos)
+        captures.append((cfg.hand_part, preshape_fraction, table_z))
+        return PreshapeHandClearance(torch.zeros(3, 3), 0.04, 0.03, table_z)
+
+    monkeypatch.setattr(slide_preshape, "capture_preshape_hand_clearance", capture)
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+        hand_geometry_cfgs=cfgs,
+    )
+    factory.world_source_stamp = lambda: PhysicalObservationStamp(
+        "factory", "default.contacts", 0, 0.0
+    )
+    assert captures == []
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    assert (
+        type(engine.planning_services.slide_hand_clearance_provider)
+        is slide_preshape.SimulationSlideHandClearanceProvider
+    )
+    assert captures == [("left_hand", 0.85, 0.0), ("right_hand", 0.85, 0.0)]
+
+
+@pytest.mark.parametrize("region", [False, True])
+def test_standard_factory_shares_pour_geometry_and_requires_compiled_roles(
+    monkeypatch, region
+):
+    import sys
+    from embodichain.lab.task_program.integrations import InvocationPolicyBinding
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+    from embodichain.lab.task_program.integrations.simulation.pour_binding import (
+        PourProjectionBinding,
+    )
+    from embodichain.lab.task_program.integrations.simulation.pour_projection import (
+        ResolvedPourProjectionRoute,
+        SimulationPourProjectionProvider,
+    )
+    from embodichain.lab.sim.scene.pour_region import PourGeometryProvider
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    reads = []
+    vertices = torch.tensor(
+        [[-0.1, -0.1, 0.0], [0.1, -0.1, 0.0], [0.1, 0.1, 0.0], [-0.1, 0.1, 0.0]]
+    )[None]
+    faces = torch.tensor([[0, 1, 2], [0, 2, 3]])[None]
+
+    def entity(name):
+        def get_vertices(*, env_ids, scale):
+            assert env_ids == [0] and scale is True
+            reads.append((name, "vertices"))
+            return vertices.clone()
+
+        def get_triangles(*, env_ids):
+            assert env_ids == [0]
+            reads.append((name, "faces"))
+            return faces.clone()
+
+        return SimpleNamespace(
+            num_instances=1, get_vertices=get_vertices, get_triangles=get_triangles
+        )
+
+    simulation = _Simulation(
+        robot,
+        {"native_source": entity("source"), "native_receiver": entity("receiver")},
+    )
+    simulation.physics_backend = "default"
+    simulation.sim_config = SimpleNamespace(
+        physics_cfg=SimpleNamespace(gravity=(0.0, 0.0, -9.81))
+    )
+    binding = PourProjectionBinding(
+        "p/pick:0", "p/stage:0", "p/pour:0", "p/return:0", "p/place:0"
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            "scene",
+            rigid_objects=(
+                SimulationRigidObjectBinding("source", "native_source"),
+                SimulationRigidObjectBinding("receiver", "native_receiver"),
+            ),
+        ),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            capture_root_pose=True,
+            capture_native_revision=True,
+            pour_projection_bindings=(binding,),
+        ),
+        invocation_policy_bindings=tuple(
+            InvocationPolicyBinding("a" * 64, identity, "safe")
+            for identity in binding.invocation_ids
+        ),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    profile = factory.create_robot_skill_profile()
+    with pytest.raises(ValueError, match="compiled role bindings"):
+        factory.create_atomic_action_engine(profile)
+    assert reads == []
+    route = ResolvedPourProjectionRoute(
+        binding.pick_invocation_id,
+        binding.stage_invocation_id,
+        binding.pour_invocation_id,
+        "source",
+        "receiver",
+        "manipulator",
+        torch.eye(4),
+        0.05,
+        1.2,
+        101,
+        0.03 if region else None,
+    )
+    engine = factory.create_atomic_action_engine(
+        profile, pour_projection_routes=(route,)
+    )
+    provider = engine.planning_services.pour_grasp_projection_provider
+    assert type(provider) is SimulationPourProjectionProvider
+    assert isinstance(provider, PourGeometryProvider)
+    assert reads == [("source", "vertices"), ("receiver", "vertices")] + (
+        [("receiver", "faces")] if region else []
+    )
+    assert provider.scene_vertices["source"].dtype.name == "float32"
+    if region:
+        assert (
+            provider.region_geometry("source", "receiver", 0.03)
+            is provider.region_geometries["p/pick:0"]
+        )
+
+
+def test_standard_factory_owns_lazy_paired_grasp_services_across_engines(monkeypatch):
+    import sys
+    from embodichain.lab.task_program.integrations.simulation import (
+        coordinated_grasp as owner,
+    )
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+    from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGenerator,
+        ParallelJawGraspCollisionCfg,
+    )
+    from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
+        FixedGripperCollisionGeometry,
+    )
+    from embodichain.toolkits.graspkit.pg_grasp.coordinated import CoordinatedGraspCfg
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    made, queries = [], []
+
+    class Paired:
+        def __init__(self, left, right, left_geometry, right_geometry, *, cfg):
+            assert left_geometry.runtime_owner is right_geometry.runtime_owner is robot
+            made.append(self)
+
+        def get_dual_arm_valid_grasp_poses(self, **kwargs):
+            queries.append(kwargs)
+            return [None]
+
+    monkeypatch.setattr(owner, "RobotCoordinatedGraspProvider", Paired)
+    robot = _DualRobot()
+    simulation = _Simulation(robot)
+    profile = _handover_profile_binding()
+    profile = SimulationRobotSkillProfileBinding(
+        profile_id="paired",
+        resources=profile.resources,
+        command_presets=profile.command_presets,
+        presets=_profile_binding().presets,
+        default_preset="safe",
+    )
+    cfg = CoordinatedGraspCfg(
+        contact_tolerance=0.0005,
+        minimum_normal_cosine=0.5,
+        normal_probe_distance=0.00001,
+        max_candidates=32,
+        candidate_chunk_size=32,
+        cargo_clearance_reserve=0.008,
+    )
+    declaration = owner.CoordinatedGraspServiceCfg(
+        left_grasp_target_id="left_hand",
+        right_grasp_target_id="right_hand",
+        contact=cfg,
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding("scene"),
+        profile,
+        planning_services=SimulationPlanningServicesCfg(
+            coordinated_grasps=(declaration,)
+        ),
+    )
+    delegates = {
+        side
+        + "_hand": AntipodalGraspPoseGenerator(
+            ParallelJawGripperModelCfg(),
+            collision_geometry=FixedGripperCollisionGeometry(
+                torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
+            ),
+            collision_cfg=ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+        )
+        for side in ("left", "right")
+    }
+    geometry = {
+        side
+        + "_hand": RobotHandGeometryCfg(
+            motion_part=side + "_arm",
+            hand_part=side + "_hand",
+            hand_root_link=side + "_root",
+            pad_link_names=(side + "_pad_a", side + "_pad_b"),
+            open_qpos=(0.04,),
+            closed_qpos=(0.0,),
+            sample_count=65,
+            body_max_edge=0.01,
+            pad_max_edge=0.004,
+            max_subdivisions=10,
+        )
+        for side in ("left", "right")
+    }
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+        grasp_pose_generators=delegates,
+        hand_geometry_cfgs=geometry,
+    )
+    assert len(made) == 1 and queries == []
+    first = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    second = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    grasp = first.planning_services.grasp_pose_generator("left_hand")
+    assert grasp is second.planning_services.grasp_pose_generator("left_hand")
+    standalone = []
+    monkeypatch.setattr(
+        delegates["left_hand"],
+        "get_valid_grasp_poses",
+        lambda **kwargs: standalone.append(kwargs) or [],
+    )
+    assert grasp.get_valid_grasp_poses(marker="single") == [] and queries == []
+    assert standalone == [{"marker": "single"}]
+    query = dict(
+        mesh_vertices=torch.zeros(1, 3, 3),
+        mesh_triangles=torch.tensor([[[0, 1, 2]]]),
+        obj_poses=torch.eye(4)[None],
+        left_to_right_arm_direction=torch.tensor([0.0, 1.0, 0.0]),
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+    assert grasp.get_dual_arm_valid_grasp_poses(**query) == [None]
+    assert len(queries) == 1 and len(made) == 1
+    factory.close_runtime_resources()
+    with pytest.raises(RuntimeError):
+        grasp.get_dual_arm_valid_grasp_poses(**query)
+    assert len(queries) == 1
+
+
+def test_standard_factory_installs_live_drawer_provider_without_planning(monkeypatch):
+    import sys
+    from embodichain.lab.sim.evidence import PhysicalObservationStamp
+    from embodichain.lab.sim.scene.articulation_inputs import PrismaticBinding
+    from embodichain.lab.task_program.integrations.simulation.drawer_planning import (
+        DrawerInvocationBinding,
+        SimulationDrawerPlanningProvider,
+    )
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        SimulationArticulationBinding,
+        SimulationArticulationLinkBinding,
+    )
+    from embodichain.lab.task_program.integrations import InvocationPolicyBinding
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    vertices = torch.tensor([[[-0.01, -0.01, -0.01], [0.01, 0.01, 0.01]]])
+    payload = SimpleNamespace(
+        get_vertices=lambda **kw: vertices,
+        get_local_pose=lambda **kw: torch.eye(4)[None],
+    )
+    articulation = SimpleNamespace(
+        joint_names=["rail"],
+        get_qpos=lambda: torch.zeros(1, 1),
+        get_link_pose=lambda *a, **kw: torch.eye(4)[None],
+    )
+    simulation = _Simulation(robot, {"payload": payload})
+    simulation.physics_backend = "default"
+    simulation.get_articulation = lambda uid: articulation if uid == "cabinet" else None
+    source = PrismaticBinding(
+        "cabinet",
+        "rail",
+        "drawer",
+        "base",
+        "/drawer/grip",
+        "0" * 64,
+        1.0,
+        (1.0, 0.0, 0.0),
+        (0.0, 0.4),
+    )
+    declaration = DrawerInvocationBinding(
+        invocation_id="p/close:0",
+        operation="close",
+        target_id="drawer_frame",
+        link_entity_id="drawer_frame",
+        object_id="payload",
+        source=source,
+        lower=(-0.2, -0.2, 0.0),
+        upper=(0.2, 0.2, 0.2),
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            "scene",
+            rigid_objects=(SimulationRigidObjectBinding("payload", "payload"),),
+            articulations=(SimulationArticulationBinding("cabinet", "cabinet"),),
+            links=(
+                SimulationArticulationLinkBinding("drawer_frame", "cabinet", "drawer"),
+            ),
+        ),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            capture_root_pose=True,
+            capture_native_revision=True,
+            drawer_bindings=(declaration,),
+        ),
+        invocation_policy_bindings=(
+            InvocationPolicyBinding("a" * 64, "p/close:0", "safe"),
+        ),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    revision = [0]
+    factory.world_source_stamp = lambda: PhysicalObservationStamp(
+        "factory", "default.contacts", revision[0], 0.0
+    )
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    provider = engine.planning_services.drawer_planning_provider
+    assert type(provider) is SimulationDrawerPlanningProvider
+    assert provider.robot is robot
+    assert torch.equal(
+        vertices, torch.tensor([[[-0.01, -0.01, -0.01], [0.01, 0.01, 0.01]]])
+    )
+
+    from embodichain.lab.sim.atomic_actions import (
+        PlanningContext,
+        RobotObservation,
+        TaskState,
+        SceneSnapshot,
+    )
+
+    root_pose = torch.eye(4)[None]
+    robot.get_local_pose = lambda **kw: root_pose
+    context = PlanningContext(
+        RobotObservation(
+            0.0,
+            robot.get_qpos(),
+            torch.zeros_like(robot.get_qpos()),
+            root_pose=root_pose,
+        ),
+        TaskState.empty(1, "cpu"),
+        SceneSnapshot.empty(),
+        torch.tensor([0]),
+        control_dt=_STEP_DT,
+        world_source_stamp=factory.world_source_stamp(),
+    )
+    request = SimpleNamespace(invocation_id="p/close:0", skill_id="slide")
+    view = provider.inputs(request, context)[0].observation
+    assert not view.containment_report(lateral_margin=0.0)["accepted"]
+    revision[0] = 1
+    with pytest.raises(ValueError, match="original complete native observation"):
+        view.containment_report(lateral_margin=0.0)
+
+
+def test_standard_factory_scopes_released_provider_to_program_episode_and_cleanup(
+    monkeypatch,
+):
+    import sys
+    from embodichain.lab.task_program.integrations import InvocationPolicyBinding
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+    from embodichain.lab.task_program.integrations.simulation import (
+        released_continuation,
+    )
+    from embodichain.lab.task_program.integrations.simulation.released_continuation import (
+        ReleasedHandContinuationBinding,
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    simulation.physics_backend = "default"
+    declaration = ReleasedHandContinuationBinding(
+        "a" * 64, "p/release:0", "p/clearance:0", ("p/park:0",)
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding("scene"),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            free_motion_query="discrete_mesh",
+            capture_root_pose=True,
+            capture_native_revision=True,
+            released_hand_continuations=(declaration,),
+        ),
+        invocation_policy_bindings=tuple(
+            InvocationPolicyBinding("a" * 64, identity, "safe")
+            for identity in ("p/release:0", "p/clearance:0", "p/park:0")
+        ),
+    )
+    made = []
+
+    class Provider:
+        def __init__(self, selected, program, registered, **kwargs):
+            assert selected is robot and registered is registration
+            self.robot = selected
+            self.program = program
+            self.kwargs = kwargs
+            self.closed = False
+            self.bound = []
+            made.append(self)
+
+        def prepare(self, *args):
+            return None
+
+        def require_park(self, *args):
+            pass
+
+        def bind_compiler(self, engine, compiler):
+            self.bound.append((engine, compiler))
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        released_continuation, "SimulationReleasedHandContinuationProvider", Provider
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+        episode_identity=lambda: "7",
+    )
+    profile = factory.create_robot_skill_profile()
+    with pytest.raises(ValueError, match="compiled program"):
+        factory.create_atomic_action_engine(profile)
+    assert made == []
+    program = object()
+    engine = factory.create_atomic_action_engine(profile, planning_program=program)
+    provider = engine.planning_services.released_hand_provider
+    assert provider is made[0] and provider.program is program
+    assert provider.kwargs["read_episode"]() == "7"
+    compiler = object()
+    factory.bind_compiler_planning_services(engine, compiler)
+    assert provider.bound == [(engine, compiler)]
+    factory.close_compiler_planning_services(engine)
+    assert provider.closed
+
+
+def test_standard_factory_installs_measured_provider_without_native_capture(
+    monkeypatch,
+):
+    import sys
+    from embodichain.lab.sim.evidence import PhysicalObservationStamp
+    from embodichain.lab.task_program.integrations import InvocationPolicyBinding
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+    from embodichain.lab.task_program.integrations.simulation.measured_rigid import (
+        MeasuredRigidInvocationBinding,
+        SimulationMeasuredRigidProvider,
+    )
+    from embodichain.lab.task_program.integrations.simulation import measured_rigid
+    from embodichain.lab.sim.atomic_actions import (
+        PlanningContext,
+        RobotObservation,
+        TaskState,
+        SceneSnapshot,
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    simulation = _Simulation(robot, {"native_payload": _RigidObject()})
+    simulation.physics_backend = "default"
+    simulation.is_default_backend = True
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            "scene",
+            rigid_objects=(SimulationRigidObjectBinding("payload", "native_payload"),),
+        ),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            capture_root_pose=True,
+            capture_native_revision=True,
+            measured_rigid_bindings=(
+                MeasuredRigidInvocationBinding("p/acquire:0", "payload"),
+            ),
+        ),
+        invocation_policy_bindings=(
+            InvocationPolicyBinding("a" * 64, "p/acquire:0", "safe"),
+        ),
+    )
+
+    def no_capture(*args, **kwargs):
+        raise AssertionError("Factory must not capture native geometry.")
+
+    monkeypatch.setattr(measured_rigid, "build_native_closing_query", no_capture)
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    stamp = [PhysicalObservationStamp("factory", "default.contacts", 0, 0.0)]
+    factory.world_source_stamp = lambda: stamp[0]
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    provider = engine.planning_services.measured_rigid_provider
+    assert type(provider) is SimulationMeasuredRigidProvider and provider.robot is robot
+    root = torch.eye(4)[None]
+    robot.get_local_pose = lambda **kw: root
+    context = PlanningContext(
+        RobotObservation(
+            0.0, robot.get_qpos(), torch.zeros_like(robot.get_qpos()), root_pose=root
+        ),
+        TaskState.empty(1, "cpu"),
+        SceneSnapshot(0.0, 0, {}),
+        torch.tensor([0]),
+        world_source_stamp=stamp[0],
+    )
+    session = provider.prepare(SimpleNamespace(invocation_id="p/acquire:0"), context)
+    session.validate_observation()
+    stamp[0] = PhysicalObservationStamp("factory", "default.contacts", 1, 0.0)
+    with pytest.raises(ValueError, match="original native observation"):
+        session.validate_observation()
+    session.close()

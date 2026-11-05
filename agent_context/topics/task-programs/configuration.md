@@ -120,7 +120,8 @@ and the deployment's Task Program selectors, returning a fresh
 lazy `TaskProgramAdapterFactory`. It does not register a Gym ID or create a live
 simulator or adapter. Physical component checks and ordinary program loading
 remain host responsibilities; configured nominal sources retain their static
-program preflight. Private loader aliases remain available for existing internal
+program preflight. Configured occurrence bindings likewise preflight the exact
+program before composition returns. Private loader aliases remain available for existing internal
 callers, with the same result types and composition rules.
 
 Ownership is explicit rather than a generic deep merge:
@@ -149,6 +150,50 @@ assurance remain component-owned. Paths in either form resolve from the runnable
 deployment. Reuse the base policy and declare tuning in the selector instead of
 copying a policy for each robot or sampling rate; the supported fields and
 example are in the [task package usage](../../../extensions/embodichain_tasks/README.md).
+
+Named execution-policy `presets` patch policy groups over the unchanged base
+preset. Task `profile.preset_options` owns action options and effect monitors for
+those names. `runtime_services.invocation_policy_bindings` binds the complete
+compiled-program fingerprint, a sequential execution occurrence, and one declared
+preset. Repeated calls retain separate occurrence IDs. The catalog validates the
+selected preset during linking, and the bridge consumes the same immutable
+bindings; configured and explicit binding tuples cannot be combined.
+Registered lowerers receive that same invocation identity and grounding revision
+through `RegisteredSemanticLowerer.lower_occurrence()`; its default delegates to
+the existing `lower()` contract once. Geometry routes use this identity rather
+than an analysis-cache index.
+
+`simulation/planning_services.py` owns the closed geometry-service declaration.
+Exactly one component owns it; composition snapshots it and stores it in the
+integration fingerprint without native work. The standard simulation factory
+creates the explicitly selected shared Motion collision and Scene receiver
+providers only after the host exists. Configured native receiver geometry needs
+a complete ordered collision roster, observed root and actual native revision;
+it retains Default/B=1 qualification. Gym checks declared backend/batch eligibility
+before creating Sim. Planning observations compare the full native source stamp
+before and after capture, and closed factories cannot authorize new captures.
+The closed decoder covers native Pick closing, measured Pick/inside Place,
+Place scene roles, held staging and command authority, Pour recipes and observed
+cuRobo inputs. Exact program/preset/resource declarations qualify these services;
+missing bindings never select a generic fallback. File and inline deployments use
+the same public loader. Provider-free compilation may establish occurrence
+fingerprints before service binding; final deployment loading still performs the
+complete catalog preflight.
+
+Read-only `native_grip` evidence declarations do not add grasp execution
+capabilities or select a planning backend. Their physical hand bindings may be
+observed independently of the semantic profile. Actual manipulation calls still
+link their required grasp endpoints, and native planning/recorded-source services
+retain their explicit backend and batch restrictions.
+Evidence object aliases resolve through the same provider-free scene manifest as
+live registration; each canonical object must retain its exact native UID and
+appear only once.
+
+Continuation providers bind to the one assembled compiler/engine. Released
+cleanup/Park authority additionally binds to the actual EpisodeContext identity
+and closes through the existing bridge cleanup callback; previews cannot mutate
+execution effects or silently acquire another compiler. Fixed source algorithms,
+budgets and physical acceptance remain in their existing owners.
 
 Configured `motion` policies accept optional finite, strictly positive
 `velocity_limit` and `acceleration_limit` values. Configured Pour action options
@@ -195,6 +240,13 @@ then guards `transport` and requests terminal attachment verification. Projected
 presets reject this contract before motion planning or dispatch. The legacy
 single-target factory keeps its existing effectless behavior and identity.
 
+The same closed route also exposes retained alignment,
+released clearance and paired idle clear/restore declarations. Their factories
+bind explicit operands into the ordinary shared Atomic skills, with target math
+in Compute. The catalog checks idle pairing, required discrete queries, exact
+Cartesian policy modes and B=1 eligibility before simulation. Planning and
+physical effect verification remain separate; bounded staging/released-session
+policies reject until their owning providers are available.
 
 Container affordances may declare a local-z release clearance while retaining
 their original semantic target for final acceptance.

@@ -46,6 +46,14 @@ from ._configured_hand_geometry import (
     _RobotHandGeometryCfgFactory,
     _decode_hand_geometry,
 )
+from ._configured_controls import _decode_control_operation, _decode_control_lowerer
+from .simulation.control_assembly import ControlOperationDeclaration
+from .simulation.recorded_contacts import SimulationRecordedContactCfg
+from embodichain.lab.sim.atomic_actions.grip_evidence import DriverOpeningBinding
+from .simulation.cargo_observation import SimulationCargoEnvelopeCfg
+from embodichain.lab.sim.sensors.contact.timeline import ContactTimelineCfg
+from .simulation.control_policy import SimulationControlConditionCfg
+from .simulation.control_lowering import PressPrepareFactory, TwistPrepareFactory
 from .catalog import (
     SimulationTaskProgramRegistration,
 )
@@ -93,6 +101,7 @@ from embodichain.lab.sim.atomic_actions import (
     DynamicCollisionMode,
     ExecutionRunnerCfg,
     HandOverOptions,
+    HandOverPlanningRecovery,
     MotionPolicy,
     MoveEndEffectorOptions,
     MoveHeldObjectOptions,
@@ -100,11 +109,18 @@ from embodichain.lab.sim.atomic_actions import (
     PickUpOptions,
     PlaceOptions,
     PourOptions,
+    PressOptions,
+    PressPlanningRecovery,
     PushObjectOptions,
     PushObjectToolCalibration,
     RecoveryPolicy,
     SlideOptions,
+    SlidePlanningRecovery,
+    ArticulationWithdrawalPlanningRecovery,
+    ArticulationParkPlanningRecovery,
     TrackingPolicy,
+    TwistOptions,
+    TwistPlanningRecovery,
 )
 from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanOptions,
@@ -128,6 +144,93 @@ from embodichain.toolkits.graspkit import (
 
 if TYPE_CHECKING:
     from .environment import TaskProgramEnvironmentAdapter
+
+from .simulation.planning_services import (
+    CollisionSceneRosterCfg,
+    SimulationPlanningServicesCfg,
+)
+from .invocation_policy import InvocationPolicyBinding
+from .simulation.held_alignment import HeldAlignmentRoute, HeldAlignmentLowererFactory
+from .simulation.release_clearance import (
+    ReleasedHandRoute,
+    NominalHandBinding,
+    ClearReleasedLowererFactory,
+)
+from .simulation.idle_clearance import IdleClearanceRoute, IdleClearanceFactory
+from embodichain.toolkits.graspkit.hand_envelope import NominalHandEnvelope
+
+from ._configured_prismatic import _decode_prismatic_lowerer
+from .simulation.prismatic_lowering import (
+    ArticulationSlideFactory,
+    ArticulationParkFactory,
+)
+from embodichain.lab.sim.atomic_actions.articulation_continuation import (
+    SlidePlanningRecovery,
+    ArticulationWithdrawalPlanningRecovery,
+    ArticulationParkPlanningRecovery,
+)
+from .simulation.effect_contracts import (
+    PlacementEffectContract,
+    TransportEffectContract,
+)
+from .simulation.planning_services import ObservedCuroboServicesCfg
+from .simulation.place_scene import PlaceSceneBinding
+from .simulation.grip_evidence import NativeGripEvidenceCfg, NativeGripEvidenceFactory
+from .simulation.coordinated_grasp import CoordinatedGraspServiceCfg
+from embodichain.toolkits.graspkit.pg_grasp.coordinated import CoordinatedGraspCfg
+from .simulation.held_planning import HeldStagingInvocationBinding
+from .simulation.released_continuation import ReleasedHandContinuationBinding
+from embodichain.lab.sim.atomic_actions.released_continuation import (
+    ReleasedHandClearanceRecovery,
+    ReleasedHandParkRecovery,
+)
+from .simulation.pick_closing import PickClosingBinding
+from .simulation.pour_binding import PourProjectionBinding
+from .simulation.slide_preshape import SlidePreshapeBinding
+from .simulation.place_continuation import (
+    PlaceContinuationBinding,
+    HeldAlignmentContinuationBinding,
+)
+from .simulation.drawer_planning import DrawerInvocationBinding
+from .simulation.measured_rigid import MeasuredRigidInvocationBinding
+from .simulation.placement import (
+    ObservedRelativePlaceBinding,
+    ObservedRelativePlaceLowererFactory,
+    UprightPlaceLowererFactory,
+)
+from .simulation.retained_pour import RetainedPourFactory
+from .simulation.jaw_pour import JawPourFactory
+from .simulation.pour_transport import (
+    PourStageRoute,
+    PourTransportFactory,
+    PourRegionTransportFactory,
+)
+from .simulation.stack_placement import StackPlaceLowererFactory
+from .simulation.pick_targets import (
+    PickTargetRoute,
+    ConfiguredPickLowererFactory,
+    make_pick_alias_factory,
+)
+from .simulation.coordinated import (
+    CoordinatedHoldLowererFactory,
+    CoordinatedTargetRoute,
+    CoordinatedPlacementLowererFactory,
+    _CoordinatedRetainedTargetFactory,
+)
+from .simulation.transport import (
+    TerminalAttachmentTransportLowererFactory,
+    DrawerTransportLowererFactory,
+)
+from embodichain.lab.sim.atomic_actions.primitives.twist_recovery import (
+    TwistPlanningRecovery,
+)
+from embodichain.lab.sim.atomic_actions import (
+    PickPlanningRecovery,
+    PlacePlanningRecovery,
+    MoveHeldObjectPlanningRecovery,
+)
+
+from embodichain.lab.sim.atomic_actions.grip_evidence import DriverOpeningBinding
 
 __all__: list[str] = []
 
@@ -961,6 +1064,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         required=frozenset({"kind"}),
         optional=frozenset(
             {
+                "require_free_motion",
                 "hand_interp_steps",
                 "hold_steps",
                 "release",
@@ -970,10 +1074,26 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "retreat_distance",
                 "retreat_steps",
                 "receive_pick_object_part",
+                "adaptive_receive",
+                "require_receiver_scene",
+                "receive_region",
+                "existing_hold_hand_source",
+                "source_retreat_mode",
                 "object_motion_keyframes",
+                "continue_verified_holds",
+                "prefer_cargo_clearance",
                 "grasp_settle_steps",
                 "release_settle_steps",
                 "pick_object_part",
+                "adaptive_grasp",
+                "full_opening_clearance",
+                "native_closing_revision",
+                "require_qualified_approach",
+                "constrained_grasp",
+                "qualify_fixed_grasp",
+                "measured_preshape",
+                "qualify_downstream_targets",
+                "native_scene_trial",
                 "lift_height",
                 "pre_grasp_distance",
                 "grasp_commit_fraction",
@@ -987,12 +1107,34 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "grasp_frame_to_eef",
                 "fixed_object_to_eef",
                 "max_approach_retract_z",
+                "linear_segments",
+                "lift_clearance",
+                "hand_hold",
+                "report_retained_attachment",
+                "qualify_required_waypoints",
+                "monitor_scene_until_approach",
+                "drawer_placement",
+                "measured_inside",
+                "drawer_transport",
+                "drawer_containment",
+                "preserve_vertical",
                 "cartesian_waypoint_count",
                 "preserve_current_object_orientation",
                 "direction",
                 "approach_distance",
                 "translation_distance",
+                "press_distance",
+                "press_position",
+                "contact_roll_alternatives",
+                "contact_bite_depth",
+                "contact_roll",
+                "contact_settle_steps",
+                "rotation_enabled",
+                "twist_angle",
+                "max_twist_angle",
+                "twist_waypoint_count",
                 "preshape_fraction",
+                "qualify_hand_clearance",
                 "approach_along_grasp_axis",
                 "release_retreat_distance",
                 "rotate_angle",
@@ -1034,6 +1176,22 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "rotate_upright",
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
+                    *(
+                        (
+                            "adaptive_grasp",
+                            "full_opening_clearance",
+                            "native_closing_revision",
+                            "require_qualified_approach",
+                            "constrained_grasp",
+                            "qualify_fixed_grasp",
+                            "measured_preshape",
+                            "qualify_downstream_targets",
+                            "native_scene_trial",
+                            "linear_segments",
+                        )
+                        if kind == "pick_up"
+                        else ()
+                    ),
                     *(("target_axis",) if kind == "axis_align" else ()),
                 }
             ),
@@ -1139,6 +1297,28 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     dtype=torch.float32,
                 )
             return AxisAlignOptions(**kwargs)
+        if "adaptive_grasp" in config:
+            kwargs["adaptive_grasp"] = _identifier(
+                config["adaptive_grasp"], path=f"{path}.adaptive_grasp"
+            )
+        for name in (
+            "full_opening_clearance",
+            "require_qualified_approach",
+            "constrained_grasp",
+            "qualify_fixed_grasp",
+            "measured_preshape",
+            "qualify_downstream_targets",
+            "native_scene_trial",
+            "linear_segments",
+        ):
+            if name in config:
+                kwargs[name] = _boolean(config[name], path=f"{path}.{name}")
+        if "native_closing_revision" in config:
+            kwargs["native_closing_revision"] = _integer(
+                config["native_closing_revision"],
+                path=f"{path}.native_closing_revision",
+                minimum=1,
+            )
         return PickUpOptions(**kwargs)
     if kind == "place":
         config = _mapping(
@@ -1147,16 +1327,30 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             required=frozenset({"kind"}),
             optional=frozenset(
                 {
+                    "drawer_placement",
+                    "measured_inside",
+                    "preserve_vertical",
                     "hand_interp_steps",
                     "release_settle_steps",
                     "lift_height",
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
                     "preserve_current_object_orientation",
+                    "linear_segments",
+                    "qualify_required_waypoints",
+                    "monitor_scene_until_approach",
                 }
             ),
         )
         kwargs = {}
+        for name in (
+            "drawer_placement",
+            "measured_inside",
+            "preserve_vertical",
+        ):
+            if name in config:
+                kwargs[name] = _boolean(config[name], path=f"{path}.{name}")
+
         if "hand_interp_steps" in config:
             kwargs["hand_interp_steps"] = _integer(
                 config["hand_interp_steps"],
@@ -1191,20 +1385,76 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 config["preserve_current_object_orientation"],
                 path=f"{path}.preserve_current_object_orientation",
             )
+        for name in (
+            "linear_segments",
+            "qualify_required_waypoints",
+            "monitor_scene_until_approach",
+        ):
+            if name in config:
+                kwargs[name] = _boolean(config[name], path=f"{path}.{name}")
         return PlaceOptions(**kwargs)
     if kind == "move_held_object":
-        _mapping(value, path=path, required=frozenset({"kind"}))
-        return MoveHeldObjectOptions()
-    if kind == "move_joints":
-        _mapping(
+        config = _mapping(
             value,
             path=path,
             required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "drawer_transport",
+                    "preserve_vertical",
+                    "linear_segments",
+                    "lift_clearance",
+                    "hand_hold",
+                    "report_retained_attachment",
+                }
+            ),
         )
-        return MoveJointsOptions()
+        kwargs = {}
+        for name in (
+            "drawer_transport",
+            "preserve_vertical",
+        ):
+            if name in config:
+                kwargs[name] = _boolean(config[name], path=f"{path}.{name}")
+
+        for name in ("linear_segments", "report_retained_attachment"):
+            if name in config:
+                kwargs[name] = _boolean(config[name], path=f"{path}.{name}")
+        if "lift_clearance" in config:
+            kwargs["lift_clearance"] = (
+                None
+                if config["lift_clearance"] is None
+                else _real(
+                    config["lift_clearance"], path=f"{path}.lift_clearance", minimum=0.0
+                )
+            )
+        if "hand_hold" in config:
+            kwargs["hand_hold"] = _identifier(
+                config["hand_hold"], path=f"{path}.hand_hold"
+            )
+        return MoveHeldObjectOptions(**kwargs)
+    if kind == "move_joints":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset({"require_free_motion"}),
+        )
+        return MoveJointsOptions(
+            require_free_motion=config.get("require_free_motion", False)
+        )
     if kind == "move_end_effector":
-        _mapping(value, path=path, required=frozenset({"kind"}))
-        return MoveEndEffectorOptions()
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset({"linear_segments"}),
+        )
+        return MoveEndEffectorOptions(
+            linear_segments=_boolean(
+                config.get("linear_segments", False), path=f"{path}.linear_segments"
+            )
+        )
     if kind == "coordinated_pickment":
         config = _mapping(
             value,
@@ -1213,6 +1463,8 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             optional=frozenset(
                 {
                     "object_motion_keyframes",
+                    "continue_verified_holds",
+                    "prefer_cargo_clearance",
                     "pre_grasp_distance",
                     "lift_height",
                     "hand_interp_steps",
@@ -1256,6 +1508,15 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     minimum=0.0,
                     maximum=(1.0 if field_name == "middle_empty_ratio" else math.inf),
                 )
+        if "prefer_cargo_clearance" in config:
+            kwargs["prefer_cargo_clearance"] = _boolean(
+                config["prefer_cargo_clearance"], path=f"{path}.prefer_cargo_clearance"
+            )
+        if "continue_verified_holds" in config:
+            kwargs["continue_verified_holds"] = _boolean(
+                config["continue_verified_holds"],
+                path=f"{path}.continue_verified_holds",
+            )
         if "release" in config:
             kwargs["release"] = _boolean(
                 config["release"],
@@ -1432,6 +1693,110 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 )
             kwargs["tool_calibrations"] = tuple(calibrations)
         return PushObjectOptions(**kwargs)
+    if kind == "twist":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "hand_interp_steps",
+                    "twist_waypoint_count",
+                    "pre_grasp_distance",
+                    "twist_angle",
+                    "max_twist_angle",
+                    "contact_bite_depth",
+                    "contact_roll",
+                    "contact_settle_steps",
+                    "rotation_enabled",
+                }
+            ),
+        )
+        kwargs = {}
+        for name in (
+            "hand_interp_steps",
+            "twist_waypoint_count",
+            "contact_settle_steps",
+        ):
+            if name in config:
+                kwargs[name] = _integer(
+                    config[name],
+                    path=f"{path}.{name}",
+                    minimum=0 if name == "contact_settle_steps" else 1,
+                )
+        for name in (
+            "pre_grasp_distance",
+            "twist_angle",
+            "max_twist_angle",
+            "contact_bite_depth",
+            "contact_roll",
+        ):
+            if name in config:
+                kwargs[name] = (
+                    None
+                    if config[name] is None
+                    and name in {"contact_bite_depth", "contact_roll"}
+                    else _real(config[name], path=f"{path}.{name}")
+                )
+        if "rotation_enabled" in config:
+            kwargs["rotation_enabled"] = _boolean(
+                config["rotation_enabled"], path=f"{path}.rotation_enabled"
+            )
+        return TwistOptions(**kwargs)
+    if kind == "press":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "hand_interp_steps",
+                    "approach_distance",
+                    "press_distance",
+                    "press_position",
+                    "contact_roll_alternatives",
+                }
+            ),
+        )
+        kwargs = {}
+        if "hand_interp_steps" in config:
+            kwargs["hand_interp_steps"] = _integer(
+                config["hand_interp_steps"], path=f"{path}.hand_interp_steps", minimum=1
+            )
+        for name in ("approach_distance", "press_distance"):
+            if name in config:
+                kwargs[name] = _real(
+                    config[name],
+                    path=f"{path}.{name}",
+                    minimum=0.0,
+                    strict_minimum=name == "press_distance",
+                )
+        if "press_position" in config:
+            kwargs["press_position"] = (
+                None
+                if config["press_position"] is None
+                else _finite_tuple(
+                    config["press_position"],
+                    path=f"{path}.press_position",
+                    expected_length=3,
+                )
+            )
+        if "contact_roll_alternatives" in config:
+            kwargs["contact_roll_alternatives"] = tuple(
+                _real(
+                    item,
+                    path=f"{path}.contact_roll_alternatives[{index}]",
+                    minimum=-math.pi,
+                    maximum=math.pi,
+                )
+                for index, item in enumerate(
+                    _sequence(
+                        config["contact_roll_alternatives"],
+                        path=f"{path}.contact_roll_alternatives",
+                    )
+                )
+            )
+        return PressOptions(**kwargs)
     if kind == "slide":
         config = _mapping(
             value,
@@ -1439,17 +1804,23 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             required=frozenset({"kind"}),
             optional=frozenset(
                 {
+                    "drawer_containment",
                     "direction",
                     "hand_interp_steps",
                     "approach_distance",
                     "translation_distance",
                     "preshape_fraction",
+                    "qualify_hand_clearance",
                     "approach_along_grasp_axis",
                     "release_retreat_distance",
                 }
             ),
         )
         kwargs = {}
+        for name in ("drawer_containment",):
+            if name in config:
+                kwargs[name] = _boolean(config[name], path=f"{path}.{name}")
+
         if "direction" in config:
             kwargs["direction"] = _identifier(
                 config["direction"],
@@ -1477,6 +1848,10 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         for name in ("preshape_fraction", "release_retreat_distance"):
             if name in config:
                 kwargs[name] = _real(config[name], path=f"{path}.{name}", minimum=0.0)
+        if "qualify_hand_clearance" in config:
+            kwargs["qualify_hand_clearance"] = _boolean(
+                config["qualify_hand_clearance"], path=f"{path}.qualify_hand_clearance"
+            )
         if "approach_along_grasp_axis" in config:
             kwargs["approach_along_grasp_axis"] = _boolean(
                 config["approach_along_grasp_axis"],
@@ -1499,10 +1874,20 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "receive_pick_object_part",
                     "release_at_target",
                     "arm_selection",
+                    "adaptive_receive",
+                    "linear_segments",
+                    "require_receiver_scene",
+                    "receive_region",
+                    "existing_hold_hand_source",
+                    "source_retreat_mode",
                 }
             ),
         )
         kwargs = {}
+        if "linear_segments" in config:
+            kwargs["linear_segments"] = _boolean(
+                config["linear_segments"], path=f"{path}.linear_segments"
+            )
         for field_name in (
             "pre_grasp_distance",
             "lift_height",
@@ -1542,12 +1927,29 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 config["arm_selection"],
                 path=f"{path}.arm_selection",
             )
+        if "require_receiver_scene" in config:
+            kwargs["require_receiver_scene"] = _boolean(
+                config["require_receiver_scene"], path=f"{path}.require_receiver_scene"
+            )
+        if "adaptive_receive" in config:
+            kwargs["adaptive_receive"] = _boolean(
+                config["adaptive_receive"], path=f"{path}.adaptive_receive"
+            )
+        for field_name in (
+            "receive_region",
+            "existing_hold_hand_source",
+            "source_retreat_mode",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _identifier(
+                    config[field_name], path=f"{path}.{field_name}"
+                )
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
         "['coordinated_pickment', 'hand_over', 'move_end_effector', 'move_held_object', "
         "'move_joints', "
-        "'pick_up', 'place', 'pour', 'push_object', 'slide']."
+        "'pick_up', 'place', 'pour', 'press', 'push_object', 'slide', 'twist']."
     )
 
 
@@ -1787,6 +2189,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 "goal_translation_threshold",
                 "goal_rotation_threshold",
                 "action_timeout",
+                "planning_recovery",
                 "planning_budget",
                 "retry_all_failed_plans",
             }
@@ -1843,6 +2246,127 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 )
             )
         )
+    if config.get("planning_recovery") is not None:
+        declaration_path = f"{path}.planning_recovery"
+        declaration = _mapping(
+            config["planning_recovery"],
+            path=declaration_path,
+            required=frozenset({"kind", "revision"}),
+            optional=frozenset(
+                {
+                    "variant",
+                    "inside_world_yaw",
+                    "staging",
+                    "constrained_roll",
+                    "preshape_aperture_recovery",
+                    "place_continuation",
+                }
+            ),
+        )
+        kind = _identifier(declaration["kind"], path=f"{declaration_path}.kind")
+        declaration_types = {
+            "press_bounded": PressPlanningRecovery,
+            "twist_bounded": TwistPlanningRecovery,
+            "slide_bounded": SlidePlanningRecovery,
+            "articulation_withdrawal": ArticulationWithdrawalPlanningRecovery,
+            "articulation_park": ArticulationParkPlanningRecovery,
+            "released_clearance": ReleasedHandClearanceRecovery,
+            "released_park": ReleasedHandParkRecovery,
+            "pick_bounded": PickPlanningRecovery,
+            "place_bounded": PlacePlanningRecovery,
+            "handover_bounded": HandOverPlanningRecovery,
+            "held_alignment_bounded": MoveHeldObjectPlanningRecovery,
+        }
+        if kind not in declaration_types:
+            raise ValueError(
+                f"{declaration_path}.kind must be one of {sorted(declaration_types)}."
+            )
+        if (
+            _integer(
+                declaration["revision"], path=f"{declaration_path}.revision", minimum=1
+            )
+            != 1
+        ):
+            raise ValueError(f"Unsupported {declaration_path}.revision.")
+        if "constrained_roll" in declaration and kind != "pick_bounded":
+            raise ValueError("This selection only belongs to Pick recovery.")
+        if kind != "slide_bounded" and "preshape_aperture_recovery" in declaration:
+            raise ValueError("Preshape aperture recovery belongs only to Slide.")
+
+        if "place_continuation" in declaration and kind not in {
+            "pick_bounded",
+            "held_alignment_bounded",
+        }:
+            raise ValueError(
+                "Place continuation only belongs to Pick or held alignment recovery."
+            )
+        if kind == "pick_bounded":
+            if set(declaration) - {
+                "kind",
+                "revision",
+                "constrained_roll",
+                "place_continuation",
+            }:
+                raise ValueError(
+                    "Pick recovery supports only constrained_roll and place_continuation selections."
+                )
+            kwargs["planning_recovery"] = PickPlanningRecovery(
+                place_continuation=_boolean(
+                    declaration.get("place_continuation", False),
+                    path=f"{declaration_path}.place_continuation",
+                ),
+                constrained_roll=_boolean(
+                    declaration.get("constrained_roll", False),
+                    path=f"{declaration_path}.constrained_roll",
+                ),
+            )
+        elif kind == "slide_bounded":
+            if set(declaration) - {"kind", "revision", "preshape_aperture_recovery"}:
+                raise ValueError("Slide recovery has unsupported fields.")
+            kwargs["planning_recovery"] = SlidePlanningRecovery(
+                preshape_aperture_recovery=_boolean(
+                    declaration.get("preshape_aperture_recovery", False),
+                    path=f"{declaration_path}.preshape_aperture_recovery",
+                )
+            )
+        elif kind == "held_alignment_bounded":
+            if "variant" in declaration or "inside_world_yaw" in declaration:
+                raise ValueError(
+                    f"{declaration_path} does not support variant or inside_world_yaw."
+                )
+            kwargs["planning_recovery"] = MoveHeldObjectPlanningRecovery(
+                place_continuation=_boolean(
+                    declaration.get("place_continuation", False),
+                    path=f"{declaration_path}.place_continuation",
+                ),
+                staging=_boolean(
+                    declaration.get("staging", False),
+                    path=f"{declaration_path}.staging",
+                ),
+            )
+        elif kind == "place_bounded":
+            if "staging" in declaration:
+                raise ValueError(f"{declaration_path} does not support staging.")
+            kwargs["planning_recovery"] = PlacePlanningRecovery(
+                variant=_identifier(
+                    declaration.get("variant", "waypoint"),
+                    path=f"{declaration_path}.variant",
+                ),
+                inside_world_yaw=_boolean(
+                    declaration.get("inside_world_yaw", False),
+                    path=f"{declaration_path}.inside_world_yaw",
+                ),
+            )
+        else:
+            if (
+                "variant" in declaration
+                or "inside_world_yaw" in declaration
+                or "staging" in declaration
+            ):
+                raise ValueError(
+                    f"{declaration_path} does not support variant, inside_world_yaw or staging."
+                )
+            kwargs["planning_recovery"] = declaration_types[kind]()
     return RecoveryPolicy(**kwargs)
 
 
@@ -1959,6 +2483,21 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
                 f"{path}.motion.plan_opts requires the trapezoidal planner."
             )
         required_planner = "trapezoidal"
+    recovery_policy = _decode_recovery_policy(
+        config["recovery"], path=f"{path}.recovery"
+    )
+    handover_recovery = isinstance(
+        recovery_policy.planning_recovery, HandOverPlanningRecovery
+    )
+    handover_options = [
+        value for value in action_options.values() if type(value) is HandOverOptions
+    ]
+    if (handover_recovery and not handover_options) or any(
+        value.adaptive_receive != handover_recovery for value in handover_options
+    ):
+        raise ValueError(
+            f"{path}: adaptive receiving and handover_bounded recovery must be declared together."
+        )
     return SkillPolicyPreset(
         _identifier(config["preset_id"], path=f"{path}.preset_id"),
         action_option_templates=action_options,
@@ -1972,10 +2511,7 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
             config["tracking"],
             path=f"{path}.tracking",
         ),
-        recovery_policy=_decode_recovery_policy(
-            config["recovery"],
-            path=f"{path}.recovery",
-        ),
+        recovery_policy=recovery_policy,
         workflow_recovery_policy=WorkflowRecoveryPolicy(
             max_recovery_attempts=_integer(
                 workflow["max_recovery_attempts"],
@@ -2341,18 +2877,76 @@ def _decode_registered_lowerer(
     value: object,
     *,
     path: str,
+    control_operations: tuple[ControlOperationDeclaration, ...] = (),
 ) -> (
     _ArticulationLinkSlideLowererFactory
     | _AxisAlignLowererFactory
     | _CoordinatedTransportLowererFactory
+    | CoordinatedHoldLowererFactory
+    | CoordinatedPlacementLowererFactory
     | _MoveHeldObjectLowererFactory
     | _ParkLowererFactory
     | RoutedMoveHeldObjectLowererFactory
     | _PourLowererFactory
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
+    | ObservedRelativePlaceLowererFactory
+    | UprightPlaceLowererFactory
+    | StackPlaceLowererFactory
+    | RetainedPourFactory
+    | JawPourFactory
+    | PourTransportFactory
+    | PourRegionTransportFactory
+    | HeldAlignmentLowererFactory
+    | ClearReleasedLowererFactory
+    | ConfiguredPickLowererFactory
+    | PressPrepareFactory
+    | TwistPrepareFactory
+    | ArticulationSlideFactory
+    | ArticulationParkFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "idle_arm_clearance":
+        from .simulation.idle_clearance import IdleClearanceFactory, IdleClearanceRoute
+
+        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+        routes = tuple(
+            IdleClearanceRoute(
+                **_mapping(
+                    item,
+                    path=f"{path}.routes[{index}]",
+                    required=frozenset(
+                        {
+                            "route_id",
+                            "clear_segment",
+                            "restore_segment",
+                            "resource",
+                            "joint_name",
+                            "offset_rad",
+                        }
+                    ),
+                    optional=frozenset({"search", "protected_control_part"}),
+                )
+            )
+            for index, item in enumerate(
+                _sequence(config["routes"], path=f"{path}.routes")
+            )
+        )
+        return IdleClearanceFactory(routes)
+
+    if isinstance(value, Mapping) and value.get("kind") in (
+        "prismatic_slide",
+        "prismatic_withdraw",
+        "articulation_park",
+    ):
+        return _decode_prismatic_lowerer(value, path=path)
+    if isinstance(value, Mapping) and value.get("kind") in (
+        "press_prepare",
+        "press",
+        "twist_prepare",
+        "twist",
+    ):
+        return _decode_control_lowerer(value, operations=control_operations, path=path)
     common = _mapping(
         value,
         path=path,
@@ -2368,14 +2962,221 @@ def _decode_registered_lowerer(
                 "reference_entity_id",
                 "relative_pose",
                 "object_id",
+                "call_id",
+                "verify_phases",
                 "object_ids",
+                "receivers",
                 "routes",
+                "staging_routes",
+                "proxy_position_tolerance_m",
                 "stage_id",
+                "grasp_transform_source",
+                "verify_retention",
+                "hands",
+                "retreat_distance",
+                "approach_clearance",
+                "release_clearance",
+                "nominal_clearance",
+                "effect_contract",
                 "target",
             }
         ),
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind in {"pour_transport", "pour_region_transport"}:
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset(
+                {"kind", "routes", "staging_routes"}
+                | (
+                    {"proxy_position_tolerance_m"}
+                    if kind == "pour_region_transport"
+                    else set()
+                )
+            ),
+        )
+        routes = []
+        for index, raw in enumerate(_sequence(config["routes"], path=f"{path}.routes")):
+            route_path = f"{path}.routes[{index}]"
+            route = _mapping(
+                raw,
+                path=route_path,
+                required=frozenset({"object_id", "target_id", "pose"}),
+            )
+            routes.append(
+                HeldObjectTransportRoute(
+                    object_id=_identifier(
+                        route["object_id"], path=f"{route_path}.object_id"
+                    ),
+                    target_id=_identifier(
+                        route["target_id"], path=f"{route_path}.target_id"
+                    ),
+                    pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
+                )
+            )
+        stages = tuple(
+            PourStageRoute(
+                **_mapping(
+                    raw,
+                    path=f"{path}.staging_routes[{index}]",
+                    required=frozenset(
+                        {"object_id", "target_id", "receiver_id", "clearance_m"}
+                    ),
+                )
+            )
+            for index, raw in enumerate(
+                _sequence(config["staging_routes"], path=f"{path}.staging_routes")
+            )
+        )
+        if kind == "pour_region_transport":
+            return PourRegionTransportFactory(
+                tuple(routes), stages, config["proxy_position_tolerance_m"]
+            )
+        return PourTransportFactory(tuple(routes), stages)
+    if kind == "pick":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes"}),
+            optional=frozenset({"call_id", "verify_phases", "hands"}),
+        )
+        routes = []
+        for index, raw in enumerate(_sequence(config["routes"], path=f"{path}.routes")):
+            route_path = f"{path}.routes[{index}]"
+            route = _mapping(
+                raw,
+                path=route_path,
+                required=frozenset({"object_id", "target_id"}),
+                optional=frozenset(
+                    {
+                        "release_clearance_object_pose",
+                        "release_clearance_plane_z",
+                        "release_clearance_safety_margin",
+                        "grasp_region",
+                    }
+                ),
+            )
+            if route.get("release_clearance_object_pose") is not None:
+                route["release_clearance_object_pose"] = _decode_goal_pose(
+                    route["release_clearance_object_pose"],
+                    path=f"{route_path}.release_clearance_object_pose",
+                )
+            routes.append(PickTargetRoute(**route))
+        hands = []
+        for index, raw in enumerate(
+            _sequence(config.get("hands", ()), path=f"{path}.hands")
+        ):
+            hand = _mapping(
+                raw,
+                path=f"{path}.hands[{index}]",
+                required=frozenset({"grasp_target_id", "model_id", "envelope"}),
+            )
+            envelope = NominalHandEnvelope(
+                **_mapping(
+                    hand["envelope"],
+                    path=f"{path}.hands[{index}].envelope",
+                    required=frozenset(
+                        {
+                            "finger_length",
+                            "finger_width",
+                            "finger_thickness",
+                            "palm_depth",
+                            "opening_margin",
+                        }
+                    ),
+                )
+            )
+            hands.append(
+                NominalHandBinding(hand["grasp_target_id"], hand["model_id"], envelope)
+            )
+        return make_pick_alias_factory(
+            tuple(routes),
+            config.get("call_id", "simulation.pick"),
+            verify_phases=config.get("verify_phases", False),
+            hands=tuple(hands),
+        )
+    if kind == "clear_released":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes", "hands"}),
+            optional=frozenset({"retreat_distance"}),
+        )
+        routes = tuple(
+            ReleasedHandRoute(
+                **_mapping(
+                    raw,
+                    path=f"{path}.routes[{index}]",
+                    required=frozenset({"object_id", "target_id", "minimum_height"}),
+                )
+            )
+            for index, raw in enumerate(
+                _sequence(config["routes"], path=f"{path}.routes")
+            )
+        )
+        hands = []
+        for index, raw in enumerate(_sequence(config["hands"], path=f"{path}.hands")):
+            hand = _mapping(
+                raw,
+                path=f"{path}.hands[{index}]",
+                required=frozenset({"grasp_target_id", "model_id", "envelope"}),
+            )
+            envelope = NominalHandEnvelope(
+                **_mapping(
+                    hand["envelope"],
+                    path=f"{path}.hands[{index}].envelope",
+                    required=frozenset(
+                        {
+                            "finger_length",
+                            "finger_width",
+                            "finger_thickness",
+                            "palm_depth",
+                            "opening_margin",
+                        }
+                    ),
+                )
+            )
+            hands.append(
+                NominalHandBinding(hand["grasp_target_id"], hand["model_id"], envelope)
+            )
+        return ClearReleasedLowererFactory(
+            routes, tuple(hands), retreat_distance=config.get("retreat_distance", 0.15)
+        )
+    if kind == "align_held":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes"}),
+            optional=frozenset({"verify_retention"}),
+        )
+        routes = []
+        for index, raw in enumerate(_sequence(config["routes"], path=f"{path}.routes")):
+            route = _mapping(
+                raw,
+                path=f"{path}.routes[{index}]",
+                required=frozenset(
+                    {
+                        "object_id",
+                        "target_id",
+                        "preserve_yaw",
+                        "axis_direction_free",
+                        "local_axis",
+                    }
+                ),
+                optional=frozenset({"position"}),
+            )
+            routes.append(HeldAlignmentRoute(**route))
+        return HeldAlignmentLowererFactory(
+            tuple(routes), verify_retention=config.get("verify_retention", False)
+        )
+    if "effect_contract" in value and kind not in {
+        "move_held_object",
+        "place_relative",
+        "place_upright",
+        "stack_place",
+    }:
+        raise ValueError(f"{path}.effect_contract is unsupported for {kind!r}.")
     if kind == "axis_align":
         config = _mapping(
             value,
@@ -2434,8 +3235,17 @@ def _decode_registered_lowerer(
             ),
             target_pose_mode=target_pose_mode,
         )
-    if kind == "move_held_object" and "routes" in value:
-        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+    if kind in {"move_held_object", "drawer_transport"} and "routes" in value:
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes"}),
+            optional=(
+                frozenset({"effect_contract"})
+                if kind == "move_held_object"
+                else frozenset()
+            ),
+        )
         routes = []
         for index, item in enumerate(
             _sequence(config["routes"], path=f"{path}.routes")
@@ -2457,7 +3267,23 @@ def _decode_registered_lowerer(
                     pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
                 )
             )
-        return RoutedMoveHeldObjectLowererFactory(routes=tuple(routes))
+        if kind == "drawer_transport":
+            return DrawerTransportLowererFactory(routes=tuple(routes))
+        try:
+            contract = TransportEffectContract(
+                config.get(
+                    "effect_contract", TransportEffectContract.GUARDED_ATTACHMENT.value
+                )
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"{path}.effect_contract is not a supported transport contract."
+            ) from error
+        return (
+            TerminalAttachmentTransportLowererFactory
+            if contract is TransportEffectContract.TERMINAL_ATTACHMENT
+            else RoutedMoveHeldObjectLowererFactory
+        )(routes=tuple(routes))
     if kind == "move_held_object":
         config = _mapping(
             value,
@@ -2483,7 +3309,7 @@ def _decode_registered_lowerer(
                 expected_length=16,
             ),
         )
-    if kind == "coordinated_transport":
+    if kind in {"coordinated_transport", "coordinated_hold"}:
         config = _mapping(
             value,
             path=path,
@@ -2503,20 +3329,40 @@ def _decode_registered_lowerer(
                         "reference_entity_id",
                         "relative_pose",
                         "world_displacement",
+                        "relation",
                     }
                 ),
             )
             has_reference = "reference_entity_id" in route
             has_pose = "relative_pose" in route
             has_displacement = "world_displacement" in route
-            if has_reference != has_pose or has_reference == has_displacement:
+            if "relation" in route:
+                if (
+                    kind != "coordinated_transport"
+                    or route["relation"] != "on"
+                    or not has_reference
+                    or not has_displacement
+                    or has_pose
+                ):
+                    raise ValueError(
+                        "Coordinated on placement requires release, a distinct rigid reference and world offset."
+                    )
+            elif has_reference != has_pose or has_reference == has_displacement:
                 raise ValueError(
                     f"{route_path} must declare exactly one of "
                     "reference_entity_id with relative_pose or "
                     "world_displacement."
                 )
+            special = "relation" in route or (
+                has_displacement
+                and all(value == 0 for value in route["world_displacement"])
+            )
+            route_type = (
+                CoordinatedTargetRoute if special else _CoordinatedTransportRoute
+            )
             routes.append(
-                _CoordinatedTransportRoute(
+                route_type(
+                    **({"relation": route.get("relation")} if special else {}),
                     object_id=_identifier(
                         route["object_id"], path=f"{route_path}.object_id"
                     ),
@@ -2551,14 +3397,69 @@ def _decode_registered_lowerer(
                     ),
                 )
             )
-        return _CoordinatedTransportLowererFactory(routes=tuple(routes))
-    if kind == "place_relative":
+        if any(type(route) is CoordinatedTargetRoute for route in routes):
+            routes = [
+                (
+                    CoordinatedTargetRoute(**asdict(route))
+                    if type(route) is _CoordinatedTransportRoute
+                    else route
+                )
+                for route in routes
+            ]
+            factory_type = (
+                _CoordinatedRetainedTargetFactory
+                if kind == "coordinated_hold"
+                else CoordinatedPlacementLowererFactory
+            )
+            return factory_type(routes=tuple(routes))
+        factory_type = (
+            CoordinatedHoldLowererFactory
+            if kind == "coordinated_hold"
+            else _CoordinatedTransportLowererFactory
+        )
+        return factory_type(routes=tuple(routes))
+    if kind in {"place_relative", "place_upright", "stack_place"}:
         config = _mapping(
             value,
             path=path,
             required=frozenset({"kind", "routes"}),
+            optional=frozenset(
+                (
+                    {"approach_clearance", "release_clearance", "nominal_clearance"}
+                    if kind == "stack_place"
+                    else {"grasp_transform_source"}
+                )
+                | {"effect_contract"}
+            ),
         )
-        routes: list[_RelativePlaceRoute] = []
+        source = config.get(
+            "grasp_transform_source",
+            "observed" if kind in {"place_upright", "stack_place"} else "verified",
+        )
+        if kind == "place_upright" and source != "observed":
+            raise ValueError("Upright placement requires observed grasp geometry.")
+        if source not in {"verified", "observed"}:
+            raise ValueError("grasp_transform_source must be verified or observed.")
+        observed = source == "observed"
+        expected_contract = (
+            PlacementEffectContract.TERMINAL_RELEASE
+            if observed
+            else PlacementEffectContract.PHASED_RELEASE
+        )
+        try:
+            contract = PlacementEffectContract(
+                config.get("effect_contract", expected_contract.value)
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"{path}.effect_contract is not a supported release contract."
+            ) from error
+        if contract is not expected_contract:
+            raise ValueError(
+                f"{path}: {source} placement requires effect_contract={expected_contract.value!r}."
+            )
+        route_type = ObservedRelativePlaceBinding if observed else _RelativePlaceRoute
+        routes = []
         for index, route_value in enumerate(
             _sequence(config["routes"], path=f"{path}.routes")
         ):
@@ -2574,10 +3475,17 @@ def _decode_registered_lowerer(
                         "world_displacement",
                     }
                 ),
-                optional=frozenset({"stage_id"}),
+                optional=frozenset(
+                    {"stage_id"}
+                    | (
+                        {"world_yaw_offset", "reference_link_id", "reference_part"}
+                        if observed
+                        else set()
+                    )
+                ),
             )
             routes.append(
-                _RelativePlaceRoute(
+                route_type(
                     object_id=_identifier(
                         route["object_id"],
                         path=f"{route_path}.object_id",
@@ -2595,6 +3503,32 @@ def _decode_registered_lowerer(
                         path=f"{route_path}.world_displacement",
                         expected_length=3,
                     ),
+                    **(
+                        {
+                            "world_yaw_offset": _real(
+                                route.get("world_yaw_offset", 0.0),
+                                path=f"{route_path}.world_yaw_offset",
+                            ),
+                            "reference_link_id": (
+                                None
+                                if route.get("reference_link_id") is None
+                                else _identifier(
+                                    route["reference_link_id"],
+                                    path=f"{route_path}.reference_link_id",
+                                )
+                            ),
+                            "reference_part": (
+                                None
+                                if route.get("reference_part") is None
+                                else _identifier(
+                                    route["reference_part"],
+                                    path=f"{route_path}.reference_part",
+                                )
+                            ),
+                        }
+                        if observed
+                        else {}
+                    ),
                     stage_id=(
                         _identifier(route["stage_id"], path=f"{route_path}.stage_id")
                         if str(route.get("stage_id", "")).strip()
@@ -2602,7 +3536,28 @@ def _decode_registered_lowerer(
                     ),
                 )
             )
-        return _RelativePlaceLowererFactory(routes=tuple(routes))
+        if kind == "stack_place":
+            return StackPlaceLowererFactory(
+                routes=tuple(routes),
+                **{
+                    name: config[name]
+                    for name in (
+                        "approach_clearance",
+                        "release_clearance",
+                        "nominal_clearance",
+                    )
+                    if name in config
+                },
+            )
+        return (
+            UprightPlaceLowererFactory
+            if kind == "place_upright"
+            else (
+                ObservedRelativePlaceLowererFactory
+                if observed
+                else _RelativePlaceLowererFactory
+            )
+        )(routes=tuple(routes))
     if kind == "park":
         _mapping(
             value,
@@ -2610,6 +3565,32 @@ def _decode_registered_lowerer(
             required=frozenset({"kind"}),
         )
         return _ParkLowererFactory()
+    if kind == "jaw_pour":
+        config = _mapping(
+            value, path=path, required=frozenset({"kind", "object_id", "receivers"})
+        )
+        receivers = []
+        for index, value in enumerate(
+            _sequence(config["receivers"], path=f"{path}.receivers")
+        ):
+            pair = _sequence(value, path=f"{path}.receivers[{index}]")
+            if len(pair) != 2:
+                raise ValueError("Jaw Pour receivers require occurrence/entity pairs.")
+            receivers.append(
+                tuple(
+                    _identifier(item, path=f"{path}.receivers[{index}]")
+                    for item in pair
+                )
+            )
+        return JawPourFactory(
+            object_id=_identifier(config["object_id"], path=f"{path}.object_id"),
+            receivers=tuple(receivers),
+        )
+    if kind == "retained_pour":
+        config = _mapping(value, path=path, required=frozenset({"kind", "object_id"}))
+        return RetainedPourFactory(
+            _identifier(config["object_id"], path=f"{path}.object_id")
+        )
     if kind == "pour":
         config = _mapping(
             value,
@@ -2689,7 +3670,7 @@ def _decode_registered_lowerer(
         return _PushObjectLowererFactory(routes=tuple(routes))
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['articulation_link_slide', 'axis_align', 'coordinated_transport', "
+        "['articulation_link_slide', 'axis_align', 'coordinated_transport', 'coordinated_hold', "
         "'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
     )
 
@@ -2698,8 +3679,10 @@ def _decode_control_part_evidence(
     value: object,
     *,
     path: str,
-) -> _JointPositionConstraintEvidenceProviderFactory:
+) -> _JointPositionConstraintEvidenceProviderFactory | NativeGripEvidenceFactory:
     """Decode one allowlisted control-part evidence provider factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "native_grip":
+        return _decode_native_grip_evidence(value, path=path)
     config = _mapping(
         value,
         path=path,
@@ -2717,7 +3700,7 @@ def _decode_control_part_evidence(
     if kind != "joint_position_constraint":
         raise ValueError(
             f"Unsupported {path}.kind {kind!r}; supported kinds are "
-            "['joint_position_constraint']."
+            "['joint_position_constraint', 'native_grip']."
         )
     return _JointPositionConstraintEvidenceProviderFactory(
         control_parts=_identifier_tuple(
@@ -2742,10 +3725,110 @@ def _decode_control_part_evidence(
     )
 
 
+def _decode_driver_openings(
+    value: object, *, path: str
+) -> tuple[DriverOpeningBinding, ...]:
+    openings = []
+    for index, raw in enumerate(_sequence(value, path=f"{path}")):
+        item = _mapping(
+            raw,
+            path=f"{path}[{index}]",
+            required=frozenset(
+                {
+                    "control_part",
+                    "joint_names",
+                    "driver_indices",
+                    "open_qpos",
+                    "tolerance",
+                }
+            ),
+        )
+        openings.append(
+            DriverOpeningBinding(
+                control_part=_identifier(
+                    item["control_part"],
+                    path=f"{path}[{index}].control_part",
+                ),
+                joint_names=_identifier_tuple(
+                    item["joint_names"],
+                    path=f"{path}[{index}].joint_names",
+                ),
+                driver_indices=tuple(
+                    _sequence(
+                        item["driver_indices"],
+                        path=f"{path}[{index}].driver_indices",
+                    )
+                ),
+                open_qpos=_finite_tuple(
+                    item["open_qpos"],
+                    path=f"{path}[{index}].open_qpos",
+                ),
+                tolerance=_real(
+                    item["tolerance"],
+                    path=f"{path}[{index}].tolerance",
+                    minimum=0.0,
+                    strict_minimum=True,
+                ),
+            )
+        )
+    return tuple(openings)
+
+
+def _decode_recorded_contacts(
+    value: object, *, path: str
+) -> SimulationRecordedContactCfg:
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"sensor_uid", "retention", "pad_bindings"}),
+        optional=frozenset({"opening_bindings", "observer_name"}),
+    )
+    retained = _mapping(
+        config["retention"],
+        path=f"{path}.retention",
+        required=frozenset({"step_dt"}),
+        optional=frozenset(
+            {
+                "max_control_steps",
+                "max_contact_rows",
+                "max_substeps_per_control",
+                "max_errors_per_env",
+            }
+        ),
+    )
+    pads = []
+    for index, value in enumerate(
+        _sequence(config["pad_bindings"], path=f"{path}.pad_bindings")
+    ):
+        pair = _sequence(value, path=f"{path}.pad_bindings[{index}]")
+        if len(pair) != 2:
+            raise ValueError("Recorded pad bindings require part/link-list pairs.")
+        pads.append(
+            (
+                _identifier(pair[0], path=f"{path}.pad_bindings[{index}].part"),
+                _identifier_tuple(pair[1], path=f"{path}.pad_bindings[{index}].links"),
+            )
+        )
+    return SimulationRecordedContactCfg(
+        sensor_uid=_identifier(config["sensor_uid"], path=f"{path}.sensor_uid"),
+        retention=ContactTimelineCfg(**retained),
+        pad_bindings=tuple(pads),
+        opening_bindings=_decode_driver_openings(
+            config.get("opening_bindings", ()), path=f"{path}.opening_bindings"
+        ),
+        observer_name=config.get("observer_name", "task_program.recorded_contacts"),
+    ).snapshot()
+
+
 @dataclass(frozen=True, slots=True)
 class _DecodedRuntimeServices:
     """Typed configured services separated by registration ownership."""
 
+    recorded_contacts_cfg: SimulationRecordedContactCfg | None = None
+    cargo_envelope_cfg: SimulationCargoEnvelopeCfg | None = None
+
+    planning_services: SimulationPlanningServicesCfg | None = None
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = ()
     grasp_pose_generators: tuple[
         tuple[str, _AntipodalGraspPoseGeneratorFactory], ...
     ] = ()
@@ -2755,23 +3838,45 @@ class _DecodedRuntimeServices:
         _ArticulationLinkSlideLowererFactory
         | _AxisAlignLowererFactory
         | _CoordinatedTransportLowererFactory
+        | CoordinatedHoldLowererFactory
+        | CoordinatedPlacementLowererFactory
         | _MoveHeldObjectLowererFactory
         | _ParkLowererFactory
         | RoutedMoveHeldObjectLowererFactory
         | _PourLowererFactory
         | _PushObjectLowererFactory
-        | _RelativePlaceLowererFactory,
+        | _RelativePlaceLowererFactory
+        | ObservedRelativePlaceLowererFactory
+        | UprightPlaceLowererFactory
+        | StackPlaceLowererFactory
+        | RetainedPourFactory
+        | JawPourFactory
+        | PourTransportFactory
+        | PourRegionTransportFactory
+        | HeldAlignmentLowererFactory
+        | ClearReleasedLowererFactory
+        | ConfiguredPickLowererFactory
+        | PressPrepareFactory
+        | TwistPrepareFactory
+        | ArticulationSlideFactory
+        | ArticulationParkFactory,
         ...,
     ] = ()
-    control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
+    control_part_evidence: (
+        _JointPositionConstraintEvidenceProviderFactory
+        | NativeGripEvidenceFactory
+        | None
+    ) = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
+    control_operations: tuple[ControlOperationDeclaration, ...] = ()
     settle_presets: (
         tuple[
             tuple[
                 str,
                 DynamicSettleMonitorCfg
                 | SimulationStabilityConditionCfg
-                | SimulationJointStabilityConditionCfg,
+                | SimulationJointStabilityConditionCfg
+                | SimulationControlConditionCfg,
             ],
             ...,
         ]
@@ -2784,7 +3889,8 @@ def _decode_settle_presets(value: object, *, path: str) -> tuple[
         str,
         DynamicSettleMonitorCfg
         | SimulationStabilityConditionCfg
-        | SimulationJointStabilityConditionCfg,
+        | SimulationJointStabilityConditionCfg
+        | SimulationControlConditionCfg,
     ],
     ...,
 ]:
@@ -2797,6 +3903,22 @@ def _decode_settle_presets(value: object, *, path: str) -> tuple[
         item_path = f"{path}.{name}"
         if not isinstance(item, Mapping):
             raise TypeError(f"{item_path} must be a mapping.")
+        if item.get("kind") in {"press_control", "twist_control"}:
+            config = _mapping(
+                item,
+                path=item_path,
+                required=frozenset({"kind", "entity", "operation_id", "phase"}),
+                optional=frozenset({"terminal"}),
+            )
+            preset = SimulationControlConditionCfg(
+                entity=config["entity"],
+                operation_id=config["operation_id"],
+                family="press" if config["kind"] == "press_control" else "twist",
+                phase=config["phase"],
+                terminal=config.get("terminal", False),
+            ).snapshot()
+            result.append((name, preset))
+            continue
         if item.get("kind") == "joint_position_and_stability":
             config = _mapping(
                 item,
@@ -2879,25 +4001,54 @@ def _decode_runtime_services(
                 "hand_geometries",
                 "handover_pose_providers",
                 "registered_semantic_lowerers",
+                "control_operations",
+                "cargo_envelope",
+                "recorded_contacts",
                 "control_part_evidence",
                 "nominal_motion_sources",
                 "settle_presets",
+                "planning_services",
+                "invocation_policy_bindings",
             }
         ),
     )
+    cargo_cfg = None
+    if "cargo_envelope" in config:
+        cargo = _mapping(
+            config["cargo_envelope"],
+            path=f"{path}.cargo_envelope",
+            required=frozenset({"carrier_uids"}),
+            optional=frozenset({"excluded_uids"}),
+        )
+        cargo_cfg = SimulationCargoEnvelopeCfg(
+            carrier_uids=tuple(
+                _identifier(uid, path=f"{path}.cargo_envelope.carrier_uids")
+                for uid in _sequence(
+                    cargo["carrier_uids"], path=f"{path}.cargo_envelope.carrier_uids"
+                )
+            ),
+            excluded_uids=tuple(
+                _identifier(uid, path=f"{path}.cargo_envelope.excluded_uids")
+                for uid in _sequence(
+                    cargo.get("excluded_uids", ()),
+                    path=f"{path}.cargo_envelope.excluded_uids",
+                )
+            ),
+        ).snapshot()
     generators_value = config.get("grasp_pose_generators", {})
     if not isinstance(generators_value, Mapping):
         raise TypeError(f"{path}.grasp_pose_generators must be a mapping.")
     generators = tuple(
         sorted(
             (
-                _identifier(target_id, path=f"{path}.grasp_pose_generators keys"),
-                _decode_grasp_generator(
-                    item,
-                    path=f"{path}.grasp_pose_generators.{target_id}",
-                ),
+                (
+                    _identifier(target_id, path=f"{path}.grasp_pose_generators keys"),
+                    _decode_grasp_generator(
+                        item, path=f"{path}.grasp_pose_generators.{target_id}"
+                    ),
+                )
+                for target_id, item in generators_value.items()
             )
-            for target_id, item in generators_value.items()
         )
     )
     hand_values = config.get("hand_geometries", {})
@@ -2908,42 +4059,67 @@ def _decode_runtime_services(
     hand_geometries = tuple(
         sorted(
             (
-                _identifier(target_id, path=f"{path}.hand_geometries keys"),
-                _decode_hand_geometry(
-                    item,
-                    path=f"{path}.hand_geometries.{target_id}",
-                    target_id=target_id,
-                    profile=robot_profile_binding,
-                ),
+                (
+                    _identifier(target_id, path=f"{path}.hand_geometries keys"),
+                    _decode_hand_geometry(
+                        item,
+                        path=f"{path}.hand_geometries.{target_id}",
+                        target_id=target_id,
+                        profile=robot_profile_binding,
+                    ),
+                )
+                for target_id, item in hand_values.items()
             )
-            for target_id, item in hand_values.items()
         )
     )
     handover = tuple(
-        _decode_handover_pose_provider(
-            item,
-            path=f"{path}.handover_pose_providers[{index}]",
-        )
-        for index, item in enumerate(
-            _sequence(
-                config.get("handover_pose_providers", ()),
-                path=f"{path}.handover_pose_providers",
+        (
+            _decode_handover_pose_provider(
+                item, path=f"{path}.handover_pose_providers[{index}]"
+            )
+            for index, item in enumerate(
+                _sequence(
+                    config.get("handover_pose_providers", ()),
+                    path=f"{path}.handover_pose_providers",
+                )
             )
         )
     )
+    operations = tuple(
+        (
+            _decode_control_operation(item, path=f"{path}.control_operations[{index}]")
+            for index, item in enumerate(
+                _sequence(
+                    config.get("control_operations", ()),
+                    path=f"{path}.control_operations",
+                )
+            )
+        )
+    )
+    if len({item.call.operation_id for item in operations}) != len(operations):
+        raise ValueError("Control operation IDs must be unique.")
+    if not {item.grasp_target_id for item in operations} <= {
+        key for key, _ in hand_geometries
+    }:
+        raise ValueError(
+            "Control operations require explicitly configured hand geometry."
+        )
     lowerers = tuple(
-        _decode_registered_lowerer(
-            item,
-            path=f"{path}.registered_semantic_lowerers[{index}]",
-        )
-        for index, item in enumerate(
-            _sequence(
-                config.get("registered_semantic_lowerers", ()),
-                path=f"{path}.registered_semantic_lowerers",
+        (
+            _decode_registered_lowerer(
+                item,
+                path=f"{path}.registered_semantic_lowerers[{index}]",
+                control_operations=operations,
+            )
+            for index, item in enumerate(
+                _sequence(
+                    config.get("registered_semantic_lowerers", ()),
+                    path=f"{path}.registered_semantic_lowerers",
+                )
             )
         )
     )
-    lowerer_call_ids = tuple(factory.call_id for factory in lowerers)
+    lowerer_call_ids = tuple((factory.call_id for factory in lowerers))
     if len(set(lowerer_call_ids)) != len(lowerer_call_ids):
         raise ValueError(
             f"{path}.registered_semantic_lowerers contains duplicate call IDs."
@@ -2952,8 +4128,7 @@ def _decode_runtime_services(
         None
         if "control_part_evidence" not in config
         else _decode_control_part_evidence(
-            config["control_part_evidence"],
-            path=f"{path}.control_part_evidence",
+            config["control_part_evidence"], path=f"{path}.control_part_evidence"
         )
     )
     nominal = []
@@ -3061,11 +4236,414 @@ def _decode_runtime_services(
         nominal.append(declaration)
     if len({item.call_index for item in nominal}) != len(nominal):
         raise ValueError(f"{path}.nominal_motion_sources has duplicate call indices")
+    planning = None
+    if "planning_services" in config:
+        planning = _mapping(
+            config["planning_services"],
+            path=f"{path}.planning_services",
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "revision",
+                    "observed_curobo",
+                    "collision_roster",
+                    "place_scene_bindings",
+                    "held_staging_bindings",
+                    "pick_closing_bindings",
+                    "released_hand_continuations",
+                    "pour_projection_bindings",
+                    "slide_preshape_bindings",
+                    "place_continuation_bindings",
+                    "drawer_bindings",
+                    "measured_rigid_bindings",
+                    "free_motion_query",
+                    "capture_root_pose",
+                    "capture_native_revision",
+                    "native_handover_scene",
+                    "capture_coordinated_cargo",
+                    "coordinated_grasps",
+                    "hold_qpos_source",
+                }
+            ),
+        )
+        planning = dict(planning)
+        if "collision_roster" in planning:
+            roster = _mapping(
+                planning["collision_roster"],
+                path=f"{path}.planning_services.collision_roster",
+                required=frozenset({"rigid_objects", "articulation_links"}),
+            )
+            planning["collision_roster"] = CollisionSceneRosterCfg(**roster).snapshot()
+        if "measured_rigid_bindings" in planning:
+            planning["measured_rigid_bindings"] = tuple(
+                (
+                    MeasuredRigidInvocationBinding(
+                        **_mapping(
+                            value,
+                            path=f"{path}.planning_services.measured_rigid_bindings[{index}]",
+                            required=frozenset({"invocation_id", "object_id"}),
+                            optional=frozenset({"container_id"}),
+                        )
+                    )
+                    for index, value in enumerate(
+                        _sequence(
+                            planning["measured_rigid_bindings"],
+                            path=f"{path}.planning_services.measured_rigid_bindings",
+                        )
+                    )
+                )
+            )
+        if "drawer_bindings" in planning:
+            from embodichain.lab.sim.scene.articulation_inputs import PrismaticBinding
+
+            rows = []
+            for index, item in enumerate(
+                _sequence(
+                    planning["drawer_bindings"],
+                    path=f"{path}.planning_services.drawer_bindings",
+                )
+            ):
+                row = dict(
+                    _mapping(
+                        item,
+                        path=f"{path}.planning_services.drawer_bindings[{index}]",
+                        required=frozenset(
+                            {
+                                "invocation_id",
+                                "operation",
+                                "target_id",
+                                "link_entity_id",
+                                "object_id",
+                                "source",
+                                "lower",
+                                "upper",
+                            }
+                        ),
+                    )
+                )
+                row["source"] = PrismaticBinding.decode(row["source"])
+                rows.append(DrawerInvocationBinding(**row))
+            planning["drawer_bindings"] = tuple(rows)
+        if "pour_projection_bindings" in planning:
+            planning["pour_projection_bindings"] = tuple(
+                (
+                    PourProjectionBinding(
+                        **_mapping(
+                            value,
+                            path=f"{path}.planning_services.pour_projection_bindings[{index}]",
+                            required=frozenset(
+                                {
+                                    "pick_invocation_id",
+                                    "stage_invocation_id",
+                                    "pour_invocation_id",
+                                    "return_invocation_id",
+                                    "place_invocation_id",
+                                }
+                            ),
+                        )
+                    )
+                    for index, value in enumerate(
+                        _sequence(
+                            planning["pour_projection_bindings"],
+                            path=f"{path}.planning_services.pour_projection_bindings",
+                        )
+                    )
+                )
+            )
+        if "coordinated_grasps" in planning:
+            pairs = []
+            for index, raw in enumerate(
+                _sequence(
+                    planning["coordinated_grasps"],
+                    path=f"{path}.planning_services.coordinated_grasps",
+                )
+            ):
+                pair = _mapping(
+                    raw,
+                    path=f"{path}.planning_services.coordinated_grasps[{index}]",
+                    required=frozenset(
+                        {"left_grasp_target_id", "right_grasp_target_id", "contact"}
+                    ),
+                )
+                contact = _mapping(
+                    pair["contact"],
+                    path=f"{path}.planning_services.coordinated_grasps[{index}].contact",
+                    required=frozenset(
+                        {
+                            "contact_tolerance",
+                            "minimum_normal_cosine",
+                            "normal_probe_distance",
+                            "max_candidates",
+                            "candidate_chunk_size",
+                            "cargo_clearance_reserve",
+                        }
+                    ),
+                )
+                pairs.append(
+                    CoordinatedGraspServiceCfg(
+                        left_grasp_target_id=pair["left_grasp_target_id"],
+                        right_grasp_target_id=pair["right_grasp_target_id"],
+                        contact=CoordinatedGraspCfg(**contact),
+                    ).snapshot()
+                )
+            planning["coordinated_grasps"] = tuple(pairs)
+        if "place_continuation_bindings" in planning:
+            selected = []
+            for index, value in enumerate(
+                _sequence(
+                    planning["place_continuation_bindings"],
+                    path=f"{path}.planning_services.place_continuation_bindings",
+                )
+            ):
+                item = _mapping(
+                    value,
+                    path=f"{path}.planning_services.place_continuation_bindings[{index}]",
+                    required=frozenset(
+                        {
+                            "program_fingerprint",
+                            "source_invocation_id",
+                            "place_invocation_id",
+                        }
+                    ),
+                    optional=frozenset({"transport_invocation_id", "kind"}),
+                )
+                declaration = dict(item)
+                kind = declaration.pop("kind", "pick")
+                if kind not in {"pick", "held_alignment"}:
+                    raise ValueError("Unknown Place continuation binding kind.")
+                selected.append(
+                    (
+                        PlaceContinuationBinding
+                        if kind == "pick"
+                        else HeldAlignmentContinuationBinding
+                    )(**declaration)
+                )
+            planning["place_continuation_bindings"] = tuple(selected)
+        if "released_hand_continuations" in planning:
+            values = []
+            for index, value in enumerate(
+                _sequence(
+                    planning["released_hand_continuations"],
+                    path=f"{path}.planning_services.released_hand_continuations",
+                )
+            ):
+                row = dict(
+                    _mapping(
+                        value,
+                        path=f"{path}.planning_services.released_hand_continuations[{index}]",
+                        required=frozenset(
+                            {
+                                "program_fingerprint",
+                                "release_invocation_id",
+                                "clearance_invocation_id",
+                                "park_invocation_ids",
+                            }
+                        ),
+                    )
+                )
+                row["park_invocation_ids"] = tuple(
+                    _sequence(
+                        row["park_invocation_ids"],
+                        path=f"{path}.planning_services.released_hand_continuations[{index}].park_invocation_ids",
+                    )
+                )
+                values.append(ReleasedHandContinuationBinding(**row))
+            planning["released_hand_continuations"] = tuple(values)
+        if "pick_closing_bindings" in planning:
+            selected = []
+            for index, value in enumerate(
+                _sequence(
+                    planning["pick_closing_bindings"],
+                    path=f"{path}.planning_services.pick_closing_bindings",
+                )
+            ):
+                entry_path = f"{path}.planning_services.pick_closing_bindings[{index}]"
+                item = dict(
+                    _mapping(
+                        value,
+                        path=entry_path,
+                        required=frozenset({"invocation_id", "object_id"}),
+                        optional=frozenset(
+                            {
+                                "opening_reference_id",
+                                "opening_object_target",
+                                "opening_place_invocation_id",
+                            }
+                        ),
+                    )
+                )
+                if item.get("opening_object_target") is not None:
+                    item["opening_object_target"] = _decode_goal_pose(
+                        item["opening_object_target"],
+                        path=f"{entry_path}.opening_object_target",
+                    )
+                selected.append(PickClosingBinding(**item))
+            planning["pick_closing_bindings"] = tuple(selected)
+        if "slide_preshape_bindings" in planning:
+            planning["slide_preshape_bindings"] = tuple(
+                (
+                    SlidePreshapeBinding(
+                        **_mapping(
+                            item,
+                            path=f"{path}.planning_services.slide_preshape_bindings[{index}]",
+                            required=frozenset(
+                                {"invocation_id", "grasp_target_id", "table_uid"}
+                            ),
+                        )
+                    )
+                    for index, item in enumerate(
+                        _sequence(
+                            planning["slide_preshape_bindings"],
+                            path=f"{path}.planning_services.slide_preshape_bindings",
+                        )
+                    )
+                )
+            )
+            if any(
+                (
+                    binding.grasp_target_id not in dict(hand_geometries)
+                    for binding in planning["slide_preshape_bindings"]
+                )
+            ):
+                raise ValueError(
+                    "Slide preshape requires declared hand geometry calibration."
+                )
+        if "held_staging_bindings" in planning:
+            planning["held_staging_bindings"] = tuple(
+                (
+                    HeldStagingInvocationBinding(
+                        **_mapping(
+                            item,
+                            path=f"{path}.planning_services.held_staging_bindings[{index}]",
+                            required=frozenset({"invocation_id", "rigid_entity_id"}),
+                            optional=frozenset(
+                                {
+                                    "articulation_scene",
+                                    "predecessor_invocation_id",
+                                    "predecessor_call_id",
+                                    "resource_id",
+                                }
+                            ),
+                        )
+                    )
+                    for index, item in enumerate(
+                        _sequence(
+                            planning["held_staging_bindings"],
+                            path=f"{path}.planning_services.held_staging_bindings",
+                        )
+                    )
+                )
+            )
+        if "place_scene_bindings" in planning:
+            planning["place_scene_bindings"] = tuple(
+                (
+                    PlaceSceneBinding(
+                        **_mapping(
+                            item,
+                            path=f"{path}.planning_services.place_scene_bindings[{index}]",
+                            required=frozenset({"invocation_id", "floor_entity_id"}),
+                            optional=frozenset(
+                                {
+                                    "support_owner_id",
+                                    "inside_subject_id",
+                                    "inside_container_id",
+                                }
+                            ),
+                        )
+                    )
+                    for index, item in enumerate(
+                        _sequence(
+                            planning["place_scene_bindings"],
+                            path=f"{path}.planning_services.place_scene_bindings",
+                        )
+                    )
+                )
+            )
+        if "observed_curobo" in planning:
+            cfg = _mapping(
+                planning["observed_curobo"],
+                path=f"{path}.planning_services.observed_curobo",
+                required=frozenset(),
+                optional=frozenset({"cuda_device", "max_voxel_count"}),
+            )
+            planning["observed_curobo"] = ObservedCuroboServicesCfg(**cfg).snapshot()
+        planning = SimulationPlanningServicesCfg(**planning).snapshot()
+        if planning.measured_rigid_bindings and (
+            not hand_geometries
+            or any((factory.sample_count != 65 for _, factory in hand_geometries))
+        ):
+            raise ValueError(
+                "Measured rigid planning requires explicit 65-sample hand geometry declarations."
+            )
+        if planning.pour_projection_bindings and (not hand_geometries):
+            raise ValueError(
+                "Configured Pour projection requires explicit hand geometry declarations."
+            )
+        if planning.pick_closing_bindings and (
+            not hand_geometries
+            or any((factory.sample_count != 65 for _, factory in hand_geometries))
+        ):
+            raise ValueError(
+                "Configured native Pick requires explicit 65-sample hand geometry declarations."
+            )
+    if planning is not None and planning.coordinated_grasps:
+        declared_generators = dict(generators)
+        declared_geometry = dict(hand_geometries)
+        for pair in planning.coordinated_grasps:
+            for target in (pair.left_grasp_target_id, pair.right_grasp_target_id):
+                factory = declared_generators.get(target)
+                geometry = declared_geometry.get(target)
+                if (
+                    type(factory) is not _AntipodalGraspPoseGeneratorFactory
+                    or factory.filter_ground_collision is not False
+                    or geometry is None
+                    or (geometry.hand_part != target)
+                ):
+                    raise ValueError(
+                        "Configured coordinated grasp targets require explicit antipodal generators without ground filtering and matching hand geometry."
+                    )
+        for pair in planning.coordinated_grasps:
+            left, right = (
+                declared_generators[name]
+                for name in (pair.left_grasp_target_id, pair.right_grasp_target_id)
+            )
+            if (left.model_id, left.min_opening_width, left.max_opening_width) != (
+                right.model_id,
+                right.min_opening_width,
+                right.max_opening_width,
+            ):
+                raise ValueError(
+                    "Configured coordinated grasp pairs require matching declared gripper models and openings."
+                )
+    bindings = []
+    for index, raw in enumerate(
+        _sequence(
+            config.get("invocation_policy_bindings", ()),
+            path=f"{path}.invocation_policy_bindings",
+        )
+    ):
+        item = _mapping(
+            raw,
+            path=f"{path}.invocation_policy_bindings[{index}]",
+            required=frozenset({"program_fingerprint", "invocation_id", "preset_id"}),
+        )
+        bindings.append(InvocationPolicyBinding(**item))
     return _DecodedRuntimeServices(
+        recorded_contacts_cfg=(
+            None
+            if "recorded_contacts" not in config
+            else _decode_recorded_contacts(
+                config["recorded_contacts"], path=f"{path}.recorded_contacts"
+            )
+        ),
+        cargo_envelope_cfg=cargo_cfg,
+        planning_services=planning,
+        invocation_policy_bindings=tuple(bindings),
         grasp_pose_generators=generators,
         hand_geometries=hand_geometries,
         handover_pose_providers=handover,
         registered_semantic_lowerers=lowerers,
+        control_operations=operations,
         control_part_evidence=evidence,
         nominal_motion_sources=tuple(nominal),
         settle_presets=(
@@ -3102,9 +4680,7 @@ class _ConfiguredTaskProgramAdapterFactory:
 
 
 def _decode_configured_task_program_integration(
-    value: object,
-    *,
-    planner_config: Mapping[str, object] | None = None,
+    value: object, *, planner_config: Mapping[str, object] | None = None
 ) -> _ConfiguredTaskProgramIntegration:
     """Decode one composable, callable-free Task Program integration.
 
@@ -3126,7 +4702,6 @@ def _decode_configured_task_program_integration(
     services = _decode_runtime_services(
         config.get("runtime_services", {}), robot_profile_binding=robot_profile_binding
     )
-
     call_catalog = builtin_semantic_call_catalog()
     for lowerer_factory in services.registered_semantic_lowerers:
         call_catalog = call_catalog.with_descriptor(
@@ -3136,13 +4711,43 @@ def _decode_configured_task_program_integration(
                 target_descriptor=lowerer_factory.target_descriptor,
             )
         )
+    if type(services.control_part_evidence) is NativeGripEvidenceFactory:
+        geometry_by_target = dict(services.hand_geometries)
+        for part, pads in services.control_part_evidence.pad_bindings:
+            geometry = geometry_by_target.get(part)
+            if geometry is not None and (
+                geometry.hand_part != part or tuple(geometry.pad_link_names) != pads
+            ):
+                raise ValueError(
+                    "Native grip pads differ from the declared hand geometry roles."
+                )
+    if any(
+        (
+            type(factory) is JawPourFactory
+            for factory in services.registered_semantic_lowerers
+        )
+    ):
+        if (
+            not services.hand_geometries
+            or services.planning_services is None
+            or (not services.planning_services.capture_root_pose)
+            or (not services.planning_services.capture_native_revision)
+        ):
+            raise ValueError(
+                "Source jaw Pour requires explicit hand geometry and root/native capture services."
+            )
     registration = SimulationTaskProgramRegistration(
+        planning_services=services.planning_services,
+        invocation_policy_bindings=services.invocation_policy_bindings,
         scene_binding=scene_binding,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,
         control_part_evidence_factory=services.control_part_evidence,
-        registered_semantic_lowerer_factories=(services.registered_semantic_lowerers),
+        registered_semantic_lowerer_factories=services.registered_semantic_lowerers,
+        control_operations=services.control_operations,
+        cargo_envelope_cfg=services.cargo_envelope_cfg,
+        recorded_contacts_cfg=services.recorded_contacts_cfg,
         **(
             {}
             if services.settle_presets is None
@@ -3150,18 +4755,21 @@ def _decode_configured_task_program_integration(
         ),
     )
     grasp_fingerprint = tuple(
-        {
-            "target_id": target_id,
-            "factory": {
-                key: value
-                for key, value in asdict(factory).items()
-                if not (
-                    key in {"approach_deviation_angle", "max_candidates", "center_mode"}
-                    and value is None
-                )
-            },
-        }
-        for target_id, factory in services.grasp_pose_generators
+        (
+            {
+                "target_id": target_id,
+                "factory": {
+                    key: value
+                    for key, value in asdict(factory).items()
+                    if not (
+                        key
+                        in {"approach_deviation_angle", "max_candidates", "center_mode"}
+                        and value is None
+                    )
+                },
+            }
+            for target_id, factory in services.grasp_pose_generators
+        )
     )
     fingerprint_payload = {
         "registration": registration.fingerprint,
@@ -3170,8 +4778,10 @@ def _decode_configured_task_program_integration(
     }
     if services.hand_geometries:
         fingerprint_payload["hand_geometries"] = tuple(
-            {"target_id": target_id, "factory": asdict(factory)}
-            for target_id, factory in services.hand_geometries
+            (
+                {"target_id": target_id, "factory": asdict(factory)}
+                for target_id, factory in services.hand_geometries
+            )
         )
     if services.nominal_motion_sources:
         fingerprint_payload["nominal_motion_sources"] = [
@@ -3206,4 +4816,70 @@ def _decode_configured_task_program_integration(
         registration=registration,
         adapter_factory=adapter_factory,
         integration_fingerprint=integration_fingerprint,
+    )
+
+
+def _decode_native_grip_evidence(
+    value: object, *, path: str
+) -> NativeGripEvidenceFactory:
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"kind", "sensor_uid", "object_bindings", "pad_bindings"}),
+        optional=frozenset(
+            {
+                "algorithm_revision",
+                "opening_bindings",
+                "max_contacts_per_env",
+                "trace_capacity",
+            }
+        ),
+    )
+    objects = []
+    for index, raw in enumerate(
+        _sequence(config["object_bindings"], path=f"{path}.object_bindings")
+    ):
+        pair = _sequence(raw, path=f"{path}.object_bindings[{index}]")
+        if len(pair) != 2:
+            raise ValueError("Native grip object bindings require identity/UID pairs.")
+        objects.append(
+            tuple(
+                _identifier(item, path=f"{path}.object_bindings[{index}]")
+                for item in pair
+            )
+        )
+    pads = []
+    for index, raw in enumerate(
+        _sequence(config["pad_bindings"], path=f"{path}.pad_bindings")
+    ):
+        pair = _sequence(raw, path=f"{path}.pad_bindings[{index}]")
+        if len(pair) != 2:
+            raise ValueError(
+                "Native grip pad bindings require control-part/link-list pairs."
+            )
+        pads.append(
+            (
+                _identifier(pair[0], path=f"{path}.pad_bindings[{index}]"),
+                _identifier_tuple(pair[1], path=f"{path}.pad_bindings[{index}].links"),
+            )
+        )
+    openings = _decode_driver_openings(
+        config.get("opening_bindings", ()), path=f"{path}.opening_bindings"
+    )
+    return NativeGripEvidenceFactory(
+        NativeGripEvidenceCfg(
+            sensor_uid=_identifier(config["sensor_uid"], path=f"{path}.sensor_uid"),
+            object_bindings=tuple(objects),
+            pad_bindings=tuple(pads),
+            opening_bindings=tuple(openings),
+            **{
+                name: config[name]
+                for name in (
+                    "algorithm_revision",
+                    "max_contacts_per_env",
+                    "trace_capacity",
+                )
+                if name in config
+            },
+        )
     )

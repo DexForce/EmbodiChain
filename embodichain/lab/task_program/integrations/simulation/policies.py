@@ -58,6 +58,7 @@ from embodichain.lab.task_program.compiler import (
     CompiledTaskProgramSegment,
     CompiledTaskProgramValidator,
 )
+from .control_policy import SimulationControlConditionCfg, ControlOperationRuntime
 from .bindings import SimulationSceneBinding
 from .stability import (
     SimulationStabilityConditionCfg,
@@ -65,6 +66,12 @@ from .stability import (
 )
 
 if TYPE_CHECKING:
+    from .control_assembly import ControlOperationDeclaration
+    from ..runtime_services import TaskProgramRuntimeServiceContext
+    from .control_observation import (
+        ControlObservationSnapshot,
+        ControlPolicyObservation,
+    )
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.sensors.base_sensor import BaseSensor
@@ -185,7 +192,8 @@ class SimulationSegmentPolicyPort:
                 str,
                 DynamicSettleMonitorCfg
                 | SimulationStabilityConditionCfg
-                | SimulationJointStabilityConditionCfg,
+                | SimulationJointStabilityConditionCfg
+                | SimulationControlConditionCfg,
             ]
             | None
         ) = None,
@@ -193,6 +201,8 @@ class SimulationSegmentPolicyPort:
         step_dt: float | None = None,
         support_registry: SupportObservationRegistry | None = None,
         sensor_suite: MutableMapping[str, BaseSensor] | None = None,
+        control_operations: Mapping[str, ControlOperationRuntime] | None = None,
+        control_declarations: Mapping[str, ControlOperationDeclaration] | None = None,
     ) -> None:
         if type(scene_binding) is not SimulationSceneBinding:
             raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
@@ -225,7 +235,8 @@ class SimulationSegmentPolicyPort:
             str,
             DynamicSettleMonitorCfg
             | SimulationStabilityConditionCfg
-            | SimulationJointStabilityConditionCfg,
+            | SimulationJointStabilityConditionCfg
+            | SimulationControlConditionCfg,
         ] = {}
         for preset_id, cfg in selected_presets.items():
             if (
@@ -240,6 +251,7 @@ class SimulationSegmentPolicyPort:
             if not isinstance(cfg, DynamicSettleMonitorCfg) and type(cfg) not in (
                 SimulationStabilityConditionCfg,
                 SimulationJointStabilityConditionCfg,
+                SimulationControlConditionCfg,
             ):
                 raise TypeError(
                     "settle_presets require dynamic monitors or typed stability conditions."
@@ -255,7 +267,11 @@ class SimulationSegmentPolicyPort:
             raise ValueError("step_dt must be finite and positive when supplied.")
         if step_dt is None and any(
             type(cfg)
-            in (SimulationStabilityConditionCfg, SimulationJointStabilityConditionCfg)
+            in (
+                SimulationStabilityConditionCfg,
+                SimulationJointStabilityConditionCfg,
+                SimulationControlConditionCfg,
+            )
             or (
                 isinstance(cfg, SimulationSettleMonitorCfg)
                 and cfg.measurement == "pose_delta"
@@ -266,6 +282,48 @@ class SimulationSegmentPolicyPort:
                 "Pose-delta or condition settling requires an explicit control step_dt."
             )
 
+        declarations = dict(control_declarations or {})
+        if declarations:
+            from .control_assembly import ControlOperationDeclaration
+            from embodichain.lab.sim.scene.press_inputs import PressBinding
+
+            if control_operations or any(
+                type(value) is not ControlOperationDeclaration
+                or key != value.call.operation_id
+                for key, value in declarations.items()
+            ):
+                raise ValueError(
+                    "Control declaration ports cannot also own live operation services."
+                )
+        self._control_declarations = MappingProxyType(declarations)
+        operations = dict(control_operations or {})
+        if any(
+            type(value) is not ControlOperationRuntime or key != value.operation_id
+            for key, value in operations.items()
+        ):
+            raise ValueError(
+                "Control operations require exact declared runtime owners."
+            )
+        for cfg in normalized_presets.values():
+            if type(cfg) is SimulationControlConditionCfg:
+                if cfg.operation_id in operations:
+                    operations[cfg.operation_id].validate(cfg)
+                elif cfg.operation_id in declarations:
+                    declaration = declarations[cfg.operation_id]
+                    family = (
+                        "press"
+                        if type(declaration.binding) is PressBinding
+                        else "twist"
+                    )
+                    if cfg.entity != declaration.call.entity_id or cfg.family != family:
+                        raise ValueError(
+                            "Control policy differs from its static declaration."
+                        )
+                else:
+                    raise ValueError(
+                        "Control post-policy has no explicit operation service."
+                    )
+        self._control_operations = MappingProxyType(operations)
         self._simulation = simulation
         self._robot = robot
         self._scene_binding = scene_binding
@@ -292,6 +350,7 @@ class SimulationSegmentPolicyPort:
                     )
                 self._joint_conditions[name] = (art, art.joint_names.index(cfg.joint))
         self._post_policy_results: dict[int, dict[str, object]] = {}
+        self._control_policy_measurements: dict[int, ControlPolicyObservation] = {}
         self._post_policy_success: dict[int, torch.Tensor] = {}
         self._validator_results: dict[int, dict[str, object]] = {}
         self._validator_active_masks: dict[int, torch.Tensor] = {}
@@ -318,15 +377,39 @@ class SimulationSegmentPolicyPort:
                 sensor_suite=sensor_suite,
             )
 
+    def validate_environment_owner(self, simulation: object, robot: object) -> None:
+        """Require the exact borrowed environment owners without acquiring state.
+
+        Args:
+            simulation: Actual simulation manager selected by the host.
+            robot: Actual robot selected by the same host.
+
+        Raises:
+            RuntimeError: This policy session has closed.
+            ValueError: Either owner belongs to a different environment.
+        """
+        self._require_open()
+        if self._simulation is not simulation or self._robot is not robot:
+            raise ValueError("The policy session belongs to another environment owner.")
+
     def bind_clock(self, clock: SupportControlClock) -> None:
         """Bind the existing environment clock for explicitly declared conditions.
 
         Args:
             clock: Canonical environment execution clock, never advanced here.
         """
+        if self._control_declarations:
+            raise ValueError(
+                "Declared controls require fresh per-bridge operation assembly before clock binding."
+            )
+
         self._require_open()
+        for operation in self._control_operations.values():
+            operation.validate_clock(clock)
         if self._condition_runtime is not None:
             self._condition_runtime.bind_clock(clock)
+        for operation in self._control_operations.values():
+            operation.bind_clock(clock)
         if self._lifetime.observation_clock is not clock:
             self._lifetime.observation_clock = clock
             self._lifetime.observation_generation += 1
@@ -398,6 +481,8 @@ class SimulationSegmentPolicyPort:
         self._lifetime.closed = True
         if self._condition_runtime is not None:
             self._condition_runtime.close()
+        for operation in self._control_operations.values():
+            operation.close()
 
     def _require_open(self) -> None:
         if self._lifetime.closed:
@@ -416,8 +501,13 @@ class SimulationSegmentPolicyPort:
             validator baselines, results and post-policy state.
         """
         self._require_open()
+        if self._control_operations or self._control_declarations:
+            raise ValueError(
+                "Control sessions require fresh services and operation instances from their owning factory."
+            )
         session = copy(self)
         session._post_policy_results = {}
+        session._control_policy_measurements = {}
         session._post_policy_success = {}
         session._validator_results = {}
         session._validator_active_masks = {}
@@ -450,6 +540,13 @@ class SimulationSegmentPolicyPort:
                 f"Unknown settle preset {policy.cfg.preset!r}; available presets "
                 f"are {sorted(self._settle_presets)}."
             )
+        cfg = self._settle_presets[policy.cfg.preset]
+        if type(cfg) is SimulationControlConditionCfg:
+            if policy.entity.entity_id != cfg.entity:
+                raise ValueError("Control policy entity differs from its declaration.")
+            if cfg.operation_id in self._control_operations:
+                self._control_operations[cfg.operation_id].validate(cfg)
+            return
         if (
             type(self._settle_presets[policy.cfg.preset])
             is SimulationJointStabilityConditionCfg
@@ -519,6 +616,9 @@ class SimulationSegmentPolicyPort:
         self.validate_policy(policy, segment=segment)
         active_mask = self._validate_active_mask(active_mask)
         preset = self._settle_presets[policy.cfg.preset]
+        if type(preset) is SimulationControlConditionCfg:
+            yield from self._control_actions(policy, active_mask=active_mask)
+            return
         if type(preset) is SimulationJointStabilityConditionCfg:
             yield from self._joint_condition_actions(
                 policy, segment=segment, active_mask=active_mask
@@ -752,6 +852,179 @@ class SimulationSegmentPolicyPort:
                 invalid_observation_policy=cfg.invalid_observation_policy,
                 interruption_reason=interrupted_reason,
             )
+
+    def _control_actions(
+        self, policy: CompiledPostPolicy, *, active_mask: torch.Tensor
+    ) -> Iterator[torch.Tensor]:
+        cfg = self._settle_presets[policy.cfg.preset]
+        key = id(policy)
+        self._post_policy_success.pop(key, None)
+        self._post_policy_results.pop(key, None)
+        self._control_policy_measurements.pop(key, None)
+        if active_mask.shape != (1,):
+            raise ValueError("Control post-policies support B=1 only.")
+        if not active_mask.any():
+            self._post_policy_success[key] = torch.zeros_like(active_mask)
+            self._post_policy_results[key] = {
+                "accepted": False,
+                "observation_available": False,
+                "reason": "inactive_control_operation",
+            }
+            return
+        operation = self._control_operations[cfg.operation_id]
+        iterator = operation.actions(cfg, preset=policy.cfg.preset)
+        try:
+            while True:
+                self._require_open()
+                if self.observation_clock is None:
+                    raise ValueError(
+                        "Control post-policy requires a bound execution clock."
+                    )
+                try:
+                    command = next(iterator)
+                except StopIteration:
+                    break
+                yield command
+            result = operation.receipt()
+            self._post_policy_results[key] = result
+            self._control_policy_measurements[key] = operation.recorded_measurements()
+            self._post_policy_success[key] = (
+                torch.full_like(active_mask, bool(result["accepted"])) & active_mask
+            )
+        finally:
+            iterator.close()
+
+    def runtime_service_context(
+        self, *, program_fingerprint: str, episode_id: str
+    ) -> TaskProgramRuntimeServiceContext:
+        """Expose this actual bound policy session's runtime services for lowerers.
+
+        The caller supplies the compiled program and EpisodeContext identities;
+        they must match the operations already installed in this session. The
+        captured clock guard cannot follow a newer bridge's active owner.
+        """
+        from ..runtime_services import TaskProgramRuntimeServiceContext
+
+        self._require_open()
+        clock = self.observation_clock
+        if clock is None:
+            raise ValueError("Runtime services require the actual bound bridge clock.")
+        return TaskProgramRuntimeServiceContext(
+            program_fingerprint,
+            episode_id,
+            self._control_operations,
+            lambda: self.validate_observation_scope(clock),
+        )
+
+    def control_policy_scope(
+        self,
+        policy: CompiledPostPolicy,
+        *,
+        segment: CompiledTaskProgramSegment,
+    ) -> dict[str, object]:
+        """Read the actual completed control occurrence's owned provenance.
+
+        Historical reads do not consult the current observation clock or native
+        scene. Identity must still match the exact compiled post-policy instance.
+        """
+        if type(policy) is not CompiledPostPolicy:
+            raise TypeError("policy must be exactly CompiledPostPolicy.")
+        self._validate_segment_membership(segment, policy, kind="post policy")
+        cfg = self._settle_presets.get(policy.cfg.preset)
+        if (
+            type(cfg) is not SimulationControlConditionCfg
+            or self._post_policy_results.get(id(policy), {}).get("kind")
+            != "control_operation"
+        ):
+            raise ValueError(
+                "No completed control evidence belongs to this post-policy occurrence."
+            )
+        operation = self._control_operations[cfg.operation_id]
+        return {
+            **operation.observation_scope,
+            "source_path": list(policy.source_path),
+            "policy_index": next(
+                index
+                for index, value in enumerate(segment.post_policies)
+                if value is policy
+            ),
+            "preset": policy.cfg.preset,
+            "route_payload": operation.route_payload,
+            "phase": cfg.phase,
+            "terminal": cfg.terminal,
+        }
+
+    def control_operation_scope(self, operation_id: str) -> dict[str, object]:
+        """Read actual bound operation provenance before execution, without acquisition.
+
+        Args:
+            operation_id: Exact configured operation identity.
+
+        Returns:
+            Owned physical/program/episode bindings from this session's instance.
+        """
+        self._require_open()
+        operation = self._control_operations[operation_id]
+        operation.validate_scope()
+        return {**operation.observation_scope, "route_payload": operation.route_payload}
+
+    def control_policy_measurements(
+        self, policy: CompiledPostPolicy, *, segment: CompiledTaskProgramSegment
+    ) -> ControlPolicyObservation:
+        """Copy the exact completed occurrence's physical reads without live fallback.
+
+        Args:
+            policy: Actual compiled policy object from this bridge.
+            segment: Actual compiled owning segment.
+
+        Returns:
+            Owned hold/limit/clearance/joint-baseline frames and window identity.
+        """
+        self.control_policy_scope(policy, segment=segment)
+        try:
+            return self._control_policy_measurements[id(policy)].snapshot()
+        except KeyError as error:
+            raise ValueError(
+                "Completed control policy physical measurements are unavailable."
+            ) from error
+
+    def control_policy_window(
+        self,
+        policy: CompiledPostPolicy,
+        *,
+        segment: CompiledTaskProgramSegment,
+        startup: bool = False,
+    ) -> ControlObservationSnapshot:
+        """Copy the retained raw window actually used by a completed occurrence.
+
+        Later operation windows cannot substitute for an earlier receipt. This
+        returns historical facts without new sampling or current-state fallback.
+        """
+        self.control_policy_scope(policy, segment=segment)
+        cfg = self._settle_presets[policy.cfg.preset]
+        if startup and (cfg.family != "twist" or cfg.phase != "ready"):
+            raise ValueError("Startup evidence belongs only to a Twist ready policy.")
+        operation = self._control_operations[cfg.operation_id]
+        captured = operation.recorded_window(startup=startup)
+        receipt = self._post_policy_results[id(policy)]["control"]
+        window = receipt.get("window")
+        actual = (
+            [captured.samples[0].timestamp, captured.samples[-1].timestamp]
+            if captured.samples
+            else None
+        )
+        if startup:
+            if (
+                actual is None
+                or window is None
+                or not math.isclose(actual[-1], window[-1], rel_tol=0, abs_tol=1e-8)
+            ):
+                raise ValueError("Startup evidence does not match this ready boundary.")
+        elif len(captured.samples) != receipt["sample_count"] or actual != window:
+            raise ValueError(
+                "Retained control window belongs to another post-policy boundary."
+            )
+        return captured
 
     def post_policy_result(
         self,

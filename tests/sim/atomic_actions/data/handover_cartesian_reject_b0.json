@@ -1,0 +1,1538 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "scope": "Complete native HandOver under original Cartesian outer scope",
+  "record": {
+    "success": [
+      false
+    ],
+    "positions_sha256": "ae2c18dcf410f1294a16203051253a2db166f0b8cab643c04b62992bb187bb0a",
+    "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+    "segments": [
+      [
+        "transfer",
+        0,
+        50
+      ],
+      [
+        "receive_approach",
+        50,
+        100
+      ],
+      [
+        "receive_close",
+        100,
+        110
+      ],
+      [
+        "receive_hold",
+        110,
+        114
+      ],
+      [
+        "handover_release",
+        114,
+        124
+      ],
+      [
+        "source_retreat",
+        124,
+        144
+      ]
+    ],
+    "metadata": {
+      "affordance_sample": {
+        "receive_grasp": {
+          "pose_frame": "world",
+          "selected_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "reference_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.5
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "success": [
+            false
+          ],
+          "env_ids": [
+            0
+          ],
+          "key": "transfer:receive_grasp",
+          "sampling": null,
+          "candidate_ids": [
+            -1
+          ],
+          "valid_candidate_counts": [
+            0
+          ],
+          "unique_candidate_counts": [
+            0
+          ],
+          "reused": [
+            false
+          ],
+          "adaptive_grasp": {
+            "axis_region_policy": "supported_end",
+            "strategy_indices": [
+              -1
+            ],
+            "approach_directions": [
+              [
+                -0.8660253882408142,
+                0.0,
+                -0.5
+              ]
+            ],
+            "feasible_counts": [
+              [
+                0
+              ]
+            ]
+          },
+          "handover_candidate_environment": {
+            "revision": 4,
+            "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+            "approach_samples": 50,
+            "pre_grasp_distance_m": 0.1,
+            "eligible_count": 1,
+            "requires_complete_command_guard": true,
+            "candidates": [
+              {
+                "pool_index": 0,
+                "valid": false,
+                "revision": 4,
+                "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                "frames": 50,
+                "inventory": [
+                  {
+                    "owner": "wall",
+                    "link": null,
+                    "status": "controlled_fixture",
+                    "shapes": 1,
+                    "plane_shapes": 0
+                  }
+                ],
+                "excluded_target_object": "object",
+                "not_evaluated": [
+                  "held_target_contact",
+                  "source_hand_and_robot_self",
+                  "payload_scene",
+                  "between_command_samples",
+                  "future_scene_motion",
+                  "ik_reachability",
+                  "emitted_command_fk"
+                ],
+                "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                "planning_timestamp": 0.0,
+                "minimum_checked_distance_m": 0.006679497252139664,
+                "fcl_queries": 1,
+                "plane_queries": 0,
+                "minimum_plane_signed_distance_m": null,
+                "frame": 38,
+                "receiver_link": "receiver_palm",
+                "obstacle_owner": "wall",
+                "obstacle_link": null,
+                "obstacle_name": "wall",
+                "minimum_distance_m": 0.006679497252139664,
+                "native_pair_contact_offset_m": 0.007,
+                "reason": "receiver_hand_non_target_contact_envelope"
+              }
+            ],
+            "open_hand_joint_positions": [
+              [
+                0.03999999910593033
+              ]
+            ],
+            "exchange_selection": {
+              "revision": 1,
+              "scope": "native_receiver_approach_and_both_arm_endpoint_ik_not_complete_plan",
+              "accepted": false,
+              "station_budget": 3,
+              "ik_query_budget": 9,
+              "budget_scope": "one_original_receive_pool",
+              "ik_queries": 3,
+              "station_attempts": [
+                {
+                  "axis": "+y",
+                  "translation": [
+                    [
+                      0.0,
+                      0.037010177969932556,
+                      0.0
+                    ]
+                  ],
+                  "norm_m": 0.037010177969932556,
+                  "native_approach": {
+                    "revision": 4,
+                    "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                    "approach_samples": 50,
+                    "pre_grasp_distance_m": 0.1,
+                    "eligible_count": 1,
+                    "requires_complete_command_guard": true,
+                    "candidates": [
+                      {
+                        "pool_index": 0,
+                        "valid": true,
+                        "revision": 4,
+                        "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                        "frames": 50,
+                        "inventory": [
+                          {
+                            "owner": "wall",
+                            "link": null,
+                            "status": "controlled_fixture",
+                            "shapes": 1,
+                            "plane_shapes": 0
+                          }
+                        ],
+                        "excluded_target_object": "object",
+                        "not_evaluated": [
+                          "held_target_contact",
+                          "source_hand_and_robot_self",
+                          "payload_scene",
+                          "between_command_samples",
+                          "future_scene_motion",
+                          "ik_reachability",
+                          "emitted_command_fk"
+                        ],
+                        "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                        "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                        "planning_timestamp": 0.0,
+                        "minimum_checked_distance_m": null,
+                        "fcl_queries": 0,
+                        "plane_queries": 0,
+                        "minimum_plane_signed_distance_m": null
+                      }
+                    ],
+                    "open_hand_joint_positions": [
+                      [
+                        0.03999999910593033
+                      ]
+                    ]
+                  },
+                  "endpoint_ik": [
+                    {
+                      "target": "source_exchange",
+                      "control_part": "source_arm",
+                      "solver_success": false,
+                      "finite": true,
+                      "within_runtime_and_solver_limits": true,
+                      "accepted": false
+                    }
+                  ],
+                  "accepted": false,
+                  "pool_index": 0,
+                  "reason": "endpoint_ik_rejected"
+                },
+                {
+                  "axis": "-y",
+                  "translation": [
+                    [
+                      0.0,
+                      -0.037010177969932556,
+                      0.0
+                    ]
+                  ],
+                  "norm_m": 0.037010177969932556,
+                  "native_approach": {
+                    "revision": 4,
+                    "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                    "approach_samples": 50,
+                    "pre_grasp_distance_m": 0.1,
+                    "eligible_count": 1,
+                    "requires_complete_command_guard": true,
+                    "candidates": [
+                      {
+                        "pool_index": 0,
+                        "valid": true,
+                        "revision": 4,
+                        "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                        "frames": 50,
+                        "inventory": [
+                          {
+                            "owner": "wall",
+                            "link": null,
+                            "status": "controlled_fixture",
+                            "shapes": 1,
+                            "plane_shapes": 0
+                          }
+                        ],
+                        "excluded_target_object": "object",
+                        "not_evaluated": [
+                          "held_target_contact",
+                          "source_hand_and_robot_self",
+                          "payload_scene",
+                          "between_command_samples",
+                          "future_scene_motion",
+                          "ik_reachability",
+                          "emitted_command_fk"
+                        ],
+                        "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                        "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                        "planning_timestamp": 0.0,
+                        "minimum_checked_distance_m": null,
+                        "fcl_queries": 0,
+                        "plane_queries": 0,
+                        "minimum_plane_signed_distance_m": null
+                      }
+                    ],
+                    "open_hand_joint_positions": [
+                      [
+                        0.03999999910593033
+                      ]
+                    ]
+                  },
+                  "endpoint_ik": [
+                    {
+                      "target": "source_exchange",
+                      "control_part": "source_arm",
+                      "solver_success": false,
+                      "finite": true,
+                      "within_runtime_and_solver_limits": true,
+                      "accepted": false
+                    }
+                  ],
+                  "accepted": false,
+                  "pool_index": 0,
+                  "reason": "endpoint_ik_rejected"
+                },
+                {
+                  "axis": "+z",
+                  "translation": [
+                    [
+                      0.0,
+                      0.0,
+                      0.04067044332623482
+                    ]
+                  ],
+                  "norm_m": 0.04067044332623482,
+                  "native_approach": {
+                    "revision": 4,
+                    "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                    "approach_samples": 50,
+                    "pre_grasp_distance_m": 0.1,
+                    "eligible_count": 1,
+                    "requires_complete_command_guard": true,
+                    "candidates": [
+                      {
+                        "pool_index": 0,
+                        "valid": true,
+                        "revision": 4,
+                        "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                        "frames": 50,
+                        "inventory": [
+                          {
+                            "owner": "wall",
+                            "link": null,
+                            "status": "controlled_fixture",
+                            "shapes": 1,
+                            "plane_shapes": 0
+                          }
+                        ],
+                        "excluded_target_object": "object",
+                        "not_evaluated": [
+                          "held_target_contact",
+                          "source_hand_and_robot_self",
+                          "payload_scene",
+                          "between_command_samples",
+                          "future_scene_motion",
+                          "ik_reachability",
+                          "emitted_command_fk"
+                        ],
+                        "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                        "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                        "planning_timestamp": 0.0,
+                        "minimum_checked_distance_m": null,
+                        "fcl_queries": 0,
+                        "plane_queries": 0,
+                        "minimum_plane_signed_distance_m": null
+                      }
+                    ],
+                    "open_hand_joint_positions": [
+                      [
+                        0.03999999910593033
+                      ]
+                    ]
+                  },
+                  "endpoint_ik": [
+                    {
+                      "target": "source_exchange",
+                      "control_part": "source_arm",
+                      "solver_success": false,
+                      "finite": true,
+                      "within_runtime_and_solver_limits": true,
+                      "accepted": false
+                    }
+                  ],
+                  "accepted": false,
+                  "pool_index": 0,
+                  "reason": "endpoint_ik_rejected"
+                }
+              ],
+              "selected_pool_index": null,
+              "selected_translation": null,
+              "requires_complete_shared_plan_and_command_guard": true,
+              "proposal": {
+                "revision": 4,
+                "scope": "native_receiver_suffix_aabb_exchange_proposals",
+                "coordinate_frame": "planning_robot_arena",
+                "dominant_root_axis": 0,
+                "preserved_midpoint_coordinate": 0.0,
+                "eligible_count": 1,
+                "requires_complete_command_guard": true,
+                "not_evaluated": [
+                  "source_hand",
+                  "held_payload",
+                  "ik_reachability"
+                ],
+                "suffix_indices_inclusive": [
+                  24,
+                  49
+                ],
+                "native_swept_bounds_m": [
+                  [
+                    -0.013660253882408142,
+                    -0.01,
+                    0.4363397341966629
+                  ],
+                  [
+                    0.10026279270648956,
+                    0.01,
+                    0.5136602538824081
+                  ]
+                ],
+                "ik_geometric_uncertainty": {
+                  "position_tolerance_m": 1e-05,
+                  "rotation_tolerance_rad": 1e-05,
+                  "hand_radius_m": 0.017320508075688773,
+                  "surface_uncertainty_m": 1.0173205080756167e-05,
+                  "not_a_physical_acceptance_threshold": true
+                },
+                "native_hand_contact_offset_upper_m": 0.002,
+                "near_native_bodies": [
+                  {
+                    "name": "wall",
+                    "contact_offset_m": 0.005,
+                    "arena_bounds_m": [
+                      [
+                        -0.02,
+                        -0.02,
+                        0.43
+                      ],
+                      [
+                        0.02,
+                        0.02,
+                        0.47000000000000003
+                      ]
+                    ],
+                    "contact_envelope_plus_ik_uncertainty_m": 0.007010173205080756
+                  }
+                ],
+                "near_native_planes": [],
+                "proposal_count": 3
+              },
+              "reason": "no_qualified_exchange_station"
+            },
+            "raw_valid_count": [
+              1
+            ],
+            "sampler_eligible_count": [
+              1
+            ],
+            "original_candidates": [
+              {
+                "env_row": 0,
+                "pool_index": 0,
+                "pose": [
+                  [
+                    -0.5,
+                    0.0,
+                    -0.8660253882408142,
+                    0.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    0.8660253882408142,
+                    0.0,
+                    -0.5,
+                    0.44999998807907104
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ],
+                "cost": 0.0
+              }
+            ]
+          },
+          "control_parts": [
+            "destination_arm"
+          ]
+        }
+      },
+      "receive_direction_attempts": [
+        {
+          "plan_success": [
+            false
+          ],
+          "metadata": {
+            "affordance_sample": {
+              "receive_grasp": {
+                "pose_frame": "world",
+                "selected_poses": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "reference_poses": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.5
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "success": [
+                  false
+                ],
+                "env_ids": [
+                  0
+                ],
+                "key": "transfer:receive_grasp",
+                "sampling": null,
+                "candidate_ids": [
+                  -1
+                ],
+                "valid_candidate_counts": [
+                  0
+                ],
+                "unique_candidate_counts": [
+                  0
+                ],
+                "reused": [
+                  false
+                ],
+                "adaptive_grasp": {
+                  "axis_region_policy": "supported_end",
+                  "strategy_indices": [
+                    -1
+                  ],
+                  "approach_directions": [
+                    [
+                      -0.8660253882408142,
+                      0.0,
+                      -0.5
+                    ]
+                  ],
+                  "feasible_counts": [
+                    [
+                      0
+                    ]
+                  ]
+                },
+                "handover_candidate_environment": {
+                  "revision": 4,
+                  "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                  "approach_samples": 50,
+                  "pre_grasp_distance_m": 0.1,
+                  "eligible_count": 1,
+                  "requires_complete_command_guard": true,
+                  "candidates": [
+                    {
+                      "pool_index": 0,
+                      "valid": false,
+                      "revision": 4,
+                      "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                      "frames": 50,
+                      "inventory": [
+                        {
+                          "owner": "wall",
+                          "link": null,
+                          "status": "controlled_fixture",
+                          "shapes": 1,
+                          "plane_shapes": 0
+                        }
+                      ],
+                      "excluded_target_object": "object",
+                      "not_evaluated": [
+                        "held_target_contact",
+                        "source_hand_and_robot_self",
+                        "payload_scene",
+                        "between_command_samples",
+                        "future_scene_motion",
+                        "ik_reachability",
+                        "emitted_command_fk"
+                      ],
+                      "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                      "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                      "planning_timestamp": 0.0,
+                      "minimum_checked_distance_m": 0.006679497252139664,
+                      "fcl_queries": 1,
+                      "plane_queries": 0,
+                      "minimum_plane_signed_distance_m": null,
+                      "frame": 38,
+                      "receiver_link": "receiver_palm",
+                      "obstacle_owner": "wall",
+                      "obstacle_link": null,
+                      "obstacle_name": "wall",
+                      "minimum_distance_m": 0.006679497252139664,
+                      "native_pair_contact_offset_m": 0.007,
+                      "reason": "receiver_hand_non_target_contact_envelope"
+                    }
+                  ],
+                  "open_hand_joint_positions": [
+                    [
+                      0.03999999910593033
+                    ]
+                  ],
+                  "exchange_selection": {
+                    "revision": 1,
+                    "scope": "native_receiver_approach_and_both_arm_endpoint_ik_not_complete_plan",
+                    "accepted": false,
+                    "station_budget": 3,
+                    "ik_query_budget": 9,
+                    "budget_scope": "one_original_receive_pool",
+                    "ik_queries": 3,
+                    "station_attempts": [
+                      {
+                        "axis": "+y",
+                        "translation": [
+                          [
+                            0.0,
+                            0.037010177969932556,
+                            0.0
+                          ]
+                        ],
+                        "norm_m": 0.037010177969932556,
+                        "native_approach": {
+                          "revision": 4,
+                          "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                          "approach_samples": 50,
+                          "pre_grasp_distance_m": 0.1,
+                          "eligible_count": 1,
+                          "requires_complete_command_guard": true,
+                          "candidates": [
+                            {
+                              "pool_index": 0,
+                              "valid": true,
+                              "revision": 4,
+                              "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                              "frames": 50,
+                              "inventory": [
+                                {
+                                  "owner": "wall",
+                                  "link": null,
+                                  "status": "controlled_fixture",
+                                  "shapes": 1,
+                                  "plane_shapes": 0
+                                }
+                              ],
+                              "excluded_target_object": "object",
+                              "not_evaluated": [
+                                "held_target_contact",
+                                "source_hand_and_robot_self",
+                                "payload_scene",
+                                "between_command_samples",
+                                "future_scene_motion",
+                                "ik_reachability",
+                                "emitted_command_fk"
+                              ],
+                              "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                              "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                              "planning_timestamp": 0.0,
+                              "minimum_checked_distance_m": null,
+                              "fcl_queries": 0,
+                              "plane_queries": 0,
+                              "minimum_plane_signed_distance_m": null
+                            }
+                          ],
+                          "open_hand_joint_positions": [
+                            [
+                              0.03999999910593033
+                            ]
+                          ]
+                        },
+                        "endpoint_ik": [
+                          {
+                            "target": "source_exchange",
+                            "control_part": "source_arm",
+                            "solver_success": false,
+                            "finite": true,
+                            "within_runtime_and_solver_limits": true,
+                            "accepted": false
+                          }
+                        ],
+                        "accepted": false,
+                        "pool_index": 0,
+                        "reason": "endpoint_ik_rejected"
+                      },
+                      {
+                        "axis": "-y",
+                        "translation": [
+                          [
+                            0.0,
+                            -0.037010177969932556,
+                            0.0
+                          ]
+                        ],
+                        "norm_m": 0.037010177969932556,
+                        "native_approach": {
+                          "revision": 4,
+                          "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                          "approach_samples": 50,
+                          "pre_grasp_distance_m": 0.1,
+                          "eligible_count": 1,
+                          "requires_complete_command_guard": true,
+                          "candidates": [
+                            {
+                              "pool_index": 0,
+                              "valid": true,
+                              "revision": 4,
+                              "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                              "frames": 50,
+                              "inventory": [
+                                {
+                                  "owner": "wall",
+                                  "link": null,
+                                  "status": "controlled_fixture",
+                                  "shapes": 1,
+                                  "plane_shapes": 0
+                                }
+                              ],
+                              "excluded_target_object": "object",
+                              "not_evaluated": [
+                                "held_target_contact",
+                                "source_hand_and_robot_self",
+                                "payload_scene",
+                                "between_command_samples",
+                                "future_scene_motion",
+                                "ik_reachability",
+                                "emitted_command_fk"
+                              ],
+                              "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                              "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                              "planning_timestamp": 0.0,
+                              "minimum_checked_distance_m": null,
+                              "fcl_queries": 0,
+                              "plane_queries": 0,
+                              "minimum_plane_signed_distance_m": null
+                            }
+                          ],
+                          "open_hand_joint_positions": [
+                            [
+                              0.03999999910593033
+                            ]
+                          ]
+                        },
+                        "endpoint_ik": [
+                          {
+                            "target": "source_exchange",
+                            "control_part": "source_arm",
+                            "solver_success": false,
+                            "finite": true,
+                            "within_runtime_and_solver_limits": true,
+                            "accepted": false
+                          }
+                        ],
+                        "accepted": false,
+                        "pool_index": 0,
+                        "reason": "endpoint_ik_rejected"
+                      },
+                      {
+                        "axis": "+z",
+                        "translation": [
+                          [
+                            0.0,
+                            0.0,
+                            0.04067044332623482
+                          ]
+                        ],
+                        "norm_m": 0.04067044332623482,
+                        "native_approach": {
+                          "revision": 4,
+                          "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                          "approach_samples": 50,
+                          "pre_grasp_distance_m": 0.1,
+                          "eligible_count": 1,
+                          "requires_complete_command_guard": true,
+                          "candidates": [
+                            {
+                              "pool_index": 0,
+                              "valid": true,
+                              "revision": 4,
+                              "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                              "frames": 50,
+                              "inventory": [
+                                {
+                                  "owner": "wall",
+                                  "link": null,
+                                  "status": "controlled_fixture",
+                                  "shapes": 1,
+                                  "plane_shapes": 0
+                                }
+                              ],
+                              "excluded_target_object": "object",
+                              "not_evaluated": [
+                                "held_target_contact",
+                                "source_hand_and_robot_self",
+                                "payload_scene",
+                                "between_command_samples",
+                                "future_scene_motion",
+                                "ik_reachability",
+                                "emitted_command_fk"
+                              ],
+                              "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                              "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                              "planning_timestamp": 0.0,
+                              "minimum_checked_distance_m": null,
+                              "fcl_queries": 0,
+                              "plane_queries": 0,
+                              "minimum_plane_signed_distance_m": null
+                            }
+                          ],
+                          "open_hand_joint_positions": [
+                            [
+                              0.03999999910593033
+                            ]
+                          ]
+                        },
+                        "endpoint_ik": [
+                          {
+                            "target": "source_exchange",
+                            "control_part": "source_arm",
+                            "solver_success": false,
+                            "finite": true,
+                            "within_runtime_and_solver_limits": true,
+                            "accepted": false
+                          }
+                        ],
+                        "accepted": false,
+                        "pool_index": 0,
+                        "reason": "endpoint_ik_rejected"
+                      }
+                    ],
+                    "selected_pool_index": null,
+                    "selected_translation": null,
+                    "requires_complete_shared_plan_and_command_guard": true,
+                    "proposal": {
+                      "revision": 4,
+                      "scope": "native_receiver_suffix_aabb_exchange_proposals",
+                      "coordinate_frame": "planning_robot_arena",
+                      "dominant_root_axis": 0,
+                      "preserved_midpoint_coordinate": 0.0,
+                      "eligible_count": 1,
+                      "requires_complete_command_guard": true,
+                      "not_evaluated": [
+                        "source_hand",
+                        "held_payload",
+                        "ik_reachability"
+                      ],
+                      "suffix_indices_inclusive": [
+                        24,
+                        49
+                      ],
+                      "native_swept_bounds_m": [
+                        [
+                          -0.013660253882408142,
+                          -0.01,
+                          0.4363397341966629
+                        ],
+                        [
+                          0.10026279270648956,
+                          0.01,
+                          0.5136602538824081
+                        ]
+                      ],
+                      "ik_geometric_uncertainty": {
+                        "position_tolerance_m": 1e-05,
+                        "rotation_tolerance_rad": 1e-05,
+                        "hand_radius_m": 0.017320508075688773,
+                        "surface_uncertainty_m": 1.0173205080756167e-05,
+                        "not_a_physical_acceptance_threshold": true
+                      },
+                      "native_hand_contact_offset_upper_m": 0.002,
+                      "near_native_bodies": [
+                        {
+                          "name": "wall",
+                          "contact_offset_m": 0.005,
+                          "arena_bounds_m": [
+                            [
+                              -0.02,
+                              -0.02,
+                              0.43
+                            ],
+                            [
+                              0.02,
+                              0.02,
+                              0.47000000000000003
+                            ]
+                          ],
+                          "contact_envelope_plus_ik_uncertainty_m": 0.007010173205080756
+                        }
+                      ],
+                      "near_native_planes": [],
+                      "proposal_count": 3
+                    },
+                    "reason": "no_qualified_exchange_station"
+                  },
+                  "raw_valid_count": [
+                    1
+                  ],
+                  "sampler_eligible_count": [
+                    1
+                  ],
+                  "original_candidates": [
+                    {
+                      "env_row": 0,
+                      "pool_index": 0,
+                      "pose": [
+                        [
+                          -0.5,
+                          0.0,
+                          -0.8660253882408142,
+                          0.0
+                        ],
+                        [
+                          0.0,
+                          1.0,
+                          0.0,
+                          0.0
+                        ],
+                        [
+                          0.8660253882408142,
+                          0.0,
+                          -0.5,
+                          0.44999998807907104
+                        ],
+                        [
+                          0.0,
+                          0.0,
+                          0.0,
+                          1.0
+                        ]
+                      ],
+                      "cost": 0.0
+                    }
+                  ]
+                },
+                "control_parts": [
+                  "destination_arm"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "plan_success": [
+            false
+          ],
+          "metadata": {
+            "affordance_sample": {
+              "receive_grasp": {
+                "pose_frame": "world",
+                "selected_poses": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "reference_poses": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.5
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "success": [
+                  false
+                ],
+                "env_ids": [
+                  0
+                ],
+                "key": "transfer:receive_grasp",
+                "sampling": null,
+                "candidate_ids": [
+                  -1
+                ],
+                "valid_candidate_counts": [
+                  0
+                ],
+                "unique_candidate_counts": [
+                  0
+                ],
+                "reused": [
+                  false
+                ],
+                "adaptive_grasp": {
+                  "axis_region_policy": "supported_end",
+                  "strategy_indices": [
+                    -1
+                  ],
+                  "approach_directions": [
+                    [
+                      0.0,
+                      0.0,
+                      -1.0
+                    ]
+                  ],
+                  "feasible_counts": [
+                    [
+                      0
+                    ]
+                  ]
+                },
+                "handover_candidate_environment": {
+                  "revision": 4,
+                  "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                  "approach_samples": 50,
+                  "pre_grasp_distance_m": 0.1,
+                  "eligible_count": 1,
+                  "requires_complete_command_guard": true,
+                  "candidates": [
+                    {
+                      "pool_index": 0,
+                      "valid": false,
+                      "revision": 4,
+                      "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                      "frames": 50,
+                      "inventory": [
+                        {
+                          "owner": "wall",
+                          "link": null,
+                          "status": "controlled_fixture",
+                          "shapes": 1,
+                          "plane_shapes": 0
+                        }
+                      ],
+                      "excluded_target_object": "object",
+                      "not_evaluated": [
+                        "held_target_contact",
+                        "source_hand_and_robot_self",
+                        "payload_scene",
+                        "between_command_samples",
+                        "future_scene_motion",
+                        "ik_reachability",
+                        "emitted_command_fk"
+                      ],
+                      "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                      "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                      "planning_timestamp": 0.0,
+                      "minimum_checked_distance_m": 0.006000013351440403,
+                      "fcl_queries": 1,
+                      "plane_queries": 0,
+                      "minimum_plane_signed_distance_m": null,
+                      "frame": 40,
+                      "receiver_link": "receiver_palm",
+                      "obstacle_owner": "wall",
+                      "obstacle_link": null,
+                      "obstacle_name": "wall",
+                      "minimum_distance_m": 0.006000013351440403,
+                      "native_pair_contact_offset_m": 0.007,
+                      "reason": "receiver_hand_non_target_contact_envelope"
+                    }
+                  ],
+                  "open_hand_joint_positions": [
+                    [
+                      0.03999999910593033
+                    ]
+                  ],
+                  "exchange_selection": {
+                    "revision": 1,
+                    "scope": "native_receiver_approach_and_both_arm_endpoint_ik_not_complete_plan",
+                    "accepted": false,
+                    "station_budget": 3,
+                    "ik_query_budget": 9,
+                    "budget_scope": "one_original_receive_pool",
+                    "ik_queries": 3,
+                    "station_attempts": [
+                      {
+                        "axis": "+y",
+                        "translation": [
+                          [
+                            0.0,
+                            0.037010177969932556,
+                            0.0
+                          ]
+                        ],
+                        "norm_m": 0.037010177969932556,
+                        "native_approach": {
+                          "revision": 4,
+                          "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                          "approach_samples": 50,
+                          "pre_grasp_distance_m": 0.1,
+                          "eligible_count": 1,
+                          "requires_complete_command_guard": true,
+                          "candidates": [
+                            {
+                              "pool_index": 0,
+                              "valid": true,
+                              "revision": 4,
+                              "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                              "frames": 50,
+                              "inventory": [
+                                {
+                                  "owner": "wall",
+                                  "link": null,
+                                  "status": "controlled_fixture",
+                                  "shapes": 1,
+                                  "plane_shapes": 0
+                                }
+                              ],
+                              "excluded_target_object": "object",
+                              "not_evaluated": [
+                                "held_target_contact",
+                                "source_hand_and_robot_self",
+                                "payload_scene",
+                                "between_command_samples",
+                                "future_scene_motion",
+                                "ik_reachability",
+                                "emitted_command_fk"
+                              ],
+                              "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                              "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                              "planning_timestamp": 0.0,
+                              "minimum_checked_distance_m": null,
+                              "fcl_queries": 0,
+                              "plane_queries": 0,
+                              "minimum_plane_signed_distance_m": null
+                            }
+                          ],
+                          "open_hand_joint_positions": [
+                            [
+                              0.03999999910593033
+                            ]
+                          ]
+                        },
+                        "endpoint_ik": [
+                          {
+                            "target": "source_exchange",
+                            "control_part": "source_arm",
+                            "solver_success": false,
+                            "finite": true,
+                            "within_runtime_and_solver_limits": true,
+                            "accepted": false
+                          }
+                        ],
+                        "accepted": false,
+                        "pool_index": 0,
+                        "reason": "endpoint_ik_rejected"
+                      },
+                      {
+                        "axis": "-y",
+                        "translation": [
+                          [
+                            0.0,
+                            -0.037010177969932556,
+                            0.0
+                          ]
+                        ],
+                        "norm_m": 0.037010177969932556,
+                        "native_approach": {
+                          "revision": 4,
+                          "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                          "approach_samples": 50,
+                          "pre_grasp_distance_m": 0.1,
+                          "eligible_count": 1,
+                          "requires_complete_command_guard": true,
+                          "candidates": [
+                            {
+                              "pool_index": 0,
+                              "valid": true,
+                              "revision": 4,
+                              "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                              "frames": 50,
+                              "inventory": [
+                                {
+                                  "owner": "wall",
+                                  "link": null,
+                                  "status": "controlled_fixture",
+                                  "shapes": 1,
+                                  "plane_shapes": 0
+                                }
+                              ],
+                              "excluded_target_object": "object",
+                              "not_evaluated": [
+                                "held_target_contact",
+                                "source_hand_and_robot_self",
+                                "payload_scene",
+                                "between_command_samples",
+                                "future_scene_motion",
+                                "ik_reachability",
+                                "emitted_command_fk"
+                              ],
+                              "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                              "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                              "planning_timestamp": 0.0,
+                              "minimum_checked_distance_m": null,
+                              "fcl_queries": 0,
+                              "plane_queries": 0,
+                              "minimum_plane_signed_distance_m": null
+                            }
+                          ],
+                          "open_hand_joint_positions": [
+                            [
+                              0.03999999910593033
+                            ]
+                          ]
+                        },
+                        "endpoint_ik": [
+                          {
+                            "target": "source_exchange",
+                            "control_part": "source_arm",
+                            "solver_success": false,
+                            "finite": true,
+                            "within_runtime_and_solver_limits": true,
+                            "accepted": false
+                          }
+                        ],
+                        "accepted": false,
+                        "pool_index": 0,
+                        "reason": "endpoint_ik_rejected"
+                      },
+                      {
+                        "axis": "+z",
+                        "translation": [
+                          [
+                            0.0,
+                            0.0,
+                            0.03701018914580345
+                          ]
+                        ],
+                        "norm_m": 0.03701018914580345,
+                        "native_approach": {
+                          "revision": 4,
+                          "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                          "approach_samples": 50,
+                          "pre_grasp_distance_m": 0.1,
+                          "eligible_count": 1,
+                          "requires_complete_command_guard": true,
+                          "candidates": [
+                            {
+                              "pool_index": 0,
+                              "valid": true,
+                              "revision": 4,
+                              "scope": "receiver_open_hand_nominal_approach_non_target_scene",
+                              "frames": 50,
+                              "inventory": [
+                                {
+                                  "owner": "wall",
+                                  "link": null,
+                                  "status": "controlled_fixture",
+                                  "shapes": 1,
+                                  "plane_shapes": 0
+                                }
+                              ],
+                              "excluded_target_object": "object",
+                              "not_evaluated": [
+                                "held_target_contact",
+                                "source_hand_and_robot_self",
+                                "payload_scene",
+                                "between_command_samples",
+                                "future_scene_motion",
+                                "ik_reachability",
+                                "emitted_command_fk"
+                              ],
+                              "geometry_source": "native_cooked_finite_shapes_and_analytic_planes",
+                              "clearance_policy": "sum_of_unchanged_native_contact_offsets",
+                              "planning_timestamp": 0.0,
+                              "minimum_checked_distance_m": null,
+                              "fcl_queries": 0,
+                              "plane_queries": 0,
+                              "minimum_plane_signed_distance_m": null
+                            }
+                          ],
+                          "open_hand_joint_positions": [
+                            [
+                              0.03999999910593033
+                            ]
+                          ]
+                        },
+                        "endpoint_ik": [
+                          {
+                            "target": "source_exchange",
+                            "control_part": "source_arm",
+                            "solver_success": false,
+                            "finite": true,
+                            "within_runtime_and_solver_limits": true,
+                            "accepted": false
+                          }
+                        ],
+                        "accepted": false,
+                        "pool_index": 0,
+                        "reason": "endpoint_ik_rejected"
+                      }
+                    ],
+                    "selected_pool_index": null,
+                    "selected_translation": null,
+                    "requires_complete_shared_plan_and_command_guard": true,
+                    "proposal": {
+                      "revision": 4,
+                      "scope": "native_receiver_suffix_aabb_exchange_proposals",
+                      "coordinate_frame": "planning_robot_arena",
+                      "dominant_root_axis": 0,
+                      "preserved_midpoint_coordinate": 0.0,
+                      "eligible_count": 1,
+                      "requires_complete_command_guard": true,
+                      "not_evaluated": [
+                        "source_hand",
+                        "held_payload",
+                        "ik_reachability"
+                      ],
+                      "suffix_indices_inclusive": [
+                        24,
+                        49
+                      ],
+                      "native_swept_bounds_m": [
+                        [
+                          -0.010000000000000002,
+                          -0.01,
+                          0.43999998807907104
+                        ],
+                        [
+                          0.010000000000000002,
+                          0.01,
+                          0.560000011920929
+                        ]
+                      ],
+                      "ik_geometric_uncertainty": {
+                        "position_tolerance_m": 1e-05,
+                        "rotation_tolerance_rad": 1e-05,
+                        "hand_radius_m": 0.017320508075688773,
+                        "surface_uncertainty_m": 1.0173205080756167e-05,
+                        "not_a_physical_acceptance_threshold": true
+                      },
+                      "native_hand_contact_offset_upper_m": 0.002,
+                      "near_native_bodies": [
+                        {
+                          "name": "wall",
+                          "contact_offset_m": 0.005,
+                          "arena_bounds_m": [
+                            [
+                              -0.02,
+                              -0.02,
+                              0.43
+                            ],
+                            [
+                              0.02,
+                              0.02,
+                              0.47000000000000003
+                            ]
+                          ],
+                          "contact_envelope_plus_ik_uncertainty_m": 0.007010173205080756
+                        }
+                      ],
+                      "near_native_planes": [],
+                      "proposal_count": 3
+                    },
+                    "reason": "no_qualified_exchange_station"
+                  },
+                  "raw_valid_count": [
+                    1
+                  ],
+                  "sampler_eligible_count": [
+                    1
+                  ],
+                  "original_candidates": [
+                    {
+                      "env_row": 0,
+                      "pool_index": 0,
+                      "pose": [
+                        [
+                          -1.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        [
+                          0.0,
+                          1.0,
+                          0.0,
+                          0.0
+                        ],
+                        [
+                          0.0,
+                          0.0,
+                          -1.0,
+                          0.44999998807907104
+                        ],
+                        [
+                          0.0,
+                          0.0,
+                          0.0,
+                          1.0
+                        ]
+                      ],
+                      "cost": 0.0
+                    }
+                  ]
+                },
+                "control_parts": [
+                  "destination_arm"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "selected_receive_attempt": [
+        -1
+      ]
+    },
+    "captures": 1,
+    "after_rng": [
+      "dc6cccb034101ad8658165e22d1e561ffde7d48d0f8687d3378e4d3242f032fd",
+      0.3692533101705139,
+      0.25064449386576815
+    ],
+    "grasps_sha256": "9eec9a05237f77ea6aa040f689637c4193d8f90be59db55a973688a6ccac0600",
+    "ik_sha256": "3457ba0a02a526c6600fdff2a47284bbfe2843ded03f657d55a55b98a5cdcb3c",
+    "fk_sha256": "fa4417cd4ce4d0268abe71f8f8ab68ca95b70a0150a8c8112d64bf3f37bc37d5"
+  },
+  "diagnostic_key_renames": {
+    "gen_sim_handover_candidate_environment": "handover_candidate_environment",
+    "gen_sim_handover_environment": "handover_environment"
+  }
+}

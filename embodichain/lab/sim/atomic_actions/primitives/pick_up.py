@@ -19,8 +19,11 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, replace
-from typing import ClassVar
+from collections.abc import Iterator
+from contextvars import ContextVar
+from contextlib import nullcontext
+from dataclasses import dataclass, field, replace
+from typing import ClassVar, Literal, TYPE_CHECKING
 
 import torch
 
@@ -48,7 +51,11 @@ from embodichain.lab.sim.atomic_actions.control import (
     OPEN_COMMAND,
     JointPositionCommand,
 )
-from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
+from embodichain.lab.sim.atomic_actions.core import (
+    AtomicAction,
+    ObjectSemantics,
+    CompletePlanBuilder,
+)
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.goals import (
     ObjectActionGoal,
@@ -66,10 +73,11 @@ from embodichain.lab.sim.atomic_actions.nominal import NominalMotionSource
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
     PlannerDiagnostics,
+    PlanQualification,
     TimedTrajectory,
     normalize_success_mask,
 )
-from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, PlanningRecovery
 from embodichain.lab.sim.atomic_actions.requirements import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
@@ -88,10 +96,25 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
 
+if TYPE_CHECKING:
+    from embodichain.compute.geometry.pouring import PourGraspProjection
+    from embodichain.lab.sim.atomic_actions.pour_projection import (
+        PourGraspProjectionInputs,
+    )
+
+from embodichain.toolkits.graspkit.pg_grasp.constraints import GraspGeometryConstraint
+
+_POUR_PROJECTION: ContextVar[PourGraspProjection | None] = ContextVar(
+    "atomic_pick_pour_projection", default=None
+)
+
 
 @dataclass(frozen=True, slots=True, eq=False)
 class GraspGoal(ObjectActionGoal):
     """Pickup target with an affordance-selected or supplied grasp pose."""
+
+    grasp_constraint: GraspGeometryConstraint | None = field(default=None, kw_only=True)
+    """Optional immutable target-local region/release geometry, not execution policy."""
 
     grasp_xpos: PoseGoalValue | None = None
     """Optional end-effector grasp pose.
@@ -122,6 +145,13 @@ class GraspGoal(ObjectActionGoal):
 
     def __post_init__(self) -> None:
         ObjectActionGoal.__post_init__(self)
+        if (
+            self.grasp_constraint is not None
+            and type(self.grasp_constraint) is not GraspGeometryConstraint
+        ):
+            raise TypeError(
+                "grasp_constraint must use the immutable GraspKit contract."
+            )
         if self.object_pose is not None:
             validate_pose_goal(self.object_pose, "object_pose", allow_waypoints=False)
         if self.grasp_xpos is not None:
@@ -160,6 +190,46 @@ def _validate_single_se3(value: torch.Tensor, name: str) -> None:
 class PickUpOptions(ActionOptions):
     """Per-invocation pickup behavior."""
 
+    linear_segments: bool = field(default=False, kw_only=True)
+    """Explicit source Cartesian approach/lift grid using shared Motion retries."""
+
+    qualify_fixed_grasp: bool = field(default=False, kw_only=True)
+    """Qualify the declared fixed grasp with source native/scene/command checks."""
+
+    constrained_grasp: bool = field(default=False, kw_only=True)
+    """Explicit immutable grasp-filter and source robot-safety qualification."""
+
+    adaptive_grasp: Literal["none", "ordinary", "pour", "handover_source"] = field(
+        default="none", kw_only=True
+    )
+    """Explicit geometric approach/end-region intent; omission keeps shared sampling."""
+
+    measured_preshape: bool = field(default=False, kw_only=True)
+    """Apply the source native measured preshape after complete ordinary planning."""
+
+    native_closing_revision: int | None = field(default=None, kw_only=True)
+    """Require the explicit native nominal closing law (revisions 1 through 9).
+
+    This B1/env0 planning screen uses the current resolved stroke commands and
+    65 samples. It is separate from physical acquisition evidence. Revisions
+    6–9 use the declared bounded depth budget without the global opening envelope.
+    Ordinary Pick and revision-eight end grasps retain their open/precontact
+    scene checks; Pour purpose retains its separate candidate projection and
+    does not borrow those ordinary scene screens. Revisions 8–9 qualify deferred
+    center proposals before their cap. Complete prospective action continuations
+    are distinct from these numeric candidate checks.
+    """
+
+    full_opening_clearance: bool = field(default=False, kw_only=True)
+    """Require the complete object mesh to fit inside the calibrated open pads."""
+
+    require_qualified_approach: bool = field(default=False, kw_only=True)
+    """Require continuous contact geometry and a discrete free-motion entry check.
+
+    Rebuilding or trying another candidate additionally requires PickPlanningRecovery;
+    the requirement alone never enables recovery or widens a planning budget.
+    """
+
     hand_interp_steps: int = 5
     """Number of waypoints for the gripper-close interpolation segment."""
 
@@ -183,6 +253,12 @@ class PickUpOptions(ActionOptions):
 
     approach_alignment_max_angle: float | None = None
     """Optional maximum TCP z-axis deviation from the approach direction."""
+
+    native_scene_trial: bool = field(default=False, kw_only=True)
+    """Permit the explicit native-physics experiment without certifying scene clearance."""
+
+    qualify_downstream_targets: bool = field(default=True, kw_only=True)
+    """Qualify compiler look-ahead targets; explicit False defers the whole tuple."""
 
     downstream_object_target_poses: tuple[PoseGoalValue, ...] = ()
     """Future object poses that must be reachable with the selected grasp."""
@@ -214,6 +290,27 @@ class PickUpOptions(ActionOptions):
     """
 
     def __post_init__(self) -> None:
+        if type(self.measured_preshape) is not bool:
+            raise TypeError("measured_preshape must be bool.")
+        if self.native_closing_revision is not None and (
+            type(self.native_closing_revision) is not int
+            or self.native_closing_revision not in (1, 2, 3, 4, 5, 6, 7, 8, 9)
+        ):
+            raise ValueError(
+                "Unsupported native_closing_revision; implemented revisions are 1 through 9."
+            )
+        if self.adaptive_grasp not in {"none", "ordinary", "pour", "handover_source"}:
+            raise ValueError("Unknown adaptive_grasp intent.")
+        if (
+            type(self.linear_segments) is not bool
+            or type(self.qualify_downstream_targets) is not bool
+            or type(self.native_scene_trial) is not bool
+            or type(self.qualify_fixed_grasp) is not bool
+            or type(self.constrained_grasp) is not bool
+            or type(self.full_opening_clearance) is not bool
+            or type(self.require_qualified_approach) is not bool
+        ):
+            raise TypeError("Pick geometry requirements must be booleans.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if type(self.grasp_settle_steps) is not int or self.grasp_settle_steps < 0:
@@ -296,12 +393,44 @@ class PickUpOptions(ActionOptions):
             )
 
 
+@dataclass(frozen=True, slots=True)
+class PickPlanningRecovery(PlanningRecovery):
+    """Bounded ordinary or native end-grasp Pick recovery sharing one source budget."""
+
+    kind: str = field(default="pick_bounded", init=False)
+    skill_id: str = field(default="pick_up", init=False)
+    revision: int = field(default=1, init=False)
+    constrained_roll: bool = field(default=False, kw_only=True)
+    """Enable source constrained opening/roll alternatives, not ordinary path recovery."""
+    place_continuation: bool = field(default=False, kw_only=True)
+    """Enable the bound source Pick-to-Place forecast and its fixed twelve-candidate cap."""
+    max_candidate_paths: int = field(default=4, init=False)
+    max_contact_refinements: int = field(default=2, init=False)
+    allow_joint_prefix: bool = field(default=True, init=False)
+    allow_curobo_prefix: bool = field(default=True, init=False)
+    retry_filtered_candidates: bool = field(default=True, init=False)
+    retry_raw_candidates: bool = field(default=True, init=False)
+
+    def __post_init__(self) -> None:
+        PlanningRecovery.__post_init__(self)
+        if (
+            type(self.constrained_roll) is not bool
+            or type(self.place_continuation) is not bool
+        ):
+            raise TypeError("Pick recovery selections must be bool.")
+        if self.constrained_roll and self.place_continuation:
+            raise ValueError(
+                "Constrained roll and prospective release recovery are distinct modes."
+            )
+
+
 class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
     """Approach a grasp pose, close the gripper, lift."""
 
     skill_id: ClassVar[str] = "pick_up"
     GoalType: ClassVar[type] = GraspGoal
     OptionsType: ClassVar[type] = PickUpOptions
+    PlanningRecoveryType: ClassVar[type] = PickPlanningRecovery
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             make_manipulation_slot(
@@ -320,6 +449,25 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             ),
         ),
     )
+
+    def plan_complete_request(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+        *,
+        build: CompletePlanBuilder,
+        external_nominal: bool = False,
+    ) -> ActionPlan:
+        """Apply explicitly selected measured preshape after the complete base plan."""
+        if not request.skill_options.measured_preshape:
+            return build(request)
+        from embodichain.lab.sim.atomic_actions.primitives._measured_rigid import (
+            plan_measured_rigid,
+        )
+
+        return plan_measured_rigid(
+            self, request, context, build=build, external_nominal=external_nominal
+        )
 
     def _scene_dependencies(
         self,
@@ -354,6 +502,44 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         hand_grasp_qpos: torch.Tensor,
         interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
+        """Reuse the same invocation's selected adaptive trajectory, if present."""
+        from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+            current_pick_state,
+        )
+
+        state = current_pick_state()
+        if state is not None and state.trajectory is not None:
+            return state.trajectory
+        if state is not None and state.direction is not None:
+            approach_direction = state.direction
+        return self._build_pickup_trajectory(
+            grasp_xpos,
+            start_arm_qpos,
+            last_qpos,
+            motion_policy,
+            options,
+            approach_direction,
+            manipulator,
+            end_effector,
+            hand_open_qpos,
+            hand_grasp_qpos,
+            interpolation_dt,
+        )
+
+    def _build_pickup_trajectory(
+        self,
+        grasp_xpos: torch.Tensor,
+        start_arm_qpos: torch.Tensor,
+        last_qpos: torch.Tensor,
+        motion_policy: MotionPolicy,
+        options: PickUpOptions,
+        approach_direction: torch.Tensor,
+        manipulator: JointPositionTarget,
+        end_effector: JointPositionTarget,
+        hand_open_qpos: torch.Tensor,
+        hand_grasp_qpos: torch.Tensor,
+        interpolation_dt: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
         )
@@ -374,18 +560,17 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             control_part=manipulator.control_part,
             sample_count=n_approach + n_lift,
             interpolation_dt=interpolation_dt,
+            cartesian_keyframes=options.linear_segments,
         )
         if motion_policy.strategy == "motion_gen":
             # Keep the native combined path for the pose-based split. The
             # motion generator resolves backend defaults when no explicit
             # planner options were supplied.
             motion_options.sample_count = None
-        motion_result = self.motion_generator.generate(
-            build_pose_plan_states(
-                torch.stack([pre_grasp_xpos, grasp_xpos, lift_xpos], dim=1)
-            ),
-            options=motion_options,
+        targets = build_pose_plan_states(
+            torch.stack([pre_grasp_xpos, grasp_xpos, lift_xpos], dim=1)
         )
+        motion_result = self.motion_generator.generate(targets, options=motion_options)
         assert isinstance(motion_result.success, torch.Tensor)
         assert motion_result.positions is not None
         assert motion_result.dt is not None
@@ -453,7 +638,485 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             },
         )
 
+    def _validate_segment_motion_recovery(self, request, context) -> None:
+        if (
+            context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or not request.skill_options.linear_segments
+            or request.motion_policy.strategy != "ik_interp"
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or request.motion_policy.segment_continuous_ik_recovery
+        ):
+            raise ValueError(
+                "Pick Cartesian density recovery requires B1/env0 linear ik_interp/off without per-segment continuity."
+            )
+
+    def _validate_planning_requirements(self, request, context) -> None:
+        """Reject known incompatible declarations before invoking any provider."""
+        from embodichain.lab.sim.atomic_actions.primitives._pick_closing import (
+            native_handover_source,
+            native_pour_source,
+        )
+
+        if request.skill_options.linear_segments and (
+            context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or request.motion_policy.strategy != "ik_interp"
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or request.motion_policy.interpolation_mode != "fixed_grid"
+            or request.motion_policy.ik_seed_mode != "sequential"
+        ):
+            raise ValueError(
+                "Pick Cartesian segments require explicit B1/env0 fixed-grid sequential ik_interp/off."
+            )
+        fixed = request.skill_options.qualify_fixed_grasp
+        if fixed and (
+            request.skill_options.fixed_object_to_eef is None
+            or not isinstance(request.goal.semantics.affordance, AntipodalAffordance)
+            or request.skill_options.full_opening_clearance
+            or request.goal.grasp_xpos is not None
+            or request.goal.object_pose is not None
+            or request.skill_options.constrained_grasp
+            or request.skill_options.adaptive_grasp != "none"
+            or request.skill_options.rotate_upright is not None
+            or request.skill_options.obj_upright_direction is not None
+            or request.skill_options.pick_object_part != "center"
+            or context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or request.motion_policy.strategy != "ik_interp"
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or request.skill_options.native_closing_revision is None
+            or self.planning_services.free_motion_query is None
+            or request.skill_options.require_qualified_approach
+        ):
+            raise ValueError(
+                "Fixed Pick qualification requires its exact B1/env0 fixed grasp, native closing and scene query."
+            )
+        if (
+            request.skill_options.native_scene_trial
+            and not request.skill_options.require_qualified_approach
+        ):
+            raise ValueError(
+                "Native scene trial requires explicit ordinary approach qualification."
+            )
+        constrained = request.skill_options.constrained_grasp
+        if constrained:
+            from embodichain.lab.sim.atomic_actions.primitives._pick_constrained import (
+                owns_constrained_pick,
+            )
+
+            if (
+                not owns_constrained_pick(request, context, self.motion_generator)
+                or request.skill_options.adaptive_grasp != "none"
+                or request.skill_options.require_qualified_approach
+            ):
+                raise ValueError(
+                    "Constrained Pick requires exact B1/env0 center sampling and explicit filter geometry."
+                )
+        elif request.goal.grasp_constraint is not None:
+            raise ValueError(
+                "Grasp constraints require explicit constrained_grasp options."
+            )
+        recovery = request.recovery_policy.planning_recovery
+        if (
+            recovery is not None
+            and recovery.place_continuation
+            and (
+                self.planning_services.place_continuation_provider is None
+                or context.batch_size != 1
+                or context.env_ids.tolist() != [0]
+                or request.skill_options.linear_segments
+                or request.skill_options.adaptive_grasp in {"pour", "handover_source"}
+                or fixed
+                or constrained
+                or request.skill_options.rotate_upright is not None
+                or request.skill_options.obj_upright_direction is not None
+                or request.skill_options.pick_object_part != "center"
+                or request.motion_policy.strategy != "ik_interp"
+                or request.motion_policy.dynamic_collision_mode != "off"
+            )
+        ):
+            raise ValueError(
+                "Pick place_continuation recovery requires its exact declared B1 source and provider."
+            )
+        if constrained and recovery is None:
+            raise ValueError(
+                "Constrained safety requires its explicit bounded roll policy."
+            )
+        if recovery is not None and recovery.constrained_roll != constrained:
+            raise ValueError(
+                "Constrained Pick must use its exact declared roll recovery mode."
+            )
+        native_source = native_handover_source(request) or native_pour_source(request)
+        if native_source and (
+            context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or request.goal.object_pose is not None
+            or request.motion_policy.strategy != "ik_interp"
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or request.skill_options.require_qualified_approach
+        ):
+            raise ValueError(
+                "Native end/Pour Pick requires B1/env0 sampled ik_interp/off without ordinary path qualification."
+            )
+        if (
+            request.recovery_policy.planning_recovery is not None
+            and not request.skill_options.require_qualified_approach
+            and not native_source
+            and not constrained
+            and not fixed
+            and not recovery.place_continuation
+        ):
+            raise ValueError(
+                "PickPlanningRecovery requires a qualified approach requirement."
+            )
+        if request.skill_options.require_qualified_approach and (
+            context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or request.skill_options.adaptive_grasp != "ordinary"
+            or request.motion_policy.strategy != "ik_interp"
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or request.motion_policy.interpolation_mode != "fixed_grid"
+            or request.motion_policy.ik_seed_mode != "sequential"
+            or self.planning_services.free_motion_query is None
+        ):
+            raise ValueError(
+                "Qualified ordinary Pick requires B1/env0, ordinary sampling, fixed-grid sequential ik_interp/off and a free-motion query."
+            )
+        if request.skill_options.adaptive_grasp != "none" and (
+            request.goal.grasp_xpos is not None
+            or request.skill_options.fixed_object_to_eef is not None
+            or request.skill_options.pick_object_part != "center"
+            or request.skill_options.rotate_upright is not None
+            or request.skill_options.obj_upright_direction is not None
+        ):
+            raise ValueError(
+                "Adaptive Pick requires unconstrained center-sampled grasps."
+            )
+        from embodichain.lab.sim.atomic_actions.primitives._pick_closing import (
+            validate_closing_request,
+        )
+
+        validate_closing_request(self, request, context)
+
     def _plan(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Prepare an optional owned numeric constraint before candidate IK."""
+        self._validate_planning_requirements(request, context)
+        prepared_projection = self._prepare_pour_projection(request, context)
+        from embodichain.lab.sim.atomic_actions.pour_projection import (
+            PourGraspProjectionInputs,
+        )
+
+        inputs = (
+            prepared_projection
+            if type(prepared_projection) is PourGraspProjectionInputs
+            else None
+        )
+        projection = inputs.projection if inputs is not None else prepared_projection
+        token = _POUR_PROJECTION.set(projection)
+        from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+            pick_planning_scope,
+        )
+        from embodichain.lab.sim.atomic_actions.primitives._pick_closing import (
+            closing_query_scope,
+        )
+        from embodichain.lab.sim.motion.mesh_collision import (
+            robot_collision_query_scope,
+        )
+
+        scoped_robot_queries = (
+            request.skill_options.native_closing_revision is not None
+            or request.skill_options.require_qualified_approach
+            or request.skill_options.constrained_grasp
+            or self.planning_services.place_continuation_provider is not None
+        )
+
+        try:
+            with (
+                (
+                    robot_collision_query_scope()
+                    if scoped_robot_queries
+                    else nullcontext()
+                ),
+                closing_query_scope(self, request, context) as closing,
+                pick_planning_scope(request) as state,
+            ):
+                state.closing_query = closing
+                state.pour_inputs = inputs
+                if closing is not None:
+                    state.object_pose = closing.object_pose_at_capture.clone()
+                if request.skill_options.qualify_fixed_grasp:
+                    from embodichain.lab.sim.atomic_actions.primitives._pick_fixed import (
+                        plan_fixed_grasp,
+                    )
+
+                    return plan_fixed_grasp(self, request, context, state)
+                plan = self._finish_native_plan(
+                    request, context, self._plan_pick(request, context)
+                )
+                if request.skill_options.constrained_grasp:
+                    from embodichain.lab.sim.atomic_actions.primitives._pick_constrained import (
+                        recover_constrained_pick,
+                    )
+
+                    if request.recovery_policy.planning_recovery is None:
+                        raise ValueError(
+                            "Constrained safety requires its explicit bounded roll policy."
+                        )
+                    plan = recover_constrained_pick(self, request, context, plan)
+                    if (
+                        self.planning_services.free_motion_query is not None
+                        and request.goal.object_pose is None
+                        and state.raw_candidate_routes
+                        and not plan.plan_success.any()
+                    ):
+                        from embodichain.lab.sim.atomic_actions.primitives._pick_recovery import (
+                            retry_raw_candidates,
+                        )
+
+                        plan = retry_raw_candidates(self, request, context, plan, state)
+                    return self._finish_native_plan(request, context, plan)
+                from embodichain.lab.sim.atomic_actions.primitives._place_continuation import (
+                    prepare_pick_continuation,
+                    eligible,
+                    recover,
+                )
+
+                preview = prepare_pick_continuation(self, request, context)
+                if eligible(request, context, state, preview):
+                    recovery = request.recovery_policy.planning_recovery
+                    if recovery is None or not recovery.place_continuation:
+                        raise ValueError(
+                            "Bound Pick continuation requires explicit place_continuation recovery."
+                        )
+                    plan = self._finish_native_plan(
+                        request,
+                        context,
+                        recover(self, request, context, plan, state, preview),
+                    )
+                if request.skill_options.require_qualified_approach:
+                    from embodichain.lab.sim.atomic_actions.primitives._pick_path import (
+                        qualify_pick_path,
+                    )
+
+                    plan = self._finish_native_plan(
+                        request,
+                        context,
+                        qualify_pick_path(self, request, context, plan, state),
+                    )
+                    if (
+                        request.recovery_policy.planning_recovery is not None
+                        and not plan.plan_success.all()
+                    ):
+                        self._expand_native_pick_candidates(state)
+                        from embodichain.lab.sim.atomic_actions.primitives._pick_recovery import (
+                            retry_filtered_candidates,
+                            retry_raw_candidates,
+                        )
+
+                        plan = retry_filtered_candidates(
+                            self, request, context, plan, state
+                        )
+                        if state.raw_candidate_routes and not plan.plan_success.any():
+                            plan = retry_raw_candidates(
+                                self, request, context, plan, state
+                            )
+                elif request.recovery_policy.planning_recovery is not None:
+                    # Nonordinary native routes do not own ordinary-path
+                    # reconstruction. A Pour projection excludes raw recovery.
+                    from embodichain.lab.sim.atomic_actions.primitives._pick_recovery import (
+                        retry_raw_candidates,
+                    )
+
+                    if (
+                        projection is None
+                        and self.planning_services.free_motion_query is not None
+                        and state.raw_candidate_routes
+                        and not plan.plan_success.any()
+                    ):
+                        plan = retry_raw_candidates(self, request, context, plan, state)
+                if (
+                    closing is not None
+                    and not request.skill_options.require_qualified_approach
+                ):
+                    plan = self._finish_native_plan(request, context, plan)
+                return plan
+        finally:
+            _POUR_PROJECTION.reset(token)
+
+    def _finish_native_plan(self, request, context, plan):
+        from embodichain.lab.sim.atomic_actions.primitives._pick_closing import (
+            finish_closing_plan,
+        )
+
+        from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+            current_pick_state,
+        )
+        from embodichain.lab.sim.atomic_actions.primitives._pick_audit import (
+            finish_audit,
+        )
+
+        return finish_audit(
+            finish_closing_plan(self, request, context, plan), current_pick_state()
+        )
+
+    def _qualify_final_plan(self, request, context, plan):
+        from embodichain.lab.sim.atomic_actions.primitives._pick_closing import (
+            closing_query_scope,
+            inspect_closing_plan,
+        )
+
+        self._validate_planning_requirements(request, context)
+        trial = (
+            request.skill_options.native_scene_trial
+            and "gen_sim_native_pick_exploration" in plan.diagnostics.metadata
+        )
+        if trial:
+            from embodichain.lab.sim.atomic_actions.primitives._pick_path import (
+                qualify_trial_after_transform,
+            )
+
+            return qualify_trial_after_transform(self, request, context, plan)
+        elif (
+            request.skill_options.constrained_grasp
+            or request.skill_options.qualify_fixed_grasp
+        ):
+            from embodichain.lab.sim.atomic_actions.primitives._manipulation_checks import (
+                inspect_manipulation_plan,
+            )
+
+            checked = inspect_manipulation_plan(self.robot, request, context, plan)
+            diagnostics = replace(
+                plan.diagnostics,
+                metadata={**plan.diagnostics.metadata, "gen_sim_pick_safety": checked},
+            )
+            approach = PlanQualification(
+                plan.plan_success & bool(checked["valid"]), diagnostics
+            )
+
+        else:
+            approach = self._qualify_approach_after_transform(request, context, plan)
+        if request.skill_options.native_closing_revision is None:
+            return approach
+        if approach is not None and not approach.valid_mask.any():
+            # The actual command/path gate already rejected every row. Do not
+            # capture native contact geometry or replace the first failure.
+            return approach
+        with closing_query_scope(self, request, context) as query:
+            closing = inspect_closing_plan(self, request, context, plan, query)
+        if approach is None:
+            return closing
+        return PlanQualification(
+            approach.valid_mask & closing.valid_mask,
+            replace(
+                closing.diagnostics,
+                metadata={
+                    **(approach.diagnostics.metadata if approach.diagnostics else {}),
+                    **closing.diagnostics.metadata,
+                },
+            ),
+        )
+
+    def _qualify_approach_after_transform(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+        plan: ActionPlan,
+    ) -> PlanQualification | None:
+        """Recheck transformed samples without permitting a recovery attempt."""
+        if not request.skill_options.require_qualified_approach:
+            return None
+        if not plan.plan_success.any():
+            return PlanQualification(plan.plan_success, plan.diagnostics)
+        from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+            PickPlanningState,
+        )
+        from embodichain.lab.sim.atomic_actions.primitives._pick_path import (
+            qualify_pick_path,
+        )
+
+        sampled = plan.diagnostics.metadata.get("affordance_sample", {}).get(
+            "grasp", {}
+        )
+        directions = sampled.get("adaptive_grasp", {}).get("approach_directions")
+        if directions is None:
+            raise ValueError(
+                "Transformed ordinary Pick lost its selected approach geometry."
+            )
+        selected = replace(
+            request,
+            recovery_policy=replace(request.recovery_policy, planning_recovery=None),
+        )
+        state = PickPlanningState(
+            selected,
+            direction=torch.as_tensor(
+                directions, device=self.device, dtype=context.robot.qpos.dtype
+            ),
+        )
+        # The disabled declaration rejects before either contact or prefix
+        # generation. Only the certificate crosses the final-hook boundary.
+        checked = qualify_pick_path(
+            self, selected, context, plan, state, final_only=True
+        )
+        return PlanQualification(checked.plan_success, checked.diagnostics)
+
+    def _prepare_pour_projection(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+    ) -> PourGraspProjection | PourGraspProjectionInputs | None:
+        provider = self.planning_services.pour_grasp_projection_provider
+        if provider is None:
+            return None
+        projection = provider.prepare(request, context)
+        if projection is not None:
+            from embodichain.compute.geometry.pouring import PourGraspProjection
+
+            from embodichain.lab.sim.atomic_actions.pour_projection import (
+                PourGraspProjectionInputs,
+            )
+
+            if type(projection) not in (PourGraspProjection, PourGraspProjectionInputs):
+                raise TypeError("Pick requires owned numeric Pour projection inputs.")
+            if type(projection) is PourGraspProjectionInputs and (
+                projection.pick_id != request.invocation_id
+                or projection.object_id != request.goal.semantics.entity_id
+                or len(request.skill_options.downstream_object_target_poses) != 2
+            ):
+                raise ValueError(
+                    "Bound Pour projection requires its exact Pick identity and two-target suffix."
+                )
+            if context.batch_size != 1:
+                raise ValueError("Pour candidate projection supports only B=1.")
+            if (
+                request.goal.grasp_xpos is not None
+                or request.skill_options.fixed_object_to_eef is not None
+            ):
+                raise ValueError(
+                    "Pour candidate projection requires sampled Pick candidates."
+                )
+        return projection
+
+    def _prepare_request(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+    ) -> ResolvedActionRequest[GraspGoal, PickUpOptions]:
+        prepared = super()._prepare_request(request, context)
+        if not prepared.skill_options.qualify_downstream_targets:
+            prepared = replace(
+                prepared,
+                skill_options=replace(
+                    prepared.skill_options, downstream_object_target_poses=()
+                ),
+            )
+        return prepared
+
+    def _plan_pick(
         self,
         request: ResolvedActionRequest[GraspGoal, PickUpOptions],
         context: PlanningContext,
@@ -632,6 +1295,24 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         nominal_source: NominalMotionSource,
     ) -> ActionPlan:
         """Assemble a Pick from an explicitly supplied external motion."""
+        if (
+            request.skill_options.adaptive_grasp != "none"
+            or request.skill_options.constrained_grasp
+            or request.skill_options.qualify_fixed_grasp
+            or request.skill_options.linear_segments
+            or request.goal.grasp_constraint is not None
+            or request.skill_options.full_opening_clearance
+            or request.skill_options.native_closing_revision is not None
+            or request.skill_options.require_qualified_approach
+            or request.recovery_policy.planning_recovery is not None
+        ):
+            raise ValueError(
+                "External nominal Pick cannot bypass explicit sampling/path qualification or recovery."
+            )
+        if self._prepare_pour_projection(request, context) is not None:
+            raise ValueError(
+                "External nominal Pick cannot bypass required candidate-dependent Pour targets."
+            )
         target = self.require_goal(request)
         motion = self._validate_nominal_motion(
             request, context, nominal_source, segments=("approach", "close", "lift")
@@ -829,6 +1510,52 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         if not isinstance(affordance, AntipodalAffordance):
             raise ValueError("PickUp grasp sampling requires AntipodalAffordance.")
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+            current_pick_state,
+        )
+
+        state = current_pick_state()
+        if (
+            state is not None
+            and state.closing_query is not None
+            and state.closing_query.revision >= 5
+            and not options.constrained_grasp
+        ):
+            from embodichain.lab.sim.atomic_actions.primitives._pick_proposals import (
+                NativeGraspView,
+            )
+
+            generator = NativeGraspView(generator, state.closing_query)
+        if options.constrained_grasp:
+            from embodichain.toolkits.graspkit.pg_grasp.constraints import (
+                ConstrainedGraspPoseGenerator,
+            )
+
+            generator = ConstrainedGraspPoseGenerator(
+                generator, state.request.goal.grasp_constraint
+            )
+        if options.full_opening_clearance and not options.constrained_grasp:
+            from embodichain.toolkits.graspkit.pg_grasp.opening import (
+                OpeningEnvelopeGraspPoseGenerator,
+            )
+
+            generator = OpeningEnvelopeGraspPoseGenerator(generator)
+        if options.adaptive_grasp != "none":
+            from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+                adaptive_pick_sample,
+            )
+
+            return adaptive_pick_sample(
+                self,
+                semantics,
+                object_pose,
+                start_qpos,
+                manipulator,
+                generator,
+                options,
+                context,
+                sample_key=sample_key,
+            )
         obj_longest_axis = None
         is_positive_part = True
         if options.pick_object_part != "center":
@@ -843,6 +1570,54 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             obj_longest_axis=obj_longest_axis,
             is_positive_part=is_positive_part,
         )
+        if state is not None and options.constrained_grasp:
+            # Preserve the geometry pool before endpoint IK discards branches.
+            # Bounded full-path recovery runs only after constrained roll safety
+            # fails, and retains its independent shared retry/RNG accounting.
+            state.raw_candidate_routes.append(
+                (0, candidates, approach_direction.reshape(1, 3).clone())
+            )
+        if (
+            state is not None
+            and options.constrained_grasp
+            and not candidates.valid.any()
+            and torch.equal(
+                approach_direction.reshape(-1, 3),
+                approach_direction.new_tensor([[0.0, 0.0, -1.0]]),
+            )
+        ):
+            from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+                adaptive_pick_sample,
+            )
+            from embodichain.lab.sim.atomic_actions.primitives._grasp_sampling import (
+                observed_axis,
+            )
+            from embodichain.compute.geometry.gripper import adaptive_grasp_approaches
+            from embodichain.lab.sim.motion.search import PlanningRandomState
+
+            axis = observed_axis(affordance, object_pose)
+            tcp = self.robot.compute_fk(
+                qpos=start_qpos, name=manipulator.control_part, to_matrix=True
+            )
+            choices = adaptive_grasp_approaches(
+                axis, object_pose, tcp, ends=False, purpose="ordinary"
+            )[1:]
+            checkpoint = PlanningRandomState.capture((self.device, self.robot.device))
+            try:
+                return adaptive_pick_sample(
+                    self,
+                    semantics,
+                    object_pose,
+                    start_qpos,
+                    manipulator,
+                    generator,
+                    options,
+                    context,
+                    sample_key=sample_key,
+                    choices_override=choices,
+                )
+            finally:
+                checkpoint.restore()
         poses, ik_success = self._select_feasible_grasp_variants(
             candidates.poses,
             start_qpos,
@@ -856,6 +1631,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             costs=candidates.costs,
             valid=candidates.valid & ik_success,
         )
+        if state is not None:
+            state.candidates = feasible
         return affordance.sample_candidates(
             feasible,
             sampling=context.affordance_sampling,
@@ -865,6 +1642,197 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         )
 
     def _select_feasible_grasp_variants(
+        self,
+        grasp_xpos: torch.Tensor,
+        start_qpos: torch.Tensor,
+        object_poses: torch.Tensor,
+        manipulator: JointPositionTarget,
+        options: PickUpOptions,
+        approach_direction: torch.Tensor,
+        *,
+        candidate_costs: torch.Tensor | None = None,
+        candidate_limit: int | None = None,
+        first_feasible: bool = False,
+        candidate_route: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Prefilter grasp columns, leaving IK and roll selection to shared PickUp."""
+        from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+            current_pick_state,
+            _depth_random_scope,
+        )
+        from embodichain.lab.sim.motion.search import PlanningRandomState
+
+        selection = current_pick_state()
+        checkpoint = (
+            PlanningRandomState.capture((grasp_xpos.device,))
+            if first_feasible and candidate_route is not None
+            else None
+        )
+        if selection is not None:
+            selection.object_pose = object_poses
+        if candidate_limit is None and (
+            (options.adaptive_grasp == "none" and not options.constrained_grasp)
+            or options.rotate_upright is not None
+            or options.approach_alignment_max_angle is None
+        ):
+            return self._select_grasp_variants(
+                grasp_xpos,
+                start_qpos,
+                object_poses,
+                manipulator,
+                options,
+                approach_direction,
+            )
+        mirrored = grasp_xpos.clone()
+        mirrored[..., :3, :2] *= -1
+        variants = torch.stack((grasp_xpos, mirrored), dim=2)
+        eef_variants = variants @ options.grasp_frame_to_eef.to(
+            device=self.device, dtype=grasp_xpos.dtype
+        )
+        # Legacy callers retain their IK population and random draws. Native
+        # proposals qualify both final TCP rolls before spending candidate slots.
+        aligned = self._direction_alignment_mask(
+            eef_variants, options, approach_direction
+        )
+        # Keep the full environment axis and both roll variants of a retained
+        # candidate. Only columns rejected by every row can be removed safely.
+        keep = aligned.any(dim=(0, 2))
+        indices = torch.nonzero(keep, as_tuple=False).flatten()
+        selected = eef_variants[:, :, 0].clone()
+        success = torch.zeros(
+            grasp_xpos.shape[:2], dtype=torch.bool, device=self.device
+        )
+        if candidate_limit is not None:
+            if (
+                grasp_xpos.shape[0] != 1
+                or candidate_costs is None
+                or candidate_costs.shape != grasp_xpos.shape[:2]
+            ):
+                raise ValueError(
+                    "Native candidate ranking requires B1 and aligned costs."
+                )
+            eligible = indices[torch.isfinite(candidate_costs[0, indices])]
+            order = torch.argsort(candidate_costs[0, eligible], stable=True)
+            ranked = eligible[order]
+            retained, count, checked = [], 0, 0
+            while checked < len(ranked) and count < candidate_limit:
+                width = (
+                    min(50, candidate_limit - count)
+                    if first_feasible
+                    else candidate_limit - count
+                )
+                stop = min(len(ranked), checked + width)
+                chunk = ranked[checked:stop]
+                qualified = self._approach_alignment_mask(
+                    eef_variants[:, chunk], options, approach_direction
+                ).any(dim=(0, 2))
+                accepted = chunk[qualified]
+                retained.append(accepted)
+                count += len(accepted)
+                checked = stop
+                if first_feasible and len(accepted):
+                    poses, valid = self._select_grasp_variants(
+                        grasp_xpos[:, accepted],
+                        start_qpos,
+                        object_poses,
+                        manipulator,
+                        options,
+                        approach_direction,
+                    )
+                    selected[:, accepted] = poses
+                    success[:, accepted] = valid
+                    if valid.any():
+                        break
+            indices = torch.cat(retained) if retained else ranked[:0]
+            if selection is not None:
+                selection.closing_scene_checks.append(
+                    {
+                        "stage": "native_candidate_limit",
+                        "raw_candidates": grasp_xpos.shape[1],
+                        "qualified_before_limit": len(indices),
+                        "qualification_exhaustive": checked == len(ranked),
+                        "native_candidates_queried": checked,
+                        "direction_eligible_candidates": len(ranked),
+                        "retained": len(indices),
+                        "limit": candidate_limit,
+                        "physical_evidence": False,
+                        "first_feasible_batch": first_feasible,
+                    }
+                )
+            if first_feasible:
+                if (
+                    selection is not None
+                    and candidate_route is not None
+                    and success.any()
+                    and checked < len(ranked)
+                    and count < candidate_limit
+                ):
+
+                    def expand():
+                        with _depth_random_scope(checkpoint, grasp_xpos.device):
+                            poses, valid = self._select_feasible_grasp_variants(
+                                grasp_xpos,
+                                start_qpos,
+                                object_poses,
+                                manipulator,
+                                options,
+                                approach_direction,
+                                candidate_costs=candidate_costs,
+                                candidate_limit=candidate_limit,
+                            )
+                        return AffordancePoseCandidates(poses, candidate_costs, valid)
+
+                    selection.native_candidate_expanders[candidate_route] = expand
+                return selected, success
+        if len(indices):
+            poses, valid = self._select_grasp_variants(
+                grasp_xpos[:, indices],
+                start_qpos,
+                object_poses,
+                manipulator,
+                options,
+                approach_direction,
+            )
+            selected[:, indices] = poses
+            success[:, indices] = valid
+        return selected, success
+
+    def _expand_native_pick_candidates(self, selection) -> None:
+        """Restore the original filtered recovery population only after path failure."""
+        if selection.depth_recovery_attempts >= 4:
+            return
+        for index, (strategy, pool, direction) in enumerate(selection.candidate_routes):
+            expand = selection.native_candidate_expanders.pop(strategy, None)
+            if expand is not None:
+                selection.candidate_routes[index] = (strategy, expand(), direction)
+
+    def _select_grasp_variants(
+        self,
+        grasp_xpos: torch.Tensor,
+        start_qpos: torch.Tensor,
+        object_poses: torch.Tensor,
+        manipulator: JointPositionTarget,
+        options: PickUpOptions,
+        approach_direction: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+            current_pick_state,
+        )
+        from embodichain.lab.sim.atomic_actions.primitives._pick_audit import (
+            candidate_group,
+        )
+
+        with candidate_group(current_pick_state(), object_poses):
+            return self._select_grasp_variants_core(
+                grasp_xpos,
+                start_qpos,
+                object_poses,
+                manipulator,
+                options,
+                approach_direction,
+            )
+
+    def _select_grasp_variants_core(
         self,
         grasp_xpos: torch.Tensor,
         start_qpos: torch.Tensor,
@@ -928,23 +1896,9 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         # MoveHeldObject begins after the lift, so screen its target from the
         # same joint state that the execution stream will use.
         downstream_seed = lift_qpos
-        for object_target_pose in options.downstream_object_target_poses:
-            object_target_pose = object_target_pose.to(
-                device=self.device, dtype=torch.float32
-            )
-            if object_target_pose.shape == (4, 4):
-                object_target_pose = object_target_pose.unsqueeze(0).repeat(
-                    num_envs, 1, 1
-                )
-            if object_target_pose.shape != (num_envs, 4, 4):
-                raise ValueError(
-                    "downstream_object_target_poses entries must have shape "
-                    f"(4, 4) or ({num_envs}, 4, 4), but got "
-                    f"{object_target_pose.shape}."
-                )
-            downstream_eef_variants = torch.matmul(
-                object_target_pose[:, None, None], object_to_eef_variants
-            )
+        for downstream_eef_variants in self._iter_downstream_eef_targets(
+            object_to_eef_variants, options
+        ):
             downstream_success, downstream_seed = self._compute_batch_candidate_ik(
                 downstream_eef_variants, downstream_seed, manipulator
             )
@@ -1002,7 +1956,72 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         ik_success = pickup_success[env_idx, pose_idx, best_variant_idx]
         return selected_grasp_xpos, ik_success
 
-    def _approach_alignment_mask(
+    def _iter_downstream_eef_targets(
+        self, object_to_eef_variants: torch.Tensor, options: PickUpOptions
+    ) -> Iterator[torch.Tensor]:
+        """Preserve downstream candidate/role order before selecting a grasp."""
+        projection = _POUR_PROJECTION.get()
+        if projection is not None:
+            from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+                current_pick_state,
+            )
+            from embodichain.lab.sim.atomic_actions.primitives._pick_audit import (
+                projected_targets,
+            )
+
+            yield from projected_targets(
+                current_pick_state(), projection, object_to_eef_variants
+            )
+            return
+        num_envs = object_to_eef_variants.shape[0]
+        for object_target_pose in options.downstream_object_target_poses:
+            object_target_pose = object_target_pose.to(
+                device=self.device, dtype=torch.float32
+            )
+            if object_target_pose.shape == (4, 4):
+                object_target_pose = object_target_pose.unsqueeze(0).repeat(
+                    num_envs, 1, 1
+                )
+            if object_target_pose.shape != (num_envs, 4, 4):
+                raise ValueError(
+                    "downstream_object_target_poses entries must have shape "
+                    f"(4, 4) or ({num_envs}, 4, 4), but got {object_target_pose.shape}."
+                )
+            yield torch.matmul(
+                object_target_pose[:, None, None], object_to_eef_variants
+            )
+
+    def _approach_alignment_mask(self, grasp_poses, options, approach_direction):
+        from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+            current_pick_state,
+        )
+
+        aligned = self._direction_alignment_mask(
+            grasp_poses, options, approach_direction
+        )
+        state = current_pick_state()
+        if state is not None and state.closing_query is not None:
+            aligned &= state.closing_query.mask(grasp_poses, state.object_pose)
+        projection = _POUR_PROJECTION.get()
+        if projection is not None:
+            if state is None or state.object_pose is None:
+                raise ValueError("Pour look-ahead requires the exact Pick object pose.")
+            aligned &= projection.valid_mask(
+                pose_inv(state.object_pose)[:, None, None] @ grasp_poses
+            )
+        if (
+            state is not None
+            and state.active_ik_audit is not None
+            and not state.active_ik_audit.get("omitted")
+        ):
+            from embodichain.lab.sim.atomic_actions.primitives._pick_audit import (
+                tensor_record,
+            )
+
+            state.active_ik_audit["alignment_mask"] = tensor_record(aligned)
+        return aligned
+
+    def _direction_alignment_mask(
         self,
         grasp_poses: torch.Tensor,
         options: PickUpOptions,
@@ -1030,25 +2049,47 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         manipulator: JointPositionTarget,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Solve candidate IK poses while preserving the candidate dimensions."""
-        num_envs, n_pose, n_variant = poses.shape[:3]
-        flat_poses = poses.reshape(num_envs, n_pose * n_variant, 4, 4)
-        if joint_seed.dim() == 2:
-            joint_seed = joint_seed[:, None, None, :].expand(-1, n_pose, n_variant, -1)
-        manipulator_dof = len(manipulator.joint_ids)
-        flat_seed = joint_seed.reshape(num_envs, n_pose * n_variant, manipulator_dof)
-        is_success, qpos = self.robot.compute_batch_ik(
-            pose=flat_poses,
-            name=manipulator.control_part,
-            joint_seed=flat_seed,
-        )
-        return (
-            is_success.to(device=self.device, dtype=torch.bool).reshape(
-                num_envs,
-                n_pose,
-                n_variant,
-            ),
-            qpos.reshape(num_envs, n_pose, n_variant, manipulator_dof),
-        )
+        from embodichain.lab.sim.motion.cpu_threads import candidate_ik_threads
+
+        with candidate_ik_threads(self.robot, manipulator.control_part, poses):
+            num_envs, n_pose, n_variant = poses.shape[:3]
+            flat_poses = poses.reshape(num_envs, n_pose * n_variant, 4, 4)
+            if joint_seed.dim() == 2:
+                joint_seed = joint_seed[:, None, None, :].expand(
+                    -1, n_pose, n_variant, -1
+                )
+            manipulator_dof = len(manipulator.joint_ids)
+            flat_seed = joint_seed.reshape(
+                num_envs, n_pose * n_variant, manipulator_dof
+            )
+            from embodichain.lab.sim.atomic_actions.primitives._pick_adaptive import (
+                current_pick_state,
+            )
+            from embodichain.lab.sim.atomic_actions.primitives._pick_audit import (
+                before_ik,
+                tensor_record,
+            )
+
+            record = before_ik(current_pick_state(), poses, joint_seed, manipulator)
+            is_success, qpos = self.robot.compute_batch_ik(
+                pose=flat_poses,
+                name=manipulator.control_part,
+                joint_seed=flat_seed,
+            )
+            result = (
+                is_success.to(device=self.device, dtype=torch.bool).reshape(
+                    num_envs,
+                    n_pose,
+                    n_variant,
+                ),
+                qpos.reshape(num_envs, n_pose, n_variant, manipulator_dof),
+            )
+            if record is not None:
+                record.update(
+                    raw_success=tensor_record(result[0]),
+                    output_qpos=tensor_record(result[1]),
+                )
+            return result
 
     def _upright_adjusted_grasp_poses(
         self,
@@ -1087,4 +2128,4 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         return adjusted_grasp_xpos
 
 
-__all__ = ["GraspGoal", "PickUp", "PickUpOptions"]
+__all__ = ["GraspGoal", "PickUp", "PickUpOptions", "PickPlanningRecovery"]

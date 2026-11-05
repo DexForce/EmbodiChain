@@ -312,9 +312,23 @@ def test_grip_trace_keeps_explicit_loss_and_nonfinite_accounting():
     source = ContactSource()
     reader = observer(source, capacity=1)
     reader(query(), context())
+    latest = reader.snapshot_latest_query(object_id="subject", control_part="hand")
+    latest["query"]["rows"][0]["raw_contacts"]["pairs"][0][0] = 999
+    assert (
+        reader.snapshot_latest_query(object_id="subject", control_part="hand")["query"][
+            "rows"
+        ][0]["raw_contacts"]["pairs"][0][0]
+        != 999
+    )
+    with pytest.raises(ValueError, match="another participant"):
+        reader.snapshot_latest_query(object_id="subject", control_part="other")
     source.data["normal"][0, 0, 0] = float("nan")
     reader(query(), context(revision=2))
     snapshot = reader.snapshot_trace()
+    with pytest.raises(RuntimeError, match="requested acquisition"):
+        reader.snapshot_latest_query(
+            object_id="subject", control_part="hand", query_index=1
+        )
     assert snapshot["cumulative_query_count"] == 2
     assert snapshot["retained_query_count"] == 1
     assert snapshot["evicted_query_count"] == 1
@@ -332,6 +346,8 @@ def test_grip_trace_keeps_explicit_loss_and_nonfinite_accounting():
     result = reader(query(), context(revision=3))
     assert not result.valid.any()
     assert reader.snapshot_trace()["unrecorded_query_count"] == 1
+    with pytest.raises(RuntimeError, match="latest grip acquisition"):
+        reader.snapshot_latest_query(object_id="subject", control_part="hand")
 
 
 @pytest.mark.parametrize("revision", [1, 2])
@@ -445,6 +461,28 @@ def test_shared_factory_uses_explicit_bindings_and_keeps_provider_identity_and_i
     source.cfg.filter_need_both_actor = False
     with pytest.raises(ValueError, match="contact scope"):
         factory.create(**arguments)
+    source.cfg.filter_need_both_actor = True
+    original_update = source.update
+    for when in ("before", "during"):
+        sensors[cfg.sensor_uid] = source
+        before = first.grip_observer.cumulative_query_count
+        if when == "before":
+            sensors[cfg.sensor_uid] = object()
+        else:
+
+            def update_and_replace():
+                original_update()
+                sensors[cfg.sensor_uid] = object()
+
+            source.update = update_and_replace
+        with pytest.raises(ValueError, match="observation ownership changed"):
+            first.capture_grip_observation(
+                PhysicalEvidenceRequest(3.0, 7, torch.arange(3)),
+                object_id="subject",
+                control_part="precision_clamp",
+            )
+        assert first.grip_observer.cumulative_query_count == before + (when == "during")
+        source.update = original_update
 
 
 def make_timeline(source, *, max_steps=30000, max_rows=1_000_000, max_substeps=256):
@@ -1014,7 +1052,7 @@ def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
     qpos[0] = 0.13
     observer.after_sample(0.004, token)
     records = observer.snapshot()
-    assert len(records) == 2
+    assert len(records) == observer.record_count == 2
     assert len(observer.snapshot(1)) == 1
     assert observer.snapshot(2) == ()
     with pytest.raises(ValueError, match="window prefix"):
@@ -1129,3 +1167,72 @@ def test_joint_contact_duration_limit_preserves_owned_prefix_and_stops_acquisiti
     observer.begin_window("new")
     assert observer.generation != generation and observer.snapshot() == ()
     assert len(retained) == 1 and retained[0].frame.timestamp == 0.0
+
+
+@pytest.mark.parametrize("retain", [False, True])
+def test_joint_contact_retains_completed_sample_only_with_explicit_policy(retain):
+    from embodichain.lab.sim.sensors.contact import JointContactObserver
+
+    source, clock, joint_reads = ContactSource(), [0.0], []
+
+    def position():
+        joint_reads.append(clock[0])
+        return torch.zeros(1)
+
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source),
+        position,
+        lambda: clock[0],
+        retain_source_stamp=retain,
+    )
+    generation = observer.begin_window("prepare")
+    assert observer.capture(refresh=True) is None
+    assert source.update_count == 1 and joint_reads == [0.0]
+    observer.pause_window()
+    token = observer.before_sample()
+    assert (token is not None) is retain
+    clock[0] = 0.004
+    # Model the ContactSensor's one completed substep acquisition. The observer
+    # keeps its real before-fetch stamp without another sensor or joint query.
+    source.update()
+    observer.after_sample(0.004, token)
+    assert source.update_count == 2 and joint_reads == [0.0]
+    assert observer.record_count == 1 and observer.generation == generation
+    if not retain:
+        with pytest.raises(ValueError, match="No current completed"):
+            observer.latest_source_stamp()
+        return
+    stamp = observer.latest_source_stamp()
+    observer.begin_window("next")
+    assert observer.capture(refresh=False, source_stamp=stamp) is None
+    assert source.update_count == 2 and joint_reads == [0.0, 0.004]
+    assert observer.record_count == 1
+    assert observer.snapshot()[0].frame.timestamp == 0.004
+    clock[0] += 0.004
+    with pytest.raises(ValueError, match="No current completed"):
+        observer.latest_source_stamp()
+    observer.reset()
+    with pytest.raises(ValueError, match="No current completed"):
+        observer.latest_source_stamp()
+    observer.close()
+    with pytest.raises(ValueError, match="No current completed"):
+        observer.latest_source_stamp()
+
+
+def test_joint_opening_helper_delegates_to_canonical_binding_without_sampling():
+    from embodichain.lab.sim.sensors.joint_opening import create_joint_opening_reader
+
+    calls = []
+    robot = SimpleNamespace(
+        joint_names=("drive",),
+        get_joint_ids=lambda **kw: [0],
+        get_qpos=lambda **kw: calls.append(kw) or torch.tensor([[0.8]]),
+    )
+    binding = DriverOpeningBinding("hand", ("drive",), (0,), (0.8,), 0.008)
+    reader = create_joint_opening_reader(robot, (binding,))
+    assert not calls
+    observed = reader("hand", 0)
+    assert observed["open"] and observed["finite"]
+    assert calls == [{"name": "hand"}]
+    with pytest.raises(ValueError, match="unique control parts"):
+        create_joint_opening_reader(robot, (binding, binding))

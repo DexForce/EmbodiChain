@@ -76,3 +76,49 @@ Ordinary calls, planner-owned retries, sampled input paths and complete-action
 retry policies keep their existing owners and defaults. The internal helper is
 not a second public generation entry. Geometric collision and physical-effect
 acceptance remain caller-owned.
+
+
+Scoped revolute-source queries
+------------------------------
+
+These query/factory interfaces prepare source collision geometry independently
+of action phases or task objects. Each B1/Default query retains exact physical,
+source, model and observation ownership. Partial collision subtrees, changed
+sources or a closed query reject rather than return clearance. Queries preserve
+the original sampling/FK order and close only owned resources.
+
+The reports distinguish unsupported inputs from supported decisions. Their
+qualification is a source-input command-frame proxy and does not certify native
+cooking, continuous collisions, contact or task success.
+
+.. currentmodule:: embodichain.lab.sim.motion.revolute_query
+
+.. autosummary::
+   :nosignatures:
+
+   RevolutePathQueryFactory
+   RevolutePathQuery
+   RevolutePathReport
+   RevoluteDependencyReport
+
+.. autoclass:: RevolutePathQueryFactory
+   :members:
+
+.. autoclass:: RevolutePathQuery
+   :members:
+
+.. autoclass:: RevolutePathReport
+   :members:
+
+.. autoclass:: RevoluteDependencyReport
+
+Bounded drawer endpoint ranking
+-------------------------------
+
+The prefilter tests explicit outside/rim/release poses from the original seed,
+retaining stage failure records and the bounded complete-plan candidate list.
+Ranking does not certify a complete path; a failed prefilter still permits the
+source's first ranked complete-planner attempt.
+
+.. automodule:: embodichain.lab.sim.motion.drawer_ranking
+   :members:

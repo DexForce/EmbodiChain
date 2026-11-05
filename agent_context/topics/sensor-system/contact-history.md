@@ -105,6 +105,12 @@ sequence. Initial captures explicitly request a refresh; substeps reuse the
 completed sensor sample. The observer never declares action success or task
 acceptance; integrations own occurrence and episode binding.
 
+Controls can explicitly select ``retain_source_stamp=True`` to keep the last
+completed before-fetch stamp even between windows. ``capture(refresh=False)``
+reuses that completed buffer; the default observer path and sensor refresh count
+remain unchanged. ``pause_window`` stops retaining window rows without inventing a
+new physical sample. Reset and close invalidate retained stamps.
+
 Window generations reject delayed callbacks after reset, replacement or close.
 Records are append-only within a generation; `snapshot(start)` returns an owned
 suffix, with `snapshot()` selecting the full window. Limits mark
@@ -140,3 +146,19 @@ evidence window.
 it returns the highest accepted contact or NaN for an unavailable row. It does
 not create a physical window or choose a Task Program verdict. Geometric world
 mesh envelopes are numerical Compute inputs, independent of this contact proof.
+
+
+`simulation/recorded_contacts.py` registers one existing sensor's ContactTimeline
+before the bridge's first step, then copies the retained packed data and exact
+raw ObservationManager pose windows. Captures never refresh the sensor. Its
+explicit complete single-sided roster and 1024-contact query remain unchanged;
+opening readers call the canonical Atomic binding through a private structural
+port, so `sensors/joint_opening.py` imports no Atomic/Task Program implementation.
+`SimulationObservationServices` owns these subscriptions and closes them on
+failure or teardown, while the ordinary environment retains its sensor suite.
+
+`sensors/cargo_envelope.py` retains initial source geometry and reports terminal
+and complete-prefix envelope facts. It delegates the original 64-frame chunks to
+`compute.geometry.cargo`, keeps missing acquisition rows unavailable and does not
+evaluate physical retention or a TaskSpec. Its Task Program collector reads only
+the selected raw fields, preserving original revision/timestamp metadata.

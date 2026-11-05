@@ -1,0 +1,161 @@
+{
+  "mode": "lift_fallback",
+  "success": [
+    true
+  ],
+  "positions_sha256": "8fb9aa574b1e59bb520cbb6e03dd5699cb214f77b2015a919a1b42a2651085ba",
+  "dt_sha256": "a7d6453f6fc1cc42f6adcb3846195e151df210f8ae3318108da4e4eb179c69a0",
+  "segments": [
+    [
+      "transport",
+      0,
+      45
+    ]
+  ],
+  "metadata": {
+    "held_alignment": {
+      "final_command_check": {
+        "valid": true,
+        "collision": {
+          "valid": true,
+          "frames": 45,
+          "scope": "discrete_robot_meshes"
+        }
+      },
+      "robot_proxy_attempts": [
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": false,
+            "frame": 0,
+            "kind": "self",
+            "pairs": [
+              [
+                "arm",
+                "torso"
+              ]
+            ]
+          }
+        },
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": false,
+            "frame": 0,
+            "kind": "self",
+            "pairs": [
+              [
+                "arm",
+                "torso"
+              ]
+            ]
+          }
+        },
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": false,
+            "frame": 0,
+            "kind": "self",
+            "pairs": [
+              [
+                "arm",
+                "torso"
+              ]
+            ]
+          }
+        },
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": false,
+            "frame": 0,
+            "kind": "self",
+            "pairs": [
+              [
+                "arm",
+                "torso"
+              ]
+            ]
+          }
+        },
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": false,
+            "frame": 0,
+            "kind": "self",
+            "pairs": [
+              [
+                "arm",
+                "torso"
+              ]
+            ]
+          }
+        },
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": false,
+            "frame": 0,
+            "kind": "self",
+            "pairs": [
+              [
+                "arm",
+                "torso"
+              ]
+            ]
+          }
+        },
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": false,
+            "frame": 0,
+            "kind": "self",
+            "pairs": [
+              [
+                "arm",
+                "torso"
+              ]
+            ]
+          }
+        },
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": false,
+            "frame": 0,
+            "kind": "self",
+            "pairs": [
+              [
+                "arm",
+                "torso"
+              ]
+            ]
+          }
+        }
+      ],
+      "rejected_raw_success": 8,
+      "local_fallback": {
+        "predicate_calls": 44,
+        "target_count": 44,
+        "sample_count": 45,
+        "accepted": true,
+        "world_yaw_offset_rad": 3.141592653589793
+      }
+    }
+  },
+  "failure": null,
+  "held_keys": [
+    "source_arm"
+  ],
+  "rng": [
+    "c27b58ca1de8d22987675cb1eb8921685571f49cee02313a4bf8108043c5adef",
+    0.5305867556052941,
+    0.8066907771186791
+  ],
+  "calls_sha256": "18343f7aa623db2490015d648cb698d5c86006aef34e54324640c90e0a32248e",
+  "checks_sha256": "721a10419ff5d37c8b5b1b0f5540c13ae7caa5a22c5011261147af60314078c0",
+  "ik_sha256": "053a5c89fa4a69013b196cfb2acd7e75388cb56e630af06ba90132587941dbe2"
+}

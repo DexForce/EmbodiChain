@@ -755,6 +755,7 @@ def config_to_cfg(
     configured_task_program_selection = None
     configured_task_program_id: str | None = None
     configured_task_program_path: Path | None = None
+    configured_task_program_deployment = None
     if "task_program" in config:
         if not component_resolution.embodiment_selected:
             raise ValueError(
@@ -789,6 +790,7 @@ def config_to_cfg(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,
         )
+        configured_task_program_deployment = deployment
         configured_task_program_integration = deployment.integration
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
@@ -798,23 +800,30 @@ def config_to_cfg(
 
     if (
         task_program_path_override is not None
-        or configured_task_program_path is not None
+        or configured_task_program_deployment is not None
     ):
-        if task_program_path_override is not None:
-            task_program_path = task_program_path_override
-            if not isinstance(task_program_path, (str, os.PathLike)):
-                raise TypeError("task_program_path must be a string or path.")
-        else:
-            assert configured_task_program_path is not None
-            task_program_path = configured_task_program_path
-        task_program_path_text = os.fspath(task_program_path)
-        if not task_program_path_text or (
-            task_program_path_text != task_program_path_text.strip()
-        ):
-            raise ValueError(
-                "task_program_path must be a non-empty string without outer "
-                "whitespace."
-            )
+        inline_deployment = (
+            configured_task_program_deployment is not None
+            and configured_task_program_deployment.program_path is None
+            and task_program_path_override is None
+        )
+        task_program_path_text = None
+        if not inline_deployment:
+            if task_program_path_override is not None:
+                task_program_path = task_program_path_override
+                if not isinstance(task_program_path, (str, os.PathLike)):
+                    raise TypeError("task_program_path must be a string or path.")
+            else:
+                assert configured_task_program_path is not None
+                task_program_path = configured_task_program_path
+            task_program_path_text = os.fspath(task_program_path)
+            if not task_program_path_text or (
+                task_program_path_text != task_program_path_text.strip()
+            ):
+                raise ValueError(
+                    "task_program_path must be a non-empty string without outer "
+                    "whitespace."
+                )
         from embodichain.lab.task_program.language.loader import (
             load_task_program,
         )
@@ -827,11 +836,18 @@ def config_to_cfg(
             registration = configured_task_program_integration.registration
         if registration is not None:
             registration.assert_unchanged()
-        task_program = load_task_program(
-            task_program_path_text,
-            integration=configured_task_program_selection,
-            validation_context=(None if registration is None else registration.catalog),
-        )
+            registration.validate_num_envs(config.get("num_envs", 1))
+            registration.validate_physics(config["physics"])
+        if inline_deployment:
+            task_program = configured_task_program_deployment.load_program()
+        else:
+            task_program = load_task_program(
+                task_program_path_text,
+                integration=configured_task_program_selection,
+                validation_context=(
+                    None if registration is None else registration.catalog
+                ),
+            )
         if (
             configured_task_program_id is not None
             and task_program.program_id != configured_task_program_id
@@ -2702,6 +2718,168 @@ def _read_raw_rollout(
         times,
         "simulation_time" if all(time is not None for time in times) else "unavailable",
     )
+
+
+def _read_raw_rollout_step_counts(
+    storage: TensorDictBase | None,
+    context: Any,
+    *,
+    episode_ids: Sequence[int],
+    env_ids: Sequence[int] | None = None,
+) -> tuple[int, ...]:
+    """Copy completed boundaries from the raw owner without copying field history."""
+    state = _raw_rollout_state(storage, context)
+    ids = context._ids(env_ids).to(storage["raw_actions"].device)
+    rows, episodes = tuple(ids.cpu().tolist()), tuple(episode_ids)
+    if (
+        not rows
+        or len(episodes) != len(rows)
+        or any(type(value) is not int or value < 0 for value in episodes)
+    ):
+        raise ValueError("Raw history boundaries require exact episode IDs per row.")
+
+    def check() -> None:
+        _raw_rollout_state(storage, context)
+        current = context.snapshot(rows)
+        _raw_rollout_state(storage, context)
+        if (
+            tuple(row["episode"] for row in current) != episodes
+            or not all(row["initialized"] for row in current)
+            or tuple(state["episodes"][row] for row in rows) != episodes
+        ):
+            raise ValueError(
+                "Raw observations belong to another or uninitialized episode."
+            )
+
+    check()
+    counts = tuple(storage["raw_steps"][ids].detach().cpu().tolist())
+    capacity = storage["raw_actions"].shape[1]
+    if any(type(value) is not int or not 0 <= value <= capacity for value in counts):
+        raise ValueError("Raw history completed boundaries exceed their storage.")
+    slots = torch.tensor(counts, dtype=torch.long, device=ids.device)
+    if bool((storage["raw_revision"][ids, slots] < 0).any()):
+        raise ValueError("The requested boundary is not fully recorded.")
+    check()
+    return counts
+
+
+def _read_raw_rollout_window(
+    storage: TensorDictBase | None,
+    context: Any,
+    start_frames: Sequence[int],
+    end_frames: Sequence[int],
+    *,
+    fields: Sequence[str],
+    episode_ids: Sequence[int],
+    env_ids: Sequence[int] | None = None,
+    device: str | torch.device = "cpu",
+) -> dict[str, Any]:
+    """Copy selected inclusive slices from the existing raw observation owner."""
+    state = _raw_rollout_state(storage, context)
+    ids = context._ids(env_ids).to(storage["raw_actions"].device)
+    rows = tuple(ids.cpu().tolist())
+    starts, ends, episodes, names = (
+        tuple(start_frames),
+        tuple(end_frames),
+        tuple(episode_ids),
+        tuple(fields),
+    )
+    capacity = storage["raw_actions"].shape[1]
+    if (
+        not rows
+        or any(len(values) != len(rows) for values in (starts, ends, episodes))
+        or any(
+            type(value) is not int or value < 0
+            for values in (starts, ends, episodes)
+            for value in values
+        )
+        or any(
+            start > end or end > capacity
+            for start, end in zip(starts, ends, strict=True)
+        )
+        or not names
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError(
+            "Raw history windows require exact fields and inclusive boundaries per row."
+        )
+
+    def check() -> None:
+        _raw_rollout_state(storage, context)
+        current = context.snapshot(rows)
+        _raw_rollout_state(storage, context)
+        if (
+            tuple(row["episode"] for row in current) != episodes
+            or not all(row["initialized"] for row in current)
+            or tuple(state["episodes"][row] for row in rows) != episodes
+        ):
+            raise ValueError(
+                "Raw observations belong to another or uninitialized episode."
+            )
+
+    check()
+    completed = storage["raw_steps"][ids].detach().cpu().tolist()
+    if any(end > complete for end, complete in zip(ends, completed, strict=True)):
+        raise ValueError("The requested window is not fully recorded.")
+    selections = tuple(
+        slice(start, end + 1) for start, end in zip(starts, ends, strict=True)
+    )
+    revisions, timestamps = [], []
+    for row, slots in zip(rows, selections, strict=True):
+        revision = (
+            storage["raw_revision"][row, slots].detach().to(device=device, copy=True)
+        )
+        if bool((revision < 0).any()):
+            raise ValueError("The requested window is not fully recorded.")
+        revisions.append(revision)
+        timestamps.append(
+            storage["raw_timestamp"][row, slots].detach().to(device=device, copy=True)
+        )
+    errors = storage.get_non_tensor("raw_acquisition_errors")
+    result = {}
+    for name in names:
+        values, validity, reasons = [], [], []
+        for row, start, slots in zip(rows, starts, selections, strict=True):
+            values.append(
+                storage["raw_obs"][name][row, slots]
+                .detach()
+                .to(device=device, copy=True)
+            )
+            valid = (
+                storage["raw_valid"][name][row, slots]
+                .detach()
+                .to(device=device, copy=True)
+            )
+            validity.append(valid)
+            row_errors: list[str | None] = [None] * valid.numel()
+            for offset in (~valid).nonzero(as_tuple=False).flatten().cpu().tolist():
+                row_errors[offset] = errors[name].get(
+                    (row, start + offset),
+                    "Raw observation acquisition is unavailable or nonfinite.",
+                )
+            reasons.append(tuple(row_errors))
+        result[name] = {
+            "values": tuple(values),
+            "valid": tuple(validity),
+            "acquisition_errors": tuple(reasons),
+        }
+    check()
+    timestamp_valid = tuple(torch.isfinite(times) for times in timestamps)
+    return {
+        "fields": result,
+        "env_ids": rows,
+        "episode_ids": episodes,
+        "start_frames": starts,
+        "end_frames": ends,
+        "revisions": tuple(revisions),
+        "timestamps": tuple(timestamps),
+        "timestamp_valid": timestamp_valid,
+        "clock_domain": (
+            "simulation_time"
+            if all(bool(valid.all()) for valid in timestamp_valid)
+            else "unavailable"
+        ),
+    }
 
 
 def _close_raw_rollout(storage: TensorDictBase | None) -> None:

@@ -1,0 +1,425 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "cases": [
+    {
+      "dtype": "float32",
+      "mode": "terminal",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "terminal",
+        "accepted_mask": [
+          true,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              true,
+              true
+            ],
+            "first_failed_frames": [
+              null,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float32",
+      "mode": "accepted",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          true,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              true,
+              true
+            ],
+            "first_failed_frames": [
+              null,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float32",
+      "mode": "frame63",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          false,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              false,
+              true
+            ],
+            "first_failed_frames": [
+              63,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float32",
+      "mode": "frame64",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          false,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              false,
+              true
+            ],
+            "first_failed_frames": [
+              64,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float32",
+      "mode": "frame127",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          false,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              false,
+              true
+            ],
+            "first_failed_frames": [
+              127,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float32",
+      "mode": "terminal_escape",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          true,
+          false
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              true,
+              false
+            ],
+            "first_failed_frames": [
+              null,
+              129
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float32",
+      "mode": "unselected_row",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          true,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              false
+            ],
+            "accepted_mask": [
+              true,
+              true
+            ],
+            "first_failed_frames": [
+              null,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float64",
+      "mode": "terminal",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "terminal",
+        "accepted_mask": [
+          true,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              true,
+              true
+            ],
+            "first_failed_frames": [
+              null,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float64",
+      "mode": "accepted",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          true,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              true,
+              true
+            ],
+            "first_failed_frames": [
+              null,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float64",
+      "mode": "frame63",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          false,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              false,
+              true
+            ],
+            "first_failed_frames": [
+              63,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float64",
+      "mode": "frame64",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          false,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              false,
+              true
+            ],
+            "first_failed_frames": [
+              64,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float64",
+      "mode": "frame127",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          false,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              false,
+              true
+            ],
+            "first_failed_frames": [
+              127,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float64",
+      "mode": "terminal_escape",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          true,
+          false
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              true
+            ],
+            "accepted_mask": [
+              true,
+              false
+            ],
+            "first_failed_frames": [
+              null,
+              129
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "dtype": "float64",
+      "mode": "unselected_row",
+      "report": {
+        "schema_version": "gen_sim.cargo-envelope/v1",
+        "scope": "recorded_trajectory_and_terminal",
+        "accepted_mask": [
+          true,
+          true
+        ],
+        "contents": [
+          {
+            "carrier": "tray",
+            "object": "cargo",
+            "initial_mask": [
+              true,
+              false
+            ],
+            "accepted_mask": [
+              true,
+              true
+            ],
+            "first_failed_frames": [
+              null,
+              null
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -671,6 +671,36 @@ class RegisteredSemanticLowerer(ABC):
         del call, picked_object, bound, previous_target
         return None
 
+    def lower_occurrence(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+        invocation_id: str,
+        revision: int,
+    ) -> SemanticLowering:
+        """Lower with the same execution identity used by the final invocation.
+
+        Args:
+            call: Registered semantic call value.
+            context: Current planning observation.
+            bound: Linked resources and selected policy preset.
+            option_template: Owned selected action-option template.
+            invocation_id: Exact execution occurrence, independent of cached analysis.
+            revision: Monotonic grounding revision of that same occurrence.
+
+        Returns:
+            Existing lowering result. The default delegates once to ``lower``;
+            occurrence-aware integrations may select explicitly bound geometry
+            without interpreting task names or replacing policy options.
+        """
+        del invocation_id, revision
+        return self.lower(
+            call, context=context, bound=bound, option_template=option_template
+        )
+
     @abstractmethod
     def lower(
         self,
@@ -1519,6 +1549,11 @@ class SemanticCallCompiler:
         self._validate_context(context)
         eligible = self._normalize_eligible_mask(eligible_mask, context)
         analyzed = workflow.calls[call_index]
+        resolved_invocation_id = (
+            invocation_id
+            if invocation_id is not None
+            else f"{workflow.workflow_id}:{call_index}"
+        )
         call = analyzed.call
         if type(call) is Pick:
             lowering = self._lower_pick(analyzed, context)
@@ -1527,7 +1562,13 @@ class SemanticCallCompiler:
         elif type(call) is HandOver:
             lowering = self._lower_handover(analyzed, context, eligible, path=path)
         elif type(call) is RegisteredSemanticCall:
-            lowering = self._lower_registered(analyzed, context, path=path)
+            lowering = self._lower_registered(
+                analyzed,
+                context,
+                path=path,
+                invocation_id=resolved_invocation_id,
+                revision=revision,
+            )
             self._validate_registered_held_effects(
                 analyzed,
                 lowering,
@@ -1552,11 +1593,7 @@ class SemanticCallCompiler:
             recovery_policy=bound.preset.recovery_policy,
             skill_options=lowering.skill_options,
             control_overrides=lowering.control_overrides,
-            invocation_id=(
-                invocation_id
-                if invocation_id is not None
-                else f"{workflow.workflow_id}:{call_index}"
-            ),
+            invocation_id=resolved_invocation_id,
             revision=revision,
         )
         effect_spec = self._ground_effect_spec(
@@ -1917,7 +1954,11 @@ class SemanticCallCompiler:
                     analyzed.handover_source_pick_object_part
                     or option_template.pick_object_part
                 ),
-                downstream_object_target_poses=tuple(downstream_targets),
+                downstream_object_target_poses=(
+                    tuple(downstream_targets)
+                    if option_template.qualify_downstream_targets
+                    else ()
+                ),
             ),
         )
 
@@ -2023,6 +2064,8 @@ class SemanticCallCompiler:
         context: PlanningContext,
         *,
         path: tuple[PathPart, ...],
+        invocation_id: str,
+        revision: int,
     ) -> SemanticLowering:
         """Invoke one explicitly installed registered-call lowerer."""
         call = analyzed.call
@@ -2042,11 +2085,13 @@ class SemanticCallCompiler:
             analyzed,
             target.options_type,
         )
-        lowering = lowerer.lower(
+        lowering = lowerer.lower_occurrence(
             call,
             context=context,
             bound=analyzed.bound,
             option_template=deepcopy(option_template),
+            invocation_id=invocation_id,
+            revision=revision,
         )
         if type(lowering) is not SemanticLowering:
             raise TypeError(

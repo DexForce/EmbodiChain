@@ -1,0 +1,1312 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "source_engine": "GenSimActionEngine, source sampled contract, explicit motion_samples and deterministic FK/IK/collision ports",
+  "source_fixture": "source-oracles/freeze-pick-transform-audit.py",
+  "cases": [
+    {
+      "mode": "ordinary",
+      "variant": "identity",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e",
+      "candidate_positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "identity"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "f98e49cd8357c84d7768a914914ccb0b7e71a1a9618ed6ead75800bf11523018",
+      "ik_sha256": "d6f1817c847ec06a4820a2891f562f9720012fa0b902eeb1c9fb0a541983cee2"
+    },
+    {
+      "mode": "ordinary",
+      "variant": "arm_jump",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "71e6e047103f6686bb9170e31db19d059fcd842ad5ed7687092c414619c32d47",
+      "candidate_positions": "71e6e047103f6686bb9170e31db19d059fcd842ad5ed7687092c414619c32d47",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "arm_jump"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "f98e49cd8357c84d7768a914914ccb0b7e71a1a9618ed6ead75800bf11523018",
+      "ik_sha256": "d6f1817c847ec06a4820a2891f562f9720012fa0b902eeb1c9fb0a541983cee2"
+    },
+    {
+      "mode": "ordinary",
+      "variant": "scene_bulge",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "bb5e4c9ede1ab870ad44745307453fca9552450efa1569b1cfe7b8901565d9db",
+      "candidate_positions": "bb5e4c9ede1ab870ad44745307453fca9552450efa1569b1cfe7b8901565d9db",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "scene_bulge"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "f98e49cd8357c84d7768a914914ccb0b7e71a1a9618ed6ead75800bf11523018",
+      "ik_sha256": "d6f1817c847ec06a4820a2891f562f9720012fa0b902eeb1c9fb0a541983cee2"
+    },
+    {
+      "mode": "ordinary",
+      "variant": "close_change",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "07c1564468b3c7482aa4786fb0221b7115d84a383c1f3f0b00a826582b42d7cc",
+      "candidate_positions": "07c1564468b3c7482aa4786fb0221b7115d84a383c1f3f0b00a826582b42d7cc",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "close_change"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "f98e49cd8357c84d7768a914914ccb0b7e71a1a9618ed6ead75800bf11523018",
+      "ik_sha256": "d6f1817c847ec06a4820a2891f562f9720012fa0b902eeb1c9fb0a541983cee2"
+    },
+    {
+      "mode": "ordinary",
+      "variant": "velocity_spike",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "a6efb1eee439aceb8bce4d05cc977d325dfc525a99530d6a2b384e627e3ec419",
+      "candidate_positions": "a6efb1eee439aceb8bce4d05cc977d325dfc525a99530d6a2b384e627e3ec419",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "velocity_spike"
+        },
+        {
+          "kind": "plan",
+          "count": 260
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 279,
+          "positions": "927526608de59336491bf3804348332cc88eb2d88aac8a4c65728ddf5be5618e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 279,
+          "positions": "a15089acaf7b83d9ea1f68c0068783b3bac2055c1c8e04d7483707e6a6c0e7ea"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 168,
+          "positions": "7a0ce95d899e05900b4cab9d13577965819357f388aa8e497186bed606fd3642",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 260,
+          "variant": "velocity_spike"
+        },
+        {
+          "kind": "plan",
+          "count": 320
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 343,
+          "positions": "2656e290ba84e67ba9371ec9a4b867c783f596a88434b4e75a20807e66c3a4e2"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 343,
+          "positions": "d744b31383a52a6de547d174458ddcc364e8bc3194186162ff2a9ffa7226220d"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 208,
+          "positions": "1b195f1737c060cdd43fe2d0025f230824cc8fbcaf2c7afef35b9b1139463559",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 320,
+          "variant": "velocity_spike"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 3,
+      "calls_sha256": "acf3647163a4bc28b58a4a4b657019e47708e2f97b654e5df4ce003bcb98b6bc",
+      "ik_sha256": "8b5ce01a859cd65ae1717fd38c2e3c11305e720e061a3fe920c2360974186aaf"
+    },
+    {
+      "mode": "native",
+      "variant": "identity",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e",
+      "candidate_positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "identity"
+        },
+        {
+          "kind": "robot",
+          "stage": "after",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "f98e49cd8357c84d7768a914914ccb0b7e71a1a9618ed6ead75800bf11523018",
+      "ik_sha256": "d6f1817c847ec06a4820a2891f562f9720012fa0b902eeb1c9fb0a541983cee2"
+    },
+    {
+      "mode": "native",
+      "variant": "arm_jump",
+      "success": [
+        false
+      ],
+      "failure": "pick_contact_geometry_failed",
+      "positions": "71e6e047103f6686bb9170e31db19d059fcd842ad5ed7687092c414619c32d47",
+      "candidate_positions": "71e6e047103f6686bb9170e31db19d059fcd842ad5ed7687092c414619c32d47",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "arm_jump"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "f98e49cd8357c84d7768a914914ccb0b7e71a1a9618ed6ead75800bf11523018",
+      "ik_sha256": "d6f1817c847ec06a4820a2891f562f9720012fa0b902eeb1c9fb0a541983cee2"
+    },
+    {
+      "mode": "native",
+      "variant": "scene_bulge",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "bb5e4c9ede1ab870ad44745307453fca9552450efa1569b1cfe7b8901565d9db",
+      "candidate_positions": "bb5e4c9ede1ab870ad44745307453fca9552450efa1569b1cfe7b8901565d9db",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "scene_bulge"
+        },
+        {
+          "kind": "robot",
+          "stage": "after",
+          "frames": 151,
+          "positions": "bb5e4c9ede1ab870ad44745307453fca9552450efa1569b1cfe7b8901565d9db"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "f98e49cd8357c84d7768a914914ccb0b7e71a1a9618ed6ead75800bf11523018",
+      "ik_sha256": "d6f1817c847ec06a4820a2891f562f9720012fa0b902eeb1c9fb0a541983cee2"
+    },
+    {
+      "mode": "native",
+      "variant": "close_change",
+      "success": [
+        false
+      ],
+      "failure": "pick_contact_geometry_failed",
+      "positions": "07c1564468b3c7482aa4786fb0221b7115d84a383c1f3f0b00a826582b42d7cc",
+      "candidate_positions": "07c1564468b3c7482aa4786fb0221b7115d84a383c1f3f0b00a826582b42d7cc",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "close_change"
+        },
+        {
+          "kind": "robot",
+          "stage": "after",
+          "frames": 151,
+          "positions": "07c1564468b3c7482aa4786fb0221b7115d84a383c1f3f0b00a826582b42d7cc"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "f98e49cd8357c84d7768a914914ccb0b7e71a1a9618ed6ead75800bf11523018",
+      "ik_sha256": "d6f1817c847ec06a4820a2891f562f9720012fa0b902eeb1c9fb0a541983cee2"
+    },
+    {
+      "mode": "native",
+      "variant": "velocity_spike",
+      "success": [
+        false
+      ],
+      "failure": "pick_contact_geometry_failed",
+      "positions": "a6efb1eee439aceb8bce4d05cc977d325dfc525a99530d6a2b384e627e3ec419",
+      "candidate_positions": "a6efb1eee439aceb8bce4d05cc977d325dfc525a99530d6a2b384e627e3ec419",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "16ba53118b3178ce618e9d52f4c46c3265008257d2fe2418c9e8b1e80b6191fb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "8534671ad773c14f7a14ee9deff6c54f2617355e9d80d76efa8a6c9f2a25793e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 88,
+          "positions": "0891e9dbbc184d5d5fc5f30613923ba40d8fd9e88e06477952d48ea9f26befa1",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "velocity_spike"
+        },
+        {
+          "kind": "plan",
+          "count": 260
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 279,
+          "positions": "927526608de59336491bf3804348332cc88eb2d88aac8a4c65728ddf5be5618e"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 279,
+          "positions": "a15089acaf7b83d9ea1f68c0068783b3bac2055c1c8e04d7483707e6a6c0e7ea"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 168,
+          "positions": "7a0ce95d899e05900b4cab9d13577965819357f388aa8e497186bed606fd3642",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 260,
+          "variant": "velocity_spike"
+        },
+        {
+          "kind": "plan",
+          "count": 320
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 343,
+          "positions": "2656e290ba84e67ba9371ec9a4b867c783f596a88434b4e75a20807e66c3a4e2"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60",
+          "valid": true
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 343,
+          "positions": "d744b31383a52a6de547d174458ddcc364e8bc3194186162ff2a9ffa7226220d"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 208,
+          "positions": "1b195f1737c060cdd43fe2d0025f230824cc8fbcaf2c7afef35b9b1139463559",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 320,
+          "variant": "velocity_spike"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 3,
+      "calls_sha256": "acf3647163a4bc28b58a4a4b657019e47708e2f97b654e5df4ce003bcb98b6bc",
+      "ik_sha256": "8b5ce01a859cd65ae1717fd38c2e3c11305e720e061a3fe920c2360974186aaf"
+    },
+    {
+      "mode": "constrained",
+      "variant": "identity",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "1370416657bd467df2fdb793647521b824bfba603cc4bd6dafb0d82219b0f78a",
+      "candidate_positions": "1370416657bd467df2fdb793647521b824bfba603cc4bd6dafb0d82219b0f78a",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60"
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "1370416657bd467df2fdb793647521b824bfba603cc4bd6dafb0d82219b0f78a"
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "identity"
+        },
+        {
+          "kind": "robot",
+          "stage": "after",
+          "frames": 151,
+          "positions": "1370416657bd467df2fdb793647521b824bfba603cc4bd6dafb0d82219b0f78a"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "82aeac634c5ec85247cd7e35b0640e317553e097c49b1cfc9c5a4cf2e93c5e2f",
+      "ik_sha256": "b6036cb1d4b8334277712843c95adbab295df6ee101e5a398de0fb7c4de88ec6"
+    },
+    {
+      "mode": "constrained",
+      "variant": "arm_jump",
+      "success": [
+        false
+      ],
+      "failure": "pick_robot_safety_failed",
+      "positions": "6230331b1d9d2ea9af49665d16e2e4223eaf82d36b3151dbf30511ea91e1b308",
+      "candidate_positions": "6230331b1d9d2ea9af49665d16e2e4223eaf82d36b3151dbf30511ea91e1b308",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60"
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "1370416657bd467df2fdb793647521b824bfba603cc4bd6dafb0d82219b0f78a"
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "arm_jump"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "82aeac634c5ec85247cd7e35b0640e317553e097c49b1cfc9c5a4cf2e93c5e2f",
+      "ik_sha256": "b6036cb1d4b8334277712843c95adbab295df6ee101e5a398de0fb7c4de88ec6"
+    },
+    {
+      "mode": "constrained",
+      "variant": "scene_bulge",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "8a7e41a0fb4496146aa28295bf424739d116da5161f8c9a02131efa1bc7202ed",
+      "candidate_positions": "8a7e41a0fb4496146aa28295bf424739d116da5161f8c9a02131efa1bc7202ed",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60"
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "1370416657bd467df2fdb793647521b824bfba603cc4bd6dafb0d82219b0f78a"
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "scene_bulge"
+        },
+        {
+          "kind": "robot",
+          "stage": "after",
+          "frames": 151,
+          "positions": "8a7e41a0fb4496146aa28295bf424739d116da5161f8c9a02131efa1bc7202ed"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "82aeac634c5ec85247cd7e35b0640e317553e097c49b1cfc9c5a4cf2e93c5e2f",
+      "ik_sha256": "b6036cb1d4b8334277712843c95adbab295df6ee101e5a398de0fb7c4de88ec6"
+    },
+    {
+      "mode": "constrained",
+      "variant": "close_change",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "4e7111765c5d2445c2e1c64fb8dbae30d6360da01eb154df386c70ec41e13cc2",
+      "candidate_positions": "4e7111765c5d2445c2e1c64fb8dbae30d6360da01eb154df386c70ec41e13cc2",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60"
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "1370416657bd467df2fdb793647521b824bfba603cc4bd6dafb0d82219b0f78a"
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "close_change"
+        },
+        {
+          "kind": "robot",
+          "stage": "after",
+          "frames": 151,
+          "positions": "4e7111765c5d2445c2e1c64fb8dbae30d6360da01eb154df386c70ec41e13cc2"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 1,
+      "calls_sha256": "82aeac634c5ec85247cd7e35b0640e317553e097c49b1cfc9c5a4cf2e93c5e2f",
+      "ik_sha256": "b6036cb1d4b8334277712843c95adbab295df6ee101e5a398de0fb7c4de88ec6"
+    },
+    {
+      "mode": "constrained",
+      "variant": "velocity_spike",
+      "success": [
+        false
+      ],
+      "failure": "pick_robot_safety_failed",
+      "positions": "ecf61e9fedaacca1fdfc5e556dbdf546de580b8a52a41257e8803bfcc3472371",
+      "candidate_positions": "ecf61e9fedaacca1fdfc5e556dbdf546de580b8a52a41257e8803bfcc3472371",
+      "dt": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+      "shape": [
+        1,
+        151,
+        5
+      ],
+      "commands_active": 151,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60"
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 151,
+          "positions": "1370416657bd467df2fdb793647521b824bfba603cc4bd6dafb0d82219b0f78a"
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "velocity_spike"
+        },
+        {
+          "kind": "plan",
+          "count": 260
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60"
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 279,
+          "positions": "3211864d6e79e072b5c23f6aa3caba859e0f3b7c7b6a243f81e0ecf2ff7e9ec3"
+        },
+        {
+          "kind": "transform",
+          "count": 260,
+          "variant": "velocity_spike"
+        },
+        {
+          "kind": "plan",
+          "count": 320
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 1,
+          "positions": "b0a7b423c8f21fcce8310dc30d5de790239c67dcbf708ebca75252717e444e60"
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 343,
+          "positions": "84bf3cef044466d58c765df39741731b34dffb2f1bfe67652bdee0a107ea28d0"
+        },
+        {
+          "kind": "transform",
+          "count": 320,
+          "variant": "velocity_spike"
+        }
+      ],
+      "rng": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+      "transform_count": 3,
+      "calls_sha256": "d653a50fbf34c4b02e3e698fa46e2f99aa5da50c016121dc95b65a2f9db62a1f",
+      "ik_sha256": "6c0163b76aa450b46fb852a6417737b730c53dc0fe72053162b098cca0da56a2"
+    },
+    {
+      "mode": "fixed",
+      "variant": "identity",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "581ba34c433623d1572efaa3971d0770a352fb3e528a8e3374f41b2505012ccf",
+      "candidate_positions": "581ba34c433623d1572efaa3971d0770a352fb3e528a8e3374f41b2505012ccf",
+      "dt": "92aca8f2631b3c354db29e9f724b7b411a75a7938bdf8900ce749debeff8b12b",
+      "shape": [
+        1,
+        140,
+        5
+      ],
+      "commands_active": 140,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 140,
+          "positions": "581ba34c433623d1572efaa3971d0770a352fb3e528a8e3374f41b2505012ccf"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 77,
+          "positions": "ce7a020f7b4108de2a8146559e03a2c14a803c1708e9dc9ca7f0b0ff244ddd53",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "identity"
+        },
+        {
+          "kind": "robot",
+          "stage": "after",
+          "frames": 140,
+          "positions": "581ba34c433623d1572efaa3971d0770a352fb3e528a8e3374f41b2505012ccf"
+        }
+      ],
+      "rng": "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      "transform_count": 1,
+      "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "mode": "fixed",
+      "variant": "arm_jump",
+      "success": [
+        false
+      ],
+      "failure": "pick_contact_geometry_failed",
+      "positions": "84573d05e8c4ca498b9606de4b6fb075d327f4f2d4f33346e7fe430a430d6983",
+      "candidate_positions": "84573d05e8c4ca498b9606de4b6fb075d327f4f2d4f33346e7fe430a430d6983",
+      "dt": "92aca8f2631b3c354db29e9f724b7b411a75a7938bdf8900ce749debeff8b12b",
+      "shape": [
+        1,
+        140,
+        5
+      ],
+      "commands_active": 140,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 140,
+          "positions": "581ba34c433623d1572efaa3971d0770a352fb3e528a8e3374f41b2505012ccf"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 77,
+          "positions": "ce7a020f7b4108de2a8146559e03a2c14a803c1708e9dc9ca7f0b0ff244ddd53",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "arm_jump"
+        }
+      ],
+      "rng": "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      "transform_count": 1,
+      "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "mode": "fixed",
+      "variant": "scene_bulge",
+      "success": [
+        true
+      ],
+      "failure": null,
+      "positions": "493ce475e4eb7c827b4efb7a2290413e48f61f804d7cfccd3b50acf2ecb603f8",
+      "candidate_positions": "493ce475e4eb7c827b4efb7a2290413e48f61f804d7cfccd3b50acf2ecb603f8",
+      "dt": "92aca8f2631b3c354db29e9f724b7b411a75a7938bdf8900ce749debeff8b12b",
+      "shape": [
+        1,
+        140,
+        5
+      ],
+      "commands_active": 140,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 140,
+          "positions": "581ba34c433623d1572efaa3971d0770a352fb3e528a8e3374f41b2505012ccf"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 77,
+          "positions": "ce7a020f7b4108de2a8146559e03a2c14a803c1708e9dc9ca7f0b0ff244ddd53",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "scene_bulge"
+        },
+        {
+          "kind": "robot",
+          "stage": "after",
+          "frames": 140,
+          "positions": "493ce475e4eb7c827b4efb7a2290413e48f61f804d7cfccd3b50acf2ecb603f8"
+        }
+      ],
+      "rng": "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      "transform_count": 1,
+      "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "mode": "fixed",
+      "variant": "close_change",
+      "success": [
+        false
+      ],
+      "failure": "pick_contact_geometry_failed",
+      "positions": "99c68a3fa5e4d028fedc14e2863dca645c7ec8deae66d23d6c31cbb1600a41e1",
+      "candidate_positions": "99c68a3fa5e4d028fedc14e2863dca645c7ec8deae66d23d6c31cbb1600a41e1",
+      "dt": "92aca8f2631b3c354db29e9f724b7b411a75a7938bdf8900ce749debeff8b12b",
+      "shape": [
+        1,
+        140,
+        5
+      ],
+      "commands_active": 140,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 140,
+          "positions": "581ba34c433623d1572efaa3971d0770a352fb3e528a8e3374f41b2505012ccf"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 77,
+          "positions": "ce7a020f7b4108de2a8146559e03a2c14a803c1708e9dc9ca7f0b0ff244ddd53",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "close_change"
+        },
+        {
+          "kind": "robot",
+          "stage": "after",
+          "frames": 140,
+          "positions": "99c68a3fa5e4d028fedc14e2863dca645c7ec8deae66d23d6c31cbb1600a41e1"
+        }
+      ],
+      "rng": "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      "transform_count": 1,
+      "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "mode": "fixed",
+      "variant": "velocity_spike",
+      "success": [
+        false
+      ],
+      "failure": "pick_contact_geometry_failed",
+      "positions": "8b95c364421e3e59e68a3308686a6b52c506a04988beae8a6a49acf157116836",
+      "candidate_positions": "8b95c364421e3e59e68a3308686a6b52c506a04988beae8a6a49acf157116836",
+      "dt": "92aca8f2631b3c354db29e9f724b7b411a75a7938bdf8900ce749debeff8b12b",
+      "shape": [
+        1,
+        140,
+        5
+      ],
+      "commands_active": 140,
+      "events": [
+        {
+          "kind": "plan",
+          "count": 140
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 140,
+          "positions": "581ba34c433623d1572efaa3971d0770a352fb3e528a8e3374f41b2505012ccf"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 77,
+          "positions": "ce7a020f7b4108de2a8146559e03a2c14a803c1708e9dc9ca7f0b0ff244ddd53",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 140,
+          "variant": "velocity_spike"
+        },
+        {
+          "kind": "plan",
+          "count": 260
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 260,
+          "positions": "b692c35ee23cf7fbabfde648fc096f5164393aa1f2860da642f5bc945f08fdbb"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 149,
+          "positions": "a568d3e6a3ebfffe09e0366e74c81e8f81e3ca722d13387abdca75f2a3ace751",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 260,
+          "variant": "velocity_spike"
+        },
+        {
+          "kind": "plan",
+          "count": 320
+        },
+        {
+          "kind": "robot",
+          "stage": "before",
+          "frames": 320,
+          "positions": "a0b657b77a8a7cbaf0aa2b28d524aced8ba728abc12a3c9d2050f22ebe244a81"
+        },
+        {
+          "kind": "scene",
+          "stage": "before",
+          "frames": 185,
+          "positions": "b8f34c039407b27650baf4d4612633ad811d1737fb9ed9f863e8db7aff5db728",
+          "valid": true
+        },
+        {
+          "kind": "transform",
+          "count": 320,
+          "variant": "velocity_spike"
+        }
+      ],
+      "rng": "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+      "transform_count": 3,
+      "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ]
+}
