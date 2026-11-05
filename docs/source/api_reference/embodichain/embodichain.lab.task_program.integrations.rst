@@ -632,6 +632,20 @@ control bridges. Software assembly checks do not establish physical qualificatio
 
 .. automodule:: embodichain.lab.task_program.integrations.simulation.control_policy
    :members:
+   :exclude-members: ControlOperationRuntime
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.control_policy
+
+.. autoclass:: ControlOperationRuntime
+   :members:
+   :exclude-members: observation_scope
+
+.. py:attribute:: ControlOperationRuntime.observation_scope
+   :type: dict[str, builtins.object]
+
+   Owned JSON provenance for the declared program, episode, operation, native
+   actors, observer and clock. Reading this metadata performs no acquisition;
+   the declarations do not establish current physical evidence availability.
 
 Control observers opt into retaining the actual before-fetch source stamp. Their
 ``capture(refresh=False)`` reuses the completed buffer; this does not add a sensor
