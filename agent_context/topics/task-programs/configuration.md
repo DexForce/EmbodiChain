@@ -123,6 +123,21 @@ remain host responsibilities; configured nominal sources retain their static
 program preflight. Private loader aliases remain available for existing internal
 callers, with the same result types and composition rules.
 
+For static runtime asset inventory, the standard simulation adapter factory and
+configured wrapper expose `declared_asset_files()`. It calls only explicit
+`DeclaredAssetFileProvider` methods; grasp and hand-calibration factories must
+implement that protocol when inventory is requested. Configured model/side
+assets resolve through the GraspKit model owner without constructing a sampler
+or adapter. Physical robot/scene declarations and motion-source manifests
+remain separate input owners; do not inspect a wrapper's private state to
+enumerate them.
+Use `embodichain/lab/gym/utils/gym_utils.py:robot_config_from_dict` to resolve
+effective robot-preset defaults without registering an environment or creating
+runtime resources. The same owner's `robot_config_asset_files` delegates source
+inputs to Data while excluding the derived URDF assembly output. Model-owned
+files outside serialized declarations need an explicit model inventory; do not
+reproduce preset selection or inspect private model fields in a consumer.
+
 Ownership is explicit rather than a generic deep merge:
 
 - `program.yaml` owns task flow, targets, post-policies, and validators; it
