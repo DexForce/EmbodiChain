@@ -25,11 +25,13 @@ semantic scene graph, generation model client or task lifecycle.
 | Existing-entity expansion proposals and host integration | [Scene expansion](../scene-expansion/scene-expansion.md) |
 
 The package facade resolves services lazily. Expansion has its own
-`scene.expansion` namespace. `compute.geometry` takes numerical geometry, never entity UIDs,
-simulation or GenSim models. Its `landing.py` CPU routines additionally consume
-Trimesh meshes and Shapely polygons for triangle-union floor and silhouette measurements.
-Scene CPU strategies own support
-selection, polygon search, greedy packing and SciPy SLSQP optimization.
+`scene.expansion` namespace. `compute.geometry` takes numerical geometry, never
+simulation or GenSim models. Its `contact_support.py` computes a contact patch
+and COM distance from arrays; native acquisition and witness lifetimes belong
+to the [sensor integration](../sensor-system/contact-history.md). Its `landing.py`
+CPU routines additionally consume Trimesh meshes and Shapely polygons for
+triangle-union floor and silhouette measurements. Scene CPU strategies own
+support selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
 `rigid_mesh.capture_rigid_mesh` snapshots scaled native input vertices and
 matching triangles as owned CPU data with the environment axis intact. It reads

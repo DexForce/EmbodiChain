@@ -1,0 +1,569 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""CPU native-support contracts on the real ContactSensor observer lifecycle."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from contextlib import nullcontext
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+import torch
+import warp as wp
+
+from dexsim.scene import ContactActorInfo, ContactBuffer, ContactQueryCapabilities
+from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+from embodichain.lab.gym.envs.base_env import BaseEnv
+from embodichain.lab.sim.sensors.contact.sensor import ContactSensor, ContactSensorCfg
+from embodichain.lab.sim.sensors.support_observation import (
+    ContactWitness,
+    NativeSupportObservation,
+    NativeSupportResult,
+    SupportObservationRegistry,
+)
+
+
+class _Body:
+    def __init__(self, uid: str, count: int, rest_offset: float = 0.001) -> None:
+        self.uid, self.num_instances = uid, count
+        self.pose = torch.eye(4).repeat(count, 1, 1)
+        self.body_data = SimpleNamespace(com_pose=torch.zeros(count, 7))
+        self.body_data.com_pose[:, 2] = 0.1
+        self._entities = [
+            SimpleNamespace(
+                get_physical_attr=lambda: SimpleNamespace(rest_offset=rest_offset)
+            )
+            for _ in range(count)
+        ]
+        self.pose_reads = 0
+
+    def get_local_pose(self, *, to_matrix):
+        assert to_matrix
+        self.pose_reads += 1
+        return self.pose.clone()
+
+
+class _Query:
+    def __init__(self, count: int) -> None:
+        self.capabilities = ContactQueryCapabilities(True, True, True)
+        self.actors = tuple(
+            ContactActorInfo(
+                10 * row + offset, f"arena_{row}/{uid}", None, f"arena_{row}", row
+            )
+            for row in range(count)
+            for offset, uid in ((1, "payload"), (2, "support"))
+        )
+        self.selected_actor_ids = tuple(actor.actor_id for actor in self.actors)
+        self.buffer = ContactBuffer.allocate(4 * count, "cpu")
+        self.buffer.data.zero_()
+        self.buffer.count = 4 * count
+        patch = torch.tensor(
+            [[-0.02, -0.02, 0], [-0.02, 0.02, 0], [0.02, -0.02, 0], [0.02, 0.02, 0]]
+        )
+        for row in range(count):
+            start = 4 * row
+            self.buffer.data[start : start + 4, :3] = patch
+            self.buffer.data[start : start + 4, 5] = 1.0
+            self.buffer.data[start : start + 4, 9] = 0.001
+            self.buffer.actor_ids[start : start + 4] = torch.tensor(
+                [10 * row + 2, 10 * row + 1]
+            )
+            self.buffer.env_ids[start : start + 4] = row
+        self.fetches = 0
+        self.on_fetch = lambda: None
+
+    def actor_info(self, actor_id):
+        return next(actor for actor in self.actors if actor.actor_id == actor_id)
+
+    def fetch(self):
+        self.fetches += 1
+        self.on_fetch()
+        return self.buffer
+
+
+class _Simulation:
+    def __init__(self, count=2) -> None:
+        self.num_envs = count
+        self.arena_offsets = torch.zeros(count, 3)
+        self.objects = {uid: _Body(uid, count) for uid in ("payload", "support")}
+        self.sensors = {}
+        self.query = _Query(count)
+        self.time = 0.0
+        self.revision = 1
+        self.sensor_creations = 0
+        self.spawn_result = SimpleNamespace(
+            backend="dexsim",
+            topology_revision=1,
+            create_contact_query=lambda *args, **kwargs: self.query,
+        )
+        self._spawn_scene = SimpleNamespace(
+            handles=lambda uid: tuple(
+                SimpleNamespace(path=f"arena_{row}/{uid}") for row in range(count)
+            )
+        )
+
+    @property
+    def physics_step_index(self):
+        return self.revision
+
+    def get_world(self):
+        physics = SimpleNamespace(_get_contact_data_revision=lambda: self.revision)
+        return SimpleNamespace(get_physics_scene=lambda: physics)
+
+    def get_rigid_object(self, uid):
+        return self.objects.get(uid)
+
+    def get_sensor(self, uid):
+        return self.sensors.get(uid)
+
+    def add_sensor(self, cfg):
+        self.sensor_creations += 1
+        sensor = ContactSensor(deepcopy(cfg), owner=self)
+        self.sensors[cfg.uid] = sensor
+        return sensor
+
+
+def _setup(*, strong=False, count=2, capacity=4):
+    wp.init()
+    simulation = _Simulation(count)
+    registry = SupportObservationRegistry(
+        simulation, acquisition_clock=lambda: simulation.time
+    )
+    cfg = ContactSensorCfg(
+        uid="declared_support",
+        rigid_uid_list=["payload", "support"],
+        max_contacts_per_env=capacity,
+    )
+    observer = registry.acquire(
+        simulation.objects["payload"],
+        simulation.objects["support"],
+        entity_id="item",
+        reference_id="surface",
+        observer_name="support_observation",
+        sensor_cfg=cfg,
+    )
+    clock = EnvironmentStepClock(0.04)
+    if strong:
+        observer.bind_clock(clock)
+    return simulation, registry, observer, clock, cfg
+
+
+def _substep(simulation, observer, dt=0.01):
+    simulation.revision += 1
+    simulation.time += dt
+    observer.sensor.update_physics_step(dt)
+
+
+def _window(simulation, observer, clock):
+    observer.sensor.begin_control_step()
+    for _ in range(4):
+        _substep(simulation, observer)
+    clock.advance_after_env_step()
+
+
+def _observe(observer, revision=None):
+    return observer.observe(
+        observer.object.pose.clone(),
+        observer.reference.pose.clone(),
+        support_contract_revision=revision,
+    )
+
+
+def test_legacy_support_owns_metadata_and_uses_actual_acquisition_clock():
+    sim, _, observer, _, _ = _setup()
+    sim.time = 7.25
+    result = _observe(observer)
+    assert result.support.values.tolist() == [True, True]
+    assert result.support.valid.tolist() == [True, True]
+    assert result.support.timestamp == 7.25
+    assert result.support.observation_revision == 1
+    assert observer.tolerance == pytest.approx(0.003)
+    assert set(result.metadata) == {
+        "scope",
+        "entity",
+        "reference",
+        "object_pose",
+        "reference_pose",
+        "supported",
+        "env_ids",
+        "rows",
+    }
+    assert result.metadata["rows"][0]["com_patch_distance_m"] == 0.0
+    assert result.metadata["rows"][0]["upward_impulse"] == pytest.approx(0.004)
+    result.support.values.zero_()
+    result.metadata["rows"][0]["contacts_world"][0][0] = 100.0
+    again = _observe(observer)
+    assert again.support.values.all()
+    assert again.metadata["rows"][0]["contacts_world"][0][0] == pytest.approx(-0.02)
+    assert (
+        sim.query.fetches == 1
+    )  # Same completed physics step reuses its contact snapshot.
+
+
+@pytest.mark.parametrize("moving", ["payload", "support"])
+def test_positive_witness_survives_sleep_but_not_either_body_motion(moving):
+    sim, _, observer, _, _ = _setup()
+    assert _observe(observer).support.values.all()
+    sim.query.buffer.count = 0
+    assert _observe(observer).support.values.all()
+    sim.objects[moving].pose[:, 0, 3] = 0.000099
+    assert _observe(observer).support.values.all()
+    sim.objects[moving].pose[:, 0, 3] = 0.000101
+    result = _observe(observer)
+    assert result.support.valid.all()
+    assert not result.support.values.any()
+    sim.query.buffer.count = 4 * sim.num_envs
+    sim.revision += 1
+    assert _observe(observer).support.values.all()
+    assert (
+        sim.query.fetches == 2
+    )  # New completed physics step can establish fresh support.
+
+
+@pytest.mark.parametrize("moving", ["payload", "support"])
+def test_callback_sample_cannot_reestablish_support_after_same_step_body_motion(moving):
+    sim, _, observer, _, _ = _setup()
+    _substep(sim, observer)
+    assert sim.query.fetches == 1
+
+    sim.objects[moving].pose[0, 0, 3] = 0.001
+    moved = _observe(observer)
+    assert moved.support.valid.tolist() == [True, True]
+    assert moved.support.values.tolist() == [False, True]
+    assert sim.query.fetches == 1
+    assert _observe(observer).support.values.tolist() == [False, True]
+
+    _substep(sim, observer)
+    assert _observe(observer).support.values.tolist() == [True, True]
+    assert sim.query.fetches == 2
+
+
+def test_strong_support_requires_clock_complete_window_and_positive_witness():
+    sim, _, observer, clock, _ = _setup()
+    unavailable = _observe(observer, 1)
+    assert not unavailable.support.valid.any()
+    assert sim.query.fetches == 0
+    observer.bind_clock(clock)
+    _window(sim, observer, clock)
+    result = _observe(observer, 1)
+    assert result.support.values.all() and result.support.valid.all()
+    assert sim.query.fetches == 4
+    assert result.metadata["support_contract_revision"] == 1
+    assert result.metadata["observed_step"] == 1
+    assert result.metadata["observed_at"] == 0.04
+    info = deepcopy(result.metadata["rows"][0]["sample"])
+    assert info == dict(
+        timestamp=0.04,
+        control_step=1,
+        substep=4,
+        serial=4,
+        episode_generation=1,
+        native_revision=5,
+        topology_revision=1,
+    )
+    result.metadata["rows"][0]["sample"]["serial"] = 999
+    result.metadata["actor_pairs"][0]["object_info"]["actor_id"] = -1
+    again = _observe(observer, 1)
+    assert again.support.valid.all()
+    assert again.metadata["rows"][0]["sample"] == info
+    assert again.metadata["actor_pairs"][0]["object_info"]["actor_id"] == 1
+    legacy = _observe(observer)
+    assert legacy.support.values.all()
+    assert "support_contract_revision" not in legacy.metadata
+    assert sim.query.fetches == 4
+    sim.query.buffer.count = 0
+    _window(sim, observer, clock)
+    sleeping = _observe(observer, 1)
+    assert sleeping.support.values.all() and sleeping.support.valid.all()
+    assert sleeping.metadata["rows"][0]["retained"] is True
+    assert sleeping.metadata["rows"][0]["sample"] == info
+
+
+@pytest.mark.parametrize("moving", ["payload", "support"])
+@pytest.mark.parametrize("contract_revision", [None, 1])
+def test_clock_bound_observer_invalidates_moved_bodies_for_both_metadata_modes(
+    moving, contract_revision
+):
+    sim, _, observer, clock, _ = _setup(strong=True)
+    _window(sim, observer, clock)
+    assert _observe(observer, contract_revision).support.values.all()
+
+    sim.objects[moving].pose[0, 0, 3] = 0.001
+    moved = _observe(observer, contract_revision)
+    assert moved.support.valid.tolist() == [True, True]
+    assert moved.support.values.tolist() == [False, True]
+    assert sim.query.fetches == 4
+    assert ("support_contract_revision" in moved.metadata) == (contract_revision == 1)
+
+    _window(sim, observer, clock)
+    assert _observe(observer, contract_revision).support.values.all()
+    assert sim.query.fetches == 8
+
+
+def test_public_support_result_constructor_copies_mutable_external_inputs():
+    _, _, observer, _, _ = _setup()
+    source = _observe(observer)
+    result = NativeSupportResult(source.support, source.metadata)
+    source.support.values.zero_()
+    source.metadata["rows"][0]["contacts_world"][0][0] = 100.0
+    assert result.support.values.all()
+    assert result.metadata["rows"][0]["contacts_world"][0][0] == pytest.approx(-0.02)
+    source.support.env_ids[0] = source.support.env_ids[1]
+    with pytest.raises(ValueError, match="unique"):
+        NativeSupportResult(source.support, source.metadata)
+
+
+def test_complete_empty_contact_sample_is_only_an_instantaneous_negative():
+    sim, _, observer, clock, _ = _setup(strong=True)
+    sim.query.buffer.count = 0
+    _window(sim, observer, clock)
+    result = _observe(observer, 1)
+    assert result.support.valid.all()
+    assert not result.support.values.any()
+    assert all(row["sample"] is None for row in result.metadata["rows"])
+
+
+def test_binding_strong_clock_keeps_source_serial_separate_from_all_acquisitions():
+    sim, _, observer, clock, _ = _setup()
+    assert _observe(observer).support.observation_revision == 1
+    observer.bind_clock(clock)
+    _window(sim, observer, clock)
+    result = _observe(observer, 1)
+    assert result.support.observation_revision == 5
+    assert result.metadata["rows"][0]["sample"]["serial"] == 4
+
+
+@pytest.mark.parametrize("substeps", [2, 5])
+def test_partial_or_overlong_window_is_unavailable(substeps):
+    sim, _, observer, clock, _ = _setup(strong=True)
+    observer.sensor.begin_control_step()
+    for _ in range(substeps):
+        _substep(sim, observer)
+    clock.advance_after_env_step()
+    result = _observe(observer, 1)
+    assert not result.support.valid.any()
+    assert all(result.support.acquisition_errors)
+
+
+def test_missing_acquisition_time_never_becomes_a_fabricated_zero_timestamp():
+    sim, _, observer, _, _ = _setup()
+    sim.time = float("nan")
+    with pytest.raises(ValueError, match="acquisition time"):
+        _observe(observer)
+
+
+def test_public_base_env_step_samples_support_once_per_physics_substep():
+    sim, _, observer, clock, _ = _setup(strong=True, count=1)
+    env = BaseEnv.__new__(BaseEnv)
+    env.cfg = SimpleNamespace(sim_steps_per_control=4)
+    env.sim_cfg = SimpleNamespace(physics_dt=0.01)
+    env.sensors = {observer.sensor.cfg.uid: observer.sensor}
+
+    def update(dt, steps, **kwargs):
+        for _ in range(steps):
+            sim.revision += 1
+            sim.time += dt
+            kwargs["after_substep"](dt)
+
+    env.sim = SimpleNamespace(update=update, render_frame=lambda: nullcontext())
+    env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
+    env._elapsed_steps = torch.zeros(1, dtype=torch.long)
+    for name in ("_preprocess_action", "_step_action", "_postprocess_action"):
+        setattr(env, name, lambda action: action)
+    env._update_sim_state = lambda **kwargs: None
+    env._update_physical_objective = lambda: None
+    env.get_obs = lambda **kwargs: {}
+    env.get_info = lambda **kwargs: {}
+    env.get_reward = lambda **kwargs: torch.zeros(1)
+    env._extend_reward = lambda rewards, **kwargs: rewards
+    env._get_termination_flags = lambda *args: (
+        torch.zeros(1, dtype=torch.bool),
+        torch.zeros(1, dtype=torch.bool),
+    )
+    env._hook_after_sim_step = lambda **kwargs: None
+    env.step(None)
+    clock.advance_after_env_step()
+    result = _observe(observer, 1)
+    assert result.support.valid.tolist() == result.support.values.tolist() == [True]
+    assert sim.query.fetches == 4
+    assert result.metadata["rows"][0]["sample"]["substep"] == 4
+
+
+@pytest.mark.parametrize(
+    "damage",
+    ["nonfinite_row", "overflow", "fetch_revision", "topology", "unobserved_step"],
+)
+def test_acquisition_failure_invalidates_every_witness(damage):
+    sim, _, observer, clock, _ = _setup(strong=True)
+    _window(sim, observer, clock)
+    assert _observe(observer, 1).support.values.all()
+    if damage == "nonfinite_row":
+        sim.query.buffer.data[0, 5] = float("nan")
+    elif damage == "overflow":
+        sim.query.buffer.dropped_count = 1
+    elif damage == "fetch_revision":
+        sim.query.on_fetch = lambda: setattr(sim, "revision", sim.revision + 1)
+    elif damage == "topology":
+        sim.query.on_fetch = lambda: setattr(
+            sim.spawn_result,
+            "topology_revision",
+            sim.spawn_result.topology_revision + 1,
+        )
+    if damage == "unobserved_step":
+        sim.revision += 1
+    else:
+        _window(sim, observer, clock)
+    result = _observe(observer, 1)
+    assert not result.support.valid.any()
+    assert all(result.support.acquisition_errors)
+    sim.query.buffer.data[0, 5] = 1.0
+    sim.query.buffer.count = 0
+    sim.query.buffer.dropped_count = 0
+    sim.query.on_fetch = lambda: None
+    _window(sim, observer, clock)
+    clean_empty = _observe(observer, 1)
+    assert clean_empty.support.valid.all()
+    assert not clean_empty.support.values.any()
+
+
+def test_partial_reset_requires_the_next_complete_window_for_selected_rows():
+    sim, _, observer, clock, _ = _setup(strong=True)
+    observer.sensor.begin_control_step()
+    for _ in range(2):
+        _substep(sim, observer)
+    observer.sensor.reset([0, 0])
+    for _ in range(2):
+        _substep(sim, observer)
+    clock.advance_after_env_step()
+    result = _observe(observer, 1)
+    assert result.support.valid.tolist() == [False, True]
+    assert result.metadata["episode_generations"] == [2, 1]
+    _window(sim, observer, clock)
+    next_result = _observe(observer, 1)
+    assert next_result.support.valid.all() and next_result.support.values.all()
+
+
+def test_registry_reuses_exact_owners_and_requires_explicit_native_rebinding():
+    sim, registry, observer, _, cfg = _setup()
+    arguments = dict(
+        entity_id="item",
+        reference_id="surface",
+        observer_name="support_observation",
+        sensor_cfg=cfg,
+    )
+    assert (
+        registry.acquire(observer.object, observer.reference, **arguments) is observer
+    )
+    assert sim.sensor_creations == 1
+    replacement = _Body("payload", 2)
+    sim.objects["payload"] = replacement
+    with pytest.raises(ValueError, match="rebind"):
+        registry.acquire(replacement, observer.reference, **arguments)
+    assert not _observe(observer).support.valid.any()
+    registry.release("payload", "support")
+    new = registry.acquire(replacement, observer.reference, **arguments)
+    assert new is not observer
+    assert sim.sensor_creations == 1
+    registry.close()
+    assert sim.get_sensor(cfg.uid) is observer.sensor
+    assert sim.get_rigid_object("payload") is replacement
+    assert not observer.sensor.requires_substep_update
+
+
+def test_registry_does_not_silently_reuse_a_changed_sensor_declaration():
+    _, registry, observer, _, cfg = _setup()
+    cfg.max_contacts_per_env = 8
+    assert observer.sensor.cfg.max_contacts_per_env == 4
+    with pytest.raises(ValueError, match="declaration changed"):
+        registry.acquire(
+            observer.object,
+            observer.reference,
+            entity_id="item",
+            reference_id="surface",
+            observer_name="support_observation",
+            sensor_cfg=cfg,
+        )
+    assert _observe(observer).support.values.all()
+
+
+def test_close_cannot_remove_a_replacement_hook_and_is_idempotent():
+    _, _, observer, _, _ = _setup()
+    sensor = observer.sensor
+    sensor.remove_sampling_observer("support_observation", expected=observer)
+    replacement = SimpleNamespace(
+        begin_control_step=lambda: None,
+        before_sample=lambda: None,
+        after_sample=lambda dt, token: None,
+        reset=lambda ids: None,
+    )
+    sensor.add_sampling_observer("support_observation", replacement)
+    with pytest.raises(ValueError, match="different owner"):
+        sensor.remove_sampling_observer("support_observation", expected=observer)
+    observer.close()
+    observer.close()
+    assert sensor.remove_sampling_observer("support_observation") is replacement
+
+
+def test_delayed_after_sample_from_sensor_token_snapshot_does_not_revive_closed_owner():
+    sim, _, observer, _, _ = _setup()
+    sensor = observer.sensor
+    sensor.remove_sampling_observer("support_observation", expected=observer)
+    closer = SimpleNamespace(
+        begin_control_step=lambda: None,
+        before_sample=lambda: None,
+        after_sample=lambda dt, token: observer.close(),
+        reset=lambda ids: None,
+    )
+    sensor.add_sampling_observer("closer", closer)
+    sensor.add_sampling_observer("support_observation", observer)
+    _substep(sim, observer)
+    assert observer.object.pose_reads == observer.reference.pose_reads == 0
+    assert not _observe(observer).support.valid.any()
+    sensor.remove_sampling_observer("closer")
+
+
+def test_native_rest_envelope_bound_is_checked_without_installing_hook():
+    sim, registry, observer, _, cfg = _setup()
+    registry.close()
+    sim.objects["payload"] = _Body("payload", 2, rest_offset=0.01)
+    with pytest.raises(ValueError, match="rest envelopes"):
+        registry.acquire(
+            sim.objects["payload"],
+            sim.objects["support"],
+            entity_id="item",
+            reference_id="surface",
+            observer_name="support_observation",
+            sensor_cfg=cfg,
+        )
+    assert not observer.sensor.requires_substep_update
+
+
+def test_contact_witness_owns_patch_and_pose_snapshot():
+    pose = torch.eye(4)
+    patch = (
+        np.array([[1, 2]]),
+        np.array([[0.0, 0, 0]]),
+        np.array([[0.0, 0, 1]]),
+        np.array([0.001]),
+    )
+    witness = ContactWitness()
+    witness.update(pose, pose, patch)
+    patch[1][0, 0] = 1.0
+    assert witness.update(pose, pose, None)[1][0, 0] == 0.0
+    assert witness.update(pose, pose, None, invalid=True) is None

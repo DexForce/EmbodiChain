@@ -161,6 +161,7 @@ topics:
   - embodichain/lab/sim/sensors/contact/sensor.py
   - embodichain/lab/sim/sensors/contact/sampling.py
   - embodichain/lab/sim/sensors/contact/timeline.py
+  - embodichain/lab/sim/sensors/support_observation.py
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
@@ -258,7 +259,7 @@ topics:
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
     aabb_overlap_depth, aabb_containment_violation, transform_aabbs, triangle_geometry,
-    geometry kernels, RobotSceneWorkspace, SceneWorkspaceCandidate, robot_workspace demo, 场景几何核]
+    geometry kernels, support_from_contacts, RobotSceneWorkspace, SceneWorkspaceCandidate, robot_workspace demo, 场景几何核]
   paths: [topics/scene-services/scene-services.md]
   source_of_truth:
   - embodichain/lab/sim/scene/
@@ -458,7 +459,6 @@ topics:
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
   - embodichain/lab/task_program/integrations/simulation/grip_evidence.py
-
   - embodichain/lab/task_program/integrations/invocation_policy.py
   - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
