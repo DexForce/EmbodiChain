@@ -98,7 +98,7 @@ report schema wrappers and semantic actor labels. The CPU test
 `tests/gym/envs/task_program/test_contact_evidence.py` exercises the actual public
 step boundary, frame ownership, native stamps and selective reset behavior.
 
-`joint_contact_observation.py` collects explicit B=1 joint position/velocity
+`contact/observation.py` collects explicit B=1 joint position/velocity
 and packed valid contacts through the same sensor hooks. It uses actual
 simulation time and separates native contact revision from its acquisition
 sequence. Initial captures explicitly request a refresh; substeps reuse the
@@ -106,8 +106,8 @@ completed sensor sample. The observer never declares action success or task
 acceptance; integrations own occurrence and episode binding.
 
 Window generations reject delayed callbacks after reset, replacement or close.
-Records are append-only within a generation; `snapshot_since` returns owned
-new records, while full `snapshot` retains its ownership contract. Limits mark
+Records are append-only within a generation; `snapshot(start)` returns an owned
+suffix, with `snapshot()` selecting the full window. Limits mark
 overflow explicitly, and missing/nonfinite channels preserve unavailability
 independently.
 

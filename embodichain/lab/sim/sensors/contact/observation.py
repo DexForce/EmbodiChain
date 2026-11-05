@@ -29,7 +29,7 @@ from embodichain.lab.sim.evidence import (
     PhysicalEvidenceFrame,
     PhysicalEvidenceRequest,
 )
-from .contact.sampling import (
+from .sampling import (
     CONTACT_DISTANCES,
     CONTACT_VALID_MASK,
     DEFAULT_CHANNELS,
@@ -44,10 +44,8 @@ __all__ = ["JointContactObservation", "JointContactObserver"]
 class JointContactObservation:
     """Owned joint/contact acquisition, without an action or task verdict.
 
-    Frame time is actual simulation time supplied by the owner. Its observation
-    revision counts this observer's acquisitions; native contact revision is
-    retained separately. Integrations bind these facts to invocation/episode
-    identity using their existing execution contracts.
+    Frame timestamps use simulation time; observation revisions count this
+    observer's acquisitions. Native contact revision remains independent.
     """
 
     frame: PhysicalEvidenceFrame
@@ -64,10 +62,9 @@ class JointContactObservation:
 class JointContactObserver:
     """Collect explicit B=1 joint channels alongside sampled native contacts.
 
-    Attach this observer to an ordinary ContactSensor. Substep callbacks reuse
-    its completed sample and never fetch a second time. Named windows select
-    only a phase and optional storage limits; the integration owns occurrence,
-    episode and policy identity. No names select a skill, threshold or verdict.
+    ContactSensor drives substep callbacks from its completed sample. Windows
+    own phase labels and storage limits; integrations own episode/occurrence
+    binding and verdicts. No callback advances simulation or fetches again.
 
     Args:
         sampler: Existing standard contact source, with exactly one environment.
@@ -86,12 +83,10 @@ class JointContactObserver:
     ) -> None:
         if sampler.num_envs != 1:
             raise ValueError("Joint contact observation supports B=1 only.")
-        self._sampler, self._position, self._velocity = (
-            sampler,
-            joint_position,
-            joint_velocity,
-        )
-        self._clock = clock
+        self._sampler, self._clock = sampler, clock
+        self._joints = {"articulation.joint_position": joint_position}
+        if joint_velocity is not None:
+            self._joints["articulation.joint_velocity"] = joint_velocity
         self._generation = 0
         self._revision = 0
         self._closed = False
@@ -140,10 +135,9 @@ class JointContactObserver:
             raise ValueError("max_duration must be finite and positive.")
         self.set_phase(phase)
         started = self._time()
-        self._generation += 1
-        self._records.clear()
+        self.reset()
         self._max_samples, self._max_duration = max_samples, max_duration
-        self._started_at, self._overflow, self._active = started, False, True
+        self._started_at, self._active = started, True
         return self._generation
 
     def set_phase(self, phase: str) -> None:
@@ -203,24 +197,17 @@ class JointContactObserver:
         *,
         refresh: bool,
         source_stamp: ContactSourceStamp | None = None,
-    ) -> JointContactObservation | None:
-        """Acquire actual joint state and contact channels for the active window.
+    ) -> None:
+        """Append one joint/contact sample to the active window.
 
-        ``refresh=True`` explicitly fetches once (for initial prepare samples).
-        Substep hooks always use ``False`` with their before-fetch source stamp.
-        Missing channels retain unavailability independently; they never become
-        measured no-contact or joint success. None means the window limit was hit.
+        Args:
+            refresh: Explicitly refresh the sensor for a prepare sample. Sensor
+                callbacks reuse the completed substep with ``False``.
+            source_stamp: Before-sample stamp supplied by the sensor callback.
+
+        Read stored data with :meth:`snapshot`. A reached limit marks overflow
+        without acquiring another sample. Missing channels remain unavailable.
         """
-        record = self._capture_owned(refresh=refresh, source_stamp=source_stamp)
-        return None if record is None else record.snapshot()
-
-    def _capture_owned(
-        self,
-        *,
-        refresh: bool,
-        source_stamp: ContactSourceStamp | None = None,
-    ) -> JointContactObservation | None:
-        """Store one newly owned frame without publishing a redundant copy."""
         if self._closed or not self._active:
             raise RuntimeError("Joint contact observation has no active window.")
         generation, phase = self._generation, self._phase
@@ -240,7 +227,7 @@ class JointContactObserver:
             and timestamp - self._started_at > self._max_duration + 1e-8
         ):
             self._overflow = True
-            return None
+            return
         self._revision += 1
         request = PhysicalEvidenceRequest(
             timestamp,
@@ -251,29 +238,16 @@ class JointContactObserver:
         sample = self._sampler.sample(
             request, refresh=refresh, source_stamp=source_stamp
         )
-        # The source trace retains valid contacts only. Keeping every fixed
-        # query slot for thousands of substeps would multiply sensor capacity
-        # by history length, even when no contacts are present.
+        # Retain valid contacts rather than fixed-capacity padding per substep.
         mask = sample.frame.batches[CONTACT_VALID_MASK].values[0]
         batches = {
-            name: PhysicalEvidenceBatch(
-                name,
-                batch.values[:, mask],
-                batch.valid,
-                batch.acquisition_errors,
-                timestamp,
-                request.env_ids,
-                request.observation_revision,
-            )
+            name: replace(batch, values=batch.values[:, mask])
             for name, batch in sample.frame.batches.items()
         }
-        batches["articulation.joint_position"] = self._joint_batch(
-            self._position, "articulation.joint_position", request
+        batches.update(
+            (name, self._joint_batch(reader, name, request))
+            for name, reader in self._joints.items()
         )
-        if self._velocity is not None:
-            batches["articulation.joint_velocity"] = self._joint_batch(
-                self._velocity, "articulation.joint_velocity", request
-            )
         if self._closed or not self._active or generation != self._generation:
             raise ValueError("Observation window changed during acquisition.")
         if self._time() != timestamp:
@@ -290,30 +264,25 @@ class JointContactObserver:
             sample.dropped_contacts,
         )
         self._records.append(record)
-        return record
 
-    @property
-    def record_count(self) -> int:
-        """Return the append-only count within the current window generation."""
-        return len(self._records)
+    def snapshot(self, start: int = 0) -> tuple[JointContactObservation, ...]:
+        """Copy all records or only the suffix beginning at an earlier offset.
 
-    def snapshot_since(self, start: int) -> tuple[JointContactObservation, ...]:
-        """Return detached newly appended records from an exact generation offset.
+        Args:
+            start: Record count already consumed in the current generation.
+                Callers check :attr:`generation` before reusing an offset.
 
-        Callers retain and check :attr:`generation` across reads. Existing records
-        never mutate within a generation; begin/reset/close advance the generation
-        before clearing storage. Serialized owners can project only new samples
-        without repeatedly copying full raw history.
+        Returns:
+            Owned observations; later samples and resets cannot modify them.
+
+        Raises:
+            ValueError: The offset does not address the current window prefix.
         """
         if type(start) is not int or not 0 <= start <= len(self._records):
             raise ValueError(
                 "Observation offset must address the current window prefix."
             )
         return tuple(record.snapshot() for record in self._records[start:])
-
-    def snapshot(self) -> tuple[JointContactObservation, ...]:
-        """Return detached records; callers separately retain generation/overflow."""
-        return self.snapshot_since(0)
 
     def begin_control_step(self) -> None:
         """Keep the window across control steps; the sensor owns interval counters."""
@@ -344,9 +313,7 @@ class JointContactObserver:
             abs_tol=1e-8,
         ):
             raise ValueError("Joint contact samples do not cover consecutive substeps.")
-        # Substep callbacks do not publish a return value. Public capture and
-        # snapshots still revalidate and copy every externally visible frame.
-        self._capture_owned(refresh=False, source_stamp=token[2])
+        self.capture(refresh=False, source_stamp=token[2])
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """End the owned window when its single native row resets."""

@@ -986,7 +986,7 @@ def test_optional_contact_distances_preserve_default_channels_and_row_validity()
 
 
 def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
-    from embodichain.lab.sim.sensors.joint_contact_observation import (
+    from embodichain.lab.sim.sensors.contact import (
         JointContactObserver,
     )
     from embodichain.lab.sim.sensors.contact.sampling import CONTACT_DISTANCES
@@ -1002,7 +1002,8 @@ def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
         joint_velocity=lambda: qvel,
     )
     generation = observer.begin_window("prepare")
-    initial = observer.capture(refresh=True)
+    observer.capture(refresh=True)
+    initial = observer.snapshot()[0]
     assert source.update_count == 1
     observer.set_phase("twist")
     token = observer.before_sample()
@@ -1010,11 +1011,11 @@ def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
     qpos[0] = 0.13
     observer.after_sample(0.004, token)
     records = observer.snapshot()
-    assert len(records) == observer.record_count == 2
-    assert len(observer.snapshot_since(1)) == 1
-    assert observer.snapshot_since(2) == ()
+    assert len(records) == 2
+    assert len(observer.snapshot(1)) == 1
+    assert observer.snapshot(2) == ()
     with pytest.raises(ValueError, match="window prefix"):
-        observer.snapshot_since(-1)
+        observer.snapshot(-1)
     assert [record.phase for record in records] == ["prepare", "twist"]
     assert records[-1].frame.timestamp == 0.004
     assert records[-1].frame.observation_revision == 2
@@ -1040,7 +1041,8 @@ def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
     observer.after_sample(0.004, token)
     assert observer.snapshot() == ()
     observer.capture(refresh=True)
-    assert observer.capture(refresh=True) is None
+    observer.capture(refresh=True)
+    assert len(observer.snapshot()) == 1
     assert observer.overflow
     assert source.update_count == 2
     late = observer.before_sample()
@@ -1050,7 +1052,7 @@ def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
 
 
 def test_joint_contact_channels_keep_missing_and_nonfinite_observations_unavailable():
-    from embodichain.lab.sim.sensors.joint_contact_observation import (
+    from embodichain.lab.sim.sensors.contact import (
         JointContactObserver,
     )
     from embodichain.lab.sim.sensors.contact.sampling import CONTACT_DISTANCES
@@ -1062,7 +1064,8 @@ def test_joint_contact_channels_keep_missing_and_nonfinite_observations_unavaila
         lambda: 1.0,
     )
     observer.begin_window("press")
-    record = observer.capture(refresh=True)
+    observer.capture(refresh=True)
+    record = observer.snapshot()[0]
     assert not record.frame.get("articulation.joint_position").valid.any()
     assert not record.frame.get(CONTACT_DISTANCES).valid.any()
     assert record.frame.get(CONTACT_NORMALS).valid.all()
@@ -1074,23 +1077,52 @@ def test_joint_contact_channels_keep_missing_and_nonfinite_observations_unavaila
         )
 
 
-def test_joint_contact_observer_rejects_replaced_window_during_acquisition():
-    from embodichain.lab.sim.sensors.joint_contact_observation import (
+@pytest.mark.parametrize("change", ["window", "clock"])
+def test_joint_contact_observer_rejects_changed_window_or_clock_during_acquisition(
+    change,
+):
+    from embodichain.lab.sim.sensors.contact import (
         JointContactObserver,
     )
 
     source = ContactSource()
-    holder = []
+    holder, clock = [], [1.0]
 
     def read_joint():
-        holder[0].begin_window("replacement")
+        if change == "window":
+            holder[0].begin_window("replacement")
+        else:
+            clock[0] += 0.004
         return torch.zeros(1)
 
     observer = JointContactObserver(
-        ContactEvidenceSampler(source), read_joint, lambda: 1.0
+        ContactEvidenceSampler(source), read_joint, lambda: clock[0]
     )
     holder.append(observer)
     observer.begin_window("original")
-    with pytest.raises(ValueError, match="window changed"):
+    message = "window changed" if change == "window" else "Simulation time changed"
+    with pytest.raises(ValueError, match=message):
         observer.capture(refresh=True)
     assert observer.snapshot() == ()
+
+
+def test_joint_contact_duration_limit_preserves_owned_prefix_and_stops_acquisition():
+    from embodichain.lab.sim.sensors.contact import JointContactObserver
+
+    source, clock = ContactSource(), [0.0]
+    observer = JointContactObserver(
+        ContactEvidenceSampler(source), lambda: torch.zeros(1), lambda: clock[0]
+    )
+    generation = observer.begin_window("bounded", max_duration=0.01)
+    observer.capture(refresh=True)
+    retained = observer.snapshot()
+    clock[0] = 0.01
+    observer.capture(refresh=True)
+    assert len(observer.snapshot()) == 2
+    clock[0] = 0.02
+    observer.capture(refresh=True)
+    assert observer.overflow and source.update_count == 2
+    assert len(observer.snapshot()) == 2
+    observer.begin_window("new")
+    assert observer.generation != generation and observer.snapshot() == ()
+    assert len(retained) == 1 and retained[0].frame.timestamp == 0.0
