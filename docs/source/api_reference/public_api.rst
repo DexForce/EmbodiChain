@@ -1040,6 +1040,8 @@ state and world-to-base transforms belong to the query snapshot. Payload queries
 remain B=1; the carried body owns its identity, control part, local spheres and
 observed world pose. These values are separate from serialized configuration.
 Subsets, reordered environments, and per-environment worlds are unsupported.
+An omitted start uses the captured selected joint rows; the motion facade reports
+the world as immutable.
 
 The owned motion factory closes backend-local attachments on exit and makes no
 skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
