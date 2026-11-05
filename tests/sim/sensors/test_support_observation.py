@@ -295,6 +295,27 @@ def test_strong_support_requires_clock_complete_window_and_positive_witness():
     assert sleeping.metadata["rows"][0]["sample"] == info
 
 
+@pytest.mark.parametrize("moving", ["payload", "support"])
+@pytest.mark.parametrize("contract_revision", [None, 1])
+def test_clock_bound_observer_invalidates_moved_bodies_for_both_metadata_modes(
+    moving, contract_revision
+):
+    sim, _, observer, clock, _ = _setup(strong=True)
+    _window(sim, observer, clock)
+    assert _observe(observer, contract_revision).support.values.all()
+
+    sim.objects[moving].pose[0, 0, 3] = 0.001
+    moved = _observe(observer, contract_revision)
+    assert moved.support.valid.tolist() == [True, True]
+    assert moved.support.values.tolist() == [False, True]
+    assert sim.query.fetches == 4
+    assert ("support_contract_revision" in moved.metadata) == (contract_revision == 1)
+
+    _window(sim, observer, clock)
+    assert _observe(observer, contract_revision).support.values.all()
+    assert sim.query.fetches == 8
+
+
 def test_public_support_result_constructor_copies_mutable_external_inputs():
     _, _, observer, _, _ = _setup()
     source = _observe(observer)

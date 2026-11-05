@@ -751,7 +751,7 @@ class NativeSupportObservation:
                     mask = self._last_sample.frame.batches[CONTACT_VALID_MASK].values[
                         row
                     ]
-                    if self._clock is None and not sample_is_fresh:
+                    if not sample_is_fresh:
                         # A cached contact cannot re-establish a witness invalidated by motion.
                         mask = torch.zeros_like(mask)
                     patch = tuple(
