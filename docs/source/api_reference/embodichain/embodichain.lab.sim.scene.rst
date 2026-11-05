@@ -745,6 +745,7 @@ calibration remains explicit and retains other drive/mass owners.
 .. autofunction:: prismatic_reset_state
 
 .. autofunction:: prismatic_handle_center_world
+
 Local source vertices
 ----------------------
 
