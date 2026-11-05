@@ -78,6 +78,17 @@ BindingReport: TypeAlias = dict[str, Any]
 
 
 def validate_scene_manifest(value: Mapping[str, Any]) -> SceneManifest:
+    """Validate the semantic object inventory and robot-profile metadata.
+
+    Args:
+        value: Mapping using this function's versioned declaration schema.
+
+    Returns:
+        A detached scene manifest; geometry is supplied rather than measured.
+
+    Raises:
+        ValueError: A required field, identity, type or cross-declaration invariant is invalid.
+    """
     result = _mapping(value, "SceneManifest")
     _keys(
         result,
@@ -125,6 +136,17 @@ def validate_scene_manifest(value: Mapping[str, Any]) -> SceneManifest:
 
 
 def validate_role_bindings(value: Mapping[str, Any]) -> RoleBindings:
+    """Validate reference UID sets and explicit resource-role bindings.
+
+    Args:
+        value: Mapping using this function's versioned declaration schema.
+
+    Returns:
+        Detached bindings retaining the exact task and candidate identities.
+
+    Raises:
+        ValueError: A required field, identity, type or cross-declaration invariant is invalid.
+    """
     result = _mapping(value, "RoleBindings")
     _keys(
         result,
@@ -152,6 +174,17 @@ def validate_role_bindings(value: Mapping[str, Any]) -> RoleBindings:
 
 
 def validate_binding_report(value: Mapping[str, Any]) -> BindingReport:
+    """Validate candidate selection and individual reference-binding outcomes.
+
+    Args:
+        value: Mapping using this function's versioned declaration schema.
+
+    Returns:
+        A detached binding report with consistent selection and candidate states.
+
+    Raises:
+        ValueError: A required field, identity, type or cross-declaration invariant is invalid.
+    """
     result = _mapping(value, "BindingReport")
     _keys(
         result,

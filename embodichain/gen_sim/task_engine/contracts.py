@@ -116,6 +116,17 @@ def canonical_hash(value: Any) -> str:
 
 
 def validate_task_draft(value: Mapping[str, Any]) -> TaskDraft:
+    """Validate task identity and the ordered instruction-intent steps.
+
+    Args:
+        value: Mapping using this function's versioned declaration schema.
+
+    Returns:
+        A detached draft with normalized intent fields.
+
+    Raises:
+        ValueError: A required field, identity, type or cross-declaration invariant is invalid.
+    """
     result = _mapping(value, "TaskDraft")
     _keys(result, _DRAFT_KEYS, "TaskDraft")
     _schema(result, TASK_DRAFT_SCHEMA, "TaskDraft")
@@ -129,6 +140,17 @@ def validate_task_draft(value: Mapping[str, Any]) -> TaskDraft:
 
 
 def validate_scene_request(value: Mapping[str, Any]) -> SceneRequest:
+    """Validate source references, scene relations and robot requirements.
+
+    Args:
+        value: Mapping using this function's versioned declaration schema.
+
+    Returns:
+        A detached scene request retaining its declared task identity.
+
+    Raises:
+        ValueError: A required field, identity, type or cross-declaration invariant is invalid.
+    """
     result = _mapping(value, "SceneRequest")
     _keys(result, _SCENE_REQUEST_KEYS, "SceneRequest")
     _schema(result, SCENE_REQUEST_SCHEMA, "SceneRequest")
@@ -181,6 +203,18 @@ def validate_success_spec(
     *,
     draft: Mapping[str, Any] | None = None,
 ) -> SuccessSpec:
+    """Validate complete ordered success terms against an optional draft.
+
+    Args:
+        value: Mapping using this function's versioned declaration schema.
+        draft: Optional source draft whose task identity and derived terms must match.
+
+    Returns:
+        A detached all-clause success declaration; no physical verdict.
+
+    Raises:
+        ValueError: A required field, identity, type or cross-declaration invariant is invalid.
+    """
     result = _mapping(value, "SuccessSpec")
     _keys(result, _SUCCESS_KEYS, "SuccessSpec")
     _schema(result, SUCCESS_SPEC_SCHEMA, "SuccessSpec")
@@ -223,6 +257,17 @@ def validate_success_spec(
 
 
 def validate_task_candidate(value: Mapping[str, Any]) -> TaskCandidate:
+    """Verify a candidate, its derived declarations and canonical step hash.
+
+    Args:
+        value: Mapping using this function's versioned declaration schema.
+
+    Returns:
+        A detached candidate retaining voting and normalization provenance.
+
+    Raises:
+        ValueError: A required field, identity, type or cross-declaration invariant is invalid.
+    """
     result = _mapping(value, "TaskCandidate")
     _keys(result, _CANDIDATE_KEYS, "TaskCandidate")
     result["candidate_id"] = _nonempty(
@@ -262,6 +307,17 @@ def validate_task_candidate(value: Mapping[str, Any]) -> TaskCandidate:
 
 
 def validate_task_candidate_set(value: Mapping[str, Any]) -> TaskCandidateSet:
+    """Validate candidate voting and source-response accounting.
+
+    Args:
+        value: Mapping using this function's versioned declaration schema.
+
+    Returns:
+        A detached candidate set with consistent task and candidate identities.
+
+    Raises:
+        ValueError: A required field, identity, type or cross-declaration invariant is invalid.
+    """
     result = _mapping(value, "TaskCandidateSet")
     _keys(result, _CANDIDATE_SET_KEYS, "TaskCandidateSet")
     _schema(result, TASK_CANDIDATE_SET_SCHEMA, "TaskCandidateSet")
