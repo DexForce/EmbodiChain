@@ -99,3 +99,10 @@ unavailable per environment. Lab state collectors use the same canonical
 ObservationManager history as support collection, preserving raw validity,
 acquisition errors and temporal identities without a second acquisition path.
 The Task Engine projection supplies declarations only and selects no thresholds.
+
+Historical Press/Twist control proof lives in `control_evidence.py`. Bindings
+seal explicit predicate/joint/direction/resource and compiled occurrence identity.
+TaskSpec replays the original acceptance receipt and complete execution prefix;
+program success alone cannot certify a physical control effect. Missing acquisition
+remains unavailable, and an original measured rejection remains rejected. This
+verifier collects no state and changes no physics or acceptance thresholds.
