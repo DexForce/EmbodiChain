@@ -217,6 +217,13 @@ executable lowerers. The current frontend permits the constrained node/call
 subset enforced by its decoder; Task Program itself supports the complete
 language.
 
+`TaskProgramPlanLifecycleFactory` is the provider-free selection protocol for
+an explicit grounded occurrence. Its composite permits at most one lifecycle
+owner and rejects duplicate factory registration. Runtime hosts bind this port
+explicitly; source-specific lowerers and services remain with their owning
+integration layers. Semantic preflight checks planning recovery against the
+actual target SkillDescriptor before grounding or physical acquisition.
+
 ## Evidence ownership across integrations
 
 Task Engine selects declared evidence requirements and named policies from skill,

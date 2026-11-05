@@ -51,9 +51,12 @@ def test_search_deadline_stops_only_at_cooperative_boundaries(monkeypatch):
         with search.search_cost_scope(wall_seconds=1.0) as cost:
             search.record_search("started")
             clock[0] = 6.0
+            search.record_search(
+                "additional_measurement", count=4, budget_checkpoint=False
+            )
             search.record_search("next")
     assert failure.value.operation == "next"
-    assert cost.counters == {"started": 1}
+    assert cost.counters == {"started": 1, "additional_measurement": 4}
     assert search.current_search_cost() is None
     with pytest.raises(ValueError, match="finite and positive"):
         with search.search_cost_scope(wall_seconds=0):

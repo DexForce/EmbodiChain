@@ -19,12 +19,17 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import math
+import random
 from time import perf_counter
+from typing import Any
+
+import numpy as np
+import torch
 
 __all__ = [
     "PlanningBudgetExceeded",
@@ -33,7 +38,59 @@ __all__ = [
     "search_cost_scope",
     "record_search",
     "measure_search",
+    "PlanningRandomState",
 ]
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PlanningRandomState:
+    """Owned Python/NumPy/Torch streams for replaying bounded candidate searches.
+
+    Construct through :meth:`capture` and restore at the exact candidate and
+    finally boundaries selected by the owning skill. Capturing does not draw a
+    random value or seed a new stream. This is transient runtime state, not a
+    serializable motion policy.
+    """
+
+    _python: Any
+    _numpy: Any
+    _cpu: torch.Tensor
+    _cuda: dict[int, torch.Tensor]
+
+    @classmethod
+    def capture(cls, devices: Iterable[torch.device | str] = ()) -> PlanningRandomState:
+        """Capture current streams for the explicitly involved CUDA devices.
+
+        Args:
+            devices: Runtime tensor/robot devices involved in the search.
+                CPU devices add no CUDA state; indexless CUDA resolves current.
+
+        Returns:
+            Independently owned states with the source capture/restore order.
+        """
+        cuda_devices = set()
+        for value in devices:
+            device = torch.device(value)
+            if device.type == "cuda":
+                cuda_devices.add(
+                    device.index
+                    if device.index is not None
+                    else torch.cuda.current_device()
+                )
+        return cls(
+            random.getstate(),
+            np.random.get_state(),
+            torch.random.get_rng_state(),
+            {index: torch.cuda.get_rng_state(index) for index in cuda_devices},
+        )
+
+    def restore(self) -> None:
+        """Restore every captured stream without changing a search's policy."""
+        random.setstate(self._python)
+        np.random.set_state(self._numpy)
+        torch.random.set_rng_state(self._cpu)
+        for index, value in self._cuda.items():
+            torch.cuda.set_rng_state(value, index)
 
 
 class PlanningBudgetExceeded(Exception):
@@ -130,16 +187,21 @@ def search_cost_scope(*, wall_seconds: float | None = None) -> Iterator[SearchCo
         _COST.reset(token)
 
 
-def record_search(operation: str, *, count: int = 1) -> None:
+def record_search(
+    operation: str, *, count: int = 1, budget_checkpoint: bool = True
+) -> None:
     """Record only while an explicit outer planning scope owns the ledger.
 
     Args:
         operation: Caller-defined measurement name.
-        count: Number of operations to add after checking the deadline.
+        count: Number of operations to add.
+        budget_checkpoint: Check the deadline here. False records additional
+            migration measurements without introducing a new stop boundary.
     """
     cost = _COST.get()
     if cost is not None:
-        cost.check_budget(operation)
+        if budget_checkpoint:
+            cost.check_budget(operation)
         cost.counters[operation] += count
 
 
