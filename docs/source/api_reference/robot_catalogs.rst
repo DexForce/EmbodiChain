@@ -666,8 +666,15 @@ publishes a content-addressed complete resource directory atomically; its
 identity covers the source URDFs, meshes, textures and assembly recipe.
 An explicit ``fpath`` bypasses assembly. Catalog imports perform no asset IO.
 
-.. automodule:: embodichain_robots.tianji.marvin.robotiq
-   :members:
+.. py:class:: embodichain_robots.tianji.marvin.robotiq.TianjiMarvinRobotiq140Cfg
+
+   Model-owned configuration for the complete Marvin/Robotiq assembly.
+   ``from_dict()`` builds defaults and applies explicit caller overrides through
+   the shared RobotCfg merge path. ``assembly_directory`` selects the optional
+   generated-model cache root. ``build_pk_serial_chain()`` returns the two raw
+   seven-joint wrist chains using the same assembled URDF as simulation; the
+   declared solver TCP is applied separately. Serialization retains explicit
+   overrides without reapplying transforms or reconstructing a simulator.
 
 
 embodichain_robots.tianji.marvin.assets
