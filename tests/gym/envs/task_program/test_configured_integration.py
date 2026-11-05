@@ -1694,8 +1694,12 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
     import embodichain.toolkits.graspkit.pg_grasp.model_geometry as geometry
 
     marker = object()
+    geometry_values = {}
+    contact = [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]]
     monkeypatch.setattr(
-        geometry, "get_parallel_jaw_collision_geometry", lambda *a, **kw: marker
+        geometry,
+        "get_parallel_jaw_collision_geometry",
+        lambda *a, **kw: (geometry_values.update(kw), marker)[1],
     )
     monkeypatch.setattr(
         grasp,
@@ -1709,6 +1713,7 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
             "approach_deviation_angle": 0.3490658503988659,
             "max_candidates": 500,
             "center_mode": "centroid",
+            "root_from_contact_frame": contact,
         },
         path="generator",
     )()
@@ -1716,6 +1721,8 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
     assert generator.algorithm_cfg.approach_deviation_angle == 0.3490658503988659
     assert generator.algorithm_cfg.max_candidates == 500
     assert generator.algorithm_cfg.center_mode == "centroid"
+
+    assert geometry_values["root_from_contact_frame"].tolist() == contact
 
 
 @pytest.mark.parametrize(
@@ -1726,6 +1733,7 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
         {"max_candidates": 0},
         {"max_candidates": True},
         {"center_mode": "guessed"},
+        {"root_from_contact_frame": [[0.0] * 4 for _ in range(4)]},
     ],
 )
 def test_grasp_search_declarations_reject_invalid_values_before_construction(value):
