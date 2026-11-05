@@ -158,6 +158,10 @@ compiled-program fingerprint, a sequential execution occurrence, and one declare
 preset. Repeated calls retain separate occurrence IDs. The catalog validates the
 selected preset during linking, and the bridge consumes the same immutable
 bindings; configured and explicit binding tuples cannot be combined.
+Registered lowerers receive that same invocation identity and grounding revision
+through `RegisteredSemanticLowerer.lower_occurrence()`; its default delegates to
+the existing `lower()` contract once. Geometry routes use this identity rather
+than an analysis-cache index.
 
 `simulation/planning_services.py` owns the closed geometry-service declaration.
 Exactly one component owns it; composition snapshots it and stores it in the
