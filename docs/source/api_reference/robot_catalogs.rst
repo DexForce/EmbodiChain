@@ -693,3 +693,56 @@ embodichain_robots.wuji.hand
 .. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.from_dict
 
 .. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.build_pk_serial_chain
+
+
+embodichain_robots.tianji.marvin.deployment
+-------------------------------------------
+
+Native Marvin source placement reads the authored base collider against an
+explicit table. Its contact overlay is opt-in and binds the actual native finger
+links. Standard asset preflight loads only the existing gripper-equipped Marvin
+asset; no alternate wrist assembly, simulator, motion plan or certificate is
+created.
+
+.. currentmodule:: embodichain_robots.tianji.marvin.deployment
+
+.. autosummary::
+
+   source_tianji_mount_declaration
+   source_tianji_contact_pad_declaration
+   source_tianji_lateral_positions
+   require_tianji_task_assets
+
+.. autofunction:: source_tianji_mount_declaration
+
+.. autofunction:: source_tianji_contact_pad_declaration
+
+.. autofunction:: source_tianji_lateral_positions
+
+.. autofunction:: require_tianji_task_assets
+
+embodichain_robots.tianji.marvin.task_program
+---------------------------------------------
+
+The source declaration reuses ``TianjiMarvinCfg`` and ``tianji_marvin.yaml``.
+It preserves the native two-joint hands and mimic drivers, calibrated component
+TCPs, SSIK configuration, ready pose and sensor suite. Explicit sampled-hand
+services and named arm Park commands are added only to a source integration
+copy. Nominal reserves come from authored colliders and do not replace measured
+native geometry or task acceptance. The ordinary component is unchanged.
+
+.. currentmodule:: embodichain_robots.tianji.marvin.task_program
+
+.. autosummary::
+
+   TianjiMarvinTaskHandCalibration
+   declare_tianji_task_program_embodiment
+   tianji_marvin_task_hand_calibrations
+
+.. autoclass:: TianjiMarvinTaskHandCalibration
+   :members:
+
+.. autofunction:: declare_tianji_task_program_embodiment
+
+.. autofunction:: tianji_marvin_task_hand_calibrations
+
