@@ -1595,5 +1595,35 @@ class SimulationSegmentPolicyPort:
             raise ValueError(f"Rigid object {entity_id!r} pose must be finite.")
         return pose.clone()
 
+    def measure_support_geometry(
+        self,
+        preset_id: str,
+        *,
+        native_support: Mapping[str, Any],
+        object_pose: Any,
+        reference_pose: Any,
+    ) -> Mapping[str, Any]:
+        """Measure a captured support snapshot using the existing region geometry.
+
+        Args:
+            preset_id: Registered full-footprint support condition.
+            native_support: Owned current or recorded native support measurements.
+            object_pose: Matching observed payload poses, including exact historical slots.
+            reference_pose: Corresponding observed support poses.
+
+        Returns:
+            Owned footprint and contact-height measurements. This method samples
+            no contacts/live poses and computes no task acceptance decision.
+        """
+        self._require_open()
+        if self._condition_runtime is None:
+            raise ValueError("No support region condition is registered.")
+        return self._condition_runtime.measure_support_geometry(
+            preset_id,
+            native_support=native_support,
+            object_pose=object_pose,
+            reference_pose=reference_pose,
+        )
+
 
 __all__ = ["SimulationSettleMonitorCfg"]
