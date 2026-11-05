@@ -1578,9 +1578,6 @@ impulses were refreshed at that time or establish task acceptance.
 .. autoclass:: SimulationSupportObservationCollector
    :members:
 
-.. autoclass:: SimulationStateObservationCollector
-   :members:
-
 embodichain.lab.task_program.integrations.simulation.stability
 --------------------------------------------------------------
 
