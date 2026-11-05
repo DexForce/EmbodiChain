@@ -2061,6 +2061,7 @@ def _decode_grasp_generator(
                 "point_spacing",
                 "side",
                 "root_from_tcp",
+                "root_from_contact_frame",
             }
         ),
     )
@@ -2100,6 +2101,14 @@ def _decode_grasp_generator(
         ),
         side=side,
         root_from_tcp=root_from_tcp,
+        root_from_contact_frame=(
+            _geometry_pose(
+                config["root_from_contact_frame"],
+                path=f"{path}.root_from_contact_frame",
+            )
+            if "root_from_contact_frame" in config
+            else None
+        ),
         sample_count=(
             _integer(config["sample_count"], path=f"{path}.sample_count", minimum=1)
             if "sample_count" in config
