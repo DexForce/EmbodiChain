@@ -1284,27 +1284,6 @@ def test_condition_session_cleanup_stops_incomplete_sampling_without_success():
     assert not session.post_policy_result(policy, segment=segment).any()
 
 
-def test_support_height_uses_highest_qualified_contact_without_averaging():
-    from embodichain.lab.task_program.integrations.simulation._stability_runtime import (
-        _contact_support_heights,
-    )
-
-    row = {
-        "contacts_world": [[-0.01, 0.0, 0.08], [0.01, 0.0, 0.12]],
-        "center_of_mass_world": [0.0, 0.0, 0.2],
-        "com_patch_distance_m": 0.0,
-        "com_tolerance_m": 0.003,
-        "upward_impulse": 0.1,
-    }
-    heights = _contact_support_heights(
-        torch.tensor([True, False]),
-        {"scope": "native_contact_support", "rows": [row, row]},
-        torch.zeros(2),
-    )
-    assert heights[0].item() == pytest.approx(0.12)
-    assert torch.isnan(heights[1])
-
-
 def test_observation_clock_scope_is_local_idempotent_and_does_not_change_default_execution():
     from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
 

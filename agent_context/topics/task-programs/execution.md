@@ -95,9 +95,19 @@ and row identity; unclocked direct execution retains the legacy receipt alone.
 Native support and qualified planar-region inputs remain distinct measurements;
 missing acquisition cannot become geometric success. Pure task/report matching
 stays outside Lab and can consume owned condition data without a runtime.
+Mesh-envelope math belongs to Compute; qualified contact-height adaptation
+belongs to sensors. Empty attachment selections perform no Robot query, and
+multi-arm attachment checks reuse one inverse without changing FK or sampling.
 
-The simulation factory owns support observer reuse across bridges and installs
-the same native sensor instances in the public environment suite. Closing an
+The simulation factory owns support observer reuse and installs the same native
+sensor instances in the public environment suite. A support-enabled factory
+rejects overlapping unfinished bridges before replacing the clock. The adapter
+checks ownership before live assembly and binds the actual returned bridge.
+`execution_finished` distinguishes safely ended iteration from successful
+`program_completed`: outstanding lazy segments and unacknowledged actions keep
+ownership until consumed/validated or explicitly aborted. Non-support factories
+retain existing assembly. Returned effect providers, live scene snapshots and
+drive-target holds share the factory lifetime guard. Closing an
 environment keeps the demo executor's existing abort handshake, discards/finalizes
 recorders, closes runtime hooks, then destroys simulation. Close never guesses an
 action acknowledgement or steps physics; incomplete manual execution remains
@@ -174,7 +184,12 @@ its call ID, revision, and target Atomic Skill descriptor. Use this extension
 to expose shared Atomic Skills; do not place task-local motion generators in a
 lowerer.
 Registered held effects use compiler-owned expectations, monitor grounding,
-acquisition/release gates and retention guards. A registered release may retain
+acquisition/release gates and retention guards. An attached retention-only
+contract consumes an exact verified input hold for every eligible row, requires
+a verified monitor, and guards the declared segments without a new acquisition
+gate. Routed held-object transport uses this contract and its named Atomic goal
+requests terminal retained-attachment verification.
+A registered release may retain
 its incoming verified hold through declared approach phases and require measured
 detachment before retracting. Relative Place declares the same checks as ordinary
 Place. Runtime validates every guard phase against each successful final plan,
@@ -206,16 +221,15 @@ to the integration and execution thresholds belong to the selected policy.
 The integration resolves those declarations against exact native owners and
 adapts semantic clauses to shared physical requests. Sensor acquisition/history
 lives in `lab.sim.sensors`; physical grip interpretation lives in
-`lab.sim.atomic_actions.grip_evidence`; contact arithmetic lives in
-
 `lab.sim.atomic_actions.grip_evidence`, including `DriverOpeningBinding.bind`
 for calibrated hand-opening observations. Factories bind those declarations
-before creating sensor resources; sensors do not own release predicates or
-experiment labels. Contact arithmetic lives in
-`compute.geometry.grip_contacts`. `lab.sim.evidence` is the common frame/batch/request
-owner. Existing Atomic public imports refer to the same types. No raw acquisition
-module imports Task Program or Task Engine. Invocation and episode associations
-are maintained by the execution host rather than fields on shared raw frames.
+before creating sensor resources; release predicates and experiment labels
+remain outside raw acquisition. Contact arithmetic lives in
+`compute.geometry.grip_contacts` and `compute.geometry.contact_support`.
+`lab.sim.evidence` is the common frame/batch/request owner. Existing Atomic public
+imports refer to the same types. No raw acquisition module imports Task Program
+or Task Engine. Invocation and episode associations are maintained by the
+execution host rather than fields on shared raw frames.
 
 Changes after the contact-evidence extraction must import the sensor modules
 rather than the removed integration-local contact_evidence/contact_timeline paths.

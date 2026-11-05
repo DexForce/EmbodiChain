@@ -1558,6 +1558,7 @@ def test_bridge_publishes_completion_only_after_normal_program_exhaustion() -> N
     with pytest.raises(StopIteration):
         next(segments)
     assert bridge.program_completed is True
+    assert bridge.execution_finished
     completion = bridge.completion_mask
     completion[0] = False
     assert bridge.completion_mask.tolist() == [True, True]
@@ -1571,17 +1572,21 @@ def test_closing_without_abort_handshake_fails_loudly_and_does_not_ack() -> None
     with pytest.raises(TaskProgramBridgeError, match="abort_actions"):
         actions.close()
 
+    assert not bridge.execution_finished
     assert clock.step_index == 0
     assert runtime.cancel_count == 1
 
 
 def test_abort_handshake_discards_unconsumed_command_and_yields_safe_hold() -> None:
     bridge, runtime, clock = _bridge(duration=2 * STEP_DT)
-    segment = next(bridge.iter_segments())
+    segments = bridge.iter_segments()
+    segment = next(segments)
     actions = iter(segment.actions)
 
     command = next(actions)
     assert command.metadata["bridge_action_kind"] == "runtime_command"
+    segments.close()
+    assert not bridge.execution_finished
     assert segment.abort_actions is not None
     emergency = iter(segment.abort_actions("operator stop", last_action_consumed=False))
     hold = next(emergency)
@@ -1605,6 +1610,7 @@ def test_abort_handshake_discards_unconsumed_command_and_yields_safe_hold() -> N
             )
         )
     actions.close()
+    assert bridge.execution_finished
 
 
 def test_abort_handshake_acknowledges_consumed_command_exactly_once() -> None:

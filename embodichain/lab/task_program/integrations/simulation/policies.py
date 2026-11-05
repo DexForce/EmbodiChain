@@ -38,7 +38,6 @@ import torch
 
 from embodichain.compute.geometry.rigid import rigid_pose_displacement
 from embodichain.lab.sim.evidence import PhysicalEvidenceBatch
-
 from embodichain.utils import configclass
 
 from embodichain.lab.gym.envs.objectives.conditions import evaluate_near_target
