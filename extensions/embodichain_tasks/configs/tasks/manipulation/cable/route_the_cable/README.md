@@ -35,16 +35,20 @@ python -m embodichain run-task \
 ```
 
 `YamI2rtCfg` resolves `get_data_path("YamI2rt/yam_i2rt.urdf")` through the same
-asset registry and cache used by Franka. The command above is optional once the
-archive is published: constructing the robot downloads and extracts the ready
+asset registry and cache used by Franka. The predownload command above is optional:
+constructing the robot downloads and extracts the ready
 `robot_assets/YamI2rtV1.zip` bundle when needed. Downloading the bundle does not
 require CoACD. `EMBODICHAIN_DOWNLOAD_PREFIX` selects a mirror; the official
 `DexForceAI/embodichain_data` Hugging Face dataset is the fallback.
 
-**Draft publication status:** a maintainer still needs to upload
-`robot_assets/YamI2rtV1.zip` to the official dataset. Until then, prepare the
-assets from source using the commands below, reuse an existing local bundle,
-or set the robot's `fpath` to a prepared `yam_i2rt.urdf`.
+The bundle was
+[published on 2026-11-05](https://huggingface.co/datasets/DexForceAI/embodichain_data/commit/8c0b7dcc8a80ab5a1f177c7384ad9d6950281a68)
+and is publicly downloadable without a Hugging Face token. Official HF download
+into an empty cache, archive checksums, extraction, cache reuse and robot
+configuration/FK-chain loading were verified. This asset validation does not
+qualify a complete routing episode.
+
+For optional reconstruction from the pinned source in a checkout, use:
 
 ```bash
 python -m pip install coacd==1.0.14 trimesh==4.12.2 scipy==1.18.1

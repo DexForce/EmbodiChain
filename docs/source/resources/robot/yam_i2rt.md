@@ -14,8 +14,11 @@ python -m embodichain data download --name YamI2rt
 
 The registry uses `EMBODICHAIN_DOWNLOAD_PREFIX` and falls back to the official
 `DexForceAI/embodichain_data` Hugging Face dataset. The prepared download needs
-no CoACD installation. **During this Draft PR, publication is pending a
-maintainer upload.** Until publication, prepare from source in a checkout:
+no CoACD installation. The bundle was
+[published on 2026-11-05](https://huggingface.co/datasets/DexForceAI/embodichain_data/commit/8c0b7dcc8a80ab5a1f177c7384ad9d6950281a68)
+and is publicly downloadable without a Hugging Face token.
+
+For optional reconstruction from the pinned source in a checkout:
 
 ```bash
 python -m pip install coacd==1.0.14 trimesh==4.12.2 scipy==1.18.1
