@@ -81,7 +81,7 @@ Offline semantic graph viewer
 -----------------------------
 
 Render an existing semantic graph into one HTML document with embedded styles,
-JavaScript, licensed local fonts and SVG interactions. TaskSpec, declaration
+a compiled React/TypeScript interface, licensed local fonts and React Flow interactions. TaskSpec, declaration
 coverage, report overlays, thumbnails and translated display labels are optional.
 The pure renderer makes no model, network or simulator call. Display data keeps
 program outcomes and normative verdicts separate; unavailable evidence is never
@@ -130,3 +130,10 @@ Absence carries no normative success or certificate.
 
 .. automodule:: embodichain.gen_sim.task_engine.bundle_spec
    :members:
+
+The frontend build uses the same React/TypeScript/Vite/React Flow versions as
+the architecture explorer. Shared viewport controls and theme tokens live in
+``web/graph-ui``; each app retains its own data model and layout. The Python
+API embeds committed build outputs, so installed offline rendering has no Node
+runtime requirement. Vector SVG export serializes the current task layout and
+retains the original evidence status rather than generating a new verdict.

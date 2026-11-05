@@ -70,12 +70,12 @@ def _viewer_document(data: Mapping[str, Any]) -> str:
     values = {
         "__GRAPH_DATA__": _json_script(data),
         "__VIEWER_STYLE__": fonts
-        + (root / "_semantic_graph_viewer.css").read_text(encoding="utf-8"),
-        "__VIEWER_SCRIPT__": (root / "_semantic_graph_viewer.js").read_text(
-            encoding="utf-8"
-        ),
+        + (root / "_graph_react.css").read_text(encoding="utf-8"),
+        "__VIEWER_SCRIPT__": (root / "_graph_react.js").read_text(encoding="utf-8"),
         "__FONT_LICENSES__": _json_script(
             (assets / "LICENSE.txt").read_text(encoding="utf-8")
+            + "\n\n"
+            + (root / "_graph_react.LICENSE.txt").read_text(encoding="utf-8")
         ),
     }
     template = (root / "_semantic_graph_viewer.html").read_text(encoding="utf-8")

@@ -495,7 +495,7 @@ topics:
   - embodichain/gen_sim/task_engine/reporting.py
   - embodichain/gen_sim/task_engine/bundle_spec.py
   - embodichain/gen_sim/task_engine/orchestration/contracts.py
-  watch_paths: [embodichain/gen_sim/task_engine/, tests/gen_sim/task_engine/]
+  watch_paths: [embodichain/gen_sim/task_engine/, tests/gen_sim/task_engine/, web/task-engine/, web/graph-ui/]
   related_topics: [task-spec, task-programs, gen-sim]
   status: active
 - id: task-spec

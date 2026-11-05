@@ -90,8 +90,8 @@ def test_offline_viewer_uses_current_task_and_preserves_literal_template_tokens(
     assert payload(html)["graph"] == before
     assert payload(html)["task_spec"] is None
     assert graph == before
-    assert 'id="i-Workflow"' in html and "data:font/woff2;base64," in html
-    assert 'data-language="zh"' in html and 'data-language="en"' in html
+    assert 'id="root"' in html and "data:font/woff2;base64," in html
+    assert 'type="module"' not in html  # Compiled IIFE runs directly from a file URL.
     assert "connect-src 'none'" in html and "font-src data:" in html
     assert "task1181" not in html and "20261024_054454" not in html
     assert "<img onerror=bad()>" not in html
