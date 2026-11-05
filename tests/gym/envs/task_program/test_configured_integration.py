@@ -3372,3 +3372,52 @@ def test_configured_joint_stability_rejects_incomplete_policy(change):
     }
     with pytest.raises((TypeError, ValueError)):
         _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"invalid_observation_policy": "ignore"},
+        {"max_observation_samples": 1},
+        {"max_observation_samples": True},
+    ],
+)
+def test_joint_window_configuration_rejects_unknown_runtime_modes(changes):
+    payload = _integration_payload("open_drawer")
+    declaration = dict(
+        kind="joint_position_and_stability",
+        entity="drawer",
+        joint="cabinet_to_drawer",
+        target=0.1,
+        tolerance=0.03,
+        **changes,
+    )
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": declaration
+    }
+    with pytest.raises((ValueError, TypeError)):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_joint_window_runtime_settings_do_not_redefine_normative_condition_data():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationJointStabilityConditionCfg,
+    )
+
+    baseline = SimulationJointStabilityConditionCfg(
+        entity="drawer", joint="cabinet_to_drawer", target=0.1, tolerance=0.03
+    )
+    changed = baseline.snapshot()
+    changed.invalid_observation_policy = "isolate_rows"
+    changed.max_observation_samples = 128
+    assert baseline.to_condition_dict() == changed.to_condition_dict()
+    payload = _integration_payload("open_drawer")
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "retained": dict(kind="joint_position_and_stability", **baseline.to_dict())
+    }
+    first = _decode_configured_task_program_integration(payload).registration
+    payload["runtime_services"]["settle_presets"]["retained"] = dict(
+        kind="joint_position_and_stability", **changed.to_dict()
+    )
+    second = _decode_configured_task_program_integration(payload).registration
+    assert first.fingerprint != second.fingerprint

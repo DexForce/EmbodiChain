@@ -37,7 +37,8 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 from embodichain.compute.geometry.rigid import rigid_pose_displacement
-from embodichain.lab.sim.evidence import PhysicalEvidenceBatch
+from embodichain.compute.trajectory.stability import PositionRangeMonitor
+from ._joint_window import JointWindowRecord
 from embodichain.utils import configclass
 
 from embodichain.lab.gym.envs.objectives.conditions import evaluate_near_target
@@ -492,7 +493,9 @@ class SimulationSegmentPolicyPort:
         active_mask = self._validate_active_mask(active_mask)
         preset = self._settle_presets[policy.cfg.preset]
         if type(preset) is SimulationJointStabilityConditionCfg:
-            yield from self._joint_condition_actions(policy, active_mask=active_mask)
+            yield from self._joint_condition_actions(
+                policy, segment=segment, active_mask=active_mask
+            )
             return
         if type(preset) is SimulationStabilityConditionCfg:
             yield from self._condition_runtime.actions(
@@ -572,9 +575,13 @@ class SimulationSegmentPolicyPort:
             elapsed_steps += 1
 
     def _joint_condition_actions(
-        self, policy: CompiledPostPolicy, *, active_mask: torch.Tensor
+        self,
+        policy: CompiledPostPolicy,
+        *,
+        segment: CompiledTaskProgramSegment,
+        active_mask: torch.Tensor,
     ) -> Iterator[torch.Tensor]:
-        """Observe a joint-coordinate window; do not use articulation root pose."""
+        """Orchestrate sampling and holds around the pure coordinate monitor."""
         cfg = self._settle_presets[policy.cfg.preset]
         assert type(cfg) is SimulationJointStabilityConditionCfg
         art, index = self._joint_conditions[policy.cfg.preset]
@@ -582,12 +589,14 @@ class SimulationSegmentPolicyPort:
         self._post_policy_results.pop(key, None)
         self._post_policy_success.pop(key, None)
         hold = self._read_robot_qpos(self._robot, target=False).clone()
-        counts = torch.zeros_like(active_mask, dtype=torch.long)
         anchor = art.get_qpos()[:, index].clone()
         if active_mask.shape != anchor.shape or active_mask.device != anchor.device:
             raise ValueError("Joint stability rows must match the observed batch.")
-        low, high = anchor.clone(), anchor.clone()
-        required = math.ceil(cfg.duration / self._step_dt)
+        monitor = PositionRangeMonitor(
+            anchor,
+            required_steps=math.ceil(cfg.duration / self._step_dt),
+            position_drift=cfg.position_drift,
+        )
         timeout = math.ceil(cfg.timeout / self._step_dt)
         clock = self.observation_clock
         if clock is not None and not math.isclose(
@@ -597,85 +606,125 @@ class SimulationSegmentPolicyPort:
                 "Joint observation clock differs from the control cadence."
             )
         start = None if clock is None else (clock.step_index, clock.now())
-        sample_serial = 0
+        history = JointWindowRecord(
+            min(timeout + 1, cfg.max_observation_samples),
+            initial=anchor,
+            condition=cfg.to_condition_dict(),
+            env_ids=self._env_ids,
+            native_uid=next(
+                value.simulation_uid
+                for value in self._scene_binding.articulations
+                if value.entity_id == cfg.entity
+            ),
+            segment_id=segment.segment_id,
+            policy_source_path=list(policy.source_path),
+            observation_generation=self._observation_generation,
+            clock_start=start,
+            step_dt=self._step_dt,
+        )
         timestamp = None
-        for tick in range(timeout + 1):
-            self._require_open()
-            if clock is not None:
-                self.validate_observation_scope(clock)
-                if clock.step_index != start[0] + tick or not math.isclose(
-                    clock.now(),
-                    start[1] + tick * self._step_dt,
-                    rel_tol=0,
-                    abs_tol=1e-8,
+        step = None
+        qpos = anchor
+        finite = torch.isfinite(qpos)
+        unavailable = torch.zeros_like(active_mask)
+        accepted = torch.zeros_like(active_mask)
+        completed = False
+        termination = "cancelled"
+        interrupted_reason = None
+        try:
+            for tick in range(timeout + 1):
+                self._require_open()
+                if clock is not None:
+                    self.validate_observation_scope(clock)
+                    if clock.step_index != start[0] + tick or not math.isclose(
+                        clock.now(),
+                        start[1] + tick * self._step_dt,
+                        rel_tol=0,
+                        abs_tol=1e-8,
+                    ):
+                        raise ValueError(
+                            "Joint stability requires acknowledged environment steps."
+                        )
+                observed = art.get_qpos()[:, index].clone()
+                if (
+                    observed.shape != anchor.shape
+                    or observed.device != anchor.device
+                    or observed.dtype != anchor.dtype
                 ):
                     raise ValueError(
-                        "Joint stability requires acknowledged environment steps."
+                        "Joint observations changed batch shape, dtype or device."
                     )
-            qpos = art.get_qpos()[:, index].clone()
-            sample_serial += 1
-            if clock is not None:
-                timestamp = clock.now()
-                self.validate_observation_scope(clock)
-                if clock.step_index != start[0] + tick or not math.isclose(
-                    timestamp, start[1] + tick * self._step_dt, rel_tol=0, abs_tol=1e-8
+                if clock is not None:
+                    acquired_at, acquired_step = clock.now(), clock.step_index
+                    self.validate_observation_scope(clock)
+                    if acquired_step != start[0] + tick or not math.isclose(
+                        acquired_at,
+                        start[1] + tick * self._step_dt,
+                        rel_tol=0,
+                        abs_tol=1e-8,
+                    ):
+                        raise ValueError(
+                            "The execution clock changed during joint acquisition."
+                        )
+                    timestamp, step = acquired_at, acquired_step
+                qpos = observed
+                history.append(qpos, step, timestamp)
+                finite = torch.isfinite(qpos)
+                unavailable |= active_mask & ~finite
+                within = (qpos - cfg.target).abs() <= cfg.tolerance
+                accepted = (
+                    monitor.observe(qpos, within, elapsed_steps=tick) & active_mask
+                )
+                if cfg.invalid_observation_policy == "isolate_rows":
+                    accepted &= ~unavailable
+                    done = (accepted | unavailable | ~active_mask).all()
+                else:
+                    done = (accepted | ~active_mask).all()
+                if (
+                    done
+                    or (
+                        cfg.invalid_observation_policy == "abort_batch"
+                        and not finite[active_mask].all()
+                    )
+                    or tick == timeout
                 ):
-                    raise ValueError(
-                        "The execution clock changed during joint acquisition."
+                    termination = (
+                        "satisfied"
+                        if (accepted | ~active_mask).all()
+                        else (
+                            "invalid_observation"
+                            if (
+                                cfg.invalid_observation_policy == "abort_batch"
+                                and not finite[active_mask].all()
+                            )
+                            or (unavailable | accepted | ~active_mask).all()
+                            else "timed_out"
+                        )
                     )
-            finite = torch.isfinite(qpos)
-            good = finite & ((qpos - cfg.target).abs() <= cfg.tolerance)
-            low, high = torch.minimum(low, qpos), torch.maximum(high, qpos)
-            reset = ~good | ((high - low) > cfg.position_drift)
-            low, high = torch.where(reset, qpos, low), torch.where(reset, qpos, high)
-            counts = torch.where(reset, 0, counts + int(tick > 0))
-            accepted = good & (counts >= required) & active_mask
-            if (
-                (accepted | ~active_mask).all()
-                or not finite[active_mask].all()
-                or tick == timeout
-            ):
-                break
-            yield hold.clone()
-        self._post_policy_success[key] = accepted.clone()
-        self._post_policy_results[key] = {
-            "joint": cfg.joint,
-            "target": cfg.target,
-            "observed": [float(v) if math.isfinite(float(v)) else None for v in qpos],
-            "tolerance": cfg.tolerance,
-            "stable_seconds": cfg.duration,
-            "accepted": accepted.tolist(),
-            "evidence": "joint_position_and_stability",
-            "contact_qualification": "not_provided",
-        }
-        if clock is not None:
-            raw = PhysicalEvidenceBatch(
-                "articulation.joint_position",
+                    completed = True
+                    break
+                yield hold.clone()
+        except GeneratorExit:
+            raise
+        except BaseException as error:
+            termination = "interrupted"
+            interrupted_reason = str(error) or type(error).__name__
+            raise
+        finally:
+            # Never retain a success when an exact policy execution was cancelled.
+            result = accepted if completed else torch.zeros_like(accepted)
+            if completed:
+                self._post_policy_success[key] = result.clone()
+            self._post_policy_results[key] = history.finish(
                 qpos,
-                finite,
-                tuple(
-                    None if value else "Non-finite articulation joint observation."
-                    for value in finite.tolist()
-                ),
-                timestamp,
-                self._env_ids,
-                sample_serial,
+                active_mask=active_mask,
+                unavailable=unavailable,
+                accepted=result,
+                completed=completed,
+                termination=termination,
+                invalid_observation_policy=cfg.invalid_observation_policy,
+                interruption_reason=interrupted_reason,
             )
-            self._post_policy_results[key]["joint_observation"] = {
-                "evidence_id": raw.evidence_id,
-                "values": _json_speed_values(raw.values),
-                "valid": raw.valid.tolist(),
-                "acquisition_errors": list(raw.acquisition_errors),
-                "timestamp": raw.timestamp,
-                "env_ids": raw.env_ids.tolist(),
-                "observation_revision": raw.observation_revision,
-                "revision_scope": "policy_window_qpos_acquisition_sequence",
-                "clock": "environment_step",
-                "start_step": start[0],
-                "end_step": clock.step_index,
-                "started_at": start[1],
-                "step_dt": clock.step_dt,
-            }
 
     def post_policy_result(
         self,
@@ -705,10 +754,9 @@ class SimulationSegmentPolicyPort:
     ) -> Mapping[str, object]:
         """Return the latest JSON-safe settling trace for one policy.
 
-        The trace is available after the policy generator has started. A
-        terminal trace has status ``"settled"``, ``"timed_out"``, or
-        ``"skipped"`` when no rows remain active; an early demo interruption
-        intentionally retains the latest ``"running"`` snapshot for diagnosis.
+        Dynamic-settle traces retain their latest running or terminal status.
+        Joint-window records become available on completion, cancellation or
+        interruption, with execution termination separate from row conditions.
         """
         if type(policy) is not CompiledPostPolicy:
             raise TypeError("policy must be exactly CompiledPostPolicy.")

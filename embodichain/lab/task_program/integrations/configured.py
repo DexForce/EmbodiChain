@@ -2736,7 +2736,15 @@ def _decode_settle_presets(value: object, *, path: str) -> tuple[
                 item,
                 path=item_path,
                 required=frozenset({"kind", "entity", "joint", "target", "tolerance"}),
-                optional=frozenset({"duration", "timeout", "position_drift"}),
+                optional=frozenset(
+                    {
+                        "duration",
+                        "timeout",
+                        "position_drift",
+                        "invalid_observation_policy",
+                        "max_observation_samples",
+                    }
+                ),
             )
             preset = SimulationJointStabilityConditionCfg(
                 **{

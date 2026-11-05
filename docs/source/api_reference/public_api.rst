@@ -1333,8 +1333,35 @@ acknowledged ticks after the initial sample, and records the original
 ``joint_position_and_stability`` receipt. This is joint retention evidence;
 it does not qualify contact safety. When an execution clock is bound, the
 receipt additionally includes the actual final joint acquisition with per-row
-validity, environment IDs and a policy-window sample sequence. Without a clock,
-no timestamped raw evidence is fabricated.
+validity, environment IDs and a policy-window sample sequence. ``joint_window``
+retains sampled coordinates, validity/errors, actual step/timestamp arrays,
+native joint identity and compiled policy/segment identity for independent
+reassessment. ``monitor_initial_values`` preserves the pre-sample range anchor
+as numerical initialization, separately from the clock-verified acquisitions.
+A final sample alone does not establish a complete time window.
+Without a clock, no timestamped raw evidence is fabricated.
+
+The default ``invalid_observation_policy="abort_batch"`` retains the source
+behavior. Explicit ``isolate_rows`` marks the first invalid active row unavailable
+for that execution while other rows continue. The receipt separates execution
+termination from per-row condition status; timeout, unavailable observation and
+cancellation are not interchangeable. Cancellation preserves partial diagnostic
+facts but publishes no post-policy success.
+
+``max_observation_samples`` bounds raw retention, independently of the runtime
+condition. The default 4096 comfortably holds the 126 samples from a 5-second
+wait at a 0.04-second control period. Longer waits may drop old samples, report
+``dropped_samples`` and set ``record_complete=false``; a truncated history must
+not certify complete coverage. Storage is O(batch times retained samples), and
+conversion to JSON occurs after sampling, without per-step device-to-host trace
+copies. Runtime row handling and retention settings remain registration-owned;
+``to_condition_dict()`` preserves the original normative parameter fields.
+
+Target, tolerance and range drift use native runtime joint units. Translation
+and rotation require their own explicitly selected policy values; the default
+0.001 is not a universal physical distance or velocity threshold. Robot holds
+retain the source observed posture, and neither this monitor nor the policy
+advances environment time itself.
 
 Supported conditions declare a standard contact sensor through
 ``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native

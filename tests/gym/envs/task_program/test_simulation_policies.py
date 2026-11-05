@@ -1320,7 +1320,7 @@ def test_observation_clock_scope_is_local_idempotent_and_does_not_change_default
     assert independent.observation_clock is clock
 
 
-def _joint_condition_port(qpos, *, duration=1.0, timeout=5.0):
+def _joint_condition_port(qpos, *, duration=1.0, timeout=5.0, **options):
     from embodichain.lab.task_program.integrations.simulation.stability import (
         SimulationJointStabilityConditionCfg,
     )
@@ -1336,6 +1336,7 @@ def _joint_condition_port(qpos, *, duration=1.0, timeout=5.0):
         tolerance=0.03,
         duration=duration,
         timeout=timeout,
+        **options,
     )
     port = SimulationSegmentPolicyPort(
         _Simulation(articulation=art),
@@ -1448,3 +1449,173 @@ def test_joint_stability_rejects_unacknowledged_steps_before_claiming_duration()
         next(actions)
     with pytest.raises(RuntimeError, match="unavailable"):
         port.post_policy_result(policy, segment=segment)
+
+
+def test_joint_window_records_distinguish_same_terminal_sample_histories():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    records = []
+    for transient in (False, True):
+        port, art, _, segment, policy = _joint_condition_port(
+            torch.tensor([[0.1]]), timeout=1.0
+        )
+        clock = EnvironmentStepClock(0.04)
+        port.bind_clock(clock)
+        for _ in port.actions(
+            policy, segment=segment, active_mask=torch.tensor([True])
+        ):
+            clock.advance_after_env_step()
+            # A transient stays inside the target tolerance but violates the
+            # candidate window's 1 mm range; the final coordinate is unchanged.
+            art._qpos[0, 0] = 0.102 if transient and clock.step_index == 10 else 0.1
+        records.append(port.post_policy_metadata(policy, segment=segment))
+    assert records[0]["joint_observation"] == records[1]["joint_observation"]
+    assert [record["accepted"] for record in records] == [[True], [False]]
+    good, bad = [record["joint_window"] for record in records]
+    assert good["values"] != bad["values"]
+    assert good["steps"] == bad["steps"] == list(range(26))
+    assert good["record_complete"] and bad["record_complete"]
+    assert good["termination"] == "satisfied"
+    assert bad["termination"] == "timed_out"
+    assert bad["condition_status"] == ["not_satisfied"]
+    assert good["policy_source_path"] == list(policy.source_path)
+    assert good["native_uid"] == "native_drawer"
+    # Independent consumer can recompute the rule from the emitted facts.
+    from embodichain.compute.trajectory import PositionRangeMonitor
+
+    for record in records:
+        window = record["joint_window"]
+        values = torch.tensor(window["values"])
+        monitor = PositionRangeMonitor(
+            torch.tensor(window["monitor_initial_values"]),
+            required_steps=25,
+            position_drift=0.001,
+        )
+        for step in window["steps"]:
+            observed = values[:, step]
+            replayed = monitor.observe(
+                observed,
+                (observed - record["target"]).abs() <= record["tolerance"],
+                elapsed_steps=step,
+            )
+        assert replayed.tolist() == record["accepted"]
+
+
+def test_joint_window_replay_retains_pre_sample_range_anchor():
+    from embodichain.compute.trajectory import PositionRangeMonitor
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, art, _, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1]]), timeout=1.0
+    )
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    original = art.get_qpos
+    reads = 0
+
+    def anchored_read():
+        nonlocal reads
+        reads += 1
+        return torch.tensor([[0.1008]]) if reads == 1 else original()
+
+    art.get_qpos = anchored_read
+    for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
+        clock.advance_after_env_step()
+        art._qpos[0, 0] = 0.0997 if clock.step_index >= 10 else 0.1
+    record = port.post_policy_metadata(policy, segment=segment)
+    window = record["joint_window"]
+    values = torch.tensor(window["values"])
+    assert window["monitor_initial_values"] != values[:, 0].tolist()
+    monitor = PositionRangeMonitor(
+        torch.tensor(window["monitor_initial_values"]),
+        required_steps=25,
+        position_drift=0.001,
+    )
+    for step, sample in enumerate(values.T):
+        accepted = monitor.observe(
+            sample,
+            (sample - record["target"]).abs() <= record["tolerance"],
+            elapsed_steps=step,
+        )
+    assert accepted.tolist() == record["accepted"] == [False]
+
+
+def test_joint_window_explicitly_isolates_unavailable_rows():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1], [float("nan")]]), invalid_observation_policy="isolate_rows"
+    )
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    for _ in port.actions(
+        policy, segment=segment, active_mask=torch.tensor([True, True])
+    ):
+        clock.advance_after_env_step()
+    assert clock.step_index == 25
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    record = port.post_policy_metadata(policy, segment=segment)
+    assert record["joint_window"]["condition_status"] == ["satisfied", "unavailable"]
+    assert record["joint_observation"]["valid"] == [True, False]
+    assert record["joint_window"]["values"][1] == [None] * 26
+    json.dumps(record, allow_nan=False)
+
+
+def test_joint_window_partial_receipt_is_not_success_or_complete_duration():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    actions = port.actions(policy, segment=segment, active_mask=torch.tensor([True]))
+    next(actions)
+    actions.close()
+    with pytest.raises(RuntimeError, match="unavailable"):
+        port.post_policy_result(policy, segment=segment)
+    window = port.post_policy_metadata(policy, segment=segment)["joint_window"]
+    assert window["termination"] == "cancelled"
+    assert not window["execution_complete"]
+    assert window["condition_status"] == ["pending"]
+    assert window["steps"] == [0]
+
+
+def test_joint_window_rejects_clock_changes_during_acquisition_without_raw_fact():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, art, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    original = art.get_qpos
+    reads = 0
+
+    def changing_clock():
+        nonlocal reads
+        reads += 1
+        if reads == 2:  # Anchor read is followed by the first policy sample.
+            clock.advance_after_env_step()
+        return original()
+
+    art.get_qpos = changing_clock
+    with pytest.raises(ValueError, match="clock changed during"):
+        next(port.actions(policy, segment=segment, active_mask=torch.tensor([True])))
+    record = port.post_policy_metadata(policy, segment=segment)
+    assert "joint_observation" not in record
+    assert record["joint_window"]["sample_count"] == 0
+    assert record["joint_window"]["termination"] == "interrupted"
+
+
+def test_joint_window_trace_capacity_never_silently_certifies_full_record():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1]]), max_observation_samples=3
+    )
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
+        clock.advance_after_env_step()
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True]
+    window = port.post_policy_metadata(policy, segment=segment)["joint_window"]
+    assert window["sample_count"] == 26 and window["retained_sample_count"] == 3
+    assert window["dropped_samples"] == 23 and not window["record_complete"]
+    assert window["steps"] == [23, 24, 25]
