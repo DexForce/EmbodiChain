@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="EmbodiChain / DexUni 与 Isaac Lab 的仿真实验、对比结论、原生视频及原始数据。">
+  <title>{{ title }} · 仿真实验报告</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/site.css">
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+  <script defer src="/static/vendor/katex/katex.min.js"></script>
+  <script defer src="/static/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">S<span>R</span></span><span>仿真实验报告<small>EmbodiChain × Isaac Lab</small></span></a>
+    <div class="top-links"><span class="edition">局域网材料库 · 实验初稿</span><button class="nav-toggle" type="button" aria-expanded="false" aria-controls="sidebar">实验目录</button></div>
+  </header>
+  <nav class="sidebar" id="sidebar" aria-label="全部实验">
+    <a href="/" class="overview-link{% if not item %} active{% endif %}">报告总览 <span>↗</span></a>
+    {% for group in groups %}
+    <div class="nav-group"><p>{{ group.name }}</p>
+      {% for entry in group['items'] %}
+      <a href="{{ entry.url }}" class="nav-item{% if item and entry.id == item.id %} active{% endif %}" {% if item and entry.id == item.id %}aria-current="page"{% endif %}><span class="nav-id">{{ entry.id }}</span><span>{{ entry.title }}</span><i class="state-dot {{ entry.status }}" title="{{ entry.status_label }}"></i></a>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    <p class="sidebar-note">保留原始数据与失败结果。<br>实验完成不等于发布就绪。</p>
+  </nav>
+  <main id="main" class="main">
+    {% block content %}{% endblock %}
+    <footer class="footer"><span>本地实验材料 · HTML 阅读版</span><span>整理于 {{ built_at }} · <a href="/publication-manifest.json">文件与 SHA-256 清单</a></span></footer>
+  </main>
+  <a class="back-top" href="#main" aria-label="返回顶部">↑</a>
+</body>
+</html>

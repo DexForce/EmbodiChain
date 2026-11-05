@@ -1,0 +1,61 @@
+{
+  "purpose": "P-01 DexUni baseline through EmbodiChain, frozen thresholds and shared initial states.",
+  "runs": [
+    {
+      "id": "main_freefall_dt010",
+      "case": "freefall",
+      "dt": 0.01,
+      "count": 10,
+      "phase": "main"
+    },
+    {
+      "id": "main_freefall_dt005",
+      "case": "freefall",
+      "dt": 0.005,
+      "count": 10,
+      "phase": "main"
+    },
+    {
+      "id": "main_freefall_dt0025",
+      "case": "freefall",
+      "dt": 0.0025,
+      "count": 10,
+      "phase": "main"
+    },
+    {
+      "id": "supplement_freefall_dt001",
+      "case": "freefall",
+      "dt": 0.001,
+      "count": 10,
+      "phase": "supplement"
+    },
+    {
+      "id": "main_pendulum_dt010",
+      "case": "pendulum",
+      "dt": 0.01,
+      "count": 10,
+      "phase": "main"
+    },
+    {
+      "id": "main_pendulum_dt005",
+      "case": "pendulum",
+      "dt": 0.005,
+      "count": 10,
+      "phase": "main"
+    },
+    {
+      "id": "main_pendulum_dt0025",
+      "case": "pendulum",
+      "dt": 0.0025,
+      "count": 10,
+      "phase": "main"
+    },
+    {
+      "id": "supplement_pendulum_dt001",
+      "case": "pendulum",
+      "dt": 0.001,
+      "count": 10,
+      "phase": "supplement"
+    }
+  ]
+}

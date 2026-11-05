@@ -1,0 +1,73 @@
+{
+  "experiment": "L-02",
+  "version": 3,
+  "dt": 0.005,
+  "gravity": [
+    0,
+    0,
+    0
+  ],
+  "mass_kg": 0.1,
+  "mesh_triangles": {
+    "cube": 12,
+    "sphere": 528
+  },
+  "renderer": {
+    "width": 640,
+    "height": 480,
+    "intrinsics": [
+      500,
+      500,
+      320,
+      240
+    ],
+    "eye": [
+      0.65,
+      0.65,
+      0.6
+    ],
+    "target": [
+      0,
+      0,
+      0.1
+    ],
+    "capacity_eye": [
+      4.5,
+      4.5,
+      4.0
+    ],
+    "capacity_target": [
+      1.2,
+      1.2,
+      1.35
+    ],
+    "samples_per_pixel": 1,
+    "denoising": "off",
+    "antialiasing": "off"
+  },
+  "dexuni_iterations": 10,
+  "physx_position_iterations": 4,
+  "physx_velocity_iterations": 1,
+  "timeout_s": 180,
+  "asset_dir": "outputs/benchmarks/L-02/prepared/assets-v1",
+  "dexsim_runtime": "outputs/benchmarks/P-03/runtime/p03-frozen-v1",
+  "cache_policy": "C and H are both fresh processes; OS and general kernel caches retained. Analytic colliders require no cooking. H adds a completed matching preparation. C is not disk-cold or compiler-cold.",
+  "timeout_definition": "180 s per process, including post-timing audits and teardown; timeout stage recorded; capacity is within this startup budget, not an unconditional GPU memory limit",
+  "main_repetitions": 100,
+  "notes": [
+    "N is num_envs, one rigid body per arena; one declaration replicated through each platform public scene API",
+    "Each independent process must return finite state [num_envs,1,13] and audit arena/instance counts",
+    "Only S shared-source homogeneous arenas. Old U varied objects within one arena, excluded from this workload",
+    "Media is separate, 16 arenas and native cameras; it does not measure headless startup",
+    "Original single-env outputs and profiling remain historical; no cross-protocol speed ratio"
+  ],
+  "scope": "multi_arena",
+  "objects_per_env": 1,
+  "env_spacing": 0.2,
+  "local_position": [
+    0,
+    0,
+    0.1
+  ],
+  "measurement": "headless physics-ready, no cameras, rendering disabled"
+}

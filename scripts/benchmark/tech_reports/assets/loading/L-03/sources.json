@@ -1,0 +1,52 @@
+{
+  "scope": "Source references for the measured three-robot matrix; generic assets are not redistributed. Resolve under a separately obtained NVIDIA asset root and verify hashes.",
+  "license": "Original asset notices apply; no redistribution license is asserted here.",
+  "robots": {
+    "cartpole": {
+      "upstream": "NVIDIA Isaac Sim 5.1 asset package",
+      "default_prim": "/cartpole",
+      "variant_selections": {},
+      "files": [
+        {
+          "source_relative_path": "Isaac/IsaacLab/Robots/Classic/Cartpole/Props/instanceable_meshes.usd",
+          "size_bytes": 7375,
+          "sha256": "8a48ddf5d2f1afc31152fe212c7c3656afd1a5d50c5a69b9d2d27fd8459110c0"
+        },
+        {
+          "source_relative_path": "Isaac/IsaacLab/Robots/Classic/Cartpole/cartpole.usd",
+          "size_bytes": 3067,
+          "sha256": "c98ce5dbb174876998052d486036fb79e07f52320851526a4ff61c60ed2db043"
+        }
+      ]
+    },
+    "franka": {
+      "upstream": "NVIDIA Isaac Sim 5.1 asset package",
+      "default_prim": "/panda",
+      "variant_selections": {},
+      "files": [
+        {
+          "source_relative_path": "Isaac/IsaacLab/Factory/franka_mimic.usd",
+          "size_bytes": 7075031,
+          "sha256": "86d0017a093669b222a8c640bf581cc3e3715035aa7c596600f478da011f6c8e"
+        }
+      ]
+    },
+    "go2": {
+      "upstream": "NVIDIA Isaac Sim 5.1 asset package",
+      "default_prim": "/go2_description",
+      "variant_selections": {},
+      "files": [
+        {
+          "source_relative_path": "Isaac/IsaacLab/Robots/Unitree/Go2/Props/instanceable_meshes.usd",
+          "size_bytes": 18802187,
+          "sha256": "2902646d0f4c13c9ecae3ac9046e32c7d18902eef9679de9829f642a15c93fb5"
+        },
+        {
+          "source_relative_path": "Isaac/IsaacLab/Robots/Unitree/Go2/go2.usd",
+          "size_bytes": 8142,
+          "sha256": "ba171c972b987d8c8fb7157ccad2ba9c0c1fed105755d2d8af46bef96cc11c6d"
+        }
+      ]
+    }
+  }
+}

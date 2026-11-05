@@ -1,0 +1,55 @@
+{
+  "experiment": "L-02",
+  "version": 1,
+  "dt": 0.005,
+  "gravity": [
+    0,
+    0,
+    0
+  ],
+  "mass_kg": 0.1,
+  "mesh_triangles": {
+    "cube": 12,
+    "sphere": 528
+  },
+  "renderer": {
+    "width": 640,
+    "height": 480,
+    "intrinsics": [
+      500,
+      500,
+      320,
+      240
+    ],
+    "eye": [
+      1.8,
+      1.8,
+      1.6
+    ],
+    "target": [
+      0.45,
+      0.45,
+      0.55
+    ],
+    "capacity_eye": [
+      4.5,
+      4.5,
+      4.0
+    ],
+    "capacity_target": [
+      1.2,
+      1.2,
+      1.35
+    ],
+    "samples_per_pixel": 1,
+    "denoising": "off",
+    "antialiasing": "off"
+  },
+  "dexuni_iterations": 10,
+  "physx_position_iterations": 4,
+  "physx_velocity_iterations": 1,
+  "timeout_s": 600,
+  "asset_dir": "outputs/benchmarks/L-02/prepared/assets-v1",
+  "dexsim_runtime": "outputs/benchmarks/P-03/runtime/p03-frozen-v1",
+  "cache_policy": "C/H retain general shader/kernel and OS caches; new processes clear in-memory USD/mesh/material state. Analytic collisions do not need convex/mesh cooking. H has a completed same-case first-frame preparation. Uncontrolled renderer-native caches explicitly reported."
+}
