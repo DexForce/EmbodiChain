@@ -1260,3 +1260,510 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
                 },
             ),
         )
+
+    def capture_planar_placement(
+        self,
+        object_id: str,
+        reference_id: str,
+        frame_indices: Sequence[int],
+        *,
+        observation_kind: str,
+        exact_silhouette: bool,
+    ) -> dict[str, Any]:
+        """Acquire exact native planar geometry at an explicit state boundary.
+
+        Args:
+            object_id: Registered payload rigid object.
+            reference_id: Registered planar reference rigid object.
+            frame_indices: Exact seeded boundary slots for every native row.
+            observation_kind: Recorded slots or current final native poses.
+            exact_silhouette: Explicit triangle union or legacy convex-hull mode.
+
+        Returns:
+            Owned geometry and acquisition channels without support, release or
+            containment acceptance. Missing topology never becomes a hull fallback.
+        """
+        import torch
+        from embodichain.lab.sim.scene.planar_observation import NativePlanarPlacement
+        from embodichain.lab.sim.evidence import (
+            PhysicalEvidenceFrame,
+            PhysicalEvidenceBatch,
+        )
+        from ..invocation_policy import task_program_fingerprint
+
+        self._check_episode()
+        if (
+            observation_kind not in {"final", "recorded"}
+            or type(exact_silhouette) is not bool
+            or object_id == reference_id
+        ):
+            raise ValueError(
+                "Planar acquisition requires an explicit boundary and geometry mode."
+            )
+        if self._observations is None:
+            raise RuntimeError("Observation history is unavailable.")
+        frames = tuple(frame_indices)
+        count = len(self._episodes)
+        if len(frames) != count or any(
+            type(frame) is not int or frame <= 0 for frame in frames
+        ):
+            raise ValueError(
+                "Planar acquisition requires exact positive native boundary slots."
+            )
+        if observation_kind == "final":
+            self._port.validate_observation_scope(self._bridge.clock)
+            if frames != self._observations.read_history_step_counts(
+                episode_ids=self._episodes
+            ):
+                raise ValueError(
+                    "Final planar acquisition requires its actual native recording boundary."
+                )
+        poses = []
+        uids = []
+        natives = []
+        fields = {}
+        for entity in (object_id, reference_id):
+            uid, native = self._native(entity, articulated=False)
+            uids.append(uid)
+            natives.append(native)
+            if observation_kind == "recorded":
+                candidates = [
+                    name
+                    for name, descriptor in self._observations.schema.items()
+                    if descriptor.entity_uid == uid
+                    and descriptor.quantity == "pose"
+                    and descriptor.coordinate_frame == "arena"
+                    and descriptor.representation == "xyz_xyzw"
+                    and descriptor.shape == (7,)
+                    and descriptor.units == ("m", "unitless")
+                ]
+                if not candidates:
+                    raise RuntimeError(
+                        f"Recorded raw arena pose for {uid!r} is unavailable."
+                    )
+                fields[entity] = candidates[0]
+        snapshot = None
+        if observation_kind == "recorded":
+            from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+            snapshot = self._observations.read_history(
+                frames,
+                fields=tuple(dict.fromkeys(fields.values())),
+                episode_ids=self._episodes,
+            )
+            if any(timestamp is None for timestamp in snapshot.timestamps):
+                raise RuntimeError("Recorded planar acquisition time is unavailable.")
+            for entity in (object_id, reference_id):
+                field = fields[entity]
+                if not bool(snapshot.valid[field].all()):
+                    raise RuntimeError(
+                        f"Recorded raw pose acquisition for {entity!r} is unavailable: "
+                        f"{snapshot.acquisition_errors[field]}."
+                    )
+                poses.append(xyz_quat_to_4x4_matrix(snapshot.values[field]))
+        else:
+            poses = [
+                native.get_local_pose(to_matrix=True).detach().cpu()
+                for native in natives
+            ]
+        geometry = NativePlanarPlacement(self._env.sim, *uids, batch_size=count)
+        metrics = geometry.measure(*poses, exact_silhouette=exact_silhouette)
+        columns = ["support_gap_m", "footprint_area_m2"] + (
+            ["outside_floor_area_m2"] if exact_silhouette else []
+        )
+        values = {
+            "planar.geometry": torch.tensor(
+                [[metrics[key][row] for key in columns] for row in range(count)],
+                dtype=torch.float64,
+            ),
+            "planar.full_footprint_inside": torch.tensor(
+                metrics["full_footprint_inside"], dtype=torch.bool
+            ),
+            "rigid.object_pose": poses[0],
+            "rigid.reference_pose": poses[1],
+        }
+        if exact_silhouette:
+            values.update(
+                {
+                    "planar." + key: torch.tensor(metrics[key], dtype=torch.bool)
+                    for key in (
+                        "reference_has_raised_geometry",
+                        "reference_aabb_overlap",
+                    )
+                }
+            )
+        self._capture_revision += 1
+        timestamp = float(self._env.sim.simulation_time)
+        ids = torch.arange(count, dtype=torch.long)
+        frame = PhysicalEvidenceFrame._from_owned_batches(
+            timestamp,
+            self._capture_revision,
+            ids,
+            {
+                name: PhysicalEvidenceBatch(
+                    name,
+                    value,
+                    torch.ones(count, dtype=torch.bool),
+                    (None,) * count,
+                    timestamp,
+                    ids,
+                    self._capture_revision,
+                )
+                for name, value in values.items()
+            },
+        )
+        self._check_episode()
+        self._observations.validate_history_owner(self._env.episode_context)
+        for entity in (object_id, reference_id):
+            self._native(entity, articulated=False)
+        if observation_kind == "final":
+            self._port.validate_observation_scope(self._bridge.clock)
+        result = dict(
+            schema_version="simulation.planar_observation/v1",
+            object_id=object_id,
+            reference_id=reference_id,
+            object_native_uid=uids[0],
+            reference_native_uid=uids[1],
+            program_fingerprint=task_program_fingerprint(self._bridge.program),
+            observation_kind=observation_kind,
+            episode_ids=list(self._episodes),
+            boundary_frames=list(frames),
+            exact_silhouette=exact_silhouette,
+            native_planar=metrics,
+            geometry_columns=columns,
+            geometry_frame=dict(
+                timestamp=frame.timestamp,
+                observation_revision=frame.observation_revision,
+                env_ids=ids.tolist(),
+                clock_domain="simulation_time",
+                revision_kind="planar_geometry_acquisition",
+                batches={
+                    name: dict(
+                        evidence_id=batch.evidence_id,
+                        value_dtype=str(batch.values.dtype),
+                        values=batch.values.tolist(),
+                        valid=batch.valid.tolist(),
+                        acquisition_errors=list(batch.acquisition_errors),
+                        timestamp=batch.timestamp,
+                        observation_revision=batch.observation_revision,
+                        env_ids=batch.env_ids.tolist(),
+                    )
+                    for name, batch in frame.batches.items()
+                },
+            ),
+        )
+        if snapshot is not None:
+            result["recorded_acquisition"] = dict(
+                field_ids={
+                    entity: self._observations.field_ids[field]
+                    for entity, field in fields.items()
+                },
+                env_ids=list(snapshot.env_ids),
+                episode_ids=list(snapshot.episode_ids),
+                frame_indices=list(snapshot.frame_indices),
+                observation_revisions=list(snapshot.revisions),
+                timestamps=list(snapshot.timestamps),
+                clock_domain=snapshot.clock_domain,
+            )
+        return result
+
+    def capture_directional_placement(
+        self,
+        object_id: str,
+        reference_id: str,
+        table_id: str,
+        frame_indices: Sequence[int],
+        *,
+        axes: Sequence[tuple[int, int]],
+        observation_kind: str,
+        preset_id: str,
+        reference_part: str | None = None,
+        reference_link_id: str | None = None,
+        segment_name: str | None = None,
+        source_path: Sequence[str | int] | None = None,
+    ) -> dict[str, Any]:
+        """Capture explicit signed envelopes and tabletop geometry without a verdict.
+
+        Args:
+            object_id: Registered rigid payload.
+            reference_id: Registered rigid object or articulation parent.
+            table_id: Explicit rigid floor used by the source tabletop contract.
+            frame_indices: Exact positive native boundary slots.
+            axes: Numeric world-axis selections supplied by the normative owner.
+            observation_kind: Current final or exact recorded observation.
+            preset_id: Actual named policy for the recorded reference observation.
+            reference_part: Explicit authored part catalog identity, if selected.
+            reference_link_id: Exact registered link entity, or None for rigid reference.
+            segment_name: Exact recorded boundary segment name.
+            source_path: Exact compiled boundary path, required with recorded mode.
+
+        Returns:
+            Owned physical channels and original world-axis geometry. Recorded
+            link poses come only from their exact policy observation, never live FK.
+        """
+        import torch
+        from embodichain.compute.geometry.envelope import signed_envelope_gaps
+        from embodichain.lab.sim.scene.rigid_mesh import capture_rigid_mesh
+        from embodichain.lab.sim.scene.planar_observation import NativePlanarPlacement
+        from embodichain.lab.sim.scene.spatial_reference import read_spatial_reference
+        from embodichain.lab.sim.evidence import (
+            PhysicalEvidenceFrame,
+            PhysicalEvidenceBatch,
+        )
+        from ..invocation_policy import task_program_fingerprint
+
+        self._check_episode()
+        if observation_kind not in {"final", "recorded"}:
+            raise ValueError(
+                "Directional observation requires an explicit boundary kind."
+            )
+        if self._observations is None:
+            raise RuntimeError("Observation history is unavailable.")
+        frames = tuple(frame_indices)
+        count = len(self._episodes)
+        if len(frames) != count or any(
+            type(value) is not int or value <= 0 for value in frames
+        ):
+            raise ValueError(
+                "Directional observations require exact positive native boundary slots."
+            )
+        if observation_kind == "final":
+            self._port.validate_observation_scope(self._bridge.clock)
+            if frames != self._observations.read_history_step_counts(
+                episode_ids=self._episodes
+            ):
+                raise ValueError(
+                    "Final directional observation requires the actual native boundary."
+                )
+
+        recorded = {}
+
+        def rigid_pose(entity: str) -> tuple[str, torch.Tensor]:
+            uid, native = self._native(entity, articulated=False)
+            if observation_kind == "recorded":
+                from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+                candidates = [
+                    name
+                    for name, descriptor in self._observations.schema.items()
+                    if descriptor.entity_uid == uid
+                    and descriptor.quantity == "pose"
+                    and descriptor.coordinate_frame == "arena"
+                    and descriptor.representation == "xyz_xyzw"
+                    and descriptor.shape == (7,)
+                    and descriptor.units == ("m", "unitless")
+                ]
+                if not candidates:
+                    raise RuntimeError(
+                        f"Recorded raw arena pose for {uid!r} is unavailable."
+                    )
+                field = candidates[0]
+                snapshot = self._observations.read_history(
+                    frames, fields=(field,), episode_ids=self._episodes
+                )
+                if any(timestamp is None for timestamp in snapshot.timestamps):
+                    raise RuntimeError(
+                        "Recorded directional acquisition time is unavailable."
+                    )
+                if not bool(snapshot.valid[field].all()):
+                    raise RuntimeError(
+                        f"Recorded raw pose acquisition for {entity!r} is unavailable: "
+                        f"{snapshot.acquisition_errors[field]}."
+                    )
+                recorded[entity] = dict(
+                    field_id=self._observations.field_ids[field],
+                    env_ids=list(snapshot.env_ids),
+                    episode_ids=list(snapshot.episode_ids),
+                    frame_indices=list(snapshot.frame_indices),
+                    observation_revisions=list(snapshot.revisions),
+                    timestamps=list(snapshot.timestamps),
+                    clock_domain=snapshot.clock_domain,
+                )
+                pose = xyz_quat_to_4x4_matrix(snapshot.values[field])
+            else:
+                pose = native.get_local_pose(to_matrix=True)
+            return uid, pose.detach().cpu()
+
+        object_uid, object_pose = rigid_pose(object_id)
+        table_uid, table_pose = rigid_pose(table_id)
+        native_link_name = None
+        if reference_link_id is not None:
+            links = [
+                link
+                for link in self._registration.scene_binding.links
+                if link.entity_id == reference_link_id
+            ]
+            if len(links) != 1 or links[0].articulation_id != reference_id:
+                raise ValueError(
+                    "Directional link belongs to another declared articulation."
+                )
+            link = links[0]
+            reference_uid, art = self._native(reference_id, articulated=True)
+            cfg = art.cfg
+            geometry = read_spatial_reference(
+                dict(
+                    uid=reference_id,
+                    fpath=cfg.fpath,
+                    body_scale=cfg.body_scale,
+                    fix_base=cfg.root_props.fixed_base,
+                    init_local_pose=cfg.init_local_pose,
+                    init_pos=cfg.init_pos,
+                    init_rot=cfg.init_rot,
+                ),
+                reference_part,
+            )
+            native_link_name = geometry.link
+            if native_link_name != link.native_link_name:
+                raise ValueError("Directional part catalog names another native link.")
+            reference_vertices = torch.tensor(geometry.vertices.copy())
+            reference_pose = (
+                None
+                if observation_kind == "recorded"
+                else art.get_link_pose(native_link_name, to_matrix=True).detach().cpu()
+            )
+        else:
+            if reference_part is not None:
+                raise ValueError(
+                    "A rigid reference cannot borrow an articulation part."
+                )
+            reference_uid, reference_pose = rigid_pose(reference_id)
+            reference_vertices = capture_rigid_mesh(
+                self._env.sim, reference_uid, batch_size=count
+            ).vertices
+        if observation_kind == "recorded":
+            if segment_name is None or source_path is None:
+                raise ValueError(
+                    "Recorded directional observation requires its compiled boundary descriptor."
+                )
+            segments = [
+                segment
+                for segment in self._bridge.program.iter_segments()
+                if segment.name == segment_name
+                and segment.source_path == tuple(source_path)
+                and any(
+                    policy.cfg.preset == preset_id for policy in segment.post_policies
+                )
+            ]
+            if len(segments) != 1:
+                raise ValueError(
+                    "Recorded directional reference requires one actual named policy occurrence."
+                )
+            segment = segments[0]
+            policies = [
+                policy
+                for policy in segment.post_policies
+                if policy.cfg.preset == preset_id
+            ]
+            if len(policies) != 1:
+                raise ValueError(
+                    "Recorded directional reference requires one actual named policy."
+                )
+            result = self._port.post_policy_metadata(policies[0], segment=segment)
+            if reference_link_id is not None:
+                reference_pose = torch.tensor(result["measurements"]["reference_pose"])
+        assert reference_pose is not None
+        vertices = capture_rigid_mesh(
+            self._env.sim, object_uid, batch_size=count
+        ).vertices
+        gaps = signed_envelope_gaps(
+            vertices, object_pose, reference_vertices, reference_pose, axes
+        )
+        table = NativePlanarPlacement(
+            self._env.sim, object_uid, table_uid, batch_size=count
+        ).measure(object_pose, table_pose)
+        metrics = dict(
+            object_pose=object_pose.tolist(),
+            reference_pose=reference_pose.tolist(),
+            envelope_gaps_m=gaps.tolist(),
+            tabletop=table,
+        )
+        values = {
+            "directional.envelope_gaps": gaps.T,
+            "rigid.object_pose": object_pose,
+            "reference.pose": reference_pose,
+            "table.pose": table_pose,
+            "tabletop.geometry": torch.tensor(
+                [
+                    [table["support_gap_m"][i], table["footprint_area_m2"][i]]
+                    for i in range(count)
+                ],
+                dtype=torch.float64,
+            ),
+            "tabletop.full_footprint_inside": torch.tensor(
+                table["full_footprint_inside"], dtype=torch.bool
+            ),
+        }
+        self._capture_revision += 1
+        timestamp = float(self._env.sim.simulation_time)
+        ids = torch.arange(count, dtype=torch.long)
+        frame = PhysicalEvidenceFrame._from_owned_batches(
+            timestamp,
+            self._capture_revision,
+            ids,
+            {
+                name: PhysicalEvidenceBatch(
+                    name,
+                    value,
+                    torch.ones(count, dtype=torch.bool),
+                    (None,) * count,
+                    timestamp,
+                    ids,
+                    self._capture_revision,
+                )
+                for name, value in values.items()
+            },
+        )
+        self._check_episode()
+        self._observations.validate_history_owner(self._env.episode_context)
+        self._native(object_id, articulated=False)
+        self._native(table_id, articulated=False)
+        self._native(reference_id, articulated=reference_link_id is not None)
+        if observation_kind == "final":
+            self._port.validate_observation_scope(self._bridge.clock)
+        result = dict(
+            schema_version="simulation.directional_observation/v1",
+            object_id=object_id,
+            reference_id=reference_id,
+            table_id=table_id,
+            object_native_uid=object_uid,
+            reference_native_uid=reference_uid,
+            table_native_uid=table_uid,
+            reference_part=reference_part,
+            reference_link_id=reference_link_id,
+            native_link_name=native_link_name,
+            program_fingerprint=task_program_fingerprint(self._bridge.program),
+            observation_kind=observation_kind,
+            episode_ids=list(self._episodes),
+            boundary_frames=list(frames),
+            policy_segment_name=(
+                segment_name if observation_kind == "recorded" else None
+            ),
+            policy_source_path=(
+                list(source_path) if observation_kind == "recorded" else None
+            ),
+            axes=[list(pair) for pair in axes],
+            native_directional=metrics,
+            geometry_frame=dict(
+                timestamp=frame.timestamp,
+                observation_revision=frame.observation_revision,
+                env_ids=ids.tolist(),
+                clock_domain="simulation_time",
+                revision_kind="directional_geometry_acquisition",
+                batches={
+                    name: dict(
+                        evidence_id=batch.evidence_id,
+                        value_dtype=str(batch.values.dtype),
+                        values=batch.values.tolist(),
+                        valid=batch.valid.tolist(),
+                        acquisition_errors=list(batch.acquisition_errors),
+                        timestamp=batch.timestamp,
+                        observation_revision=batch.observation_revision,
+                        env_ids=batch.env_ids.tolist(),
+                    )
+                    for name, batch in frame.batches.items()
+                },
+            ),
+        )
+        if recorded:
+            result["recorded_acquisitions"] = recorded
+        return result
