@@ -38,11 +38,13 @@ triangle-union floor and silhouette measurements. Scene CPU strategies own
 support selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
 Pure grasp samples, release clearances, ordered footprint proposals, source-axis
-adaptation and distal staging also live in `compute.geometry`. They consume
-explicit arrays, tensors or mesh/polygon inputs and retain no scene, Robot or
-semantic graph. Runtime acquisition, policy selection, ownership and physical
-acceptance remain with their consuming subsystems. `pose_checks.as_rigid_matrix`
-only validates one input transform; it neither repairs it nor invokes FK/IK.
+adaptation, held-object alignment targets and distal staging also live in
+`compute.geometry`. They consume explicit arrays, tensors or mesh/polygon inputs
+and retain no scene, Robot or semantic graph. `alignment.py` takes supplied poses,
+axes and held/root transforms. Runtime acquisition, policy selection, ownership
+and physical acceptance remain with their consuming subsystems.
+`pose_checks.as_rigid_matrix` only validates one input transform; it neither
+repairs it nor invokes FK/IK.
 
 `rigid_mesh.capture_rigid_mesh` snapshots scaled native input vertices and
 matching triangles as owned CPU data with the environment axis intact. It reads
