@@ -105,7 +105,7 @@ def test_usd_inventory_retains_used_layers_and_adjacent_source_annotation(tmp_pa
     annotation = root.with_suffix(".twist.json")
     annotation.write_text('{"authored": "retained without semantic evaluation"}')
     before = {p: p.read_bytes() for p in (root, child, annotation)}
-    assert asset_dependency_files(root) == tuple(sorted((root, annotation)))
+    assert asset_dependency_files(root) == tuple(sorted((root, child, annotation)))
     assert collect_declared_asset_files({"fpath": root.name}, base_dir=tmp_path) == {
         root,
         child,
@@ -308,6 +308,60 @@ def test_model_owner_can_bind_exact_existing_archive_reference_without_guessing(
     mesh.unlink()
     with pytest.raises(FileNotFoundError):
         asset_dependency_files(original, reference_overrides={reference: mesh})
+
+
+def test_usd_inventory_includes_composed_layer_asset_properties_and_missing_textures(
+    tmp_path,
+):
+    from pxr import Sdf, Usd, UsdGeom, UsdShade
+
+    texture = tmp_path / "albedo.png"
+    texture.write_bytes(b"original texture")
+    child = tmp_path / "material.usda"
+    stage = Usd.Stage.CreateNew(str(child))
+    shader = UsdShade.Shader.Define(stage, "/Material/Texture")
+    shader.CreateIdAttr("UsdUVTexture")
+    shader.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(
+        Sdf.AssetPath(texture.name)
+    )
+    stage.GetRootLayer().Save()
+    root = tmp_path / "model.usda"
+    stage = Usd.Stage.CreateNew(str(root))
+    stage.GetRootLayer().subLayerPaths = [child.name]
+    UsdGeom.Xform.Define(stage, "/Model")
+    stage.GetRootLayer().Save()
+    before = {p: p.read_bytes() for p in [root, child, texture]}
+    expected = {root, child, texture}
+    assert set(asset_dependency_files(root)) == expected
+    assert (
+        collect_declared_asset_files({"fpath": str(root)}, base_dir=tmp_path)
+        == expected
+    )
+    assert {p: p.read_bytes() for p in expected} == before
+    texture.unlink()
+    with pytest.raises(FileNotFoundError, match="unresolved"):
+        asset_dependency_files(root)
+
+
+def test_usdz_inventory_hashes_the_outer_package_for_contained_assets(tmp_path):
+    from pxr import Sdf, Usd, UsdGeom, UsdShade, UsdUtils
+    from PIL import Image
+
+    texture = tmp_path / "albedo.png"
+    Image.new("RGB", (1, 1), (17, 31, 53)).save(texture)
+    root = tmp_path / "model.usda"
+    stage = Usd.Stage.CreateNew(str(root))
+    prim = UsdGeom.Xform.Define(stage, "/Model")
+    stage.SetDefaultPrim(prim.GetPrim())
+    shader = UsdShade.Shader.Define(stage, "/Material/Texture")
+    shader.CreateIdAttr("UsdUVTexture")
+    shader.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(
+        Sdf.AssetPath(texture.name)
+    )
+    stage.GetRootLayer().Save()
+    package = tmp_path / "model.usdz"
+    assert UsdUtils.CreateNewUsdzPackage(Sdf.AssetPath(str(root)), str(package))
+    assert asset_dependency_files(package) == (package,)
 
 
 def test_explicit_urdf_collision_consumer_does_not_read_visual_or_other_links(tmp_path):
