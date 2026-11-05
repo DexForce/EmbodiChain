@@ -88,7 +88,7 @@ from embodichain.compute.geometry import rotate_rigid_grasp
 
 @dataclass(frozen=True, slots=True, eq=False)
 class OpenDoorGoal(ObjectActionGoal):
-    """Door handle and desired absolute opening state."""
+    """Door handle and desired absolute opening state, reached in either direction."""
 
     target_pose: PoseGoalValue
     """Handle-link pose snapshot or late-bound scene-entity reference."""
@@ -133,7 +133,7 @@ class OpenDoorOptions(ActionOptions):
     """Post-release retreat distance opposite the rotated approach axis."""
 
     joint_position_tolerance: float = 1.0e-4
-    """Tolerance for legal-limit and already-open comparisons in radians."""
+    """Tolerance for legal-limit and already-satisfied comparisons in radians."""
 
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
@@ -184,7 +184,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         request: ResolvedActionRequest[OpenDoorGoal, OpenDoorOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        """Plan the complete six-stage door-opening motion without side effects."""
+        """Plan the complete six-stage hinge motion without side effects."""
         if request.motion_policy.strategy != "ik_interp":
             raise ValueError(
                 "OpenDoor requires strategy='ik_interp' because reach, hinge, "
@@ -588,7 +588,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         *,
         tolerance: float,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Resolve an opening-directed row-local delta from an absolute fraction."""
+        """Resolve a signed row-local delta from an absolute opening fraction."""
         if joint_limits is None:
             invalid = torch.zeros(
                 context.batch_size,
@@ -661,11 +661,9 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             & (position <= upper + tolerance)
         )
         rotation = target_position - position
-        directed_rotation = rotation * opening_direction
-        forward_or_reached = directed_rotation >= -tolerance
-        semantic_valid = fraction_valid & position_valid & forward_or_reached
-        already_open = semantic_valid & (directed_rotation.abs() <= tolerance)
-        active = semantic_valid & (directed_rotation > tolerance)
+        semantic_valid = fraction_valid & position_valid
+        already_open = semantic_valid & (rotation.abs() <= tolerance)
+        active = semantic_valid & (rotation.abs() > tolerance)
         safe_rotation = torch.where(active, rotation, torch.zeros_like(rotation))
         return safe_rotation, active, already_open, semantic_valid
 
