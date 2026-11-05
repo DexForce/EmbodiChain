@@ -16,6 +16,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Existing binding selection and cloned poses | `embodichain/lab/sim/scene/query.py` |
 | Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
+| Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
@@ -37,6 +38,16 @@ for missing topology. Callers recapture after model/scale changes. This separate
 API leaves the lightweight mesh-envelope path unchanged and supplies
 `NativePlanarPlacement` and exact silhouette/Pour consumers.
 
+`native_hand.py` captures cooked convex/box geometry and explicitly requested
+rest/contact offsets for the exact simulation-owned Robot and native rigid UIDs.
+It requires Default/B1/env0, checks named FK against native frames, and validates
+original owners before subsequent rigid reads. Strict shape conversion and offset
+reads belong to `objects/backends/collision.py`; closing FK reuses
+[hand geometry](../robot-system/robot-system.md#sampled-hand-geometry).
+It creates no collision query and selects no grasp policy. Geometric qualification
+belongs to [GraspKit](../motion-planning/motion-planning.md); query composition and
+cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
+Captured shapes and nominal queries do not establish physical acquisition/release.
 
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
 recreate it after replacing either object or changing its model/scale. Queries
@@ -45,7 +56,6 @@ gap, without accepting a task or inferring contact support. Exact silhouette mod
 retains concavities and holes; convex-hull mode remains explicit. Acquisition
 errors remain unavailable evidence. Callers own thresholds, invocation/episode
 association, observation timing and evidence publication.
-
 
 `mesh_snapshot.py` captures scaled rigid visual vertices and ordered articulation
 collision-input components from explicit UID/link mappings. It reads no live

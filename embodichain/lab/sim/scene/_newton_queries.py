@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
+from importlib.metadata import version
 import math
 import numpy as np
 import trimesh
@@ -56,6 +57,15 @@ class _ConvexCollection:
         self._closed = False
         self._identity = object()
         _require_newton()
+
+    @staticmethod
+    def metadata() -> dict[str, str]:
+        """Describe the actual shared backend used by injected mesh queries."""
+        return {
+            "collision_backend": "newton.CollisionPipeline",
+            "collision_backend_version": version("newton"),
+            "distance_semantics": "capped_conversion_interval/v1",
+        }
 
     def add_object(self, name: str, mesh: trimesh.Trimesh, transform=None) -> None:
         if self._closed or self._frozen:
