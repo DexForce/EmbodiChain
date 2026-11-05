@@ -4491,6 +4491,13 @@ device, float64 matrix channels and final native-agreement check. Original raw
 availability and temporal metadata remain authoritative; no new sensor sample
 or inferred task outcome is produced. Unavailable history fails explicitly.
 
+``capture_planar_placement`` and ``capture_directional_placement`` likewise use
+explicit current or exact historical boundaries. Their PhysicalEvidenceFrame
+channels preserve the original hull/triangle modes, signed world-axis gaps and
+native row identity. Historical links require the actual completed named policy
+observation. Missing raw poses or original times remain unavailable; geometry
+measurements cannot establish contact support or certify a task predicate.
+
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
 
 .. autoclass:: SimulationStateObservationCollector
@@ -4542,3 +4549,20 @@ standard native Marvin component; stored historical inputs are not converted.
 
 .. autofunction:: require_robot_assets
 
+
+Selected-link source spatial geometry
+-------------------------------------
+
+The Scene reader supplies owned link-local input vertices and the original
+root-composed pose for an explicitly selected native root or horizontal
+prismatic part. A fixed grasp child does not replace its catalog body. Inputs
+retain their authored-unit, scale and root-frame contracts; missing geometry
+never becomes a proxy. These source inputs do not certify cooked native shapes,
+contact, motion or task acceptance.
+
+.. currentmodule:: embodichain.lab.sim.scene.spatial_reference
+
+.. autoclass:: SpatialReferenceGeometry
+   :members:
+
+.. autofunction:: read_spatial_reference

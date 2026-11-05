@@ -67,7 +67,14 @@ _SOURCE = json.loads(
 
 
 def _collector_case(
-    name="nominal", *, count=1, robot_qpos=None, joint_valid=True, joint_timestamp=True
+    name="nominal",
+    *,
+    count=1,
+    robot_qpos=None,
+    joint_valid=True,
+    joint_timestamp=True,
+    condition=None,
+    advance=True,
 ):
     case = next(item for item in _SOURCE["cases"] if item["name"] == name)
     common = _SOURCE["common"]
@@ -132,7 +139,13 @@ def _collector_case(
         ),
         default_preset="default",
     )
-    registration = SimulationTaskProgramRegistration(scene, profile)
+    registration = SimulationTaskProgramRegistration(
+        scene,
+        profile,
+        **(
+            {"settle_presets": {"observed": condition}} if condition is not None else {}
+        ),
+    )
     compiled = TaskProgramCompiler(scene.declare()).compile(
         decode_task_program(
             dict(
@@ -147,6 +160,19 @@ def _collector_case(
                     kind="segment",
                     name="observe",
                     steps=dict(kind="invoke", call=dict(kind="pick", object="cube")),
+                    **(
+                        {
+                            "post": [
+                                {
+                                    "kind": "wait_stable",
+                                    "entity": "cube",
+                                    "preset": "observed",
+                                }
+                            ]
+                        }
+                        if condition is not None
+                        else {}
+                    ),
                 ),
             )
         )
@@ -264,8 +290,9 @@ def _collector_case(
     collector = SimulationStateObservationCollector(
         env, bridge, registration, observations=recording
     )
-    for _ in range(common["written_steps"][0]):
-        clock.advance_after_env_step()
+    if advance:
+        for _ in range(common["written_steps"][0]):
+            clock.advance_after_env_step()
     sim.simulation_time = 0.1 + clock.now()
     return collector, env, case, bodies, compiled
 
@@ -591,3 +618,227 @@ def test_held_poses_reject_unsupported_robot_bases_before_reading_history(
     )
     with pytest.raises(ValueError, match="fixed robot base"):
         collector.capture_held_poses("cube", ["arm"], [1], observation_kind="recorded")
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+@pytest.mark.parametrize("exact", [False, True])
+def test_planar_observation_preserves_source_gap_mode_and_exact_history(
+    monkeypatch, recorded, exact
+):
+    import trimesh
+
+    poses = deepcopy(_SOURCE["common"]["poses"])
+    for uid, height in [("cube", 0.11), ("region", 0.0)]:
+        for row in poses[uid]:
+            for pose in row:
+                pose[:3] = [0.0, 0.0, height]
+                pose[3:] = [0.0, 0.0, 0.0, 1.0]
+    monkeypatch.setitem(_SOURCE["common"], "poses", poses)
+    collector, env, _, bodies, _ = _collector_case()
+    collector._bridge.post_policy_port.bind_clock(collector._bridge.clock)
+    for uid, extent, height in [
+        ("cube", (0.1, 0.1, 0.1), 0.11),
+        ("region", (1.0, 1.0, 0.1), 0.0),
+    ]:
+        mesh = trimesh.creation.box(extents=extent)
+        vertices = torch.tensor(mesh.vertices.copy(), dtype=torch.float32)[None]
+        triangles = torch.tensor(mesh.faces.copy(), dtype=torch.long)[None]
+        bodies[uid].get_vertices = lambda scale=True, vertices=vertices: vertices
+        bodies[uid].get_triangles = lambda triangles=triangles: triangles
+        pose = torch.eye(4)[None]
+        pose[:, 2, 3] = height
+        if recorded:
+            bodies[uid].get_local_pose = lambda **kwargs: pytest.fail(
+                "Recorded planar facts must not sample live poses"
+            )
+        else:
+            bodies[uid].get_local_pose = lambda to_matrix, pose=pose: pose
+    frame = [1] if recorded else [30]
+    packet = collector.capture_planar_placement(
+        "cube",
+        "region",
+        frame,
+        observation_kind="recorded" if recorded else "final",
+        exact_silhouette=exact,
+    )
+    assert packet["native_planar"]["support_gap_m"] == pytest.approx([0.01], abs=1e-7)
+    assert packet["native_planar"]["full_footprint_inside"] == [True]
+    assert packet["exact_silhouette"] is exact
+    assert packet["geometry_frame"]["observation_revision"] == 1
+    assert packet["geometry_frame"]["batches"]["planar.geometry"]["valid"] == [True]
+    assert "accepted" not in packet["native_planar"]
+    assert "support_tolerance_m" not in packet["native_planar"]
+    if recorded:
+        assert packet["recorded_acquisition"]["timestamps"] == [0.04]
+        assert packet["recorded_acquisition"]["frame_indices"] == [1]
+    else:
+        with pytest.raises(ValueError, match="actual native recording boundary"):
+            collector.capture_planar_placement(
+                "cube", "region", [1], observation_kind="final", exact_silhouette=exact
+            )
+
+
+def test_directional_observation_preserves_signed_gap_without_task_acceptance():
+    import trimesh
+
+    collector, env, _, bodies, _ = _collector_case()
+    collector._bridge.post_policy_port.bind_clock(collector._bridge.clock)
+    for uid, extent, translation in [
+        ("cube", (0.1, 0.1, 0.1), (0.7, -1.0, 0.11)),
+        ("region", (4.0, 4.0, 0.1), (0.0, 0.0, 0.0)),
+    ]:
+        mesh = trimesh.creation.box(extents=extent)
+        vertices = torch.tensor(mesh.vertices.copy(), dtype=torch.float32)[None]
+        triangles = torch.tensor(mesh.faces.copy(), dtype=torch.long)[None]
+        pose = torch.eye(4)[None]
+        pose[0, :3, 3] = torch.tensor(translation)
+        bodies[uid].get_vertices = lambda scale=True, vertices=vertices: vertices
+        bodies[uid].get_triangles = lambda triangles=triangles: triangles
+        bodies[uid].get_local_pose = lambda to_matrix, pose=pose: pose
+    packet = collector.capture_directional_placement(
+        "cube",
+        "region",
+        "region",
+        [30],
+        axes=((1, -1),),
+        observation_kind="final",
+        preset_id="unused_current",
+    )
+    assert packet["native_directional"]["envelope_gaps_m"][0] == pytest.approx(
+        [-1.05], abs=1e-6
+    )
+    assert packet["geometry_frame"]["observation_revision"] == 1
+    assert "accepted" not in packet["native_directional"]
+    assert "support_tolerance_m" not in packet["native_directional"]["tabletop"]
+    with pytest.raises(ValueError, match="actual native boundary"):
+        collector.capture_directional_placement(
+            "cube",
+            "region",
+            "region",
+            [1],
+            axes=((1, -1),),
+            observation_kind="final",
+            preset_id="unused_current",
+        )
+
+
+def test_recorded_directional_observation_requires_its_exact_policy_boundary():
+    collector, _, _, _, _ = _collector_case()
+    with pytest.raises(ValueError, match="compiled boundary descriptor"):
+        collector.capture_directional_placement(
+            "cube",
+            "region",
+            "region",
+            [1],
+            axes=((1, -1),),
+            observation_kind="recorded",
+            preset_id="missing_policy",
+        )
+
+
+def test_recorded_directional_observation_uses_actual_completed_policy_and_raw_slots(
+    monkeypatch,
+):
+    import trimesh
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+    )
+
+    positions = deepcopy(_SOURCE["common"]["poses"])
+    for uid, xyz in [("cube", [0.7, -1.0, 0.11]), ("region", [0.0, 0.0, 0.0])]:
+        for row in positions[uid]:
+            for pose in row:
+                pose[:3], pose[3:] = xyz, [0.0, 0.0, 0.0, 1.0]
+    monkeypatch.setitem(_SOURCE["common"], "poses", positions)
+    cfg = SimulationStabilityConditionCfg(
+        entity="cube",
+        kind="placement",
+        reference="region",
+        displacement=(0.7, -1.0, 0.11),
+        duration=0.04,
+        timeout=0.12,
+    )
+    collector, env, _, bodies, _ = _collector_case(condition=cfg, advance=False)
+    collector._bridge.post_policy_port.bind_clock(collector._bridge.clock)
+    for uid, extent, xyz in [
+        ("cube", (0.1, 0.1, 0.1), (0.7, -1.0, 0.11)),
+        ("region", (4.0, 4.0, 0.1), (0.0, 0.0, 0.0)),
+    ]:
+        mesh = trimesh.creation.box(extents=extent)
+        vertices = torch.tensor(mesh.vertices.copy(), dtype=torch.float32)[None]
+        triangles = torch.tensor(mesh.faces.copy(), dtype=torch.long)[None]
+        bodies[uid].get_vertices = lambda scale=True, vertices=vertices: vertices
+        bodies[uid].get_triangles = lambda triangles=triangles: triangles
+        pose = torch.eye(4)[None]
+        pose[0, :3, 3] = torch.tensor(xyz)
+        bodies[uid].get_local_pose = lambda to_matrix=True, pose=pose: pose
+    segment = next(collector._bridge.program.iter_segments())
+    policy = segment.post_policies[0]
+    actions = collector._port.actions(
+        policy, segment=segment, active_mask=torch.ones(1, dtype=torch.bool)
+    )
+    for _ in actions:
+        collector._bridge.clock.advance_after_env_step()
+        env.sim.simulation_time = 0.1 + collector._bridge.clock.now()
+    assert collector._port.post_policy_result(policy, segment=segment).tolist() == [
+        True
+    ]
+    assert collector._bridge.clock.step_index > 0
+    for body in bodies.values():
+        body.get_local_pose = lambda **kwargs: pytest.fail(
+            "Historical directional facts cannot read live poses"
+        )
+    packet = collector.capture_directional_placement(
+        "cube",
+        "region",
+        "region",
+        [collector._bridge.clock.step_index],
+        axes=((1, -1),),
+        observation_kind="recorded",
+        preset_id="observed",
+        segment_name=segment.name,
+        source_path=segment.source_path,
+    )
+    assert packet["native_directional"]["envelope_gaps_m"][0] == pytest.approx(
+        [-1.05], abs=1e-6
+    )
+    assert packet["policy_segment_name"] == segment.name
+    assert packet["policy_source_path"] == list(segment.source_path)
+    assert packet["recorded_acquisitions"]["cube"]["frame_indices"] == [
+        collector._bridge.clock.step_index
+    ]
+
+
+@pytest.mark.parametrize("family", ["planar", "directional"])
+@pytest.mark.parametrize("damage", ["pose", "timestamp"])
+def test_spatial_observation_keeps_missing_raw_evidence_unavailable(family, damage):
+    collector, env, _, _, _ = _collector_case()
+    if damage == "pose":
+        field = env.observation_manager.field_ids["cube"]
+        env._test_raw_storage["raw_valid"][field][0, 1] = False
+        env._test_raw_storage.get_non_tensor("raw_acquisition_errors")[field][
+            0, 1
+        ] = "spatial pose unavailable"
+        message = "spatial pose unavailable"
+    else:
+        env._test_raw_storage["raw_timestamp"][0, 1] = float("nan")
+        message = "acquisition time is unavailable"
+    with pytest.raises(RuntimeError, match=message):
+        if family == "planar":
+            collector.capture_planar_placement(
+                "cube",
+                "region",
+                [1],
+                observation_kind="recorded",
+                exact_silhouette=True,
+            )
+        else:
+            collector.capture_directional_placement(
+                "cube",
+                "region",
+                "region",
+                [1],
+                axes=((1, -1),),
+                observation_kind="recorded",
+                preset_id="missing_policy",
+            )

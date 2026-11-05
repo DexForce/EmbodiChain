@@ -381,6 +381,14 @@ checked before publication. The packet also preserves original recorded field,
 row, revision and time identities. Missing history never substitutes a live
 joint read; moving bases and changing chain mounts remain unsupported.
 
+`capture_planar_placement` and `capture_directional_placement` retain the existing
+native geometry rules while reading exact historical poses from the canonical
+ObservationManager. Final reads require the actual completed recording boundary;
+recorded reads preserve raw availability and original time/revision identity.
+Directional link poses require the selected completed policy occurrence rather
+than a later live link read. These APIs publish signed envelopes, footprint and
+gap measurements without selecting task thresholds or accepting task outcomes.
+
 `SimulationStateObservationCollector.capture_recorded_pour_geometry` reads one
 owned snapshot from the explicitly supplied ObservationManager, then selects
 exact inclusive source slots and receiver slots at the first maximum tilt.
