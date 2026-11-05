@@ -509,6 +509,7 @@ These interfaces install no standard post-policy producer or control factory.
    :members:
 
 .. automodule:: embodichain.lab.task_program.integrations.simulation.twist_session
+   :members:
 
 Declared articulation continuation and drawer services
 ------------------------------------------------------
@@ -580,3 +581,20 @@ already available from configuration.
 
 .. autoclass:: SimulationHandOverSceneProvider
    :members: prepare
+
+Explicit runtime observation scope
+----------------------------------
+
+``TaskProgramEnvironmentAdapter.assemble_runtime`` and ``create_bridge`` accept
+an optional ``runtime_scope_guard`` for a host-owned session, episode or physical
+owner epoch. The standard factory forwards it to the planning observation port
+and shared scene cache. ``validate_runtime_scope()`` checks factory lifetime and
+this explicit authority without acquiring robot/sensor state or stepping physics.
+A scope change during acquisition rejects the result. Cached qpos also rejects
+closed factory resources; a live factory does not imply that a previous bridge
+still has authority.
+
+The default ``None`` keeps legacy custom factory calls unchanged: no new keyword
+is passed to them. Explicit scope requests require a factory supporting the
+optional keyword. The validator must not acquire observations or mutate physical
+state. Control-service construction and evidence collection remain separate.
