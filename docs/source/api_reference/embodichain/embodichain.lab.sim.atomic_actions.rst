@@ -584,6 +584,34 @@ available; explicit measured source policies reject incompatible nominal input.
    PlaceInsideLanding
    PlaceSceneProvider
 
+Explicit Press planning recovery
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``PressPlanningRecovery`` selects the existing Press skill's failure-only B1
+recovery. Nominal planning and at most one declared contact-roll alternative share
+the original two-complete-plan budget and RNG progression. Failed Cartesian
+phases may retry through the shared unchanged-target, unchanged-time IK resolver.
+The final emitted full-robot trajectory retains velocity qualification after
+resampling and transforms. Missing motion or excessive velocity remains failure.
+Default ``PressOptions`` enables no contact-roll alternatives or recovery.
+
+``validate_press_extra_distance`` accepts only an optional finite addition in
+``[0, 0.010]`` metres. It does not alter the authored stroke or determine physical
+contact, release or task success. Configured recovery accepts only
+``{kind: press_bounded, revision: 1}``; budgets and callbacks cannot be supplied
+through that declaration.
+
+.. autosummary::
+   :nosignatures:
+
+   PressPlanningRecovery
+   validate_press_extra_distance
+
+.. autoclass:: PressPlanningRecovery
+   :members:
+
+.. autofunction:: validate_press_extra_distance
+
 Curobo queries
 ^^^^^^^^^^^^^^
 
