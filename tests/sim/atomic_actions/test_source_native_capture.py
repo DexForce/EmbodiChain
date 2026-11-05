@@ -222,7 +222,9 @@ def test_cooked_convex_scale_and_local_pose_are_applied_once(monkeypatch):
 
 
 def test_native_scene_queries_do_not_import_task_or_atomic_request_layers():
-    directory = Path(__file__).parents[3] / "embodichain/lab/sim/scene"
+    from embodichain.lab.sim.scene import native_hand
+
+    directory = Path(native_hand.__file__).parent
     forbidden = []
     for filename in ("native_hand.py",):
         tree = ast.parse((directory / filename).read_text())
