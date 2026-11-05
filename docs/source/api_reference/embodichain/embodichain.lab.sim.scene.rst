@@ -649,3 +649,16 @@ as None; it is not a cooked-collider observation or physical clearance proof.
 .. autofunction:: read_gltf_z_up_mesh
 
 .. autofunction:: estimate_source_mesh_top_z
+
+Local source vertices
+----------------------
+
+``read_source_vertices`` retains source-local ordering and one body scale for
+mesh and articulation geometry. Explicit local overrides already own their scale.
+It reads no native state and applies no world pose. Missing mesh geometry is an
+error, including primitive configurations without an explicit local override;
+this does not qualify cooked collision shapes or physical containment.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autofunction:: read_source_vertices
