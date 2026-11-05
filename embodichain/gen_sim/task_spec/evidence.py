@@ -869,105 +869,11 @@ def evaluate_placement_evidence_report(
     Raises:
         ValueError: Binding rows, episode ownership or observation identities clash.
     """
-    from .spec import TaskSpec
-    from .validation import evaluate_task_spec
+    from .evidence_report import evaluate_physical_evidence_report
 
-    normalized = TaskSpec.from_dict(spec)
-    if type(num_envs) is not int or num_envs < 1:
-        raise ValueError("num_envs must be a positive integer.")
     selected = tuple(
         SupportedPlacementEvidenceBinding.from_dict(item) for item in bindings
     )
-    if len({item.predicate_id for item in selected}) != len(selected):
-        raise ValueError("Evidence bindings must identify unique predicates.")
-    if any(item.env_ids != tuple(range(num_envs)) for item in selected):
-        raise ValueError("Evidence bindings have another environment batch.")
-    if len({item.evidence_format for item in selected}) > 1:
-        raise ValueError(
-            "One report cannot mix raw and historical evidence input contracts."
-        )
-    if len({item.episode_ids for item in selected}) > 1:
-        raise ValueError(
-            "Evidence bindings cannot mix declared or historical episodes."
-        )
-    goals = {item.id: item for item in normalized.goal}
-    milestones = {
-        item.id: item
-        for milestone in normalized.milestones
-        for item in milestone.achieve
-    }
-    goal_rows: list[dict[str, Any]] = [{} for _ in range(num_envs)]
-    events: list[dict[int, dict[str, Any]]] = [{} for _ in range(num_envs)]
-
-    def store_observation(
-        target: dict[str, Any], key: str, packet: dict[str, Any]
-    ) -> None:
-        previous = target.get(key)
-        if previous is not None:
-            if any(
-                previous.get(field) != packet.get(field)
-                for field in ("status", "value")
-            ):
-                raise ValueError(
-                    "Predicate bindings assign conflicting observations to one key."
-                )
-            packet["evidence_refs"] = sorted(
-                set(previous["evidence_refs"]) | set(packet["evidence_refs"])
-            )
-        target[key] = packet
-
-    for binding in selected:
-        snapshot = json_snapshot(evidence.get(binding.predicate_id, {}))
-        outcomes = evaluate_supported_placement_evidence(
-            normalized, binding, snapshot, program=program
-        )
-        predicate = goals.get(
-            binding.predicate_id, milestones.get(binding.predicate_id)
-        )
-        assert predicate is not None  # The public verifier checked this identity.
-        frame_indices = None
-        if binding.predicate_id in milestones:
-            frames = snapshot.get("boundary_frames")
-            if frames is None:
-                frames = (
-                    snapshot.get("record", {})
-                    .get("measurements", {})
-                    .get("boundary_frames")
-                )
-            if (
-                isinstance(frames, list)
-                and len(frames) == num_envs
-                and all(type(frame) is int and frame > 0 for frame in frames)
-            ):
-                frame_indices = frames
-        for row, outcome in enumerate(outcomes):
-            packet = {
-                "status": outcome.status.value,
-                "value": outcome.observed,
-                "reason": outcome.reason,
-                "evidence_refs": list(outcome.evidence_refs),
-            }
-            key = predicate.observation or predicate.id
-            if binding.predicate_id in goals:
-                store_observation(goal_rows[row], key, packet)
-            elif frame_indices is not None:
-                store_observation(
-                    events[row].setdefault(frame_indices[row], {}), key, packet
-                )
-    reports = []
-    for row in range(num_envs):
-        trajectory = [snapshot for _, snapshot in sorted(events[row].items())]
-        for condition in normalized.temporal:
-            for snapshot in trajectory:
-                snapshot[condition.predicate.observation or condition.predicate.id] = {
-                    "status": "unavailable",
-                    "reason": "No complete control-step trajectory.",
-                }
-        reports.append(
-            evaluate_task_spec(
-                normalized,
-                {"init": {}, "goal": goal_rows[row], "invariants": {}},
-                trajectory=trajectory,
-            )
-        )
-    return tuple(reports)
+    return evaluate_physical_evidence_report(
+        spec, selected, evidence, program=program, num_envs=num_envs
+    )

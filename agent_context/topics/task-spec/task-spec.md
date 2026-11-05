@@ -16,6 +16,8 @@ of those owners.
 | Predicate vocabulary and temporal windows | `expressions.py` |
 | Structure validation and evidence evaluation | `validation.py` |
 | Placement binding, physical proof checks and certificate assembly | `evidence.py` |
+| Orientation/joint state and milestone qualification | `condition_evidence.py` |
+| Common per-environment physical reports | `evidence_report.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
 | JSON snapshots and semantic hashing | `canonicalization.py` |
@@ -87,3 +89,13 @@ serialization, cache, missing-evidence, temporal-window and milestone contracts.
 The [API supplement](../../../docs/source/api_reference/public_api.rst) documents
 the public imports. Provider calls and simulation runs are unnecessary for this
 protocol and snapshot-validation package.
+
+Orientation and articulation state bindings seal criteria, native identities,
+episode, format and exact execution occurrences. Current state is independent
+of program success. Recorded milestones retain their complete successful prefix
+and original policy/validator receipts. E6 rechecks the authored joint target,
+tolerance and one-second stable window; invalid or missing evidence remains
+unavailable per environment. Lab state collectors use the same canonical
+ObservationManager history as support collection, preserving raw validity,
+acquisition errors and temporal identities without a second acquisition path.
+The Task Engine projection supplies declarations only and selects no thresholds.
