@@ -24,6 +24,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from copy import deepcopy
 import torch
 
 from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
@@ -1930,7 +1931,13 @@ def test_control_port_cancellation_and_foreign_clock_cannot_reuse_success():
 
 
 def _twist_control_case(
-    *, program_fingerprint="program", compiled=None, initialize=None, retain=False
+    *,
+    program_fingerprint="program",
+    compiled=None,
+    initialize=None,
+    retain=False,
+    post_policy_bindings=(),
+    expect_terminal_accepted=True,
 ):
     from dataclasses import asdict
     from embodichain.lab.sim.scene.revolute_inputs import RevoluteControlBinding
@@ -2046,6 +2053,14 @@ def _twist_control_case(
             ("park", "released", True),
         )
     }
+    if post_policy_bindings:
+        presets["turned"] = SimulationControlConditionCfg(
+            entity="drawer",
+            operation_id="twist0",
+            family="twist",
+            phase="released",
+            terminal=False,
+        )
     system.port = SimulationSegmentPolicyPort(
         _Simulation(articulation=art),
         robot,
@@ -2061,6 +2076,10 @@ def _twist_control_case(
         step_dt=0.04,
         control_operations={"twist0": operation},
     )
+    if post_policy_bindings:
+        system.port = system.port.with_post_policy_presets(
+            compiled, post_policy_bindings
+        )
     system.port.bind_clock(system.clock)
     system.operation = operation
     if initialize is not None:
@@ -2118,9 +2137,21 @@ def _twist_control_case(
     system.data["impulse"].zero_()
     commands, chunk = _run_control_policy(system, "chunk")
     assert len(commands) == 13 and chunk["accepted"] and chunk["goal_complete"]
+    if post_policy_bindings:
+        release_commands, release_result = _run_control_policy(system, "released")
+        assert (
+            len(release_commands) == 13
+            and release_result["accepted"]
+            and not release_result["terminal"]
+        )
+        assert release_result["preset"] == "turned"
     commands, terminal = _run_control_policy(system, "park")
     assert all(torch.equal(value, torch.full((1, 2), 0.7)) for value in commands)
-    assert len(commands) == 13 and terminal["accepted"] and terminal["terminal"]
+    assert (
+        len(commands) == 13
+        and terminal["accepted"] is expect_terminal_accepted
+        and terminal["terminal"]
+    )
     assert (
         terminal["stable"] and terminal["others_unchanged"] and terminal["early_stop"]
     )
@@ -2315,3 +2346,122 @@ def _raw_press_observation(*, empty_initial=False):
     )
     raw = collector.capture(selectors, terminal_policy=selectors[-1])
     return system, collector, payload, segments, selectors, raw
+
+
+def test_explicit_post_binding_preserves_press_holds_with_root_and_reused_release_preset():
+    from embodichain.lab.task_program.integrations import (
+        BoundPostPolicyPresets,
+        PostPolicyPresetBinding,
+        task_program_fingerprint,
+    )
+
+    payload, _ = _full_control_program()
+    for item in payload["program"]["items"]:
+        item["post"][0]["entity"] = "native_drawer"
+    payload["program"]["items"][-1]["post"][0]["preset"] = "released"
+    before = deepcopy(payload)
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneArticulationRef("native_drawer"),
+                state_provider=_StaticStateProvider(),
+            ),
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
+        decode_task_program(payload)
+    )
+    fingerprint = task_program_fingerprint(compiled)
+    system = _press_control_port(program_fingerprint=fingerprint)
+    segments = tuple(compiled.iter_segments())
+    with pytest.raises(ValueError, match="entity differs"):
+        system.port.validate_policy(segments[0].post_policies[0], segment=segments[0])
+    bindings = tuple(
+        PostPolicyPresetBinding(
+            fingerprint, f"{compiled.program_id}/{segment.segment_id}:post:0", target
+        )
+        for segment, target in zip(segments, ("ready", "released", "park"), strict=True)
+    )
+    system.port = system.port.with_post_policy_presets(compiled, bindings)
+    system.compiled = compiled
+    commands, ready = _run_control_policy(system, "ready")
+    assert len(commands) == 13 and ready["accepted"]
+    assert all(torch.equal(command, torch.full((1, 2), 0.2)) for command in commands)
+    system.data["impulse"].fill_(0.1)
+    system.advance()
+    system.art._qpos.fill_(0.00006)
+    system.advance()
+    system.data["impulse"].zero_()
+    commands, released = _run_control_policy(system, "released")
+    assert len(commands) == 5 and released["accepted"] and not released["terminal"]
+    commands, terminal = _run_control_policy(system, "park")
+    assert len(commands) == 5 and terminal["accepted"] and terminal["terminal"]
+    assert all(torch.equal(command, torch.full((1, 2), 0.7)) for command in commands)
+    assert terminal["preset"] == released["preset"] == "released"
+    assert payload == before
+    scope = system.port.control_policy_scope(
+        segments[-1].post_policies[0], segment=segments[-1]
+    )
+    assert (
+        scope["entity_id"] == "drawer"
+        and scope["preset"] == "released"
+        and scope["terminal"]
+    )
+
+
+@pytest.mark.parametrize("clearance,accepted", [(0.03, False), (0.04, True)])
+def test_bound_twist_reused_turned_preset_keeps_distinct_terminal_clearance(
+    clearance, accepted
+):
+    from embodichain.lab.task_program.integrations import (
+        PostPolicyPresetBinding,
+        task_program_fingerprint,
+    )
+
+    payload, _ = _full_control_program(("ready", "chunk", "released", "park"))
+    for item in payload["program"]["items"]:
+        item["post"][0]["entity"] = "native_drawer"
+        if item["name"] in {"released", "park"}:
+            item["post"][0]["preset"] = "turned"
+    before = deepcopy(payload)
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneArticulationRef("native_drawer"),
+                state_provider=_StaticStateProvider(),
+            ),
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
+        decode_task_program(payload)
+    )
+    fingerprint = task_program_fingerprint(compiled)
+    bindings = tuple(
+        PostPolicyPresetBinding(
+            fingerprint, f"{compiled.program_id}/{segment.segment_id}:post:0", target
+        )
+        for segment, target in zip(
+            compiled.iter_segments(), ("ready", "chunk", "turned", "park"), strict=True
+        )
+    )
+
+    def initialize(system):
+        values = iter((0.03, clearance))
+        system.geometry.park_clearance = lambda: next(values)
+
+    system = _twist_control_case(
+        program_fingerprint=fingerprint,
+        compiled=compiled,
+        initialize=initialize,
+        retain=True,
+        post_policy_bindings=bindings,
+        expect_terminal_accepted=accepted,
+    )
+    action, park = (system.segments[name] for name in ("released", "park"))
+    a = system.port.control_policy_scope(action[1], segment=action[0])
+    b = system.port.control_policy_scope(park[1], segment=park[0])
+    assert (
+        a["preset"] == b["preset"] == "turned" and not a["terminal"] and b["terminal"]
+    )
+    assert payload == before
+    system.port.close_runtime_resources()

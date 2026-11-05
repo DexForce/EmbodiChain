@@ -66,6 +66,8 @@ from .stability import (
 )
 
 if TYPE_CHECKING:
+    from ..invocation_policy import BoundPostPolicyPresets, PostPolicyPresetBinding
+    from embodichain.lab.task_program.compiler import CompiledTaskProgram
     from .control_assembly import ControlOperationDeclaration
     from ..runtime_services import TaskProgramRuntimeServiceContext
     from .control_observation import (
@@ -203,6 +205,7 @@ class SimulationSegmentPolicyPort:
         sensor_suite: MutableMapping[str, BaseSensor] | None = None,
         control_operations: Mapping[str, ControlOperationRuntime] | None = None,
         control_declarations: Mapping[str, ControlOperationDeclaration] | None = None,
+        bound_post_policy_presets: BoundPostPolicyPresets | None = None,
     ) -> None:
         if type(scene_binding) is not SimulationSceneBinding:
             raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
@@ -335,6 +338,14 @@ class SimulationSegmentPolicyPort:
             device=qpos.device,
         )
         self._settle_presets = MappingProxyType(normalized_presets)
+        if bound_post_policy_presets is not None:
+            from ..invocation_policy import BoundPostPolicyPresets
+
+            if type(bound_post_policy_presets) is not BoundPostPolicyPresets:
+                raise TypeError(
+                    "bound_post_policy_presets must be BoundPostPolicyPresets or None."
+                )
+        self._bound_post_policy_presets = bound_post_policy_presets
         (
             self._settle_targets,
             self._objects,
@@ -516,6 +527,58 @@ class SimulationSegmentPolicyPort:
             session._condition_runtime = self._condition_runtime.new_session()
         return session
 
+    def with_post_policy_presets(
+        self,
+        program: CompiledTaskProgram,
+        bindings: tuple[PostPolicyPresetBinding, ...],
+    ) -> SimulationSegmentPolicyPort:
+        """Return an isolated static view of explicitly program-bound control policies.
+
+        The registration catalog validates complete physical operation coverage;
+        this view selects already-declared presets without modifying program data
+        or acquiring a native observation. Ordinary ports are unchanged.
+
+        Args:
+            program: Actual compiled program owning the selected occurrences.
+            bindings: Validated immutable integration post-policy selections.
+
+        Returns:
+            Independent policy-port view sharing only existing borrowed owners.
+        """
+        self._require_open()
+        from ..invocation_policy import BoundPostPolicyPresets
+
+        bound = BoundPostPolicyPresets(program, bindings)
+        for value in bound.bindings:
+            if (
+                type(self._settle_presets.get(value.preset_id))
+                is not SimulationControlConditionCfg
+            ):
+                raise ValueError(
+                    "Post-policy preset binding requires a declared control condition."
+                )
+        result = copy(self)
+        result._bound_post_policy_presets = bound
+        return result
+
+    def _control_policy_cfg(
+        self, policy: CompiledPostPolicy, *, segment: CompiledTaskProgramSegment
+    ) -> SimulationControlConditionCfg:
+        name = policy.cfg.preset
+        if self._bound_post_policy_presets is not None:
+            selected = self._bound_post_policy_presets.preset_for(
+                policy, segment=segment
+            )
+            if selected is None:
+                raise ValueError(
+                    "Control post-policy occurrence has no explicit binding."
+                )
+            name = selected
+        cfg = self._settle_presets[name]
+        if type(cfg) is not SimulationControlConditionCfg:
+            raise ValueError("Bound control policy has another preset capability.")
+        return cfg
+
     def validate_policy(
         self,
         policy: Any,
@@ -542,7 +605,11 @@ class SimulationSegmentPolicyPort:
             )
         cfg = self._settle_presets[policy.cfg.preset]
         if type(cfg) is SimulationControlConditionCfg:
-            if policy.entity.entity_id != cfg.entity:
+            cfg = self._control_policy_cfg(policy, segment=segment)
+            if (
+                self._bound_post_policy_presets is None
+                and policy.entity.entity_id != cfg.entity
+            ):
                 raise ValueError("Control policy entity differs from its declaration.")
             if cfg.operation_id in self._control_operations:
                 self._control_operations[cfg.operation_id].validate(cfg)
@@ -617,7 +684,9 @@ class SimulationSegmentPolicyPort:
         active_mask = self._validate_active_mask(active_mask)
         preset = self._settle_presets[policy.cfg.preset]
         if type(preset) is SimulationControlConditionCfg:
-            yield from self._control_actions(policy, active_mask=active_mask)
+            yield from self._control_actions(
+                policy, segment=segment, active_mask=active_mask
+            )
             return
         if type(preset) is SimulationJointStabilityConditionCfg:
             yield from self._joint_condition_actions(
@@ -854,9 +923,13 @@ class SimulationSegmentPolicyPort:
             )
 
     def _control_actions(
-        self, policy: CompiledPostPolicy, *, active_mask: torch.Tensor
+        self,
+        policy: CompiledPostPolicy,
+        *,
+        segment: CompiledTaskProgramSegment,
+        active_mask: torch.Tensor,
     ) -> Iterator[torch.Tensor]:
-        cfg = self._settle_presets[policy.cfg.preset]
+        cfg = self._control_policy_cfg(policy, segment=segment)
         key = id(policy)
         self._post_policy_success.pop(key, None)
         self._post_policy_results.pop(key, None)
@@ -931,6 +1004,8 @@ class SimulationSegmentPolicyPort:
             raise TypeError("policy must be exactly CompiledPostPolicy.")
         self._validate_segment_membership(segment, policy, kind="post policy")
         cfg = self._settle_presets.get(policy.cfg.preset)
+        if type(cfg) is SimulationControlConditionCfg:
+            cfg = self._control_policy_cfg(policy, segment=segment)
         if (
             type(cfg) is not SimulationControlConditionCfg
             or self._post_policy_results.get(id(policy), {}).get("kind")

@@ -361,3 +361,11 @@ Embodiment grasp services may explicitly select `approach_deviation_angle`,
 `max_candidates` and `center_mode` (`bounds` or `centroid`). Omitted fields
 retain toolkit defaults and the prior integration fingerprint. These numerical
 search declarations do not change contact/effect evidence requirements.
+
+Post-policy occurrence selection is an explicit `runtime_services.post_policy_bindings`
+table of `PostPolicyPresetBinding` values. Bindings use the complete existing
+program fingerprint and `program_id/segment_id:post:policy_index`, retaining the
+program's original entity/preset text. The current capability binds control
+conditions only, with complete prepare/action/cleanup coverage and exact resource
+identity. Terminal criteria are selected before execution, not guessed from names.
+An empty table preserves ordinary lookup and fingerprint payloads.

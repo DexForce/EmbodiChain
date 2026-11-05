@@ -91,6 +91,8 @@ from .simulation.policies import (
 from .invocation_policy import (
     BoundInvocationPolicies,
     InvocationPolicyBinding,
+    PostPolicyPresetBinding,
+    BoundPostPolicyPresets,
     task_program_fingerprint,
 )
 
@@ -98,6 +100,8 @@ __all__ = [
     "AntipodalGraspAffordanceBinding",
     "BoundInvocationPolicies",
     "InvocationPolicyBinding",
+    "PostPolicyPresetBinding",
+    "BoundPostPolicyPresets",
     "task_program_fingerprint",
     "ContainerAffordanceBinding",
     "ControlPartCommandPreset",

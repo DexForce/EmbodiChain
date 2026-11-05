@@ -430,3 +430,121 @@ def _validate_control_registration(declarations, scene_binding, presets, factori
                 "Control operation requires one prepare/action factory and complete physical policy phases."
             )
     return tuple(calls)
+
+
+def _bind_control_post_policies(
+    program, bindings, control_calls, presets, cleanup_call_ids
+):
+    """Preflight explicit post occurrences against complete typed control recipes."""
+    from ..invocation_policy import BoundPostPolicyPresets
+    from .control_policy import SimulationControlConditionCfg
+
+    bound = BoundPostPolicyPresets(program, bindings)
+    operations = {value.call.operation_id: value for _, value, _ in control_calls}
+    prepare_ids = {
+        key: {
+            call_id
+            for call_id, value, prepare in control_calls
+            if prepare and value.call.operation_id == key
+        }
+        for key in operations
+    }
+    action_ids = {
+        key: {
+            call_id
+            for call_id, value, prepare in control_calls
+            if not prepare and value.call.operation_id == key
+        }
+        for key in operations
+    }
+    records = {key: [] for key in operations}
+    for segment in program.iter_segments():
+        for policy in segment.post_policies:
+            selected = bound.preset_for(policy, segment=segment)
+            original = presets.get(policy.cfg.preset)
+            if type(original) is not SimulationControlConditionCfg:
+                if selected is not None:
+                    raise ValueError(
+                        "Post-policy preset binding currently requires a control condition."
+                    )
+                continue
+            if selected is None:
+                raise ValueError(
+                    "Every control post-policy occurrence requires an explicit binding."
+                )
+            effective = presets.get(selected)
+            if type(effective) is not SimulationControlConditionCfg:
+                raise ValueError(
+                    "Bound post-policy requires a declared control preset."
+                )
+            if (
+                effective.operation_id != original.operation_id
+                or effective.family != original.family
+                or effective.phase != original.phase
+            ):
+                raise ValueError(
+                    "Bound control post-policy cannot change operation, family or phase."
+                )
+            declaration = operations.get(effective.operation_id)
+            if declaration is None or effective.entity != declaration.call.entity_id:
+                raise ValueError(
+                    "Bound control condition differs from its physical operation."
+                )
+            if policy.entity.entity_id not in {
+                declaration.binding.object_id,
+                declaration.call.entity_id,
+            }:
+                raise ValueError("Bound control policy has a foreign logical entity.")
+            if (
+                segment.parallel_block is not None
+                or len(segment.calls) != 1
+                or len(segment.post_policies) != 1
+            ):
+                raise ValueError(
+                    "Bound control policies require serial single-call/policy segments."
+                )
+            records[effective.operation_id].append((segment, effective))
+    for operation_id, declaration in operations.items():
+        rows = records[operation_id]
+        count = (
+            declaration.chunk_count
+            if type(declaration.call) is TwistCallDeclaration
+            else 1
+        )
+        if len(rows) != count + 2:
+            raise ValueError(
+                "Bound control post-policy coverage differs from the complete operation."
+            )
+        resource = dict(rows[0][0].calls[0].call.resources)
+        if set(resource) != {"primary"}:
+            raise ValueError(
+                "Bound control operations require one explicit primary resource."
+            )
+        for index, (segment, cfg) in enumerate(rows):
+            call = segment.calls[0].call
+            call_id = getattr(call, "call_id", None)
+            if dict(call.resources) != resource:
+                raise ValueError(
+                    "Bound control operation resources differ across occurrences."
+                )
+            terminal = index == len(rows) - 1
+            if cfg.terminal is not terminal:
+                raise ValueError(
+                    "Control terminal policy must bind exactly its cleanup occurrence."
+                )
+            if index == 0:
+                valid = call_id in prepare_ids[operation_id] and cfg.phase == "ready"
+            elif terminal:
+                valid = (
+                    call_id in cleanup_call_ids
+                    and not call.arguments
+                    and cfg.phase == "released"
+                )
+            else:
+                phase = "chunk" if count > 1 and index < count else "released"
+                valid = call_id in action_ids[operation_id] and cfg.phase == phase
+            if not valid:
+                raise ValueError(
+                    "Bound control policy does not match its declared prepare/action/cleanup occurrence."
+                )
+    return bound

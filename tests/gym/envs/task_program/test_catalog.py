@@ -29,6 +29,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
+from embodichain.lab.task_program.compiler import TaskProgramCompiler
 
 from embodichain.lab.task_program import (
     TaskProgramValidationError,
@@ -1534,3 +1535,183 @@ def test_native_service_extension_preserves_public_default_values_and_capabiliti
             value = getattr(atomic_actions, name)()
         actual[name] = _canonical_value(value)
     assert actual == frozen
+
+
+def _bound_control_post_case():
+    from embodichain.lab.sim.scene.revolute_inputs import RevoluteControlBinding
+    from embodichain.lab.task_program.integrations import (
+        PostPolicyPresetBinding,
+        task_program_fingerprint,
+    )
+    from embodichain.lab.task_program.integrations.simulation.control_assembly import (
+        ControlOperationDeclaration,
+    )
+    from embodichain.lab.task_program.integrations.simulation.control_lowering import (
+        TwistCallDeclaration,
+    )
+    from embodichain.lab.task_program.integrations.simulation.control_policy import (
+        SimulationControlConditionCfg,
+    )
+
+    initial = _registration().catalog
+    source = RevoluteControlBinding(
+        "cube",
+        "joint",
+        "cap",
+        "base",
+        "a" * 64,
+        1.0,
+        (0.0, 0.0, 1.0),
+        1.0,
+        (0.0, 0.0, 0.0),
+        (0.04, 0.0, 0.0),
+        0.008,
+        0.04,
+        (-1.0, 1.0),
+        1,
+        0.4,
+        calibration_sha256="b" * 64,
+    )
+    operation = ControlOperationDeclaration(
+        TwistCallDeclaration("operation", "cap"),
+        source,
+        "contacts",
+        "eef",
+        ("finger_a", "finger_b"),
+        "explicit",
+        table_uid="native_table",
+        chunk_count=3,
+    )
+    prepare, action, cleanup = (
+        "gen_sim.twist_prepare.operation",
+        "gen_sim.twist.operation",
+        "example.cleanup",
+    )
+    presets = {
+        name: SimulationControlConditionCfg(
+            entity="cap",
+            operation_id="operation",
+            family="twist",
+            phase=phase,
+            terminal=terminal,
+        )
+        for name, phase, terminal in (
+            ("ready", "ready", False),
+            ("chunk", "chunk", False),
+            ("turned", "released", False),
+            ("terminal", "released", True),
+        )
+    }
+    payload = _program_payload()
+    payload["program"] = dict(
+        kind="sequence",
+        items=[
+            dict(
+                kind="segment",
+                name=f"control_{index}",
+                steps=dict(
+                    kind="invoke",
+                    call=dict(
+                        kind="registered",
+                        call_id=(
+                            prepare if index == 0 else cleanup if index == 4 else action
+                        ),
+                        arguments=(
+                            {} if index == 4 else {"object": "cube", "setting": 1}
+                        ),
+                        resources={"primary": "custom_resource"},
+                    ),
+                ),
+                post=[dict(kind="wait_stable", entity="cube", preset=phase)],
+            )
+            for index, phase in enumerate(
+                ("ready", "chunk", "chunk", "turned", "turned")
+            )
+        ],
+    )
+    compiled = TaskProgramCompiler(initial.scene).compile(decode_task_program(payload))
+    segments = tuple(compiled.iter_segments())
+    fingerprint = task_program_fingerprint(compiled)
+    bindings = tuple(
+        PostPolicyPresetBinding(
+            fingerprint, f"{compiled.program_id}/{segment.segment_id}:post:0", target
+        )
+        for segment, target in zip(
+            segments, ("ready", "chunk", "chunk", "turned", "terminal"), strict=True
+        )
+    )
+    catalog = replace(
+        initial,
+        control_calls=((prepare, operation, True), (action, operation, False)),
+        control_presets={key: ("operation", cfg.phase) for key, cfg in presets.items()},
+        control_conditions=presets,
+        control_cleanup_call_ids=frozenset({cleanup}),
+        post_policy_bindings=bindings,
+    )
+    return catalog, payload, compiled, bindings
+
+
+def test_bound_control_presets_preserve_root_entity_reused_preset_and_terminal_scope():
+    catalog, payload, compiled, bindings = _bound_control_post_case()
+    before = deepcopy(payload)
+    catalog.validate_control_program(compiled)
+    rows = tuple(compiled.iter_segments())
+    assert (
+        rows[-2].post_policies[0].cfg.preset
+        == rows[-1].post_policies[0].cfg.preset
+        == "turned"
+    )
+    assert all(row.post_policies[0].entity.entity_id == "cube" for row in rows)
+    assert bindings[-2].preset_id == "turned" and bindings[-1].preset_id == "terminal"
+    assert payload == before
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing",
+        "duplicate",
+        "foreign_program",
+        "terminal_on_action",
+        "unknown_preset",
+        "foreign_resource",
+        "foreign_cleanup",
+    ],
+)
+def test_bound_control_presets_reject_incomplete_or_foreign_occurrence_contracts(
+    damage,
+):
+    from embodichain.lab.task_program.integrations import task_program_fingerprint
+
+    catalog, payload, compiled, bindings = _bound_control_post_case()
+    bindings = list(bindings)
+    if damage == "missing":
+        bindings.pop()
+    elif damage == "duplicate":
+        bindings.append(bindings[-1])
+    elif damage == "foreign_program":
+        bindings[0] = replace(bindings[0], program_fingerprint="f" * 64)
+    elif damage == "terminal_on_action":
+        bindings[-2] = replace(bindings[-2], preset_id="terminal")
+        bindings[-1] = replace(bindings[-1], preset_id="turned")
+    elif damage == "unknown_preset":
+        bindings[-1] = replace(bindings[-1], preset_id="missing_preset")
+    else:
+        call = payload["program"]["items"][1 if damage == "foreign_resource" else -1][
+            "steps"
+        ]["call"]
+        if damage == "foreign_resource":
+            call["resources"]["primary"] = "foreign_resource"
+        else:
+            call["call_id"] = "foreign.cleanup"
+        compiled = TaskProgramCompiler(catalog.scene).compile(
+            decode_task_program(payload)
+        )
+        fingerprint = task_program_fingerprint(compiled)
+        bindings = [
+            replace(value, program_fingerprint=fingerprint) for value in bindings
+        ]
+    with pytest.raises(ValueError):
+        replace(catalog, post_policy_bindings=tuple(bindings)).validate_control_program(
+            compiled
+        )

@@ -1341,15 +1341,24 @@ class TaskProgramEnvironmentAdapter:
         """Validate every segment hook without live observation or action."""
         if type(program) is not CompiledTaskProgram:
             raise TypeError("program must be exactly CompiledTaskProgram.")
+        post_port = self._post_policy_port
+        if self._registration is not None and self._registration.post_policy_bindings:
+            self._registration.catalog.validate_control_program(program)
+            bind = getattr(post_port, "with_post_policy_presets", None)
+            if not callable(bind):
+                raise TypeError(
+                    "Post-policy bindings require a program-bound policy port."
+                )
+            post_port = bind(program, self._registration.post_policy_bindings)
         for segment in program.iter_segments():
-            if segment.post_policies and self._post_policy_port is None:
+            if segment.post_policies and post_port is None:
                 raise TaskProgramBridgeError(
                     f"Segment {segment.segment_id!r} declares post-policies, but no "
                     "SegmentPostPolicyPort was installed."
                 )
             for policy in segment.post_policies:
-                assert self._post_policy_port is not None
-                self._post_policy_port.validate_policy(policy, segment=segment)
+                assert post_port is not None
+                post_port.validate_policy(policy, segment=segment)
             if segment.validators and self._validator_port is None:
                 raise TaskProgramBridgeError(
                     f"Segment {segment.segment_id!r} declares validators, but no "

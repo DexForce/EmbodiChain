@@ -25,6 +25,8 @@ import json
 from types import MappingProxyType
 
 from embodichain.lab.task_program.compiler.program import (
+    CompiledPostPolicy,
+    CompiledTaskProgramSegment,
     CompiledTaskProgram,
     CompiledTaskProgramAnalysis,
 )
@@ -38,6 +40,8 @@ from .catalog import _canonical_value
 __all__ = [
     "InvocationPolicyBinding",
     "BoundInvocationPolicies",
+    "PostPolicyPresetBinding",
+    "BoundPostPolicyPresets",
     "task_program_fingerprint",
 ]
 
@@ -280,3 +284,136 @@ class BoundInvocationPolicies:
         return tuple(
             value for index in indices for value in self._segment_presets[index]
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PostPolicyPresetBinding:
+    """Select an integration-owned preset for one unchanged program post-policy.
+
+    Attributes:
+        program_fingerprint: Canonical fingerprint of the complete compiled program.
+        occurrence_id: Execution ID ``program_id/segment_id:post:policy_index``.
+        preset_id: Explicit integration preset owning the effective policy operands.
+    """
+
+    program_fingerprint: str
+    occurrence_id: str
+    preset_id: str
+
+    def __post_init__(self) -> None:
+        _identifier(self.program_fingerprint, "program_fingerprint")
+        if len(self.program_fingerprint) != 64 or any(
+            c not in "0123456789abcdef" for c in self.program_fingerprint
+        ):
+            raise ValueError("program_fingerprint must be a lowercase SHA-256 digest.")
+        _identifier(self.occurrence_id, "occurrence_id")
+        _identifier(self.preset_id, "preset_id")
+
+
+def _post_segment_digest(segment: CompiledTaskProgramSegment) -> str:
+    return _call_digest(segment)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class BoundPostPolicyPresets:
+    """Own immutable, program-scoped post-policy selections without runtime inference.
+
+    Unselected policies retain ordinary named-preset lookup. Explicit selection
+    currently supports sequential segments; parallel occurrences reject before
+    execution. The integration owner validates available presets and capability.
+    """
+
+    program_fingerprint: str
+    bindings: tuple[PostPolicyPresetBinding, ...]
+    _program_id: str = field(repr=False)
+    _segments: Mapping[int, tuple[str, tuple[str | None, ...]]] = field(repr=False)
+
+    def __init__(
+        self, program: CompiledTaskProgram, bindings: Iterable[PostPolicyPresetBinding]
+    ) -> None:
+        """Validate and snapshot exact compiled post-policy occurrences.
+
+        Args:
+            program: Provider-free compiled program retaining source post strings.
+            bindings: Unique program/occurrence-bound target preset declarations.
+
+        Raises:
+            TypeError: A binding has another declaration type.
+            ValueError: Program, occurrence, uniqueness or capability differs.
+        """
+        fingerprint = task_program_fingerprint(program)
+        declarations = tuple(bindings)
+        if not all(type(value) is PostPolicyPresetBinding for value in declarations):
+            raise TypeError(
+                "Post-policy bindings require exact PostPolicyPresetBinding values."
+            )
+        selected = {}
+        for value in declarations:
+            if value.program_fingerprint != fingerprint:
+                raise ValueError("Post-policy program fingerprint mismatch.")
+            if value.occurrence_id in selected:
+                raise ValueError("Duplicate post-policy occurrence binding.")
+            selected[value.occurrence_id] = value.preset_id
+        known = set()
+        segments = {}
+        for segment in program.iter_segments():
+            values = []
+            for index, policy in enumerate(segment.post_policies):
+                occurrence = f"{program.program_id}/{segment.segment_id}:post:{index}"
+                known.add(occurrence)
+                preset = selected.get(occurrence)
+                if preset is not None and segment.parallel_block is not None:
+                    raise ValueError(
+                        "Post-policy bindings do not support parallel occurrences."
+                    )
+                values.append(preset)
+            segments[segment.segment_index] = (
+                _post_segment_digest(segment),
+                tuple(values),
+            )
+        if set(selected) - known:
+            raise ValueError("Unknown post-policy occurrence binding.")
+        object.__setattr__(self, "program_fingerprint", fingerprint)
+        object.__setattr__(self, "bindings", declarations)
+        object.__setattr__(self, "_program_id", program.program_id)
+        object.__setattr__(self, "_segments", MappingProxyType(segments))
+
+    def validate_program(self, program: CompiledTaskProgram) -> None:
+        """Reject another or mutated compiled program before execution.
+
+        Args:
+            program: Program that will consume this owned selection table.
+        """
+        if task_program_fingerprint(program) != self.program_fingerprint:
+            raise ValueError("Post-policy program fingerprint mismatch.")
+
+    def preset_for(
+        self, policy: CompiledPostPolicy, *, segment: CompiledTaskProgramSegment
+    ) -> str | None:
+        """Read one already-bound selection after exact occurrence validation.
+
+        Args:
+            policy: Exact compiled member of the supplied segment.
+            segment: Owning segment from the same immutable program occurrence.
+
+        Returns:
+            Explicit selected preset, or None for ordinary unselected policies.
+        """
+        if (
+            type(segment) is not CompiledTaskProgramSegment
+            or type(policy) is not CompiledPostPolicy
+        ):
+            raise TypeError("Post-policy selection requires exact compiled values.")
+        selected = self._segments.get(segment.segment_index)
+        if selected is None or selected[0] != _post_segment_digest(segment):
+            raise ValueError(
+                "Post-policy segment differs from its bound program occurrence."
+            )
+        indices = [
+            index
+            for index, value in enumerate(segment.post_policies)
+            if value is policy
+        ]
+        if len(indices) != 1:
+            raise ValueError("Post-policy does not belong to the supplied occurrence.")
+        return selected[1][indices[0]]

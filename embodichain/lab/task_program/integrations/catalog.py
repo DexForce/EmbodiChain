@@ -170,7 +170,7 @@ from .simulation.control_assembly import (
 )
 
 if TYPE_CHECKING:
-    from .invocation_policy import InvocationPolicyBinding
+    from .invocation_policy import InvocationPolicyBinding, PostPolicyPresetBinding
 
 from .simulation.stability import (
     SimulationStabilityConditionCfg,
@@ -637,6 +637,9 @@ class TaskProgramIntegrationCatalog:
     invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = field(
         default=(), kw_only=True
     )
+    post_policy_bindings: tuple[PostPolicyPresetBinding, ...] = field(
+        default=(), kw_only=True
+    )
     """Exact program-bound named presets for sequential execution occurrences."""
 
     idle_factories: tuple[IdleClearanceFactory, ...] = field(default=(), kw_only=True)
@@ -646,6 +649,12 @@ class TaskProgramIntegrationCatalog:
     )
     control_presets: Mapping[str, tuple[str, str]] = field(
         default_factory=dict, kw_only=True
+    )
+    control_conditions: Mapping[str, SimulationControlConditionCfg] = field(
+        default_factory=dict, kw_only=True, repr=False
+    )
+    control_cleanup_call_ids: frozenset[str] = field(
+        default_factory=frozenset, kw_only=True
     )
 
     inside_landing_targets: Mapping[str, tuple[str, str]] = field(
@@ -699,7 +708,7 @@ class TaskProgramIntegrationCatalog:
     )
 
     def __post_init__(self) -> None:
-        from .invocation_policy import InvocationPolicyBinding
+        from .invocation_policy import InvocationPolicyBinding, PostPolicyPresetBinding
 
         if type(self.measured_rigid_bindings) is not tuple or any(
             type(value) is not MeasuredRigidInvocationBinding
@@ -775,6 +784,13 @@ class TaskProgramIntegrationCatalog:
                 "Inside landing targets require exact immutable subject/container identities."
             )
         object.__setattr__(self, "inside_landing_targets", MappingProxyType(targets))
+        if type(self.post_policy_bindings) is not tuple or any(
+            type(value) is not PostPolicyPresetBinding
+            for value in self.post_policy_bindings
+        ):
+            raise TypeError(
+                "post_policy_bindings must be a tuple of PostPolicyPresetBinding."
+            )
         if type(self.invocation_policy_bindings) is not tuple or not all(
             type(item) is InvocationPolicyBinding
             for item in self.invocation_policy_bindings
@@ -793,6 +809,16 @@ class TaskProgramIntegrationCatalog:
             self.invocation_policy_bindings
         ):
             raise ValueError("Duplicate invocation policy occurrence.")
+        object.__setattr__(
+            self,
+            "control_conditions",
+            MappingProxyType(
+                {
+                    key: value.snapshot()
+                    for key, value in self.control_conditions.items()
+                }
+            ),
+        )
         for field_name in ("scene_registry_id", "robot_profile_id"):
             value = getattr(self, field_name)
             if type(value) is not str or not value or value != value.strip():
@@ -1021,7 +1047,9 @@ class TaskProgramIntegrationCatalog:
                     path,
                     "Pose-delta settling requires an explicitly bound native rigid object.",
                 )
-        if policy.preset in self.condition_settle_entities:
+        if policy.preset in self.condition_settle_entities and not (
+            self.post_policy_bindings and policy.preset in self.control_presets
+        ):
             entity = self.scene.resolve(policy.entity, path=(*path, "entity"))
             if entity.entity_id != self.condition_settle_entities[policy.preset]:
                 raise TaskProgramValidationError(
@@ -1391,6 +1419,16 @@ class TaskProgramIntegrationCatalog:
                 raise ValueError(
                     "Program control occurrences differ from the declared operation budget."
                 )
+        if self.post_policy_bindings:
+            from .simulation.control_assembly import _bind_control_post_policies
+
+            _bind_control_post_policies(
+                program,
+                self.post_policy_bindings,
+                self.control_calls,
+                self.control_conditions,
+                self.control_cleanup_call_ids,
+            )
 
     def validate_engine(self, engine: AtomicActionEngine) -> None:
         """Require the live engine to expose every statically selected skill."""
@@ -1619,6 +1657,7 @@ def _registration_payload(
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
     planning_services: SimulationPlanningServicesCfg | None = None,
     invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+    post_policy_bindings: tuple[PostPolicyPresetBinding, ...] = (),
     control_operations: tuple[ControlOperationDeclaration, ...] = (),
     cargo_envelope_cfg: SimulationCargoEnvelopeCfg | None = None,
     recorded_contacts_cfg: SimulationRecordedContactCfg | None = None,
@@ -1740,6 +1779,8 @@ def _registration_payload(
         )
     if invocation_policy_bindings:
         payload["invocation_policy_bindings"] = invocation_policy_bindings
+    if post_policy_bindings:
+        payload["post_policy_bindings"] = post_policy_bindings
     if cargo_envelope_cfg is not None:
         payload["cargo_envelope"] = cargo_envelope_cfg
     if recorded_contacts_cfg is not None:
@@ -2057,6 +2098,9 @@ class SimulationTaskProgramRegistration:
     invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = field(
         default=(), kw_only=True
     )
+    post_policy_bindings: tuple[PostPolicyPresetBinding, ...] = field(
+        default=(), kw_only=True
+    )
     control_operations: tuple[ControlOperationDeclaration, ...] = ()
     recorded_contacts_cfg: SimulationRecordedContactCfg | None = field(
         default=None, kw_only=True
@@ -2126,8 +2170,15 @@ class SimulationTaskProgramRegistration:
                     "Cargo selections differ from registered native physical owners."
                 )
             object.__setattr__(self, "cargo_envelope_cfg", cargo)
-        from .invocation_policy import InvocationPolicyBinding
+        from .invocation_policy import InvocationPolicyBinding, PostPolicyPresetBinding
 
+        if type(self.post_policy_bindings) is not tuple or any(
+            type(value) is not PostPolicyPresetBinding
+            for value in self.post_policy_bindings
+        ):
+            raise TypeError(
+                "post_policy_bindings must be a tuple of PostPolicyPresetBinding."
+            )
         if type(self.invocation_policy_bindings) is not tuple or not all(
             type(item) is InvocationPolicyBinding
             for item in self.invocation_policy_bindings
@@ -2370,16 +2421,20 @@ class SimulationTaskProgramRegistration:
                 ),
                 planning_services=self.planning_services,
                 invocation_policy_bindings=self.invocation_policy_bindings,
+                post_policy_bindings=self.post_policy_bindings,
                 control_operations=self.control_operations,
                 cargo_envelope_cfg=self.cargo_envelope_cfg,
                 recorded_contacts_cfg=self.recorded_contacts_cfg,
             )
         )
+        from .simulation.prismatic_lowering import ArticulationParkFactory
+
         object.__setattr__(
             self,
             "catalog",
             TaskProgramIntegrationCatalog(
                 invocation_policy_bindings=self.invocation_policy_bindings,
+                post_policy_bindings=self.post_policy_bindings,
                 inside_landing_targets={
                     binding.invocation_id: (
                         binding.inside_subject_id,
@@ -2490,6 +2545,16 @@ class SimulationTaskProgramRegistration:
                 ),
                 fingerprint=fingerprint,
                 control_calls=control_calls,
+                control_conditions={
+                    key: cfg
+                    for key, cfg in settle_presets.items()
+                    if type(cfg) is SimulationControlConditionCfg
+                },
+                control_cleanup_call_ids=frozenset(
+                    value.call_id
+                    for value in self.registered_semantic_lowerer_factories
+                    if isinstance(value, ArticulationParkFactory)
+                ),
                 control_presets={
                     key: (cfg.operation_id, cfg.phase)
                     for key, cfg in settle_presets.items()
@@ -2635,6 +2700,7 @@ class SimulationTaskProgramRegistration:
                 ),
                 planning_services=self.planning_services,
                 invocation_policy_bindings=self.invocation_policy_bindings,
+                post_policy_bindings=self.post_policy_bindings,
                 control_operations=self.control_operations,
                 cargo_envelope_cfg=self.cargo_envelope_cfg,
                 recorded_contacts_cfg=self.recorded_contacts_cfg,

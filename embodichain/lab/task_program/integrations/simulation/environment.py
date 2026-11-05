@@ -106,7 +106,7 @@ from embodichain.lab.task_program.compiler.lowering import SemanticCallCompiler
 from .policies import SimulationSegmentPolicyPort
 from .stability import SimulationStabilityConditionCfg
 from ..runtime_services import TaskProgramRuntimeServiceContext
-from ..invocation_policy import task_program_fingerprint
+from ..invocation_policy import task_program_fingerprint, BoundPostPolicyPresets
 from .control_assembly import ControlOperationAssembly, assemble_control_operation
 from .twist_session import TwistOperationRegistry
 from .articulation_session import (
@@ -1322,6 +1322,15 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 control_operations={
                     value.operation.operation_id: value.operation for value in built
                 },
+                **(
+                    {
+                        "bound_post_policy_presets": BoundPostPolicyPresets(
+                            program, self._registration.post_policy_bindings
+                        )
+                    }
+                    if self._registration.post_policy_bindings
+                    else {}
+                ),
             )
             port.bind_clock(clock)
             sessions = tuple(

@@ -57,6 +57,7 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
         "settle_presets",
         "planning_services",
         "invocation_policy_bindings",
+        "post_policy_bindings",
     }
 )
 _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
@@ -309,6 +310,14 @@ def _merge_runtime_services(
         result["invocation_policy_bindings"] = _owned_sequence(
             owner["invocation_policy_bindings"],
             path="runtime_services.invocation_policy_bindings",
+        )
+    if "post_policy_bindings" in skill_profile and "post_policy_bindings" in task:
+        raise ValueError("Post-policy bindings require one declaration owner.")
+    post_owner = task if "post_policy_bindings" in task else skill_profile
+    if "post_policy_bindings" in post_owner:
+        result["post_policy_bindings"] = _owned_sequence(
+            post_owner["post_policy_bindings"],
+            path="runtime_services.post_policy_bindings",
         )
     return result
 

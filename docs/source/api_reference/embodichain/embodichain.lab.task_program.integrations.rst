@@ -411,6 +411,34 @@ selection, and hosts constructing a bridge directly retain that responsibility.
 
 .. autofunction:: task_program_fingerprint
 
+.. currentmodule:: embodichain.lab.task_program.integrations
+
+Post-policy occurrence preset bindings
+-------------------------------------
+
+``PostPolicyPresetBinding`` selects an integration-owned condition preset for one
+exact ``program_id/segment_id:post:policy_index`` occurrence and complete compiled
+program fingerprint. It retains the program's original entity/preset strings.
+``BoundPostPolicyPresets`` snapshots exact compiled segments and validates
+membership, changed declarations, duplicate/unknown occurrences and foreign
+programs. Legal compiler-normalized scene aliases remain valid.
+
+Configured ``runtime_services.post_policy_bindings`` is opt-in. Its current
+simulation capability requires complete sequential control-operation coverage,
+matching target/source operation and phase, one primary resource, and a terminal
+condition only at the explicitly registered cleanup occurrence. Native child-link
+identity stays in the declared control operation; no task ID, suffix or cached
+analysis index selects runtime behavior. Runtime ports read pre-bound presets.
+Empty tables retain existing defaults and registration fingerprints.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.invocation_policy
+
+.. autoclass:: PostPolicyPresetBinding
+
+.. autoclass:: BoundPostPolicyPresets
+   :members: validate_program, preset_for
+
+
 Configured transport targets
 ----------------------------
 

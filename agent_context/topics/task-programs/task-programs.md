@@ -36,7 +36,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Parallel scheduling and safety boundary | `embodichain/lab/task_program/runtime/parallel.py`, `parallel_executor.py` |
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
 | Immutable catalog and extension declarations | `embodichain/lab/task_program/integrations/catalog.py`, `extensions.py` |
-| Program-bound occurrence policy selection | `embodichain/lab/task_program/integrations/invocation_policy.py` |
+| Program-bound call and post-policy preset selection | `embodichain/lab/task_program/integrations/invocation_policy.py` |
 | Bridge-owned runtime service identity | `embodichain/lab/task_program/integrations/runtime_services.py` |
 | Declared control operations, physical policy and grounding | `embodichain/lab/task_program/integrations/simulation/control_assembly.py`, `control_policy.py`, `control_lowering.py` |
 | Environment adapter and runtime assembly | `embodichain/lab/task_program/integrations/environment.py` |

@@ -149,7 +149,7 @@ from .simulation.planning_services import (
     CollisionSceneRosterCfg,
     SimulationPlanningServicesCfg,
 )
-from .invocation_policy import InvocationPolicyBinding
+from .invocation_policy import InvocationPolicyBinding, PostPolicyPresetBinding
 from .simulation.held_alignment import HeldAlignmentRoute, HeldAlignmentLowererFactory
 from .simulation.release_clearance import (
     ReleasedHandRoute,
@@ -3869,6 +3869,7 @@ class _DecodedRuntimeServices:
     ) = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
     control_operations: tuple[ControlOperationDeclaration, ...] = ()
+    post_policy_bindings: tuple[PostPolicyPresetBinding, ...] = ()
     settle_presets: (
         tuple[
             tuple[
@@ -4009,6 +4010,7 @@ def _decode_runtime_services(
                 "settle_presets",
                 "planning_services",
                 "invocation_policy_bindings",
+                "post_policy_bindings",
             }
         ),
     )
@@ -4628,6 +4630,18 @@ def _decode_runtime_services(
             required=frozenset({"program_fingerprint", "invocation_id", "preset_id"}),
         )
         bindings.append(InvocationPolicyBinding(**item))
+    post_bindings = []
+    for index, raw in enumerate(
+        _sequence(
+            config.get("post_policy_bindings", ()), path=f"{path}.post_policy_bindings"
+        )
+    ):
+        item = _mapping(
+            raw,
+            path=f"{path}.post_policy_bindings[{index}]",
+            required=frozenset({"program_fingerprint", "occurrence_id", "preset_id"}),
+        )
+        post_bindings.append(PostPolicyPresetBinding(**item))
     return _DecodedRuntimeServices(
         recorded_contacts_cfg=(
             None
@@ -4639,6 +4653,7 @@ def _decode_runtime_services(
         cargo_envelope_cfg=cargo_cfg,
         planning_services=planning,
         invocation_policy_bindings=tuple(bindings),
+        post_policy_bindings=tuple(post_bindings),
         grasp_pose_generators=generators,
         hand_geometries=hand_geometries,
         handover_pose_providers=handover,
@@ -4739,6 +4754,7 @@ def _decode_configured_task_program_integration(
     registration = SimulationTaskProgramRegistration(
         planning_services=services.planning_services,
         invocation_policy_bindings=services.invocation_policy_bindings,
+        post_policy_bindings=services.post_policy_bindings,
         scene_binding=scene_binding,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
