@@ -32,23 +32,20 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
     from ..catalog import SimulationTaskProgramRegistration
 
-__all__ = ["SimulationSupportObservationCollector"]
+__all__ = [
+    "SimulationSupportObservationCollector",
+    "SimulationStateObservationCollector",
+]
 
 
-class SimulationSupportObservationCollector:
-    """Read physical support snapshots from one explicit environment/bridge pair.
-
-    Construct before the first bridge control step, using the actual bridge rather
-    than an adapter template port. This object borrows the existing policy
-    session, registry and sensors. It creates no native resources, steps no
-    physics and computes no TaskSpec predicate or release decision.
+class _SimulationObservationCollector:
+    """Share the existing environment, registration and episode binding.
 
     Args:
-        environment: Initialized recording environment for this execution.
-        bridge: Exact bridge whose clock and policy session drive this run.
-        registration: Sealed declaration used to create the runtime.
-        observations: Observation manager owning the source schema and optional
-            numeric history. Historical capture requires this dependency.
+        environment: Initialized execution's physical owner.
+        bridge: Exact bridge and observation policy session.
+        registration: Sealed scene, profile and policy declarations.
+        observations: Optional raw history owner for recorded boundaries.
     """
 
     def __init__(
@@ -148,6 +145,23 @@ class SimulationSupportObservationCollector:
         ):
             raise ValueError("Physical support observations belong to another episode.")
         self._registration.assert_unchanged()
+
+
+class SimulationSupportObservationCollector(_SimulationObservationCollector):
+    """Read physical support snapshots from one explicit environment/bridge pair.
+
+    Construct before the first bridge control step, using the actual bridge rather
+    than an adapter template port. This object borrows the existing policy
+    session, registry and sensors. It creates no native resources, steps no
+    physics and computes no TaskSpec predicate or release decision.
+
+    Args:
+        environment: Initialized recording environment for this execution.
+        bridge: Exact bridge whose clock and policy session drive this run.
+        registration: Sealed declaration used to create the runtime.
+        observations: Observation manager owning the source schema and optional
+            numeric history. Historical capture requires this dependency.
+    """
 
     def _condition(self, preset_id: str) -> SimulationStabilityConditionCfg:
         cfg = self._registration.settle_presets[preset_id]
@@ -320,4 +334,151 @@ class SimulationSupportObservationCollector:
             "boundary_poses": poses,
             "boundary_frames": list(frame_indices),
             "episode_ids": list(self._episodes),
+        }
+
+
+class SimulationStateObservationCollector(_SimulationObservationCollector):
+    """Acquire declared current grip facts for one bound execution.
+
+    Bind before the first bridge step. This collector borrows the configured
+    physical provider and the existing raw history owner. It creates no native
+    resources and computes no task acceptance.
+
+    Args:
+        environment: Initialized environment whose native owners are observed.
+        bridge: Exact pre-execution bridge and its observation policy session.
+        registration: Sealed scene, profile and policy declarations.
+        observations: Raw history owner qualifying completed row boundaries.
+    """
+
+    def __init__(
+        self,
+        environment: EmbodiedEnv,
+        bridge: TaskProgramDemoBridge,
+        registration: SimulationTaskProgramRegistration,
+        *,
+        observations: ObservationManager | None = None,
+    ) -> None:
+        super().__init__(environment, bridge, registration, observations=observations)
+        self._rigid_owners = {
+            binding.entity_id: (
+                binding.simulation_uid,
+                environment.sim.get_rigid_object(binding.simulation_uid),
+            )
+            for binding in registration.scene_binding.rigid_objects
+        }
+
+    def _native(self, entity_id: str) -> tuple[str, Any]:
+        uid, native = self._rigid_owners[entity_id]
+        if (
+            native is None
+            or self._env.sim.get_rigid_object(uid) is not native
+            or getattr(native, "uid", None) != uid
+        ):
+            raise ValueError("Current state belongs to another native object owner.")
+        return uid, native
+
+    def capture_current_grip(
+        self,
+        object_id: str,
+        control_part: str,
+        *,
+        observation_revision: int,
+        frame_indices: Sequence[int],
+    ) -> dict[str, Any]:
+        """Acquire one fresh grip through this bridge's configured native provider.
+
+        Args:
+            object_id: Exact registered object selected by the source receipt.
+            control_part: Exact resolved grasp endpoint, not an inferred hand name.
+            observation_revision: Explicit semantic query revision. This is not
+                advertised as a native impulse revision.
+            frame_indices: Current completed boundary slots for all native rows.
+
+        Returns:
+            One exact owned raw query, actor identities, acquisition validity and
+            its declared clock scope. A failed query cannot borrow an older trace.
+        """
+        import torch
+        from embodichain.lab.sim.evidence import PhysicalEvidenceRequest
+        from embodichain.lab.task_program.semantics.evidence import (
+            EffectEvidenceCollector,
+        )
+        from embodichain.lab.sim.atomic_actions.grip_evidence import (
+            GripEvidenceObservationPort,
+        )
+
+        self._check_episode()
+        if self._observations is None:
+            raise RuntimeError("Observation history is unavailable.")
+        self._native(object_id)
+        self._port.validate_observation_scope(self._bridge.clock)
+        frames = tuple(frame_indices)
+        if (
+            len(frames) != len(self._episodes)
+            or any(type(frame) is not int or frame <= 0 for frame in frames)
+            or max(frames) != self._bridge.clock.step_index
+            or frames
+            != self._observations.read_history_step_counts(episode_ids=self._episodes)
+        ):
+            raise ValueError(
+                "Current grip evidence requires its actual current boundary."
+            )
+        collector = self._bridge.evidence_collector
+        if type(collector) is not EffectEvidenceCollector:
+            raise ValueError(
+                "This runtime has no supported physical evidence collector."
+            )
+        provider = collector.registry.providers.get(("builtin.control_part", "1"))
+        if not isinstance(provider, GripEvidenceObservationPort):
+            raise ValueError(
+                "Native grip evidence was not explicitly configured for this runtime."
+            )
+        request = PhysicalEvidenceRequest(
+            self._bridge.clock.now(),
+            observation_revision,
+            torch.arange(len(self._episodes), dtype=torch.long),
+            ("grip.bilateral",),
+        )
+        robot = self._env.robot
+        if robot is not self._port._robot:
+            raise ValueError("Grip evidence belongs to another runtime robot.")
+        batch, sample = provider.capture_grip_observation(
+            request, object_id=object_id, control_part=control_part
+        )
+        if (
+            sample["query"]["timestamp"] != request.timestamp
+            or sample["query"]["observation_revision"] != request.observation_revision
+        ):
+            raise ValueError(
+                "The fresh grip query belongs to another observation request."
+            )
+        self._check_episode()
+        self._native(object_id)
+        self._port.validate_observation_scope(self._bridge.clock)
+        if (
+            self._env.robot is not robot
+            or self._bridge.evidence_collector is not collector
+            or collector.registry.providers.get(("builtin.control_part", "1"))
+            is not provider
+        ):
+            raise ValueError(
+                "The execution evidence owner changed during grip capture."
+            )
+        return {
+            **sample,
+            "episode_ids": list(self._episodes),
+            "boundary_frames": list(frames),
+            "timestamp_scope": "collection_query_clock_not_native_impulse_refresh",
+            "grip_acquisition": dict(
+                evidence_id=batch.evidence_id,
+                values=batch.values.tolist(),
+                valid=batch.valid.tolist(),
+                acquisition_errors=list(batch.acquisition_errors),
+                timestamp=batch.timestamp,
+                observation_revision=batch.observation_revision,
+                env_ids=batch.env_ids.tolist(),
+                clock_domain="environment_step",
+                revision_kind="semantic_query_revision",
+            ),
         }

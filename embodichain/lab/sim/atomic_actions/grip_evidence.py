@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 import math
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 import torch
 from embodichain.compute.geometry.grip_contacts import classify_contacts
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
@@ -35,7 +35,7 @@ from embodichain.lab.sim.sensors.contact.sampling import (
     CONTACT_IMPULSES,
 )
 
-__all__ = ["GripContactObserver", "DriverOpeningBinding"]
+__all__ = ["GripContactObserver", "DriverOpeningBinding", "GripEvidenceObservationPort"]
 _INVALID_CONTACT = (
     "Target grip contact is incomplete, one-sided, non-opposing, or saturated."
 )
@@ -179,6 +179,31 @@ def _finite_trace_copy(value: Any, path: str, errors: list[dict[str, str]]) -> A
     return deepcopy(value)
 
 
+@runtime_checkable
+class GripEvidenceObservationPort(Protocol):
+    """Explicit capability for an owned bilateral-grip acquisition and snapshot.
+
+    Execution owners may forward this port through a guarded provider wrapper.
+    The port exposes no underlying observer or provider instance.
+    """
+
+    def capture_grip_observation(
+        self, request: PhysicalEvidenceRequest, *, object_id: str, control_part: str
+    ) -> tuple[PhysicalEvidenceBatch, dict[str, Any]]:
+        """Perform one requested acquisition and return its exact owned snapshot.
+
+        Args:
+            request: Actual current acquisition time, revision and native rows.
+            object_id: Explicit registered target object.
+            control_part: Explicit declared hand/control part.
+
+        Returns:
+            Owned acquisition batch and the raw record from that same query.
+            Forwarders must preserve their host and runtime lifetime guards.
+        """
+        ...
+
+
 class GripContactObserver:
     """Observe target-specific bilateral contact through physical evidence frames.
 
@@ -299,6 +324,54 @@ class GripContactObserver:
                 "nonfinite_encoding": "explicit_value_marker_at_original_location",
             },
             "trace": records,
+        }
+
+    def snapshot_latest_query(
+        self, *, object_id: str, control_part: str, query_index: int | None = None
+    ) -> dict[str, Any]:
+        """Own the latest completed raw query for exact declared participants.
+
+        Args:
+            object_id: Canonical object selected by the last observation.
+            control_part: Exact pad binding selected by that observation.
+            query_index: Optional expected cumulative acquisition ordinal. A
+                newer query cannot substitute for that explicitly selected call.
+
+        Returns:
+            One owned raw query, its actor bindings and finite-value audit. This
+            does not sample contacts or copy the observer's entire history.
+
+        Raises:
+            RuntimeError: The newest acquisition produced no recorded query;
+                an older retained entry is never substituted.
+            ValueError: The latest query belongs to another object or hand.
+        """
+        if (
+            not self.trace
+            or self.trace[-1]["query_index"] != self.cumulative_query_count
+        ):
+            raise RuntimeError("The latest grip acquisition has no recorded query.")
+        query = self.trace[-1]
+        if query_index is not None:
+            if type(query_index) is not int or query_index < 1:
+                raise ValueError(
+                    "Grip query_index must be a positive acquisition ordinal."
+                )
+            if query["query_index"] != query_index:
+                raise RuntimeError(
+                    "The latest grip query is not the requested acquisition."
+                )
+        if query["object_id"] != object_id or query["control_part"] != control_part:
+            raise ValueError("The latest grip query belongs to another participant.")
+        nonfinite: list[dict[str, str]] = []
+        owned = _finite_trace_copy(query, "query", nonfinite)
+        return {
+            "query": owned,
+            "object_actor_ids": self._object_actors[object_id].tolist(),
+            "pad_actor_ids": self._pad_actors[control_part].tolist(),
+            "sensor_uid": self.sensor_uid,
+            "algorithm_revision": self.algorithm_revision,
+            "finite_audit": {"valid": not nonfinite, "nonfinite_locations": nonfinite},
         }
 
     def observe(

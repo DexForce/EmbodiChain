@@ -63,7 +63,10 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
     ParallelSemanticExecutionResult,
     ParallelSemanticExecutor,
 )
-from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
+from embodichain.lab.task_program.runtime.executor import (
+    SemanticCallExecutor,
+    EffectEvidenceCollectorPort,
+)
 from embodichain.lab.task_program.compiler.program import CompiledTaskProgram
 from embodichain.lab.task_program.compiler.lowering import SemanticWorkflow
 from embodichain.lab.task_program.runtime.results import (
@@ -1324,6 +1327,23 @@ class TaskProgramDemoBridge:
         template port. Consumers still own checking the supported provider API.
         """
         return self._post_policy_port
+
+    @property
+    def evidence_collector(self) -> EffectEvidenceCollectorPort | None:
+        """Return this runtime's actual evidence port when the host exposes one.
+
+        Standard runtimes expose their injected port. A custom runtime lacking
+        this optional observation capability returns None; no provider is created
+        or borrowed from another assembly.
+        """
+        collector = getattr(self._runtime, "evidence_collector", None)
+        if collector is not None and not isinstance(
+            collector, EffectEvidenceCollectorPort
+        ):
+            raise TypeError(
+                "Runtime evidence_collector must implement its public port."
+            )
+        return collector
 
     @property
     def program_completed(self) -> bool:
