@@ -596,3 +596,59 @@ class _ConditionStabilityRuntime:
         result._results = {}
         result._metadata = {}
         return result
+
+    def measure_support_geometry(
+        self,
+        preset_id: str,
+        *,
+        native_support: Mapping[str, Any],
+        object_pose: Any,
+        reference_pose: Any,
+    ) -> dict[str, Any]:
+        """Project captured poses against this owner's existing input geometry.
+
+        No sensor or live pose is sampled. The caller supplies either a current
+        owned observation or its historical policy snapshot and seeded poses.
+        """
+        self._require_open()
+        cfg = self._presets[preset_id]
+        if cfg.kind != "supported_region":
+            raise ValueError(
+                "Full-footprint measurements require a declared region condition."
+            )
+        # The frozen collector computed final/historical mesh projection on CPU.
+        # Preserve that arithmetic/device boundary even when simulation is CUDA.
+        vertices = self._support_vertices[cfg.entity].detach().cpu()
+        pose = torch.as_tensor(
+            object_pose, dtype=vertices.dtype, device=vertices.device
+        )
+        reference = torch.as_tensor(
+            reference_pose, dtype=vertices.dtype, device=vertices.device
+        )
+        if (
+            native_support.get("entity") != cfg.entity
+            or native_support.get("reference") != cfg.reference
+            or native_support.get("env_ids") != list(range(vertices.shape[0]))
+        ):
+            raise ValueError("Captured support has another declared pair or row scope.")
+        landing = self._region_geometry[(cfg.entity, cfg.reference)].measure(
+            pose.detach().cpu(), reference.detach().cpu()
+        )
+        landing.update(support_tolerance_m=0.05, penetration_tolerance_m=0.01)
+        bottom = (vertices.to(pose) @ pose[:, 2, :3, None]).squeeze(-1).amin(-1) + pose[
+            :, 2, 3
+        ]
+        heights = qualified_support_heights(
+            torch.tensor(
+                native_support["supported"], dtype=torch.bool, device=pose.device
+            ),
+            native_support,
+            bottom,
+        )
+        return {
+            "landing_region": landing,
+            "support_gap_m": [
+                float(value) if torch.isfinite(value) else None
+                for value in bottom - heights
+            ],
+        }
