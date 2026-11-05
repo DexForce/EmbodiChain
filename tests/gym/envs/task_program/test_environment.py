@@ -1128,6 +1128,19 @@ def test_factory_protocol_is_required() -> None:
         TaskProgramEnvironmentAdapter(object(), step_dt=_STEP_DT)
 
 
+def test_adapter_close_releases_only_owned_resources_and_rejects_new_assembly():
+    factory = _FakeEnvironmentFactory()
+    closed = []
+    factory.close_runtime_resources = lambda: closed.append(True)
+    adapter = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
+    adapter.close()
+    adapter.close()
+    assert closed == [True]
+    with pytest.raises(RuntimeError, match="closed"):
+        adapter.assemble_runtime(_program().integration)
+    assert factory.calls == Counter()
+
+
 class _InvocationPolicyFactory(_FakeEnvironmentFactory):
     """Expose declared alternative presets through the ordinary profile surface."""
 

@@ -1040,6 +1040,8 @@ state and world-to-base transforms belong to the query snapshot. Payload queries
 remain B=1; the carried body owns its identity, control part, local spheres and
 observed world pose. These values are separate from serialized configuration.
 Subsets, reordered environments, and per-environment worlds are unsupported.
+An omitted start uses the captured selected joint rows; the motion facade reports
+the world as immutable.
 
 The owned motion factory closes backend-local attachments on exit and makes no
 skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
@@ -1203,6 +1205,62 @@ any task-success evaluation.
    ContactTimeline
    ContactTimelineCfg
 
+embodichain.lab.sim.sensors.support_observation
+-----------------------------------------------
+
+Native support acquisition uses a standard borrowed ``ContactSensor`` and the
+public sampling observer lifecycle. Each explicit runtime registry owns one
+observer per exact native pair. Replacing native instances under the same UID
+requires release and rebind; closing an old observer cannot detach a new owner
+registered under the same hook name. Borrowed sensors and bodies are never
+destroyed by this registry.
+
+Every physical batch has a real timestamp and a collector-owned revision.
+Legacy acquisition uses the simulation clock. Strong frames and results use the
+bound environment clock and observed substep offset; their fixed mapping to
+simulation time is checked, including warmup offsets. Unobserved advancement
+cannot be hidden by rebasing that mapping. The bound clock qualifies support contract
+revision 1, including native source identity, topology, episode generation and
+the complete substep interval. Legacy metadata stays legacy even when sharing
+an observer whose strong clock is bound. Its strong-only sample serial and the
+all-acquisition frame revision are separate identities.
+
+``NativeSupportResult.support.valid`` must be checked before using its values.
+Acquisition errors invalidate the whole pair's witness batch; selected resets
+leave the other rows intact. Positive contact patches may persist through
+sleep while both body poses remain within the original tolerance. Missing,
+overflowed or changed observations invalidate those witnesses. A complete empty
+sample is an instantaneous negative, not proof of absent support throughout a
+stability window. Normative task acceptance remains outside this module.
+
+.. currentmodule:: embodichain.lab.sim.sensors.support_observation
+
+.. autosummary::
+
+   NATIVE_SUPPORT_CHANNEL
+   SupportControlClock
+   NativeSupportResult
+   NativeSupportObservation
+   SupportObservationRegistry
+   qualified_support_heights
+
+.. autoclass:: NativeSupportResult
+   :members:
+
+.. autoclass:: NativeSupportObservation
+   :members:
+
+.. autoclass:: SupportObservationRegistry
+   :members:
+
+
+Qualified contact-height adaptation remains sensor-owned. It uses only a
+positive-load COM-qualified patch and returns the highest point; invalid rows
+remain NaN. Pure transformed mesh envelopes live in
+``compute.geometry.rigid.support_mesh_envelope`` and establish no contact.
+
+.. autofunction:: qualified_support_heights
+
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
 
@@ -1231,6 +1289,7 @@ serializers and TaskSpec evaluation belong outside this module.
    NativeGripEvidenceProvider
    NativeGripObserver
 
+
 embodichain.lab.sim.scene.mesh_snapshot
 ---------------------------------------
 
@@ -1257,6 +1316,46 @@ embodichain.lab.task_program.integrations.simulation.handover
 .. autosummary::
 
    ConfiguredHandOverPoseProvider
+
+embodichain.lab.task_program.integrations.simulation.stability
+--------------------------------------------------------------
+
+Named geometric conditions share ``SimulationTaskProgramRegistration.settle_presets``
+with ordinary dynamic settle monitors. ``SimulationStabilityConditionCfg`` owns
+its duration, timeout, pose/axis targets, attachment-drift bounds and optional
+native-support declaration. Registration snapshots and fingerprints the complete
+configuration; names do not select hidden behavior.
+
+Supported conditions declare a standard contact sensor through
+``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native
+rigid UIDs; the runtime factory creates or reuses the sensor and the environment
+suite drives the same instance. Incompatible existing UIDs and missing clock,
+geometry or support inputs fail before execution. There is no geometry-only
+success fallback for native support.
+
+The standard policy port preserves the source time grid: the initial observation
+does not count toward duration, ordinary pose drift resets the anchor/window,
+and held-object failures remain latched. It yields controller-target holds and
+leaves environment stepping, cancellation and task acceptance with their owners.
+Incomplete support windows keep their per-row validity/errors and continue holds;
+other valid rows can qualify independently. Metadata includes the physical
+``support_acquisition`` channel, missing-observation counts and the latest error
+for each row. A failed result following missing evidence retains
+``support_result_available=false`` unless a complete successful window is later
+established. This distinguishes unavailable outcomes from measured negatives.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.stability
+
+.. autosummary::
+
+   SupportSensorDeclarationCfg
+   SimulationStabilityConditionCfg
+
+.. autoclass:: SupportSensorDeclarationCfg
+   :members:
+
+.. autoclass:: SimulationStabilityConditionCfg
+   :members:
 
 embodichain.lab.gym.envs.episode_context
 --------------------------------------
@@ -3560,3 +3659,24 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 
 .. autoclass:: DriverOpeningBinding
    :members:
+
+Stability execution ownership
+----------------------------
+
+A simulation factory with native support owns one unfinished bridge at a time.
+``validate_runtime_bridge_creation`` rejects overlap before rebinding clocks;
+``bind_runtime_bridge`` records the bridge created by the standard adapter.
+``TaskProgramDemoBridge.execution_finished`` requires closed segment iteration
+and a consumed/validated or explicitly aborted final segment, with no active
+action generator. It is distinct from ``program_completed`` and does not certify
+success or acknowledge commands. Non-support factories retain existing assembly.
+
+Factory-returned effect providers retain their public IDs/revisions and guard
+all collection through the shared lifetime. The same guard protects live scene
+snapshots and drive-target holds. Independently owned past reports remain readable.
+
+The source control grid, stability counters and held-failure latch are unchanged.
+CPU policy profiling can run with
+``python -m scripts.benchmark.task_program.stability --output /tmp/stability``.
+This measures constant-pose policy overhead and serialization separately from
+native contact acquisition, physical tasks and GPU execution.

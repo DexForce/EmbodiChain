@@ -1910,3 +1910,21 @@ def test_unknown_dynamic_snapshot_is_not_relabeled_by_metadata_retrieval() -> No
     metadata = EmbodiedEnv.get_demo_episode_metadata(env, 0)
     assert metadata["instruction"] == "unknown_task"
     assert metadata["instruction_source"] == "unknown"
+
+
+def test_close_incomplete_execution_cleans_runtime_before_sim_without_stepping():
+    env = _CloseEnvStub()
+    order = []
+    env._active_task_program_bridge = SimpleNamespace(is_complete=False)
+    env.discard = lambda: order.append("discard")
+    env.dataset_manager.finalize = lambda: order.append("finalize")
+    env._task_program_adapter = SimpleNamespace(close=lambda: order.append("runtime"))
+    env._profiler.report = lambda: order.append("report")
+    env.sim.destroy = lambda **kwargs: order.append("destroy")
+    env.step = lambda *args: pytest.fail(
+        "close must not step physics or issue commands"
+    )
+    EmbodiedEnv.close(env, exit_process=False)
+    EmbodiedEnv.close(env, exit_process=False)
+    assert order == ["discard", "finalize", "runtime", "report", "destroy"]
+    assert env._active_task_program_bridge.is_complete is False

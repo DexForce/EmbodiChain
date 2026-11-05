@@ -203,17 +203,21 @@ def _resolve_hand_frame(
     return path, link_names, joint_names, solver
 
 
-def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
-    path, link_names, joint_names, solver = _resolve_hand_frame(robot, cfg)
-    current = robot.get_qpos()
-    if (
-        not isinstance(current, torch.Tensor)
-        or current.ndim != 2
-        or not len(current)
-        or current.shape[1] != len(robot.joint_names)
-    ):
-        raise ValueError("Robot positions must match the full named joint order.")
-    states = current[0:1].detach().repeat(cfg.sample_count, 1)
+def _sample_hand_stroke(
+    robot: Robot,
+    cfg: RobotHandGeometryCfg,
+    reference_qpos: torch.Tensor,
+    *,
+    link_names: list[str],
+    joint_names: list[str],
+    solver: SolverCfg,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Share named closing FK between URDF surfaces and native shape capture.
+
+    Callers retain their reference-state validation, link order and inverse
+    arithmetic. This helper never reads or writes the robot's live state.
+    """
+    states = reference_qpos.detach().repeat(cfg.sample_count, 1)
     opened, closed = (
         states.new_tensor(values) for values in (cfg.open_qpos, cfg.closed_qpos)
     )
@@ -244,7 +248,28 @@ def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
         raise ValueError(
             "Unsupported hand frame: the declared motion TCP moves during hand actuation."
         )
-    relative = torch.linalg.inv(tools)[:, None] @ fk[:, :-1]
+    return fk[:, :-1], tools
+
+
+def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
+    path, link_names, joint_names, solver = _resolve_hand_frame(robot, cfg)
+    current = robot.get_qpos()
+    if (
+        not isinstance(current, torch.Tensor)
+        or current.ndim != 2
+        or not len(current)
+        or current.shape[1] != len(robot.joint_names)
+    ):
+        raise ValueError("Robot positions must match the full named joint order.")
+    fk, tools = _sample_hand_stroke(
+        robot,
+        cfg,
+        current[0:1],
+        link_names=link_names,
+        joint_names=joint_names,
+        solver=solver,
+    )
+    relative = torch.linalg.inv(tools)[:, None] @ fk
     clouds = sample_urdf_collision_surfaces(
         path,
         link_names=link_names,
