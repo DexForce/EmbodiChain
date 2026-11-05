@@ -215,7 +215,7 @@ def test_historical_control_hash_serialization_outcomes_and_reports_match_actual
 
 def test_raw_binding_decode_stays_standard_library_only():
     _, binding, _, _ = raw_case()
-    root = Path(__file__).resolve().parents[3]
+    root = Path(sys.modules["embodichain"].__file__).resolve().parents[1]
     script = f"import sys;sys.path.insert(0,{str(root)!r});from embodichain.gen_sim.task_spec.control_evidence import ControlEvidenceBinding;ControlEvidenceBinding.from_dict({binding.to_dict()!r});assert not any(n=='torch' or n=='numpy' or n.startswith('embodichain.lab') or n.startswith('embodichain.gen_sim.task_engine') for n in sys.modules)"
     result = subprocess.run(
         [sys.executable, "-I", "-c", script], capture_output=True, text=True, timeout=30
