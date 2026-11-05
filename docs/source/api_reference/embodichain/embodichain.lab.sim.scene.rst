@@ -643,3 +643,20 @@ precedence over a single-file shoulder lookup. No model or hand is selected.
 .. autofunction:: source_fixed_frame_pose
 
 .. autofunction:: source_arm_base_position
+
+
+Authored revolute setting attributes
+------------------------------------
+
+This adapter exposes only qualified authored setting labels and their exact joint
+and source identities. A source without fixed-base setting annotations advertises
+none. It selects no task program, motion goal or execution/recovery budget.
+
+.. currentmodule:: embodichain.lab.sim.scene.revolute_inputs
+
+.. autosummary::
+   :nosignatures:
+
+   revolute_setting_attributes
+
+.. autofunction:: revolute_setting_attributes

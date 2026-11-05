@@ -62,6 +62,22 @@ capped intervals under the query precision policy. A threshold inside an interva
 remains unavailable, never a fabricated contact or free path. CPU comparisons
 remain separate from GPU and physical-task qualification.
 
+`RevolutePathQueryFactory` prepares original URDF collision inputs for one exact
+Default/B1 robot, articulation and support. It borrows native owners and accepts
+an explicit complete motion-root subtree; it never creates a simulator, task,
+skill or planning context. Fresh `NativeQueryScope` queries bind supplied root,
+parent/child and measured-joint observations. Source/model/frame/owner drift
+rejects without recapturing a replacement baseline. Closing releases query
+resources, never borrowed Robot/native objects.
+
+`RevolutePathReport` keeps unsupported acquisition distinct from an accepted or
+rejected supported screen. `RevoluteDependencyReport` describes the preserved
+source-input command-frame proxy and conservative sweep qualification, not
+native cooking, continuous collision or physical effects. The original FK batch,
+sampling order and collision domains remain with this Motion query. Scene's
+`revolute_setting_attributes` only exposes authored fixed-base setting identities;
+it chooses no Semantic Call or recovery policy.
+
 ## Timing and batch boundary
 
 Planning is environment-batched: waypoint qpos is `(B, dof)`, TCP transforms
