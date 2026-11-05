@@ -417,7 +417,7 @@ selection, and hosts constructing a bridge directly retain that responsibility.
 .. currentmodule:: embodichain.lab.task_program.integrations
 
 Post-policy occurrence preset bindings
--------------------------------------
+--------------------------------------
 
 ``PostPolicyPresetBinding`` selects an integration-owned condition preset for one
 exact ``program_id/segment_id:post:policy_index`` occurrence and complete compiled
