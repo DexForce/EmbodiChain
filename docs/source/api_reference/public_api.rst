@@ -975,6 +975,36 @@ Cold import and binding normalization do not load a simulation or numeric backen
 
 .. autofunction:: evaluate_condition_evidence
 
+embodichain.gen_sim.task_spec.condition_group_evidence
+------------------------------------------------------
+
+Finite-count orientation and articulation-state proofs retain the unchanged
+full TaskSpec and program. The group requires a complete bijection between the
+declared count, execution groups and logical/native member channels; articulation
+members are identified by both entity and part/joint. No synthetic child spec,
+subset selection or unobserved ``all`` universe can stand in for that proof.
+
+Every required member retains its row, episode, occurrence and input-format
+identity. Missing members or historical failures remain unavailable; complete
+valid negative final measurements remain failed. E1 final upright/vertical facts
+are independent of placement, while its original recorded scope remains upright
+only. E6 normal multi-part milestone availability is unchanged. Single-member
+binding serialization, semantic identity and successful-case hashes remain stable.
+The common physical report accepts these condition-group bindings without adding
+support for unrelated held/transport evidence.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.condition_group_evidence
+
+.. autosummary::
+
+   ConditionEvidenceGroupBinding
+   evaluate_condition_group_evidence
+
+.. autoclass:: ConditionEvidenceGroupBinding
+   :members:
+
+.. autofunction:: evaluate_condition_group_evidence
+
 embodichain.gen_sim.task_spec.contracts
 ---------------------------------------
 

@@ -25,6 +25,10 @@ from .evidence import (
     evaluate_supported_placement_evidence,
 )
 from .condition_evidence import ConditionEvidenceBinding, evaluate_condition_evidence
+from .condition_group_evidence import (
+    ConditionEvidenceGroupBinding,
+    evaluate_condition_group_evidence,
+)
 from .control_evidence import ControlEvidenceBinding, evaluate_control_evidence
 from .pour_evidence import PourEvidenceBinding, evaluate_pour_evidence
 
@@ -40,11 +44,14 @@ def _binding(
 ) -> (
     SupportedPlacementEvidenceBinding
     | ConditionEvidenceBinding
+    | ConditionEvidenceGroupBinding
     | ControlEvidenceBinding
     | PourEvidenceBinding
 ):
     if isinstance(value, SupportedPlacementEvidenceBinding):
         return SupportedPlacementEvidenceBinding.from_dict(value)
+    if isinstance(value, ConditionEvidenceGroupBinding):
+        return ConditionEvidenceGroupBinding.from_dict(value)
     if isinstance(value, ConditionEvidenceBinding):
         return ConditionEvidenceBinding.from_dict(value)
     if isinstance(value, ControlEvidenceBinding):
@@ -55,6 +62,8 @@ def _binding(
         version = value.get("schema_version")
         if version == "task_spec.placement_evidence_binding/v2":
             return SupportedPlacementEvidenceBinding.from_dict(value)
+        if version == "task_spec.condition_group_evidence_binding/v1":
+            return ConditionEvidenceGroupBinding.from_dict(value)
         if version == "task_spec.condition_evidence_binding/v1":
             return ConditionEvidenceBinding.from_dict(value)
         if version == "task_spec.control_evidence_binding/v1":
@@ -71,6 +80,7 @@ def evaluate_physical_evidence_report(
     bindings: Sequence[
         SupportedPlacementEvidenceBinding
         | ConditionEvidenceBinding
+        | ConditionEvidenceGroupBinding
         | ControlEvidenceBinding
         | PourEvidenceBinding
         | Mapping[str, Any]
@@ -145,6 +155,7 @@ def evaluate_physical_evidence_report(
         verifier = {
             SupportedPlacementEvidenceBinding: evaluate_supported_placement_evidence,
             ConditionEvidenceBinding: evaluate_condition_evidence,
+            ConditionEvidenceGroupBinding: evaluate_condition_group_evidence,
             ControlEvidenceBinding: evaluate_control_evidence,
             PourEvidenceBinding: evaluate_pour_evidence,
         }[type(binding)]

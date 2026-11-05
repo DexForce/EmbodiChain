@@ -17,6 +17,7 @@ of those owners.
 | Structure validation and evidence evaluation | `validation.py` |
 | Placement bindings and physical proof checks | `evidence.py` |
 | Orientation/joint state and milestone qualification | `condition_evidence.py` |
+| Complete finite orientation/part groups | `condition_group_evidence.py`; common member aggregation in `_group_evidence.py` |
 | Operation-bound historical Press/Twist qualification | `control_evidence.py` |
 | Rigid Pour motion qualification and exact occurrence selection | `pour_evidence.py` |
 | Common per-environment physical reports | `evidence_report.py` |
@@ -91,6 +92,16 @@ stability contract; missing or failed milestone evidence remains unavailable.
 Raw joint receipts additionally bind their actual environment-step acquisition
 clock and boundary. A common report owner combines supported physical families
 without filling absent predicates or historical boundaries.
+
+Finite condition groups validate the original full TaskSpec/program and exact
+count-to-execution/member bijection before reusing per-member state proofs.
+Logical/native articulation membership includes part/joint, so one articulation
+can supply distinct members. Missing any required member remains unavailable;
+complete valid final negatives remain failed. `one` and explicit `count=1` use
+the same single-member gate without changing role serialization or semantic
+hashes. No unobserved `all` universe is inferred. E1 final upright/vertical facts
+remain independent of placement; recorded E1 permits only the original upright
+fact. Original E6 normal multi-part milestones retain their unavailable boundary.
 
 Control qualification consumes a plain sealed source route and exact execution
 occurrences, not a live Press/Twist factory. It retains source sampling-window,

@@ -1,0 +1,3753 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "scope": "Actual B0 functions, simulated acquisition ports only; no physics qualification.",
+  "source_function_sha256": {
+    "capture_final_goals": "2793d9ee200d0f8e643fdb7ed1fdb7479f6eab144509961c28b72bdb9d428924",
+    "evaluate_runtime_evidence": "c9417733643a8fa89ed8e6d668f648e05fb1f9e5614d3f07ef244df5f2f91781",
+    "_needs_universe": "d4e553ab5cb2f51ce0335e459d40e83c552b9b9f4d17293fc7c4e1aa9b9fda94"
+  },
+  "spec": {
+    "schema_version": "task_spec/v0.1",
+    "canonicalization_version": "task_spec_c14n/v1",
+    "roles": [
+      {
+        "id": "role_001",
+        "kind": "object",
+        "cardinality": "count",
+        "affordances": [
+          "graspable",
+          "orientable"
+        ],
+        "properties": {},
+        "count": 2,
+        "source_structure": "rigid_object"
+      }
+    ],
+    "init": [],
+    "goal": [
+      {
+        "id": "goal_001",
+        "predicate": "object_upright",
+        "operator": "eq",
+        "expected": true,
+        "subject": "role_001",
+        "arguments": {
+          "orientation_goal": "upright",
+          "task_type": "E2"
+        }
+      }
+    ],
+    "invariants": [],
+    "temporal": [],
+    "milestones": [
+      {
+        "id": "step_01",
+        "achieve": [
+          {
+            "id": "milestone:step_01:0",
+            "predicate": "object_upright",
+            "operator": "eq",
+            "expected": true,
+            "subject": "role_001",
+            "arguments": {
+              "orientation_goal": "upright",
+              "task_type": "E2"
+            }
+          }
+        ]
+      }
+    ],
+    "requirements": [
+      {
+        "consumer": "asset",
+        "key": "role_001",
+        "value": {
+          "affordances": [
+            "graspable",
+            "orientable"
+          ],
+          "attributes": {},
+          "source_structure": "rigid_object"
+        }
+      },
+      {
+        "consumer": "expansion",
+        "key": "lineage_key",
+        "value": "task_spec.semantic_hash"
+      },
+      {
+        "consumer": "scene",
+        "key": "role_001",
+        "value": {
+          "initial_state": {},
+          "kind": "object"
+        }
+      },
+      {
+        "consumer": "task_program",
+        "key": "goal_predicates",
+        "value": [
+          "object_upright"
+        ]
+      }
+    ],
+    "task_id": "finite_count",
+    "instruction": "Stand two cans",
+    "metadata": {
+      "candidate_id": "candidate_01",
+      "generator": "embodichain.gen_sim.task_engine",
+      "goal_sources": {
+        "goal_001": [
+          "step_01"
+        ]
+      },
+      "instruction_coverage": "validated_draft_only",
+      "legacy_semantic_hash": "e519a7ebac71b5aa458a6614f9c7c14179bdd584bcf090f3ffcf4702b56d6ff6",
+      "milestone_sources": {
+        "step_01": "step_01"
+      },
+      "role_references": {
+        "role_001": [
+          "step_01.object"
+        ]
+      },
+      "step_roles": {
+        "step_01": {
+          "object": "role_001"
+        }
+      },
+      "task_candidate_schema": "action_engine_task_draft_v1",
+      "terminal_goal_policy": "explicit_state_slots/v1"
+    },
+    "semantic_hash": "84c635db63f455b20d3f44c5f2184c1e451829a10078f973744da38333568f5d"
+  },
+  "graph": {
+    "schema_version": "semantic_task_graph/v1",
+    "task_id": "finite_count",
+    "instruction": "Stand two cans",
+    "planner_route": "offline",
+    "integration_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+    "targets": {
+      "step_01__01_upright_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      },
+      "step_01__01_upright_staging_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      },
+      "step_01_upright_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      },
+      "step_01_upright_staging_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    },
+    "nodes": [
+      {
+        "id": "step_01__01__call_01",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.pick",
+          "arguments": {
+            "object": "a",
+            "target": "step_01__01_upright_target"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [],
+        "task_instance_id": "step_01__01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__01__call_02",
+        "call": {
+          "kind": "registered",
+          "call_id": "gen_sim.align_held",
+          "arguments": {
+            "object": "a",
+            "target": "step_01__01_upright_staging_target",
+            "preserve_yaw": false
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__01__call_01"
+        ],
+        "task_instance_id": "step_01__01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__01__call_03",
+        "call": {
+          "kind": "registered",
+          "call_id": "gen_sim.align_held",
+          "arguments": {
+            "object": "a",
+            "target": "step_01__01_upright_target",
+            "preserve_yaw": false
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__01__call_02"
+        ],
+        "task_instance_id": "step_01__01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__01__call_04",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.place_relative",
+          "arguments": {
+            "object": "a",
+            "reference": "table",
+            "relation": "on"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__01__call_03"
+        ],
+        "task_instance_id": "step_01__01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__01__call_05",
+        "call": {
+          "kind": "registered",
+          "call_id": "gen_sim.clear_released",
+          "arguments": {
+            "object": "a",
+            "target": "step_01__01_upright_staging_target"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__01__call_04"
+        ],
+        "task_instance_id": "step_01__01",
+        "task_type": "E2",
+        "role": "cleanup"
+      },
+      {
+        "id": "step_01__01__call_06",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.park",
+          "arguments": {},
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__01__call_05"
+        ],
+        "task_instance_id": "step_01__01",
+        "task_type": "E2",
+        "role": "cleanup"
+      },
+      {
+        "id": "step_01__call_01",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.pick",
+          "arguments": {
+            "object": "b",
+            "target": "step_01_upright_target"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__01__call_06"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_02",
+        "call": {
+          "kind": "registered",
+          "call_id": "gen_sim.align_held",
+          "arguments": {
+            "object": "b",
+            "target": "step_01_upright_staging_target",
+            "preserve_yaw": false
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_01"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_03",
+        "call": {
+          "kind": "registered",
+          "call_id": "gen_sim.align_held",
+          "arguments": {
+            "object": "b",
+            "target": "step_01_upright_target",
+            "preserve_yaw": false
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_02"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_04",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.place_relative",
+          "arguments": {
+            "object": "b",
+            "reference": "table",
+            "relation": "on"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_03"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_05",
+        "call": {
+          "kind": "registered",
+          "call_id": "gen_sim.clear_released",
+          "arguments": {
+            "object": "b",
+            "target": "step_01_upright_staging_target"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_04"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "cleanup"
+      },
+      {
+        "id": "step_01__call_06",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.park",
+          "arguments": {},
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_05"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "cleanup"
+      }
+    ],
+    "task_groups": [
+      {
+        "id": "step_01__01",
+        "task_type": "E2",
+        "node_ids": [
+          "step_01__01__call_01",
+          "step_01__01__call_02",
+          "step_01__01__call_03",
+          "step_01__01__call_04",
+          "step_01__01__call_05",
+          "step_01__01__call_06"
+        ],
+        "depends_on": [],
+        "success": {
+          "kind": "semantic_task_term",
+          "step_id": "step_01__01",
+          "type": "object_upright"
+        }
+      },
+      {
+        "id": "step_01",
+        "task_type": "E2",
+        "node_ids": [
+          "step_01__call_01",
+          "step_01__call_02",
+          "step_01__call_03",
+          "step_01__call_04",
+          "step_01__call_05",
+          "step_01__call_06"
+        ],
+        "depends_on": [
+          "step_01__01"
+        ],
+        "success": {
+          "kind": "semantic_task_term",
+          "step_id": "step_01",
+          "type": "object_upright"
+        }
+      }
+    ],
+    "success": {
+      "kind": "all_task_groups",
+      "source": {
+        "schema_version": "action_engine_success_spec_v1",
+        "task_id": "finite_count",
+        "op": "all",
+        "terms": [
+          {
+            "step_id": "step_01__01",
+            "type": "object_upright"
+          },
+          {
+            "step_id": "step_01",
+            "type": "object_upright"
+          }
+        ]
+      }
+    }
+  },
+  "program": {
+    "program_id": "count-oracle",
+    "program": {
+      "kind": "sequence",
+      "items": [
+        {
+          "kind": "segment",
+          "name": "step_01__01__call_01",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.pick",
+              "arguments": {
+                "object": "a",
+                "target": "step_01__01_upright_target"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__01__call_02",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "a",
+                "target": "step_01__01_upright_staging_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__01__call_03",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "a",
+                "target": "step_01__01_upright_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__01__call_04",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "a",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__01__call_05",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "a",
+                "target": "step_01__01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__01__call_06",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": [
+            {
+              "kind": "wait_stable",
+              "entity": "a",
+              "preset": "gen_sim.step_01__01__call_06.stable"
+            }
+          ]
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_01",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.pick",
+              "arguments": {
+                "object": "b",
+                "target": "step_01_upright_target"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_02",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "b",
+                "target": "step_01_upright_staging_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_03",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "b",
+                "target": "step_01_upright_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_04",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "b",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_05",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "b",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_06",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          "post": [
+            {
+              "kind": "wait_stable",
+              "entity": "b",
+              "preset": "gen_sim.step_01__call_06.stable"
+            }
+          ]
+        }
+      ]
+    },
+    "targets": {
+      "step_01__01_upright_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      },
+      "step_01__01_upright_staging_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      },
+      "step_01_upright_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      },
+      "step_01_upright_staging_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "constraints": {
+    "presets": {
+      "gen_sim.step_01__01__call_06.stable": {
+        "entity": "a",
+        "kind": "upright",
+        "local_axis": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "minimum_alignment": 0.8660254037844386,
+        "axis_direction_free": false,
+        "duration": 1.0,
+        "timeout": 5.0
+      },
+      "gen_sim.step_01__call_06.stable": {
+        "entity": "b",
+        "kind": "upright",
+        "local_axis": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "minimum_alignment": 0.8660254037844386,
+        "axis_direction_free": false,
+        "duration": 1.0,
+        "timeout": 5.0
+      }
+    }
+  },
+  "validation": {
+    "task_spec_digest": "1dd87464258730c92732764e38e3d5490337dfda4a5ba088ff8ce40fa3967d4e",
+    "graph_digest": "b1d613efb5158c8ee930815b58ed77b66a48985085e8dc1c7aa876f3a9468237",
+    "program_digest": "1d23f1db978cbdec791137eac0a643acd54b0771f66e8dafd10f77c5348cb19b",
+    "constraints_digest": "c8ceb3ac7a44b5600462de147ee0b1734737eeeb4de03e6728f2831e5069da2e",
+    "coverage": {
+      "status": "covered",
+      "issues": [],
+      "roles": {
+        "role_001": [
+          {
+            "uid": "a",
+            "part_id": null
+          },
+          {
+            "uid": "b",
+            "part_id": null
+          }
+        ]
+      },
+      "goals": [
+        {
+          "id": "goal_001",
+          "predicate": {
+            "id": "goal_001",
+            "predicate": "object_upright",
+            "arguments": {
+              "orientation_goal": "upright",
+              "subject": "role_001",
+              "task_type": "E2"
+            },
+            "operator": "eq",
+            "expected": true,
+            "observation": null
+          },
+          "source_steps": [
+            "step_01"
+          ],
+          "groups": [
+            "step_01__01",
+            "step_01"
+          ],
+          "status": "declared"
+        }
+      ],
+      "milestones": [
+        {
+          "id": "step_01",
+          "source_step": "step_01",
+          "groups": [
+            "step_01__01",
+            "step_01"
+          ],
+          "members": [
+            {
+              "group_id": "step_01__01",
+              "object_uid": "a",
+              "object_part_id": null
+            },
+            {
+              "group_id": "step_01",
+              "object_uid": "b",
+              "object_part_id": null
+            }
+          ]
+        }
+      ],
+      "lineage": {
+        "step_01": [
+          {
+            "group_id": "step_01__01",
+            "object_uid": "a",
+            "object_part_id": null
+          },
+          {
+            "group_id": "step_01",
+            "object_uid": "b",
+            "object_part_id": null
+          }
+        ]
+      },
+      "runtime_evidence_status": "not_run",
+      "instruction_coverage": "validated_draft_only"
+    }
+  },
+  "candidate": {
+    "candidate_id": "candidate_01",
+    "draft": {
+      "schema_version": "action_engine_task_draft_v1",
+      "task_id": "finite_count",
+      "instruction": "Stand two cans",
+      "steps": [
+        {
+          "id": "step_01",
+          "task_type": "E2",
+          "object": {
+            "kind": "scene_ref",
+            "step_id": "",
+            "reference": "cans",
+            "quantifier": "count",
+            "count": 2
+          },
+          "target": {
+            "kind": "none",
+            "step_id": "",
+            "reference": "",
+            "quantifier": "one",
+            "count": 0
+          },
+          "relation": "none",
+          "required_arm": "auto",
+          "transfer_arm": "none",
+          "receive_arm": "none",
+          "orientation_goal": "upright",
+          "target_state": "none",
+          "target_setting": 0,
+          "layout": "none",
+          "axis": "none",
+          "direction": "none",
+          "terminal_behavior": "none",
+          "depends_on": []
+        }
+      ]
+    },
+    "scene_request": {
+      "schema_version": "action_engine_scene_request_v1",
+      "task_id": "finite_count",
+      "references": [
+        {
+          "reference_id": "step_01.object",
+          "step_id": "step_01",
+          "role": "object",
+          "reference": "cans",
+          "quantifier": "count",
+          "count": 2,
+          "source_structure": "rigid_object",
+          "affordances": [
+            "graspable",
+            "orientable"
+          ],
+          "initial_state": {},
+          "attributes": {}
+        }
+      ]
+    },
+    "success_spec": {
+      "schema_version": "action_engine_success_spec_v1",
+      "task_id": "finite_count",
+      "op": "all",
+      "terms": [
+        {
+          "step_id": "step_01",
+          "type": "object_upright"
+        }
+      ]
+    },
+    "semantic_hash": "e519a7ebac71b5aa458a6614f9c7c14179bdd584bcf090f3ffcf4702b56d6ff6",
+    "vote_count": 1,
+    "attempts": 1,
+    "normalizations": []
+  },
+  "role_bindings": {
+    "schema_version": "action_engine_role_bindings_v1",
+    "task_id": "finite_count",
+    "candidate_id": "candidate_01",
+    "reference_bindings": {
+      "step_01.object": [
+        "a",
+        "b"
+      ]
+    },
+    "role_bindings": {}
+  },
+  "lineage": {
+    "step_01": [
+      {
+        "group_id": "step_01__01",
+        "object_uid": "a",
+        "object_part_id": null
+      },
+      {
+        "group_id": "step_01",
+        "object_uid": "b",
+        "object_part_id": null
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "upright",
+      "poses": {
+        "a": [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ],
+        "b": [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ]
+      },
+      "runtime": {
+        "segments": [
+          {
+            "name": "step_01__01__call_01",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              0
+            ],
+            "end_steps": [
+              10
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                0
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_02",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              10
+            ],
+            "end_steps": [
+              20
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                1
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_03",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              20
+            ],
+            "end_steps": [
+              30
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                2
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_04",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              30
+            ],
+            "end_steps": [
+              40
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                3
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_05",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              40
+            ],
+            "end_steps": [
+              50
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                4
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_06",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              50
+            ],
+            "end_steps": [
+              60
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                5
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "kind": "wait_stable",
+                  "policy_index": 0,
+                  "result_mask": [
+                    true
+                  ],
+                  "preset": "gen_sim.step_01__01__call_06.stable",
+                  "source_path": [
+                    "program",
+                    "items",
+                    5,
+                    "post",
+                    0
+                  ],
+                  "result": {
+                    "kind": "upright",
+                    "preset": "gen_sim.step_01__01__call_06.stable",
+                    "accepted_mask": [
+                      true
+                    ],
+                    "measurements": {
+                      "alignment": [
+                        1.0
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "step_01__call_01",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              60
+            ],
+            "end_steps": [
+              70
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                6
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_02",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              70
+            ],
+            "end_steps": [
+              80
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                7
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_03",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              80
+            ],
+            "end_steps": [
+              90
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                8
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_04",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              90
+            ],
+            "end_steps": [
+              100
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                9
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_05",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              100
+            ],
+            "end_steps": [
+              110
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                10
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_06",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              110
+            ],
+            "end_steps": [
+              120
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                11
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "kind": "wait_stable",
+                  "policy_index": 0,
+                  "result_mask": [
+                    true
+                  ],
+                  "preset": "gen_sim.step_01__call_06.stable",
+                  "source_path": [
+                    "program",
+                    "items",
+                    11,
+                    "post",
+                    0
+                  ],
+                  "result": {
+                    "kind": "upright",
+                    "preset": "gen_sim.step_01__call_06.stable",
+                    "accepted_mask": [
+                      true
+                    ],
+                    "measurements": {
+                      "alignment": [
+                        1.0
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "final_measurements": {
+        "goal_001": {
+          "members": [
+            {
+              "group_id": "step_01__01",
+              "uid": "a",
+              "part_id": null,
+              "accepted": [
+                true
+              ],
+              "measurements": {
+                "pose": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "alignment": [
+                  1.0
+                ]
+              }
+            },
+            {
+              "group_id": "step_01",
+              "uid": "b",
+              "part_id": null,
+              "accepted": [
+                true
+              ],
+              "measurements": {
+                "pose": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "alignment": [
+                  1.0
+                ]
+              }
+            }
+          ],
+          "values": [
+            true
+          ]
+        }
+      },
+      "expected": {
+        "goal": [
+          "satisfied"
+        ],
+        "milestones": [
+          "satisfied"
+        ],
+        "status": "satisfied",
+        "certificate_ready": true
+      }
+    },
+    {
+      "name": "one_negative",
+      "poses": {
+        "a": [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ],
+        "b": [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              -1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ]
+      },
+      "runtime": {
+        "segments": [
+          {
+            "name": "step_01__01__call_01",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              0
+            ],
+            "end_steps": [
+              10
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                0
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_02",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              10
+            ],
+            "end_steps": [
+              20
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                1
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_03",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              20
+            ],
+            "end_steps": [
+              30
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                2
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_04",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              30
+            ],
+            "end_steps": [
+              40
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                3
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_05",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              40
+            ],
+            "end_steps": [
+              50
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                4
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_06",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              50
+            ],
+            "end_steps": [
+              60
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                5
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "kind": "wait_stable",
+                  "policy_index": 0,
+                  "result_mask": [
+                    true
+                  ],
+                  "preset": "gen_sim.step_01__01__call_06.stable",
+                  "source_path": [
+                    "program",
+                    "items",
+                    5,
+                    "post",
+                    0
+                  ],
+                  "result": {
+                    "kind": "upright",
+                    "preset": "gen_sim.step_01__01__call_06.stable",
+                    "accepted_mask": [
+                      true
+                    ],
+                    "measurements": {
+                      "alignment": [
+                        1.0
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "step_01__call_01",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              60
+            ],
+            "end_steps": [
+              70
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                6
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_02",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              70
+            ],
+            "end_steps": [
+              80
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                7
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_03",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              80
+            ],
+            "end_steps": [
+              90
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                8
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_04",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              90
+            ],
+            "end_steps": [
+              100
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                9
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_05",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              100
+            ],
+            "end_steps": [
+              110
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                10
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_06",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              110
+            ],
+            "end_steps": [
+              120
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                11
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "kind": "wait_stable",
+                  "policy_index": 0,
+                  "result_mask": [
+                    true
+                  ],
+                  "preset": "gen_sim.step_01__call_06.stable",
+                  "source_path": [
+                    "program",
+                    "items",
+                    11,
+                    "post",
+                    0
+                  ],
+                  "result": {
+                    "kind": "upright",
+                    "preset": "gen_sim.step_01__call_06.stable",
+                    "accepted_mask": [
+                      true
+                    ],
+                    "measurements": {
+                      "alignment": [
+                        1.0
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "final_measurements": {
+        "goal_001": {
+          "members": [
+            {
+              "group_id": "step_01__01",
+              "uid": "a",
+              "part_id": null,
+              "accepted": [
+                true
+              ],
+              "measurements": {
+                "pose": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "alignment": [
+                  1.0
+                ]
+              }
+            },
+            {
+              "group_id": "step_01",
+              "uid": "b",
+              "part_id": null,
+              "accepted": [
+                false
+              ],
+              "measurements": {
+                "pose": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      -1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "alignment": [
+                  0.0
+                ]
+              }
+            }
+          ],
+          "values": [
+            false
+          ]
+        }
+      },
+      "expected": {
+        "goal": [
+          "failed"
+        ],
+        "milestones": [
+          "satisfied"
+        ],
+        "status": "failed",
+        "certificate_ready": false
+      }
+    },
+    {
+      "name": "one_missing",
+      "poses": {
+        "a": [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ]
+      },
+      "runtime": {
+        "segments": [
+          {
+            "name": "step_01__01__call_01",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              0
+            ],
+            "end_steps": [
+              10
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                0
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_02",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              10
+            ],
+            "end_steps": [
+              20
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                1
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_03",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              20
+            ],
+            "end_steps": [
+              30
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                2
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_04",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              30
+            ],
+            "end_steps": [
+              40
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                3
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_05",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              40
+            ],
+            "end_steps": [
+              50
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                4
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_06",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              50
+            ],
+            "end_steps": [
+              60
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                5
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "kind": "wait_stable",
+                  "policy_index": 0,
+                  "result_mask": [
+                    true
+                  ],
+                  "preset": "gen_sim.step_01__01__call_06.stable",
+                  "source_path": [
+                    "program",
+                    "items",
+                    5,
+                    "post",
+                    0
+                  ],
+                  "result": {
+                    "kind": "upright",
+                    "preset": "gen_sim.step_01__01__call_06.stable",
+                    "accepted_mask": [
+                      true
+                    ],
+                    "measurements": {
+                      "alignment": [
+                        1.0
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "step_01__call_01",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              60
+            ],
+            "end_steps": [
+              70
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                6
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_02",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              70
+            ],
+            "end_steps": [
+              80
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                7
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_03",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              80
+            ],
+            "end_steps": [
+              90
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                8
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_04",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              90
+            ],
+            "end_steps": [
+              100
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                9
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_05",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              100
+            ],
+            "end_steps": [
+              110
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                10
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_06",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              110
+            ],
+            "end_steps": [
+              120
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                11
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "kind": "wait_stable",
+                  "policy_index": 0,
+                  "result_mask": [
+                    true
+                  ],
+                  "preset": "gen_sim.step_01__call_06.stable",
+                  "source_path": [
+                    "program",
+                    "items",
+                    11,
+                    "post",
+                    0
+                  ],
+                  "result": {
+                    "kind": "upright",
+                    "preset": "gen_sim.step_01__call_06.stable",
+                    "accepted_mask": [
+                      true
+                    ],
+                    "measurements": {
+                      "alignment": [
+                        1.0
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "final_measurements": {
+        "goal_001": {
+          "unavailable": [
+            "Required native rigid object is not present."
+          ]
+        }
+      },
+      "expected": {
+        "goal": [
+          "unavailable"
+        ],
+        "milestones": [
+          "satisfied"
+        ],
+        "status": "unavailable",
+        "certificate_ready": false
+      }
+    },
+    {
+      "name": "last_group_failed",
+      "poses": {
+        "a": [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ],
+        "b": [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ]
+      },
+      "runtime": {
+        "segments": [
+          {
+            "name": "step_01__01__call_01",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              0
+            ],
+            "end_steps": [
+              10
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                0
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_02",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              10
+            ],
+            "end_steps": [
+              20
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                1
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_03",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              20
+            ],
+            "end_steps": [
+              30
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                2
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_04",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              30
+            ],
+            "end_steps": [
+              40
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                3
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_05",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              40
+            ],
+            "end_steps": [
+              50
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                4
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_06",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              50
+            ],
+            "end_steps": [
+              60
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                5
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "kind": "wait_stable",
+                  "policy_index": 0,
+                  "result_mask": [
+                    true
+                  ],
+                  "preset": "gen_sim.step_01__01__call_06.stable",
+                  "source_path": [
+                    "program",
+                    "items",
+                    5,
+                    "post",
+                    0
+                  ],
+                  "result": {
+                    "kind": "upright",
+                    "preset": "gen_sim.step_01__01__call_06.stable",
+                    "accepted_mask": [
+                      true
+                    ],
+                    "measurements": {
+                      "alignment": [
+                        1.0
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "step_01__call_01",
+            "active": [
+              true
+            ],
+            "successes": [
+              false
+            ],
+            "success": false,
+            "start_steps": [
+              60
+            ],
+            "end_steps": [
+              70
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                6
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_02",
+            "active": [
+              true
+            ],
+            "successes": [
+              false
+            ],
+            "success": false,
+            "start_steps": [
+              70
+            ],
+            "end_steps": [
+              80
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                7
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_03",
+            "active": [
+              true
+            ],
+            "successes": [
+              false
+            ],
+            "success": false,
+            "start_steps": [
+              80
+            ],
+            "end_steps": [
+              90
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                8
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_04",
+            "active": [
+              true
+            ],
+            "successes": [
+              false
+            ],
+            "success": false,
+            "start_steps": [
+              90
+            ],
+            "end_steps": [
+              100
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                9
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_05",
+            "active": [
+              true
+            ],
+            "successes": [
+              false
+            ],
+            "success": false,
+            "start_steps": [
+              100
+            ],
+            "end_steps": [
+              110
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                10
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__call_06",
+            "active": [
+              true
+            ],
+            "successes": [
+              false
+            ],
+            "success": false,
+            "start_steps": [
+              110
+            ],
+            "end_steps": [
+              120
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                11
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "kind": "wait_stable",
+                  "policy_index": 0,
+                  "result_mask": [
+                    false
+                  ],
+                  "preset": "gen_sim.step_01__call_06.stable",
+                  "source_path": [
+                    "program",
+                    "items",
+                    11,
+                    "post",
+                    0
+                  ],
+                  "result": {
+                    "kind": "upright",
+                    "preset": "gen_sim.step_01__call_06.stable",
+                    "accepted_mask": [
+                      false
+                    ],
+                    "measurements": {
+                      "alignment": [
+                        1.0
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "final_measurements": {
+        "goal_001": {
+          "members": [
+            {
+              "group_id": "step_01__01",
+              "uid": "a",
+              "part_id": null,
+              "accepted": [
+                true
+              ],
+              "measurements": {
+                "pose": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "alignment": [
+                  1.0
+                ]
+              }
+            },
+            {
+              "group_id": "step_01",
+              "uid": "b",
+              "part_id": null,
+              "accepted": [
+                true
+              ],
+              "measurements": {
+                "pose": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "alignment": [
+                  1.0
+                ]
+              }
+            }
+          ],
+          "values": [
+            true
+          ]
+        }
+      },
+      "expected": {
+        "goal": [
+          "satisfied"
+        ],
+        "milestones": [
+          "unavailable"
+        ],
+        "status": "unavailable",
+        "certificate_ready": false
+      }
+    },
+    {
+      "name": "last_group_missing",
+      "poses": {
+        "a": [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ],
+        "b": [
+          [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        ]
+      },
+      "runtime": {
+        "segments": [
+          {
+            "name": "step_01__01__call_01",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              0
+            ],
+            "end_steps": [
+              10
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                0
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_02",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              10
+            ],
+            "end_steps": [
+              20
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                1
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_03",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              20
+            ],
+            "end_steps": [
+              30
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                2
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_04",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              30
+            ],
+            "end_steps": [
+              40
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                3
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_05",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              40
+            ],
+            "end_steps": [
+              50
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                4
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "step_01__01__call_06",
+            "active": [
+              true
+            ],
+            "successes": [
+              true
+            ],
+            "success": true,
+            "start_steps": [
+              50
+            ],
+            "end_steps": [
+              60
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                5
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "kind": "wait_stable",
+                  "policy_index": 0,
+                  "result_mask": [
+                    true
+                  ],
+                  "preset": "gen_sim.step_01__01__call_06.stable",
+                  "source_path": [
+                    "program",
+                    "items",
+                    5,
+                    "post",
+                    0
+                  ],
+                  "result": {
+                    "kind": "upright",
+                    "preset": "gen_sim.step_01__01__call_06.stable",
+                    "accepted_mask": [
+                      true
+                    ],
+                    "measurements": {
+                      "alignment": [
+                        1.0
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "final_measurements": {
+        "goal_001": {
+          "members": [
+            {
+              "group_id": "step_01__01",
+              "uid": "a",
+              "part_id": null,
+              "accepted": [
+                true
+              ],
+              "measurements": {
+                "pose": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "alignment": [
+                  1.0
+                ]
+              }
+            },
+            {
+              "group_id": "step_01",
+              "uid": "b",
+              "part_id": null,
+              "accepted": [
+                true
+              ],
+              "measurements": {
+                "pose": [
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      1.0,
+                      0.0
+                    ],
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ]
+                  ]
+                ],
+                "alignment": [
+                  1.0
+                ]
+              }
+            }
+          ],
+          "values": [
+            true
+          ]
+        }
+      },
+      "expected": {
+        "goal": [
+          "satisfied"
+        ],
+        "milestones": [
+          "unavailable"
+        ],
+        "status": "unavailable",
+        "certificate_ready": false
+      }
+    }
+  ],
+  "all_universe_source": {
+    "spec": {
+      "schema_version": "task_spec/v0.1",
+      "canonicalization_version": "task_spec_c14n/v1",
+      "roles": [
+        {
+          "id": "role_001",
+          "kind": "object",
+          "cardinality": "all",
+          "affordances": [
+            "graspable",
+            "orientable"
+          ],
+          "properties": {},
+          "source_structure": "rigid_object"
+        }
+      ],
+      "init": [],
+      "goal": [
+        {
+          "id": "goal_001",
+          "predicate": "object_upright",
+          "operator": "eq",
+          "expected": true,
+          "subject": "role_001",
+          "arguments": {
+            "orientation_goal": "upright",
+            "task_type": "E2"
+          }
+        }
+      ],
+      "invariants": [],
+      "temporal": [],
+      "milestones": [
+        {
+          "id": "step_01",
+          "achieve": [
+            {
+              "id": "milestone:step_01:0",
+              "predicate": "object_upright",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "arguments": {
+                "orientation_goal": "upright",
+                "task_type": "E2"
+              }
+            }
+          ]
+        }
+      ],
+      "requirements": [
+        {
+          "consumer": "asset",
+          "key": "role_001",
+          "value": {
+            "affordances": [
+              "graspable",
+              "orientable"
+            ],
+            "attributes": {},
+            "source_structure": "rigid_object"
+          }
+        },
+        {
+          "consumer": "expansion",
+          "key": "lineage_key",
+          "value": "task_spec.semantic_hash"
+        },
+        {
+          "consumer": "scene",
+          "key": "role_001",
+          "value": {
+            "initial_state": {},
+            "kind": "object"
+          }
+        },
+        {
+          "consumer": "task_program",
+          "key": "goal_predicates",
+          "value": [
+            "object_upright"
+          ]
+        }
+      ],
+      "task_id": "finite_count",
+      "instruction": "Stand two cans",
+      "metadata": {
+        "candidate_id": "candidate_01",
+        "generator": "embodichain.gen_sim.task_engine",
+        "goal_sources": {
+          "goal_001": [
+            "step_01"
+          ]
+        },
+        "instruction_coverage": "validated_draft_only",
+        "legacy_semantic_hash": "5ce53dd61084e3eb7465cc131062a84325a337dacf17305064082fd5e27c2981",
+        "milestone_sources": {
+          "step_01": "step_01"
+        },
+        "role_references": {
+          "role_001": [
+            "step_01.object"
+          ]
+        },
+        "step_roles": {
+          "step_01": {
+            "object": "role_001"
+          }
+        },
+        "task_candidate_schema": "action_engine_task_draft_v1",
+        "terminal_goal_policy": "explicit_state_slots/v1"
+      },
+      "semantic_hash": "9cc251db3dd17beb6dd2ca09ca541a88e5171959e12c0a96c3969362f9d2713d"
+    },
+    "expected": {
+      "goal": [
+        "unavailable"
+      ],
+      "milestones": [
+        "unavailable"
+      ],
+      "status": "unavailable",
+      "certificate_ready": false
+    },
+    "source_function_sha256": {
+      "capture_final_goals": "2793d9ee200d0f8e643fdb7ed1fdb7479f6eab144509961c28b72bdb9d428924",
+      "evaluate_runtime_evidence": "c9417733643a8fa89ed8e6d668f648e05fb1f9e5614d3f07ef244df5f2f91781",
+      "_needs_universe": "d4e553ab5cb2f51ce0335e459d40e83c552b9b9f4d17293fc7c4e1aa9b9fda94"
+    },
+    "program_digest": "1d23f1db978cbdec791137eac0a643acd54b0771f66e8dafd10f77c5348cb19b"
+  },
+  "existing_single_binding": {
+    "source_commit": "b0bd3c20161720331e9205f3a6571f62de45075a",
+    "source_module_sha256": "a1f318db80b58377382c0d617e88c94c1484a30476258dbf580a9f82c1b52136",
+    "binding": {
+      "schema_version": "task_spec.condition_evidence_binding/v1",
+      "task_spec_digest": "ec3e355cc8af81b6e75bf021aad0cad677dfa29a10bfee691eafbf7d83a81028",
+      "program_digest": "4b56ceccc57d7709c85b66c9d75bac815327a6561216eaa724ea9f13be0b61c6",
+      "predicate_id": "state",
+      "entity_id": "object",
+      "native_uid": "native_object",
+      "evidence_kind": "orientation",
+      "observation_kind": "final",
+      "condition": {
+        "axis_direction_free": false,
+        "entity": "object",
+        "kind": "upright",
+        "local_axis": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "minimum_alignment": 0.8660254037844386
+      },
+      "evidence_format": "raw_snapshot",
+      "boundary_segment_id": null,
+      "boundary_source_path": [],
+      "policy_segment_id": null,
+      "policy_source_path": [],
+      "stability_preset": null,
+      "required_execution": [],
+      "env_ids": [
+        0,
+        1
+      ],
+      "episode_ids": [
+        2,
+        3
+      ],
+      "binding_hash": "864734ff8d262ad54ea2c2195b7c849416f9fa06e102f948abf270a3eb8ed6b8"
+    }
+  }
+}
