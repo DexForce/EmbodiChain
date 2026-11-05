@@ -277,3 +277,10 @@ revision ordinals rather than native sensor revisions. Historical rigid poses
 use exact seeded slots; historical joint measurements copy the executed policy
 receipt from the actual bridge session. Neither path substitutes a live pose or
 qpos for missing historical data, nor imports TaskSpec to decide task acceptance.
+
+Recorded Pour geometry is collected through public inclusive Gym pose windows
+and `scene.rigid_mesh.capture_rigid_mesh`. The collector reads the receiver only
+at the first maximum-tilt source slot, preserves native row identity and emits
+synchronized `PhysicalEvidenceFrame` channels for numeric geometry and projected
+coverage. It applies no tilt/restore thresholds and determines no release or
+fluid outcome. TaskSpec owns those normative checks.

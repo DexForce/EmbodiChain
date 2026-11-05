@@ -18,6 +18,7 @@ of those owners.
 | Placement bindings and physical proof checks | `evidence.py` |
 | Orientation/joint state and milestone qualification | `condition_evidence.py` |
 | Operation-bound historical Press/Twist qualification | `control_evidence.py` |
+| Rigid Pour motion qualification and exact occurrence selection | `pour_evidence.py` |
 | Common per-environment physical reports | `evidence_report.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
@@ -99,6 +100,16 @@ control acquisition is rejected before observation until the complete window
 contract is implemented. A final control goal remains an operation-event proof,
 not a replacement for a current joint-position measurement. Failed or missing
 operation receipts remain unavailable.
+
+Rigid Pour proof preserves the explicit 30-degree tilt/15-degree restore proxy,
+receiver projection and measured release. Its source/receiver and compiled
+occurrence descriptors are plain declarations; it does not consume Task Engine
+graph objects or live Lab factories. New raw observations require their geometry
+channels, episode, cadence, compiled program fingerprint and exact
+window/boundary identities. The event proof
+cannot establish ``poured`` fluid transfer. Recorded milestones additionally
+require the successful operation prefix; valid measured negatives remain failed
+and missing channels remain unavailable per environment.
 
 ## Focused validation
 

@@ -37,10 +37,16 @@ from embodichain.gen_sim.task_spec.condition_evidence import (
     evaluate_condition_evidence,
 )
 
+from embodichain.gen_sim.task_spec.pour_evidence import (
+    PourEvidenceBinding,
+    evaluate_pour_evidence,
+)
+
 __all__ = [
     "project_placement_evidence_binding",
     "project_configured_placement_evidence_binding",
     "project_condition_evidence_binding",
+    "project_pour_evidence_binding",
 ]
 
 
@@ -592,4 +598,177 @@ def project_condition_evidence_binding(
         episode_ids=None if episode_ids is None else tuple(episode_ids),
     )
     evaluate_condition_evidence(normalized, result, {}, program=program)
+    return result
+
+
+def project_pour_evidence_binding(
+    spec: TaskSpec | Mapping[str, Any],
+    graph: Mapping[str, Any],
+    validation: Mapping[str, Any],
+    program: Mapping[str, Any],
+    occurrences: Mapping[str, Mapping[str, Any]],
+    resolved_operation: Mapping[str, Any],
+    *,
+    predicate_id: str,
+    stage_node_id: str,
+    pour_node_id: str,
+    release_node_id: str,
+    boundary_node_id: str,
+    evidence_format: str = "raw_snapshot",
+    step_dt: float | None = None,
+    episode_ids: Sequence[int] | None = None,
+    num_envs: int = 1,
+) -> PourEvidenceBinding:
+    """Project a validated operation into exact rigid Pour evidence identities.
+
+    Args:
+        spec: Frozen normative TaskSpec.
+        graph: Validated semantic graph and group lineage.
+        validation: Matching source program/spec/graph digests and coverage.
+        program: Complete serialized program.
+        occurrences: Explicit compiled segment ID, display name, source path and
+            invocation ID for each graph node. No ID is manufactured from names.
+        resolved_operation: Plain configured-owner descriptor with object_id,
+            reference_id, resource_id, object_native_uid/reference_native_uid and
+            the compiled program_fingerprint for new raw evidence.
+        predicate_id: Exact goal or milestone predicate.
+        stage_node_id: Explicit reference-relative staging occurrence.
+        pour_node_id: Explicit Pour occurrence.
+        release_node_id: Explicit release occurrence.
+        boundary_node_id: This operation's terminal boundary, including for goals.
+        evidence_format: Raw snapshot or explicit historical replay contract.
+        step_dt: Resolved recording cadence; required for raw qualification.
+        episode_ids: Initialized run identities; required for raw qualification.
+        num_envs: Ordered native environment row count.
+
+    Returns:
+        Owned normative binding. This adapter chooses no motion/geometry values
+        and acquires no state; TaskSpec verifies the supported proof contract.
+    """
+    normalized = TaskSpec.from_dict(spec)
+    graph, validation, program, occurrences, resolved = (
+        json_snapshot(value)
+        for value in (graph, validation, program, occurrences, resolved_operation)
+    )
+    for key, value in (
+        ("task_spec_digest", normalized.to_dict()),
+        ("graph_digest", graph),
+        ("program_digest", program),
+    ):
+        if validation.get(key) != canonical_hash(value):
+            raise ValueError(f"Frozen Pour projection has a different {key}.")
+    coverage = validation["coverage"]
+    if coverage.get("status") != "covered" or coverage.get("issues"):
+        raise ValueError("Pour projection requires complete declared coverage.")
+    if type(num_envs) is not int or num_envs < 1:
+        raise ValueError("num_envs must be a positive integer.")
+    matches = [(item, None) for item in normalized.goal if item.id == predicate_id] + [
+        (item, milestone.id)
+        for milestone in normalized.milestones
+        for item in milestone.achieve
+        if item.id == predicate_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("Pour projection requires one exact predicate.")
+    predicate, milestone_id = matches[0]
+    selected = [
+        item
+        for item in coverage["goals" if milestone_id is None else "milestones"]
+        if item["id"] == (predicate_id if milestone_id is None else milestone_id)
+    ]
+    if len(selected) != 1 or len(selected[0]["groups"]) != 1:
+        raise ValueError("Pour projection requires one complete grounded operation.")
+    group_id = selected[0]["groups"][0]
+    groups = [item for item in graph["task_groups"] if item["id"] == group_id]
+    if len(groups) != 1:
+        raise ValueError("Pour operation identity is missing or ambiguous.")
+    group = groups[0]
+    if (
+        group.get("task_type") != "E3"
+        or not group["node_ids"]
+        or boundary_node_id != group["node_ids"][-1]
+        or any(
+            node not in group["node_ids"]
+            for node in (stage_node_id, pour_node_id, release_node_id)
+        )
+    ):
+        raise ValueError("Pour projection has another operation or terminal boundary.")
+    roles = {role.name: role for role in normalized.roles}
+    for argument, field in (("subject", "object_id"), ("reference", "reference_id")):
+        role_id = predicate.arguments[argument]
+        if roles[role_id].quantifier != "one" or coverage["roles"][role_id] != [
+            {"uid": resolved[field], "part_id": None}
+        ]:
+            raise ValueError(
+                "Pour descriptor differs from its complete rigid-role binding."
+            )
+    lineage = [
+        entry
+        for entries in coverage["lineage"].values()
+        for entry in entries
+        if entry["group_id"] == group_id
+    ]
+    if (
+        len(lineage) != 1
+        or lineage[0]["object_uid"] != resolved["object_id"]
+        or lineage[0].get("object_part_id") is not None
+    ):
+        raise ValueError("Pour descriptor differs from its object lineage.")
+    nodes = {item["id"]: item for item in graph["nodes"]}
+    if len(nodes) != len(graph["nodes"]):
+        raise ValueError("Duplicate graph nodes cannot identify Pour occurrences.")
+    selected_occurrences = []
+    for node_id in group["node_ids"]:
+        node = nodes[node_id]
+        descriptor = occurrences[node_id]
+        item = program
+        for component in descriptor["source_path"]:
+            if type(component) not in (str, int):
+                raise ValueError(
+                    "Pour source paths require exact string/integer components."
+                )
+            item = item[component]
+        if (
+            node.get("task_type") != "E3"
+            or node.get("task_instance_id") != group_id
+            or item.get("name") != descriptor["segment_name"]
+            or item["steps"]["call"] != node["call"]
+        ):
+            raise ValueError(
+                "Compiled Pour occurrence differs from its semantic graph declaration."
+            )
+        selected_occurrences.append(
+            {
+                name: descriptor[name]
+                for name in (
+                    "segment_id",
+                    "segment_name",
+                    "source_path",
+                    "invocation_id",
+                )
+            }
+        )
+    result = PourEvidenceBinding(
+        task_spec_digest=validation["task_spec_digest"],
+        program_digest=validation["program_digest"],
+        predicate_id=predicate_id,
+        operation_id=group_id,
+        object_id=resolved["object_id"],
+        reference_id=resolved["reference_id"],
+        resource_id=resolved["resource_id"],
+        object_native_uid=resolved["object_native_uid"],
+        reference_native_uid=resolved["reference_native_uid"],
+        occurrences=tuple(selected_occurrences),
+        stage_segment_id=occurrences[stage_node_id]["segment_id"],
+        pour_segment_id=occurrences[pour_node_id]["segment_id"],
+        release_segment_id=occurrences[release_node_id]["segment_id"],
+        boundary_segment_id=occurrences[boundary_node_id]["segment_id"],
+        observation_kind="final" if milestone_id is None else "recorded",
+        evidence_format=evidence_format,
+        program_fingerprint=resolved.get("program_fingerprint"),
+        step_dt=step_dt,
+        env_ids=tuple(range(num_envs)),
+        episode_ids=None if episode_ids is None else tuple(episode_ids),
+    )
+    evaluate_pour_evidence(normalized, result, {}, program=program)
     return result

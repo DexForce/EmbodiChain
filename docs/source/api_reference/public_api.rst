@@ -847,6 +847,7 @@ and decides no predicate outcome.
 
    project_placement_evidence_binding
    project_condition_evidence_binding
+   project_pour_evidence_binding
    project_configured_placement_evidence_binding
 
 .. autofunction:: project_placement_evidence_binding
@@ -859,6 +860,14 @@ The adapter preserves opaque occurrence names, does not infer capabilities from
 names, and does not sample state or compute physical acceptance.
 
 .. autofunction:: project_condition_evidence_binding
+
+``project_pour_evidence_binding`` consumes explicit compiled occurrence IDs and
+plain configured-owner endpoint descriptors. Its event boundary belongs to the
+selected operation even for a final goal; it neither invents IDs from names nor
+reads geometry, poses or old constraint files.
+
+.. autofunction:: project_pour_evidence_binding
+
 
 New bundles use ``project_configured_placement_evidence_binding`` with a detached
 condition from the configured owner's named settle preset. It requires no
@@ -1107,6 +1116,34 @@ not-run outcomes; an incomplete always-window cannot certify success.
    evaluate_predicate
    evaluate_temporal_condition
    lookup_observation
+
+embodichain.gen_sim.task_spec.pour_evidence
+-------------------------------------------
+
+Rigid Pour proof retains the source ``measured_tilt_restore/v1`` criterion:
+30 degrees of observed tilt, restore error at most 15 degrees, the gravity-top
+proxy above the receiver projection, and an independently measured release.
+This is not a detected spout or fluid-transfer witness. ``poured`` remains
+unqualified by these APIs.
+
+Bindings seal exact compiled segment/invocation IDs, source/receiver/resource
+identities, the actual compiled program fingerprint and recording cadence and explicit raw or historical input format.
+New Lab snapshots carry synchronized geometry channels; missing validity or
+release acquisition remains unavailable per environment. Recorded milestones
+also require their full successful occurrence prefix. Core imports and binding
+normalization are standard-library-only.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.pour_evidence
+
+.. autosummary::
+
+   PourEvidenceBinding
+   evaluate_pour_evidence
+
+.. autoclass:: PourEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_pour_evidence
 
 embodichain.gen_sim.task_spec.registry
 --------------------------------------
@@ -1518,6 +1555,10 @@ are not dependencies of this Lab collector.
 native joint positions. Its revision counts owned acquisitions, not native
 contact revisions. Recorded rigid poses come only from seeded exact slots;
 recorded joint policies copy the actual bridge receipt and never read live qpos.
+Recorded Pour geometry consumes inclusive source pose windows and the receiver's
+exact first maximum-tilt slot. It reuses owned native mesh topology and shared
+numeric projection, publishes physical channels, and decides no release or
+normative outcome. No live pose substitutes for an absent recording.
 
 .. autoclass:: SimulationStateObservationCollector
    :members:
@@ -1763,6 +1804,8 @@ Slot indices are not simulation timestamps.
    RecordedRigidPoseSnapshot
    RecordedTrajectoryReader
    read_recorded_rigid_pose_snapshot
+   RecordedRigidPoseWindow
+   read_recorded_rigid_pose_window
 
 .. autoclass:: RecordedRigidPoseSnapshot
    :members:
@@ -1771,6 +1814,19 @@ Slot indices are not simulation timestamps.
    :members:
 
 .. autofunction:: read_recorded_rigid_pose_snapshot
+
+Inclusive pose-window capture retains each native row's own start/end slots and
+length without padding or resampling. Seeded slot zero may be included; the exact
+end slot must already be recorded. One bulk xyzw-to-matrix conversion per row
+preserves source dtype and grid. The recording reader validates its episode and
+lifetime before and after capture. Consumers explicitly bind this reader for
+historical pose access; unavailable recordings reject the read.
+
+.. autoclass:: RecordedRigidPoseWindow
+   :members:
+
+.. autofunction:: read_recorded_rigid_pose_window
+
 
 embodichain.lab.scripts.analyze_workspace
 -----------------------------------------

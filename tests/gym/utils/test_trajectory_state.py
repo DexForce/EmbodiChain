@@ -21,6 +21,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 import torch
 from tensordict import TensorDict
 
@@ -238,7 +239,8 @@ def test_recorded_pose_snapshot_rejects_missing_rows_and_unseeded_pose_slots():
             )
 
 
-def test_recorded_reader_rejects_lifetime_changes_during_snapshot(monkeypatch):
+@pytest.mark.parametrize("window", [False, True])
+def test_recorded_reader_rejects_lifetime_changes_during_snapshot(monkeypatch, window):
     import pytest
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.utils import trajectory_state
@@ -255,18 +257,28 @@ def test_recorded_reader_rejects_lifetime_changes_during_snapshot(monkeypatch):
         episode_context=context,
         is_closed=lambda: lifetime["closed"],
     )
-    read = trajectory_state.read_recorded_rigid_pose_snapshot
+    helper = (
+        "read_recorded_rigid_pose_window"
+        if window
+        else "read_recorded_rigid_pose_snapshot"
+    )
+    read = getattr(trajectory_state, helper)
+
+    def capture(episode_ids):
+        if window:
+            return reader.read_rigid_pose_window(
+                "cube", [0, 1], [2, 2], episode_ids=episode_ids
+            )
+        return reader.read_rigid_poses("cube", [2, 2], episode_ids=episode_ids)
 
     def reset_after_copy(*args, **kwargs):
         result = read(*args, **kwargs)
         context._begin_episode(torch.tensor([0]))
         return result
 
-    monkeypatch.setattr(
-        trajectory_state, "read_recorded_rigid_pose_snapshot", reset_after_copy
-    )
+    monkeypatch.setattr(trajectory_state, helper, reset_after_copy)
     with pytest.raises(ValueError, match="another or uninitialized episode"):
-        reader.read_rigid_poses("cube", [2, 2], episode_ids=[0, 0])
+        capture([0, 0])
     context._finish_initialization(torch.tensor([0]))
 
     def close_after_copy(*args, **kwargs):
@@ -274,8 +286,99 @@ def test_recorded_reader_rejects_lifetime_changes_during_snapshot(monkeypatch):
         lifetime["closed"] = True
         return result
 
-    monkeypatch.setattr(
-        trajectory_state, "read_recorded_rigid_pose_snapshot", close_after_copy
-    )
+    monkeypatch.setattr(trajectory_state, helper, close_after_copy)
     with pytest.raises(RuntimeError, match="after close"):
-        reader.read_rigid_poses("cube", [2, 2], episode_ids=[1, 0])
+        capture([1, 0])
+
+
+def test_recorded_windows_keep_inclusive_seeded_slots_and_per_row_lengths():
+    from embodichain.lab.gym.utils.trajectory_state import (
+        read_recorded_rigid_pose_window,
+    )
+
+    states = _make_state_buffer()
+    values = states["rigid_objects"]["cube"]["pose"]
+    values[..., 6] = 1.0
+    values[:, :, 0] = torch.tensor([0.0, 1.0, 2.0])
+    window = read_recorded_rigid_pose_window(
+        states,
+        torch.tensor([2, 2]),
+        object_uid="cube",
+        start_frames=[0, 1],
+        end_frames=[2, 2],
+        episode_ids=[4, 9],
+    )
+    assert [row[:, 0, 3].tolist() for row in window.poses] == [
+        [0.0, 1.0, 2.0],
+        [1.0, 2.0],
+    ]
+    assert window.env_ids == (0, 1)
+    assert window.episode_ids == (4, 9)
+    assert window.start_frames == (0, 1)
+    assert window.end_frames == (2, 2)
+    values.zero_()
+    assert [row[:, 0, 3].tolist() for row in window.poses] == [
+        [0.0, 1.0, 2.0],
+        [1.0, 2.0],
+    ]
+
+    import pytest
+
+    with pytest.raises(ValueError):
+        read_recorded_rigid_pose_window(
+            states,
+            torch.tensor([2, 2]),
+            object_uid="cube",
+            start_frames=[0, 1],
+            end_frames=[2, 2],
+            episode_ids=[4, 9],
+        )
+
+
+def test_recorded_windows_reject_missing_end_slots_and_episode_reuse():
+    import pytest
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.utils.trajectory_state import (
+        read_recorded_rigid_pose_window,
+        RecordedTrajectoryReader,
+    )
+
+    states = _make_state_buffer()
+    states["rigid_objects"]["cube"]["pose"][..., 6] = 1.0
+    for written, ends, message in (
+        ([1, 2], [2, 2], "not fully recorded"),
+        ([3, 3], [3, 3], "terminal state slot"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            read_recorded_rigid_pose_window(
+                states,
+                torch.tensor(written),
+                object_uid="cube",
+                start_frames=[0, 0],
+                end_frames=ends,
+                episode_ids=[0, 0],
+            )
+    context = EpisodeContext(2)
+    context._begin_episode(torch.tensor([0, 1]))
+    context._finish_initialization(torch.tensor([0, 1]))
+    env = SimpleNamespace(
+        num_envs=2,
+        episode_context=context,
+        _traj_buffer={"states": states},
+        _traj_steps=torch.tensor([2, 2]),
+        _closed=False,
+    )
+    reader = RecordedTrajectoryReader(
+        source=lambda: (env._traj_buffer["states"], env._traj_steps),
+        episode_context=context,
+        is_closed=lambda: env._closed,
+    )
+    assert reader.read_rigid_pose_window(
+        "cube", [0, 1], [2, 2], episode_ids=[0, 0]
+    ).end_frames == (2, 2)
+    context._begin_episode(torch.tensor([0]))
+    with pytest.raises(ValueError, match="another.*episode"):
+        reader.read_rigid_pose_window("cube", [0, 1], [2, 2], episode_ids=[0, 0])
+    env._closed = True
+    with pytest.raises(RuntimeError, match="after close"):
+        reader.read_rigid_pose_window("cube", [0, 1], [2, 2], episode_ids=[1, 0])

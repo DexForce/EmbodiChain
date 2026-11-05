@@ -40,6 +40,8 @@ __all__ = [
     "RecordedRigidPoseSnapshot",
     "RecordedTrajectoryReader",
     "read_recorded_rigid_pose_snapshot",
+    "RecordedRigidPoseWindow",
+    "read_recorded_rigid_pose_window",
 ]
 
 
@@ -340,6 +342,49 @@ class RecordedTrajectoryReader:
         self._check_episode(expected)
         return result
 
+    def read_rigid_pose_window(
+        self,
+        object_uid: str,
+        start_frames: Sequence[int],
+        end_frames: Sequence[int],
+        *,
+        episode_ids: Sequence[int],
+    ) -> RecordedRigidPoseWindow:
+        """Copy exact inclusive pose windows from this recording episode.
+
+        Args:
+            object_uid: Exact native rigid-object UID selected for recording.
+            start_frames: First seeded slot for every environment row.
+            end_frames: Last exact written slot for every row.
+            episode_ids: Expected episode identities captured before execution.
+
+        Returns:
+            Owned CPU windows with each row's original length, dtype, and grid.
+
+        Raises:
+            RuntimeError: Recording is unavailable or its owner is closed.
+            ValueError: An episode changed or a requested interval is invalid.
+            KeyError: The selected native object was not recorded.
+        """
+        self._check_open()
+        recording = self._source()
+        if recording is None:
+            raise RuntimeError("Rigid trajectory recording is unavailable.")
+        expected = tuple(episode_ids)
+        self._check_episode(expected)
+        states, written_steps = recording
+        result = read_recorded_rigid_pose_window(
+            states,
+            written_steps,
+            object_uid=object_uid,
+            start_frames=start_frames,
+            end_frames=end_frames,
+            episode_ids=expected,
+        )
+        self._check_open()
+        self._check_episode(expected)
+        return result
+
 
 def read_recorded_rigid_pose_snapshot(
     states: _TrajectoryState,
@@ -408,4 +453,125 @@ def read_recorded_rigid_pose_snapshot(
         episodes,
         frames,
         pose,
+    )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class RecordedRigidPoseWindow:
+    """Owned inclusive recorded pose windows, retaining each native row's length.
+
+    No row is padded or resampled. Initial slot zero is available only when it
+    was seeded, and the exact end slot must already have been written.
+    """
+
+    object_uid: str
+    env_ids: tuple[int, ...]
+    episode_ids: tuple[int, ...]
+    start_frames: tuple[int, ...]
+    end_frames: tuple[int, ...]
+    poses: tuple[torch.Tensor, ...]
+
+    def __post_init__(self) -> None:
+        from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
+
+        if (
+            type(self.object_uid) is not str
+            or not self.object_uid
+            or self.object_uid != self.object_uid.strip()
+        ):
+            raise ValueError(
+                "Recorded object UID must be an exact nonempty identifier."
+            )
+        size = len(self.env_ids)
+        if not size or len(set(self.env_ids)) != size:
+            raise ValueError("Recorded environment IDs must be nonempty and unique.")
+        for name in ("env_ids", "episode_ids", "start_frames", "end_frames"):
+            values = tuple(getattr(self, name))
+            if len(values) != size or any(
+                type(value) is not int or value < 0 for value in values
+            ):
+                raise ValueError(
+                    f"{name} must contain one qualified nonnegative integer per row."
+                )
+            object.__setattr__(self, name, values)
+        rows = tuple(self.poses)
+        if len(rows) != size:
+            raise ValueError("Recorded windows require every declared environment row.")
+        owned = []
+        for start, end, poses in zip(
+            self.start_frames, self.end_frames, rows, strict=True
+        ):
+            if end < start:
+                raise ValueError("Recorded window end cannot precede its start.")
+            validate_rigid_pose_batch(poses, end - start + 1)
+            owned.append(poses.detach().to(device="cpu", copy=True))
+        object.__setattr__(self, "poses", tuple(owned))
+
+
+def read_recorded_rigid_pose_window(
+    states: _TrajectoryState,
+    written_steps: torch.Tensor,
+    *,
+    object_uid: str,
+    start_frames: Sequence[int],
+    end_frames: Sequence[int],
+    episode_ids: Sequence[int],
+) -> RecordedRigidPoseWindow:
+    """Read exact inclusive recorded pose windows without live-state fallback.
+
+    Args:
+        states: Existing trajectory state buffers including rigid_objects.
+        written_steps: Completed transition count in every native row.
+        object_uid: Exact native rigid-object UID in the recording selection.
+        start_frames: First requested seeded slot in each row, including zero.
+        end_frames: Last exact slot in each row, already written by execution.
+        episode_ids: Host-validated episode identities for the stored buffers.
+
+    Returns:
+        Owned CPU matrices for each row's own inclusive interval. One bulk
+        conversion per row preserves source dtype, time grid and xyzw ordering.
+
+    Raises:
+        ValueError: A row/window/seeded slot is absent, incomplete or invalid.
+        KeyError: The selected rigid object was not recorded.
+    """
+    from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+    if (
+        not isinstance(written_steps, torch.Tensor)
+        or written_steps.ndim != 1
+        or written_steps.dtype != torch.long
+    ):
+        raise ValueError("Recording requires an integer completed-step vector.")
+    starts, ends, episodes = tuple(start_frames), tuple(end_frames), tuple(episode_ids)
+    size = written_steps.numel()
+    if any(len(values) != size for values in (starts, ends, episodes)) or any(
+        type(value) is not int or value < 0
+        for values in (starts, ends, episodes)
+        for value in values
+    ):
+        raise ValueError(
+            "Recorded windows require one nonnegative boundary and episode per row."
+        )
+    if any(start > end for start, end in zip(starts, ends, strict=True)):
+        raise ValueError("Recorded window end cannot precede its start.")
+    values = states["rigid_objects"][object_uid]["pose"]
+    if (
+        not isinstance(values, torch.Tensor)
+        or values.ndim != 3
+        or values.shape[0] != size
+        or values.shape[-1] != 7
+    ):
+        raise ValueError("Recorded rigid poses must contain every requested row.")
+    completed = written_steps.detach().cpu().tolist()
+    if any(end > completed[row] for row, end in enumerate(ends)):
+        raise ValueError("The requested window is not fully recorded.")
+    if any(end >= values.shape[1] for end in ends):
+        raise ValueError("The seeded terminal state slot is unavailable.")
+    poses = tuple(
+        xyz_quat_to_4x4_matrix(values[row, start : end + 1].detach().cpu())
+        for row, (start, end) in enumerate(zip(starts, ends, strict=True))
+    )
+    return RecordedRigidPoseWindow(
+        object_uid, tuple(range(size)), episodes, starts, ends, poses
     )

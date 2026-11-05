@@ -247,6 +247,8 @@ remain with callers.
    JawPourFrameSet
    PourGraspProjection
    gravity_top_frame
+   measure_pour_tilt
+   measure_pour_receiver
    pour_staging_pose
    pour_frames
    jaw_tilt_axis

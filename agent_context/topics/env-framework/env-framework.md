@@ -215,3 +215,10 @@ BaseEnv starts one simulation-manager update per control interval and samples
 participating sensors through its `after_substep` observer. See the sensor-owned [contact history contract](../sensor-system/contact-history.md)
 for interval accumulation, counterpart filtering and selective reset.
 EmbodiedEnv resets action and event managers before applying reset-mode events.
+
+Exact historical pose windows use
+`RecordedTrajectoryReader.read_rigid_pose_window`, which validates the initialized
+episode before and after reading. `RecordedRigidPoseWindow` retains each row's
+inclusive start/end slots and own length; it never pads, resamples, substitutes a
+live pose or shifts an absent end slot backward. Slot zero must contain the
+seeded initial state. Task/effect acceptance remains outside this recording API.
