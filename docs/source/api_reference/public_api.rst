@@ -1363,6 +1363,12 @@ and rotation require their own explicitly selected policy values; the default
 retain the source observed posture, and neither this monitor nor the policy
 advances environment time itself.
 
+Every environment-adapter bridge obtains fresh policy/validator session state,
+including execution without nominal sources. A later bridge supersedes the
+earlier session's observation ownership instead of replacing its clock. Captured
+position holds use the configured Gym action encoder, supplying zero velocity
+targets in ``position_velocity`` mode while retaining the original positions.
+
 Supported conditions declare a standard contact sensor through
 ``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native
 rigid UIDs; the runtime factory creates or reuses the sensor and the environment

@@ -588,6 +588,7 @@ class SimulationSegmentPolicyPort:
         key = id(policy)
         self._post_policy_results.pop(key, None)
         self._post_policy_success.pop(key, None)
+        clock = self.observation_clock
         hold = self._read_robot_qpos(self._robot, target=False).clone()
         anchor = art.get_qpos()[:, index].clone()
         if active_mask.shape != anchor.shape or active_mask.device != anchor.device:
@@ -598,7 +599,6 @@ class SimulationSegmentPolicyPort:
             position_drift=cfg.position_drift,
         )
         timeout = math.ceil(cfg.timeout / self._step_dt)
-        clock = self.observation_clock
         if clock is not None and not math.isclose(
             clock.step_dt, self._step_dt, rel_tol=0, abs_tol=1e-9
         ):

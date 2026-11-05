@@ -259,3 +259,8 @@ session's current observation binding; an unbound port returns None and a
 superseded session rejects new reads. Same-clock binding is idempotent and the
 generation belongs to the existing owner lifetime, not a global active-run
 registry. Default execution, cancellation and cleanup retain their own protocols.
+The environment adapter requests a fresh policy/validator session for every
+bridge, including ordinary execution without nominal sources. Creating a later
+bridge cannot replace the clock stored by an earlier session. Position-only
+post-policy holds pass through the configured Gym action encoder, preserving the
+captured positions and supplying zero velocity targets in position-velocity mode.
