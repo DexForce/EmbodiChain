@@ -266,6 +266,8 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/scene/
   - embodichain/compute/geometry/
+  - embodichain/compute/geometry/pouring.py
+  - embodichain/compute/geometry/projection.py
   - embodichain/lab/sim/objects/backends/_collision_inputs.py
   watch_paths: [embodichain/lab/sim/scene/, embodichain/compute/geometry/,
     tests/sim/scene/, tests/compute/geometry/]

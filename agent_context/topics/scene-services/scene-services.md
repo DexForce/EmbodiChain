@@ -259,3 +259,11 @@ geometry, constraints, recipes and runtime contracts. GenSim adapter regressions
 live in `tests/gen_sim/scene_engine/`; Task Program host regressions live in
 `tests/gym/envs/task_program/test_simulation_scene_expansion.py`. Native settling
 and restoration need an explicit supported simulator run beyond CPU port tests.
+
+`compute.geometry.pouring` owns explicit numeric tilt arcs, gravity-top staging
+and per-candidate grasp projection. It accepts arrays/tensors, actual pad lines
+and configured clearance, not scene/robot/task objects. It preserves owned
+snapshots, source order and masks and establishes no physical pour success.
+`compute.geometry.projection.triangle_mesh_xy_projection` retains all positive
+area triangles in authored order, including holes and disconnected regions;
+it does not reduce the mesh to a convex hull or choose a support floor.

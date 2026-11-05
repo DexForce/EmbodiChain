@@ -228,3 +228,45 @@ establish a task outcome. Runtime measurement and snapshot re-evaluation share
 this same calculation.
 
 .. autofunction:: contact_support_heights
+
+Pour arcs and grasp projections
+-------------------------------
+
+These B=1 numerical routines retain an observed staging orientation, generate
+an ordered-jaw fixed-pivot arc, and project five downstream targets for each
+candidate grasp before IK. ``PourGraspProjection`` owns its numeric inputs and
+retains invalid candidates' staging fallbacks. Its angle and sample count are
+resolved query operands; policies, scene observations and physical acceptance
+remain with callers.
+
+.. currentmodule:: embodichain.compute.geometry.pouring
+
+.. autosummary::
+
+   PourFrameSet
+   JawPourFrameSet
+   PourGraspProjection
+   gravity_top_frame
+   pour_staging_pose
+   pour_frames
+   jaw_tilt_axis
+   jaw_pour_frames
+
+.. automodule:: embodichain.compute.geometry.pouring
+   :members:
+
+Triangle mesh XY projection
+---------------------------
+
+The complete positive-area triangle union preserves concavities, holes and
+disconnected components. It takes plain native vertex/face arrays and retains
+source float64 projection arithmetic and face order. It does not select floor
+regions, choose placements, inspect simulation handles or compute task success.
+
+.. currentmodule:: embodichain.compute.geometry.projection
+
+.. autosummary::
+
+   triangle_mesh_xy_projection
+
+.. autofunction:: triangle_mesh_xy_projection
