@@ -427,8 +427,10 @@ def randomize_light(
         num_instance = 1
         effective_env_ids = None
     else:
-        num_instance = len(env_ids)
+        num_instance = light.num_instances if env_ids is None else len(env_ids)
         effective_env_ids = env_ids
+
+    fields: dict[str, torch.Tensor] = {}
 
     if position_range:
         if is_global:
@@ -449,7 +451,7 @@ def randomize_light(
                 size=new_pos.shape,
             )
             new_pos += random_value
-            light.set_local_pose(new_pos, env_ids=effective_env_ids)
+            fields["position"] = new_pos
 
     if color_range:
         color = torch.zeros((num_instance, 3), dtype=torch.float32)
@@ -459,7 +461,7 @@ def randomize_light(
             size=color.shape,
         )
         color += random_value
-        light.set_color(color, env_ids=effective_env_ids)
+        fields["color"] = color
 
     if intensity_range:
         init_intensity = light.cfg.intensity
@@ -475,7 +477,7 @@ def randomize_light(
         )
         new_intensity += random_value
         new_intensity.squeeze_(1)
-        light.set_intensity(new_intensity, env_ids=effective_env_ids)
+        fields["intensity"] = new_intensity
 
     if direction_range:
         light_type = light.cfg.light_type
@@ -485,6 +487,8 @@ def randomize_light(
                 f"(type='{light_type}'). Direction only applicable to "
                 f"'sun', 'direction', 'spot', 'rect', and 'mesh' types."
             )
+            if fields:
+                light.apply_state(**fields, env_ids=effective_env_ids)
             return
 
         init_dir = light.cfg.direction
@@ -499,7 +503,10 @@ def randomize_light(
             size=new_dir.shape,
         )
         new_dir += random_value
-        light.set_direction(new_dir, env_ids=effective_env_ids)
+        fields["direction"] = new_dir
+
+    if fields:
+        light.apply_state(**fields, env_ids=effective_env_ids)
 
 
 def randomize_emission_light(

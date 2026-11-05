@@ -1997,7 +1997,10 @@ def test_robot_sensor_preflight_precedes_resource_allocation(invalid: str) -> No
 @pytest.mark.gpu
 @pytest.mark.requires_sim
 @pytest.mark.parametrize("backend", ["default", "newton"])
-def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) -> None:
+@pytest.mark.parametrize("stereo", [False, True])
+def test_robot_mounted_camera_backend_lifecycle(
+    tmp_path: Path, backend: str, stereo: bool
+) -> None:
     """Mounted cameras follow state writes and survive physical topology rebuilds."""
     urdf_path = tmp_path / "camera_robot.urdf"
     urdf_path.write_text("""<robot name="camera_robot">
@@ -2034,7 +2037,7 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
         )
     )
     try:
-        camera_cfg = CameraCfg(
+        camera_cfg = (StereoCameraCfg if stereo else CameraCfg)(
             uid="mounted",
             width=32,
             height=24,
@@ -2434,6 +2437,10 @@ def test_add_camera_uses_owning_manager_render_context(
         num_envs=len(arenas), render_cfg=RenderCfg(renderer="hybrid")
     )
     sim.device = torch.device("cpu")
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(result=object(), is_finalized=False),
+        arena_names=("arena_0", "arena_1"),
+    )
     sim._world = world
     sim._arenas = arenas
     sim._sensors = {}
@@ -2458,7 +2465,7 @@ def test_camera_attachment_uses_resolved_nodes_and_tracks_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     entities = [MagicMock(), MagicMock()]
-    parent_nodes = [object(), object()]
+    parent_nodes = [MagicMock(), MagicMock()]
     owner = MagicMock()
     owner.num_envs = len(entities)
     owner.get_world.return_value = object()
@@ -2466,6 +2473,7 @@ def test_camera_attachment_uses_resolved_nodes_and_tracks_state(
 
     def build_camera(sensor, config, device) -> None:
         sensor._entities[:] = entities
+        sensor._camera_handles = tuple(entities)
 
     monkeypatch.setattr(
         sim_manager_module.Camera,
@@ -2486,8 +2494,9 @@ def test_camera_attachment_uses_resolved_nodes_and_tracks_state(
     sensor.attach_to_parent_nodes(parent_nodes)
 
     assert sensor.is_attached is True
-    for entity, parent_node in zip(entities, parent_nodes, strict=True):
-        entity.attach_node.assert_called_once_with(parent_node)
+    call = sensor._scene.attach_render_objects.call_args
+    assert call.args[0] == tuple(entities)
+    assert call.args[1] == [node.path_name() for node in parent_nodes]
 
 
 def test_manager_resolves_camera_parent_before_attachment() -> None:
@@ -2591,7 +2600,10 @@ def _make_camera_parent_asset(
     num_envs: int = 2, link_name: str = "wrist"
 ) -> tuple[SimpleNamespace, list[object]]:
     """Expose only the public articulation API used by attachment resolution."""
-    nodes = [object() for _ in range(num_envs)]
+    nodes = [
+        SimpleNamespace(path_name=lambda i=i: f"/arena_{i}/arm/wrist")
+        for i in range(num_envs)
+    ]
     return (
         SimpleNamespace(
             link_names=[link_name],
@@ -2610,7 +2622,10 @@ def _make_unbound_camera_parent_asset(
         RobotCfg(uid=uid, fpath="robot.urdf"), device=torch.device("cpu")
     )
     asset._initialize_spawn_declaration(num_envs)
-    nodes = [object() for _ in range(num_envs)]
+    nodes = [
+        SimpleNamespace(path_name=lambda i=i: f"/arena_{i}/arm/wrist")
+        for i in range(num_envs)
+    ]
     asset.get_link_render_nodes = MagicMock(return_value=nodes)
     return asset, nodes
 
@@ -2626,7 +2641,7 @@ def _bind_camera_parent_asset(
 
 def _make_camera_with_fake_views(
     cfg: CameraCfg, num_envs: int
-) -> tuple[Camera, list[MagicMock]]:
+) -> tuple[Camera, MagicMock]:
     """Exercise real camera pose and attachment logic with CPU-only views."""
     stereo = isinstance(cfg, StereoCameraCfg)
     camera_type = StereoCamera if stereo else Camera
@@ -2635,26 +2650,31 @@ def _make_camera_with_fake_views(
     camera.device = torch.device("cpu")
     camera._num_instances = num_envs
     camera._is_attached = False
-    native_views = []
+    eye_count = 2 if stereo else 1
+    camera._camera_handles = tuple(object() for _ in range(num_envs * eye_count))
+    camera._is_destroyed = False
+    camera._batch_revision = 0
+    camera._camera_batch = MagicMock()
+    camera._scene = MagicMock(topology_revision=0)
+    camera._scene.create_camera_batch.return_value = camera._camera_batch
+    poses = torch.eye(4).repeat(num_envs * eye_count, 1, 1)
 
-    def make_view() -> MagicMock:
-        view = MagicMock()
-        view.get_local_pose.return_value = np.eye(4, dtype=np.float32)
-        view.set_local_pose.side_effect = lambda pose: setattr(
-            view.get_local_pose, "return_value", pose.copy()
-        )
-        native_views.append(view)
-        return view
+    def apply_pose(values, *, rows=None, **_kwargs):
+        poses[torch.arange(len(poses)) if rows is None else rows] = values
 
-    camera._entities = [
-        (
-            PairCameraView(make_view(), make_view(), cfg.left_to_right.numpy())
-            if stereo
-            else make_view()
-        )
-        for _ in range(num_envs)
-    ]
-    return camera, native_views
+    def attach(_handles, _paths, *, local_poses):
+        poses.copy_(local_poses)
+
+    camera._camera_batch.apply_pose.side_effect = apply_pose
+    camera._camera_batch.fetch_pose.side_effect = lambda **_kw: poses.clone()
+    camera._scene.attach_render_objects.side_effect = attach
+    if stereo:
+        camera._left_to_center = torch.eye(4)
+        camera._right_to_center = torch.eye(4)
+        camera._left_to_center[:3, 3] = cfg.left_to_right[:3, 3] * -0.5
+        camera._right_to_center[:3, 3] = cfg.left_to_right[:3, 3] * 0.5
+        camera._offsets = {}
+    return camera, camera._scene.attach_render_objects
 
 
 def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
@@ -2769,11 +2789,9 @@ def test_add_camera_waits_for_parent_readiness_and_next_prepare(
         torch.testing.assert_close(
             existing.get_local_pose(to_matrix=True), runtime_pose
         )
-        for view in native_views:
-            view.attach_node.assert_called_once()
+        native_views.assert_called_once()
     else:
-        for view in native_views:
-            assert view.attach_node.call_count == 2
+        assert native_views.call_count == 2
 
 
 @pytest.mark.parametrize("stereo", [False, True])
@@ -2821,8 +2839,7 @@ def test_eager_articulation_addition_revalidates_existing_camera_parent(
     assert result.topology_revision == 4
     assert camera.is_attached
     torch.testing.assert_close(camera.get_local_pose(to_matrix=True), runtime_pose)
-    for view in native_views:
-        view.attach_node.assert_called_once()
+    native_views.assert_called_once()
 
 
 @pytest.mark.parametrize("registry", ["_robots", "_articulations"])
@@ -3113,7 +3130,12 @@ def test_prepare_detaches_camera_before_rebuilding_parent(rebuild: bool) -> None
     camera.cfg = CameraCfg(extrinsics=CameraCfg.ExtrinsicsCfg(parent="wrist"))
     camera._is_attached = True
     view = MagicMock()
-    camera._entities = [view]
+    camera._camera_handles = (view,)
+    camera.device = torch.device("cpu")
+    camera._is_destroyed = False
+    camera._camera_batch = MagicMock()
+    camera._batch_revision = 1
+    camera._scene = MagicMock(topology_revision=1)
     result = MagicMock(needs_rebuild=rebuild, topology_revision=1)
     scene = MagicMock()
     scene.builder.is_finalized = True
@@ -3122,7 +3144,7 @@ def test_prepare_detaches_camera_before_rebuilding_parent(rebuild: bool) -> None
 
     def commit():
         assert not camera.is_attached
-        view.get_node.return_value.detach_parent.assert_called_once_with()
+        camera._scene.detach_render_objects.assert_called_once()
         return result
 
     scene.commit.side_effect = commit

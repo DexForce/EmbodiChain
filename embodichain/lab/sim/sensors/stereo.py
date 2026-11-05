@@ -19,11 +19,11 @@ from __future__ import annotations
 import dexsim
 import torch
 import numpy as np
+import weakref
 import dexsim.render as dr
 
-from typing import TYPE_CHECKING, Dict, Tuple, List, Sequence
+from typing import TYPE_CHECKING, Any, Dict, Tuple, List, Sequence
 
-from dexsim.utility import inv_transform
 from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.utils.math import matrix_from_euler
 from embodichain.utils import logger, configclass
@@ -92,10 +92,19 @@ class StereoCameraCfg(CameraCfg):
 
 
 class PairCameraView:
-    """Forward one stereo instance's pose and exclusion policy to both views.
+    """Compatibility view of one stereo pair owned by a live Scene camera.
 
-    The owning :class:`StereoCamera` manages the borrowed native views and
-    their lifetime. Pose writes account for the configured eye separation.
+    Pose and attachment operations publish both eyes through the owning
+    sensor's native batch. Pose getters return an owned center-pose matrix.
+
+    Args:
+        left_view: Native left-eye view used for node access.
+        right_view: Native right-eye view paired with ``left_view``.
+        left_to_right: Calibration matrix; its translation defines the
+            symmetric eye offsets, matching the stereo sensor contract.
+        owner: Live sensor owning both Scene camera handles. Required for
+            state and attachment operations.
+        index: Logical environment row within the owning sensor.
     """
 
     def __init__(
@@ -103,7 +112,12 @@ class PairCameraView:
         left_view: dr.CameraView,
         right_view: dr.CameraView,
         left_to_right: np.ndarray,
+        *,
+        owner: Camera | None = None,
+        index: int = 0,
     ) -> None:
+        self._owner_ref = None if owner is None else weakref.ref(owner)
+        self._index = index
         self._left_view = left_view
         self._right_view = right_view
         self._left_to_right = left_to_right
@@ -119,32 +133,57 @@ class PairCameraView:
         self._left_view.set_excluded_render_categories(categories)
         self._right_view.set_excluded_render_categories(categories)
 
+    def _owner(self) -> Camera:
+        """Resolve the owning sensor without keeping it alive through a cycle."""
+        owner = None if self._owner_ref is None else self._owner_ref()
+        if owner is None:
+            raise RuntimeError(
+                "Stereo view operations require a live Scene-owned sensor."
+            )
+        return owner
+
+    def _apply_pose(self, pose: np.ndarray, frame: str) -> None:
+        """Submit both eye offsets as one native pose operation."""
+        owner = self._owner()
+        owner._batch.apply_pose(
+            np.stack((pose @ self._left_to_center, pose @ self._right_to_center)),
+            rows=[self._index, self._index + owner.num_instances],
+            frame=frame,
+        )
+
+    def _fetch_pose(self, frame: str) -> np.ndarray:
+        """Recover the center from one snapshot of both symmetric eye offsets."""
+        owner = self._owner()
+        poses = owner._batch.fetch_pose(
+            rows=[self._index, self._index + owner.num_instances], frame=frame
+        )
+        center = poses[0].copy()
+        center[:3, 3] = (poses[0, :3, 3] + poses[1, :3, 3]) * 0.5
+        return center
+
     def set_local_pose(self, pose: np.ndarray) -> None:
-        left_pose = pose @ self._left_to_center
-        right_pose = pose @ self._right_to_center
-        self._left_view.set_local_pose(left_pose)
-        self._right_view.set_local_pose(right_pose)
+        self._apply_pose(pose, "local")
 
     def get_local_pose(self) -> np.ndarray:
-        left_pose = self._left_view.get_local_pose()
-        return left_pose @ inv_transform(self._left_to_center)
+        return self._fetch_pose("local")
 
     def set_world_pose(self, pose: np.ndarray) -> None:
-        left_pose = pose @ self._left_to_center
-        right_pose = pose @ self._right_to_center
-        self._left_view.set_world_pose(left_pose)
-        self._right_view.set_world_pose(right_pose)
+        self._apply_pose(pose, "world")
 
     def get_world_pose(self) -> np.ndarray:
-        left_pose = self._left_view.get_world_pose()
-        return left_pose @ inv_transform(self._left_to_center)
+        return self._fetch_pose("world")
 
     def get_node(self) -> dexsim.engine.Node:
         return self._left_view.get_node()
 
     def attach_node(self, parent: dexsim.engine.Node) -> None:
-        self._left_view.attach_node(parent)
-        self._right_view.attach_node(parent)
+        owner = self._owner()
+        indices = [self._index, self._index + owner.num_instances]
+        owner._scene.attach_render_objects(
+            [owner._camera_handles[i] for i in indices],
+            [parent.path_name()] * 2,
+            local_poses=owner._batch.fetch_pose(rows=indices, frame="local"),
+        )
 
 
 class StereoCamera(Camera):
@@ -152,13 +191,6 @@ class StereoCamera(Camera):
 
     Sensors should inherit from this class and implement the `update` and `get_data` methods.
     """
-
-    def _detach_from_parent_nodes(self) -> None:
-        """Detach both native views before their shared parent is rebuilt."""
-        for entity in self._entities:
-            entity._left_view.get_node().detach_parent()
-            entity._right_view.get_node().detach_parent()
-        self._is_attached = False
 
     SUPPORTED_DATA_TYPES = [
         "color",
@@ -194,47 +226,21 @@ class StereoCamera(Camera):
     def _build_sensor_from_config(
         self, config: StereoCameraCfg, device: torch.device
     ) -> None:
-        self._frame_buffer = self._world.create_camera_group(
-            [config.width, config.height], self.num_instances * 2, True
-        )
-        view_attrib = config.get_view_attrib()
-        left_list = []
-        right_list = []
-        for i, arena in enumerate(self._arenas):
-            left_view_name = f"{config.uid}_left_view{i + 1}"
-            left_view = arena.create_camera(
-                left_view_name,
-                config.width,
-                config.height,
-                True,
-                view_attrib,
-                self._frame_buffer,
-            )
-            left_view.set_intrinsic(config.intrinsics)
-            left_view.set_near(config.near)
-            left_view.set_far(config.far)
-            left_list.append(left_view)
-            self._camera_names.append((arena, left_view_name))
-
-        for i, arena in enumerate(self._arenas):
-            right_view_name = f"{config.uid}_right_view{i + 1}"
-            right_view = arena.create_camera(
-                right_view_name,
-                config.width,
-                config.height,
-                True,
-                view_attrib,
-                self._frame_buffer,
-            )
-            right_view.set_intrinsic(config.intrinsics_right)
-            right_view.set_near(config.near)
-            right_view.set_far(config.far)
-            right_list.append(right_view)
-            self._camera_names.append((arena, right_view_name))
-
+        self._create_camera_views(config, (config.intrinsics, config.intrinsics_right))
+        left_list = [h.native for h in self._camera_handles[: self.num_instances]]
+        right_list = [h.native for h in self._camera_handles[self.num_instances :]]
+        self._left_to_center = torch.eye(4)
+        self._right_to_center = torch.eye(4)
+        self._left_to_center[:3, 3] = config.left_to_right[:3, 3] * -0.5
+        self._right_to_center[:3, 3] = config.left_to_right[:3, 3] * 0.5
+        self._offsets = {}
         for i in range(self.num_instances):
             self._entities[i] = PairCameraView(
-                left_list[i], right_list[i], config.left_to_right.cpu().numpy()
+                left_list[i],
+                right_list[i],
+                config.left_to_right.numpy(),
+                owner=self,
+                index=i,
             )
 
         # Define a mapping of data types to their respective shapes and dtypes
@@ -302,7 +308,7 @@ class StereoCamera(Camera):
 
         self.cfg: CameraCfg = config
 
-    def update(self, **kwargs) -> None:
+    def update(self, **kwargs: Any) -> None:
         """Update the sensor data.
 
         The supported data types are:
@@ -312,7 +318,6 @@ class StereoCamera(Camera):
             - normal: Normal images with shape (B, H, W, 3) and dtype torch.float32
             - position: Position images with shape (B, H, W, 3) and dtype torch.float32
             - disparity: Disparity images with shape (B, H, W, 1) and dtype torch.float32
-
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
@@ -320,7 +325,7 @@ class StereoCamera(Camera):
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
             self._pending_capture_metadata = None
-            self._frame_buffer.apply()
+            self._frame_buffer.apply_ordered()
             self._snapshot_render_metadata()
 
         self.cfg: StereoCameraCfg
@@ -365,41 +370,81 @@ class StereoCamera(Camera):
 
         self._capture_metadata = self._pending_capture_metadata
 
-    def get_left_right_arena_pose(self) -> torch.Tensor:
-        """Get the local pose of the left and right cameras.
+    def get_left_right_arena_pose(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Read both eye poses in arena coordinates from one native snapshot.
 
         Returns:
-            torch.Tensor: The local pose of the left camera with shape (num_envs, 4, 4).
+            Left and right pose tensors, each with shape (num_envs, 4, 4).
         """
-        left_poses = []
-        right_poses = []
-        for i, entity in enumerate(self._entities):
-            arena_pose = self._arenas[i].get_root_node().get_local_pose()
-            left_pose = entity._left_view.get_world_pose()
-            left_pose[:2, 3] -= arena_pose[:2, 3]
-            left_poses.append(
-                torch.as_tensor(
-                    left_pose,
-                    dtype=torch.float32,
+        poses = torch.as_tensor(
+            self._batch.fetch_pose(frame="arena", device=str(self.device)),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        return poses[: self.num_instances], poses[self.num_instances :]
+
+    @property
+    def _eye_count(self) -> int:
+        """Two native views share each logical stereo row."""
+        return 2
+
+    def _view_rows(self, env_ids: Sequence[int] | torch.Tensor | None):
+        """Expand selections into left-then-right native view order."""
+        if env_ids is None:
+            return None
+        rows = torch.as_tensor(
+            env_ids,
+            dtype=torch.long,
+            device=env_ids.device if torch.is_tensor(env_ids) else self.device,
+        )
+        return torch.cat((rows, rows + self.num_instances))
+
+    def _eye_poses(self, poses: torch.Tensor) -> torch.Tensor:
+        """Apply the existing fixed eye offsets in one tensor operation."""
+        key = (poses.device, poses.dtype)
+        if key not in self._offsets:
+            self._offsets[key] = torch.stack(
+                (self._left_to_center, self._right_to_center)
+            ).to(poses)
+        offsets = self._offsets[key]
+        return torch.cat((poses @ offsets[0], poses @ offsets[1]))
+
+    def _logical_poses(self, frame: str) -> torch.Tensor:
+        """Recover the center frame from a single native pose snapshot."""
+        poses = super()._logical_poses(frame)
+        left, right = poses[: self.num_instances], poses[self.num_instances :]
+        center = left.clone()
+        # Symmetric eye positions avoid subtracting a stored baseline from a
+        # world-to-arena float32 read, which loses zero-center precision.
+        center[:, :3, 3] = (left[:, :3, 3] + right[:, :3, 3]) * 0.5
+        return center
+
+    @staticmethod
+    def _intrinsics_matrices(values: torch.Tensor, count: int) -> torch.Tensor:
+        """Preserve complete K validation while packing different eye formats."""
+        if values.shape == (3, 3):
+            return values.expand(count, 3, 3)
+        if values.ndim == 3 and values.shape[1:] == (3, 3):
+            if len(values) != count:
+                raise ValueError(
+                    "Intrinsics row count does not match selected environments."
                 )
-            )
-            right_pose = entity._right_view.get_world_pose()
-            right_pose[:2, 3] -= arena_pose[:2, 3]
-            right_poses.append(
-                torch.as_tensor(
-                    right_pose,
-                    dtype=torch.float32,
-                )
-            )
-        return torch.stack(left_poses, dim=0).to(self.device), torch.stack(
-            right_poses, dim=0
-        ).to(self.device)
+            return values
+        if values.shape == (4,):
+            values = values.expand(count, 4)
+        if values.shape != (count, 4):
+            raise ValueError("Intrinsics must be (4,), (3,3), (N,4) or (N,3,3).")
+        result = torch.zeros((count, 3, 3), dtype=values.dtype, device=values.device)
+        result[:, 0, 0], result[:, 1, 1] = values[:, 0], values[:, 1]
+        result[:, 0, 2], result[:, 1, 2] = values[:, 2], values[:, 3]
+        result[:, 2, 2] = 1
+        return result
 
     def set_intrinsics(
         self,
         intrinsics: torch.Tensor,
         right_intrinsics: torch.Tensor | None = None,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
         """
         Set the camera intrinsics for both left and right cameras.
@@ -409,41 +454,16 @@ class StereoCamera(Camera):
             right_intrinsics (torch.Tensor | None): The intrinsics for the right camera with shape (4,) / (3, 3) or (B, 4) / (B, 3, 3). If None, use the same intrinsics as the left camera.
             env_ids (Sequence[int] | None): The environment ids to set the intrinsics. If None, set for all environments.
         """
-        ids = env_ids if env_ids is not None else range(self.num_instances)
-
-        if intrinsics.dim() == 2 and intrinsics.shape[1] == 3:
-            intrinsics = intrinsics.unsqueeze(0).repeat(len(ids), 1, 1)
-
-        if intrinsics.dim() == 1:
-            intrinsics = intrinsics.unsqueeze(0).repeat(len(ids), 1)
-
-        if len(ids) != intrinsics.shape[0]:
-            logger.log_error(
-                f"Intrinsics shape {intrinsics.shape} does not match env_ids length {len(ids)}"
-            )
-
-        if right_intrinsics is None:
-            right_intrinsics = intrinsics
-        else:
-            if right_intrinsics.dim() == 2 and right_intrinsics.shape[1] == 3:
-                right_intrinsics = right_intrinsics.unsqueeze(0).repeat(len(ids), 1, 1)
-
-            if right_intrinsics.dim() == 1:
-                right_intrinsics = right_intrinsics.unsqueeze(0).repeat(len(ids), 1)
-
-            if len(ids) != right_intrinsics.shape[0]:
-                logger.log_error(
-                    f"Right intrinsics shape {right_intrinsics.shape} does not match env_ids length {len(ids)}"
-                )
-
-        for i, env_id in enumerate(ids):
-            entity = self._entities[env_id]
-            if intrinsics.shape[1] == 3:
-                entity._left_view.set_intrinsic(intrinsics[i].cpu().numpy())
-                entity._right_view.set_intrinsic(right_intrinsics[i].cpu().numpy())
-            else:
-                entity._left_view.set_intrinsic(intrinsics[i].cpu().tolist())
-                entity._right_view.set_intrinsic(right_intrinsics[i].cpu().tolist())
+        count = self.num_instances if env_ids is None else len(env_ids)
+        left = self._intrinsics_matrices(intrinsics, count)
+        right = (
+            left
+            if right_intrinsics is None
+            else self._intrinsics_matrices(right_intrinsics, count).to(left)
+        )
+        self._batch.apply_intrinsics(
+            torch.cat((left, right)), rows=self._view_rows(env_ids)
+        )
 
     def get_intrinsics(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -452,17 +472,9 @@ class StereoCamera(Camera):
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: The intrinsics for the left and right cameras with shape (B, 3, 3).
         """
-        intrinsics_left = []
-        intrinsics_right = []
-        for entity in self._entities:
-            intrinsics_left.append(
-                torch.as_tensor(entity._left_view.get_intrinsic(), dtype=torch.float32)
-            )
-            intrinsics_right.append(
-                torch.as_tensor(entity._right_view.get_intrinsic(), dtype=torch.float32)
-            )
-
-        return (
-            torch.stack(intrinsics_left, dim=0).to(self.device),
-            torch.stack(intrinsics_right, dim=0).to(self.device),
+        intrinsics = torch.as_tensor(
+            self._batch.fetch_intrinsics(matrix=True, device=str(self.device)),
+            dtype=torch.float32,
+            device=self.device,
         )
+        return intrinsics[: self.num_instances], intrinsics[self.num_instances :]

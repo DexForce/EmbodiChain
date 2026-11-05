@@ -229,6 +229,17 @@ class MockLight:
         self._last_set_direction = None
         self._last_env_ids = None
 
+    def apply_state(self, *, env_ids=None, **fields):
+        for field, value in fields.items():
+            target = {
+                "color": "color",
+                "intensity": "intensity",
+                "position": "local_pose",
+                "direction": "direction",
+            }[field]
+            setattr(self, f"_last_set_{target}", value)
+        self._last_env_ids = env_ids
+
     def set_color(self, color, env_ids=None):
         self._last_set_color = color
         self._last_env_ids = env_ids
