@@ -13,7 +13,7 @@ Lightweight RL environments have a separate owner in
 | Example discovery / launch | `embodichain/cli/run_example.py` → script path in the ordinary `examples/` tree → `_example_runner.py`; see [running and adding examples](../../../examples/README.md) |
 | Task discovery / gallery / `show-task` | `embodichain/cli/_task_catalog.py` → shared logical-task/deployment records; `list_task.py` and `show_task.py` render them |
 | Launch / CLI overrides | `embodichain/lab/scripts/run_task.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
-| Generic component expansion | `embodichain/lab/gym/utils/_component_composition.py` |
+| Public execution-free component expansion | `embodichain/lab/gym/utils/composition.py` → shared strict decoders |
 | Config decoding | `embodichain/lab/gym/utils/gym_utils.py` |
 | Robot selector decoding | `robot.class_type` → `embodichain/robot_registry.py`; catalog ownership is in [robot-system](../robot-system/robot-system.md) |
 | Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `extensions/embodichain_tasks/embodichain_tasks/` |

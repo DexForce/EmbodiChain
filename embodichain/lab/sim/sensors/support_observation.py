@@ -324,6 +324,12 @@ class NativeSupportObservation:
             ),
         )
 
+    def _physics_step(self) -> int:
+        step = self._simulation.physics_step_index
+        if type(step) is not int or step < 0:
+            raise ValueError("Native support requires a valid physics-step identity.")
+        return step
+
     def _revision_or_none(self) -> int | None:
         if self._clock is None:
             return None
@@ -522,6 +528,7 @@ class NativeSupportObservation:
                 timestamp = self._base[1] + self._offset
                 self._validate_time_mapping(token.timestamp, timestamp)
             self._refresh_identity()
+            legacy_step = self._physics_step() if self._clock is None else None
             sample = self._sampler.sample(
                 PhysicalEvidenceRequest(
                     timestamp,
@@ -536,6 +543,12 @@ class NativeSupportObservation:
                 self.object.get_local_pose(to_matrix=True),
                 self.reference.get_local_pose(to_matrix=True),
             )
+            if legacy_step is not None:
+                if self._physics_step() != legacy_step:
+                    raise ValueError(
+                        "Native support physics step changed during capture."
+                    )
+                self._legacy_sample_step = legacy_step
         except _ERRORS as error:
             self._unavailable(error)
 
@@ -740,11 +753,7 @@ class NativeSupportObservation:
                         timestamp, self._capture_revision, torch.arange(count)
                     )
                 )
-                step = self._simulation.physics_step_index
-                if type(step) is not int or step < 0:
-                    raise ValueError(
-                        "Native support requires a valid physics-step identity."
-                    )
+                step = self._physics_step()
                 if (
                     self._last_sample is None
                     or self._legacy_sample_step != step
@@ -789,7 +798,7 @@ class NativeSupportObservation:
                     mask = self._last_sample.frame.batches[CONTACT_VALID_MASK].values[
                         row
                     ]
-                    if self._clock is None and not sample_is_fresh:
+                    if not sample_is_fresh:
                         # A cached contact cannot re-establish a witness invalidated by motion.
                         mask = torch.zeros_like(mask)
                     patch = tuple(

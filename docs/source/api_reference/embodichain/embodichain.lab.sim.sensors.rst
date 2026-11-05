@@ -119,12 +119,6 @@ CUDA history reduction consumes compact contact rows and device counts through
 sparse Warp kernels. The ``dropped_contacts`` diagnostic sums query loss and
 scatter overflow across the current control interval; standalone updates
 without histories or sampling observers report the most recent sample.
-``latest_sample_dropped_contacts`` exposes query and scatter loss from the latest
-fetch even when interval counters are retained. The physical-evidence sampler
-rejects either kind of loss and uses their maximum to avoid counting overlapping
-diagnostics twice. Reading these counters may synchronize device work.
-
-without a history report the most recent sample.
 
 ``latest_sample_dropped_contacts`` reports the latest fetch's query and scatter
 loss even when observers retain interval counters. Evidence sampling rejects
@@ -142,17 +136,12 @@ Sampling observers
 
 Named sampling observers belong to one ContactSensor instance. The empty default
 adds no observer snapshots or callbacks. Begin and selective-reset notifications
-follow the sensor's own history/counter updates; before/after tokens surround the
-native fetch. Observation callbacks run outside the internal CUDA capture, and
-external capture with observers is rejected before callbacks begin. The observer
-owns retention limits and diagnostics and must not step physics or issue commands.
-
-.. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
-
-follow the sensor's own history/counter updates; before/after tokens surround one physics-step sample. A prior raw fetch
-in that same step is reused; repeated substep calls do not repeat callbacks. Observation callbacks run outside the internal CUDA capture, and
-external capture with observers is rejected before callbacks begin. The observer
-owns retention limits and diagnostics and must not step physics or issue commands.
+follow the sensor's own history/counter updates; before/after tokens surround one
+physics-step sample. A prior raw fetch in that same step is reused; repeated
+substep calls do not repeat callbacks. Observation callbacks run outside the
+internal CUDA capture, and external capture with observers is rejected before
+callbacks begin. The observer owns retention limits and diagnostics and must not
+step physics or issue commands.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
 

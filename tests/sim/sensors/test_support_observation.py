@@ -779,3 +779,42 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
         8 if startup == "cold" else 16 if startup == "row_reset" else 12
     )
     registry.close()
+
+
+@pytest.mark.parametrize("moving", ["payload", "support"])
+def test_callback_sample_cannot_reestablish_support_after_same_step_body_motion(moving):
+    sim, _, observer, _, _ = _setup()
+    _substep(sim, observer)
+    assert sim.query.fetches == 1
+
+    sim.objects[moving].pose[0, 0, 3] = 0.001
+    moved = _observe(observer)
+    assert moved.support.valid.tolist() == [True, True]
+    assert moved.support.values.tolist() == [False, True]
+    assert sim.query.fetches == 1
+    assert _observe(observer).support.values.tolist() == [False, True]
+
+    _substep(sim, observer)
+    assert _observe(observer).support.values.tolist() == [True, True]
+    assert sim.query.fetches == 2
+
+
+@pytest.mark.parametrize("moving", ["payload", "support"])
+@pytest.mark.parametrize("contract_revision", [None, 1])
+def test_clock_bound_observer_invalidates_moved_bodies_for_both_metadata_modes(
+    moving, contract_revision
+):
+    sim, _, observer, clock, _ = _setup(strong=True)
+    _window(sim, observer, clock)
+    assert _observe(observer, contract_revision).support.values.all()
+
+    sim.objects[moving].pose[0, 0, 3] = 0.001
+    moved = _observe(observer, contract_revision)
+    assert moved.support.valid.tolist() == [True, True]
+    assert moved.support.values.tolist() == [False, True]
+    assert sim.query.fetches == 4
+    assert ("support_contract_revision" in moved.metadata) == (contract_revision == 1)
+
+    _window(sim, observer, clock)
+    assert _observe(observer, contract_revision).support.values.all()
+    assert sim.query.fetches == 8

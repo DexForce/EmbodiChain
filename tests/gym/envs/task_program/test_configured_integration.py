@@ -61,9 +61,9 @@ from embodichain.lab.task_program.integrations._configured_composition import (
     _load_configured_task_program_deployment,
     _resolve_task_program_components,
 )
-from embodichain.lab.gym.utils._component_composition import (
-    _ResolvedGymComponents,
-    _resolve_gym_components,
+from embodichain.lab.gym.utils.composition import (
+    ResolvedGymComponents,
+    resolve_gym_components,
 )
 from embodichain.lab.gym.envs.task_program.registration import (
     _register_configured_task_program_integration,
@@ -209,9 +209,9 @@ def _gym_config(task_name: str) -> dict[str, object]:
 def _physical_components(
     path: Path,
     config: dict[str, object],
-) -> _ResolvedGymComponents:
+) -> ResolvedGymComponents:
     """Resolve one deployment's reusable physical components."""
-    return _resolve_gym_components(config, base_dir=path.parent)
+    return resolve_gym_components(config, base_dir=path.parent)
 
 
 def _integration_payload(task_name: str) -> dict[str, object]:
@@ -310,7 +310,14 @@ def test_public_composition_owns_declarations_and_defers_live_state(
     gym_before = dict(gym_registry)
     path = _config_path("hand_over")
     config = _gym_config("hand_over")
+    input_snapshot = deepcopy(config)
     physical = _physical_components(path, config)
+    other = _physical_components(path, config)
+    assert isinstance(physical, ResolvedGymComponents)
+    assert physical.config == other.config
+    other.config["robot"]["uid"] = "changed_physical_copy"
+    assert physical.config["robot"]["uid"] != "changed_physical_copy"
+    assert config == input_snapshot
     assert physical.embodiment_skill_profile is not None
     selectors = physical.config["task_program"]
     profile = physical.embodiment_skill_profile

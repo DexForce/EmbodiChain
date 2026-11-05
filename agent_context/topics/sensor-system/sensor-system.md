@@ -12,9 +12,6 @@
 | Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
 | Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact/sensor.py` |
 | Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
-| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/_warp/contact.py` |
-
-| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact/sensor.py` |
 | Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
 
 Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
