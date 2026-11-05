@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from pathlib import Path
 
 import torch
 
@@ -248,6 +249,35 @@ class TianjiMarvinCfg(RobotCfg):
         """Use the variant's simulation URDF, honoring an ``fpath`` override."""
         filename = "robot_with_ee_acd.urdf" if self.with_gripper else "robot_acd.urdf"
         return self.fpath or get_data_path(f"TianjiMarvin/{filename}")
+
+    def declared_asset_files(self) -> tuple[Path, ...]:
+        """Declare physical and same-source kinematic inputs without construction.
+
+        The effective ``fpath`` is shared with :meth:`build_pk_serial_chain`.
+        Explicit solver/component source overrides retain their own declared
+        files; a future assembled-URDF destination is not an input. Dependency
+        references use the shared Data inventory and its existing URI rules.
+
+        Returns:
+            Sorted unique source files and transitive local dependencies. This
+            structural asset-provider opt-in makes no native qualification claim.
+
+        Raises:
+            ValueError: The effective configuration is incomplete or an asset
+                reference is unsupported.
+            FileNotFoundError: A selected source or dependency is unavailable.
+        """
+        from embodichain.data.asset_dependencies import collect_declared_asset_files
+
+        self.validate()
+        declaration = self.to_dict()
+        declaration["fpath"] = str(Path(self._pk_urdf_path).expanduser().resolve())
+        urdf = declaration.get("urdf_cfg")
+        if isinstance(urdf, dict):
+            urdf.pop("fpath", None)
+        return tuple(
+            sorted(collect_declared_asset_files(declaration, base_dir=Path.cwd()))
+        )
 
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs: Any
