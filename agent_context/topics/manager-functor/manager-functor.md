@@ -98,7 +98,8 @@ The config attribute name is the stable functor identity.
 
 For a flat policy tensor, the environment calls manager processing, manager
 application, physics, event `interval`, observation, and reward in that order.
-A term can opt into physics-substep refresh. Its first command is processed and
+A term can opt into physics-substep refresh, scheduled by `EmbodiedEnv`.
+Its first command is processed and
 applied normally; subsequent substeps call `update_substep` and apply only the
 opted-in terms. Inactive demo rows retain measured holds on every refresh.
 `expert_trajectory.use_action_manager` routes position-only expert commands

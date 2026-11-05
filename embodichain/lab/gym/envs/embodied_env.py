@@ -2485,6 +2485,28 @@ class EmbodiedEnv(BaseEnv):
             return action
         return EmbodiedEnv._apply_controller_action(self, action)
 
+    def _advance_physics(self) -> None:
+        """Refresh opted-in action terms between physics substeps."""
+        manager = getattr(self, "action_manager", None)
+        if (
+            not getattr(self, "_step_uses_action_manager", False)
+            or manager is None
+            or not manager.requires_substep_update
+        ):
+            return super()._advance_physics()
+
+        sensors = [
+            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+        ]
+        for sensor in sensors:
+            sensor.begin_control_step()
+        for substep in range(self.cfg.sim_steps_per_control):
+            if substep:
+                manager.apply_substep_actions()
+            self.sim.update(self.physics_dt, 1, render_final_step=False)
+            for sensor in sensors:
+                sensor.update_physics_step(self.physics_dt)
+
     @property
     def last_action_trace(self) -> ActionTrace | None:
         """Return the most recent ActionManager request/command trace."""

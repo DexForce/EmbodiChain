@@ -18,13 +18,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 import pytest
-from embodichain.lab.gym.envs import BaseEnv
+from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnv
 
 
+@pytest.mark.parametrize("env_type", (BaseEnv, EmbodiedEnv))
 @pytest.mark.parametrize("enabled", (False, True))
-def test_standard_step_schedules_sensor_after_each_physics_substep(enabled):
+def test_standard_step_schedules_sensor_after_each_physics_substep(env_type, enabled):
     events = []
-    env = BaseEnv.__new__(BaseEnv)
+    env = env_type.__new__(env_type)
     env.cfg = SimpleNamespace(sim_steps_per_control=3)
     env.sim_cfg = SimpleNamespace(physics_dt=0.01)
 
@@ -52,22 +53,36 @@ def test_standard_step_schedules_sensor_after_each_physics_substep(enabled):
     assert events == expected
 
 
-@pytest.mark.parametrize("controller_ready", [False, True])
+@pytest.mark.parametrize(
+    "env_type,controller_ready,substep_actions,refreshes",
+    [
+        (EmbodiedEnv, False, True, True),
+        (EmbodiedEnv, True, True, False),
+        (EmbodiedEnv, False, False, False),
+        (BaseEnv, False, True, False),
+    ],
+)
 def test_substep_action_updates_interleave_with_physics_and_sensor_observation(
+    env_type,
     controller_ready,
+    substep_actions,
+    refreshes,
 ):
-    """Policy controllers refresh between steps; ready joint commands bypass them."""
+    """Only opted-in EmbodiedEnv policy controllers refresh between steps."""
     calls = []
-    env = BaseEnv.__new__(BaseEnv)
+    updates = []
+    env = env_type.__new__(env_type)
     env.cfg = SimpleNamespace(sim_steps_per_control=3)
     env.sim_cfg = SimpleNamespace(physics_dt=0.01)
     env._step_uses_action_manager = not controller_ready
     env.action_manager = SimpleNamespace(
-        requires_substep_update=True,
+        requires_substep_update=substep_actions,
         apply_substep_actions=lambda: calls.append("control"),
     )
 
     def update(dt, n, *, after_substep=None, render_final_step=True):
+        assert render_final_step is False
+        updates.append(n)
         for _ in range(n):
             calls.append("physics")
             if after_substep is not None:
@@ -84,7 +99,7 @@ def test_substep_action_updates_interleave_with_physics_and_sensor_observation(
     env._advance_physics()
     expected = (
         ["physics", "sensor"] * 3
-        if controller_ready
+        if not refreshes
         else [
             "physics",
             "sensor",
@@ -97,3 +112,4 @@ def test_substep_action_updates_interleave_with_physics_and_sensor_observation(
         ]
     )
     assert calls == expected
+    assert updates == ([1, 1, 1] if refreshes else [3])

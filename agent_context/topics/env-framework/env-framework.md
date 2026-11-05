@@ -202,9 +202,11 @@ the traceback can retain native resources not yet registered with the manager.
 
 ### Stateful sensor and action lifecycle
 
-BaseEnv normally starts one simulation-manager update per control interval and
-samples participating sensors through its `after_substep` observer. Opted-in
-action terms instead refresh between individual physics updates; sensor samples
+`BaseEnv._advance_physics()` starts one simulation-manager update per control
+interval and samples participating sensors through its `after_substep` observer.
+`EmbodiedEnv._advance_physics()` owns ActionManager substep scheduling and delegates
+ordinary actions to the base implementation. Opted-in action terms refresh
+between individual physics updates; sensor samples
 remain after each completed substep. Direct controller-ready commands bypass
 this refresh path; the explicit expert ActionManager route participates. See the sensor-owned [contact history contract](../sensor-system/contact-history.md)
 for interval accumulation, counterpart filtering and selective reset.

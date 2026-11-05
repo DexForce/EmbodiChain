@@ -629,22 +629,6 @@ class BaseEnv(gym.Env):
         sensors = [
             sensor for sensor in self.sensors.values() if sensor.requires_substep_update
         ]
-        manager = getattr(self, "action_manager", None)
-        update_actions = (
-            getattr(self, "_step_uses_action_manager", False)
-            and manager is not None
-            and manager.requires_substep_update
-        )
-        if update_actions:
-            for sensor in sensors:
-                sensor.begin_control_step()
-            for substep in range(self.cfg.sim_steps_per_control):
-                if substep:
-                    manager.apply_substep_actions()
-                self.sim.update(self.physics_dt, 1, render_final_step=False)
-                for sensor in sensors:
-                    sensor.update_physics_step(self.physics_dt)
-            return
         if not sensors:
             self.sim.update(
                 self.physics_dt,
