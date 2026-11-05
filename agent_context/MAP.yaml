@@ -254,7 +254,6 @@ topics:
     RigidMeshSnapshot, capture_rigid_mesh,
     NativeHandGeometry, capture_native_hand_geometry, capture_native_rigid_obstacles, native hand capture,
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
-
     SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,

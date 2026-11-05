@@ -59,7 +59,6 @@ retains concavities and holes; convex-hull mode remains explicit. Acquisition
 errors remain unavailable evidence. Callers own thresholds, invocation/episode
 association, observation timing and evidence publication.
 
-
 `mesh_snapshot.py` captures scaled rigid visual vertices and ordered articulation
 collision-input components from explicit UID/link mappings. It reads no live
 poses and keeps unavailable geometry distinct from usable components. Neutral

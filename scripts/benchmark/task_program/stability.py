@@ -53,7 +53,18 @@ from embodichain.lab.task_program.integrations.simulation import _stability_runt
 def benchmark_policy(
     batch: int, *, held: bool, read_each_step: bool, repeats: int
 ) -> dict[str, Any]:
-    """Measure the public policy port on one fixed three-second CPU hold."""
+    """Measure the public policy port on one fixed three-second CPU hold.
+
+    Args:
+        batch: Number of independent CPU fixture environments.
+        held: Select dual-arm attachment checks instead of plain placement.
+        read_each_step: Serialize metadata during every yielded hold as well as at termination.
+        repeats: Warmed completed-call wall samples to retain.
+
+    Returns:
+        Timing samples, separate Python allocation peak, exact metadata hash,
+        command count and fixture read counts. No physical success is established.
+    """
     pose = torch.eye(4).repeat(batch, 1, 1)
     qpos = torch.zeros(batch, 2)
     body = SimpleNamespace(

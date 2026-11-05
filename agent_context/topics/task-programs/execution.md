@@ -212,8 +212,6 @@ to the integration and execution thresholds belong to the selected policy.
 The integration resolves those declarations against exact native owners and
 adapts semantic clauses to shared physical requests. Sensor acquisition/history
 lives in `lab.sim.sensors`; physical grip interpretation lives in
-`lab.sim.atomic_actions.grip_evidence`; contact arithmetic lives in
-
 `lab.sim.atomic_actions.grip_evidence`, including `DriverOpeningBinding.bind`
 for calibrated hand-opening observations. Factories bind those declarations
 before creating sensor resources; release predicates and experiment labels

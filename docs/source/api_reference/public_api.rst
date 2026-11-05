@@ -1146,8 +1146,6 @@ embodichain.lab.sim.scene.expansion.persistence
    save_scene_variants
    load_scene_variants
 
-embodichain.lab.sim.sensors.contact_sampling
-
 embodichain.lab.sim.sensors.contact.sampling
 ---------------------------------------------------------------------
 
@@ -1167,8 +1165,6 @@ observation was produced. The common frame has no invocation field.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
-
 .. autosummary::
 
    CONTACT_ACTOR_IDS
@@ -1180,8 +1176,6 @@ observation was produced. The common frame has no invocation field.
    ContactEvidenceSampler
    ContactSourceStamp
    native_contact_revision
-
-embodichain.lab.sim.sensors.contact_timeline
 
 embodichain.lab.sim.sensors.contact.timeline
 ---------------------------------------------------------------------
@@ -1203,8 +1197,6 @@ is reached, the next sample records unavailable capacity loss. Control-step and
 substep caps also bound empty histories.
 Frontend code owns actor/semantic label maps, serialized report schema IDs and
 any task-success evaluation.
-
-.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
 
@@ -3628,20 +3620,6 @@ classes; sensor acquisition never imports Task Program or Atomic implementation.
    PhysicalEvidenceBatch
    PhysicalEvidenceFrame
 
-embodichain.lab.sim.sensors.joint_opening
------------------------------------------
-
-Robot-owned driver calibration and read-only joint-opening observations.
-No model-name or task-name inference is performed.
-
-.. currentmodule:: embodichain.lab.sim.sensors.joint_opening
-
-.. autosummary::
-
-   DriverOpeningBinding
-   create_joint_opening_reader
-
-
 embodichain.compute.geometry.grip_contacts
 ------------------------------------------
 
@@ -3666,7 +3644,6 @@ are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrat
 .. autosummary::
 
    GripContactObserver
-
    DriverOpeningBinding
 
 ``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
