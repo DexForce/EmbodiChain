@@ -662,3 +662,29 @@ this does not qualify cooked collision shapes or physical containment.
 .. currentmodule:: embodichain.lab.sim.scene.source_geometry
 
 .. autofunction:: read_source_vertices
+
+Static world source inputs
+--------------------------
+
+These readers retain authored local dimensions, basis and world pose. The slider
+obstacle envelope deliberately overestimates aggregate fixed/prismatic geometry;
+revolute/floating obstacles reject. These static bounds are not native collision,
+approach-path or contact evidence. No source file or simulation state is changed.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autofunction:: source_rotation
+
+.. autofunction:: source_position
+
+.. autofunction:: read_source_world_mesh
+
+.. autofunction:: source_local_bounds
+
+.. autofunction:: source_longest_local_axis
+
+.. currentmodule:: embodichain.lab.sim.scene.source_envelopes
+
+.. autofunction:: source_world_vertices
+
+.. autofunction:: source_obstacle_bounds

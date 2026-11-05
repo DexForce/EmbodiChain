@@ -32,6 +32,11 @@ __all__ = [
     "read_gltf_z_up_mesh",
     "estimate_source_mesh_top_z",
     "read_source_vertices",
+    "source_rotation",
+    "source_position",
+    "read_source_world_mesh",
+    "source_local_bounds",
+    "source_longest_local_axis",
 ]
 
 
@@ -136,3 +141,133 @@ def read_source_vertices(
         ).vertices,
         dtype=np.float64,
     )
+
+
+def source_rotation(source: Mapping[str, Any]) -> np.ndarray:
+    """Read matrix-authoritative or intrinsic-XYZ declared orientation.
+
+    Args:
+        source: Physical declaration with an optional pose matrix or Euler angles.
+
+    Returns:
+        Local-to-world 3x3 orientation, without observing native state.
+    """
+    from scipy.spatial.transform import Rotation
+
+    if source.get("init_local_pose") is not None:
+        rotation = np.asarray(source["init_local_pose"], dtype=float)[:3, :3]
+    else:
+        rotation = Rotation.from_euler(
+            "XYZ", source.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+        ).as_matrix()
+    return rotation
+
+
+def source_position(source: Mapping[str, Any]) -> tuple[float, float, float]:
+    """Read one explicit finite source position.
+
+    Args:
+        source: Physical declaration with a three-value ``init_pos`` list.
+
+    Returns:
+        Three world-frame coordinates; no missing position is inferred.
+    """
+    value = source.get("init_pos")
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(
+            f"Scene object {source.get('uid')!r} has no three-value init_pos."
+        )
+    result = tuple(float(item) for item in value)
+    if not all(np.isfinite(item) for item in result):
+        raise ValueError(f"Scene object {source.get('uid')!r} has invalid init_pos.")
+    return result
+
+
+def source_local_bounds(
+    source: Mapping[str, Any],
+) -> tuple[list[float], list[float]] | None:
+    """Read authored local bounds before body scale or Z-up conversion.
+
+    Args:
+        source: Physical Cube or mesh shape declaration.
+
+    Returns:
+        Original local minimum/maximum bounds, or None when unavailable.
+        These raw dimensions retain source recipe calibration semantics.
+    """
+    shape = source.get("shape", {})
+    if not isinstance(shape, dict):
+        return None
+    if shape.get("shape_type") == "Cube":
+        size = shape.get("size")
+        if isinstance(size, list) and len(size) == 3:
+            extents = [float(value) for value in size]
+            if min(extents) <= 0.0:
+                return None
+            return (
+                [-value / 2.0 for value in extents],
+                [value / 2.0 for value in extents],
+            )
+    path = shape.get("fpath")
+    if not path:
+        return None
+    try:
+        import trimesh
+
+        geometry = trimesh.load(str(path), force="scene").to_geometry()
+        bounds = [[float(value) for value in row] for row in geometry.bounds]
+    except (OSError, TypeError, ValueError):
+        return None
+    if (
+        len(bounds) != 2
+        or any(len(row) != 3 for row in bounds)
+        or any(maximum <= minimum for minimum, maximum in zip(*bounds, strict=True))
+    ):
+        return None
+    return bounds[0], bounds[1]
+
+
+def read_source_world_mesh(source: Mapping[str, Any]) -> Trimesh:
+    """Read authored table triangles with their original topology and world pose.
+
+    Args:
+        source: Physical Cube or mesh declaration with explicit pose and scale.
+
+    Returns:
+        Owned world-frame triangles, not a native cooked collision query.
+    """
+    import trimesh
+    from .source_envelopes import source_world_vertices
+
+    points = source_world_vertices(dict(source))
+    if source["shape"].get("shape_type") == "Cube":
+        mesh = trimesh.creation.box(extents=source["shape"]["size"])
+    else:
+        mesh = trimesh.load(str(source["shape"]["fpath"]), force="scene").to_geometry()
+    mesh.vertices = points
+    return mesh
+
+
+def source_longest_local_axis(source: Mapping[str, Any]) -> list[float]:
+    """Map the longest authored source axis into the imported object's basis.
+
+    Args:
+        source: Physical shape declaration; raw local bounds own axis selection.
+
+    Returns:
+        Signed local basis vector, preserving glTF Y-up conversion and the
+        original fallback when source dimensions are unavailable.
+    """
+    bounds = source_local_bounds(source)
+    if bounds is None:
+        axis = [0.0, 0.0, 1.0]
+    else:
+        extents = [maximum - minimum for minimum, maximum in zip(*bounds, strict=True)]
+        axis = [0.0, 0.0, 0.0]
+        axis[max(range(3), key=extents.__getitem__)] = 1.0
+    shape = source.get("shape", {})
+    path = shape.get("fpath") if isinstance(shape, dict) else None
+    if path and Path(str(path)).suffix.lower() in {".glb", ".gltf"}:
+        x_axis, y_axis, z_axis = axis
+        return [x_axis, -z_axis, y_axis]
+    return axis
