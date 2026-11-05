@@ -18,7 +18,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
-from collections.abc import Mapping
+from collections.abc import Mapping, Collection
 import json
 import shlex
 import struct
@@ -30,7 +30,10 @@ __all__ = ["asset_dependency_files", "collect_declared_asset_files"]
 
 
 def asset_dependency_files(
-    asset_path: Path, *, reference_overrides: Mapping[str, str | Path] | None = None
+    asset_path: Path,
+    *,
+    reference_overrides: Mapping[str, str | Path] | None = None,
+    urdf_collision_links: Collection[str] | None = None,
 ) -> tuple[Path, ...]:
     """Enumerate one source and its supported local declared dependencies.
 
@@ -47,6 +50,9 @@ def asset_dependency_files(
         reference_overrides: Optional model-owner mapping from exact authored XML
             references to their existing absolute local files. These explicit
             bindings preserve registered archive repairs without path guessing.
+        urdf_collision_links: Optional exact collision-link roster for the root
+            URDF consumer. Visual-only and unselected-link mesh references are
+            not read by that consumer; dependency formats remain transitive.
 
     Returns:
         Sorted unique resolved paths. Opaque non-XML input remains a direct
@@ -85,7 +91,21 @@ def asset_dependency_files(
             # Opaque articulation assets remain valid direct dependencies even
             # when their extension suggests XML.
             continue
-        for element in root.iter():
+        elements = root.iter()
+        if path == asset_path.resolve() and urdf_collision_links is not None:
+            selected = set(urdf_collision_links)
+            links = {link.get("name"): link for link in root.findall("link")}
+            if not selected or not selected <= links.keys():
+                raise ValueError(
+                    "URDF collision inventory requires exact existing links."
+                )
+            elements = (
+                element
+                for name in selected
+                for collision in links[name].findall("collision")
+                for element in collision.iter()
+            )
+        for element in elements:
             tag = element.tag.rsplit("}", maxsplit=1)[-1]
             if tag not in {"mesh", "texture", "include"}:
                 continue
