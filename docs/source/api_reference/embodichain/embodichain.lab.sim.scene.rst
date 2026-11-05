@@ -1,5 +1,5 @@
 embodichain.lab.sim.scene
-==================
+=========================
 
 Scene services share composition, geometric layout, physical state operations
 and measured validation between GenSim, explicit recipes and execution hosts.
