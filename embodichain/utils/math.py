@@ -2347,11 +2347,7 @@ def interpolate_poses(
 
     if num_steps == 0:
         # Skip interpolation
-        return (
-            torch.cat([pos1[None], pos2[None]], dim=0),
-            torch.cat([rot1[None], rot2[None]], dim=0),
-            num_steps,
-        )
+        return torch.stack((pose_1, pose_2)), 0
 
     delta_pos = pos2 - pos1
     if num_steps is None:
