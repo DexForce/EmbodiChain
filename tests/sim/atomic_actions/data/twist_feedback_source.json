@@ -1,0 +1,380 @@
+{
+  "source_sha256": "b12189f0982187bfcf16f8b42cf6b2c62ab9843cdf6827e6f08e0c7b09fb3680",
+  "scope": "Actual B0 post-policy generator over frozen samples/joint reads; pure shared Atomic feedback, no physics qualification.",
+  "cases": [
+    {
+      "case": "progress",
+      "hold_commands": 13,
+      "receipt": {
+        "accepted": true,
+        "phase": "bounded_chunk",
+        "reason": "chunk_observed",
+        "sample_count": 132,
+        "target_contact": true,
+        "parent_contact_fraction": 0.0,
+        "observed_qpos": 0.30000001192092896,
+        "target_error": 1.1920928966180355e-08,
+        "already_reached": true,
+        "parent_contact_fraction_limit": 0.25,
+        "parent_contact_warning": false,
+        "candidate_selected": 0,
+        "candidate_bite_depth": 0.0016666666666666668,
+        "candidate_roll": 0.0,
+        "candidate_fallback": false,
+        "candidate_axis_switch": false,
+        "candidate_next": null,
+        "candidate_reserved_indices": [
+          0
+        ],
+        "candidate_fallback_count": 0,
+        "candidate_fallback_limit": 2,
+        "candidate_order": [
+          0,
+          4
+        ],
+        "candidate_attempt_count": 1,
+        "candidate_stalled_chunks": 0,
+        "candidate_stalled_chunk_limit": 2,
+        "chunk_contact_progress": 0.30000001192092896,
+        "contact_released": true,
+        "stable": true,
+        "recovery_safe": true,
+        "candidate_exhausted": false,
+        "coarse_turn_threshold": 0.2617993877991494,
+        "cumulative_contact_path": 0.30000001192092896,
+        "coarse_turn_reached": true,
+        "early_stop": true,
+        "goal_complete": true
+      },
+      "cursor": {
+        "forced_index": 0,
+        "order": [
+          0,
+          4
+        ],
+        "candidates": [
+          [
+            0,
+            0.0,
+            -0.0033333333333333335
+          ],
+          [
+            4,
+            0.0,
+            -0.0016666666666666668
+          ]
+        ],
+        "reserved_indices": [
+          0
+        ],
+        "selected_index": 0,
+        "selected_bite_depth": 0.0016666666666666668,
+        "selected_roll": 0.0,
+        "fallback_count": 0,
+        "locked": true,
+        "stalled_chunks": 0,
+        "contact_path": 0.30000001192092896,
+        "goal_complete": true
+      }
+    },
+    {
+      "case": "fallback",
+      "hold_commands": 13,
+      "receipt": {
+        "accepted": true,
+        "phase": "bounded_chunk",
+        "reason": "candidate_fallback",
+        "sample_count": 132,
+        "target_contact": false,
+        "parent_contact_fraction": 0.0,
+        "observed_qpos": 0.0,
+        "target_error": 0.3,
+        "already_reached": false,
+        "parent_contact_fraction_limit": 0.25,
+        "parent_contact_warning": false,
+        "candidate_selected": 0,
+        "candidate_bite_depth": 0.0016666666666666668,
+        "candidate_roll": 0.0,
+        "candidate_fallback": true,
+        "candidate_axis_switch": false,
+        "candidate_next": 4,
+        "candidate_reserved_indices": [
+          0,
+          4
+        ],
+        "candidate_fallback_count": 1,
+        "candidate_fallback_limit": 2,
+        "candidate_order": [
+          0,
+          4
+        ],
+        "candidate_attempt_count": 2,
+        "candidate_stalled_chunks": 0,
+        "candidate_stalled_chunk_limit": 2,
+        "chunk_contact_progress": 0.0,
+        "contact_released": true,
+        "stable": true,
+        "recovery_safe": true,
+        "candidate_exhausted": false,
+        "coarse_turn_threshold": 0.2617993877991494,
+        "cumulative_contact_path": 0.0,
+        "coarse_turn_reached": false,
+        "early_stop": false,
+        "goal_complete": false
+      },
+      "cursor": {
+        "forced_index": 4,
+        "order": [
+          0,
+          4
+        ],
+        "candidates": [
+          [
+            0,
+            0.0,
+            -0.0033333333333333335
+          ],
+          [
+            4,
+            0.0,
+            -0.0016666666666666668
+          ]
+        ],
+        "reserved_indices": [
+          0,
+          4
+        ],
+        "selected_index": 0,
+        "selected_bite_depth": 0.0016666666666666668,
+        "selected_roll": 0.0,
+        "fallback_count": 1,
+        "locked": false,
+        "stalled_chunks": 0,
+        "contact_path": 0.0,
+        "goal_complete": false
+      }
+    },
+    {
+      "case": "unsafe",
+      "hold_commands": 13,
+      "receipt": {
+        "accepted": false,
+        "phase": "bounded_chunk",
+        "reason": "recovery_boundary_not_safe",
+        "sample_count": 132,
+        "target_contact": false,
+        "parent_contact_fraction": 0.0,
+        "observed_qpos": 0.0,
+        "target_error": 0.3,
+        "already_reached": false,
+        "parent_contact_fraction_limit": 0.25,
+        "parent_contact_warning": false,
+        "candidate_selected": 0,
+        "candidate_bite_depth": 0.0016666666666666668,
+        "candidate_roll": 0.0,
+        "candidate_fallback": false,
+        "candidate_axis_switch": false,
+        "candidate_next": null,
+        "candidate_reserved_indices": [
+          0
+        ],
+        "candidate_fallback_count": 0,
+        "candidate_fallback_limit": 2,
+        "candidate_order": [
+          0,
+          4
+        ],
+        "candidate_attempt_count": 1,
+        "candidate_stalled_chunks": 0,
+        "candidate_stalled_chunk_limit": 2,
+        "chunk_contact_progress": 0.0,
+        "contact_released": true,
+        "stable": false,
+        "recovery_safe": false,
+        "candidate_exhausted": false,
+        "coarse_turn_threshold": 0.2617993877991494,
+        "cumulative_contact_path": 0.0,
+        "coarse_turn_reached": false,
+        "early_stop": false,
+        "goal_complete": false
+      },
+      "cursor": {
+        "forced_index": null,
+        "order": [
+          0,
+          4
+        ],
+        "candidates": [
+          [
+            0,
+            0.0,
+            -0.0033333333333333335
+          ],
+          [
+            4,
+            0.0,
+            -0.0016666666666666668
+          ]
+        ],
+        "reserved_indices": [
+          0
+        ],
+        "selected_index": 0,
+        "selected_bite_depth": 0.0016666666666666668,
+        "selected_roll": 0.0,
+        "fallback_count": 0,
+        "locked": false,
+        "stalled_chunks": 0,
+        "contact_path": 0.0,
+        "goal_complete": false
+      }
+    },
+    {
+      "case": "invalid",
+      "hold_commands": 13,
+      "receipt": {
+        "accepted": false,
+        "phase": "bounded_chunk",
+        "reason": "invalid_observation",
+        "sample_count": 132,
+        "target_contact": false,
+        "parent_contact_fraction": 0.0,
+        "observed_qpos": 0.0,
+        "target_error": 0.3,
+        "already_reached": false,
+        "parent_contact_fraction_limit": 0.25,
+        "parent_contact_warning": false,
+        "candidate_selected": 0,
+        "candidate_bite_depth": 0.0016666666666666668,
+        "candidate_roll": 0.0,
+        "candidate_fallback": false,
+        "candidate_axis_switch": false,
+        "candidate_next": null,
+        "candidate_reserved_indices": [],
+        "candidate_fallback_count": 0,
+        "candidate_fallback_limit": 2,
+        "candidate_order": [
+          0,
+          4
+        ],
+        "candidate_attempt_count": 1,
+        "candidate_stalled_chunks": 0,
+        "candidate_stalled_chunk_limit": 2,
+        "chunk_contact_progress": 0.0,
+        "contact_released": true,
+        "stable": true,
+        "recovery_safe": true,
+        "candidate_exhausted": false,
+        "coarse_turn_threshold": 0.2617993877991494,
+        "cumulative_contact_path": 0.0,
+        "coarse_turn_reached": false,
+        "early_stop": false,
+        "goal_complete": false
+      },
+      "cursor": {
+        "forced_index": null,
+        "order": [
+          0,
+          4
+        ],
+        "candidates": [
+          [
+            0,
+            0.0,
+            -0.0033333333333333335
+          ],
+          [
+            4,
+            0.0,
+            -0.0016666666666666668
+          ]
+        ],
+        "reserved_indices": [],
+        "selected_index": 0,
+        "selected_bite_depth": 0.0016666666666666668,
+        "selected_roll": 0.0,
+        "fallback_count": 0,
+        "locked": false,
+        "stalled_chunks": 0,
+        "contact_path": 0.0,
+        "goal_complete": false
+      }
+    },
+    {
+      "case": "calibrated",
+      "hold_commands": 13,
+      "receipt": {
+        "accepted": true,
+        "phase": "bounded_chunk",
+        "reason": "chunk_observed",
+        "sample_count": 132,
+        "target_contact": true,
+        "parent_contact_fraction": 0.0,
+        "observed_qpos": 0.30000001192092896,
+        "target_error": 0.699999988079071,
+        "already_reached": false,
+        "parent_contact_fraction_limit": 0.25,
+        "parent_contact_warning": false,
+        "candidate_selected": 0,
+        "candidate_bite_depth": 0.0016666666666666668,
+        "candidate_roll": 0.0,
+        "candidate_fallback": false,
+        "candidate_axis_switch": false,
+        "candidate_next": null,
+        "candidate_reserved_indices": [
+          0
+        ],
+        "candidate_fallback_count": 0,
+        "candidate_fallback_limit": 2,
+        "candidate_order": [
+          0,
+          4
+        ],
+        "candidate_attempt_count": 1,
+        "candidate_stalled_chunks": 0,
+        "candidate_stalled_chunk_limit": 2,
+        "chunk_contact_progress": 0.30000001192092896,
+        "contact_released": true,
+        "stable": true,
+        "recovery_safe": true,
+        "candidate_exhausted": false,
+        "coarse_turn_threshold": 0.2617993877991494,
+        "cumulative_contact_path": 0.30000001192092896,
+        "coarse_turn_reached": false,
+        "early_stop": false,
+        "goal_complete": false
+      },
+      "cursor": {
+        "forced_index": 0,
+        "order": [
+          0,
+          4
+        ],
+        "candidates": [
+          [
+            0,
+            0.0,
+            -0.0033333333333333335
+          ],
+          [
+            4,
+            0.0,
+            -0.0016666666666666668
+          ]
+        ],
+        "reserved_indices": [
+          0
+        ],
+        "selected_index": 0,
+        "selected_bite_depth": 0.0016666666666666668,
+        "selected_roll": 0.0,
+        "fallback_count": 0,
+        "locked": true,
+        "stalled_chunks": 0,
+        "contact_path": 0.30000001192092896,
+        "goal_complete": false
+      }
+    }
+  ],
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c"
+}

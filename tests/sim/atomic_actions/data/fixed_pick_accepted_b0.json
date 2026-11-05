@@ -1,0 +1,156 @@
+{
+  "success": [
+    true
+  ],
+  "positions": "581ba34c433623d1572efaa3971d0770a352fb3e528a8e3374f41b2505012ccf",
+  "dt": "92aca8f2631b3c354db29e9f724b7b411a75a7938bdf8900ce749debeff8b12b",
+  "segments": [
+    [
+      "approach",
+      0,
+      77
+    ],
+    [
+      "close",
+      77,
+      89
+    ],
+    [
+      "lift",
+      89,
+      140
+    ]
+  ],
+  "metadata": {
+    "gen_sim_pick_contact_geometry": {
+      "valid": true,
+      "emitted_close_samples": 12,
+      "revision": 1,
+      "identity": {},
+      "scope": "discrete_nominal_hand_target_rest_order_not_physical_acquisition",
+      "native_pair_rest_offsets_used": true,
+      "native_pair_contact_offsets_used": false,
+      "closing_grid_samples": 65,
+      "unique_tcp_queries": 1,
+      "accepted_queries": 1,
+      "reasons": [
+        {
+          "valid": true,
+          "reason": "nominal_bilateral_pad_rest_first",
+          "checked_samples": 38,
+          "nominal_closing_fraction": 0.578125
+        }
+      ]
+    },
+    "gen_sim_fixed_pick": {
+      "accepted": true,
+      "fixed_object_to_eef": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          -1.0,
+          0.009999999776482582
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "selected_pose": [
+        [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.20000000298023224
+          ],
+          [
+            0.0,
+            -1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.10999999940395355
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      ],
+      "approach_direction": [
+        [
+          0.0,
+          0.0,
+          -1.0
+        ]
+      ],
+      "trajectory": {
+        "valid": true,
+        "downstream": {
+          "valid": true,
+          "target_count": 0,
+          "qualification_scope": "untimed_endpoint_ik_fk_only",
+          "continuous_path_qualified": false
+        },
+        "phase_samples": {
+          "approach": 77,
+          "close": 12,
+          "lift": 51
+        },
+        "timing_unchanged": true,
+        "qualification_scope": "continuous_pick_cartesian_samples_not_physical_acquisition"
+      },
+      "emitted_plan": {
+        "valid": true,
+        "frames": 140,
+        "scope": "discrete_robot_meshes"
+      },
+      "approach_scene": {
+        "valid": true,
+        "frames": 77,
+        "scope": "discrete_free_motion_meshes"
+      },
+      "resampled": false,
+      "physical_evidence": false
+    }
+  },
+  "failure": null,
+  "calls": [],
+  "ik": [],
+  "inspections": [
+    {
+      "valid": true,
+      "frames": 140,
+      "scope": "discrete_robot_meshes"
+    }
+  ],
+  "rng": "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+  "scene_checks": [
+    {
+      "valid": true,
+      "frames": 77,
+      "scope": "discrete_free_motion_meshes"
+    }
+  ]
+}

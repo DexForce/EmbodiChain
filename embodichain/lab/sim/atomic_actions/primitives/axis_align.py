@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import torch
 
@@ -118,6 +118,21 @@ class AxisAlignOptions(PickUpOptions):
 
     def __post_init__(self) -> None:
         PickUpOptions.__post_init__(self)
+        if (
+            self.native_closing_revision is not None
+            or self.native_scene_trial
+            or self.adaptive_grasp != "none"
+            or self.full_opening_clearance
+            or self.require_qualified_approach
+            or self.linear_segments
+            or self.qualify_fixed_grasp
+            or self.constrained_grasp
+            or self.measured_preshape
+            or not self.qualify_downstream_targets
+        ):
+            raise ValueError(
+                "AxisAlign does not support Pick-only sampling/closing requirements."
+            )
         if (
             not isinstance(self.target_axis, torch.Tensor)
             or self.target_axis.dim() not in (1, 2)

@@ -1,0 +1,89 @@
+{
+  "success": [
+    false
+  ],
+  "positions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "dt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "segments": [],
+  "metadata": {
+    "gen_sim_fixed_pick": {
+      "accepted": false,
+      "fixed_object_to_eef": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          -1.0,
+          0.009999999776482582
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "selected_pose": [
+        [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.20000000298023224
+          ],
+          [
+            0.0,
+            -1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.10999999940395355
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      ],
+      "approach_direction": [
+        [
+          0.0,
+          0.0,
+          -1.0
+        ]
+      ],
+      "trajectory": {
+        "valid": false,
+        "reason": "action_duration_budget"
+      },
+      "resampled": false,
+      "physical_evidence": false
+    }
+  },
+  "failure": {
+    "code": "gen_sim_fixed_pick_unqualified",
+    "retryable": false
+  },
+  "calls": [],
+  "ik": [],
+  "inspections": [],
+  "rng": "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976",
+  "scene_checks": []
+}

@@ -1,0 +1,251 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "scope": "real source Place and GenSimActionEngine with controlled segment outputs; source best-effort overspeed exhaustion is not dispatch-qualified",
+  "cases": [
+    {
+      "mode": "both",
+      "calls": [
+        {
+          "count": 138,
+          "preserve": true,
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ]
+        },
+        {
+          "count": 260,
+          "preserve": true,
+          "draws": [
+            0.5351095795631409,
+            0.5305867556052941,
+            0.8066907771186791
+          ]
+        },
+        {
+          "count": 258,
+          "preserve": true,
+          "draws": [
+            0.8302087187767029,
+            0.19152078694749486,
+            0.9604947743238768
+          ]
+        },
+        {
+          "count": 260,
+          "preserve": true,
+          "draws": [
+            0.1238635778427124,
+            0.06790035819129137,
+            0.2896253777644655
+          ]
+        },
+        {
+          "count": 318,
+          "preserve": true,
+          "draws": [
+            0.02932107448577881,
+            0.7869854599999133,
+            0.7661074377979527
+          ]
+        }
+      ],
+      "success": [
+        true
+      ],
+      "positions_sha256": "49fd19c493da62eb5f496e7688f0fae7c9da23215e0117d5f12f82eb75e5d93d",
+      "dt_sha256": "a0b929e9023c20c22d20e8e4376d9d2bc12c649703d85355580f1ab47428c718",
+      "segments": [
+        [
+          "approach",
+          0,
+          173
+        ],
+        [
+          "release",
+          173,
+          175
+        ],
+        [
+          "retract",
+          175,
+          263
+        ]
+      ],
+      "after_rng": [
+        "b15baa748e05702b886840c24e696befc67736e73f2d5c1a13b797054ef4ed48",
+        0.6563335217758555,
+        0.7042198668434126
+      ]
+    },
+    {
+      "mode": "inner",
+      "calls": [
+        {
+          "count": 138,
+          "preserve": true,
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ]
+        },
+        {
+          "count": 260,
+          "preserve": true,
+          "draws": [
+            0.5351095795631409,
+            0.5305867556052941,
+            0.8066907771186791
+          ]
+        }
+      ],
+      "success": [
+        true
+      ],
+      "positions_sha256": "49fd19c493da62eb5f496e7688f0fae7c9da23215e0117d5f12f82eb75e5d93d",
+      "dt_sha256": "a0b929e9023c20c22d20e8e4376d9d2bc12c649703d85355580f1ab47428c718",
+      "segments": [
+        [
+          "approach",
+          0,
+          173
+        ],
+        [
+          "release",
+          173,
+          175
+        ],
+        [
+          "retract",
+          175,
+          263
+        ]
+      ],
+      "after_rng": [
+        "b15baa748e05702b886840c24e696befc67736e73f2d5c1a13b797054ef4ed48",
+        0.19152078694749486,
+        0.9604947743238768
+      ]
+    },
+    {
+      "mode": "outer",
+      "calls": [
+        {
+          "count": 138,
+          "preserve": false,
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ]
+        },
+        {
+          "count": 258,
+          "preserve": false,
+          "draws": [
+            0.5351095795631409,
+            0.5305867556052941,
+            0.8066907771186791
+          ]
+        },
+        {
+          "count": 318,
+          "preserve": false,
+          "draws": [
+            0.8302087187767029,
+            0.19152078694749486,
+            0.9604947743238768
+          ]
+        }
+      ],
+      "success": [
+        true
+      ],
+      "positions_sha256": "7ea0f474b183d605f6ee44c2e8b54cb9fe322322e823286310a225d2b8f6538d",
+      "dt_sha256": "ad1db11eeef2df67f7f1a243decaaa4732501c3e37793789d1a8b98348b2884d",
+      "segments": [
+        [
+          "approach",
+          0,
+          92
+        ],
+        [
+          "release",
+          92,
+          94
+        ],
+        [
+          "retract",
+          94,
+          149
+        ]
+      ],
+      "after_rng": [
+        "c27b58ca1de8d22987675cb1eb8921685571f49cee02313a4bf8108043c5adef",
+        0.06790035819129137,
+        0.2896253777644655
+      ]
+    },
+    {
+      "mode": "exhaust",
+      "calls": [
+        {
+          "count": 138,
+          "preserve": true,
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ]
+        },
+        {
+          "count": 260,
+          "preserve": true,
+          "draws": [
+            0.5351095795631409,
+            0.5305867556052941,
+            0.8066907771186791
+          ]
+        },
+        {
+          "count": 320,
+          "preserve": true,
+          "draws": [
+            0.8302087187767029,
+            0.19152078694749486,
+            0.9604947743238768
+          ]
+        }
+      ],
+      "success": [
+        false
+      ],
+      "positions_sha256": "b7d8ea479c070a3be61ea148c1295c90629d4dc6e02dbfb23874f42e981c653b",
+      "dt_sha256": "ad1db11eeef2df67f7f1a243decaaa4732501c3e37793789d1a8b98348b2884d",
+      "segments": [
+        [
+          "approach",
+          0,
+          92
+        ],
+        [
+          "release",
+          92,
+          94
+        ],
+        [
+          "retract",
+          94,
+          149
+        ]
+      ],
+      "after_rng": [
+        "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+        0.06790035819129137,
+        0.2896253777644655
+      ]
+    }
+  ]
+}

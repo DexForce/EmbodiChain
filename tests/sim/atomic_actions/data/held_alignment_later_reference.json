@@ -1,0 +1,68 @@
+{
+  "mode": "later",
+  "success": [
+    true
+  ],
+  "positions_sha256": "0c949cc608d6b180b4f3913811488c37705259b2f81d4ed0dd6d8cf432e9dcaa",
+  "dt_sha256": "a7d6453f6fc1cc42f6adcb3846195e151df210f8ae3318108da4e4eb179c69a0",
+  "segments": [
+    [
+      "transport",
+      0,
+      45
+    ]
+  ],
+  "metadata": {
+    "world_yaw_offsets_rad": [
+      0.7853981852531433
+    ],
+    "yaw_plan_attempts": 2,
+    "held_alignment": {
+      "robot_proxy_attempts": [
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": false,
+            "frame": 0,
+            "kind": "self",
+            "pairs": [
+              [
+                "arm",
+                "torso"
+              ]
+            ]
+          }
+        },
+        {
+          "raw_success": true,
+          "collision": {
+            "valid": true,
+            "frames": 45,
+            "scope": "discrete_robot_meshes"
+          }
+        }
+      ],
+      "rejected_raw_success": 1,
+      "final_command_check": {
+        "valid": true,
+        "collision": {
+          "valid": true,
+          "frames": 45,
+          "scope": "discrete_robot_meshes"
+        }
+      }
+    }
+  },
+  "failure": null,
+  "held_keys": [
+    "source_arm"
+  ],
+  "rng": [
+    "c27b58ca1de8d22987675cb1eb8921685571f49cee02313a4bf8108043c5adef",
+    0.5305867556052941,
+    0.8066907771186791
+  ],
+  "calls_sha256": "b603d68db7ef8393c54943100108c0ff2d2a322e5cf65b6ce589562b48bdabdc",
+  "checks_sha256": "c3fbbf3ff0d3862383c2f076d69a42719d0b8b89f3f55bae26edc4db43325842",
+  "ik_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+}

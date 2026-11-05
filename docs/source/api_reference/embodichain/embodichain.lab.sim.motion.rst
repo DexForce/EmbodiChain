@@ -50,3 +50,41 @@ validation, and dataset persistence belong to explicit host integrations.
    embodichain.lab.sim.motion.planners
    embodichain.lab.sim.motion.workspace
    embodichain.lab.sim.motion.expansion
+
+Explicit seeded IK services
+---------------------------
+
+These services accept an explicitly selected Robot, control part and observed
+poses. They solve and qualify paths without creating a simulator, executing
+commands or establishing a physical task effect. Source paths retain their B=1
+boundary, ordered seeds, authored joint limits and original time grids.
+
+.. automodule:: embodichain.lab.sim.motion.ik_branches
+   :members:
+
+``CpuIKBranchSearch.capture`` reads the declared solver root once. Its fixed-seed
+CPU search preserves the original RNG scope: ``torch.manual_seed`` also reseeds
+visible CUDA streams, so the legacy CPU-only fork does not promise CUDA isolation.
+The supplied-root constructor avoids an additional live root-pose read.
+
+.. automodule:: embodichain.lab.sim.motion.goal_seeded
+   :members:
+
+Endpoint and path qualification use the configured full-pose validation budgets.
+The callbacks and original mandatory samples retain their source order; these
+checks provide no physical attachment, collision or acceptance certificate.
+
+.. automodule:: embodichain.lab.sim.motion.solvers.tolerances
+   :members:
+
+Explicit CPU worker scope
+-------------------------
+
+This opt-in context owns process-wide Torch intra-op settings for an isolated
+worker. Capture capacity before applying serial overrides. Large CPU
+PytorchSolver pose products can reuse the captured bounded thread capacity;
+ordinary runtime calls outside the scope perform no thread-setting changes.
+The owner must serialize concurrent use of these process-wide settings.
+
+.. automodule:: embodichain.lab.sim.motion.cpu_threads
+   :members:

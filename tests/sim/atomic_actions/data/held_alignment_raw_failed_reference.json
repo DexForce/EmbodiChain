@@ -1,0 +1,66 @@
+{
+  "mode": "raw_failed",
+  "success": [
+    false
+  ],
+  "positions_sha256": "189aec61957037c7ab572ba3ac2cc6ca294e1cdafefc9b6a31c4130103d46fc9",
+  "dt_sha256": "a7d6453f6fc1cc42f6adcb3846195e151df210f8ae3318108da4e4eb179c69a0",
+  "segments": [
+    [
+      "transport",
+      0,
+      45
+    ]
+  ],
+  "metadata": {
+    "world_yaw_offsets_rad": [
+      0.0
+    ],
+    "yaw_plan_attempts": 8,
+    "held_alignment": {
+      "robot_proxy_attempts": [
+        {
+          "raw_success": false
+        },
+        {
+          "raw_success": false
+        },
+        {
+          "raw_success": false
+        },
+        {
+          "raw_success": false
+        },
+        {
+          "raw_success": false
+        },
+        {
+          "raw_success": false
+        },
+        {
+          "raw_success": false
+        },
+        {
+          "raw_success": false
+        }
+      ],
+      "rejected_raw_success": 0,
+      "local_fallback": {
+        "predicate_calls": 0,
+        "target_count": 44,
+        "sample_count": 45,
+        "accepted": false
+      }
+    }
+  },
+  "failure": "planning_failed",
+  "held_keys": [],
+  "rng": [
+    "71187551b841f6cf6d3b28ad5f39d9c7e380f13e8ccda1aa20b65e1200347e56",
+    0.03906291618886648,
+    0.026936778790526805
+  ],
+  "calls_sha256": "f8c718cff635b4772ecef3fbeb47d91ff33f35b2a3b87a6c4dd9e67f5895aa18",
+  "checks_sha256": "cc17a748e6c65b0ab1bf2d935eac195aed20ed4e57035ecee285d9f2125244e7",
+  "ik_sha256": "5b4cb7577d1971298fb90afe37b892e978700510ac2e7981fa8b1f7c49926b34"
+}

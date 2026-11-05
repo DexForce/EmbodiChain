@@ -1,0 +1,639 @@
+[
+  {
+    "mode": "initial_valid",
+    "success": [
+      true
+    ],
+    "metadata": {
+      "affordance_sample": {
+        "grasp": {
+          "pose_frame": "world",
+          "selected_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "reference_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "success": [
+            true
+          ],
+          "env_ids": [
+            0
+          ],
+          "key": "pick:grasp",
+          "sampling": null,
+          "candidate_ids": [
+            0
+          ],
+          "valid_candidate_counts": [
+            1
+          ],
+          "unique_candidate_counts": [
+            1
+          ],
+          "reused": [
+            false
+          ]
+        }
+      }
+    },
+    "failure": null,
+    "trace": []
+  },
+  {
+    "mode": "deferred",
+    "success": [
+      true
+    ],
+    "metadata": {
+      "affordance_sample": {
+        "grasp": {
+          "pose_frame": "world",
+          "selected_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "reference_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "success": [
+            true
+          ],
+          "env_ids": [
+            0
+          ],
+          "key": "pick:grasp",
+          "sampling": null,
+          "candidate_ids": [
+            0
+          ],
+          "valid_candidate_counts": [
+            1
+          ],
+          "unique_candidate_counts": [
+            1
+          ],
+          "reused": [
+            false
+          ]
+        }
+      }
+    },
+    "failure": null,
+    "trace": []
+  },
+  {
+    "mode": "initial_unavailable",
+    "success": [
+      true
+    ],
+    "metadata": {
+      "affordance_sample": {
+        "grasp": {
+          "pose_frame": "world",
+          "selected_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "reference_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "success": [
+            true
+          ],
+          "env_ids": [
+            0
+          ],
+          "key": "pick:grasp",
+          "sampling": null,
+          "candidate_ids": [
+            0
+          ],
+          "valid_candidate_counts": [
+            1
+          ],
+          "unique_candidate_counts": [
+            1
+          ],
+          "reused": [
+            false
+          ]
+        }
+      }
+    },
+    "failure": null,
+    "trace": []
+  },
+  {
+    "mode": "accepted",
+    "success": [
+      true
+    ],
+    "metadata": {
+      "affordance_sample": {
+        "grasp": {
+          "pose_frame": "world",
+          "selected_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "reference_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "success": [
+            true
+          ],
+          "env_ids": [
+            0
+          ],
+          "key": "pick:grasp",
+          "sampling": null,
+          "candidate_ids": [
+            0
+          ],
+          "valid_candidate_counts": [
+            1
+          ],
+          "unique_candidate_counts": [
+            1
+          ],
+          "reused": [
+            false
+          ]
+        }
+      }
+    },
+    "failure": null,
+    "trace": []
+  },
+  {
+    "mode": "later_unavailable",
+    "success": [
+      true
+    ],
+    "metadata": {
+      "affordance_sample": {
+        "grasp": {
+          "pose_frame": "world",
+          "selected_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "reference_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "success": [
+            true
+          ],
+          "env_ids": [
+            0
+          ],
+          "key": "pick:grasp",
+          "sampling": null,
+          "candidate_ids": [
+            0
+          ],
+          "valid_candidate_counts": [
+            1
+          ],
+          "unique_candidate_counts": [
+            1
+          ],
+          "reused": [
+            false
+          ]
+        }
+      }
+    },
+    "failure": null,
+    "trace": []
+  },
+  {
+    "mode": "exhausted",
+    "success": [
+      true
+    ],
+    "metadata": {
+      "affordance_sample": {
+        "grasp": {
+          "pose_frame": "world",
+          "selected_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "reference_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "success": [
+            true
+          ],
+          "env_ids": [
+            0
+          ],
+          "key": "pick:grasp",
+          "sampling": null,
+          "candidate_ids": [
+            0
+          ],
+          "valid_candidate_counts": [
+            1
+          ],
+          "unique_candidate_counts": [
+            1
+          ],
+          "reused": [
+            false
+          ]
+        }
+      }
+    },
+    "failure": null,
+    "trace": []
+  },
+  {
+    "mode": "pick_rejected",
+    "success": [
+      true
+    ],
+    "metadata": {
+      "affordance_sample": {
+        "grasp": {
+          "pose_frame": "world",
+          "selected_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "reference_poses": [
+            [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.20000000298023224
+              ],
+              [
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.10000000149011612
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          ],
+          "success": [
+            true
+          ],
+          "env_ids": [
+            0
+          ],
+          "key": "pick:grasp",
+          "sampling": null,
+          "candidate_ids": [
+            0
+          ],
+          "valid_candidate_counts": [
+            1
+          ],
+          "unique_candidate_counts": [
+            1
+          ],
+          "reused": [
+            false
+          ]
+        }
+      }
+    },
+    "failure": null,
+    "trace": []
+  }
+]

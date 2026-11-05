@@ -105,6 +105,8 @@ from embodichain.lab.sim.atomic_actions import (
     RecoveryPolicy,
     SlideOptions,
     TrackingPolicy,
+    TwistOptions,
+    TwistPlanningRecovery,
 )
 from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanOptions,
@@ -1011,6 +1013,15 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "contact_frame_to_eef",
                 "tool_calibrations",
                 "target_axis",
+                "hand_interp_steps",
+                "twist_waypoint_count",
+                "pre_grasp_distance",
+                "twist_angle",
+                "max_twist_angle",
+                "contact_bite_depth",
+                "contact_roll",
+                "contact_settle_steps",
+                "rotation_enabled",
             }
         ),
     )
@@ -1432,6 +1443,57 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 )
             kwargs["tool_calibrations"] = tuple(calibrations)
         return PushObjectOptions(**kwargs)
+    if kind == "twist":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "hand_interp_steps",
+                    "twist_waypoint_count",
+                    "pre_grasp_distance",
+                    "twist_angle",
+                    "max_twist_angle",
+                    "contact_bite_depth",
+                    "contact_roll",
+                    "contact_settle_steps",
+                    "rotation_enabled",
+                }
+            ),
+        )
+        kwargs = {}
+        for name in (
+            "hand_interp_steps",
+            "twist_waypoint_count",
+            "contact_settle_steps",
+        ):
+            if name in config:
+                kwargs[name] = _integer(
+                    config[name],
+                    path=f"{path}.{name}",
+                    minimum=0 if name == "contact_settle_steps" else 1,
+                )
+        for name in (
+            "pre_grasp_distance",
+            "twist_angle",
+            "max_twist_angle",
+            "contact_bite_depth",
+            "contact_roll",
+        ):
+            if name in config:
+                kwargs[name] = (
+                    None
+                    if config[name] is None
+                    and name in {"contact_bite_depth", "contact_roll"}
+                    else _real(config[name], path=f"{path}.{name}")
+                )
+        if "rotation_enabled" in config:
+            kwargs["rotation_enabled"] = _boolean(
+                config["rotation_enabled"], path=f"{path}.rotation_enabled"
+            )
+        return TwistOptions(**kwargs)
+
     if kind == "slide":
         config = _mapping(
             value,
@@ -1789,6 +1851,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 "action_timeout",
                 "planning_budget",
                 "retry_all_failed_plans",
+                "planning_recovery",
             }
         ),
     )
@@ -1843,6 +1906,25 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 )
             )
         )
+    if config.get("planning_recovery") is not None:
+        declaration_path = f"{path}.planning_recovery"
+        declaration = _mapping(
+            config["planning_recovery"],
+            path=declaration_path,
+            required=frozenset({"kind", "revision"}),
+            optional=frozenset(),
+        )
+        kind = _identifier(declaration["kind"], path=f"{declaration_path}.kind")
+        if kind != "twist_bounded":
+            raise ValueError(f"Unsupported {declaration_path}.kind {kind!r}.")
+        if (
+            _integer(
+                declaration["revision"], path=f"{declaration_path}.revision", minimum=1
+            )
+            != 1
+        ):
+            raise ValueError(f"Unsupported {declaration_path}.revision.")
+        kwargs["planning_recovery"] = TwistPlanningRecovery()
     return RecoveryPolicy(**kwargs)
 
 

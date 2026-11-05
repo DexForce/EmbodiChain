@@ -1444,6 +1444,15 @@ class CuroboPlanner(BasePlanner):
                 del self._backend_cache[key]
 
         profile = self._materialize_profile(control_part)
+        snapshot = getattr(self, "_query_snapshot", None)
+        if (
+            snapshot is not None
+            and snapshot.base_link_name is not None
+            and snapshot.base_link_name != profile.sim_base_link_name
+        ):
+            raise ValueError(
+                "Observed query base does not match the generated cuRobo URDF root."
+            )
         sim_joint_names = self._resolve_sim_joint_names(control_part)
         world_cfg = self.cfg.world
         scene_model = (

@@ -1,0 +1,30 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "scope": "actual source adaptive Pick, full command certificate and contact reconstruction; deterministic kinematics/motion/collision oracles, no native physics claim",
+  "positions_sha256": "9d98b405c2afb2d08747475a929f4c8757fde6921f8265013e0ce07dc452ae57",
+  "dt_sha256": "1c2252469c0e92cdf6d15f51538d7babcb101335e749ae64048a4c22cb66988c",
+  "rng": "903697359879995d02f3fcb75c18c2d9c06946fd9bd08607a2db33a4c0eadb43",
+  "success": [
+    true
+  ],
+  "segments": [
+    [
+      "approach",
+      0,
+      88
+    ],
+    [
+      "close",
+      88,
+      100
+    ],
+    [
+      "lift",
+      100,
+      151
+    ]
+  ],
+  "calls_sha256": "d4362f0cf353e2603098fb723b7ccf3041a408e752d81d993a738f2f303da1ba",
+  "ik_sha256": "8f24fc8265e75e2e25b7fe897628d279276fbe4d17649b3708fc296ed0efce4e",
+  "metadata_sha256": "88bc291b449df805060c55acdd7b1bc61f99b9fd2643d1d42945898258660c31"
+}

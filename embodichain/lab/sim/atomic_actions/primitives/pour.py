@@ -157,6 +157,119 @@ class PourGoal:
             raise TypeError("target must be a PourTarget or None.")
 
 
+@dataclass(frozen=True, slots=True, eq=False, kw_only=True)
+class JawPourGoal:
+    """Use the explicitly calibrated ordered pad line for the legacy tilt arc.
+
+    Args:
+        receiver_entity_id: Optional canonical receiver identity. Its pose is
+            resolved from each supplied PlanningContext. This identifier does
+            not add a scene-motion monitor or change replan triggers.
+
+    The source sampling convention drops the first generated arc pose before
+    MotionGenerator prepends the observed start. At sample_count=3 this legacy
+    convention omits the peak. Use the distinct retained variant when selecting
+    that variant's staging-inclusive arc; default PourGoal behavior is unchanged.
+    """
+
+    goal_kind: ClassVar[str] = "jaw_pour"
+    receiver_entity_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.receiver_entity_id is not None:
+            _pour_entity_id(self.receiver_entity_id, "receiver_entity_id")
+
+
+def _pour_entity_id(value: str, name: str) -> None:
+    if type(value) is not str or not value or value != value.strip():
+        raise ValueError(f"{name} must be a canonical nonempty entity ID.")
+
+
+@dataclass(frozen=True, slots=True, eq=False, kw_only=True)
+class RetainedPourGoal:
+    """Execute an ordered-jaw fixed-pivot arc and report the unchanged attachment.
+
+    Args:
+        source_entity_id: Canonical identity of the exclusively held object.
+        receiver_entity_id: Canonical receiver read from each PlanningContext.
+            Like the source variant, this does not add a receiver-motion monitor.
+        source_vertices: Already-scaled object-local grounding geometry (V, 3).
+        receiver_vertices: Already-scaled receiver-local grounding geometry (R, 3).
+        return_pose: Explicit object return target used by the bound geometric
+            recipe, shape (4, 4). This action itself restores its entry staging pose.
+        gravity_world: Actual finite, nonzero negative-Z gravity vector.
+        proxy_position_tolerance_m: Optional already-applied staging projection
+            reserve retained in diagnostics. It never relaxes collision/contact
+            checks or supplies a second motion/recovery policy.
+
+    Geometry and return-target tensors are copied at construction. Angle and
+    sample count come exclusively from the resolved PourOptions/MotionPolicy.
+    Retention reporting neither rebases the grasp nor establishes fresh physical
+    evidence, and no fluid-transfer effect is inferred.
+    """
+
+    goal_kind: ClassVar[str] = "retained_pour"
+    source_entity_id: str
+    receiver_entity_id: str
+    source_vertices: torch.Tensor
+    receiver_vertices: torch.Tensor
+    return_pose: torch.Tensor
+    gravity_world: tuple[float, float, float]
+    proxy_position_tolerance_m: float | None = None
+
+    def __post_init__(self) -> None:
+        _pour_entity_id(self.source_entity_id, "source_entity_id")
+        _pour_entity_id(self.receiver_entity_id, "receiver_entity_id")
+        for name in ("source_vertices", "receiver_vertices"):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, torch.Tensor)
+                or value.ndim != 2
+                or value.shape[1] != 3
+                or not len(value)
+                or not value.is_floating_point()
+                or not torch.isfinite(value).all()
+            ):
+                raise ValueError(f"{name} requires finite floating vertices (V, 3).")
+            object.__setattr__(self, name, value.detach().clone())
+        if not isinstance(self.return_pose, torch.Tensor) or self.return_pose.shape != (
+            4,
+            4,
+        ):
+            raise ValueError("return_pose requires one rigid transform (4, 4).")
+        # Preserve the retained arc's native-float32 tolerance; the independent
+        # mouth-target mode above intentionally has its own stricter contract.
+        from embodichain.compute.geometry.pouring import _pose
+
+        _pose(self.return_pose.detach().cpu().numpy())
+        object.__setattr__(self, "return_pose", self.return_pose.detach().clone())
+        gravity = tuple(self.gravity_world)
+        if (
+            len(gravity) != 3
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                for value in gravity
+            )
+            or gravity[0] != 0
+            or gravity[1] != 0
+            or gravity[2] >= 0
+        ):
+            raise ValueError("Retained Pour requires finite negative-Z world gravity.")
+        object.__setattr__(self, "gravity_world", gravity)
+        budget = self.proxy_position_tolerance_m
+        if budget is not None and (
+            isinstance(budget, bool)
+            or not isinstance(budget, (int, float))
+            or not math.isfinite(budget)
+            or budget <= 0
+        ):
+            raise ValueError(
+                "proxy_position_tolerance_m must be finite and positive or None."
+            )
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class PourOptions(ActionOptions):
     """Per-invocation pouring behavior."""
@@ -203,11 +316,11 @@ class PourOptions(ActionOptions):
             raise ValueError("max_rotation_step must not exceed fifteen degrees.")
 
 
-class Pour(AtomicAction[PourGoal, PourOptions]):
+class Pour(AtomicAction[PourGoal | JawPourGoal | RetainedPourGoal, PourOptions]):
     """Rotate and return an exclusively held object about its internal axis."""
 
     skill_id: ClassVar[str] = "pour"
-    GoalType: ClassVar[type] = PourGoal
+    GoalType: ClassVar[tuple[type, ...]] = (PourGoal, JawPourGoal, RetainedPourGoal)
     OptionsType: ClassVar[type] = PourOptions
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
@@ -227,10 +340,18 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[PourGoal, PourOptions],
+        request: ResolvedActionRequest[
+            PourGoal | JawPourGoal | RetainedPourGoal, PourOptions
+        ],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan a held-object rotation followed by the inverse rotation."""
+        if isinstance(request.goal, (JawPourGoal, RetainedPourGoal)):
+            from embodichain.lab.sim.atomic_actions.primitives._pour_arc import (
+                plan_pad_pour,
+            )
+
+            return plan_pad_pour(self, request, context)
         goal = self.require_goal(request)
         options = request.skill_options
         motion_endpoint = request.binding.endpoint("primary", "motion")
@@ -671,4 +792,11 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
         )
 
 
-__all__ = ["Pour", "PourGoal", "PourOptions", "PourTarget"]
+__all__ = [
+    "Pour",
+    "PourGoal",
+    "JawPourGoal",
+    "RetainedPourGoal",
+    "PourOptions",
+    "PourTarget",
+]

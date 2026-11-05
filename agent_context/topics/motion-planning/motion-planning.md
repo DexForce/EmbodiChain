@@ -24,6 +24,8 @@ Atomic skills own which segment enables recovery; Task Engine declares policy.
 | Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
+| Discrete full-robot collision queries and owned query scopes | `embodichain/lab/sim/motion/mesh_collision.py` |
+| Bounded empty-arm joint clearance | `embodichain/lab/sim/motion/joint_clearance.py` |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
@@ -61,6 +63,43 @@ capture; no FCL extra or backend fallback is selected. Distance diagnostics are
 capped intervals under the query precision policy. A threshold inside an interval
 remains unavailable, never a fabricated contact or free path. CPU comparisons
 remain separate from GPU and physical-task qualification.
+
+`ik_branches.CpuIKBranchSearch` owns the explicit B1 CPU endpoint/continuation
+search, with fixed seed order, separated branch selection and original residual
+rules. `capture` reads the configured root once; a supplied-root constructor
+keeps geometry reads caller-owned. Its legacy CPU-only Torch fork plus
+`manual_seed(0)` also reseeds visible CUDA streams. Do not claim CUDA RNG isolation
+or change that behavior as part of ownership migration. Numeric branch selection
+and pose residuals live in `compute.kinematics.seed_selection` and
+`compute.geometry.pose_checks`.
+
+`goal_seeded` supplies bounded endpoints and distinguished-goal/common-seed pose
+paths. Callers supply mandatory poses, source time samples and same-observation
+state. Motion owns solver/FK masks and limit qualification; Atomic Skills own
+phase composition, retry choices and physical effects. `solvers.tolerances` reads
+explicit full-pose solver budgets without replacing them with task thresholds.
+
+`cpu_threads.cpu_planning_threads` is an explicit isolated-worker scope, never a
+shared default. It captures capacity before overrides and restores process-wide
+Torch settings on exit; `candidate_ik_threads` uses that capacity only for
+eligible CPU PytorchSolver pose products. Hosts serialize those process-wide
+changes and retain lifecycle ownership.
+
+`RevolutePathQueryFactory` prepares original URDF collision inputs for one exact
+Default/B1 robot, articulation and support. It borrows native owners and accepts
+an explicit complete motion-root subtree; it never creates a simulator, task,
+skill or planning context. Fresh `NativeQueryScope` queries bind supplied root,
+parent/child and measured-joint observations. Source/model/frame/owner drift
+rejects without recapturing a replacement baseline. Closing releases query
+resources, never borrowed Robot/native objects.
+
+`RevolutePathReport` keeps unsupported acquisition distinct from an accepted or
+rejected supported screen. `RevoluteDependencyReport` describes the preserved
+source-input command-frame proxy and conservative sweep qualification, not
+native cooking, continuous collision or physical effects. The original FK batch,
+sampling order and collision domains remain with this Motion query. Scene's
+`revolute_setting_attributes` only exposes authored fixed-base setting identities;
+it chooses no Semantic Call or recovery policy.
 
 ## Timing and batch boundary
 

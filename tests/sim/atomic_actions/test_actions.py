@@ -305,12 +305,12 @@ def _torch_interpolation(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _robot() -> Mock:
+def _robot(batch_size: int = NUM_ENVS) -> Mock:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = ROBOT_DOF
     robot.joint_names = [f"joint_{index}" for index in range(ROBOT_DOF)]
-    robot.num_instances = NUM_ENVS
+    robot.num_instances = batch_size
     robot.control_parts = {
         "arm": object(),
         "hand": object(),
@@ -320,10 +320,10 @@ def _robot() -> Mock:
 
     def get_qpos(name: str | None = None) -> torch.Tensor:
         if name in {"arm", "alternate_arm"}:
-            return torch.zeros(NUM_ENVS, ARM_DOF)
+            return torch.zeros(batch_size, ARM_DOF)
         if name in {"hand", "alternate_hand"}:
-            return torch.zeros(NUM_ENVS, HAND_DOF)
-        return torch.zeros(NUM_ENVS, ROBOT_DOF)
+            return torch.zeros(batch_size, HAND_DOF)
+        return torch.zeros(batch_size, ROBOT_DOF)
 
     def get_joint_ids(name: str | None = None) -> list[int]:
         if name in {"arm", "alternate_arm"}:
@@ -337,7 +337,7 @@ def _robot() -> Mock:
         joint_ids: list[int] | None = None,
     ) -> torch.Tensor:
         ids = get_joint_ids(name) if joint_ids is None else joint_ids
-        return torch.ones(NUM_ENVS, len(ids))
+        return torch.ones(batch_size, len(ids))
 
     def compute_ik(
         pose: torch.Tensor | None = None,
@@ -346,14 +346,14 @@ def _robot() -> Mock:
         **_: object,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         assert joint_seed is not None
-        return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed.clone()
+        return torch.ones(batch_size, dtype=torch.bool), joint_seed.clone()
 
     def compute_fk(
         qpos: torch.Tensor | None = None,
         name: str | None = None,
         to_matrix: bool = True,
     ) -> torch.Tensor:
-        count = NUM_ENVS if qpos is None else qpos.shape[0]
+        count = batch_size if qpos is None else qpos.shape[0]
         return torch.eye(4).repeat(count, 1, 1)
 
     def compute_batch_fk(
@@ -395,16 +395,16 @@ def _robot() -> Mock:
     robot.compute_batch_ik.side_effect = compute_batch_ik
     robot.compute_fk.side_effect = compute_fk
     robot.compute_batch_fk.side_effect = compute_batch_fk
-    robot.get_qvel_limits.return_value = torch.full((NUM_ENVS, ROBOT_DOF), torch.inf)
+    robot.get_qvel_limits.return_value = torch.full((batch_size, ROBOT_DOF), torch.inf)
     robot.mimic_ids = []
     robot.mimic_parents = []
     robot.mimic_multipliers = []
     return robot
 
 
-def _motion_generator() -> MotionGenerator:
+def _motion_generator(batch_size: int = NUM_ENVS) -> MotionGenerator:
     generator = object.__new__(MotionGenerator)
-    generator.robot = _robot()
+    generator.robot = _robot(batch_size)
     generator.device = torch.device("cpu")
     generator.planner = Mock()
     generator.planner.cfg.planner_type = "stub"
@@ -490,17 +490,18 @@ def _context(
     *,
     scene: SceneSnapshot | None = None,
     timestamp: float = 0.0,
+    batch_size: int = NUM_ENVS,
 ) -> PlanningContext:
-    qpos = torch.zeros(NUM_ENVS, ROBOT_DOF)
+    qpos = torch.zeros(batch_size, ROBOT_DOF)
     return PlanningContext(
         robot=RobotObservation(
             timestamp=timestamp,
             qpos=qpos,
             qvel=torch.zeros_like(qpos),
         ),
-        task=task or TaskState.empty(batch_size=NUM_ENVS, device="cpu"),
+        task=task or TaskState.empty(batch_size=batch_size, device="cpu"),
         scene=SceneSnapshot.empty() if scene is None else scene,
-        env_ids=torch.arange(NUM_ENVS),
+        env_ids=torch.arange(batch_size),
         control_dt=CONTROL_DT,
     )
 
@@ -938,7 +939,9 @@ def test_builtin_descriptors_expose_strict_goal_types() -> None:
     assert AxisAlign.GoalType is AxisAlignGoal
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
-    assert Pour.GoalType is PourGoal
+    from embodichain.lab.sim.atomic_actions import JawPourGoal, RetainedPourGoal
+
+    assert Pour.GoalType == (PourGoal, JawPourGoal, RetainedPourGoal)
     assert Press.GoalType is PressGoal
     assert PushObject.GoalType is PushObjectGoal
     assert Slide.GoalType is SlideGoal
