@@ -31,6 +31,7 @@ def effective_articulation_declaration(config: Mapping[str, Any]) -> dict[str, A
 
     Args:
         config: Physical articulation fields accepted by ``ArticulationCfg``.
+            Serialized pose sequences are decoded without reshaping or repair.
             Non-USD declarations return an independent copy unchanged.
 
     Returns:
@@ -49,7 +50,10 @@ def effective_articulation_declaration(config: Mapping[str, Any]) -> dict[str, A
     from embodichain.lab.sim.spawn.usd import articulation_desc_from_usd
 
     # Use the same declaration translation as spawn, without creating a World.
-    cfg = ArticulationCfg.from_dict(deepcopy(dict(config)))
+    configured = deepcopy(dict(config))
+    if configured.get("init_local_pose") is not None:
+        configured["init_local_pose"] = np.asarray(configured["init_local_pose"])
+    cfg = ArticulationCfg.from_dict(configured)
     descriptor, _ = articulation_desc_from_usd(cfg, per_env=True)
     # The translator selects source scale for preserve mode. Overlay keeps its
     # declared precision; round-tripping the float32 descriptor breaks lineage.

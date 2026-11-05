@@ -285,3 +285,48 @@ def test_part_catalog_inputs_are_authored_geometry_not_live_state():
     )
     with pytest.raises(ValueError, match="Unknown"):
         prismatic_handle_center_world(config, "missing")
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_component_matrix_lists_and_typed_arrays_have_equal_effective_declarations(
+    dtype,
+):
+    config = dict(_config(), asset_physics_mode="overlay")
+    component = source_scene_component_declaration(
+        "source", background=[], rigid_objects=[], articulations=[config]
+    )
+    serialized = json.dumps(component)
+    restored = json.loads(serialized)["simulation"]["articulation"][0]
+    before = deepcopy(restored)
+    typed = deepcopy(restored)
+    typed["init_local_pose"] = np.asarray(typed["init_local_pose"], dtype=dtype)
+    typed_before = typed["init_local_pose"].copy()
+    expected = effective_articulation_declaration(typed)
+    actual = effective_articulation_declaration(restored)
+    assert actual == expected
+    assert restored == before and json.dumps(component) == serialized
+    assert typed["init_local_pose"].dtype == dtype
+    assert np.array_equal(typed["init_local_pose"], typed_before)
+
+
+@pytest.mark.parametrize("kind", ["shape", "nonfinite", "homogeneous"])
+def test_matrix_list_decoding_does_not_repair_invalid_pose(kind):
+    pose = np.eye(4)
+    if kind == "shape":
+        pose = np.eye(3)
+    elif kind == "nonfinite":
+        pose[0, 3] = np.nan
+    else:
+        pose[3, 0] = 0.1
+    config = dict(
+        _config(), asset_physics_mode="overlay", init_local_pose=pose.tolist()
+    )
+    before = deepcopy(config)
+    error = (ValueError, IndexError) if kind == "shape" else ValueError
+    with pytest.raises(error):
+        effective_articulation_declaration(config)
+    assert np.array_equal(
+        np.asarray(config["init_local_pose"]),
+        np.asarray(before["init_local_pose"]),
+        equal_nan=True,
+    )
