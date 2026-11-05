@@ -1,5 +1,16 @@
 # Motion Planning
 
+`motion.cartesian.generate_cartesian_motion` owns sampled Cartesian segment
+recovery. `segment_sample_count_retries` and
+`segment_continuous_ik_recovery` are explicit options, empty/false by default.
+Their attempt counts are local to one motion request; dense alternatives do not
+reset RNG, and exhausted alternatives keep the original failed result/grid.
+The continuous resolver receives the original samples. Ordinary `generate`
+rejects these flags, and Atomic skills reject them unless explicitly supported.
+Complete-action retries remain a distinct `MotionPolicy.sample_count_retries`
+loop with its original Torch-only fork. Policy traces report both effective
+budgets; signed registrations containing the added fields need regeneration.
+
 ## Find the owner
 
 | Change or question | Start here |

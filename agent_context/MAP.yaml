@@ -215,6 +215,7 @@ topics:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
   - embodichain/lab/sim/motion/ik.py
+  - embodichain/lab/sim/motion/cartesian.py
   - embodichain/lab/sim/motion/limits.py
   - embodichain/lab/sim/motion/search.py
   - embodichain/lab/sim/motion/refinement.py
