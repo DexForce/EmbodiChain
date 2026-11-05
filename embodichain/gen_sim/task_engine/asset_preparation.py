@@ -49,7 +49,9 @@ def fit_prepared_scene_assets(
         contact_clearances: Optional physical object margins from the Scene owner.
 
     Returns:
-        Detached source scene and original v3 adaptation metadata. This adapter
+        Source scene and original v3 adaptation metadata; unchanged results may
+        retain the original scene value. Referenced source hashes are verified
+        before adaptation. This adapter
         only collects semantic identities/provenance and updates their shared
         physical/planner declarations; it implements no geometric fitting rules.
     """
@@ -171,7 +173,8 @@ def normalize_prepared_scene_assets(
 
     Returns:
         Updated scene with source-compatible geometry/hash/provenance metadata.
-        Frozen physical snapshots must bypass this explicit source preparation.
+        Source hashes are verified before materialization. Frozen physical
+        snapshots must bypass this explicit source preparation.
     """
     scene.assert_source_assets()
     assets = normalize_source_scene_assets(
