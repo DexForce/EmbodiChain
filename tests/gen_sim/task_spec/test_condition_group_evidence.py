@@ -343,7 +343,9 @@ def test_group_snapshot_decode_has_no_simulation_or_numeric_import_dependency():
     import subprocess
     import sys
 
-    root = Path(__file__).resolve().parents[3]
+    import embodichain
+
+    root = Path(embodichain.__file__).resolve().parent.parent
     data = _declaration(recorded=False).to_dict()
     script = f"import sys;sys.path.insert(0,{str(root)!r});from embodichain.gen_sim.task_spec.condition_group_evidence import ConditionEvidenceGroupBinding;ConditionEvidenceGroupBinding.from_dict({data!r});assert not any(name=='torch' or name=='numpy' or name.startswith('embodichain.lab') or name.startswith('embodichain.gen_sim.task_engine') for name in sys.modules)"
     result = subprocess.run(

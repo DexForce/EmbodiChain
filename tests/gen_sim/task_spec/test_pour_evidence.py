@@ -234,7 +234,9 @@ def test_pour_motion_proof_does_not_certify_a_fluid_predicate_or_resign_drift():
 
 
 def test_pour_binding_cold_import_and_decode_do_not_load_numeric_or_simulation_owners():
-    root = Path(__file__).resolve().parents[3]
+    import embodichain
+
+    root = Path(embodichain.__file__).resolve().parent.parent
     data = _case()[1].to_dict()
     script = f"import sys;sys.path.insert(0,{str(root)!r});from embodichain.gen_sim.task_spec.pour_evidence import PourEvidenceBinding;PourEvidenceBinding.from_dict({data!r});assert not any(name=='torch' or name=='numpy' or name.startswith('embodichain.lab') for name in sys.modules)"
     result = subprocess.run(
