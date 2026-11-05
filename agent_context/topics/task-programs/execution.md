@@ -269,3 +269,11 @@ session's current observation binding; an unbound port returns None and a
 superseded session rejects new reads. Same-clock binding is idempotent and the
 generation belongs to the existing owner lifetime, not a global active-run
 registry. Default execution, cancellation and cleanup retain their own protocols.
+
+`SimulationStateObservationCollector` shares the same pre-execution declaration
+and episode guards. Current rigid poses and exact authored joint coordinates
+carry a `PhysicalEvidenceBatch` acquisition channel, with collector-owned
+revision ordinals rather than native sensor revisions. Historical rigid poses
+use exact seeded slots; historical joint measurements copy the executed policy
+receipt from the actual bridge session. Neither path substitutes a live pose or
+qpos for missing historical data, nor imports TaskSpec to decide task acceptance.

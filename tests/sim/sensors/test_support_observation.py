@@ -874,16 +874,20 @@ def test_support_height_uses_highest_qualified_contact_without_averaging():
     assert torch.isnan(heights[1])
 
 
-def _support_policy_fixture(*, com_tolerance=None, com_x=0.0, extra_preset=False):
+def _support_policy_fixture(
+    *, com_tolerance=None, com_x=0.0, extra_preset=False, with_joint=False
+):
     from embodichain.lab.task_program.integrations.simulation.bindings import (
         SimulationSceneBinding,
         SimulationRigidObjectBinding,
+        SimulationArticulationBinding,
     )
     from embodichain.lab.task_program.integrations.simulation.policies import (
         SimulationSegmentPolicyPort,
     )
     from embodichain.lab.task_program.integrations.simulation.stability import (
         SimulationStabilityConditionCfg,
+        SimulationJointStabilityConditionCfg,
         SupportSensorDeclarationCfg,
     )
 
@@ -899,6 +903,26 @@ def _support_policy_fixture(*, com_tolerance=None, com_x=0.0, extra_preset=False
             SimulationRigidObjectBinding(entity_id="surface", simulation_uid="support"),
         ),
     )
+    if with_joint:
+        from dataclasses import replace
+
+        joint_values = torch.tensor([[0.12], [float("nan")]])
+        sim.test_articulation = SimpleNamespace(
+            uid="native_drawer",
+            joint_names=("slide_joint",),
+            get_qpos=lambda: joint_values.clone(),
+        )
+        sim.get_articulation = lambda uid: (
+            sim.test_articulation if uid == "native_drawer" else None
+        )
+        binding = replace(
+            binding,
+            articulations=(
+                SimulationArticulationBinding(
+                    entity_id="drawer", simulation_uid="native_drawer"
+                ),
+            ),
+        )
     cfg = SimulationStabilityConditionCfg(
         entity="item",
         reference="surface",
@@ -917,7 +941,22 @@ def _support_policy_fixture(*, com_tolerance=None, com_x=0.0, extra_preset=False
         sim,
         robot,
         binding,
-        settle_presets={"support": cfg, **({"unused": cfg} if extra_preset else {})},
+        settle_presets={
+            "support": cfg,
+            **({"unused": cfg} if extra_preset else {}),
+            **(
+                {
+                    "joint": SimulationJointStabilityConditionCfg(
+                        entity="drawer",
+                        joint="slide_joint",
+                        target=0.12,
+                        tolerance=0.01,
+                    )
+                }
+                if with_joint
+                else {}
+            ),
+        },
         step_dt=0.04,
         support_registry=registry,
         sensor_suite=sim.sensors,
@@ -984,10 +1023,11 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     from embodichain.lab.sim.atomic_actions import CARTESIAN_POSE_CAPABILITY
     from embodichain.lab.task_program.integrations.simulation.observations import (
         SimulationSupportObservationCollector,
+        SimulationStateObservationCollector,
     )
 
     sim, robot, registry, template, binding, cfg = _support_policy_fixture(
-        com_tolerance=0.1, com_x=0.04, extra_preset=True
+        com_tolerance=0.1, com_x=0.04, extra_preset=True, with_joint=True
     )
     profile = SimulationRobotSkillProfileBinding(
         "robot",
@@ -1013,7 +1053,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         default_preset="default",
     )
     registration = SimulationTaskProgramRegistration(
-        binding, profile, settle_presets={"support": cfg, "unused": cfg}
+        binding, profile, settle_presets=template._settle_presets
     )
     compiled = TaskProgramCompiler(binding.declare()).compile(
         decode_task_program(
@@ -1033,7 +1073,8 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
                         "call": {"kind": "pick", "object": "item"},
                     },
                     "post": [
-                        {"kind": "wait_stable", "entity": "item", "preset": "support"}
+                        {"kind": "wait_stable", "entity": "item", "preset": "support"},
+                        {"kind": "wait_stable", "entity": "drawer", "preset": "joint"},
                     ],
                 },
             }
@@ -1130,6 +1171,12 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         registration,
         recording=None if declaration_case == "missing_reader" else recording,
     )
+    states = SimulationStateObservationCollector(
+        env,
+        bridge,
+        registration,
+        recording=None if declaration_case == "missing_reader" else recording,
+    )
     assert bridge.post_policy_port is not template
     segment = next(compiled.iter_segments())
     policy = segment.post_policies[0]
@@ -1148,6 +1195,8 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     before = sim.query.fetches
     if declaration_case == "missing_reader":
         with pytest.raises(RuntimeError, match="trajectory reader is unavailable"):
+            states.capture_recorded_rigid_pose("item", [1, 1])
+        with pytest.raises(RuntimeError, match="trajectory reader is unavailable"):
             collector.capture_recorded(
                 "support",
                 segment_id=segment.name,
@@ -1161,6 +1210,31 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         assert sim.query.fetches == before
         registry.close()
         return
+    sim.simulation_time = sim.time
+    current_pose = states.capture_current_rigid_pose("item")
+    assert current_pose["state_acquisition"]["evidence_id"] == "rigid.pose"
+    assert current_pose["state_acquisition"]["valid"] == [True, True]
+    assert current_pose["state_acquisition"]["timestamp"] == sim.time
+    assert current_pose["state_acquisition"]["revision_kind"] == "collector_acquisition"
+    assert current_pose["native_uid"] == "payload"
+    saved_pose = deepcopy(current_pose["state_acquisition"]["values"])
+    current_pose["state_acquisition"]["values"][0][0][3] = 99.0
+    assert (
+        states.capture_current_rigid_pose("item")["state_acquisition"]["values"]
+        == saved_pose
+    )
+    joint = states.capture_current_joint_position("drawer", "slide_joint")
+    assert joint["state_acquisition"]["evidence_id"] == "articulation.joint_position"
+    assert joint["state_acquisition"]["valid"] == [True, False]
+    assert joint["state_acquisition"]["values"] == [pytest.approx(0.12), None]
+    assert joint["state_acquisition"]["acquisition_errors"][1]
+    with pytest.raises(ValueError, match="exact declared native joint"):
+        states.capture_current_joint_position("drawer", "guessed_joint")
+    historical_pose = states.capture_recorded_rigid_pose("item", [1, 1])
+    assert historical_pose["state_acquisition"]["values"] == saved_pose
+    assert historical_pose["boundary_frames"] == [1, 1]
+    assert historical_pose["observation_kind"] == "recorded"
+    assert sim.query.fetches == before
     recorded = collector.capture_recorded(
         "support",
         segment_id=segment.name,
@@ -1193,6 +1267,53 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     with pytest.raises(ValueError, match="before the first"):
         SimulationSupportObservationCollector(
             env, bridge, registration, recording=recording
+        )
+    joint_policy = segment.post_policies[1]
+    with pytest.raises((KeyError, RuntimeError)):
+        states.capture_recorded_joint_policy(
+            "drawer",
+            preset_id="joint",
+            segment_id=segment.name,
+            source_path=segment.source_path,
+            frame_indices=[clock.step_index] * 2,
+        )
+    sim.test_articulation.get_qpos = lambda: torch.full((2, 1), 0.12)
+    for _ in bridge.post_policy_port.actions(
+        joint_policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    ):
+        clock.advance_after_env_step()
+    captured_joint = states.capture_recorded_joint_policy(
+        "drawer",
+        preset_id="joint",
+        segment_id=segment.name,
+        source_path=segment.source_path,
+        frame_indices=[clock.step_index] * 2,
+    )
+    assert captured_joint["policy_result"]["accepted"] == [True, True]
+    assert (
+        captured_joint["policy_result"]["joint_observation"]["end_step"]
+        == clock.step_index
+    )
+    sim.test_articulation.get_qpos = lambda: (_ for _ in ()).throw(
+        AssertionError("historical collection must not read qpos")
+    )
+    assert (
+        states.capture_recorded_joint_policy(
+            "drawer",
+            preset_id="joint",
+            segment_id=segment.name,
+            source_path=segment.source_path,
+            frame_indices=[clock.step_index] * 2,
+        )
+        == captured_joint
+    )
+    with pytest.raises(ValueError, match="exact boundary"):
+        states.capture_recorded_joint_policy(
+            "drawer",
+            preset_id="joint",
+            segment_id=segment.name,
+            source_path=segment.source_path,
+            frame_indices=[clock.step_index - 1] * 2,
         )
     context._begin_episode(torch.tensor([0]))
     with pytest.raises(ValueError, match="another episode"):

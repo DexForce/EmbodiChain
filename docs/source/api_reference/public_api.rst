@@ -846,9 +846,19 @@ and decides no predicate outcome.
 .. autosummary::
 
    project_placement_evidence_binding
+   project_condition_evidence_binding
    project_configured_placement_evidence_binding
 
 .. autofunction:: project_placement_evidence_binding
+
+``project_condition_evidence_binding`` binds explicit orientation/joint owner
+criteria to the validated single-role lineage and exact compiled occurrence
+paths. Native IDs and numerical policy values come from a resolved owner
+descriptor; semantic target-state and part identity come from TaskSpec/grounding.
+The adapter preserves opaque occurrence names, does not infer capabilities from
+names, and does not sample state or compute physical acceptance.
+
+.. autofunction:: project_condition_evidence_binding
 
 New bundles use ``project_configured_placement_evidence_binding`` with a detached
 condition from the configured owner's named settle preset. It requires no
@@ -928,6 +938,34 @@ callables, byte strings and unordered sets are rejected before serialization.
    canonicalize
    json_snapshot
 
+embodichain.gen_sim.task_spec.condition_evidence
+------------------------------------------------
+
+Sealed state bindings select explicit orientation or articulation endpoint
+criteria, native and episode identities, and separate current or recorded input
+contracts. Current orientation uses the shared rigid-pose axis computation;
+current joints use the declared target tolerance. Neither implies task execution
+success. Historical milestones require their full successful occurrence prefix
+and the original policy receipts; E6 also verifies the exact semantic operation,
+joint validator, target bounds and one-second stability contract.
+
+New raw observations require their complete acquisition channels and cannot
+switch to the historical verifier by adding a record. Missing channels, failed
+milestone receipts and unbound episodes remain unavailable per environment.
+Cold import and binding normalization do not load a simulation or numeric backend.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.condition_evidence
+
+.. autosummary::
+
+   ConditionEvidenceBinding
+   evaluate_condition_evidence
+
+.. autoclass:: ConditionEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_condition_evidence
+
 embodichain.gen_sim.task_spec.contracts
 ---------------------------------------
 
@@ -1000,6 +1038,22 @@ invariants. The ordinary TaskSpec evaluator remains the certificate authority.
 .. autofunction:: evaluate_supported_placement_evidence
 
 .. autofunction:: evaluate_placement_evidence_report
+
+embodichain.gen_sim.task_spec.evidence_report
+---------------------------------------------
+
+Combine verified placement, orientation and joint evidence using the existing
+TaskSpec evaluator. Bindings must share the native row, episode and input-format
+contract. Final observations cannot fill past milestones; sparse boundary
+observations cannot establish continuous invariants or complete temporal windows.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.evidence_report
+
+.. autosummary::
+
+   evaluate_physical_evidence_report
+
+.. autofunction:: evaluate_physical_evidence_report
 
 embodichain.gen_sim.task_spec.expressions
 -----------------------------------------
@@ -1426,8 +1480,17 @@ are not dependencies of this Lab collector.
 .. autosummary::
 
    SimulationSupportObservationCollector
+   SimulationStateObservationCollector
 
 .. autoclass:: SimulationSupportObservationCollector
+   :members:
+
+``SimulationStateObservationCollector`` captures declared rigid poses and exact
+native joint positions. Its revision counts owned acquisitions, not native
+contact revisions. Recorded rigid poses come only from seeded exact slots;
+recorded joint policies copy the actual bridge receipt and never read live qpos.
+
+.. autoclass:: SimulationStateObservationCollector
    :members:
 
 embodichain.lab.task_program.integrations.simulation.stability

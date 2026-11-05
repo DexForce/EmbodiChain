@@ -15,7 +15,9 @@ of those owners.
 | Normative identity and ordered milestones | `spec.py`: `TaskSpec`, `MilestoneSpec` |
 | Predicate vocabulary and temporal windows | `expressions.py` |
 | Structure validation and evidence evaluation | `validation.py` |
-| Placement binding, physical proof checks and certificate assembly | `evidence.py` |
+| Placement bindings and physical proof checks | `evidence.py` |
+| Orientation/joint state and milestone qualification | `condition_evidence.py` |
+| Common per-environment physical reports | `evidence_report.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
 | JSON snapshots and semantic hashing | `canonicalization.py` |
@@ -72,6 +74,21 @@ carry no accepted/released claim; historical claims are checked when present.
 Recorded region geometry is recomputed from seeded poses and the original
 native load, then compared with the original policy snapshot, without sampling
 current contacts or substituting live poses.
+
+The Task Engine `project_condition_evidence_binding` adapter only projects
+frozen role/lineage and explicit compiled occurrence descriptors. It receives
+already resolved owner criteria and native IDs; it does not select thresholds
+or acquire physical state.
+
+Orientation and articulation endpoint bindings seal their native entity,
+criteria, episode and input-format identities. Current state is evaluated
+independently of program success. Recorded milestones require the complete
+successful occurrence prefix and original policy/validator receipts. E6 retains
+the exact semantic slide target, joint-coordinate tolerance and one-second
+stability contract; missing or failed milestone evidence remains unavailable.
+Raw joint receipts additionally bind their actual environment-step acquisition
+clock and boundary. A common report owner combines supported physical families
+without filling absent predicates or historical boundaries.
 
 ## Focused validation
 
