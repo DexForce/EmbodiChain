@@ -21,6 +21,10 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Normal scene-to-frozen physical declaration composition | `source_physical_input.py` |
 | Semantic control selection and physical-owner receipts | `control_physical_preparation.py` |
 
+| Ordered relation targets and occupied support reservations | `placement_declarations.py` |
+| Static scene affordance/source bindings | `scene_binding_declarations.py` |
+| Named Task Program stability and sensor declarations | `stability_declarations.py` |
+
 TaskSpec identity and predicate evaluation belong to
 [Task specification](../task-spec/task-spec.md). Both mappings and instances must
 retain their verified semantic identity. Graph coverage checks declarations; it
@@ -118,3 +122,14 @@ must retain every original check at the group terminal. The same pure projection
 validator is owned here for later bundle loading; it depends on no bundle reader,
 simulator, robot or motion service. Complete deployment preflight remains with
 the configured Task Program owner.
+
+## Static source declarations
+
+Placement and scene-binding resolvers consume frozen source scenes and explicit
+resource mappings. Shared Scene owns mesh, articulation, collision and robot
+mount adaptation; Compute owns numeric placement and reservation geometry.
+Task Engine chooses semantic targets and produces existing declarative formats.
+`resolve_stability_conditions` takes exact support sensor declarations (or a pure
+factory), then returns detached typed conditions for the integration preset table.
+It neither constructs sensors nor acquires evidence. Runtime policy evaluation
+and physical observation remain Task Program and Lab responsibilities.

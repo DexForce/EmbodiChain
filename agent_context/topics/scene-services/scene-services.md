@@ -21,10 +21,13 @@ semantic scene graph, generation model client or task lifecycle.
 | Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
+| Selected native root/prismatic-link spatial geometry | `embodichain/lab/sim/scene/spatial_reference.py` |
 | Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
 | Explicit source control resize/support/press calibration | `control_preparation.py`, `control_support.py`, `source_measurement.py`, `press_calibration.py`; static source data, never live acquisition |
 | Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
 | Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
+| Static source support/container/Pour target affordances and horizontal permission | `declaration_placement.py`; explicit source views/reserves, no semantic graph or runtime planning |
+| Enabled authored collision meshes in owning-link frames | `source_collisions.py`; shared source snapshot, ordered polygon-fan topology and uniform-scale boundary |
 | Declared world source meshes and conservative slider envelopes | `source_geometry.py`, `source_envelopes.py`; static source/scale/pose only, no native collision claim |
 | Declared local source vertices | `source_geometry.read_source_vertices`; authored mesh/articulation data or an explicitly scaled local override, with no native observation |
 | Read-only source glTF basis/top inputs | `source_geometry.py`; original scene transforms, scale and topology, with no native acquisition |
@@ -218,6 +221,14 @@ rectangles and samples by area without placement retries.
 The table detector retains its default outer-contour behavior. Shared scene
 expansion enables `SupportSurfaceConfig.preserve_holes` and caches a rectangle
 covered by the selected mesh component, excluding openings during preparation.
+
+`spatial_reference.read_spatial_reference` resolves the selected catalog body
+and its scaled link-local vertices through the existing authored articulation
+reader. A fixed grasp child cannot replace that physical reference. Root pose,
+source units and horizontal prismatic limits retain their original contracts;
+missing/unsupported geometry is unavailable. The returned arrays are owned and
+read-only. Semantic role selection, signed-axis requests and acceptance remain
+with callers.
 
 ## Frames and runtime invariants
 

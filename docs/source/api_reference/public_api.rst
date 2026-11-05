@@ -4542,3 +4542,21 @@ standard native Marvin component; stored historical inputs are not converted.
 
 .. autofunction:: require_robot_assets
 
+
+
+Selected-link source spatial geometry
+-------------------------------------
+
+The Scene reader supplies owned link-local input vertices and the original
+root-composed pose for an explicitly selected native root or horizontal
+prismatic part. A fixed grasp child does not replace its catalog body. Inputs
+retain their authored-unit, scale and root-frame contracts; missing geometry
+never becomes a proxy. These source inputs do not certify cooked native shapes,
+contact, motion or task acceptance.
+
+.. currentmodule:: embodichain.lab.sim.scene.spatial_reference
+
+.. autoclass:: SpatialReferenceGeometry
+   :members:
+
+.. autofunction:: read_spatial_reference
