@@ -46,6 +46,13 @@ physical authenticity of caller-provided measurements.
 The cache reuses a validated semantic identity across metadata differences.
 It rejects corrupted or mismatched documents and publishes writes atomically.
 
+`transport_evidence.py` qualifies a past, exact coordinated-acquisition
+occurrence from its recorded prefix and native contact identity. It retains the
+original B=1/env0 scope and does not require an attachment to survive a later
+release. Missing/invalid history remains unavailable; a past event cannot certify
+a final held state or placement. Shared held proof primitives stay in their
+existing owner, and Lab remains responsible for acquiring facts.
+
 ## Physical evidence boundary
 
 Placement binding version 2 seals the explicit `raw_snapshot` or

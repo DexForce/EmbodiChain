@@ -1270,6 +1270,23 @@ snapshot strictly after its predecessors. ``TaskTemplate`` is an alias of
    TaskSpec
    TaskTemplate
 
+embodichain.gen_sim.task_spec.transport_evidence
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This verifier qualifies an occurrence-bound recorded acquisition event. It keeps
+that event separate from a final held state, checks the declared completed
+execution prefix and native/episode/time identities, and retains unavailable
+results for missing evidence. It acquires no physical data and does not certify
+subsequent placement or liquid transfer. The source B=1/env0 boundary remains.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.transport_evidence
+
+.. autoclass:: CoordinatedTransportEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_coordinated_transport_evidence
+
+
 embodichain.gen_sim.task_spec.validation
 ----------------------------------------
 

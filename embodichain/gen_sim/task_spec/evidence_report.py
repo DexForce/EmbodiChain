@@ -37,6 +37,11 @@ from .coordinated_evidence import (
     evaluate_coordinated_hold_evidence,
 )
 
+from .transport_evidence import (
+    CoordinatedTransportEvidenceBinding,
+    evaluate_coordinated_transport_evidence,
+)
+
 if TYPE_CHECKING:
     from .spec import TaskSpec
     from .validation import EvaluationReport
@@ -54,6 +59,7 @@ def _binding(
     | PourEvidenceBinding
     | HandOverEvidenceBinding
     | CoordinatedHoldEvidenceBinding
+    | CoordinatedTransportEvidenceBinding
 ):
     if isinstance(value, SupportedPlacementEvidenceBinding):
         return SupportedPlacementEvidenceBinding.from_dict(value)
@@ -69,6 +75,8 @@ def _binding(
         return HandOverEvidenceBinding.from_dict(value)
     if isinstance(value, CoordinatedHoldEvidenceBinding):
         return CoordinatedHoldEvidenceBinding.from_dict(value)
+    if isinstance(value, CoordinatedTransportEvidenceBinding):
+        return CoordinatedTransportEvidenceBinding.from_dict(value)
     if isinstance(value, Mapping):
         version = value.get("schema_version")
         if version == "task_spec.placement_evidence_binding/v2":
@@ -83,6 +91,8 @@ def _binding(
             return CoordinatedHoldEvidenceBinding.from_dict(value)
         if version == "task_spec.handover_evidence_binding/v1":
             return HandOverEvidenceBinding.from_dict(value)
+        if version == "task_spec.coordinated_transport_evidence_binding/v1":
+            return CoordinatedTransportEvidenceBinding.from_dict(value)
         if version == "task_spec.pour_evidence_binding/v1":
             return PourEvidenceBinding.from_dict(value)
     raise ValueError(
@@ -100,6 +110,7 @@ def evaluate_physical_evidence_report(
         | PourEvidenceBinding
         | HandOverEvidenceBinding
         | CoordinatedHoldEvidenceBinding
+        | CoordinatedTransportEvidenceBinding
         | Mapping[str, Any]
     ],
     evidence: Mapping[str, Mapping[str, Any]],
@@ -177,6 +188,7 @@ def evaluate_physical_evidence_report(
             PourEvidenceBinding: evaluate_pour_evidence,
             HandOverEvidenceBinding: evaluate_handover_evidence,
             CoordinatedHoldEvidenceBinding: evaluate_coordinated_hold_evidence,
+            CoordinatedTransportEvidenceBinding: evaluate_coordinated_transport_evidence,
         }[type(binding)]
         outcomes = verifier(normalized, binding, snapshot, program=program)
         predicate = goals.get(
