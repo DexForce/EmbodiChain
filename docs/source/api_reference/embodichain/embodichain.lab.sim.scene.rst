@@ -733,3 +733,24 @@ physical task success; projection uses the caller's current observed poses.
 .. currentmodule:: embodichain.lab.sim.scene.planar_observation
 
 .. autofunction:: capture_planar_contents
+
+Observed distal robot input meshes
+----------------------------------
+
+The explicit distal adapter captures source-ordered collision-input points and
+world TCP/root frames for one active and one disjoint passive arm. It validates
+the actual full joint observation and arm FK, while preserving hand-owner frame
+discrepancies as diagnostics. Snapshots own read-only numerical data; they do not
+select a staging route or certify native collision freedom.
+
+.. currentmodule:: embodichain.lab.sim.scene.robot_distal
+
+.. autosummary::
+
+   RobotDistalMeshSnapshot
+   capture_robot_distal_meshes
+
+.. autoclass:: RobotDistalMeshSnapshot
+   :members:
+
+.. autofunction:: capture_robot_distal_meshes

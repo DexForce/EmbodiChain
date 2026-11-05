@@ -1,5 +1,5 @@
 embodichain.lab.sim.utility
-==========================================
+===================================
 
 .. automodule:: embodichain.lab.sim.utility
 
@@ -145,3 +145,33 @@ shape substitution are unsupported. Reading constructs no Robot or simulator.
 .. currentmodule:: embodichain.lab.sim.utility.urdf_collision
 
 .. autofunction:: load_urdf_collision_inputs
+
+Explicit hand collision and preshape adapters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These opt-in Robot adapters consume the existing explicit hand/TCP calibration
+and full B=1 joint observation without moving the robot. Model-owned finger
+names and commands remain in the robot configuration. Authored collider vertices,
+Robot link meshes and sampled GraspKit surfaces retain their separate provenance.
+
+``HandCollisionTipCalibration`` retains the original twelve-step closed-side
+bisection and complete finger roster. The native link-mesh tip reader preserves
+its original closed command and mesh source. ``capture_preshape_hand_clearance``
+keeps the source seven-state sweep, point order, aperture and retreat reserve;
+the caller still owns candidate selection and physical effect verification.
+
+.. currentmodule:: embodichain.lab.sim.utility.hand_tip
+
+.. autosummary::
+
+   HandCollisionTipCalibration
+   closed_native_hand_tip_offset
+
+.. autoclass:: HandCollisionTipCalibration
+   :members:
+
+.. autofunction:: closed_native_hand_tip_offset
+
+.. currentmodule:: embodichain.lab.sim.utility.preshape_geometry
+
+.. autofunction:: capture_preshape_hand_clearance

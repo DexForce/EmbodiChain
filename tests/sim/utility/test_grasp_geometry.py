@@ -344,3 +344,86 @@ def test_single_arm_does_not_capture_and_geometry_reuses_the_same_environment_ow
     separate.get_dual_arm_valid_grasp_poses(**_query(None))
     assert other.reads == 2 and len(constructed) == 2
     assert constructed[0][0] is not constructed[1][0]
+
+
+@pytest.mark.parametrize("renamed", [False, True])
+def test_collision_tip_fit_preserves_bisection_and_full_finger_roster(
+    tmp_path, renamed
+):
+    from embodichain.lab.sim.utility.hand_tip import HandCollisionTipCalibration
+
+    robot, cfg = _case(tmp_path, renamed_pads=renamed)
+    robot.cfg.body_scale = (1.0, 1.0, 1.0)
+    observed = robot.qpos.clone()
+    calibration = HandCollisionTipCalibration(
+        robot, cfg, observed, finger_link_names=cfg.pad_link_names
+    )
+    observed.fill_(50)
+    offset, command = calibration.fit_opening(0.05)
+    assert len(robot.calls) == 15
+    assert offset == pytest.approx(0.04)
+    # Authored pad gap is 0.116 - 0.1*f. Closed-side 12-bit bound for f=.66.
+    expected = torch.tensor([[0.06, -0.06]]) + (2704 / 4096) * torch.tensor(
+        [[-0.05, 0.05]]
+    )
+    torch.testing.assert_close(command, expected, atol=0, rtol=0)
+    assert calibration.closed_tip_offset() == pytest.approx(0.04)
+    assert robot.reads == 0
+    assert all(call["qpos"][0][0] == pytest.approx(0.4) for call in robot.calls)
+    with pytest.raises(ValueError, match="outside"):
+        calibration.fit_opening(0.2)
+    with pytest.raises(ValueError, match="B=1"):
+        HandCollisionTipCalibration(
+            robot, cfg, robot.qpos.repeat(2, 1), finger_link_names=cfg.pad_link_names
+        )
+
+
+def test_closed_collision_tip_includes_declared_non_pad_finger(tmp_path):
+    from embodichain.lab.sim.utility.hand_tip import HandCollisionTipCalibration
+
+    robot, cfg = _case(tmp_path)
+    robot.cfg.body_scale = (1.0, 1.0, 1.0)
+    path = Path(robot.cfg.fpath)
+    document = ET.fromstring(path.read_text())
+    document.append(
+        ET.fromstring(
+            '<link name="guard"><collision><origin xyz="0 0 .2"/>'
+            '<geometry><box size=".01 .01 .04"/></geometry></collision></link>'
+        )
+    )
+    document.append(
+        ET.fromstring(
+            '<joint name="guard_mount" type="fixed"><parent link="hand_base"/>'
+            '<child link="guard"/></joint>'
+        )
+    )
+    path.write_text(ET.tostring(document, encoding="unicode"))
+    calibration = HandCollisionTipCalibration(
+        robot, cfg, robot.qpos, finger_link_names=(*cfg.pad_link_names, "guard")
+    )
+    assert calibration.closed_tip_offset() == pytest.approx(0.12)
+    assert robot.calls[-1]["link_names"][-1] == "guard"
+
+
+def test_native_press_tip_keeps_native_mesh_provenance_and_closed_command(tmp_path):
+    from embodichain.lab.sim.utility.hand_tip import closed_native_hand_tip_offset
+
+    robot, cfg = _case(tmp_path, renamed_pads=True)
+    reads = []
+
+    def native_mesh(name):
+        reads.append(name)
+        return torch.tensor([[0.0, 0.0, 0.01], [0.0, 0.0, 0.03]]), torch.empty(
+            0, 3, dtype=torch.long
+        )
+
+    robot.get_link_vert_face = native_mesh
+    value = closed_native_hand_tip_offset(
+        robot, cfg, robot.qpos, finger_link_names=cfg.pad_link_names
+    )
+    assert value == pytest.approx(
+        0.03
+    )  # Authored colliders in this fixture lead at .04.
+    assert reads == list(cfg.pad_link_names) and len(robot.calls) == 1
+    assert robot.calls[0]["qpos"][0] == pytest.approx([0.4, -0.01, 0.01])
+    assert robot.reads == 0
