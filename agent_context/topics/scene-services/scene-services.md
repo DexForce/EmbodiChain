@@ -29,6 +29,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Declared local source vertices | `source_geometry.read_source_vertices`; authored mesh/articulation data or an explicitly scaled local override, with no native observation |
 | Read-only source glTF basis/top inputs | `source_geometry.py`; original scene transforms, scale and topology, with no native acquisition |
 | Shared authored source reads and link-local collider inputs | `embodichain/lab/sim/spawn/source_geometry.py`; Scene retains its `LinkMesh` import |
+| Explicit robot mounting frames and URDF collision inputs | `source_robot_geometry.py`, `utility/urdf_collision.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
 | CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
 | Robot-aware object proposals and full-pose IK/FK checks | `embodichain/lab/sim/scene/workspace.py` |
@@ -80,6 +81,14 @@ source-label targets and geometry derivation; live state uses Object APIs.
 in a content-addressed derived source; it never edits the original asset.
 `control_source` rejects source/sidecar drift, including newly present optional
 sidecars. Source mesh proofs do not certify native cooked shapes or paths.
+
+`source_robot_geometry.py` resolves declared fixed mounting chains and arm-base
+anchors from source configuration; explicit component transforms take precedence.
+`utility.urdf_collision` reads exact selected mesh/box colliders into the existing
+Spawn `LinkMesh` type, preserving source order and scaling origins/vertices once.
+It rejects unresolved URIs and visual-only links. Vertex-envelope mode remains
+explicit and supplies no triangle-surface certificate. These generic readers
+construct no Robot, simulator or IK solver and select no concrete robot preset.
 
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
 recreate it after replacing either object or changing its model/scale. Queries

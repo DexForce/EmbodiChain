@@ -713,3 +713,17 @@ and owning-link frames through the shared authored-source reader.
 .. currentmodule:: embodichain.lab.sim.scene.source_collisions
 
 .. autofunction:: read_source_collision_meshes
+
+Authored robot mounting frames
+------------------------------
+
+These readers consume exact source identities and declared control parts without
+constructing a robot or solving IK. Fixed attachment chains retain URDF transform
+order; moving/cyclic mounts reject. Explicit assembly component transforms take
+precedence over a single-file shoulder lookup. No model or hand is selected.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_robot_geometry
+
+.. autofunction:: source_fixed_frame_pose
+
+.. autofunction:: source_arm_base_position
