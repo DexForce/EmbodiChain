@@ -20,11 +20,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
 from pathlib import Path
 
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
+
+from .composition import ResolvedGymComponents as _ResolvedGymComponents
 
 __all__: list[str] = []
 
@@ -62,17 +63,6 @@ _SCENE_SIMULATION_FIELDS = frozenset(
         "articulation",
     }
 )
-
-
-@dataclass(frozen=True, slots=True)
-class _ResolvedGymComponents:
-    """One Gym config after its reusable components are expanded."""
-
-    config: dict[str, object]
-    embodiment_selected: bool
-    scene_selected: bool
-    embodiment_skill_profile: dict[str, object] | None
-    scene_config: dict[str, object] | None
 
 
 def _mapping(
