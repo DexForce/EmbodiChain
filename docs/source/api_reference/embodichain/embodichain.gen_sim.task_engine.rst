@@ -174,6 +174,7 @@ not read a bundle, compose runtime services, plan motion or create a simulator;
 callers still perform complete configured deployment preflight.
 
 .. automodule:: embodichain.gen_sim.task_engine.program_declarations
+   :members:
 
 Static deployment declarations
 ------------------------------
