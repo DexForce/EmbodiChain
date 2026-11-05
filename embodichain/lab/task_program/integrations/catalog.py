@@ -115,6 +115,7 @@ from .extensions import (
     ParallelSafetyDeclaration,
     RegisteredSemanticLowererDeclaration,
     RegisteredSemanticLowererFactory,
+    RegisteredSemanticLowererSceneValidator,
     RuntimeTransportDeclaration,
     StandardExtensionDeclarations,
     build_standard_extension_declarations,
@@ -1291,6 +1292,9 @@ class SimulationTaskProgramRegistration:
             self.call_catalog,
             extensions.registered_semantic_lowerers,
         )
+        for factory in self.registered_semantic_lowerer_factories:
+            if isinstance(factory, RegisteredSemanticLowererSceneValidator):
+                factory.validate_scene_declaration(scene)
         selected_handover_provider = profile.grounding_providers.get("hand_over")
         registered_handover_provider_ids = {
             _handover_pose_provider_id(provider) for provider in handover_pose_providers
@@ -1414,6 +1418,9 @@ class SimulationTaskProgramRegistration:
                 self.call_catalog,
                 extensions.registered_semantic_lowerers,
             )
+            for factory in self.registered_semantic_lowerer_factories:
+                if isinstance(factory, RegisteredSemanticLowererSceneValidator):
+                    factory.validate_scene_declaration(scene)
             relation_grounders = _snapshot_relation_grounders(self.relation_grounders)
             relation_grounder_keys = frozenset(
                 _relation_grounder_key(grounder) for grounder in relation_grounders

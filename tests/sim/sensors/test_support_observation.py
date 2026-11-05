@@ -753,9 +753,9 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
             False,
         ]
         assert metadata["stable_seconds"] == [0.0, 0.0]
-        assert (
-            sim.query.fetches == 1
-        )  # Same completed physics step reuses its contact snapshot.8
+        # Every distinct physics substep is still sampled, even when its
+        # support clock mapping is unavailable; no source acquisition is skipped.
+        assert sim.query.fetches == 4 * (commands + 1)
         registry.close()
         return
     assert commands == (3 if startup == "row_reset" else 2)
@@ -779,6 +779,66 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
         8 if startup == "cold" else 16 if startup == "row_reset" else 12
     )
     registry.close()
+
+
+@pytest.mark.parametrize("moving", ["payload", "support"])
+def test_callback_sample_cannot_reestablish_support_after_same_step_body_motion(moving):
+    sim, _, observer, _, _ = _setup()
+    _substep(sim, observer)
+    assert sim.query.fetches == 1
+
+    sim.objects[moving].pose[0, 0, 3] = 0.001
+    moved = _observe(observer)
+    assert moved.support.valid.tolist() == [True, True]
+    assert moved.support.values.tolist() == [False, True]
+    assert sim.query.fetches == 1
+    assert _observe(observer).support.values.tolist() == [False, True]
+
+    _substep(sim, observer)
+    assert _observe(observer).support.values.tolist() == [True, True]
+    assert sim.query.fetches == 2
+
+
+@pytest.mark.parametrize("moving", ["payload", "support"])
+@pytest.mark.parametrize("contract_revision", [None, 1])
+def test_clock_bound_observer_invalidates_moved_bodies_for_both_metadata_modes(
+    moving, contract_revision
+):
+    sim, _, observer, clock, _ = _setup(strong=True)
+    _window(sim, observer, clock)
+    assert _observe(observer, contract_revision).support.values.all()
+
+    sim.objects[moving].pose[0, 0, 3] = 0.001
+    moved = _observe(observer, contract_revision)
+    assert moved.support.valid.tolist() == [True, True]
+    assert moved.support.values.tolist() == [False, True]
+    assert sim.query.fetches == 4
+    assert ("support_contract_revision" in moved.metadata) == (contract_revision == 1)
+
+    _window(sim, observer, clock)
+    assert _observe(observer, contract_revision).support.values.all()
+    assert sim.query.fetches == 8
+
+
+def test_support_height_uses_highest_qualified_contact_without_averaging():
+    from embodichain.lab.sim.sensors.support_observation import (
+        qualified_support_heights,
+    )
+
+    row = {
+        "contacts_world": [[-0.01, 0.0, 0.08], [0.01, 0.0, 0.12]],
+        "center_of_mass_world": [0.0, 0.0, 0.2],
+        "com_patch_distance_m": 0.0,
+        "com_tolerance_m": 0.003,
+        "upward_impulse": 0.1,
+    }
+    heights = qualified_support_heights(
+        torch.tensor([True, False]),
+        {"scope": "native_contact_support", "rows": [row, row]},
+        torch.zeros(2),
+    )
+    assert heights[0].item() == pytest.approx(0.12)
+    assert torch.isnan(heights[1])
 
 
 def _support_policy_fixture(*, com_tolerance=None, com_x=0.0, extra_preset=False):
@@ -1042,8 +1102,10 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         frame_indices=[1, 1],
     )
     assert again["native_support"]["rows"][0]["contacts_world"][0][0] != 100.0
+    # The mainline sensor reuses the already acquired sample in this physics
+    # step; current capture still applies the native rest-envelope tolerance.
     current = collector.capture_current("support")
-    assert sim.query.fetches == before + 1
+    assert sim.query.fetches == before
     assert current["support_acquisition"]["clock_domain"] == "simulation_time"
     assert current["native_support"]["supported"] == [False, False]
     assert current["native_support"]["rows"][0]["com_tolerance_m"] == pytest.approx(
@@ -1055,7 +1117,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     context._begin_episode(torch.tensor([0]))
     with pytest.raises(ValueError, match="another episode"):
         collector.capture_current("support")
-    assert sim.query.fetches == before + 1
+    assert sim.query.fetches == before
     template.close_runtime_resources()
     with pytest.raises(RuntimeError, match="closed"):
         collector.capture_recorded(
@@ -1064,7 +1126,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
             source_path=segment.source_path,
             frame_indices=[1, 1],
         )
-    assert sim.query.fetches == before + 1
+    assert sim.query.fetches == before
     registry.close()
 
 

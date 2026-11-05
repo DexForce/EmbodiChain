@@ -27,6 +27,7 @@ import torch
 from embodichain.compute.geometry.rigid import (
     rigid_pose_displacement,
     pose_axis_alignment,
+    support_mesh_envelope,
 )
 from embodichain.lab.sim.scene.planar_observation import NativePlanarPlacement
 from embodichain.lab.sim.evidence import PhysicalEvidenceBatch
@@ -37,6 +38,7 @@ from embodichain.lab.sim.sensors.support_observation import (
     SupportControlClock,
     NativeSupportResult,
     SupportObservationRegistry,
+    qualified_support_heights,
 )
 
 __all__: list[str] = []
@@ -46,68 +48,6 @@ __all__: list[str] = []
 class _Lifetime:
     closed: bool = False
     clock_generation: int = 0
-
-
-def _contact_support_heights(
-    supported: torch.Tensor,
-    observation: Mapping[str, Any],
-    like: torch.Tensor,
-) -> torch.Tensor:
-    """Refine heights only from NativeSupportObservation's qualified patch.
-
-    Its contact points already require positive upward load and COM support.
-    Keep the highest qualified point so penetration is not hidden by averaging.
-    Unavailable rows cannot replace the existing conservative mesh envelope.
-    """
-    heights = torch.full_like(like, torch.nan)
-    rows = observation.get("rows")
-    if (
-        supported.dtype != torch.bool
-        or supported.shape != like.shape
-        or observation.get("scope") != "native_contact_support"
-        or not isinstance(rows, list)
-        or len(rows) != like.shape[0]
-    ):
-        return heights
-    for index, row in enumerate(rows):
-        if not supported[index] or not isinstance(row, Mapping):
-            continue
-        values = tuple(
-            row.get(name)
-            for name in ("com_patch_distance_m", "com_tolerance_m", "upward_impulse")
-        )
-        if any(
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            for value in values
-        ):
-            continue
-        distance, tolerance, impulse = values
-        if tolerance <= 0 or not 0 <= distance <= tolerance or impulse <= 0:
-            continue
-        if row.get("contacts_world") is None or row.get("center_of_mass_world") is None:
-            continue
-        try:
-            points = torch.as_tensor(
-                row["contacts_world"], device=like.device, dtype=like.dtype
-            )
-            center = torch.as_tensor(
-                row["center_of_mass_world"], device=like.device, dtype=like.dtype
-            )
-        except (TypeError, ValueError):
-            continue
-        if (
-            points.ndim != 2
-            or points.shape[1] != 3
-            or not points.shape[0]
-            or center.shape != (3,)
-            or not torch.isfinite(points).all()
-            or not torch.isfinite(center).all()
-        ):
-            continue
-        heights[index] = points[:, 2].amax()
-    return heights
 
 
 class _ConditionStabilityRuntime:
@@ -347,9 +287,12 @@ class _ConditionStabilityRuntime:
     def _attachments(
         self, pose: torch.Tensor, parts: tuple[str, ...]
     ) -> tuple[torch.Tensor, ...]:
+        if not parts:
+            return ()
         qpos = self._robot.get_qpos()
+        inverse = pose_inv(pose)
         return tuple(
-            pose_inv(pose)
+            inverse
             @ self._robot.compute_fk(
                 qpos=qpos[:, self._robot.get_joint_ids(name=part)],
                 name=part,
@@ -477,23 +420,16 @@ class _ConditionStabilityRuntime:
                 assert reference is not None and reference_anchor is not None
                 vertices = self._support_vertices[cfg.entity].to(pose)
                 support_vertices = self._support_vertices[cfg.reference].to(reference)
-                bottom = (vertices @ pose[:, 2, :3, None]).squeeze(-1).amin(-1) + pose[
-                    :, 2, 3
-                ]
-                support_world = (
-                    support_vertices @ reference[:, :3, :3].transpose(-1, -2)
-                    + reference[:, None, :3, 3]
+                bottom, top, lower, upper = support_mesh_envelope(
+                    vertices, support_vertices, pose, reference, inset_xy=0.002
                 )
-                top = support_world[:, :, 2].amax(-1)
                 support_batch, support = self._support(cfg, pose, reference)
                 supported = support_batch.values & support_batch.valid
-                contact_heights = _contact_support_heights(supported, support, top)
+                contact_heights = qualified_support_heights(supported, support, top)
                 top = torch.where(torch.isfinite(contact_heights), contact_heights, top)
                 gap = bottom - top
                 # Preserve the support-envelope check using observed geometry.
                 # Projected mesh bounds alone are not contact evidence.
-                lower = support_world[:, :, :2].amin(1) + 0.002
-                upper = support_world[:, :, :2].amax(1) - 0.002
                 inside = ((pose[:, :2, 3] >= lower) & (pose[:, :2, 3] <= upper)).all(-1)
                 if cfg.kind == "supported_region":
                     landing = self._region_geometry[

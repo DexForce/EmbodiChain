@@ -56,6 +56,7 @@ __all__ = [
     "NativeSupportResult",
     "NativeSupportObservation",
     "SupportObservationRegistry",
+    "qualified_support_heights",
 ]
 
 NATIVE_SUPPORT_CHANNEL = "support.com_patch"
@@ -324,6 +325,12 @@ class NativeSupportObservation:
             ),
         )
 
+    def _physics_step(self) -> int:
+        step = self._simulation.physics_step_index
+        if type(step) is not int or step < 0:
+            raise ValueError("Native support requires a valid physics-step identity.")
+        return step
+
     def _revision_or_none(self) -> int | None:
         if self._clock is None:
             return None
@@ -522,6 +529,7 @@ class NativeSupportObservation:
                 timestamp = self._base[1] + self._offset
                 self._validate_time_mapping(token.timestamp, timestamp)
             self._refresh_identity()
+            legacy_step = self._physics_step() if self._clock is None else None
             sample = self._sampler.sample(
                 PhysicalEvidenceRequest(
                     timestamp,
@@ -536,6 +544,12 @@ class NativeSupportObservation:
                 self.object.get_local_pose(to_matrix=True),
                 self.reference.get_local_pose(to_matrix=True),
             )
+            if legacy_step is not None:
+                if self._physics_step() != legacy_step:
+                    raise ValueError(
+                        "Native support physics step changed during capture."
+                    )
+                self._legacy_sample_step = legacy_step
         except _ERRORS as error:
             self._unavailable(error)
 
@@ -779,11 +793,7 @@ class NativeSupportObservation:
                         timestamp, self._capture_revision, torch.arange(count)
                     )
                 )
-                step = self._simulation.physics_step_index
-                if type(step) is not int or step < 0:
-                    raise ValueError(
-                        "Native support requires a valid physics-step identity."
-                    )
+                step = self._physics_step()
                 if (
                     self._last_sample is None
                     or self._legacy_sample_step != step
@@ -828,7 +838,7 @@ class NativeSupportObservation:
                     mask = self._last_sample.frame.batches[CONTACT_VALID_MASK].values[
                         row
                     ]
-                    if self._clock is None and not sample_is_fresh:
+                    if not sample_is_fresh:
                         # A cached contact cannot re-establish a witness invalidated by motion.
                         mask = torch.zeros_like(mask)
                     patch = tuple(
@@ -1071,3 +1081,74 @@ class SupportObservationRegistry:
         for observer in tuple(self._observers.values()):
             observer.close()
         self._observers.clear()
+
+
+def qualified_support_heights(
+    supported: torch.Tensor,
+    observation: Mapping[str, Any],
+    like: torch.Tensor,
+) -> torch.Tensor:
+    """Refine heights only from NativeSupportObservation's qualified patch.
+
+    Args:
+        supported: Per-environment qualified physical support mask.
+        observation: Owned native contact-patch metadata from that same sample.
+        like: Per-environment tensor selecting output shape, dtype and device.
+
+    Returns:
+        Highest qualified contact height per row; unavailable rows contain NaN.
+
+
+    Its contact points already require positive upward load and COM support.
+    Keep the highest qualified point so penetration is not hidden by averaging.
+    Unavailable rows cannot replace the existing conservative mesh envelope.
+    """
+    heights = torch.full_like(like, torch.nan)
+    rows = observation.get("rows")
+    if (
+        supported.dtype != torch.bool
+        or supported.shape != like.shape
+        or observation.get("scope") != "native_contact_support"
+        or not isinstance(rows, list)
+        or len(rows) != like.shape[0]
+    ):
+        return heights
+    for index, row in enumerate(rows):
+        if not supported[index] or not isinstance(row, Mapping):
+            continue
+        values = tuple(
+            row.get(name)
+            for name in ("com_patch_distance_m", "com_tolerance_m", "upward_impulse")
+        )
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in values
+        ):
+            continue
+        distance, tolerance, impulse = values
+        if tolerance <= 0 or not 0 <= distance <= tolerance or impulse <= 0:
+            continue
+        if row.get("contacts_world") is None or row.get("center_of_mass_world") is None:
+            continue
+        try:
+            points = torch.as_tensor(
+                row["contacts_world"], device=like.device, dtype=like.dtype
+            )
+            center = torch.as_tensor(
+                row["center_of_mass_world"], device=like.device, dtype=like.dtype
+            )
+        except (TypeError, ValueError):
+            continue
+        if (
+            points.ndim != 2
+            or points.shape[1] != 3
+            or not points.shape[0]
+            or center.shape != (3,)
+            or not torch.isfinite(points).all()
+            or not torch.isfinite(center).all()
+        ):
+            continue
+        heights[index] = points[:, 2].amax()
+    return heights

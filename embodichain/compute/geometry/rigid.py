@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import math
 
 import torch
 
@@ -33,6 +34,7 @@ __all__ = [
     "rotate_rigid_grasp",
     "rigid_pose_displacement",
     "pose_axis_alignment",
+    "support_mesh_envelope",
     "validate_rigid_pose_batch",
 ]
 
@@ -161,6 +163,71 @@ def rotate_rigid_grasp(
     rotated_link = link_pose[:, None] @ (to_origin @ rotations @ from_origin)
     link_to_eef = pose_inv(link_pose) @ grasp_pose
     return rotated_link, rotated_link @ link_to_eef[:, None]
+
+
+def support_mesh_envelope(
+    object_vertices: torch.Tensor,
+    reference_vertices: torch.Tensor,
+    object_pose: torch.Tensor,
+    reference_pose: torch.Tensor,
+    *,
+    inset_xy: float = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Transform source mesh envelopes without selecting support acceptance.
+
+    Args:
+        object_vertices: Local object vertices, shaped (B, V, 3).
+        reference_vertices: Local reference vertices, shaped (B, W, 3).
+        object_pose: Matching object transforms, shaped (B, 4, 4).
+        reference_pose: Matching reference transforms, shaped (B, 4, 4).
+        inset_xy: Explicit nonnegative shrink of the horizontal reference bounds.
+
+    Returns:
+        Object bottom (B,), reference top (B,), horizontal lower and upper
+        reference bounds (B, 2), on the input dtype/device. Nonfinite values
+        propagate into measurements. Mesh envelopes establish no native contact.
+    """
+    tensors = (object_vertices, reference_vertices, object_pose, reference_pose)
+    batch = object_pose.shape[0] if object_pose.ndim == 3 else -1
+    if any(
+        not value.is_floating_point()
+        or value.device != object_pose.device
+        or value.dtype != object_pose.dtype
+        for value in tensors
+    ):
+        raise ValueError("Envelope inputs must share floating dtype and device.")
+    if any(
+        value.shape != (batch, 4, 4) for value in (object_pose, reference_pose)
+    ) or any(
+        value.ndim != 3
+        or value.shape[0] != batch
+        or value.shape[1] == 0
+        or value.shape[2] != 3
+        for value in (object_vertices, reference_vertices)
+    ):
+        raise ValueError(
+            "Envelopes require matching (B,V,3) vertices and (B,4,4) poses."
+        )
+    if (
+        isinstance(inset_xy, bool)
+        or not isinstance(inset_xy, (int, float))
+        or not math.isfinite(inset_xy)
+        or inset_xy < 0
+    ):
+        raise ValueError("inset_xy must be finite and nonnegative.")
+    bottom = (object_vertices @ object_pose[:, 2, :3, None]).squeeze(-1).amin(
+        -1
+    ) + object_pose[:, 2, 3]
+    world = (
+        reference_vertices @ reference_pose[:, :3, :3].transpose(-1, -2)
+        + reference_pose[:, None, :3, 3]
+    )
+    return (
+        bottom,
+        world[:, :, 2].amax(-1),
+        world[:, :, :2].amin(1) + inset_xy,
+        world[:, :, :2].amax(1) - inset_xy,
+    )
 
 
 def validate_rigid_pose_batch(pose: torch.Tensor, batch_size: int) -> None:
