@@ -477,7 +477,7 @@ topics:
   status: active
 - id: task-engine
   title: Task Engine
-  aliases: [Task Engine, task engine, 任务引擎, 任务理解]
+  aliases: [Task Engine, task engine, 任务引擎, 任务理解, 动作语义图, 语义图可视化]
   keywords: [TaskAgent, TaskDraft, TaskCandidateSet, InstructionIntent, TaskSpecGenerator,
     SemanticTaskGraph, validate_semantic_task_graph, validate_graph_coverage,
     render_semantic_task_graph_html, write_semantic_task_graph_html]
