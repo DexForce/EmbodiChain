@@ -3667,9 +3667,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory.create_atomic_action_engine",
-          "start_line": 1058,
-          "end_line": 1062,
-          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,\n            free_motion_query=free_motion_query,\n            handover_scene_provider=handover_scene,\n            control_profiles=profile.action_control_profiles(),"
+          "start_line": 1368,
+          "end_line": 1374,
+          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,\n            free_motion_query=free_motion_query,\n            handover_scene_provider=handover_scene,\n            twist_planning_provider=twist_planning_provider,\n            articulation_continuation_provider=articulation_continuation_provider,\n            control_profiles=profile.action_control_profiles(),"
         }
       ]
     },
@@ -3714,16 +3714,16 @@
       "source": "environment-adapter",
       "target": "step-clock",
       "relation": "constructs",
-      "description": "Create one clock from the resolved environment step duration.",
+      "description": "Use the bridge-owned control clock or construct the ordinary environment-step clock.",
       "provenance": "source-reviewed",
       "scope": "Execution-runtime assembly.",
       "evidence": [
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 666,
-          "end_line": 666,
-          "excerpt": "        clock = EnvironmentStepClock(self._step_dt)"
+          "start_line": 767,
+          "end_line": 767,
+          "excerpt": "        clock = EnvironmentStepClock(self._step_dt) if clock is None else clock"
         }
       ]
     },
@@ -3757,9 +3757,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 777,
-          "end_line": 786,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n            nominal_source_factory=nominal_source_factory,\n        )"
+          "start_line": 847,
+          "end_line": 857,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n            nominal_source_factory=nominal_source_factory,\n            plan_lifecycle_factory=plan_lifecycle_factory,\n        )"
         }
       ]
     },
@@ -3775,9 +3775,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
-          "start_line": 1019,
-          "end_line": 1024,
-          "excerpt": "        bridge = TaskProgramDemoBridge(\n            program,\n            assembly.runtime,\n            assembly.command_sink,\n            assembly.clock,\n            post_policy_port=self._post_policy_port,"
+          "start_line": 1133,
+          "end_line": 1156,
+          "excerpt": "            bridge = TaskProgramDemoBridge(\n                program,\n                assembly.runtime,\n                assembly.command_sink,\n                assembly.clock,\n                post_policy_port=(\n                    self._post_policy_port\n                    if control_services is None\n                    else control_services.policy_port\n                ),\n                validator_port=(\n                    self._validator_port\n                    if control_services is None\n                    else control_services.policy_port\n                ),\n                runner_cfg=assembly.runner_cfg,\n                parallel_safety_validator=assembly.parallel_safety_validator,\n                expansion_trace_provider=assembly.expansion_trace_provider,\n                isolate_policy_sessions=control_services is None,\n                runtime_resource_cleanup=(\n                    None if control_services is None else control_services.close\n                ),\n                **({\"invocation_policies\": policies} if policies is not None else {}),\n            )"
         }
       ]
     },
@@ -3836,9 +3836,9 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 1130,
-          "end_line": 1136,
-          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n            plan_transform=plan_transform,\n            nominal_source=nominal_source,\n        )"
+          "start_line": 1229,
+          "end_line": 1238,
+          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n            plan_transform=plan_transform,\n            nominal_source=nominal_source,\n            **(\n                {\"plan_lifecycle\": plan_lifecycle} if plan_lifecycle is not None else {}\n            ),\n        )"
         }
       ]
     },
@@ -3854,9 +3854,9 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 946,
-          "end_line": 952,
-          "excerpt": "        runner = ExecutionRunner(\n            session,\n            primed,\n            self._command_sink,\n            clock=self._clock,\n            cfg=runner_cfg,\n        )"
+          "start_line": 1241,
+          "end_line": 1247,
+          "excerpt": "            runner = ExecutionRunner(\n                session,\n                primed,\n                self._command_sink,\n                clock=self._clock,\n                cfg=runner_cfg,\n            )"
         }
       ]
     },
@@ -3879,9 +3879,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
-          "start_line": 1019,
-          "end_line": 1021,
-          "excerpt": "        bridge = TaskProgramDemoBridge(\n            program,\n            assembly.runtime,"
+          "start_line": 1133,
+          "end_line": 1135,
+          "excerpt": "            bridge = TaskProgramDemoBridge(\n                program,\n                assembly.runtime,"
         }
       ]
     },
