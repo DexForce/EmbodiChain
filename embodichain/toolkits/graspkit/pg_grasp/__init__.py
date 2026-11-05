@@ -58,6 +58,7 @@ _EXPORT_MODULES = {
     "GripperCollisionChecker": ".gripper_collision_checker",
     "FixedGripperCollisionGeometry": ".fixed_geometry",
     "get_parallel_jaw_collision_geometry": ".model_geometry",
+    "get_parallel_jaw_model_asset_files": ".model_geometry",
     "AntipodalGraspPoseGenerator": ".pose_generator",
     "AntipodalGraspPoseGeneratorCfg": ".pose_generator",
     "GraspRegionSelector": ".pose_generator",

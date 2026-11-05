@@ -476,3 +476,15 @@ queries explicitly or through the closing query's context manager.
 
 .. automodule:: embodichain.toolkits.graspkit.pg_grasp.native_contact
    :members:
+
+Registered grasp-model input files
+----------------------------------
+
+The model owner enumerates the same URDF and explicit archive references used by
+collision geometry before constructing a sampler, geometry, Robot or simulator.
+The returned paths are suitable for independent current-input hashing; this does
+not establish collision or grasp success. Unknown model/side selections reject.
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+
+.. autofunction:: get_parallel_jaw_model_asset_files
