@@ -1823,6 +1823,61 @@ def test_inline_builtin_aperture_matches_registered_model_and_rejects_unknown() 
 
 
 @pytest.mark.parametrize(
+    ("relative_path", "model_id"),
+    [
+        ("repeated_pick_place/task.franka.yaml", "franka_panda_hand"),
+        (
+            "repeated_pick_place/task.dual_ur5_dh_pgi_140_80.yaml",
+            "dh_pgi_140_80",
+        ),
+        ("tableware/pour_water/task.cobotmagic.yaml", "cobotmagic_v100_gripper"),
+    ],
+)
+def test_configured_asset_inventory_uses_model_owner_without_runtime_construction(
+    relative_path: str, model_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.task_program.integrations import (
+        DeclaredAssetFileProvider,
+        SimulationTaskProgramAdapterFactory,
+    )
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _AntipodalGraspPoseGeneratorFactory,
+    )
+    from embodichain.toolkits.graspkit.pg_grasp import model_geometry
+    from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
+        AntipodalSampler,
+    )
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError(
+            "Asset declarations cannot construct or sample runtime state."
+        )
+
+    monkeypatch.setattr(SimulationManager, "__new__", staticmethod(unexpected))
+    monkeypatch.setattr(Robot, "__init__", unexpected)
+    monkeypatch.setattr(AntipodalSampler, "__init__", unexpected)
+    monkeypatch.setattr(
+        SimulationTaskProgramAdapterFactory, "create_adapter", unexpected
+    )
+    monkeypatch.setattr(_AntipodalGraspPoseGeneratorFactory, "__call__", unexpected)
+    monkeypatch.setattr(
+        model_geometry, "get_parallel_jaw_collision_geometry", unexpected
+    )
+    expected = model_geometry.get_parallel_jaw_model_asset_files(model_id)
+
+    deployment = _deployment_from_path(_CONFIG_DIRECTORY / relative_path)
+    provider = deployment.integration.adapter_factory
+    original_fingerprint = deployment.integration.integration_fingerprint
+    assert isinstance(provider, DeclaredAssetFileProvider)
+    assert expected
+    assert provider.declared_asset_files() == expected
+    assert provider.declared_asset_files() == expected
+    assert deployment.integration.integration_fingerprint == original_fingerprint
+
+
+@pytest.mark.parametrize(
     ("relative_path", "control_part", "model_id"),
     [
         (

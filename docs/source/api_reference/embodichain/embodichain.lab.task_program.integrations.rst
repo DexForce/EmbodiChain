@@ -9,6 +9,7 @@ embodichain.lab.task_program.integrations
       PlanningObservationPort, TaskProgramIntegrationCatalog,
       SimulationTaskProgramRegistration, IntegrationFingerprintMismatch,
       ControlPartEvidenceProviderDeclaration, ControlPartEvidenceProviderFactory,
+      DeclaredAssetFileProvider,
       RegisteredSemanticLowererDeclaration, RegisteredSemanticLowererFactory,
       EndpointAdapterDeclaration, RuntimeTransportDeclaration,
       ParallelSafetyDeclaration, ParallelCommandSafetyValidatorFactory,
@@ -41,6 +42,7 @@ embodichain.lab.task_program.integrations
       ControlPartCommandPreset
       ControlPartEvidenceProviderDeclaration
       ControlPartEvidenceProviderFactory
+      DeclaredAssetFileProvider
       ControlPartEndpointBinding
       ControlPartResourceBinding
       CuroboParallelCommandSafetyValidator
@@ -120,6 +122,9 @@ Registration and extensions
    :members:
 
 .. autoclass:: ControlPartEvidenceProviderFactory
+
+.. autoclass:: DeclaredAssetFileProvider
+   :members:
 
 .. autoclass:: RegisteredSemanticLowererDeclaration
    :members:
@@ -268,6 +273,17 @@ measured positions from their planning context.
 .. autoclass:: SimulationTaskProgramAdapterFactory
    :members:
 
+``declared_asset_files()`` resolves service-owned local assets without creating
+an adapter, generator, sampler, robot, or simulator. Each grasp and hand
+calibration factory must explicitly implement ``DeclaredAssetFileProvider``
+when an inventory is requested. Configured antipodal factories delegate their
+effective model and side to the GraspKit model owner; sampled hand calibration
+borrows the physical robot's assets. Other registration extensions can declare
+their assets through the same protocol. Results are sorted unique absolute
+files. Physical declarations and motion-source manifests keep their own input
+contracts; the asset protocol does not infer them from a factory's private
+state. The configured adapter wrapper exposes the same public method.
+
 .. autoclass:: ConfiguredHandOverPoseProvider
    :members:
 
@@ -329,6 +345,7 @@ type does not register a second deployment configuration source.
 
    ControlPartEvidenceProviderDeclaration
    ControlPartEvidenceProviderFactory
+   DeclaredAssetFileProvider
    EndpointAdapterDeclaration
    ParallelCommandSafetyValidatorFactory
    ParallelSafetyDeclaration
