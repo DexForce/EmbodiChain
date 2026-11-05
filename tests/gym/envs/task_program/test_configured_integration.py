@@ -3421,3 +3421,24 @@ def test_joint_window_runtime_settings_do_not_redefine_normative_condition_data(
     )
     second = _decode_configured_task_program_integration(payload).registration
     assert first.fingerprint != second.fingerprint
+
+
+def test_generic_planning_budget_decodes_without_source_recovery_factories():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_recovery_policy,
+    )
+    from embodichain.lab.sim.atomic_actions import PlanningBudget
+
+    config = dict(
+        max_replans=0,
+        max_action_retries=0,
+        planning_budget={"wall_seconds": 0.25},
+        retry_all_failed_plans=False,
+    )
+    policy = _decode_recovery_policy(config, path="recovery")
+    assert policy.planning_budget == PlanningBudget(0.25)
+    assert policy.retry_all_failed_plans is False
+    with pytest.raises(ValueError, match="planning_recovery"):
+        _decode_recovery_policy(
+            {**config, "planning_recovery": {"kind": "not_installed"}}, path="recovery"
+        )

@@ -198,10 +198,19 @@ def _canonical_value(value: object) -> object:
             ),
         )
     if is_dataclass(value):
+        from embodichain.lab.sim.atomic_actions.policies import RecoveryPolicy
+
         metadata = {
             data_field.name: _canonical_value(getattr(value, data_field.name))
             for data_field in fields(value)
+            if not (
+                type(value) is RecoveryPolicy
+                and data_field.name == "planning_budget"
+                and getattr(value, data_field.name) is None
+            )
         }
+        if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
+            metadata.pop("retry_all_failed_plans")
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "

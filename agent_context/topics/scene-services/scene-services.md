@@ -63,6 +63,17 @@ belongs to [GraspKit](../motion-planning/motion-planning.md); query composition 
 cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
 Captured shapes and nominal queries do not establish physical acquisition/release.
 
+`native_hand_scene.py` and `native_motion_scene.py` expose opt-in FCL queries
+on the same physical observation. Hand capture retains collision-only links,
+planes and native contact/rest offsets; motion capture retains ordered rigid and
+articulation obstacles, arm parts and named-joint FK. Both preserve the original
+Default/B1/env0 coverage and reject stale or replaced owners rather than refresh.
+Callers supply the observation guard and close each owned query. These are
+discrete geometric checks, not continuous-path or physical-effect evidence.
+`convex_clearance.py` checks conservative input-mesh solids at explicit frame
+indices, preserving order and first rejection; it also catches full containment.
+It takes explicit margins and never substitutes for a native contact witness.
+
 Static control readers consume explicit authored roles, keep source mesh frames
 and identity, and never build semantic graphs or select execution/recovery
 budgets. Acceptance thresholds and semantic link IDs belong to their callers.
@@ -88,9 +99,12 @@ construct no Robot, simulator or IK solver and select no concrete robot preset.
 recreate it after replacing either object or changing its model/scale. Queries
 take explicit observed poses and return footprint containment, area and vertical
 gap, without accepting a task or inferring contact support. Exact silhouette mode
-retains concavities and holes; convex-hull mode remains explicit. Acquisition
-errors remain unavailable evidence. Callers own thresholds, invocation/episode
-association, observation timing and evidence publication.
+retains concavities and holes; convex-hull mode remains explicit. `source_geometry()` returns independent subject vertices and floor copies after
+checking the original bindings. `capture_planar_contents` reads explicitly ordered
+logical/native rigid contents at B=1; both supply geometry without reading poses
+or certifying retention. Acquisition errors remain unavailable evidence. Callers
+own thresholds, invocation/episode association, observation timing and evidence
+publication.
 
 `mesh_snapshot.py` captures scaled rigid visual vertices and ordered articulation
 collision-input components from explicit UID/link mappings. It reads no live

@@ -22,6 +22,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import trimesh
+from shapely.geometry import Polygon
 
 from .rigid_mesh import capture_rigid_mesh
 
@@ -33,7 +34,7 @@ from embodichain.compute.geometry.landing import (
 if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
 
-__all__ = ["NativePlanarPlacement"]
+__all__ = ["NativePlanarPlacement", "capture_planar_contents"]
 
 
 def _native_mesh(
@@ -91,6 +92,28 @@ class NativePlanarPlacement:
         self._reference = simulation.get_rigid_object(reference_uid)
         self._batch_size = batch_size
 
+    def source_geometry(self) -> tuple[torch.Tensor, tuple[tuple[Polygon, float], ...]]:
+        """Own original planar source vertices/floors for numeric proposal consumers.
+
+        Returns:
+            CPU scaled unique subject vertices and original per-row floor region
+            with height. Physical owner/model replacement rejects; this captures
+            no current poses and grants no placement or retention certificate.
+        """
+        if self._object is not self._simulation.get_rigid_object(
+            self._object_uid
+        ) or self._reference is not self._simulation.get_rigid_object(
+            self._reference_uid
+        ):
+            raise ValueError(
+                "Placement geometry cache differs from its native bindings."
+            )
+        from shapely import wkb
+
+        return self._vertices.clone(), tuple(
+            (wkb.loads(wkb.dumps(floor)), height) for floor, height in self._floors
+        )
+
     def measure(
         self,
         object_pose: torch.Tensor,
@@ -137,3 +160,36 @@ class NativePlanarPlacement:
             faces=faces,
             reference_vertices=reference_vertices,
         )
+
+
+def capture_planar_contents(
+    simulation: SimulationManager, contents: tuple[tuple[str, str], ...]
+) -> tuple[tuple[str, torch.Tensor], ...]:
+    """Read explicit source-ordered scaled content vertices without state mutation.
+
+    Args:
+        simulation: Exact single-environment physical owner.
+        contents: Ordered logical/native rigid identities supplied by the host.
+
+    Returns:
+        Owned current object-local vertices preserving source dtype/order. Pose
+        projection remains with the caller's qualified current observation.
+    """
+    if simulation.num_envs != 1:
+        raise ValueError("Measured planar content capture requires B1.")
+    result = []
+    for logical, uid in contents:
+        entity = simulation.get_rigid_object(uid)
+        if entity is None:
+            raise ValueError("Measured content rigid identity is unavailable.")
+        points = entity.get_vertices(scale=True)
+        if (
+            points.ndim != 3
+            or points.shape[0] != 1
+            or points.shape[2] != 3
+            or not len(points[0])
+            or not torch.isfinite(points).all()
+        ):
+            raise ValueError("Measured content geometry is unavailable.")
+        result.append((logical, points[0].detach().cpu().clone()))
+    return tuple(result)

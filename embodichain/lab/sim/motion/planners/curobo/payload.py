@@ -95,6 +95,7 @@ class CuroboQuerySnapshot:
             shape ``(B, 4, 4)``. Goals use the corresponding row.
         payload: Optional carried body from the same observation, B=1 only.
         env_ids: Canonical row order, defaulting to ``tuple(range(B))``.
+        base_link_name: Optional explicit URDF-root identity for the supplied transform.
 
     B>1 requires the complete robot environment batch in canonical order,
     identical passive locks and a shared frozen collision world in each row's
@@ -108,9 +109,16 @@ class CuroboQuerySnapshot:
     full_qpos: torch.Tensor
     world_to_base: torch.Tensor
     payload: CuroboPayload | None = None
+    base_link_name: str | None = None
     env_ids: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
+        if self.base_link_name is not None and (
+            type(self.base_link_name) is not str
+            or not self.base_link_name
+            or self.base_link_name != self.base_link_name.strip()
+        ):
+            raise ValueError("base_link_name must be an exact nonempty identifier.")
         if (
             not isinstance(self.full_qpos, torch.Tensor)
             or self.full_qpos.ndim != 2
