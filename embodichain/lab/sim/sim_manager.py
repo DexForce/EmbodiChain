@@ -1974,6 +1974,22 @@ class SimulationManager:
             if step > 0:
                 self._log_scene_summary()
 
+    @property
+    def simulation_time(self) -> float:
+        """Return elapsed time advanced through this manager's ``update`` calls.
+
+        The sum starts at manager construction and includes explicit warmup
+        updates. It is published after each successful physics substep, before
+        ``after_substep`` observers. Preparation and zero-duration render-state
+        synchronization do not advance it; object/environment resets do not
+        rewind it. Direct low-level backend/world calls are outside this clock.
+
+        This manager-relative timeline can have an offset from a Task Program's
+        episode-relative EnvironmentStepClock; consumers must map the domains
+        explicitly instead of comparing their timestamps directly.
+        """
+        return self._visualization_sim_time
+
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.
 

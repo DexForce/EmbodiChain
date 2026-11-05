@@ -125,6 +125,7 @@ from .simulation.policies import (
     SimulationSettleMonitorCfg,
     default_simulation_settle_presets,
 )
+from .simulation.stability import SimulationStabilityConditionCfg
 
 _CATALOG_FINGERPRINT_SCHEMA_VERSION = 4
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
@@ -229,12 +230,14 @@ def _digest(payload: object) -> str:
 
 
 def _snapshot_settle_presets(
-    values: Mapping[str, DynamicSettleMonitorCfg],
-) -> Mapping[str, DynamicSettleMonitorCfg]:
+    values: Mapping[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg],
+) -> Mapping[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg]:
     """Own one strict named settle-preset table."""
     if not isinstance(values, Mapping) or not values:
         raise ValueError("settle_presets must be a non-empty mapping.")
-    normalized: dict[str, DynamicSettleMonitorCfg] = {}
+    normalized: dict[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg] = (
+        {}
+    )
     for preset_id, preset in values.items():
         if (
             type(preset_id) is not str
@@ -245,9 +248,12 @@ def _snapshot_settle_presets(
                 "Settle preset IDs must be non-empty strings without outer "
                 "whitespace."
             )
-        if not isinstance(preset, DynamicSettleMonitorCfg):
+        if (
+            not isinstance(preset, DynamicSettleMonitorCfg)
+            and type(preset) is not SimulationStabilityConditionCfg
+        ):
             raise TypeError(
-                "settle_presets values must be DynamicSettleMonitorCfg values."
+                "settle_presets require dynamic monitors or typed stability conditions."
             )
         normalized[preset_id] = preset.snapshot()
     return MappingProxyType(normalized)
@@ -522,6 +528,10 @@ class TaskProgramIntegrationCatalog:
         default_factory=frozenset, kw_only=True
     )
     """Native rigid-object identities and affordances resolving to those objects."""
+    condition_settle_entities: Mapping[str, str] = field(
+        default_factory=dict, kw_only=True
+    )
+    """Immutable preset-to-entity binding for declared geometric conditions."""
 
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
@@ -598,6 +608,18 @@ class TaskProgramIntegrationCatalog:
             raise ValueError(
                 "Pose-delta presets must belong to the settle-preset table."
             )
+        conditions = dict(self.condition_settle_entities)
+        if not set(conditions) <= preset_ids:
+            raise ValueError(
+                "Condition presets must belong to the settle-preset table."
+            )
+        for key, value in conditions.items():
+            _exact_identifier(key, field_name="condition preset")
+            _exact_identifier(value, field_name="condition entity")
+        object.__setattr__(
+            self, "condition_settle_entities", MappingProxyType(conditions)
+        )
+
         if (
             type(self.fingerprint) is not str
             or len(self.fingerprint) != 64
@@ -740,6 +762,14 @@ class TaskProgramIntegrationCatalog:
                     path,
                     "Pose-delta settling requires an explicitly bound native rigid object.",
                 )
+        if policy.preset in self.condition_settle_entities:
+            entity = self.scene.resolve(policy.entity, path=(*path, "entity"))
+            if entity.entity_id != self.condition_settle_entities[policy.preset]:
+                raise TaskProgramValidationError(
+                    "stability_condition_target_mismatch",
+                    path,
+                    "The wait-stable entity differs from its declared condition.",
+                )
 
     def validate_validator(
         self,
@@ -767,7 +797,10 @@ class TaskProgramIntegrationCatalog:
         )
         for segment in compiled.iter_segments():
             for policy in segment.post_policies:
-                if policy.cfg.preset in self.pose_delta_settle_preset_ids:
+                if (
+                    policy.cfg.preset in self.pose_delta_settle_preset_ids
+                    or policy.cfg.preset in self.condition_settle_entities
+                ):
                     self.validate_post_policy(policy.cfg, path=policy.source_path)
             if (
                 segment.parallel_block is not None
@@ -1004,7 +1037,9 @@ def _registration_payload(
     robot_profile_binding: SimulationRobotSkillProfileBinding,
     robot_profile: RobotSkillProfile,
     call_catalog: SemanticCallCatalog,
-    settle_presets: Mapping[str, DynamicSettleMonitorCfg],
+    settle_presets: Mapping[
+        str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg
+    ],
     relation_grounder_keys: frozenset[tuple[str, type[Affordance], str]],
     relation_grounders: tuple[RelationTargetGrounder, ...],
     handover_pose_providers: tuple[HandOverPoseProvider, ...],
@@ -1135,9 +1170,9 @@ class SimulationTaskProgramRegistration:
     call_catalog: SemanticCallCatalog = field(
         default_factory=builtin_semantic_call_catalog
     )
-    settle_presets: Mapping[str, DynamicSettleMonitorCfg] = field(
-        default_factory=default_simulation_settle_presets
-    )
+    settle_presets: Mapping[
+        str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg
+    ] = field(default_factory=default_simulation_settle_presets)
     relation_grounders: tuple[RelationTargetGrounder, ...] = ()
     handover_pose_providers: tuple[HandOverPoseProvider, ...] = ()
     endpoint_adapters: tuple[ResourceEndpointAdapter, ...] = ()
@@ -1190,6 +1225,30 @@ class SimulationTaskProgramRegistration:
         if type(self.call_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
         settle_presets = _snapshot_settle_presets(self.settle_presets)
+        rigid_ids = {binding.entity_id for binding in self.scene_binding.rigid_objects}
+        reference_ids = (
+            rigid_ids
+            | {binding.entity_id for binding in self.scene_binding.articulations}
+            | {binding.entity_id for binding in self.scene_binding.links}
+        )
+        for cfg in settle_presets.values():
+            if type(cfg) is not SimulationStabilityConditionCfg:
+                continue
+            if cfg.entity not in rigid_ids:
+                raise ValueError(
+                    "Stability condition entities require native rigid bindings."
+                )
+            if cfg.reference is not None and cfg.reference not in reference_ids:
+                raise ValueError(
+                    "Stability condition reference is not explicitly bound."
+                )
+            if (
+                cfg.kind in {"stack", "supported_placement", "supported_region"}
+                and cfg.reference not in rigid_ids
+            ):
+                raise ValueError(
+                    "Contact support conditions require a native rigid reference."
+                )
         object.__setattr__(self, "settle_presets", settle_presets)
         configured_relation_grounders = _configured_relation_grounders(
             self.scene_binding,
@@ -1295,6 +1354,11 @@ class SimulationTaskProgramRegistration:
                 call_catalog=self.call_catalog,
                 relation_grounder_keys=relation_grounder_keys,
                 settle_preset_ids=frozenset(settle_presets),
+                condition_settle_entities={
+                    key: cfg.entity
+                    for key, cfg in settle_presets.items()
+                    if type(cfg) is SimulationStabilityConditionCfg
+                },
                 pose_delta_settle_preset_ids=frozenset(
                     key
                     for key, cfg in settle_presets.items()

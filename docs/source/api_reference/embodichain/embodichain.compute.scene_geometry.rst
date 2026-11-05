@@ -178,6 +178,8 @@ rotation angles without selecting elapsed time or stability thresholds.
    nearest_half_turn_pose
    rotate_rigid_grasp
    rigid_pose_displacement
+   pose_axis_alignment
+
 
 .. automodule:: embodichain.compute.geometry.rigid
    :members:

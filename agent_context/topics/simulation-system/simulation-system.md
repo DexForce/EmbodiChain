@@ -101,6 +101,13 @@ initialization; standalone callers supply it explicitly. `update()` also
 prepares defensively. See [lifecycle](lifecycle.md) for retries, replacement,
 reset ordering, runtime controls and teardown.
 
+`simulation_time` is a read-only manager-relative clock: successful `update()`
+substeps add their actual durations before `after_substep` callbacks. Explicit
+warmup updates count; preparation/render synchronization at zero duration does
+not advance time, and object/environment reset does not rewind it. A fresh
+manager starts at zero. Episode-relative Task Program clocks can have an offset;
+physical evidence must validate that mapping instead of mixing timestamp domains.
+
 `physics_step_index` counts completed manager substeps before each
 `after_substep` callback, including runs without rendering. Reads, selected
 resets and topology rebuilds leave it unchanged. Consumers that cache

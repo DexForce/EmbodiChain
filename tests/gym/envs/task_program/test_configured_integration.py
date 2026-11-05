@@ -3011,3 +3011,117 @@ def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(
     path.write_text(yaml.safe_dump({**payload, "unexpected": 1}))
     with pytest.raises(ValueError, match="unknown Real2Sim profile field"):
         load_real2sim_tabletop_profile(path)
+
+
+def test_configured_settle_table_is_closed_owned_and_uses_the_standard_registration():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+    )
+    from embodichain.lab.task_program.integrations.simulation.policies import (
+        SimulationSettleMonitorCfg,
+    )
+    from embodichain.lab.task_program.integrations.catalog import (
+        IntegrationFingerprintMismatch,
+    )
+    from embodichain.lab.task_program import WaitStablePostCfg
+
+    payload = _integration_payload("repeated_pick_place")
+    payload.setdefault("runtime_services", {})["settle_presets"] = {
+        "position_check": {
+            "kind": "placement",
+            "entity": "cube",
+            "target_position": [0.5, 0.0, 0.1],
+            "duration": 0.08,
+            "timeout": 0.4,
+        },
+        "pose_speed": {"measurement": "pose_delta", "min_steps": 1},
+    }
+    value = _decode_configured_task_program_integration(payload)
+    presets = value.registration.settle_presets
+    assert type(presets["position_check"]) is SimulationStabilityConditionCfg
+    assert type(presets["pose_speed"]) is SimulationSettleMonitorCfg
+    assert set(value.registration.catalog.settle_preset_ids) == set(presets)
+    value.registration.catalog.validate_post_policy(
+        WaitStablePostCfg(entity="cube", preset="position_check"), path=("post",)
+    )
+    payload["runtime_services"]["settle_presets"]["position_check"]["target_position"][
+        0
+    ] = 2.0
+    assert presets["position_check"].target_position == (0.5, 0.0, 0.1)
+    presets["position_check"].duration = 0.16
+    with pytest.raises(IntegrationFingerprintMismatch):
+        value.registration.assert_unchanged()
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["unknown_field", "missing_sensor", "unbound_reference", "unknown_measurement"],
+)
+def test_configured_stability_rejects_unsupported_combinations_before_runtime(change):
+    payload = _integration_payload("repeated_pick_place")
+    cfg = {"kind": "placement", "entity": "cube", "target_position": [0.0, 0.0, 0.0]}
+    if change == "unknown_field":
+        cfg["constraints"] = {}
+    elif change == "missing_sensor":
+        cfg = {"kind": "supported_region", "entity": "cube", "reference": "cube"}
+    elif change == "unbound_reference":
+        cfg = {
+            "kind": "supported_region",
+            "entity": "cube",
+            "reference": "missing_link",
+            "support_sensor": {"uid": "contacts"},
+        }
+    else:
+        cfg = {"measurement": "auto_by_task_name"}
+    payload.setdefault("runtime_services", {})["settle_presets"] = {"check": cfg}
+    with pytest.raises((TypeError, ValueError)):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_settle_component_ownership_is_disjoint_without_a_second_constraint_table():
+    from embodichain.lab.task_program.integrations._configured_composition import (
+        _merge_runtime_services,
+    )
+
+    monitor = {"measurement": "pose_delta"}
+    condition = {"kind": "upright", "entity": "cube", "local_axis": [0.0, 0.0, 1.0]}
+    value = _merge_runtime_services(
+        {"settle_presets": {"slow": monitor}},
+        {"settle_presets": {"upright": condition}},
+    )
+    assert set(value["settle_presets"]) == {"slow", "upright"}
+    condition["local_axis"][2] = 5.0
+    assert value["settle_presets"]["upright"]["local_axis"] == [0.0, 0.0, 1.0]
+    with pytest.raises(ValueError, match="Duplicate settle-preset"):
+        _merge_runtime_services(
+            {"settle_presets": {"same": monitor}}, {"settle_presets": {"same": monitor}}
+        )
+    with pytest.raises(ValueError):
+        _merge_runtime_services({}, {"constraints": {}})
+
+
+def test_condition_snapshot_is_idempotent_and_plain_matching_data_has_no_sensor_object():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+        SupportSensorDeclarationCfg,
+    )
+
+    cfg = SimulationStabilityConditionCfg(
+        entity="cube",
+        kind="stack",
+        reference="table",
+        local_axis=(1.0, 1.0, 1.0),
+        reference_axis=(0.0, 0.0, 1.0),
+        reference_half_extents=(0.1, 0.1),
+        support_sensor=SupportSensorDeclarationCfg(uid="support"),
+    )
+    owned = cfg.snapshot()
+    assert owned.to_dict() == owned.snapshot().to_dict()
+    cfg.support_sensor.uid = "changed"
+    assert owned.support_sensor.uid == "support"
+    plain = owned.to_condition_dict()
+    assert "support_sensor" not in plain
+    assert plain["kind"] == "stack"
+    owned.local_axis = (0.0, 0.0, 0.0)
+    with pytest.raises(ValueError, match="zero"):
+        owned.snapshot()

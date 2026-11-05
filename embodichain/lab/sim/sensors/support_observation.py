@@ -56,6 +56,7 @@ __all__ = [
     "NativeSupportResult",
     "NativeSupportObservation",
     "SupportObservationRegistry",
+    "qualified_support_heights",
 ]
 
 NATIVE_SUPPORT_CHANNEL = "support.com_patch"
@@ -290,6 +291,7 @@ class NativeSupportObservation:
         self._episode_generations = [0] * count
         self._blocked_rows: set[int] = set()
         self._clock: SupportControlClock | None = None
+        self._clock_time_offset: float | None = None
         self._base: tuple[int, float] | None = None
         self._offset, self._substep, self._serial = 0.0, 0, 0
         self._capture_revision = 0
@@ -358,6 +360,7 @@ class NativeSupportObservation:
             raise ValueError("Native support control clock is unqualified.")
         if clock is not self._clock:
             self._clock, self._base = clock, None
+            self._clock_time_offset = None
             self._sampler = self._new_sampler()
             self.reset()
 
@@ -468,6 +471,10 @@ class NativeSupportObservation:
                 index != self._base[0] + 1 or now <= self._base[1]
             ):
                 raise ValueError("Native support control clock did not advance once.")
+            acquisition_time = _timestamp(self._acquisition_clock())
+            if self._clock_time_offset is None:
+                self._clock_time_offset = acquisition_time - now
+            self._validate_time_mapping(acquisition_time, now)
             self._base, self._offset, self._substep = (index, now), 0.0, 0
             self._refresh_identity()
             self._blocked_rows.clear()
@@ -500,6 +507,7 @@ class NativeSupportObservation:
         try:
             if type(token) is not _SampleToken:
                 raise ValueError("Native support before-fetch stamp is unavailable.")
+            timestamp = token.timestamp
             if self._clock is not None:
                 if self._error is not None or self._base is None:
                     raise ValueError(
@@ -518,11 +526,13 @@ class NativeSupportObservation:
                     raise ValueError(
                         "Native support interval exceeds the control cadence."
                     )
+                timestamp = self._base[1] + self._offset
+                self._validate_time_mapping(token.timestamp, timestamp)
             self._refresh_identity()
             legacy_step = self._physics_step() if self._clock is None else None
             sample = self._sampler.sample(
                 PhysicalEvidenceRequest(
-                    token.timestamp,
+                    timestamp,
                     self._capture_revision,
                     torch.arange(len(self._witnesses)),
                 ),
@@ -540,7 +550,6 @@ class NativeSupportObservation:
                         "Native support physics step changed during capture."
                     )
                 self._legacy_sample_step = legacy_step
-
         except _ERRORS as error:
             self._unavailable(error)
 
@@ -646,6 +655,23 @@ class NativeSupportObservation:
             raise ValueError(
                 "Native support has an unobserved step or invalid interval."
             )
+        self._validate_time_mapping(
+            _timestamp(self._acquisition_clock()), _timestamp(self._clock.now())
+        )
+
+    def _validate_time_mapping(
+        self, acquisition_time: float, environment_time: float
+    ) -> None:
+        """Keep the manager timeline separate from the episode-relative clock."""
+        if self._clock_time_offset is None or not math.isclose(
+            acquisition_time,
+            environment_time + self._clock_time_offset,
+            rel_tol=0,
+            abs_tol=1e-8,
+        ):
+            raise ValueError(
+                "Native support acquisition/environment clock mapping changed."
+            )
 
     def observe(
         self,
@@ -653,6 +679,7 @@ class NativeSupportObservation:
         reference_pose: torch.Tensor,
         *,
         support_contract_revision: int | None = None,
+        com_tolerance: float | None = None,
     ) -> NativeSupportResult:
         """Measure support without stepping physics or deciding task acceptance.
 
@@ -661,15 +688,38 @@ class NativeSupportObservation:
             reference_pose: Matching support poses in the same Arena frame.
             support_contract_revision: ``None`` preserves legacy metadata; ``1``
                 requires an explicitly bound clock and complete observed interval.
+            com_tolerance: Explicit policy-owned COM tolerance override. None
+                uses the qualified native rest envelope; the observer's native
+                envelope qualification is retained in either case.
 
         Returns:
             Physical values, availability/errors and independently owned metadata.
+
+        Raises:
+            ValueError: Strong mode has no bound clock, or its actual timestamp
+                cannot be acquired. Strong results use the environment clock;
+                legacy results use the acquisition clock.
         """
         if support_contract_revision is not None and (
             type(support_contract_revision) is not int or support_contract_revision != 1
         ):
             raise ValueError("Unsupported native support contract revision.")
-        timestamp = _timestamp(self._acquisition_clock())
+        if com_tolerance is not None and (
+            type(com_tolerance) not in (int, float)
+            or not math.isfinite(com_tolerance)
+            or com_tolerance <= 0
+        ):
+            raise ValueError("COM tolerance must be finite and positive.")
+        tolerance = self._tolerance if com_tolerance is None else float(com_tolerance)
+        clocked = support_contract_revision is not None
+        sample_is_fresh = False
+        if clocked and self._clock is None:
+            error = ValueError("Native support execution clock unavailable.")
+            self._unavailable(error)
+            raise error
+        timestamp = _timestamp(
+            self._clock.now() if clocked else self._acquisition_clock()
+        )
         count = len(self._witnesses)
         if not isinstance(object_pose, torch.Tensor) or object_pose.shape != (
             count,
@@ -677,8 +727,6 @@ class NativeSupportObservation:
             4,
         ):
             raise ValueError("object_pose must contain one transform per environment.")
-        clocked = support_contract_revision is not None
-        sample_is_fresh = False
         metadata: dict[str, Any] = {
             "scope": "native_contact_support",
             "entity": self.entity_id,
@@ -765,7 +813,7 @@ class NativeSupportObservation:
                     center[row].detach().cpu().numpy(),
                     object_actor=int(self._object_actors[row, 0]),
                     reference_actor=int(self._reference_actors[row, 0]),
-                    tolerance=self._tolerance,
+                    tolerance=tolerance,
                 )
                 accepted.append(result)
                 blocked = self._clock is not None and row in self._blocked_rows
@@ -892,6 +940,7 @@ class SupportObservationRegistry:
             raise TypeError("acquisition_clock must be callable.")
         self._simulation, self._acquisition_clock = simulation, acquisition_clock
         self._observers: dict[tuple[str, str], NativeSupportObservation] = {}
+        self._closed = False
 
     def acquire(
         self,
@@ -918,6 +967,8 @@ class SupportObservationRegistry:
         Returns:
             The registry-owned pair observer. Same-UID replacements require rebind.
         """
+        if self._closed:
+            raise RuntimeError("Support observation registry is closed.")
         if (sensor is None) == (sensor_cfg is None):
             raise ValueError("Select exactly one support sensor or sensor declaration.")
         key = (obj.uid, reference.uid)
@@ -987,6 +1038,78 @@ class SupportObservationRegistry:
 
     def close(self) -> None:
         """Detach all registry-owned hooks without destroying borrowed objects."""
+        self._closed = True
         for observer in tuple(self._observers.values()):
             observer.close()
         self._observers.clear()
+
+
+def qualified_support_heights(
+    supported: torch.Tensor,
+    observation: Mapping[str, Any],
+    like: torch.Tensor,
+) -> torch.Tensor:
+    """Refine heights only from NativeSupportObservation's qualified patch.
+
+    Args:
+        supported: Per-environment qualified physical support mask.
+        observation: Owned native contact-patch metadata from that same sample.
+        like: Per-environment tensor selecting output shape, dtype and device.
+
+    Returns:
+        Highest qualified contact height per row; unavailable rows contain NaN.
+
+
+    Its contact points already require positive upward load and COM support.
+    Keep the highest qualified point so penetration is not hidden by averaging.
+    Unavailable rows cannot replace the existing conservative mesh envelope.
+    """
+    heights = torch.full_like(like, torch.nan)
+    rows = observation.get("rows")
+    if (
+        supported.dtype != torch.bool
+        or supported.shape != like.shape
+        or observation.get("scope") != "native_contact_support"
+        or not isinstance(rows, list)
+        or len(rows) != like.shape[0]
+    ):
+        return heights
+    for index, row in enumerate(rows):
+        if not supported[index] or not isinstance(row, Mapping):
+            continue
+        values = tuple(
+            row.get(name)
+            for name in ("com_patch_distance_m", "com_tolerance_m", "upward_impulse")
+        )
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in values
+        ):
+            continue
+        distance, tolerance, impulse = values
+        if tolerance <= 0 or not 0 <= distance <= tolerance or impulse <= 0:
+            continue
+        if row.get("contacts_world") is None or row.get("center_of_mass_world") is None:
+            continue
+        try:
+            points = torch.as_tensor(
+                row["contacts_world"], device=like.device, dtype=like.dtype
+            )
+            center = torch.as_tensor(
+                row["center_of_mass_world"], device=like.device, dtype=like.dtype
+            )
+        except (TypeError, ValueError):
+            continue
+        if (
+            points.ndim != 2
+            or points.shape[1] != 3
+            or not points.shape[0]
+            or center.shape != (3,)
+            or not torch.isfinite(points).all()
+            or not torch.isfinite(center).all()
+        ):
+            continue
+        heights[index] = points[:, 2].amax()
+    return heights

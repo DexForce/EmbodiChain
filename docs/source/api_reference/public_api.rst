@@ -1215,8 +1215,11 @@ requires release and rebind; closing an old observer cannot detach a new owner
 registered under the same hook name. Borrowed sensors and bodies are never
 destroyed by this registry.
 
-Every physical batch has a real host acquisition timestamp and a collector-owned
-revision. An independently bound control clock qualifies support contract
+Every physical batch has a real timestamp and a collector-owned revision.
+Legacy acquisition uses the simulation clock. Strong frames and results use the
+bound environment clock and observed substep offset; their fixed mapping to
+simulation time is checked, including warmup offsets. Unobserved advancement
+cannot be hidden by rebasing that mapping. The bound clock qualifies support contract
 revision 1, including native source identity, topology, episode generation and
 the complete substep interval. Legacy metadata stays legacy even when sharing
 an observer whose strong clock is bound. Its strong-only sample serial and the
@@ -1239,6 +1242,7 @@ stability window. Normative task acceptance remains outside this module.
    NativeSupportResult
    NativeSupportObservation
    SupportObservationRegistry
+   qualified_support_heights
 
 .. autoclass:: NativeSupportResult
    :members:
@@ -1249,6 +1253,13 @@ stability window. Normative task acceptance remains outside this module.
 .. autoclass:: SupportObservationRegistry
    :members:
 
+
+Qualified contact-height adaptation remains sensor-owned. It uses only a
+positive-load COM-qualified patch and returns the highest point; invalid rows
+remain NaN. Pure transformed mesh envelopes live in
+``compute.geometry.rigid.support_mesh_envelope`` and establish no contact.
+
+.. autofunction:: qualified_support_heights
 
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
@@ -1305,6 +1316,46 @@ embodichain.lab.task_program.integrations.simulation.handover
 .. autosummary::
 
    ConfiguredHandOverPoseProvider
+
+embodichain.lab.task_program.integrations.simulation.stability
+--------------------------------------------------------------
+
+Named geometric conditions share ``SimulationTaskProgramRegistration.settle_presets``
+with ordinary dynamic settle monitors. ``SimulationStabilityConditionCfg`` owns
+its duration, timeout, pose/axis targets, attachment-drift bounds and optional
+native-support declaration. Registration snapshots and fingerprints the complete
+configuration; names do not select hidden behavior.
+
+Supported conditions declare a standard contact sensor through
+``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native
+rigid UIDs; the runtime factory creates or reuses the sensor and the environment
+suite drives the same instance. Incompatible existing UIDs and missing clock,
+geometry or support inputs fail before execution. There is no geometry-only
+success fallback for native support.
+
+The standard policy port preserves the source time grid: the initial observation
+does not count toward duration, ordinary pose drift resets the anchor/window,
+and held-object failures remain latched. It yields controller-target holds and
+leaves environment stepping, cancellation and task acceptance with their owners.
+Incomplete support windows keep their per-row validity/errors and continue holds;
+other valid rows can qualify independently. Metadata includes the physical
+``support_acquisition`` channel, missing-observation counts and the latest error
+for each row. A failed result following missing evidence retains
+``support_result_available=false`` unless a complete successful window is later
+established. This distinguishes unavailable outcomes from measured negatives.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.stability
+
+.. autosummary::
+
+   SupportSensorDeclarationCfg
+   SimulationStabilityConditionCfg
+
+.. autoclass:: SupportSensorDeclarationCfg
+   :members:
+
+.. autoclass:: SimulationStabilityConditionCfg
+   :members:
 
 embodichain.lab.gym.envs.episode_context
 --------------------------------------
@@ -3608,3 +3659,24 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 
 .. autoclass:: DriverOpeningBinding
    :members:
+
+Stability execution ownership
+----------------------------
+
+A simulation factory with native support owns one unfinished bridge at a time.
+``validate_runtime_bridge_creation`` rejects overlap before rebinding clocks;
+``bind_runtime_bridge`` records the bridge created by the standard adapter.
+``TaskProgramDemoBridge.execution_finished`` requires closed segment iteration
+and a consumed/validated or explicitly aborted final segment, with no active
+action generator. It is distinct from ``program_completed`` and does not certify
+success or acknowledge commands. Non-support factories retain existing assembly.
+
+Factory-returned effect providers retain their public IDs/revisions and guard
+all collection through the shared lifetime. The same guard protects live scene
+snapshots and drive-target holds. Independently owned past reports remain readable.
+
+The source control grid, stability counters and held-failure latch are unchanged.
+CPU policy profiling can run with
+``python -m scripts.benchmark.task_program.stability --output /tmp/stability``.
+This measures constant-pose policy overhead and serialization separately from
+native contact acquisition, physical tasks and GPU execution.

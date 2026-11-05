@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from enum import Enum
 import hashlib
 import json
@@ -48,6 +48,12 @@ from ._configured_hand_geometry import (
 )
 from .catalog import (
     SimulationTaskProgramRegistration,
+)
+from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
+from .simulation.policies import SimulationSettleMonitorCfg
+from .simulation.stability import (
+    SimulationStabilityConditionCfg,
+    SupportSensorDeclarationCfg,
 )
 from .composition import (
     ConfiguredTaskProgramIntegration as _ConfiguredTaskProgramIntegration,
@@ -2584,6 +2590,67 @@ class _DecodedRuntimeServices:
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
+    settle_presets: (
+        tuple[
+            tuple[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg], ...
+        ]
+        | None
+    ) = None
+
+
+def _decode_settle_presets(
+    value: object, *, path: str
+) -> tuple[tuple[str, DynamicSettleMonitorCfg | SimulationStabilityConditionCfg], ...]:
+    """Decode a complete closed named table for the existing registration owner."""
+    if not isinstance(value, Mapping) or not value:
+        raise ValueError(f"{path} must be a nonempty mapping.")
+    result = []
+    for name, item in value.items():
+        name = _identifier(name, path=f"{path} keys")
+        item_path = f"{path}.{name}"
+        if not isinstance(item, Mapping):
+            raise TypeError(f"{item_path} must be a mapping.")
+        if "kind" in item:
+            config = _mapping(
+                item,
+                path=item_path,
+                required=frozenset({"kind", "entity"}),
+                optional=frozenset(
+                    field.name for field in fields(SimulationStabilityConditionCfg)
+                )
+                - {"kind", "entity"},
+            )
+            kwargs = deepcopy(dict(config))
+            sensor = kwargs.get("support_sensor")
+            if sensor is not None:
+                sensor = _mapping(
+                    sensor,
+                    path=f"{item_path}.support_sensor",
+                    required=frozenset({"uid"}),
+                    optional=frozenset({"max_contacts_per_env"}),
+                )
+                kwargs["support_sensor"] = SupportSensorDeclarationCfg(
+                    **sensor
+                ).snapshot()
+            preset = SimulationStabilityConditionCfg(**kwargs).snapshot()
+        else:
+            config = _mapping(
+                item,
+                path=item_path,
+                required=frozenset(),
+                optional=frozenset(
+                    field.name for field in fields(DynamicSettleMonitorCfg)
+                )
+                | {"measurement"},
+            )
+            cfg_type = (
+                SimulationSettleMonitorCfg
+                if "measurement" in config
+                else DynamicSettleMonitorCfg
+            )
+            preset = cfg_type(**deepcopy(dict(config))).snapshot()
+        result.append((name, preset))
+    return tuple(result)
 
 
 def _decode_runtime_services(
@@ -2605,6 +2672,7 @@ def _decode_runtime_services(
                 "registered_semantic_lowerers",
                 "control_part_evidence",
                 "nominal_motion_sources",
+                "settle_presets",
             }
         ),
     )
@@ -2791,6 +2859,13 @@ def _decode_runtime_services(
         registered_semantic_lowerers=lowerers,
         control_part_evidence=evidence,
         nominal_motion_sources=tuple(nominal),
+        settle_presets=(
+            None
+            if "settle_presets" not in config
+            else _decode_settle_presets(
+                config["settle_presets"], path=f"{path}.settle_presets"
+            )
+        ),
     )
 
 
@@ -2859,6 +2934,11 @@ def _decode_configured_task_program_integration(
         handover_pose_providers=services.handover_pose_providers,
         control_part_evidence_factory=services.control_part_evidence,
         registered_semantic_lowerer_factories=(services.registered_semantic_lowerers),
+        **(
+            {}
+            if services.settle_presets is None
+            else {"settle_presets": dict(services.settle_presets)}
+        ),
     )
     grasp_fingerprint = tuple(
         {
