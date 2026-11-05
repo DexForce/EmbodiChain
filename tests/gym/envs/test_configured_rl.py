@@ -98,7 +98,7 @@ def _env():
     env.physical_objective = None
     env.rollout_buffer = None
     env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
-    env._write_trajectory_step = lambda: None
+    env._write_trajectory_step = lambda frame, **kwargs: None
     env.episode_success_status = torch.zeros(2, dtype=torch.bool)
     env._active_task_program_bridge = None
     return env

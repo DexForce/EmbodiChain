@@ -43,6 +43,19 @@ ActionInvocation                       semantic program
         EndpointCommandRouter + transports + clock
 ```
 
+`RecoveryPolicy.planning_budget` selects an outer complete-request search ledger
+and optional cooperative deadline. Nested calls retain an existing parent's
+ledger and deadline; None adds no ledger or wall budget. `PlanningRecovery`
+values contain only immutable finite data and name their skill/revision.
+`SkillDescriptor.planning_recovery_type` accepts one exact type or an explicit
+tuple; unsupported declarations fail before skill preparation. These contracts
+add no alternate built-in skill implementation or source-specific decoder.
+
+`ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
+owned validated attempt before dispatch. Installation rejection latches the
+session: later ticks/revisions cannot resume commands. `ExecutionRunner` keeps
+its normal cancel-then-hold safe stop before the once-only abort notification.
+
 Planning never steps simulation and never treats command completion as proof of
 a physical effect. A gripper-close hold inserted into a moving arm path does not
 preserve solved timing: retain required stop boundaries and validate the compiled

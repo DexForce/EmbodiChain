@@ -27,14 +27,13 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from embodichain.gen_sim.task_spec import TaskSpec, canonical_hash, json_snapshot
-from embodichain.gen_sim.task_spec.evidence import (
-    SupportedPlacementEvidenceBinding,
-    evaluate_supported_placement_evidence,
-)
-
 from embodichain.gen_sim.task_spec.condition_evidence import (
     ConditionEvidenceBinding,
     evaluate_condition_evidence,
+)
+from embodichain.gen_sim.task_spec.evidence import (
+    SupportedPlacementEvidenceBinding,
+    evaluate_supported_placement_evidence,
 )
 
 __all__ = [
