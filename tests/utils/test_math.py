@@ -362,6 +362,9 @@ def test_named_quaternion_boundary_helpers_preserve_numpy_backend() -> None:
         (0.02, "cpu"),
         (0.05, "cpu"),
         (0.6, "cpu"),
+        (np.pi / 2 - 0.01, "cpu"),
+        (np.pi / 2 + 0.01, "cpu"),
+        (np.pi - 0.01, "cpu"),
         pytest.param(0.02, "cuda:0", marks=pytest.mark.gpu),
     ],
 )
@@ -406,16 +409,29 @@ def test_pose_interpolation_keeps_small_rotation_aligned_with_translation() -> N
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize(
-    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+    ("angle", "device"),
+    [
+        (0.02, "cpu"),
+        (np.pi / 2 - 0.01, "cpu"),
+        (np.pi / 2 + 0.01, "cpu"),
+        (np.pi - 0.01, "cpu"),
+        pytest.param(0.02, "cuda:0", marks=pytest.mark.gpu),
+        pytest.param(np.pi - 0.01, "cuda:0", marks=pytest.mark.gpu),
+    ],
 )
-def test_small_rotation_interpolation_preserves_low_precision(dtype, device) -> None:
-    start = torch.eye(3, dtype=dtype, device=device)
+def test_rotation_interpolation_preserves_low_precision(angle, device, dtype) -> None:
+    # A 90-degree X rotation is nonidentity and exactly representable in half types.
+    start_matrix = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])
+    start = torch.tensor(start_matrix, dtype=dtype, device=device)
     end = torch.tensor(
-        Rotation.from_euler("z", 0.02).as_matrix(), dtype=dtype, device=device
+        Rotation.from_euler("z", angle).as_matrix() @ start_matrix,
+        dtype=dtype,
+        device=device,
     )
     actual = interpolate_rotations(start, end, 4)
     expected = torch.tensor(
-        Rotation.from_euler("z", np.linspace(0, 0.02, 5)[:, None]).as_matrix(),
+        Rotation.from_euler("z", np.linspace(0, angle, 5)[:, None]).as_matrix()
+        @ start_matrix,
         dtype=dtype,
         device=device,
     )
