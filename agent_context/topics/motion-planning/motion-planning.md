@@ -206,7 +206,14 @@ hands provide their own geometry. Sampling/collision stays in the canonical
 contact frame, and public poses map once to the declared runtime TCP. Do not
 add a second hand-specific conversion. GraspKit owns collision-qualified end-region
 selection through `pg_grasp.regions`; callers select a policy without supplying
-a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
+a Task Engine implementation. Explicit `pg_grasp.constraints` and `opening`
+views filter complete object geometry after ordinary ranking and preserve source
+order and infinite-cost failure padding. `preshape` consumes captured numeric
+hand sweeps; `proposals` defers final-TCP qualification without bypassing required
+ground filtering. These APIs import without a Robot, simulation or target
+decomposition backend; `pg_grasp` resolves concrete implementations lazily. Nominal dimensions
+in `hand_envelope` remain separate from physical collision geometry.
+The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
 sampling and physical contact evidence remain Lab responsibilities.
 `pg_grasp.native_contact` owns discrete convex closing/opening and rigid-clearance

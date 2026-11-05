@@ -300,3 +300,35 @@ def test_region_selector_rejects_invalid_selection(invalid):
             obj_longest_axis=torch.tensor([0.0, 0.0, 1.0]),
             axis_region_selector=selector,
         )
+
+
+def test_opening_envelope_filters_after_ranking_and_owns_selected_rows():
+    from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
+    from embodichain.toolkits.graspkit.pg_grasp.opening import (
+        OpeningEnvelopeGraspPoseGenerator,
+    )
+
+    delegate = Mock(spec=ParallelJawGraspPoseGenerator)
+    delegate.gripper_model = ParallelJawGripperModelCfg(
+        model_id="test", max_opening_width=0.08
+    )
+    poses = torch.eye(4).expand(3, 4, 4).clone()
+    poses[:, 0, 3] = torch.tensor([0.0, 0.05, 0.01])
+    costs = torch.tensor([3.0, 1.0, 2.0])
+    delegate.get_valid_grasp_poses.return_value = [(poses, costs)]
+    wrapped = OpeningEnvelopeGraspPoseGenerator(delegate)
+    inputs = dict(
+        mesh_vertices=torch.tensor([[-0.01, 0.0, 0.0], [0.01, 0.0, 0.0]]),
+        mesh_triangles=torch.tensor([[0, 1, 1]]),
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+    actual = wrapped.get_valid_grasp_poses(**inputs)[0]
+    assert actual[1].tolist() == [3.0, 2.0]
+    assert torch.equal(actual[0], poses[[0, 2]])
+    poses[:, 0, 3] = 1.0
+    costs.fill_(9.0)
+    assert actual[1].tolist() == [3.0, 2.0]
+    failed = wrapped.get_valid_grasp_poses(**inputs)[0]
+    assert failed[0].shape == (1, 4, 4) and torch.isfinite(failed[0]).all()
+    assert torch.isinf(failed[1]).all()
