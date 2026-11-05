@@ -49,6 +49,7 @@ stationary paths and repeated endpoints remain valid inputs.
 .. autosummary::
 
    retime_joint_paths
+   PositionRangeMonitor
    differentiate_positions
    resample_in_time
    interpolate_with_distance
@@ -92,6 +93,21 @@ Implementation modules
 
 .. automodule:: embodichain.compute.trajectory.warping
    :members:
+
+Sampled coordinate windows
+--------------------------
+
+``PositionRangeMonitor`` separates numerical window tracking from observation
+and execution. The caller supplies coordinates and an independently chosen
+pointwise target mask. Candidate-window drift resets the complete range;
+initial samples and duplicate step counters never add elapsed intervals.
+Missing intervals reject rather than fabricating stability. Success is current,
+not latched, and periodic joint coordinates are not unwrapped implicitly.
+This monitor imports no Robot, simulator, environment or TaskSpec.
+
+.. automodule:: embodichain.compute.trajectory.stability
+   :members:
+   :no-index:
 
 Kinematics API
 --------------
