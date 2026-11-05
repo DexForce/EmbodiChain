@@ -71,6 +71,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+geometry = [
+  # Optional mesh inputs for pure numerical geometry; no simulation/FCL backend.
+  "trimesh>=4.9",
+]
 rigidformer = [
   "einops>=0.8.1",
   "roma==1.5.4",

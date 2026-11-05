@@ -90,6 +90,39 @@ maps them into `env.active_joint_ids`; observed mimic joints are included.
 Use this selector for reusable arm/gripper observations across robot DOFs and
 state orders. Physical joint IDs are not observation-column indices.
 
+## Raw observations and consumer views
+
+`managers/observation_types.py` contains the shared raw value/frame types.
+`ObservationManager` owns acquisition scopes, the single semantic schema and
+alias-to-field-ID binding. `ObservationCfg.consumers` defaults to policy.
+Recording add terms must produce described `ObservationSample` values;
+plain Tensor policy outputs retain their existing contract. The two consumers
+are policy and recording; evidence adapters read qualified recording fields.
+`ObservationManager` resolves both configured and required replay terms before
+matching their source functions/parameters, including callable strings and
+omitted default arguments. Env only supplies the declarations. Recording-only
+fields never enlarge policy observations or policy rollout allocation.
+
+`observations.get_entity_state` derives native UID, quantity, arena/joint frame,
+representation, shape, dtype and joint order from its source. Immutable
+schema descriptors are reused by semantic value; no simulation handles enter
+the bounded cache. Pose acquisition uses the resolved UID without constructing
+another `SceneEntityCfg` during each step. Explicit boundaries
+share its original acquisition across aliases and existing pose functors.
+Policy transformations receive separate tensors; zero-filled missing sources
+retain false validity and reasons. Preserve configured policy functor/RNG order.
+The host rollout writer stores raw values, availability, clocks, acquisition
+errors and cursors directly in the existing TensorDict. There is no history
+instance or separate bind/seed/append manager. `ObservationManager` binds read
+access with `bind_rollout_storage`, keeps only the semantic schema and source
+aliases, and serves `read_history`/`snapshot_history` as indexed snapshot reads.
+Evidence adapters bind roles through `manager.schema`. Rollout raw writes and
+indexing helpers live beside the existing buffer utilities in `utils/gym_utils.py`.
+`export_observation_history` projects the same schema for compatible output.
+Contact windows remain sensor-owned and cannot be replaced with a control-rate
+pose/Boolean. History timing and host lifecycle belong to
+[environment recording](../env-framework/env-framework.md#expert-trajectory-contract).
+
 ## Lifecycle
 
 Managers resolve callable strings, validate parameters, resolve `SceneEntityCfg`
@@ -98,7 +131,19 @@ The config attribute name is the stable functor identity.
 
 For a flat policy tensor, the environment calls manager processing, manager
 application, physics, event `interval`, observation, and reward in that order.
-`ControllerAction` bypasses the manager and uses the direct controller boundary;
+A term can opt into physics-substep refresh.
+`ActionManager.get_substep_callback(num_substeps)` creates a callback scoped to
+one control interval, or returns None when no refresh is needed. The manager
+counts remaining steps, refreshes opted-in terms only before another physics
+step, and preserves inactive demo rows' measured holds. The first command is
+processed and applied normally. `EmbodiedEnv` connects the callback after sensor
+sampling; simulation advancement and publication remain environment-owned.
+`expert_trajectory.use_action_manager` routes position-only expert commands
+through `ActionManager.process_joint_targets`. Relative substep DLS and binary
+gripper terms support that route, retaining exact FK targets and the expert
+storage schema while using the policy controller. Completed rows are masked
+after target conversion so binary grippers also retain measured joint holds.
+`ControllerAction` otherwise bypasses the manager for direct controller writes;
 the full loop and reset ordering are owned by
 [environment execution](../env-framework/execution.md).
 
