@@ -722,6 +722,8 @@ class _Simulation:
         rigid_objects: dict[str, _RigidObject] | None = None,
     ) -> None:
         self.robot = robot
+        self.num_envs = _BATCH_SIZE
+        self.physics_backend = "default"
         self.rigid_objects = {} if rigid_objects is None else dict(rigid_objects)
 
     def get_robot(self, uid: str) -> _Robot | None:
@@ -2392,3 +2394,187 @@ def test_returned_effect_providers_and_live_scene_reject_reads_after_close(
         live_scene.snapshot(timestamp=1.0, env_ids=context.env_ids)
     with pytest.raises(RuntimeError, match="closed"):
         observation.hold_qpos(context.env_ids)
+
+
+def test_standard_bridge_consumes_registration_owned_occurrence_bindings():
+    from dataclasses import replace
+    from embodichain.lab.task_program.integrations import (
+        InvocationPolicyBinding,
+        task_program_fingerprint,
+    )
+
+    original, _, robot, _ = _evidence_adapter_runtime()
+    config = TaskProgramCfg(
+        program_id="configured_occurrence",
+        integration=_evidence_integration(),
+        program=InvokeCfg(call=PickCfg(object="cube")),
+    )
+    compiled = original.compile(config)
+    segment = next(compiled.iter_segments())
+    binding = InvocationPolicyBinding(
+        task_program_fingerprint(compiled),
+        f"{compiled.program_id}/{segment.segment_id}:0",
+        compiled.integration.runtime_preset,
+    )
+    registration = replace(
+        original._registration, invocation_policy_bindings=(binding,)
+    )
+    factory = SimulationTaskProgramFactory(
+        original._factory._simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    adapter = factory.create_adapter()
+    bridge = adapter.create_bridge(compiled)
+    assert bridge._invocation_policies.bindings == (binding,)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        adapter.create_bridge(compiled, invocation_policy_bindings=(binding,))
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_native_world_stamp_is_explicit_and_detects_changes_during_capture(
+    monkeypatch, changed
+):
+    from embodichain.lab.sim.sensors.contact import sampling as contact_sampling
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        SimulationPlanningServicesCfg,
+    )
+
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    simulation.simulation_time = 0.03
+    values = iter((7, 8 if changed else 7))
+    monkeypatch.setattr(
+        contact_sampling, "native_contact_revision", lambda selected: next(values)
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(capture_native_revision=True),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    provider = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    if changed:
+        with pytest.raises(RuntimeError, match="changed during"):
+            provider.observe(state)
+    else:
+        context = provider.observe(state)
+        assert context.world_source_stamp.revision == 7
+        assert context.world_source_stamp.simulation_time == 0.03
+        assert context.robot.timestamp == 0.0
+        assert context.world_source_stamp.source_kind == "default.contacts"
+        projected = context.project(qpos=context.robot.qpos + 0.1, task=state)
+        assert projected.world_source_stamp == context.world_source_stamp
+
+
+def test_registered_geometry_services_use_standard_engine_and_owned_observation(
+    monkeypatch,
+):
+    import sys
+    from embodichain.lab.sim.motion import mesh_collision
+    from embodichain.lab.sim.motion.mesh_collision import MotionCollisionReport
+    from embodichain.lab.sim.sensors.contact import sampling as contact_sampling
+    from embodichain.lab.task_program.integrations.simulation.handover_scene import (
+        SimulationHandOverSceneProvider,
+    )
+    from embodichain.lab.task_program.integrations.simulation import handover_scene
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        CollisionSceneRosterCfg,
+        SimulationPlanningServicesCfg,
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    simulation.num_envs = 1
+    simulation.rigid_objects["native-item"] = _RigidObject()
+    simulation.simulation_time = 0.03
+    monkeypatch.setattr(contact_sampling, "native_contact_revision", lambda selected: 7)
+    monkeypatch.setattr(
+        handover_scene,
+        "capture_native_hand_scene",
+        lambda *args, **kwargs: pytest.fail(
+            "Factory captured native geometry eagerly."
+        ),
+    )
+    root_pose = torch.eye(4).unsqueeze(0)
+    monkeypatch.setattr(
+        robot, "get_local_pose", lambda **kwargs: root_pose, raising=False
+    )
+    created = []
+
+    class Query:
+        def __init__(self, selected_robot, selected_simulation):
+            self.robot = selected_robot
+            created.append((selected_robot, selected_simulation))
+
+        def inspect(self, positions, *, control_part):
+            return MotionCollisionReport(True, frames=len(positions))
+
+    monkeypatch.setattr(mesh_collision, "SimulationFreeMotionQuery", Query)
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            registry_id="scene",
+            rigid_objects=(SimulationRigidObjectBinding("item", "native-item"),),
+        ),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            free_motion_query="discrete_mesh",
+            capture_root_pose=True,
+            native_handover_scene=True,
+            capture_native_revision=True,
+            collision_roster=CollisionSceneRosterCfg(
+                rigid_objects=(("item", "native-item"),)
+            ),
+        ),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    assert created == []
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    assert type(engine) is AtomicActionEngine
+    assert engine.planning_services.free_motion_query.robot is robot
+    assert created == [(robot, simulation)]
+    assert (
+        type(engine.planning_services.handover_scene_provider)
+        is SimulationHandOverSceneProvider
+    )
+    assert engine.planning_services.handover_scene_provider.robot is robot
+    assert factory.world_source_stamp() == factory.world_source_stamp()
+    provider = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    context = provider.observe(TaskState.empty(1, robot.device))
+    torch.testing.assert_close(context.robot.root_pose, root_pose)
+    with pytest.raises(ValueError, match="constructor overrides"):
+        SimulationTaskProgramFactory(
+            simulation, robot, registration, step_dt=_STEP_DT, capture_root_pose=False
+        )
+    simulation.num_envs = 2
+    with pytest.raises(ValueError, match="B=1"):
+        SimulationTaskProgramFactory(simulation, robot, registration, step_dt=_STEP_DT)
+    assert len(created) == 1
+    factory.close_runtime_resources()
+    with pytest.raises(RuntimeError, match="closed"):
+        factory.world_source_stamp()

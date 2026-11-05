@@ -919,6 +919,17 @@ class TaskProgramEnvironmentAdapter:
         self._require_open()
         if type(program) is not CompiledTaskProgram:
             raise TypeError("program must be exactly CompiledTaskProgram.")
+        configured_bindings = (
+            ()
+            if self._registration is None
+            else self._registration.invocation_policy_bindings
+        )
+        if configured_bindings:
+            if invocation_policy_bindings:
+                raise ValueError(
+                    "Configured and explicit invocation policy bindings cannot be combined."
+                )
+            invocation_policy_bindings = configured_bindings
         if type(invocation_policy_bindings) is not tuple:
             raise TypeError("invocation_policy_bindings must be an exact tuple.")
         policies = None

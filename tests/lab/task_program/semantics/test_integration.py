@@ -1136,7 +1136,17 @@ def test_uninstalled_recovery_is_static_preflight_error_without_acquisition():
     assert provider.calls == 0
 
 
-def test_segment_recovery_without_handler_is_rejected_by_static_preflight():
+def test_segment_recovery_without_handler_is_rejected_by_static_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A skill without its segment handler cannot pass static capability checks."""
+    from embodichain.lab.sim.atomic_actions import AtomicAction, PickUp
+
+    monkeypatch.setattr(
+        PickUp,
+        "_validate_segment_motion_recovery",
+        AtomicAction._validate_segment_motion_recovery,
+    )
     registry, provider = _scene_registry(with_default=True)
     integration = _semantic_integration(
         registry,

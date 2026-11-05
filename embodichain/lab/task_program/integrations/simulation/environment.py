@@ -35,6 +35,8 @@ from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass, fields
 import math
+from uuid import uuid4
+from embodichain.lab.sim.evidence import PhysicalObservationStamp
 from weakref import ReferenceType, ref
 from types import MappingProxyType
 from typing import Literal, Protocol, TYPE_CHECKING
@@ -463,6 +465,8 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             unset and performs no root-pose query.
         hold_qpos_source: Use the latest captured observation by default, or
             explicitly read live controller position targets for normal holds.
+        world_stamp_reader: Optional factual native source reader. Capture rejects
+            a changed source between the robot and scene observations.
     """
 
     def __init__(
@@ -475,6 +479,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         owner_token: object,
         capture_root_pose: bool = False,
         hold_qpos_source: Literal["observed", "drive_target"] = "observed",
+        world_stamp_reader: Callable[[], PhysicalObservationStamp] | None = None,
     ) -> None:
         if type(scene_provider) is not SharedTickSceneProvider:
             raise TypeError("scene_provider must be exactly SharedTickSceneProvider.")
@@ -501,6 +506,9 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         self._clock = clock
         self._env_ids = env_ids.clone()
         self._owner_token = owner_token
+        if world_stamp_reader is not None and not callable(world_stamp_reader):
+            raise TypeError("world_stamp_reader must be callable or None.")
+        self._world_stamp_reader = world_stamp_reader
         self._capture_root_pose = capture_root_pose
         self._hold_qpos_source = hold_qpos_source
         super().__init__(self._capture)
@@ -579,6 +587,9 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         """Capture one synchronized robot and scene observation."""
         if isinstance(self._owner_token, _RuntimeOwner):
             self._owner_token.require_open()
+        world_stamp = (
+            None if self._world_stamp_reader is None else self._world_stamp_reader()
+        )
         qpos = _full_robot_tensor(self._robot, "get_qpos", required=True)
         assert qpos is not None
         if (
@@ -611,7 +622,15 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             if not isinstance(root_pose, torch.Tensor):
                 raise TypeError("Robot root observation must be a tensor.")
             root_pose = root_pose.to(qpos)
+        if (
+            self._world_stamp_reader is not None
+            and self._world_stamp_reader() != world_stamp
+        ):
+            raise RuntimeError(
+                "Native world source changed during planning observation."
+            )
         return PlanningContext(
+            world_source_stamp=world_stamp,
             robot=RobotObservation(
                 timestamp=timestamp,
                 qpos=qpos,
@@ -676,12 +695,31 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         translation_threshold: float = 1.0e-4,
         rotation_threshold: float = 1.0e-3,
         sensor_suite: MutableMapping[str, object] | None = None,
-        capture_root_pose: bool = False,
-        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
+        capture_root_pose: bool | None = None,
+        hold_qpos_source: Literal["observed", "drive_target"] | None = None,
     ) -> None:
         if type(registration) is not SimulationTaskProgramRegistration:
             raise TypeError(
                 "registration must be exactly SimulationTaskProgramRegistration."
+            )
+        registration.assert_unchanged()
+        declared_services = registration.planning_services
+        if declared_services is not None:
+            if capture_root_pose is not None or hold_qpos_source is not None:
+                raise ValueError(
+                    "Registered planning services own observation settings; remove constructor overrides."
+                )
+            declared_services = declared_services.snapshot()
+            capture_root_pose = declared_services.capture_root_pose
+            hold_qpos_source = declared_services.hold_qpos_source
+            registration.validate_num_envs(simulation.num_envs)
+            registration.validate_physics(simulation.physics_backend)
+        else:
+            capture_root_pose = (
+                False if capture_root_pose is None else capture_root_pose
+            )
+            hold_qpos_source = (
+                "observed" if hold_qpos_source is None else hold_qpos_source
             )
         if type(capture_root_pose) is not bool:
             raise TypeError("capture_root_pose must be a bool.")
@@ -760,6 +798,12 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self._owner_token = _RuntimeOwner()
         self._capture_root_pose = capture_root_pose
         self._hold_qpos_source = hold_qpos_source
+        self._capture_native_revision = (
+            declared_services is not None and declared_services.capture_native_revision
+        )
+        self._observation_source_id = (
+            uuid4().hex if self._capture_native_revision else None
+        )
 
         qpos = _full_robot_tensor(robot, "get_qpos", required=True)
         assert qpos is not None
@@ -860,8 +904,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
         translation_threshold: float = 1.0e-4,
         rotation_threshold: float = 1.0e-3,
-        capture_root_pose: bool = False,
-        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
+        capture_root_pose: bool | None = None,
+        hold_qpos_source: Literal["observed", "drive_target"] | None = None,
     ) -> SimulationTaskProgramFactory:
         """Create a registered factory from the standard Gym environment surface."""
         simulation = getattr(environment, "sim", None)
@@ -983,14 +1027,62 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise ValueError(
                 "Motion generator must own the exact robot selected by the factory."
             )
+        services = self._registration.planning_services
+        free_motion_query = None
+        if services is not None and services.free_motion_query == "discrete_mesh":
+            from embodichain.lab.sim.motion.mesh_collision import (
+                SimulationFreeMotionQuery,
+            )
+
+            free_motion_query = SimulationFreeMotionQuery(self._robot, self._simulation)
+        handover_scene = None
+        if services is not None and services.native_handover_scene:
+            from .handover_scene import SimulationHandOverSceneProvider
+
+            roster = services.collision_roster
+            required = tuple(
+                dict.fromkeys(
+                    [
+                        *(uid for _, uid in roster.rigid_objects),
+                        *(uid for _, uid, _ in roster.articulation_links),
+                    ]
+                )
+            )
+            handover_scene = SimulationHandOverSceneProvider(
+                self._robot,
+                self._simulation,
+                scene_binding=self._scene_binding,
+                required_owner_uids=required,
+                read_source_stamp=self.world_source_stamp,
+            )
         engine = AtomicActionEngine(
             motion_generator,
+            free_motion_query=free_motion_query,
+            handover_scene_provider=handover_scene,
             control_profiles=profile.action_control_profiles(),
             grasp_pose_generators=self._grasp_pose_generators,
             hand_geometry_cfgs=self._hand_geometry_cfgs,
         )
         self._registration.validate_engine(engine)
         return engine
+
+    def world_source_stamp(self) -> PhysicalObservationStamp:
+        """Read this factory's native-world source without sampling or stepping.
+
+        Returns:
+            Actual Default contact revision and manager time for this lifetime.
+        """
+        self._owner_token.require_open()
+        if self._observation_source_id is None:
+            raise ValueError("Native observation capture was not declared.")
+        from embodichain.lab.sim.sensors.contact.sampling import native_contact_revision
+
+        return PhysicalObservationStamp(
+            self._observation_source_id,
+            "default.contacts",
+            native_contact_revision(self._simulation),
+            self._simulation.simulation_time,
+        )
 
     def create_planning_observation_provider(
         self,
@@ -1030,6 +1122,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             owner_token=self._owner_token,
             capture_root_pose=self._capture_root_pose,
             hold_qpos_source=self._hold_qpos_source,
+            world_stamp_reader=(
+                self.world_source_stamp if self._capture_native_revision else None
+            ),
         )
 
     def create_effect_evidence_providers(
