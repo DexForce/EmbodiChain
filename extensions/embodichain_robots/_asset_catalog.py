@@ -159,6 +159,10 @@ ROBOT_ASSETS = {
         "class_path": "embodichain_robots.wheeltec.fa2f.assets:WheelTecFA2F",
         "category": "eef",
     },
+    "WujiHand": {
+        "class_path": "embodichain_robots.wuji.hand.assets:WujiHand",
+        "category": "eef",
+    },
     "PikaGripper": {
         "class_path": "embodichain_robots.agilex.pika.assets:PikaGripper",
         "category": "eef",

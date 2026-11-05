@@ -311,8 +311,8 @@ def test_standard_w1_v030_asset_is_discoverable_without_downloading(
     assert ("DexforceW1V030", DexforceW1V030) in download.get_registry()["w1"]
 
 
-# Pinned descriptors from the former core EEF module. Ownership moves must not
-# change downloads, cache entries or the IDs used in task configuration files.
+# Pinned EEF descriptors. Existing task references retain their archive/cache
+# identities; new bundles explicitly select their versioned cache prefixes.
 EEF_ARCHIVES = {
     "DH_PGC_140_50": ("DH_PGC_140_50.zip", "c2a642308a76e99b1b8b7cb3a11c5df3"),
     "DH_PGI_140_80": ("DH_PGI_140_80.zip", "05a1a08b13c6250cc12affeeda3a08ba"),
@@ -325,6 +325,7 @@ EEF_ARCHIVES = {
     "Robotiq2F85": ("Robotiq2F85.zip", "53ecbf2c953f43f1134aa7223e592292"),
     "WheelTecFA2F": ("WheelTecFA2F.zip", "feaf13f25b1c6ce58d011b1f2fa72f58"),
     "PikaGripper": ("PikaGripper.zip", "8a9d0779e7dbfa7bf5d4713175df014e"),
+    "WujiHand": ("WujiHandV1.zip", "898dec6518c33b96cc5a769c19fd9c14"),
 }
 
 
@@ -386,12 +387,13 @@ def test_eef_download_descriptors_and_cache_prefix_are_preserved(
     filename, md5 = EEF_ARCHIVES[name]
     hub = "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
     expected_urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}eef_assets/{filename}"]
-    if name == "PikaGripper" and EMBODICHAIN_DOWNLOAD_PREFIX != hub:
+    if name in {"PikaGripper", "WujiHand"} and EMBODICHAIN_DOWNLOAD_PREFIX != hub:
         expected_urls.append(f"{hub}eef_assets/{filename}")
     for (prefix, descriptor, root), expected_root in zip(
         captured, (EMBODICHAIN_DEFAULT_DATA_ROOT, str(tmp_path))
     ):
-        assert prefix == name
+        expected_prefix = "WujiHandV1" if name == "WujiHand" else name
+        assert prefix == expected_prefix
         assert list(descriptor.urls) == expected_urls
         assert descriptor.md5 == md5
         assert root == expected_root

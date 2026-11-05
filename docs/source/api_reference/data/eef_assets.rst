@@ -145,3 +145,21 @@ embodichain_robots.agilex.pika.assets
 
 .. autoclass:: PikaGripper
    :members:
+
+embodichain_robots.wuji.hand.assets
+-----------------------------------
+
+Pinned official left/right Wuji Hand descriptions and meshes.
+The asset includes 20 active joints per hand, upstream MJCF, licensing
+and a source manifest. It supplies model resources without registering a
+robot preset, tactile runtime or manipulation policy.
+
+.. currentmodule:: embodichain_robots.wuji.hand.assets
+
+.. autosummary::
+   :nosignatures:
+
+   WujiHand
+
+.. autoclass:: WujiHand
+   :members:

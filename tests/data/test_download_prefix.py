@@ -39,6 +39,7 @@ from embodichain.data import dataset
 from embodichain.data.assets import CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots
 from embodichain.data.assets.w1_assets import DexforceW1V030
 from embodichain_robots.agilex.pika.assets import PikaGripper
+from embodichain_robots.wuji.hand.assets import WujiHand
 
 urls = {}
 
@@ -50,7 +51,7 @@ def capture(self, prefix, descriptor, path):
     raise Captured  # stop before anything is downloaded
 
 dataset.EmbodiChainDataset.__init__ = capture
-for cls in (CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, DexforceW1V030, PikaGripper):
+for cls in (CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, DexforceW1V030, PikaGripper, WujiHand):
     try:
         cls()
     except Captured:
@@ -108,6 +109,10 @@ def test_download_prefix_gets_a_trailing_slash(monkeypatch, reload_constants) ->
 @pytest.mark.parametrize("prefix", [MIRROR, MIRROR.rstrip("/")])
 def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
     urls = _consumer_urls(prefix)
+    assert urls["WujiHandV1"] == [
+        f"{MIRROR}eef_assets/WujiHandV1.zip",
+        f"{HF_PREFIX}eef_assets/WujiHandV1.zip",
+    ]
     assert urls["PikaGripper"] == [
         f"{MIRROR}eef_assets/PikaGripper.zip",
         f"{HF_PREFIX}eef_assets/PikaGripper.zip",
@@ -134,6 +139,7 @@ def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
 @pytest.mark.no_sim
 def test_assets_do_not_repeat_the_hub_url() -> None:
     urls = _consumer_urls(HF_PREFIX)
+    assert urls["WujiHandV1"] == [f"{HF_PREFIX}eef_assets/WujiHandV1.zip"]
     assert urls["UnitreeGo2Locomotion"] == [
         f"{HF_PREFIX}robot_assets/UnitreeGo2Locomotion.zip"
     ]

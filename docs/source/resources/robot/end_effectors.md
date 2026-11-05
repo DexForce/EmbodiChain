@@ -67,6 +67,29 @@ headers are not evidence of asset licensing. In particular:
   unverified formal commercial model.
 - Missing modification records do not establish an original or unmodified asset.
 
+## Wuji Hand descriptions
+
+`WujiHand` is an additional `eef` asset from the official
+[wuji-technology/wuji-description](https://github.com/wuji-technology/wuji-description) repository,
+pinned to `5c4dfa16917355d073e2e1d7e3d03897b6cf9508`. Both hands have 20 active joints.
+The bundle preserves upstream licensing, MJCF and mesh dependencies, with
+source revision and original/prepared checksums in `manifest.json`.
+
+```python
+from embodichain.data import get_data_path
+from embodichain_robots.wuji.hand.assets import WujiHand
+
+right_urdf = get_data_path("WujiHand/urdf/right.urdf")
+left_urdf = get_data_path("WujiHand/urdf/left.urdf")
+```
+
+The official `hand/body` URDF, MJCF and mesh bytes are unchanged. Their relative directory layout is retained beneath the asset root. This bundle selects the original Wuji Hand; Hand 2, glove, soft-pad and ROS variants are excluded.
+
+The versioned bundle is `eef_assets/WujiHandV1.zip`; it uses cache prefix
+`WujiHandV1`. This adds descriptions only, with no standalone RobotCfg,
+tactile simulation or RL task. Model loading does not establish contact-rich
+manipulation performance.
+
 ## Standalone hands and mounted tools
 
 `BrainCoRevo1Cfg` is the new standalone joint-controlled hand preset. It uses
