@@ -28,6 +28,7 @@ from .stability import SimulationStabilityConditionCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.utils.trajectory_state import RecordedTrajectoryReader
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
     from ..catalog import SimulationTaskProgramRegistration
 
@@ -46,6 +47,8 @@ class SimulationSupportObservationCollector:
         environment: Initialized recording environment for this execution.
         bridge: Exact bridge whose clock and policy session drive this run.
         registration: Sealed declaration used to create the runtime.
+        recording: Optional read-only trajectory reader supplied by the recording
+            host. Historical capture requires this explicit dependency.
     """
 
     def __init__(
@@ -53,6 +56,8 @@ class SimulationSupportObservationCollector:
         environment: EmbodiedEnv,
         bridge: TaskProgramDemoBridge,
         registration: SimulationTaskProgramRegistration,
+        *,
+        recording: RecordedTrajectoryReader | None = None,
     ) -> None:
         from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
         from ..catalog import SimulationTaskProgramRegistration, _canonical_value
@@ -112,8 +117,11 @@ class SimulationSupportObservationCollector:
             raise ValueError(
                 "Physical support collection requires initialized episode rows."
             )
+        if recording is not None:
+            recording.validate_episode_source(environment.episode_context)
         self._env, self._bridge, self._port = environment, bridge, port
         self._registration = registration
+        self._recording = recording
         self._episodes = tuple(row["episode"] for row in identities)
         self._bindings = {
             item.entity_id: item for item in registration.scene_binding.rigid_objects
@@ -238,6 +246,8 @@ class SimulationSupportObservationCollector:
             RuntimeError: Recording or the requested policy measurement is absent.
         """
         self._check_episode()
+        if self._recording is None:
+            raise RuntimeError("Recorded trajectory reader is unavailable.")
         cfg = self._condition(preset_id)
         segments = [
             segment
@@ -267,7 +277,7 @@ class SimulationSupportObservationCollector:
             ) from error
         poses = {}
         for name in (cfg.entity, cfg.reference):
-            poses[name] = self._env.capture_recorded_rigid_poses(
+            poses[name] = self._recording.read_rigid_poses(
                 self._bindings[name].simulation_uid,
                 frame_indices,
                 episode_ids=self._episodes,

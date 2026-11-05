@@ -950,14 +950,20 @@ def test_current_capture_rejects_superseded_session_but_same_clock_bind_is_idemp
 
 @pytest.mark.parametrize(
     "declaration_case",
-    ["normal", "foreign_scene", "missing_preset", "equivalent_snapshot"],
+    [
+        "normal",
+        "foreign_scene",
+        "missing_preset",
+        "equivalent_snapshot",
+        "missing_reader",
+        "foreign_recording",
+    ],
 )
 def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_support(
     declaration_case,
 ):
-    from types import MethodType
     from dataclasses import replace
-    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.utils.trajectory_state import RecordedTrajectoryReader
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.envs.task_program.bridge import (
         TaskProgramDemoBridge,
@@ -1070,12 +1076,12 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         robot=robot,
         num_envs=2,
         episode_context=context,
-        _traj_buffer={"states": {"rigid_objects": values}},
-        _traj_steps=torch.ones(2, dtype=torch.long),
         _closed=False,
     )
-    env.capture_recorded_rigid_poses = MethodType(
-        EmbodiedEnv.capture_recorded_rigid_poses, env
+    recording = RecordedTrajectoryReader(
+        source=lambda: ({"rigid_objects": values}, torch.ones(2, dtype=torch.long)),
+        episode_context=context,
+        is_closed=lambda: env._closed,
     )
     if declaration_case == "foreign_scene":
         foreign = replace(
@@ -1087,19 +1093,43 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         )
         registration = replace(registration, scene_binding=foreign)
         with pytest.raises(ValueError, match="scene binding differs"):
-            SimulationSupportObservationCollector(env, bridge, registration)
+            SimulationSupportObservationCollector(
+                env, bridge, registration, recording=recording
+            )
         registry.close()
         return
     if declaration_case == "missing_preset":
         registration = replace(registration, settle_presets={"support": cfg})
         with pytest.raises(ValueError, match="complete preset selection"):
-            SimulationSupportObservationCollector(env, bridge, registration)
+            SimulationSupportObservationCollector(
+                env, bridge, registration, recording=recording
+            )
+        registry.close()
+        return
+    if declaration_case == "foreign_recording":
+        other_context = EpisodeContext(2)
+        other_context._begin_episode(torch.tensor([0, 1]))
+        other_context._finish_initialization(torch.tensor([0, 1]))
+        foreign_reader = RecordedTrajectoryReader(
+            source=lambda: pytest.fail("A foreign recording must not be read"),
+            episode_context=other_context,
+            is_closed=lambda: False,
+        )
+        with pytest.raises(ValueError, match="another episode owner"):
+            SimulationSupportObservationCollector(
+                env, bridge, registration, recording=foreign_reader
+            )
         registry.close()
         return
     if declaration_case == "equivalent_snapshot":
         registration = replace(registration, scene_binding=replace(binding))
         assert registration.scene_binding is not binding
-    collector = SimulationSupportObservationCollector(env, bridge, registration)
+    collector = SimulationSupportObservationCollector(
+        env,
+        bridge,
+        registration,
+        recording=None if declaration_case == "missing_reader" else recording,
+    )
     assert bridge.post_policy_port is not template
     segment = next(compiled.iter_segments())
     policy = segment.post_policies[0]
@@ -1116,6 +1146,21 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     with pytest.raises((KeyError, RuntimeError)):
         template.post_policy_metadata(policy, segment=segment)
     before = sim.query.fetches
+    if declaration_case == "missing_reader":
+        with pytest.raises(RuntimeError, match="trajectory reader is unavailable"):
+            collector.capture_recorded(
+                "support",
+                segment_id=segment.name,
+                source_path=segment.source_path,
+                frame_indices=[1, 1],
+            )
+        assert collector.capture_current("support")["native_support"]["supported"] == [
+            False,
+            False,
+        ]
+        assert sim.query.fetches == before
+        registry.close()
+        return
     recorded = collector.capture_recorded(
         "support",
         segment_id=segment.name,
@@ -1146,7 +1191,9 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     )
     assert "support_contract_revision" not in current["native_support"]
     with pytest.raises(ValueError, match="before the first"):
-        SimulationSupportObservationCollector(env, bridge, registration)
+        SimulationSupportObservationCollector(
+            env, bridge, registration, recording=recording
+        )
     context._begin_episode(torch.tensor([0]))
     with pytest.raises(ValueError, match="another episode"):
         collector.capture_current("support")

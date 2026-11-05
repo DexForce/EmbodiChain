@@ -252,7 +252,11 @@ checks the per-owner clock-binding generation; same-clock binding is idempotent.
 The generation is an ownership guard, not evidence of strong support. Current
 capture uses the native rest-envelope COM tolerance, while recorded snapshots
 retain the policy's original override. Recorded reads combine the original policy
-metadata with exact Gym boundary slots, never current contacts with old poses.
+metadata with exact trajectory boundary slots from an explicitly injected
+`RecordedTrajectoryReader`. The recording component validates its buffer lifetime
+and episode; the collector retains bridge/policy ownership checks. Without a
+reader, current capture remains available and historical capture rejects. It
+never combines current contacts with old poses or accesses Env's private buffers.
 
 The same policy port's `measure_support_geometry` projects an owned current or
 historical support snapshot against its existing region geometry. The collector

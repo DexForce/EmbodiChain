@@ -1414,8 +1414,10 @@ rejected. Independent runtime owners retain independent state.
 
 Current capture selects the registered pair/scope and uses the native
 rest-envelope COM tolerance. Recorded capture preserves the original policy
-parameters and reads the exact seeded end-step slots. It never resamples current
-contacts for a historical pose or falls back to a live pose/previous frame.
+parameters and reads the exact seeded end-step slots through an explicitly
+injected ``RecordedTrajectoryReader``. Omitting the reader keeps current capture
+available but rejects historical capture. It never resamples current contacts for
+a historical pose or falls back to a live pose/previous frame.
 The result owns physical metadata and availability only; TaskSpec and Task Engine
 are not dependencies of this Lab collector.
 
@@ -1652,8 +1654,13 @@ embodichain.lab.gym.utils.trajectory_state
 Owned recorded pose snapshots identify native rows, episodes and positive
 completed trajectory slots. Missing recording, incomplete rows and unavailable
 terminal slots are errors; these readers do not query current simulation state.
-``EmbodiedEnv.capture_recorded_rigid_poses`` additionally verifies the host episode
-before and after copying. Slot indices are not simulation timestamps.
+``RecordedTrajectoryReader`` owns episode, initialization and closed-lifetime
+checks before and after copying. The recording host supplies its episode owner
+and source/lifetime callbacks; consumers verify that owner by identity, so matching
+episode numbers cannot hide a reader from another environment. Readers expose
+owned snapshots instead of mutable buffers. Env only assembles
+``trajectory_reader`` and does not define entity-specific read methods.
+Slot indices are not simulation timestamps.
 
 .. currentmodule:: embodichain.lab.gym.utils.trajectory_state
 
@@ -1662,9 +1669,13 @@ before and after copying. Slot indices are not simulation timestamps.
    capture_trajectory_state
    restore_trajectory_state
    RecordedRigidPoseSnapshot
+   RecordedTrajectoryReader
    read_recorded_rigid_pose_snapshot
 
 .. autoclass:: RecordedRigidPoseSnapshot
+   :members:
+
+.. autoclass:: RecordedTrajectoryReader
    :members:
 
 .. autofunction:: read_recorded_rigid_pose_snapshot

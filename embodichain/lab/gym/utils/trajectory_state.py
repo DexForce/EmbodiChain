@@ -22,19 +22,23 @@ All seven-element root and rigid-object poses use EmbodiChain's
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias, TYPE_CHECKING
 
 import torch
 from tensordict import TensorDictBase
 
 from embodichain.utils import logger
 
+if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 __all__ = [
     "capture_trajectory_state",
     "restore_trajectory_state",
     "RecordedRigidPoseSnapshot",
+    "RecordedTrajectoryReader",
     "read_recorded_rigid_pose_snapshot",
 ]
 
@@ -234,6 +238,107 @@ class RecordedRigidPoseSnapshot:
             object.__setattr__(self, name, values)
         validate_rigid_pose_batch(self.poses, size)
         object.__setattr__(self, "poses", self.poses.detach().clone())
+
+
+class RecordedTrajectoryReader:
+    """Read live recording buffers through an episode-qualified, read-only port.
+
+    Args:
+        source: Owner callback returning recorded states and completed-step
+            counts, or None when recording is unavailable. Buffers stay with
+            the recorder and are never exposed through this reader.
+        episode_context: Recording owner's row-local episode lifecycle. Its
+            identity prevents borrowing a reader from another environment.
+        is_closed: Owner callback indicating whether recording access has ended.
+
+    The recording host supplies these dependencies during assembly. This reader
+    imports no environment or simulator and performs no physical acquisition.
+    Each result is an independently owned snapshot of exact recorded slots.
+    """
+
+    def __init__(
+        self,
+        *,
+        source: Callable[[], tuple[_TrajectoryState, torch.Tensor] | None],
+        episode_context: EpisodeContext,
+        is_closed: Callable[[], bool],
+    ) -> None:
+        if not all(callable(value) for value in (source, is_closed)):
+            raise TypeError("Recording sources and lifetime checks must be callable.")
+        self._source = source
+        self._episode_context = episode_context
+        self._is_closed = is_closed
+
+    def _check_episode(self, expected: tuple[int, ...]) -> None:
+        current = self._episode_context.snapshot()
+        if (
+            not current
+            or len(expected) != len(current)
+            or any(type(value) is not int or value < 0 for value in expected)
+            or tuple(row["episode"] for row in current) != expected
+            or not all(row["initialized"] for row in current)
+        ):
+            raise ValueError(
+                "Recorded poses belong to another or uninitialized episode."
+            )
+
+    def _check_open(self) -> None:
+        if self._is_closed():
+            raise RuntimeError("Recorded observations are unavailable after close.")
+
+    def validate_episode_source(self, episode_context: EpisodeContext) -> None:
+        """Require this recording's actual episode owner before binding a consumer.
+
+        Args:
+            episode_context: Consumer's expected recording lifecycle owner.
+
+        Raises:
+            ValueError: The reader belongs to another recording episode owner.
+        """
+        if self._episode_context is not episode_context:
+            raise ValueError("Recording reader belongs to another episode owner.")
+
+    def read_rigid_poses(
+        self,
+        object_uid: str,
+        frame_indices: Sequence[int],
+        *,
+        episode_ids: Sequence[int],
+    ) -> RecordedRigidPoseSnapshot:
+        """Copy one rigid object's exact recorded poses for the expected episode.
+
+        Args:
+            object_uid: Native UID selected for recording.
+            frame_indices: Positive completed boundary slot for each row.
+            episode_ids: Expected episode IDs captured before execution.
+
+        Returns:
+            Owned CPU matrices with environment, episode and frame identities.
+            Missing slots never fall back to earlier frames or live state.
+
+        Raises:
+            RuntimeError: Recording is unavailable or its owner is closed.
+            ValueError: An episode changed, a row is uninitialized, or the
+                requested recording boundary is incomplete or invalid.
+            KeyError: The selected native object was not recorded.
+        """
+        self._check_open()
+        recording = self._source()
+        if recording is None:
+            raise RuntimeError("Rigid trajectory recording is unavailable.")
+        expected = tuple(episode_ids)
+        self._check_episode(expected)
+        states, written_steps = recording
+        result = read_recorded_rigid_pose_snapshot(
+            states,
+            written_steps,
+            object_uid=object_uid,
+            frame_indices=frame_indices,
+            episode_ids=expected,
+        )
+        self._check_open()
+        self._check_episode(expected)
+        return result
 
 
 def read_recorded_rigid_pose_snapshot(

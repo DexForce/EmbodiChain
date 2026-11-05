@@ -50,7 +50,7 @@ topics:
   keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, register_env, list-task, run-task, run-example, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
-    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, capture_recorded_rigid_poses, RecordedRigidPoseSnapshot,
+    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, RecordedTrajectoryReader, RecordedRigidPoseSnapshot,
     task_instruction, resolve_demo_instruction,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
