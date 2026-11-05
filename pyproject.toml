@@ -81,6 +81,10 @@ policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",
 ]
+planning-geometry = [
+  # Qualified native/FCL query backend; it is not enabled by a core install.
+  "python-fcl==0.7.0.11",
+]
 gensim = [
   # Blender runs in a separate Python 3.11 runtime; see docker/README.md.
   "gradio>=6.17.3,<6.18",
