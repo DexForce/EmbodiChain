@@ -50,7 +50,7 @@ topics:
   keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, register_env, list-task, run-task, run-example, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
-    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, EpisodeRecording, RecordedObservationFrame, ObservationFrame,
+    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationManager.history, ObservationHistorySnapshot, ObservationFrame,
     task_instruction, resolve_demo_instruction,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
@@ -74,11 +74,11 @@ topics:
   - embodichain/lab/gym/envs/episode_context.py
   - embodichain/lab/gym/envs/expert_trajectory.py
   - embodichain/lab/gym/utils/trajectory_state.py
-  - embodichain/lab/gym/recording.py
-  - embodichain/lab/gym/observations.py
+  - embodichain/lab/gym/envs/managers/_observation_history.py
+  - embodichain/lab/gym/envs/managers/observation_types.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
-  watch_paths: [embodichain/lab/gym/recording.py, embodichain/lab/gym/observations.py, tests/gym/test_recording.py, embodichain/lab/gym/envs/episode_context.py, embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
+  watch_paths: [embodichain/lab/gym/envs/managers/_observation_history.py, embodichain/lab/gym/envs/managers/observation_types.py, tests/gym/envs/managers/test_observation_history.py, embodichain/lab/gym/envs/episode_context.py, embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
     embodichain/lab/gym/envs/demo.py,
     embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_task.py,
     extensions/embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
@@ -100,7 +100,7 @@ topics:
   - embodichain/lab/gym/envs/managers/manager_base.py
   - embodichain/lab/gym/envs/managers/cfg.py
   - embodichain/lab/gym/envs/managers/observation_manager.py
-  - embodichain/lab/gym/observations.py
+  - embodichain/lab/gym/envs/managers/observation_types.py
   - embodichain/lab/gym/envs/managers/reward_manager.py
   - embodichain/lab/gym/envs/managers/event_manager.py
   - embodichain/lab/gym/envs/managers/dataset_manager.py

@@ -95,10 +95,10 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
 )
-from embodichain.lab.gym.recording import EpisodeRecording
-from embodichain.lab.gym.observations import ObservationFrame
+from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
 from embodichain.lab.gym.utils.trajectory_state import (
     trajectory_observation_cfgs,
+    export_observation_history,
 )
 from embodichain.data_pipeline.recording import build_recording_provenance
 from embodichain.utils import configclass, logger
@@ -549,7 +549,6 @@ class EmbodiedEnv(BaseEnv):
                     else "expert_controller_command"
                 )
 
-            self.recording: EpisodeRecording | None = None
             self._traj_buffer: TensorDict | None = None
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
@@ -578,14 +577,13 @@ class EmbodiedEnv(BaseEnv):
                         include_nested=True, leaves_only=True
                     )
                 }
-                self.recording = EpisodeRecording(
-                    episode_context=self.episode_context,
+                self.observation_manager.enable_history(
                     fields=fields,
                     actions=self._traj_buffer["actions"][:, : self.max_episode_steps],
                 )
                 # Private aliases preserve existing replay/persistence adapters;
                 # acquisition, cursors and lifetime belong to the recorder.
-                self._traj_steps = self.recording.steps
+                self._traj_steps = self.observation_manager.history.steps
 
             self.rollout_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
@@ -758,9 +756,9 @@ class EmbodiedEnv(BaseEnv):
     def _record_initial_observation(
         self, frame: ObservationFrame, env_ids: torch.Tensor
     ) -> None:
-        recording = getattr(self, "recording", None)
-        if recording is not None:
-            recording.seed(frame, env_ids)
+        manager = getattr(self, "observation_manager", None)
+        if manager is not None and manager.history is not None:
+            manager.seed_history(frame, env_ids)
 
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
@@ -2141,14 +2139,14 @@ class EmbodiedEnv(BaseEnv):
         active: torch.Tensor | None = None,
     ) -> None:
         """Commit the actual action and its captured post-transition state."""
-        recording = getattr(self, "recording", None)
-        if recording is None:
+        manager = getattr(self, "observation_manager", None)
+        if manager is None or manager.history is None:
             return
         if frame is None or self._traj_raw_action is None:
             raise RuntimeError(
                 "Trajectory recording requires an explicit observation frame and action."
             )
-        recording.append(
+        manager.append_history(
             frame,
             self._traj_raw_action,
             active=(
@@ -3391,9 +3389,10 @@ class EmbodiedEnv(BaseEnv):
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         lengths = self._traj_steps[env_ids_t]
         max_len = int(lengths.max().item()) if len(env_ids) > 0 else 0
-        recording = getattr(self, "recording", None)
+        manager = getattr(self, "observation_manager", None)
+        recording = manager.history if manager is not None else None
         history = (
-            recording.snapshot_history(env_ids, device=self.device)
+            export_observation_history(manager, env_ids, device=self.device)
             if recording is not None and purpose == "recording"
             else None
         )
@@ -3613,9 +3612,9 @@ class EmbodiedEnv(BaseEnv):
                 return
 
             errors: list[Exception] = []
-            recording = getattr(self, "recording", None)
-            if recording is not None:
-                recording.close()
+            manager = getattr(self, "observation_manager", None)
+            if manager is not None and manager.history is not None:
+                manager.history.close()
             try:
                 self._discard_pending_recordings()
             except Exception as error:

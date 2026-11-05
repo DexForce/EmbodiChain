@@ -54,7 +54,8 @@ file or digest. The B0 fixture adapter separately checks its frozen source ident
 TaskSpec verifies receipts, acquisition masks, episode IDs, sampled support windows
 and recorded execution prefixes. Lab owns the physical collector;
 [episode recording](../env-framework/env-framework.md#expert-trajectory-contract)
-supplies described historical fields with validity and episode/lifetime checks.
+supplies historical values with validity and episode/lifetime checks; the
+observation manager owns their semantic schema.
 Env dispatches capture/reset boundaries;
 no Lab module imports TaskSpec or Task Engine.
 

@@ -20,7 +20,7 @@ Lightweight RL environments have a separate owner in
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, managers, RL outcomes and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
-| Raw observation history, queries and episode/lifetime checks | `gym/recording.py`: `EpisodeRecording`; Env dispatches explicit capture/reset/close boundaries |
+| Raw schema, optional history and exact historical queries | `managers/observation_manager.py`; Env dispatches capture/reset/close boundaries |
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
@@ -103,35 +103,32 @@ schema version, and `step_dt` in trajectory/demo metadata. Missing qvel fails
 before stepping in position-velocity mode; inactive and hold targets use zero
 qvel.
 
-`EpisodeRecording` in `gym/recording.py` owns raw field storage, actions,
-row cursors and live recording access. The first seed binds a fixed field/alias
-layout; schema drift is rejected rather than registering new fields per step.
-Standard replay fields are declared by
-`trajectory_observation_cfgs`, using the same raw functors as policy observations;
-Env does not resample state in the recording hook. Raw production and consumer
-selection belong to [manager functors](../manager-functor/manager-functor.md).
+`ObservationManager` owns raw acquisition, the single field schema, alias
+resolution and optional numeric history. Standard replay fields are declared by
+`trajectory_observation_cfgs`; Env supplies those declarations and the owned
+buffers, without interpreting source functions or maintaining another schema.
+See [manager functors](../manager-functor/manager-functor.md#raw-observations-and-consumer-views).
 
 An explicit observation boundary follows physics and interval events, before
 reward/action-postprocessing hooks and autoreset. Reset seeds S0 after
 `episode_prepare`; T transitions retain T+1 raw states, including terminal ST.
-Ordinary `get_obs()` queries do not advance history, and explicit captures in the
-same control tick receive separate revisions. Existing policy rollout buffers
-retain actual policy/noise samples and action semantics. An explicit
-`step(..., recording_active_mask=...)` selects raw recording rows independently
-of demonstration rollouts, so a diagnostic settling tail cannot extend accepted
-segment/rollout boundaries or resample state after the step.
+Ordinary `get_obs()` queries do not advance history; explicit captures in the
+same tick have distinct revisions. Policy rollouts retain the actual transformed
+and noisy values. `step(..., recording_active_mask=...)` independently selects
+history rows for a diagnostic settling tail.
 
-Historical consumers inject `env.recording`, select described fields, and query
-exact row-local frame indices with expected episode IDs. The recorder checks the
-actual lifecycle owner and initialized episodes before/after copying. Missing
-fields/slots never select an earlier frame or live state. Snapshots own CPU
-values, validity, missing reasons and source clock/revision metadata. Legacy
-trajectory files keep pre-action `states`/`actions`; new files add terminal state
-and versioned raw history. All exported state views use one owned history
-snapshot, with shared tensor storage for overlapping fields. The default bulk
-snapshot is on CPU; file export may retain the recording device for existing
-replay compatibility. Private `_traj_buffer`/`_traj_steps` remain projection
-aliases for existing persistence/replay adapters, not acquisition owners.
+Historical consumers bind fields using `observation_manager.schema`, then use
+`read_history` with exact row-local frame indices and episode IDs. The private
+history buffer stores field IDs and tensors only; it checks actual episode
+ownership, initialized rows and lifetime before/after copying. It never queries
+live state or substitutes a previous frame. Results own values, validity,
+reasons and temporal identities, without another descriptor model.
+
+`export_observation_history` projects the manager's schema onto one owned numeric
+snapshot. Legacy trajectory state views and raw history share that snapshot's
+storage. The default snapshot is CPU; file export can retain its device for
+existing replay compatibility. `_traj_buffer`/`_traj_steps` remain projection
+aliases for existing persistence/replay adapters.
 
 ## Lifecycle and boundaries
 

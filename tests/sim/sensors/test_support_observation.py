@@ -933,8 +933,8 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     declaration_case,
 ):
     from dataclasses import replace
-    from embodichain.lab.gym.recording import EpisodeRecording
-    from embodichain.lab.gym.observations import (
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.gym.envs.managers.observation_types import (
         ObservationDescriptor,
         ObservationSample,
         ObservationFrame,
@@ -1054,11 +1054,8 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         _closed=False,
     )
     fields = {f"poses/{uid}": value["pose"] for uid, value in values.items()}
-    recording = EpisodeRecording(
-        fields=fields,
-        actions=torch.zeros(2, 2, 1),
-        episode_context=context,
-    )
+    recording = ObservationManager({}, env)
+    recording.enable_history(fields=fields, actions=torch.zeros(2, 2, 1))
 
     def observation_frame(index):
         samples = {
@@ -1082,8 +1079,8 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
             None, samples, context.episode_ids, index, episode_owner=context
         )
 
-    recording.seed(observation_frame(0), [0, 1])
-    recording.append(observation_frame(1), torch.zeros(2, 1))
+    recording.seed_history(observation_frame(0), [0, 1])
+    recording.append_history(observation_frame(1), torch.zeros(2, 1))
     if declaration_case == "foreign_scene":
         foreign = replace(
             binding,
@@ -1095,7 +1092,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         registration = replace(registration, scene_binding=foreign)
         with pytest.raises(ValueError, match="scene binding differs"):
             SimulationSupportObservationCollector(
-                env, bridge, registration, recording=recording
+                env, bridge, registration, observations=recording
             )
         registry.close()
         return
@@ -1103,7 +1100,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         registration = replace(registration, settle_presets={"support": cfg})
         with pytest.raises(ValueError, match="complete preset selection"):
             SimulationSupportObservationCollector(
-                env, bridge, registration, recording=recording
+                env, bridge, registration, observations=recording
             )
         registry.close()
         return
@@ -1111,14 +1108,13 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         other_context = EpisodeContext(2)
         other_context._begin_episode(torch.tensor([0, 1]))
         other_context._finish_initialization(torch.tensor([0, 1]))
-        foreign_recording = EpisodeRecording(
-            fields={},
-            actions=torch.zeros(2, 2, 1),
-            episode_context=other_context,
+        foreign_recording = ObservationManager(
+            {}, SimpleNamespace(episode_context=other_context)
         )
+        foreign_recording.enable_history(fields={}, actions=torch.zeros(2, 2, 1))
         with pytest.raises(ValueError, match="another episode owner"):
             SimulationSupportObservationCollector(
-                env, bridge, registration, recording=foreign_recording
+                env, bridge, registration, observations=foreign_recording
             )
         registry.close()
         return
@@ -1129,7 +1125,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         env,
         bridge,
         registration,
-        recording=None if declaration_case == "missing_recording" else recording,
+        observations=None if declaration_case == "missing_recording" else recording,
     )
     assert bridge.post_policy_port is not template
     segment = next(compiled.iter_segments())
@@ -1148,7 +1144,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         template.post_policy_metadata(policy, segment=segment)
     before = sim.query.fetches
     if declaration_case == "missing_recording":
-        with pytest.raises(RuntimeError, match="Episode recording is unavailable"):
+        with pytest.raises(RuntimeError, match="Observation history is unavailable"):
             collector.capture_recorded(
                 "support",
                 segment_id=segment.name,
@@ -1193,7 +1189,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     assert "support_contract_revision" not in current["native_support"]
     with pytest.raises(ValueError, match="before the first"):
         SimulationSupportObservationCollector(
-            env, bridge, registration, recording=recording
+            env, bridge, registration, observations=recording
         )
     context._begin_episode(torch.tensor([0]))
     with pytest.raises(ValueError, match="another episode"):

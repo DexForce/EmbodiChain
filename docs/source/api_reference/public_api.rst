@@ -1408,9 +1408,9 @@ rejected. Independent runtime owners retain independent state.
 Current capture selects the registered pair/scope and uses the native
 rest-envelope COM tolerance. Recorded capture preserves the original policy
 parameters and reads the exact seeded end-step slots through an explicitly
-injected ``EpisodeRecording``. The collector resolves raw pose descriptors,
+injected ``ObservationManager``. The collector binds pose fields from its schema,
 reads original values and masks, and converts only qualified arena poses.
-Omitting the recording keeps current capture available but rejects historical capture. It never resamples current contacts for
+Omitting observation history keeps current capture available but rejects historical capture. It never resamples current contacts for
 a historical pose or falls back to a live pose/previous frame.
 The result owns physical metadata and availability only; TaskSpec and Task Engine
 are not dependencies of this Lab collector.
@@ -1675,23 +1675,23 @@ embodichain.lab.gym.utils.profiler
    EnvProfilerCfg
    EnvProfiler
 
-embodichain.lab.gym.observations
---------------------------------
+embodichain.lab.gym.envs.managers.observation_types
+-------------------------------------------------
 
-An explicit control boundary captures original described channels once. Policy
-views receive separate tensors before in-place normalization/noise; actual policy
-observations continue into the existing rollout recorder. Ordinary ``get_obs()``
-queries do not advance raw history. Repeated captures within one control tick
-have distinct revisions, so external scene edits cannot reuse a step-only cache.
-Contact histories retain the sensor's physics clock and complete-window contract.
+The observation manager owns source acquisition and the single raw-field schema.
+Policy views receive separate tensors before in-place normalization/noise;
+ordinary queries do not advance history. Raw history uses canonical field IDs,
+with no second semantic schema or entity-specific reader. Contact histories
+retain their sensor physics clocks and complete-window contracts.
 
-.. currentmodule:: embodichain.lab.gym.observations
+.. currentmodule:: embodichain.lab.gym.envs.managers.observation_types
 
 .. autosummary::
 
    ObservationDescriptor
    ObservationSample
    ObservationFrame
+   ObservationHistorySnapshot
 
 .. autoclass:: ObservationDescriptor
    :members:
@@ -1702,52 +1702,16 @@ Contact histories retain the sensor's physics clock and complete-window contract
 .. autoclass:: ObservationFrame
    :members:
 
-embodichain.lab.gym.recording
------------------------------
-
-``EpisodeRecording`` owns raw field buffers, transition actions, row cursors and
-live recording access. The first ``seed`` binds the field and alias layout;
-later frames must retain that schema. ``seed`` records S0 after reset preparation;
-``append`` commits At and its already captured St+1 before autoreset. Capacity T
-therefore retains T+1 states. ``step(recording_active_mask=...)`` can select raw
-recording rows independently of accepted demonstration rollouts, including a
-reported settling tail. Replay reset reseeds raw history after restoring the
-source initial state. ``read`` accepts original environment rows, expected
-episodes, exact frame indices and arbitrary field names; it returns owned CPU
-snapshots with descriptors, masks, reasons and source sampling identities.
-Missing channels/slots never fall back to earlier frames or current simulation.
-Foreign owners, changed descriptors, reused captures and closed recordings reject.
-Frame indices are row-local recording slots, not timestamps.
-
-``snapshot_history`` archives described raw fields and validity once per
-canonical channel. CPU is the default snapshot device; compatible file exports
-may retain their recording device. Trajectory
-``.pt`` exports retain their causal ``states[t]`` / ``actions[t]`` layout and add
-``terminal_states`` plus versioned ``raw_observations`` for all T+1 boundaries.
-The legacy state and raw-history fields share the same owned tensor storage;
-exports do not clone a second complete state history. Existing consumers can
-continue to read their original fields. Env dispatches
-capture/reset/close; recording and evidence consumers perform no second state
-acquisition through Env methods or source callbacks.
-
-.. currentmodule:: embodichain.lab.gym.recording
-
-.. autosummary::
-
-   EpisodeRecording
-   RecordedObservationFrame
-
-.. autoclass:: EpisodeRecording
-   :members:
-
-.. autoclass:: RecordedObservationFrame
+.. autoclass:: ObservationHistorySnapshot
    :members:
 
 embodichain.lab.gym.utils.trajectory_state
 ------------------------------------------
 
 Capture/restore helpers retain the standalone replay surface.
-``trajectory_observation_cfgs`` declares replay state fields as raw observation
+``export_observation_history`` combines numeric history with the observation
+manager's schema for file output. Alias state views share the same owned tensor
+snapshot. ``trajectory_observation_cfgs`` declares replay state fields as raw observation
 functors, preserving full robot/mimic joint order, articulation root states and
 rigid velocities. Declaration assembly performs no physical acquisition.
 The standard environment recorder uses these functors and shares pose acquisition
@@ -1760,8 +1724,11 @@ with policy ``get_object_pose`` / ``get_rigid_object_pose`` within a boundary.
    capture_trajectory_state
    restore_trajectory_state
    trajectory_observation_cfgs
+   export_observation_history
 
 .. autofunction:: trajectory_observation_cfgs
+
+.. autofunction:: export_observation_history
 
 embodichain.lab.scripts.analyze_workspace
 -----------------------------------------

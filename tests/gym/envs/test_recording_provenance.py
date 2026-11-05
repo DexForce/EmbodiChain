@@ -247,8 +247,8 @@ def test_diagnostic_export_does_not_make_rejected_buffers_normal_recordings(tmp_
 
 
 def test_saved_recording_preserves_terminal_state_and_described_raw_history(tmp_path):
-    from embodichain.lab.gym.recording import EpisodeRecording
-    from embodichain.lab.gym.observations import (
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.gym.envs.managers.observation_types import (
         ObservationDescriptor,
         ObservationSample,
         ObservationFrame,
@@ -262,12 +262,13 @@ def test_saved_recording_preserves_terminal_state_and_described_raw_history(tmp_
         },
         batch_size=[1, 4],
     )
-    env.recording = EpisodeRecording(
-        episode_context=env.episode_context,
+    env.episode_context = env.episode_context
+    env.observation_manager = ObservationManager({}, env)
+    env.observation_manager.enable_history(
         fields={"robot/qpos": env._traj_buffer["states"]["robot"]["qpos"]},
         actions=env._traj_buffer["actions"][:, :3],
     )
-    env._traj_steps = env.recording.steps
+    env._traj_steps = env.observation_manager.history.steps
     descriptor = ObservationDescriptor(
         "arm", "qpos", "joint", "joint_order", ("joint_units",), (2,), torch.float32
     )
@@ -287,9 +288,11 @@ def test_saved_recording_preserves_terminal_state_and_described_raw_history(tmp_
             env.episode_context,
         )
         if step == 0:
-            env.recording.seed(frame, [0])
+            env.observation_manager.seed_history(frame, [0])
         else:
-            env.recording.append(frame, torch.full((1, 2), float(step)))
+            env.observation_manager.append_history(
+                frame, torch.full((1, 2), float(step))
+            )
     path = tmp_path / "trajectory.pt"
     EmbodiedEnv.save_trajectory(env, str(path))
     payload = torch.load(path, weights_only=False)

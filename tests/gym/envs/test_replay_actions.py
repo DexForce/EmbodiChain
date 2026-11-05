@@ -317,23 +317,23 @@ def test_restoring_initial_replay_state_does_not_credit_physical_dwell():
 
 def _enable_action_recording(env, actions):
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
-    from embodichain.lab.gym.recording import EpisodeRecording
-    from embodichain.lab.gym.observations import ObservationFrame
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
 
     context = EpisodeContext(env.num_envs)
     context._begin_episode(list(range(env.num_envs)))
     context._finish_initialization(list(range(env.num_envs)))
-    env.recording = EpisodeRecording(
-        episode_context=context, fields={}, actions=actions
-    )
-    env._traj_steps = env.recording.steps
+    env.episode_context = context
+    env.observation_manager = ObservationManager({}, env)
+    env.observation_manager.enable_history(fields={}, actions=actions)
+    env._traj_steps = env.observation_manager.history.steps
 
     def frame():
         return ObservationFrame(
             None, {}, context.episode_ids, env.step_count, episode_owner=context
         )
 
-    env.recording.seed(frame(), list(range(env.num_envs)))
+    env.observation_manager.seed_history(frame(), list(range(env.num_envs)))
     return frame
 
 
@@ -441,12 +441,12 @@ def test_kinematic_task_replay_does_not_claim_measured_goal_acceptance():
 def test_replay_reset_reseeds_raw_history_after_restoring_source_state():
     from itertools import count
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
-    from embodichain.lab.gym.observations import (
+    from embodichain.lab.gym.envs.managers.observation_types import (
         ObservationDescriptor,
         ObservationSample,
         ObservationFrame,
     )
-    from embodichain.lab.gym.recording import EpisodeRecording
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
 
     env = _ReplayEnv()
     context = EpisodeContext(1)
@@ -457,9 +457,9 @@ def test_replay_reset_reseeds_raw_history_after_restoring_source_state():
     env.robot.set_qpos = lambda values, target: state.copy_(values)
     env.robot.set_local_pose = lambda values: None
     env.sim = SimpleNamespace(enable_physics=lambda enabled: None)
-    env.recording = EpisodeRecording(
-        episode_context=context, fields={}, actions=torch.zeros(1, 2, 2)
-    )
+    env.episode_context = context
+    env.observation_manager = ObservationManager({}, env)
+    env.observation_manager.enable_history(fields={}, actions=torch.zeros(1, 2, 2))
     descriptor = ObservationDescriptor(
         "robot", "qpos", "joint", "joint_order", ("joint_units",), (3,), torch.float32
     )
@@ -478,8 +478,10 @@ def test_replay_reset_reseeds_raw_history_after_restoring_source_state():
         )
 
     env._capture_observation = capture
-    env._record_initial_observation = lambda frame, ids: env.recording.seed(frame, ids)
-    env.recording.seed(capture(), [0])
+    env._record_initial_observation = (
+        lambda frame, ids: env.observation_manager.seed_history(frame, ids)
+    )
+    env.observation_manager.seed_history(capture(), [0])
     trajectory = _trajectory()
     trajectory["states"] = TensorDict(
         {
@@ -491,8 +493,8 @@ def test_replay_reset_reseeds_raw_history_after_restoring_source_state():
         batch_size=[1, 2],
     )
     obs, _ = ReplayWrapper(env, trajectory).reset()
-    snapshot = env.recording.read([0], fields=["qpos"], episode_ids=[0])
-    torch.testing.assert_close(
-        snapshot.fields["qpos"].values, torch.tensor([[7.0, 8.0, 9.0]])
+    snapshot = env.observation_manager.read_history(
+        [0], fields=["qpos"], episode_ids=[0]
     )
+    torch.testing.assert_close(snapshot.values["qpos"], torch.tensor([[7.0, 8.0, 9.0]]))
     torch.testing.assert_close(obs["qpos"], torch.tensor([[7.0, 8.0, 9.0]]))

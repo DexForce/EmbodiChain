@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any, Protocol, TypeAlias, TYPE_CHECKING
+from dataclasses import asdict
 
 import torch
 from tensordict import TensorDictBase
@@ -32,11 +33,13 @@ from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
 
 __all__ = [
     "capture_trajectory_state",
     "restore_trajectory_state",
     "trajectory_observation_cfgs",
+    "export_observation_history",
 ]
 
 
@@ -239,3 +242,32 @@ def trajectory_observation_cfgs(
         if uids is None or uid in uids:
             add("rigid_objects", uid, ("pose", "lin_vel", "ang_vel"))
     return result
+
+
+def export_observation_history(
+    observations: ObservationManager,
+    env_ids: list[int] | None = None,
+    *,
+    device: str | torch.device = "cpu",
+) -> dict[str, Any]:
+    """Project numeric history through its single observation schema for export.
+
+    Args:
+        observations: Manager owning the field meanings and canonical IDs.
+        env_ids: Selected original environment rows, or all rows.
+        device: Snapshot destination device.
+
+    Returns:
+        Owned history with source descriptors and alias views. Existing
+        trajectory state projections can share the same snapshot tensors.
+    """
+    snapshot = observations.snapshot_history(env_ids, device=device)
+    fields = snapshot["fields"]
+    for name, values in fields.items():
+        metadata = asdict(observations.schema[name])
+        metadata["dtype"] = str(observations.schema[name].dtype)
+        values["descriptor"] = metadata
+    snapshot["fields"] = {
+        name: fields[field_id] for name, field_id in observations.field_ids.items()
+    }
+    return snapshot

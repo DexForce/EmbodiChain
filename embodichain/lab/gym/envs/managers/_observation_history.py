@@ -19,56 +19,43 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, asdict, field
-from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
 
-from .observations import ObservationDescriptor, ObservationFrame, ObservationSample
+from .observation_types import ObservationHistorySnapshot
 
 if TYPE_CHECKING:
-    from .envs.episode_context import EpisodeContext
+    from ..episode_context import EpisodeContext
 
-__all__ = ["EpisodeRecording", "RecordedObservationFrame"]
+__all__: list[str] = []
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class RecordedObservationFrame:
-    """Owned selected fields at one exact boundary for each selected row.
+class _FieldValue(Protocol):
+    values: torch.Tensor
+    valid: torch.Tensor
+    acquisition_errors: tuple[str | None, ...]
 
-    Args:
-        fields: Raw values, descriptors, validity and acquisition errors.
-        env_ids: Original environment row IDs in query order.
-        episode_ids: Episode identities qualifying the selected buffers.
-        frame_indices: Row-local state indices, including initial zero.
-        revisions: Original acquisition identities per row.
-        timestamps: Source simulation times, or None when unavailable.
-        clock_domain: Source clock identity. Row indices are never timestamps.
-    """
 
-    fields: Mapping[str, ObservationSample]
-    env_ids: tuple[int, ...]
+class _HistoryInput(Protocol):
+    fields: Mapping[str, _FieldValue]
     episode_ids: tuple[int, ...]
-    frame_indices: tuple[int, ...]
-    revisions: tuple[int, ...]
-    timestamps: tuple[float | None, ...]
-    clock_domain: str = "simulation_time"
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "fields", MappingProxyType(dict(self.fields)))
+    revision: int
+    timestamp: float | None
+    clock_domain: str
+    episode_owner: EpisodeContext | None
 
 
 @dataclass(slots=True)
 class _Channel:
     name: str
-    descriptor: ObservationDescriptor
     values: torch.Tensor
     valid: torch.Tensor
     errors: dict[tuple[int, int], str] = field(default_factory=dict)
 
 
-class EpisodeRecording:
+class _ObservationHistory:
     """Own raw state frames, transition actions and row-local recording cursors.
 
     Args:
@@ -128,13 +115,6 @@ class EpisodeRecording:
                     "State fields require T+1 frames on the recording device."
                 )
 
-    @property
-    def descriptors(self) -> Mapping[str, ObservationDescriptor]:
-        """Return bound raw field identities without exposing recording buffers."""
-        return MappingProxyType(
-            {name: channel.descriptor for name, channel in self._channels.items()}
-        )
-
     def validate_episode_source(self, episode_context: EpisodeContext) -> None:
         """Require the consumer's actual lifecycle owner, not just numeric IDs.
 
@@ -148,7 +128,7 @@ class EpisodeRecording:
         if self._closed:
             raise RuntimeError("Recorded observations are unavailable after close.")
 
-    def _check_frame(self, frame: ObservationFrame) -> None:
+    def _check_frame(self, frame: _HistoryInput) -> None:
         self._check_open()
         if frame.episode_owner is not self._context:
             raise ValueError("Observation frame belongs to another episode owner.")
@@ -162,74 +142,55 @@ class EpisodeRecording:
         if frame.episode_ids != self._context.episode_ids:
             raise ValueError("Observation frame belongs to another episode.")
         if self._layout is None:
-            self._bind(frame)
-        if frame.fields.keys() != self._channels.keys():
-            raise ValueError("Raw observation field schema changed after binding.")
-        for name, channel in self._channels.items():
-            sample = frame.fields[name]
+            raise RuntimeError("Observation history storage has not been bound.")
+        for channel in self._layout:
+            values = frame.fields[channel.name].values
             if (
-                sample.descriptor is not channel.descriptor
-                and sample.descriptor != channel.descriptor
-            ):
-                raise ValueError(f"Raw observation identity drift for {name!r}.")
-            if (
-                sample.values.shape[0] != self.num_envs
-                or sample.values.device != self.actions.device
+                values.shape[0] != self.num_envs
+                or values.device != self.actions.device
+                or tuple(values.shape[1:]) != tuple(channel.values.shape[2:])
+                or values.dtype != channel.values.dtype
             ):
                 raise ValueError(
-                    "Raw observation rows and device must match recording."
+                    f"History values differ from storage for {channel.name!r}."
                 )
 
-    def _bind(self, frame: ObservationFrame) -> None:
-        if self._buffers.keys() - frame.fields.keys():
-            raise ValueError(
-                "Observation boundary is missing required recording fields."
-            )
-        for name, sample in frame.fields.items():
+    def bind(self, frame: _HistoryInput, field_ids: Sequence[str]) -> None:
+        """Allocate storage for IDs already resolved by the observation schema."""
+        if self._layout is not None:
+            return
+        if self._buffers.keys() - set(field_ids):
+            raise ValueError("Observation boundary is missing required history fields.")
+        for name in field_ids:
+            values = frame.fields[name].values
+            storage = self._buffers.get(name)
+            if storage is None:
+                storage = torch.zeros(
+                    (self.num_envs, self.capacity + 1, *values.shape[1:]),
+                    dtype=values.dtype,
+                    device=self.actions.device,
+                )
             if (
-                sample.values.shape[0] != self.num_envs
-                or sample.values.device != self.actions.device
+                values.shape[0] != self.num_envs
+                or values.device != self.actions.device
+                or tuple(storage.shape[2:]) != tuple(values.shape[1:])
+                or storage.dtype != values.dtype
             ):
-                raise ValueError(
-                    "Raw observation rows and device must match recording."
-                )
-            if name in self._buffers and (
-                tuple(self._buffers[name].shape[2:]) != sample.descriptor.shape
-                or self._buffers[name].dtype != sample.descriptor.dtype
-            ):
-                raise ValueError(f"Recording storage differs from {name!r} descriptor.")
-        storage = {
-            sample.descriptor: self._buffers[name]
-            for name, sample in frame.fields.items()
-            if name in self._buffers
-        }
-        canonical: dict[ObservationDescriptor, _Channel] = {}
-        for name, sample in frame.fields.items():
-            descriptor = sample.descriptor
-            if descriptor not in canonical:
-                values = storage.get(descriptor)
-                if values is None:
-                    values = torch.zeros(
-                        (self.num_envs, self.capacity + 1, *descriptor.shape),
-                        dtype=descriptor.dtype,
-                        device=self.actions.device,
-                    )
-                canonical[descriptor] = _Channel(
-                    name,
-                    descriptor,
-                    values,
-                    torch.zeros(
-                        (self.num_envs, self.capacity + 1),
-                        dtype=torch.bool,
-                        device=self.actions.device,
-                    ),
-                )
-            self._channels[name] = canonical[descriptor]
-        self._layout = tuple(canonical.values())
+                raise ValueError(f"History values differ from storage for {name!r}.")
+            self._channels[name] = _Channel(
+                name,
+                storage,
+                torch.zeros(
+                    (self.num_envs, self.capacity + 1),
+                    dtype=torch.bool,
+                    device=self.actions.device,
+                ),
+            )
+        self._layout = tuple(self._channels.values())
         self._buffers.clear()
 
     def _write(
-        self, frame: ObservationFrame, ids: torch.Tensor, slots: torch.Tensor
+        self, frame: _HistoryInput, ids: torch.Tensor, slots: torch.Tensor
     ) -> None:
         rows = indices = None
         for channel in self._layout:
@@ -247,9 +208,7 @@ class EpisodeRecording:
             frame.timestamp if frame.timestamp is not None else float("nan")
         )
 
-    def seed(
-        self, frame: ObservationFrame, env_ids: Sequence[int] | torch.Tensor
-    ) -> None:
+    def seed(self, frame: _HistoryInput, env_ids: Sequence[int] | torch.Tensor) -> None:
         """Start selected rows from an authoritative post-reset state frame.
 
         Args:
@@ -280,7 +239,7 @@ class EpisodeRecording:
 
     def append(
         self,
-        frame: ObservationFrame,
+        frame: _HistoryInput,
         action: torch.Tensor,
         *,
         active: torch.Tensor | None = None,
@@ -328,7 +287,7 @@ class EpisodeRecording:
         fields: Sequence[str],
         episode_ids: Sequence[int],
         env_ids: Sequence[int] | None = None,
-    ) -> RecordedObservationFrame:
+    ) -> ObservationHistorySnapshot:
         """Copy exact selected raw fields; missing frames never use live state.
 
         Args:
@@ -387,11 +346,13 @@ class EpisodeRecording:
             (self._revisions[ids, slots] < 0).any()
         ):
             raise ValueError("The requested boundary is not fully recorded.")
-        samples = {}
+        values, validity, errors = {}, {}, {}
         for name in names:
             channel = self._channels[name]
             valid = channel.valid[ids, slots].detach().cpu()
-            errors = tuple(
+            values[name] = channel.values[ids, slots].detach().cpu()
+            validity[name] = valid
+            errors[name] = tuple(
                 (
                     None
                     if ok
@@ -402,20 +363,16 @@ class EpisodeRecording:
                 )
                 for row, slot, ok in zip(rows, frames, valid.tolist(), strict=True)
             )
-            samples[name] = ObservationSample(
-                channel.descriptor,
-                channel.values[ids, slots].detach().cpu(),
-                valid,
-                errors,
-            )
         revisions = tuple(self._revisions[ids, slots].cpu().tolist())
         times = tuple(
             None if value != value else value
             for value in self._timestamps[ids, slots].cpu().tolist()
         )
         check_episode()
-        return RecordedObservationFrame(
-            samples,
+        return ObservationHistorySnapshot(
+            values,
+            validity,
+            errors,
             rows,
             episodes,
             frames,
@@ -442,9 +399,8 @@ class EpisodeRecording:
                 data; a host may retain its device for a compatible file export.
 
         Returns:
-            Versioned owned tensors, descriptors and errors. Alias fields share
-            the same snapshot. Legacy trajectory views can reference these
-            values without cloning another complete state history.
+            Owned numeric fields and temporal metadata. Field semantics and
+            aliases are supplied exclusively by the observation manager.
         """
         self._check_open()
         ids = self._context._ids(env_ids).to(self.actions.device)
@@ -472,21 +428,16 @@ class EpisodeRecording:
         revisions = self._revisions[ids, :size].detach().to(device)
         timestamps = self._timestamps[ids, :size].detach().to(device)
         written = revisions >= 0
-        copied = {}
+        fields = {}
         for channel in self._layout:
             values = channel.values[ids, :size].detach().to(device)
             values.masked_fill_(
-                ~written.reshape(
-                    *written.shape, *((1,) * len(channel.descriptor.shape))
-                ),
+                ~written.reshape(*written.shape, *((1,) * (values.ndim - 2))),
                 0,
             )
             valid = channel.valid[ids, :size].detach().to(device) & written
             valid_rows = valid.cpu().tolist()
-            metadata = asdict(channel.descriptor)
-            metadata["dtype"] = str(channel.descriptor.dtype)
-            copied[channel.name] = {
-                "descriptor": metadata,
+            fields[channel.name] = {
                 "values": values,
                 "valid": valid,
                 "acquisition_errors": [
@@ -515,9 +466,7 @@ class EpisodeRecording:
                 else "unavailable"
             ),
             "timestamp_valid": torch.isfinite(timestamps) & written,
-            "fields": {
-                name: copied[channel.name] for name, channel in self._channels.items()
-            },
+            "fields": fields,
         }
 
     def close(self) -> None:

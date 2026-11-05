@@ -19,11 +19,16 @@
 from __future__ import annotations
 
 import inspect
+from contextvars import ContextVar, Token
+from itertools import count
+from types import MappingProxyType
+from collections.abc import Callable
+from dataclasses import replace
 import torch
 from collections.abc import Sequence, Mapping
 from copy import deepcopy
 from prettytable import PrettyTable
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union, Any
 
 from embodichain.utils import logger
 from embodichain.lab.sim.types import EnvObs
@@ -31,7 +36,13 @@ from embodichain.lab.gym.utils.gym_utils import (
     fetch_data_from_dict,
     assign_data_to_dict,
 )
-from embodichain.lab.gym.observations import ObservationSample, _current_capture
+from .observation_types import (
+    ObservationDescriptor,
+    ObservationSample,
+    ObservationFrame,
+    ObservationHistorySnapshot,
+)
+from ._observation_history import _ObservationHistory
 from .manager_base import ManagerBase
 from .cfg import ObservationCfg
 
@@ -39,6 +50,7 @@ __all__ = ["ObservationManager"]
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
 
 
 class ObservationManager(ManagerBase):
@@ -77,6 +89,11 @@ class ObservationManager(ManagerBase):
 
         self._recording_cfgs = deepcopy(dict(recording or {}))
         self._has_raw_channels = False
+        self._required_fields: tuple[str, ...] = ()
+        self._schema: dict[str, ObservationDescriptor] | None = None
+        self._validated_frame: ObservationFrame | None = None
+        self._field_ids: dict[str, str] = {}
+        self.history: _ObservationHistory | None = None
         self._mode_functor_names: dict[str, list[str]] = dict()
         self._mode_functor_cfgs: dict[str, list[ObservationCfg]] = dict()
         self._mode_class_functor_cfgs: dict[str, list[ObservationCfg]] = dict()
@@ -136,6 +153,179 @@ class ObservationManager(ManagerBase):
     def has_raw_channels(self) -> bool:
         """Whether this manager declares raw recording channels."""
         return self._has_raw_channels
+
+    @property
+    def is_capturing(self) -> bool:
+        """Whether the host is inside an explicit observation boundary."""
+        return _current_capture.get() is not None
+
+    @property
+    def schema(self) -> Mapping[str, ObservationDescriptor]:
+        """Return the single bound raw-field schema, shared by all consumers."""
+        return MappingProxyType(self._schema or {})
+
+    @property
+    def field_ids(self) -> Mapping[str, str]:
+        """Map configured aliases to the canonical history field IDs."""
+        return MappingProxyType(self._field_ids)
+
+    def capture(
+        self,
+        acquire: Callable[[], EnvObs],
+        *,
+        episode_context: EpisodeContext,
+        timestamp: float | None = None,
+    ) -> ObservationFrame:
+        """Capture one observation boundary and validate its bound schema.
+
+        Args:
+            acquire: Existing observation acquisition, preserving functor order.
+            episode_context: Exact host episode owner.
+            timestamp: Source simulation time, or None.
+
+        Returns:
+            The raw boundary and its actual policy view.
+        """
+        if self._env.episode_context is not episode_context:
+            raise ValueError("Observation capture belongs to another episode owner.")
+        with _ObservationCapture(
+            episode_context.episode_ids, timestamp, episode_owner=episode_context
+        ) as capture:
+            policy = acquire()
+        frame = capture.finish(policy)
+        self._bind_schema(frame)
+        return frame
+
+    def enable_history(
+        self, *, fields: Mapping[str, torch.Tensor], actions: torch.Tensor
+    ) -> None:
+        """Attach optional temporal storage to this observation manager.
+
+        Args:
+            fields: Owned preallocated state buffers with T+1 slots.
+            actions: Owned transition buffer with T slots.
+        """
+        if self.history is not None:
+            raise RuntimeError("Observation history is already enabled.")
+        self.history = _ObservationHistory(
+            episode_context=self._env.episode_context, fields=fields, actions=actions
+        )
+
+    def snapshot_history(
+        self,
+        env_ids: Sequence[int] | None = None,
+        *,
+        device: str | torch.device = "cpu",
+    ) -> dict[str, Any]:
+        """Copy canonical numeric history for a host export adapter.
+
+        Args:
+            env_ids: Selected original rows, or all rows.
+            device: Destination snapshot device.
+
+        Returns:
+            Owned numeric history and temporal identities. Semantics remain
+            available through this manager's schema and field IDs.
+        """
+        if self.history is None:
+            raise RuntimeError("Observation history is unavailable.")
+        return self.history.snapshot_history(env_ids, device=device)
+
+    def _bind_schema(self, frame: ObservationFrame) -> None:
+        if frame is self._validated_frame:
+            return
+        if self._schema is None:
+            self._schema = {
+                name: sample.descriptor for name, sample in frame.fields.items()
+            }
+            canonical = {descriptor: name for name, descriptor in self._schema.items()}
+            for name in self._required_fields:
+                if name in self._schema:
+                    canonical[self._schema[name]] = name
+            self._field_ids = {
+                name: canonical[descriptor] for name, descriptor in self._schema.items()
+            }
+        if frame.fields.keys() != self._schema.keys():
+            raise ValueError("Raw observation field schema changed after binding.")
+        for name, descriptor in self._schema.items():
+            observed = frame.fields[name].descriptor
+            if observed is not descriptor and observed != descriptor:
+                raise ValueError(f"Raw observation identity drift for {name!r}.")
+        self._validated_frame = frame
+
+    def seed_history(
+        self, frame: ObservationFrame, env_ids: Sequence[int] | torch.Tensor
+    ) -> None:
+        """Seed selected history rows from the prepared reset observation.
+
+        Args:
+            frame: Raw frame captured after reset preparation.
+            env_ids: Selected original environment rows.
+        """
+        if self.history is not None:
+            self.history.validate_episode_source(frame.episode_owner)
+            self._bind_schema(frame)
+            self.history.bind(frame, tuple(dict.fromkeys(self._field_ids.values())))
+            self.history.seed(frame, env_ids)
+
+    def append_history(
+        self,
+        frame: ObservationFrame,
+        action: torch.Tensor,
+        *,
+        active: torch.Tensor | None = None,
+    ) -> None:
+        """Append one captured boundary to optional temporal storage.
+
+        Args:
+            frame: Original post-transition raw frame.
+            action: Host-validated action in the fixed recording layout.
+            active: Optional row selection independent of policy transforms.
+        """
+        if self.history is not None:
+            self.history.validate_episode_source(frame.episode_owner)
+            self._bind_schema(frame)
+            self.history.append(frame, action, active=active)
+
+    def read_history(
+        self,
+        frame_indices: Sequence[int],
+        *,
+        fields: Sequence[str],
+        episode_ids: Sequence[int],
+        env_ids: Sequence[int] | None = None,
+    ) -> ObservationHistorySnapshot:
+        """Read exact history slots using IDs from this observation schema.
+
+        Args:
+            frame_indices: Row-local state slots in query order.
+            fields: Bound observation field IDs or aliases.
+            episode_ids: Expected source episodes.
+            env_ids: Original rows, or all rows when omitted.
+
+        Returns:
+            Owned field tensors and original temporal identities.
+        """
+        if self.history is None:
+            raise RuntimeError("Observation history is unavailable.")
+        names = tuple(fields)
+        if not names or len(set(names)) != len(names):
+            raise ValueError("History queries require unique nonempty field IDs.")
+        ids = {name: self._field_ids[name] for name in names}
+        result = self.history.read(
+            frame_indices,
+            fields=tuple(dict.fromkeys(ids.values())),
+            episode_ids=episode_ids,
+            env_ids=env_ids,
+        )
+        return replace(
+            result,
+            values={name: result.values[key] for name, key in ids.items()},
+            valid={name: result.valid[key] for name, key in ids.items()},
+            acquisition_errors={
+                name: result.acquisition_errors[key] for name, key in ids.items()
+            },
+        )
 
     def compute(
         self,
@@ -226,6 +416,7 @@ class ObservationManager(ManagerBase):
     def _prepare_functors(self) -> None:
         items = dict(self.cfg if isinstance(self.cfg, dict) else vars(self.cfg))
         required = self._recording_cfgs
+        self._required_fields = tuple(cfg.name for cfg in required.values())
         # Normalize through the same owner before comparing aliases. In
         # particular a module:callable string and its resolved function agree.
         prepared: dict[str, ObservationCfg] = {}
@@ -290,3 +481,65 @@ class ObservationManager(ManagerBase):
             if parameter.default is not inspect.Parameter.empty
         }
         return {**defaults, **left.params} == {**defaults, **right.params}
+
+
+_current_capture: ContextVar[_ObservationCapture | None] = ContextVar(
+    "embodichain_observation_capture", default=None
+)
+_revisions = count()
+
+
+class _ObservationCapture:
+    """Memoize physical acquisition only inside an explicit boundary scope."""
+
+    def __init__(
+        self,
+        episode_ids: tuple[int, ...],
+        timestamp: float | None = None,
+        *,
+        episode_owner: EpisodeContext | None = None,
+    ):
+        self.episode_ids = episode_ids
+        self.episode_owner = episode_owner
+        self.timestamp = timestamp
+        self.revision = next(_revisions)
+        self.samples: dict[
+            ObservationDescriptor | tuple[str, ...], ObservationSample
+        ] = {}
+        self.fields: dict[str, ObservationSample] = {}
+        self._token: Token | None = None
+
+    def __enter__(self) -> _ObservationCapture:
+        self._token = _current_capture.set(self)
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        _current_capture.reset(self._token)
+
+    def acquire(
+        self,
+        key: ObservationDescriptor | tuple[str, ...],
+        producer: Callable[[], ObservationSample],
+    ) -> ObservationSample:
+        if key not in self.samples:
+            sample = producer()
+            if sample.descriptor not in self.samples:
+                self.samples[sample.descriptor] = ObservationSample(
+                    sample.descriptor,
+                    sample.values.detach().clone(),
+                    sample.valid.detach().clone(),
+                    sample.acquisition_errors,
+                )
+            self.samples[key] = self.samples[sample.descriptor]
+        return self.samples[key]
+
+    def finish(self, policy: Any) -> ObservationFrame:
+        return ObservationFrame(
+            policy,
+            self.fields,
+            self.episode_ids,
+            self.revision,
+            self.timestamp,
+            "simulation_time" if self.timestamp is not None else "unavailable",
+            self.episode_owner,
+        )

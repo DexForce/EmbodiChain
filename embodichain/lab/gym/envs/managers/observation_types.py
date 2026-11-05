@@ -22,20 +22,23 @@ are eligible for physical recording; their values precede policy transforms.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from contextvars import ContextVar, Token
+from collections.abc import Mapping
 from dataclasses import dataclass
-from itertools import count
 from types import MappingProxyType
 from typing import Any, TYPE_CHECKING
 import math
 
 if TYPE_CHECKING:
-    from .envs.episode_context import EpisodeContext
+    from ..episode_context import EpisodeContext
 
 import torch
 
-__all__ = ["ObservationDescriptor", "ObservationSample", "ObservationFrame"]
+__all__ = [
+    "ObservationDescriptor",
+    "ObservationSample",
+    "ObservationFrame",
+    "ObservationHistorySnapshot",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,63 +162,28 @@ class ObservationFrame:
             raise ValueError("An available observation timestamp must be finite.")
 
 
-_current_capture: ContextVar[_ObservationCapture | None] = ContextVar(
-    "embodichain_observation_capture", default=None
-)
-_revisions = count()
+@dataclass(frozen=True, slots=True, eq=False)
+class ObservationHistorySnapshot:
+    """Owned values selected by field ID and exact temporal row identity.
 
+    Args:
+        values: Selected field tensors, without a second semantic schema.
+        valid: Per-field row availability.
+        acquisition_errors: Per-field missing-acquisition reasons.
+        env_ids: Original environment rows in query order.
+        episode_ids: Source episode identities.
+        frame_indices: Exact row-local state slots.
+        revisions: Original acquisition revisions.
+        timestamps: Original simulation times, or None when unavailable.
+        clock_domain: Explicit source clock domain.
+    """
 
-class _ObservationCapture:
-    """Memoize physical acquisition only inside an explicit boundary scope."""
-
-    def __init__(
-        self,
-        episode_ids: tuple[int, ...],
-        timestamp: float | None = None,
-        *,
-        episode_owner: EpisodeContext | None = None,
-    ):
-        self.episode_ids = episode_ids
-        self.episode_owner = episode_owner
-        self.timestamp = timestamp
-        self.revision = next(_revisions)
-        self.samples: dict[
-            ObservationDescriptor | tuple[str, ...], ObservationSample
-        ] = {}
-        self.fields: dict[str, ObservationSample] = {}
-        self._token: Token | None = None
-
-    def __enter__(self) -> _ObservationCapture:
-        self._token = _current_capture.set(self)
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        _current_capture.reset(self._token)
-
-    def acquire(
-        self,
-        key: ObservationDescriptor | tuple[str, ...],
-        producer: Callable[[], ObservationSample],
-    ) -> ObservationSample:
-        if key not in self.samples:
-            sample = producer()
-            if sample.descriptor not in self.samples:
-                self.samples[sample.descriptor] = ObservationSample(
-                    sample.descriptor,
-                    sample.values.detach().clone(),
-                    sample.valid.detach().clone(),
-                    sample.acquisition_errors,
-                )
-            self.samples[key] = self.samples[sample.descriptor]
-        return self.samples[key]
-
-    def finish(self, policy: Any) -> ObservationFrame:
-        return ObservationFrame(
-            policy,
-            self.fields,
-            self.episode_ids,
-            self.revision,
-            self.timestamp,
-            "simulation_time" if self.timestamp is not None else "unavailable",
-            self.episode_owner,
-        )
+    values: Mapping[str, torch.Tensor]
+    valid: Mapping[str, torch.Tensor]
+    acquisition_errors: Mapping[str, tuple[str | None, ...]]
+    env_ids: tuple[int, ...]
+    episode_ids: tuple[int, ...]
+    frame_indices: tuple[int, ...]
+    revisions: tuple[int, ...]
+    timestamps: tuple[float | None, ...]
+    clock_domain: str = "simulation_time"

@@ -270,8 +270,8 @@ def completed_runner(runner_case, monkeypatch):
     from embodichain.lab.gym.envs.types import ControllerAction
     from embodichain.lab.gym.envs.expert_trajectory import build_expert_action_spec
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
-    from embodichain.lab.gym.observations import ObservationFrame
-    from embodichain.lab.gym.recording import EpisodeRecording
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
 
     case = runner_case
 
@@ -349,18 +349,19 @@ def completed_runner(runner_case, monkeypatch):
             self.cfg.seed = 123
             self.episode_context._begin_episode([0])
             self.episode_context._finish_initialization([0])
-            self.recording = EpisodeRecording(
-                episode_context=self.episode_context,
+            self.episode_context = self.episode_context
+            self.observation_manager = ObservationManager({}, self)
+            self.observation_manager.enable_history(
                 fields={},
                 actions=self._traj_buffer["actions"],
             )
-            self._traj_steps = self.recording.steps
+            self._traj_steps = self.observation_manager.history.steps
             self.rollout_steps = torch.zeros(1, dtype=torch.long)
             self._elapsed_steps = torch.zeros(1, dtype=torch.long)
             self._demo_steps = torch.zeros(1, dtype=torch.long)
             self._demo_active_mask = torch.ones(1, dtype=torch.bool)
             self.episode_success_status = torch.zeros(1, dtype=torch.bool)
-            self.recording.seed(self._observation_frame(), [0])
+            self.observation_manager.seed_history(self._observation_frame(), [0])
             return {}, {}
 
         def get_obs(self):

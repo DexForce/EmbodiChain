@@ -1519,8 +1519,10 @@ class _TrajectoryWriterStub:
             },
             batch_size=[2, 4],
         )
-        from embodichain.lab.gym.recording import EpisodeRecording
-        from embodichain.lab.gym.observations import (
+        from embodichain.lab.gym.envs.managers.observation_manager import (
+            ObservationManager,
+        )
+        from embodichain.lab.gym.envs.managers.observation_types import (
             ObservationDescriptor,
             ObservationSample,
             ObservationFrame,
@@ -1530,8 +1532,9 @@ class _TrajectoryWriterStub:
         self.episode_context._begin_episode([0, 1])
         self.episode_context._finish_initialization([0, 1])
         fields = {"robot/qpos": self._traj_buffer["states"]["robot"]["qpos"]}
-        self.recording = EpisodeRecording(
-            episode_context=self.episode_context,
+        self.episode_context = self.episode_context
+        self.observation_manager = ObservationManager({}, self)
+        self.observation_manager.enable_history(
             fields=fields,
             actions=self._traj_buffer["actions"][:, :3],
         )
@@ -1562,11 +1565,11 @@ class _TrajectoryWriterStub:
             )
 
         self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 0)
-        self.recording.seed(self.frame, [0, 1])
+        self.observation_manager.seed_history(self.frame, [0, 1])
         self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 1)
-        self.recording.append(self.frame, torch.zeros(2, 2))
+        self.observation_manager.append_history(self.frame, torch.zeros(2, 2))
         self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 2)
-        self._traj_steps = self.recording.steps
+        self._traj_steps = self.observation_manager.history.steps
         self._traj_raw_action = torch.tensor([[9.0, 9.0], [8.0, 8.0]])
         self._demo_active_mask = torch.tensor([False, True])
         self.robot = _TrajectoryRobotStub()

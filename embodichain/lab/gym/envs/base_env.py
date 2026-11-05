@@ -46,10 +46,8 @@ from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
 from embodichain.utils import configclass
 from embodichain.utils import logger, set_seed
 from .episode_context import EpisodeContext
-from embodichain.lab.gym.observations import (
+from embodichain.lab.gym.envs.managers.observation_types import (
     ObservationFrame,
-    _ObservationCapture,
-    _current_capture,
 )
 
 __all__ = ["BaseEnv", "EnvCfg"]
@@ -771,7 +769,8 @@ class BaseEnv(gym.Env):
                 )
                 self._proprio_joint_index_cache = cached
             proprioception = self.robot.get_proprioception()
-            if _current_capture.get() is not None:
+            manager = getattr(self, "observation_manager", None)
+            if manager is not None and manager.is_capturing:
                 from .managers.observations import _capture_proprioception
 
                 _capture_proprioception(self, proprioception)
@@ -794,19 +793,19 @@ class BaseEnv(gym.Env):
     def _capture_observation(self, **kwargs: Any) -> ObservationFrame:
         """Capture one explicit control boundary without advancing history."""
         manager = getattr(self, "observation_manager", None)
-        enabled = getattr(self, "recording", None) is not None or (
-            manager is not None and manager.has_raw_channels
+        enabled = manager is not None and (
+            manager.history is not None or manager.has_raw_channels
         )
         episodes = self.episode_context.episode_ids
         if not enabled:
             return ObservationFrame(self.get_obs(**kwargs), {}, episodes, -1)
         timestamp = getattr(self.sim, "simulation_time", None)
         timestamp = float(timestamp) if isinstance(timestamp, (int, float)) else None
-        with _ObservationCapture(
-            episodes, timestamp, episode_owner=self.episode_context
-        ) as capture:
-            obs = self.get_obs(**kwargs)
-        return capture.finish(obs)
+        return manager.capture(
+            lambda: self.get_obs(**kwargs),
+            episode_context=self.episode_context,
+            timestamp=timestamp,
+        )
 
     def _record_initial_observation(
         self, frame: ObservationFrame, env_ids: torch.Tensor
@@ -1157,7 +1156,10 @@ class BaseEnv(gym.Env):
                 raise ValueError(
                     "recording_active_mask requires one bool per environment row."
                 )
-            if getattr(self, "recording", None) is None:
+            if (
+                getattr(getattr(self, "observation_manager", None), "history", None)
+                is None
+            ):
                 raise RuntimeError("recording_active_mask requires episode recording.")
             recording_active_mask = recording_active_mask.to(self.device).clone()
         with self._profiler.section("step", is_root=True):

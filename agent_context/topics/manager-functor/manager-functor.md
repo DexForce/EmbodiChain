@@ -92,8 +92,9 @@ state orders. Physical joint IDs are not observation-column indices.
 
 ## Raw observations and consumer views
 
-`lab/gym/observations.py` owns raw descriptors, validity-bearing samples and
-explicit observation frames. `ObservationCfg.consumers` defaults to policy.
+`managers/observation_types.py` contains the shared raw value/frame types.
+`ObservationManager` owns acquisition scopes, the single semantic schema and
+alias-to-field-ID binding. `ObservationCfg.consumers` defaults to policy.
 Recording add terms must produce described `ObservationSample` values;
 plain Tensor policy outputs retain their existing contract. The two consumers
 are policy and recording; evidence adapters read qualified recording fields.
@@ -110,8 +111,14 @@ another `SceneEntityCfg` during each step. Explicit boundaries
 share its original acquisition across aliases and existing pose functors.
 Policy transformations receive separate tensors; zero-filled missing sources
 retain false validity and reasons. Preserve configured policy functor/RNG order.
+Optional `ObservationManager.history` stores only numeric values, validity,
+reasons and temporal row identities. It never binds semantic aliases or
+interprets UID/quantity/pose descriptors. Evidence adapters resolve fields from
+`manager.schema` and query `read_history`; schema and alias drift are rejected
+by the manager. `export_observation_history` in `utils/trajectory_state.py`
+projects that same schema onto numeric snapshots for compatible file output.
 Contact windows remain sensor-owned and cannot be replaced with a control-rate
-pose/Boolean. History ownership and T+1 timing belong to
+pose/Boolean. History timing and host lifecycle belong to
 [environment recording](../env-framework/env-framework.md#expert-trajectory-contract).
 
 ## Lifecycle

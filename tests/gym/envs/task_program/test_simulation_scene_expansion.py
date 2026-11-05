@@ -238,6 +238,7 @@ class _Environment(EmbodiedEnv):
         }
         self.observation_manager = SimpleNamespace(
             has_raw_channels=False,
+            history=None,
             reset=lambda **k: self.events.append("observation_reset"),
         )
         self.rollout_buffer = TensorDict(

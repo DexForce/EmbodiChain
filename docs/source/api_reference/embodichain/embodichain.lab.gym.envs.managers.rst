@@ -247,6 +247,16 @@ Observation Manager
     :members:
     :no-index:
 
+The manager owns the raw field schema, source aliases and acquisition context.
+``capture`` returns the original raw boundary and its actual policy view;
+``enable_history`` attaches optional numeric storage. ``seed_history`` and
+``append_history`` retain T+1 boundaries while ``read_history`` returns owned
+values, validity, missing reasons and temporal identities using field IDs.
+Evidence adapters bind semantic roles through ``schema``. History performs no
+entity/quantity lookup. ``snapshot_history`` returns canonical numeric data;
+``utils.trajectory_state.export_observation_history`` adds the single schema for
+compatible file output without copying another complete state history.
+
 Observation Functions
 ---------------------
 

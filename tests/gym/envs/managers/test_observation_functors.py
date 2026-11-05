@@ -967,8 +967,9 @@ def test_raw_pose_is_acquired_once_before_policy_noise_and_shared_by_aliases():
         get_object_pose,
     )
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
-    from embodichain.lab.gym.observations import _ObservationCapture
-    from embodichain.lab.gym.recording import EpisodeRecording
+    from embodichain.lab.gym.envs.managers.observation_manager import (
+        _ObservationCapture,
+    )
     from tensordict import TensorDict
 
     env = MockEnv(num_envs=2)
@@ -1030,12 +1031,14 @@ def test_raw_pose_is_acquired_once_before_policy_noise_and_shared_by_aliases():
     assert "scene" not in obs.keys()
     # Alias names select the same described raw acquisition and storage.
     assert frame.fields["cube_pose"] is frame.fields["scene/cube/pose"]
-    recording = EpisodeRecording(
-        episode_context=context, fields={}, actions=torch.zeros(2, 1, 1)
+    env.episode_context = context
+    manager.enable_history(fields={}, actions=torch.zeros(2, 1, 1))
+    recording = manager
+    recording.seed_history(frame, [0, 1])
+    snapshot = recording.read_history(
+        [0, 0], fields=["scene/cube/pose"], episode_ids=[0, 0]
     )
-    recording.seed(frame, [0, 1])
-    snapshot = recording.read([0, 0], fields=["scene/cube/pose"], episode_ids=[0, 0])
-    torch.testing.assert_close(snapshot.fields["scene/cube/pose"].values, raw)
+    torch.testing.assert_close(snapshot.values["scene/cube/pose"], raw)
     # A mutation in the same simulation tick requires another acquisition.
     env.test_object._pose[:, 0, 3] = 3
     with _ObservationCapture(
@@ -1046,7 +1049,7 @@ def test_raw_pose_is_acquired_once_before_policy_noise_and_shared_by_aliases():
     assert getter.call_count == 2
     assert next_frame.revision != frame.revision
     assert next_frame.fields["cube_pose"].values[:, 0].tolist() == [3.0, 3.0]
-    assert recording.steps.tolist() == [0, 0]
+    assert recording.history.steps.tolist() == [0, 0]
 
 
 def test_raw_observation_missing_entity_has_validity_and_policy_tensor_is_not_evidence():
@@ -1138,7 +1141,9 @@ def test_replay_functors_share_full_robot_proprioception_before_policy_selection
 @pytest.mark.parametrize("is_static", [False, True])
 def test_raw_velocity_does_not_reacquire_pose_or_build_a_body_state(is_static):
     from types import SimpleNamespace
-    from embodichain.lab.gym.observations import _ObservationCapture
+    from embodichain.lab.gym.envs.managers.observation_manager import (
+        _ObservationCapture,
+    )
     from embodichain.lab.gym.envs.managers import SceneEntityCfg
     from embodichain.lab.gym.envs.managers.observations import get_entity_state
 
@@ -1178,7 +1183,9 @@ def test_raw_velocity_does_not_reacquire_pose_or_build_a_body_state(is_static):
 def test_pose_observations_keep_group_shape_inside_a_recording_boundary(to_matrix):
     from embodichain.lab.gym.envs.managers import SceneEntityCfg
     from embodichain.lab.gym.envs.managers.observations import get_object_pose
-    from embodichain.lab.gym.observations import _ObservationCapture
+    from embodichain.lab.gym.envs.managers.observation_manager import (
+        _ObservationCapture,
+    )
 
     env = MockEnv(num_envs=2)
     poses = torch.zeros(2, 3, 7)
@@ -1209,7 +1216,9 @@ def test_manager_binds_required_recording_source_once_after_callable_resolution(
         SceneEntityCfg,
     )
     from embodichain.lab.gym.envs.managers.observations import get_entity_state
-    from embodichain.lab.gym.observations import _ObservationCapture
+    from embodichain.lab.gym.envs.managers.observation_manager import (
+        _ObservationCapture,
+    )
     from tensordict import TensorDict
 
     env = MockEnv(num_envs=2)
