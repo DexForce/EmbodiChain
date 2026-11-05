@@ -27,7 +27,15 @@ and verifies content, source attachments and media. A recovered receipt grants
 credit once; an interrupted physical execution never masquerades as a continuation.
 Configured and custom hosts use the same engine admission/commit loop.
 Task Program owns execution semantics; `motion_source` selects native planning or
-its bound Real2Sim prototype, not a second task system. Immutable recipes declare
+its bound Real2Sim prototype, not a second task system. Occurrence-bound DemoSkill
+sources can mix with native calls and qualified standard prototypes. The row
+source adapter owns preparation/qualification only; the World, scheduling,
+receipts and persistence still use the shared host. `prototype_validation_profile`
+retains the tabletop guard for the selected prototype occurrences, while
+`demo_skill_duration_scale` requires explicit full-joint motion limits and
+asset-owned time permissions. Spatial and mapped timing recipes use separate
+configured jobs. `sampled_rigid_v1` collision profiles independently check all
+physical box/plane scene bodies and task predicates from measured states. Immutable recipes declare
 source/backend/phase/scope and shared-resource compatibility; the host checks them
 before mutating the World.
 

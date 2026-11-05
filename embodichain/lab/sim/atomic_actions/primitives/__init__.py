@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from ..core import AtomicAction
+from .execute_demo_skill import DemoSkillGoal, ExecuteDemoSkill
 from .axis_align import AxisAlign, AxisAlignGoal, AxisAlignOptions
 from .coordinated_pickment import (
     CoordinatedPickGoal,
@@ -62,6 +63,7 @@ from .slide import (
 from .twist import Twist, TwistGoal, TwistOptions
 
 BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
+    ExecuteDemoSkill,
     MoveEndEffector,
     MoveJoints,
     PickUp,
@@ -81,6 +83,8 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
 """Built-in action implementations instantiated once per action engine."""
 
 __all__ = [
+    "DemoSkillGoal",
+    "ExecuteDemoSkill",
     "AssembleGoal",
     "AxisAlign",
     "AxisAlignGoal",

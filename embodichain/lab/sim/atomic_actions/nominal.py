@@ -23,7 +23,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import math
 from types import MappingProxyType
-from typing import Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable, TYPE_CHECKING
 
 import torch
 
@@ -33,7 +33,14 @@ from .invocation import ResolvedActionRequest
 from .plans import TimedTrajectory
 from .state import PlanningContext
 
-__all__ = ["NominalMotionSource", "InstantiatedSkillMotion"]
+if TYPE_CHECKING:
+    from .verification import EffectVerificationRequest, EffectVerificationResult
+
+__all__ = [
+    "NominalMotionSource",
+    "InstantiatedSkillMotion",
+    "MonitoredNominalMotionSource",
+]
 
 
 @dataclass(frozen=True)
@@ -361,3 +368,23 @@ class NominalMotionSource(Protocol):
         context: PlanningContext,
     ) -> InstantiatedSkillMotion:
         """Create a side-effect-free motion candidate for the current scene."""
+
+
+@runtime_checkable
+class MonitoredNominalMotionSource(NominalMotionSource, Protocol):
+    """Optional observation/verification port for a source-owned motion contract.
+
+    Implementations consume measured observations and never send commands or
+    commit symbolic state. Exceptions use the runner's ordinary stop path.
+    """
+
+    def observe_execution(
+        self, context: PlanningContext, sample_index: int | None, *, terminal: bool
+    ) -> None:
+        """Check entry or the last acknowledged plan sample against fresh evidence."""
+
+    def owns_effect(self, request: EffectVerificationRequest) -> bool:
+        """Return whether this source owns the explicit terminal requirement."""
+
+    def verify_effect(self, context: PlanningContext, request: object) -> object:
+        """Return a correlated effect result after measured terminal validation."""

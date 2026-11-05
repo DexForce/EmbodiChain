@@ -3004,3 +3004,93 @@ def test_real2sim_collection_profile_rejects_ambiguous_limits_and_recipes(
     path.write_text(yaml.safe_dump({**payload, "unexpected": 1}))
     with pytest.raises(ValueError, match="unknown Real2Sim profile field"):
         load_real2sim_tabletop_profile(path)
+
+
+def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
+    tmp_path,
+):
+    import numpy as np
+    from embodichain.data_pipeline.real2sim import (
+        RobotDemonstration,
+        DemoSkillSpec,
+        DemoSkillPhase,
+        DemoSkillConstraint,
+        JointSpec,
+        build_demo_skill,
+        save_demo_skill,
+    )
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_runtime_services,
+    )
+    from embodichain.lab.sim.atomic_actions import ExecuteDemoSkill, ActionOptions
+
+    artifact = build_demo_skill(
+        RobotDemonstration(
+            "teleop",
+            "1",
+            "specialized",
+            ("a",),
+            ("rad",),
+            np.zeros((6, 1)),
+            np.arange(6) * 0.02,
+            "s",
+            "a" * 64,
+            "b" * 64,
+        ),
+        DemoSkillSpec(
+            asset_id="task.contour",
+            instruction="Trace contour",
+            phases=(DemoSkillPhase("continuous", 0, 6),),
+            constraints=(DemoSkillConstraint("done", "metric", "terminal"),),
+        ),
+        joints=(JointSpec("a", "revolute"),),
+        control_dt=0.02,
+    )
+    manifest = save_demo_skill(artifact, tmp_path / "skill")
+    declaration = {
+        "kind": "demo_skill",
+        "call_id": "task.contour",
+        "asset_manifest": str(manifest),
+        "asset_sha256": artifact.content_sha256,
+    }
+    source = {
+        "provider_id": "demo_skill",
+        "revision": "1",
+        "call_index": 1,
+        "program_fingerprint": "c" * 64,
+        "call_id": "task.contour",
+        "asset_manifest": str(manifest),
+        "asset_sha256": artifact.content_sha256,
+    }
+    services = _decode_runtime_services(
+        {
+            "registered_semantic_lowerers": [declaration],
+            "nominal_motion_sources": [source],
+        }
+    )
+    factory = services.registered_semantic_lowerers[0]
+    assert factory.call_id == "task.contour"
+    assert factory.target_descriptor == ExecuteDemoSkill.descriptor()
+    assert (
+        type(_decode_action_options({"kind": "execute_demo_skill"}, path="options"))
+        is ActionOptions
+    )
+    payload = _integration_payload("repeated_pick_place")
+    payload.setdefault("runtime_services", {})["registered_semantic_lowerers"] = [
+        declaration
+    ]
+    integration = _decode_configured_task_program_integration(payload)
+    assert "task.contour" in integration.registration.catalog.call_catalog.descriptors
+    assert services.nominal_motion_sources[0].call_index == 1
+    with pytest.raises(ValueError, match="unsupported fields|unknown|requires kind"):
+        _decode_runtime_services(
+            {
+                "registered_semantic_lowerers": [
+                    {**declaration, "class_type": "arbitrary"}
+                ]
+            }
+        )
+    with pytest.raises(ValueError, match="digest|changed"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**source, "asset_sha256": "e" * 64}]}
+        )

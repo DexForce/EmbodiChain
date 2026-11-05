@@ -57,7 +57,7 @@ from .tracking import (
 
 if TYPE_CHECKING:
     from .engine import AtomicActionEngine, PlanTransform
-    from .nominal import NominalMotionSource
+    from .nominal import NominalMotionSource, MonitoredNominalMotionSource
 
 
 class ExecutionStatus(str, Enum):
@@ -709,6 +709,14 @@ class ExecutionSession:
         return self._plan.effect_candidates.snapshot()
 
     @property
+    def nominal_motion_monitor(self) -> MonitoredNominalMotionSource | None:
+        """Return the optional source-owned measured-execution monitor."""
+        from .nominal import MonitoredNominalMotionSource
+
+        source = self._nominal_source
+        return source if isinstance(source, MonitoredNominalMotionSource) else None
+
+    @property
     def active_plan(self) -> ActionPlan:
         """Return an independently owned snapshot of the active action plan.
 
@@ -1220,6 +1228,10 @@ class ExecutionSession:
             self._validate_destination_continuity(plan, event_kind)
         self._validate_tracking_continuity(plan, event_kind)
         self._validate_phase_effect_gates(plan)
+        monitor = self.nominal_motion_monitor
+        bind_monitor = getattr(monitor, "bind_execution_plan", None)
+        if plan.plan_success.any() and bind_monitor is not None:
+            bind_monitor(plan)
         if (
             event_kind
             not in (

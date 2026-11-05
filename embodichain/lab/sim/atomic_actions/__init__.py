@@ -274,6 +274,13 @@ from .state import (
 )
 
 __all__ = [
+    "DemoSkillObservation",
+    "DemoSkillEvidenceProvider",
+    "DemoSkillMonitor",
+    "DemoSkillMotionProvider",
+    "DemoSkillGoal",
+    "ExecuteDemoSkill",
+    "MonitoredNominalMotionSource",
     "ActionBinding",
     "ActionControlOverrides",
     "ActionInvocation",
@@ -490,3 +497,12 @@ __all__ = [
     "WholeBodyPoseTrackingState",
     "TwistAffordance",
 ]
+
+from .demo_skill import (
+    DemoSkillObservation,
+    DemoSkillEvidenceProvider,
+    DemoSkillMonitor,
+    DemoSkillMotionProvider,
+)
+from .primitives.execute_demo_skill import DemoSkillGoal, ExecuteDemoSkill
+from .nominal import MonitoredNominalMotionSource

@@ -178,3 +178,148 @@ class _MeasuredCollision:
 
     def close(self):
         self.checker.close()
+
+
+class _SampledRigidCollision:
+    """Measured box/plane adapter using the existing full-robot collision checker."""
+
+    def __init__(self, env, profile, output):
+        from .contracts import ValidationCheck, ValidationResult
+        from embodichain.lab.sim.motion.expansion.real2sim_collision import (
+            BoxCollisionBody,
+            PlaneCollisionBody,
+            SampledRobotCollisionChecker,
+        )
+
+        self.config = _decode_sampled_rigid_profile(load_config(profile))
+        self.env = env
+        self.monitors = {
+            row: MeasuredTaskMonitor(
+                self.config["final_checks"], self.config["events"], env_id=row
+            )
+            for row in range(env.num_envs)
+        }
+        self.bodies = tuple(
+            BoxCollisionBody.from_rigid_object(env.sim.get_rigid_object(uid))
+            for uid in env.sim.get_rigid_object_uid_list()
+        )
+        if (
+            env.sim.get_articulation_uid_list()
+            or env.sim.get_deformable_object_uid_list()
+            or env.sim.get_rigid_object_group_uid_list()
+        ):
+            raise ValueError(
+                "sampled rigid validation cannot omit unsupported scene entities"
+            )
+        self.checkers = tuple(
+            SampledRobotCollisionChecker(
+                env.robot.cfg.fpath,
+                joint_names=env.robot.joint_names,
+                bodies=(*self.bodies, PlaneCollisionBody("ground", np.eye(4))),
+                world_from_base=env.robot.get_local_pose(to_matrix=True)[row]
+                .detach()
+                .cpu()
+                .numpy(),
+            )
+            for row in range(env.num_envs)
+        )
+        self.initial, self.terminal, self.results = {}, {}, {}
+
+    def prepare(self, snapshot=None):
+        del snapshot
+        from embodichain.lab.sim.motion.expansion.real2sim_collision import (
+            BoxCollisionBody,
+        )
+
+        self.initial.clear()
+        self.terminal.clear()
+        self.results.clear()
+        for row, monitor in self.monitors.items():
+            for body in self.bodies:
+                actual = BoxCollisionBody.from_rigid_object(
+                    self.env.sim.get_rigid_object(body.uid), env_id=row
+                )
+                if actual.geometry_sha256 != body.geometry_sha256:
+                    raise ValueError("physical row collision geometry differs")
+            monitor.reset(self.env)
+            self.initial[row] = all(
+                monitor.predicate(self.env, item)
+                for item in self.config["initial_checks"]
+            ) and not all(
+                monitor.predicate(self.env, item)
+                for item in self.config["final_checks"]
+            )
+
+    def sample(self, ids, action, snapshot=None):
+        from embodichain.lab.sim.motion.expansion.real2sim_collision import (
+            CollisionPhase,
+        )
+        from types import SimpleNamespace
+
+        contacts = {
+            tuple(item["pair"]): item["depth_m"]
+            for item in self.config["allowed_contacts"]
+        }
+        for row in ids:
+            self.monitors[row].observe(self.env, action)
+            self.terminal[row] = self.monitors[row].validation(self.env)
+            qpos = self.env.robot.get_qpos()[row : row + 1].detach().cpu().numpy()
+            poses = {
+                body.uid: self.env.sim.get_rigid_object(body.uid)
+                .get_local_pose(to_matrix=True)[row : row + 1]
+                .detach()
+                .cpu()
+                .numpy()
+                for body in self.bodies
+            }
+            poses["ground"] = np.eye(4)[None]
+            report = self.checkers[row].validate(
+                qpos,
+                body_poses=poses,
+                phases=(CollisionPhase("measured", 0, 1, contacts),),
+            )
+            if row not in self.results or not report.accepted:
+                self.results[row] = SimpleNamespace(
+                    status="passed" if report.accepted else "failed",
+                    reason=f"{report.reason}; pair={report.first_failure_pair}; penetration_m={report.first_failure_penetration_m}",
+                )
+
+    def close(self):
+        """Release adapter-owned CPU geometry; the host owns the World."""
+        self.checkers = ()
+
+
+def _decode_sampled_rigid_profile(value):
+    if (
+        type(value) is not dict
+        or set(value)
+        != {"kind", "initial_checks", "final_checks", "events", "allowed_contacts"}
+        or value["kind"] != "sampled_rigid_v1"
+    ):
+        raise ValueError("invalid sampled_rigid_v1 collision profile")
+    if not value["initial_checks"] or not value["final_checks"]:
+        raise ValueError(
+            "sampled rigid validation requires independent entry and terminal predicates"
+        )
+    monitor = MeasuredTaskMonitor(value["final_checks"], value["events"])
+    for item in value["initial_checks"]:
+        monitor._validate(item)
+    from embodichain.lab.sim.motion.expansion.real2sim_collision import CollisionPhase
+
+    contacts = {}
+    for item in value["allowed_contacts"]:
+        if type(item) is not dict or set(item) != {"pair", "depth_m"}:
+            raise ValueError("allowed contacts require exact pair and depth_m")
+        pair = tuple(sorted(item["pair"]))
+        if pair in contacts:
+            raise ValueError("duplicate allowed contact pair")
+        contacts[pair] = item["depth_m"]
+    CollisionPhase("profile", 0, 1, contacts)
+    return value
+
+
+def _create_measured_collision(env, profile, output):
+    value = load_config(profile)
+    if isinstance(value, dict) and value.get("kind") == "sampled_rigid_v1":
+        return _SampledRigidCollision(env, profile, output)
+    return _MeasuredCollision(env, profile, output)

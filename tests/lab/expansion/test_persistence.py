@@ -193,3 +193,65 @@ def test_frozen_media_and_sources_survive_bundle_relocation(tmp_path):
     EpisodeArtifactManifest.read(
         Path(repaired.storage_id).parent / "artifacts.json"
     ).verify(Path(repaired.storage_id).parent)
+
+
+def test_demo_skill_bundle_remains_loadable_after_archiving_and_source_removal(
+    tmp_path,
+):
+    import shutil
+    from embodichain.data_pipeline.real2sim import (
+        RobotDemonstration,
+        DemoSkillSpec,
+        DemoSkillPhase,
+        DemoSkillConstraint,
+        JointSpec,
+        build_demo_skill,
+        save_demo_skill,
+        load_demo_skill,
+    )
+
+    asset = build_demo_skill(
+        RobotDemonstration(
+            "real",
+            "1",
+            "unit",
+            ("a",),
+            ("rad",),
+            np.zeros((3, 1)),
+            np.arange(3) * 0.1,
+            "s",
+            "a" * 64,
+            "b" * 64,
+        ),
+        DemoSkillSpec(
+            asset_id="test",
+            instruction="task",
+            phases=(DemoSkillPhase("task", 0, 3),),
+            constraints=(DemoSkillConstraint("done", "metric", "terminal"),),
+        ),
+        joints=(JointSpec("a", "revolute"),),
+        control_dt=0.1,
+    )
+    original = save_demo_skill(asset, tmp_path / "source")
+    bundle = {
+        key: {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        for key, path in (
+            ("asset_manifest", original),
+            ("source_manifest", original.parent / "demonstration.json"),
+            ("source_arrays", original.parent / "demonstration.npz"),
+        )
+    }
+    sink = ArtifactEpisodeSink(tmp_path / "dataset")
+    data = replace(episode(), metadata={"demo_skill_source_artifacts": {"0": bundle}})
+    receipt = sink.submit(data, submission_id=0)
+    assert receipt.confirmed
+    shutil.rmtree(original.parent)
+    from embodichain.lab.expansion.persistence import load_expansion_episode
+
+    restored = load_expansion_episode(receipt.storage_id)
+    reference = restored.metadata["demo_skill_source_artifacts"]["0"]["asset_manifest"]
+    assert load_demo_skill(reference["path"]).content_sha256 == asset.content_sha256
+    assert len(sink.inspect()) == 1

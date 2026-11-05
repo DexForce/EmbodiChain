@@ -147,9 +147,9 @@ class GymExpansionHost:
             else None
         )
         if cfg.collision_profile is not None:
-            from .collision import _MeasuredCollision
+            from .collision import _create_measured_collision
 
-            collision = _MeasuredCollision(
+            collision = _create_measured_collision(
                 env, cfg.collision_profile, root / "collision"
             )
         self._context.collision = collision

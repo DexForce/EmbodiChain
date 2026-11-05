@@ -90,6 +90,10 @@ checks remain with the selected planning policy. Validate executed mouth
 alignment and height throughout tilted motion with host observations, rather
 than treating an accepted final pose as evidence of pouring.
 
+ExecuteDemoSkill executes task-specific demonstration assets with measured runtime
+contracts through the same nominal-source and runner interfaces. Its internal
+events do not create independent recovery boundaries.
+
 PickUp, MoveHeldObject and Place can also assemble a pre-planning nominal motion
 source. The source does not own semantic effects or environment lifecycle; see
 [Real2Sim motion](../data-pipeline/real2sim.md) for source and replay limits.

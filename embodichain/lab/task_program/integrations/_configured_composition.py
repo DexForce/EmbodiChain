@@ -390,6 +390,16 @@ def _resolve_task_program_components(
         runtime_services = _owned_mapping(
             integration["runtime_services"], path="integration.runtime_services"
         )
+        if "registered_semantic_lowerers" in runtime_services:
+            for lowerer in runtime_services["registered_semantic_lowerers"]:
+                if isinstance(lowerer, dict) and lowerer.get("kind") == "demo_skill":
+                    from embodichain.data._references import _resolve_data_reference
+
+                    lowerer["asset_manifest"] = str(
+                        _resolve_data_reference(
+                            lowerer["asset_manifest"], base_dir=integration_path.parent
+                        )
+                    )
         if "nominal_motion_sources" in runtime_services:
             sources = _owned_sequence(
                 runtime_services["nominal_motion_sources"],
@@ -401,15 +411,20 @@ def _resolve_task_program_components(
                     item,
                     path=f"integration.runtime_services.nominal_motion_sources[{index}]",
                 )
-                if "prototype_manifest" not in value:
-                    raise ValueError("nominal source requires prototype_manifest")
+                manifest_key = (
+                    "asset_manifest"
+                    if value.get("provider_id") == "demo_skill"
+                    else "prototype_manifest"
+                )
+                if manifest_key not in value:
+                    raise ValueError(f"nominal source requires {manifest_key}")
                 from embodichain.data._references import _resolve_data_reference
 
-                value["prototype_manifest"] = str(
+                value[manifest_key] = str(
                     _component_path(
                         str(
                             _resolve_data_reference(
-                                value["prototype_manifest"],
+                                value[manifest_key],
                                 base_dir=integration_path.parent,
                             )
                         ),

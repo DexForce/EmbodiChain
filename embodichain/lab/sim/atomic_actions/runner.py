@@ -720,14 +720,77 @@ class ExecutionRunner:
                 context=context,
             )
 
+        motion_monitor = self._session.nominal_motion_monitor
+        if motion_monitor is not None:
+            try:
+                reference = self._session.last_commanded_plan_sample
+                motion_monitor.observe_execution(
+                    context,
+                    None if reference is None else reference[1],
+                    terminal=self._session.pending_effect is not None,
+                )
+            except Exception as exc:
+                return self._fail(
+                    f"Nominal motion contract failed: {type(exc).__name__}: {exc}",
+                    context=context,
+                )
+
         pending_effect = self._session.pending_effect
         if (
             pending_effect is not None
-            and (effect_verifier is not None or physical_effect_verifier is not None)
+            and (
+                effect_verifier is not None
+                or physical_effect_verifier is not None
+                or (
+                    motion_monitor is not None
+                    and motion_monitor.owns_effect(pending_effect)
+                )
+            )
             and context.robot.timestamp <= pending_effect.deadline
         ):
             try:
-                if physical_effect_verifier is not None:
+                if motion_monitor is not None and motion_monitor.owns_effect(
+                    pending_effect
+                ):
+                    effect_result = motion_monitor.verify_effect(
+                        context, pending_effect
+                    )
+                    # Source constraints and a catalog-owned symbolic effect are
+                    # separate verification contracts. Both must pass before the
+                    # session can commit a nonempty state delta.
+                    if not pending_effect.expected_effects.is_empty and (
+                        physical_effect_verifier is not None
+                        or effect_verifier is not None
+                    ):
+                        if type(effect_result) is not EffectVerificationResult:
+                            raise TypeError(
+                                "nominal verifier returned an invalid effect result"
+                            )
+                        own = effect_result
+                        if physical_effect_verifier is not None:
+                            assert evidence is not None
+                            semantic = physical_effect_verifier(
+                                context, evidence, pending_effect
+                            )
+                        else:
+                            semantic = effect_verifier(context, pending_effect)
+                        if type(semantic) is not EffectVerificationResult:
+                            raise TypeError(
+                                "semantic verifier returned an invalid effect result"
+                            )
+                        failed = own.failure_mask | semantic.failure_mask
+                        effect_result = replace(
+                            semantic,
+                            success_mask=own.success_mask
+                            & semantic.success_mask
+                            & ~failed,
+                            failure_mask=failed,
+                            invalidation_mask=own.invalidation_mask
+                            | semantic.invalidation_mask,
+                            retry_mask=(own.retry_mask | semantic.retry_mask) & failed,
+                        )
+
+                elif physical_effect_verifier is not None:
                     assert evidence is not None
                     effect_result = physical_effect_verifier(
                         context,
