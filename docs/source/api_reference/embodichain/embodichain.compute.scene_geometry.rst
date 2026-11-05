@@ -413,5 +413,7 @@ fluid-transfer conclusions.
 .. currentmodule:: embodichain.compute.geometry.pouring
 
 .. autofunction:: measure_pour_tilt
+   :no-index:
 
 .. autofunction:: measure_pour_receiver
+   :no-index:
