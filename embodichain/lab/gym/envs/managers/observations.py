@@ -157,9 +157,13 @@ def get_entity_state(
                 values = torch.zeros((env.num_envs, 3), device=env.device)
             else:
                 values = getattr(obj.body_data, quantity)
-            valid = torch.isfinite(values).all(dim=-1)
+            valid = torch.isfinite(values).reshape(env.num_envs, -1).all(dim=-1)
             if quantity == "pose":
-                valid &= torch.linalg.vector_norm(values[:, 3:], dim=-1) > 0
+                valid &= (
+                    (torch.linalg.vector_norm(values[..., 3:], dim=-1) > 0)
+                    .reshape(env.num_envs, -1)
+                    .all(dim=-1)
+                )
             errors = (None,) * env.num_envs
         descriptor = _entity_state_descriptor(uid, obj, quantity, values)
         return ObservationSample(descriptor, values, valid, errors)
@@ -217,7 +221,9 @@ def get_object_pose(
             env, obs, SceneEntityCfg(uid=entity_cfg.uid), quantity="pose"
         )
         return (
-            xyz_quat_to_4x4_matrix(sample.values)
+            xyz_quat_to_4x4_matrix(sample.values.reshape(-1, 7)).reshape(
+                *sample.values.shape[:-1], 4, 4
+            )
             if to_matrix
             else sample.values.clone()
         )

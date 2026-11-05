@@ -1172,3 +1172,28 @@ def test_raw_velocity_does_not_reacquire_pose_or_build_a_body_state(is_static):
         angular.values, torch.full((2, 3), 0.0 if is_static else 2.0)
     )
     assert pose.descriptor.coordinate_frame == "arena"
+
+
+@pytest.mark.parametrize("to_matrix", [False, True])
+def test_pose_observations_keep_group_shape_inside_a_recording_boundary(to_matrix):
+    from embodichain.lab.gym.envs.managers import SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.observations import get_object_pose
+    from embodichain.lab.gym.observations import _ObservationCapture
+
+    env = MockEnv(num_envs=2)
+    poses = torch.zeros(2, 3, 7)
+    poses[..., 6] = 1.0
+    poses[..., 0] = torch.tensor([1.0, 2.0, 3.0])
+    getter = Mock(side_effect=lambda to_matrix=False: poses.clone())
+    env.test_object.get_local_pose = getter
+    with _ObservationCapture((0, 0)):
+        result = get_object_pose(
+            env, {}, SceneEntityCfg(uid="test_cube"), to_matrix=to_matrix
+        )
+    if to_matrix:
+        expected = torch.eye(4).repeat(2, 3, 1, 1)
+        expected[..., 0, 3] = torch.tensor([1.0, 2.0, 3.0])
+        torch.testing.assert_close(result, expected)
+    else:
+        torch.testing.assert_close(result, poses)
+    getter.assert_called_once_with(to_matrix=False)
