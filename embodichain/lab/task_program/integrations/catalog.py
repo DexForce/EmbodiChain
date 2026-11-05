@@ -128,6 +128,8 @@ from .simulation.policies import (
     default_simulation_settle_presets,
 )
 from .simulation.planning_services import SimulationPlanningServicesCfg
+from .simulation.recorded_contacts import SimulationRecordedContactCfg
+from .simulation.cargo_observation import SimulationCargoEnvelopeCfg
 from .runtime_services import TaskProgramRuntimeServiceContext
 from .simulation.control_policy import SimulationControlConditionCfg
 from .simulation.control_lowering import TwistCallDeclaration
@@ -1227,6 +1229,8 @@ def _registration_payload(
     planning_services: SimulationPlanningServicesCfg | None = None,
     invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
     control_operations: tuple[ControlOperationDeclaration, ...] = (),
+    cargo_envelope_cfg: SimulationCargoEnvelopeCfg | None = None,
+    recorded_contacts_cfg: SimulationRecordedContactCfg | None = None,
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
     payload = {
@@ -1345,6 +1349,10 @@ def _registration_payload(
             payload["planning_services"].pop("native_handover_scene")
     if invocation_policy_bindings:
         payload["invocation_policy_bindings"] = invocation_policy_bindings
+    if cargo_envelope_cfg is not None:
+        payload["cargo_envelope"] = cargo_envelope_cfg
+    if recorded_contacts_cfg is not None:
+        payload["recorded_contacts"] = recorded_contacts_cfg
     return payload
 
 
@@ -1380,6 +1388,12 @@ class SimulationTaskProgramRegistration:
         default=(), kw_only=True
     )
     control_operations: tuple[ControlOperationDeclaration, ...] = ()
+    recorded_contacts_cfg: SimulationRecordedContactCfg | None = field(
+        default=None, kw_only=True
+    )
+    cargo_envelope_cfg: SimulationCargoEnvelopeCfg | None = field(
+        default=None, kw_only=True
+    )
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1413,6 +1427,35 @@ class SimulationTaskProgramRegistration:
     )
 
     def __post_init__(self) -> None:
+        if self.recorded_contacts_cfg is not None:
+            if type(self.recorded_contacts_cfg) is not SimulationRecordedContactCfg:
+                raise TypeError("recorded_contacts_cfg requires its typed declaration.")
+            cfg = self.recorded_contacts_cfg.snapshot()
+            parts = {
+                endpoint.control_part
+                for resource in self.robot_profile_binding.resources
+                for endpoint in resource.endpoints
+                if endpoint.endpoint_id == "grasp"
+            }
+            if not {part for part, _ in cfg.pad_bindings} <= parts:
+                raise ValueError("Recorded pads require declared grasp control parts.")
+            object.__setattr__(self, "recorded_contacts_cfg", cfg)
+        if self.cargo_envelope_cfg is not None:
+            if type(self.cargo_envelope_cfg) is not SimulationCargoEnvelopeCfg:
+                raise TypeError("cargo_envelope_cfg requires its typed declaration.")
+            cargo = self.cargo_envelope_cfg.snapshot()
+            rigid = {value.simulation_uid for value in self.scene_binding.rigid_objects}
+            owners = rigid | {
+                value.simulation_uid for value in self.scene_binding.articulations
+            }
+            if (
+                not set(cargo.carrier_uids) <= rigid
+                or not set(cargo.excluded_uids) <= owners
+            ):
+                raise ValueError(
+                    "Cargo selections differ from registered native physical owners."
+                )
+            object.__setattr__(self, "cargo_envelope_cfg", cargo)
         from .invocation_policy import InvocationPolicyBinding
 
         if type(self.invocation_policy_bindings) is not tuple or not all(
@@ -1630,6 +1673,8 @@ class SimulationTaskProgramRegistration:
                 planning_services=self.planning_services,
                 invocation_policy_bindings=self.invocation_policy_bindings,
                 control_operations=self.control_operations,
+                cargo_envelope_cfg=self.cargo_envelope_cfg,
+                recorded_contacts_cfg=self.recorded_contacts_cfg,
             )
         )
         object.__setattr__(
@@ -1697,6 +1742,8 @@ class SimulationTaskProgramRegistration:
             num_envs: Positive environment count declared by the host.
         """
         self.assert_unchanged()
+        if self.recorded_contacts_cfg is not None:
+            self.recorded_contacts_cfg.validate_num_envs(num_envs)
         if self.planning_services is not None:
             self.planning_services.validate_num_envs(num_envs)
         from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
@@ -1718,6 +1765,8 @@ class SimulationTaskProgramRegistration:
             physics: Explicit environment-owned backend name.
         """
         self.assert_unchanged()
+        if self.recorded_contacts_cfg is not None and physics != "default":
+            raise ValueError("Recorded source contacts require Default physics.")
         if self.planning_services is not None:
             self.planning_services.validate_physics(physics)
 
@@ -1803,6 +1852,8 @@ class SimulationTaskProgramRegistration:
                 planning_services=self.planning_services,
                 invocation_policy_bindings=self.invocation_policy_bindings,
                 control_operations=self.control_operations,
+                cargo_envelope_cfg=self.cargo_envelope_cfg,
+                recorded_contacts_cfg=self.recorded_contacts_cfg,
             )
             current = _digest(payload)
         except (TypeError, ValueError) as exc:

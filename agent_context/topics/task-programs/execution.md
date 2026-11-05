@@ -352,3 +352,20 @@ exact inclusive source slots and receiver slots at the first maximum tilt.
 Raw validity/errors, episode and written-boundary identity remain authoritative.
 Geometry functions live in Compute and choose no Pour thresholds or release
 verdicts. The collector does not read live poses or acquire new sensor samples.
+
+
+`simulation/observation_services.py` owns the explicit standard factory/adapter
+`create_observation_services(environment, bridge, observations=...)` entry. Bind
+an initialized environment's actual active bridge before its first step. The
+service set reuses public State/support and completed control owners; selected
+RecordedContact/Cargo collectors consume the actual ObservationManager, not an
+old trajectory reader. Contact hooks attach before stepping and detach on close,
+failed assembly or host teardown. The raw manager and control runtime remain
+borrowed. No declaration adds no hook/acquisition.
+
+Recorded-contact pose windows preserve raw validity, errors and original
+revision/time metadata. Cargo reads source-local vertices through Scene and all
+recorded frames through the same raw owner; Compute retains ordered 64-frame
+chunks and first failure. Historical reads never resample a native pose or treat
+missing timestamps as capture time. Task Engine consumes this public service set
+and owns task-specific binding/evaluation outside Lab.

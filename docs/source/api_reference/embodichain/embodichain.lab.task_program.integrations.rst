@@ -653,3 +653,54 @@ refresh or repeat the post-policy's physical acquisition. Bridge cleanup detache
 owned hooks and closes cursors/queries without acknowledging pending commands.
 The borrowed observation owner remains available for final collectors until host
 teardown, while a changed episode invalidates that bridge's live observations.
+
+
+Physical observation services for an actual execution
+------------------------------------------------------
+
+After binding the actual active bridge, call the standard adapter or simulation
+factory's ``create_observation_services(environment, bridge, observations=...)``.
+``SimulationObservationServices`` creates real collectors from the sealed
+registration before the first execution step. Unselected services add no sensor
+hook or acquisition. It reuses the public State/support collectors and borrowed
+control runtime; cleanup closes only its contact hook and Cargo owner. Closed
+service sets are released from the factory's active resource list. Factory
+teardown also closes live service sets without closing the borrowed raw manager.
+
+The actual environment-owned ObservationManager supplies selected raw pose fields,
+exact inclusive windows and cheap per-row completed counts. Original validity,
+acquisition errors, revisions and timestamps remain visible; missing finite raw
+values or timestamps cannot become valid geometry. Neither an old trajectory
+reader nor another policy/substep sampling chain is constructed.
+
+``SimulationControlObservationCollector`` copies already completed exact compiled
+policy occurrences, preserving window generations, physical channels, startup
+windows and receipts. It performs no current-state fallback and can copy retained
+facts after control hooks close. The supplied actual program/episode/native
+identity remains separate from task interpretation.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.control_observations
+   :members:
+
+``SimulationRecordedContactCfg`` selects an existing ordinary substep-suite sensor,
+complete single-sided native roster, 1024-contact query and bounded timeline.
+The collector registers its observer before stepping and reads pose windows only
+from the raw owner. Contact-only capture uses completed counts and copies no pose
+history. Closing detaches only the exact owned subscription; replacement, reset,
+episode and clock drift are rejected.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.recorded_contacts
+   :members:
+
+``SimulationCargoEnvelopeCfg`` selects source carriers and exclusions explicitly.
+The Cargo collector reads initial source meshes once per required selection, then
+checks complete original recorded prefixes and current terminal poses. Recorded
+acquisition metadata retains the native simulation clock, while report boundaries
+name the execution-step clock. The collector reports facts without evaluating a
+TaskSpec, and imports no Task Engine implementation.
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.cargo_observation
+   :members:
+
+.. automodule:: embodichain.lab.task_program.integrations.simulation.observation_services
+   :members:

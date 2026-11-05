@@ -377,6 +377,21 @@ class SimulationSegmentPolicyPort:
                 sensor_suite=sensor_suite,
             )
 
+    def validate_environment_owner(self, simulation: object, robot: object) -> None:
+        """Require the exact borrowed environment owners without acquiring state.
+
+        Args:
+            simulation: Actual simulation manager selected by the host.
+            robot: Actual robot selected by the same host.
+
+        Raises:
+            RuntimeError: This policy session has closed.
+            ValueError: Either owner belongs to a different environment.
+        """
+        self._require_open()
+        if self._simulation is not simulation or self._robot is not robot:
+            raise ValueError("The policy session belongs to another environment owner.")
+
     def bind_clock(self, clock: SupportControlClock) -> None:
         """Bind the existing environment clock for explicitly declared conditions.
 

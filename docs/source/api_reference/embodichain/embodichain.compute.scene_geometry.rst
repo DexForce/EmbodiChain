@@ -423,8 +423,15 @@ physical retention certificate and reads no simulation or task objects.
    :nosignatures:
 
    inside_carrier_envelope
+   first_carrier_envelope_failure
 
 .. autofunction:: inside_carrier_envelope
+
+Recorded prefixes are checked in the original ordered chunks of at most 64
+frames. Empty/incomplete or nonfinite prefixes remain unavailable; the function
+returns the first original frame index without resampling or changing the grid.
+
+.. autofunction:: first_carrier_envelope_failure
 
 
 Qualified contact heights
