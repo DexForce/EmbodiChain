@@ -55,7 +55,7 @@ Embodied Environment Classes
 
 .. autoclass:: EmbodiedEnv
     :members:
-    :exclude-members: get_generator, check_truncated, get_task_initial_state, initialize_task_outcome, restore_task_initial_state
+    :exclude-members: get_generator, check_truncated, get_task_initial_state, initialize_task_outcome, restore_task_initial_state, capture_recorded_rigid_poses
     :inherited-members:
     :show-inheritance:
 
