@@ -75,6 +75,15 @@ and acceleration budgets. Its plain tensor tuple retains gradients
 and explicit validity/length tensors. Duration is the sum of arrival intervals;
 solver success does not certify geometric task success.
 
+Fixed-count speed allocation
+----------------------------
+
+``interpolate_velocity_grid`` allocates each B=1 keyframe edge enough original
+control intervals for its slowest joint, then distributes spare intervals in
+input order. It retains all keyframe endpoints and rejects an insufficient fixed
+sample count instead of lengthening duration. This explicitly selected numeric
+helper does not change minimum-jerk interpolation or planner timing defaults.
+
 Implementation modules
 ----------------------
 
