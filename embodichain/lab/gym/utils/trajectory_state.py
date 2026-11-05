@@ -217,7 +217,6 @@ def trajectory_observation_cfgs(
         Recording-only add functors. No physical state is acquired here; legacy
         trajectory field paths are export names, not another acquisition path.
     """
-    from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.envs.managers.cfg import ObservationCfg, SceneEntityCfg
     from embodichain.lab.gym.envs.managers.observations import get_entity_state
 
