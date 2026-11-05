@@ -979,6 +979,35 @@ stored in these contracts.
 
    RoleSpec
 
+embodichain.gen_sim.task_spec.control_evidence
+----------------------------------------------
+
+Control bindings seal a plain source route payload and explicit terminal policy,
+source path and complete execution prefix. Historical Press/Twist replay checks
+the same operation/source-asset/route digest, sampling window, cleanup, clearance
+and declared coarse or calibrated criterion as the original source observer.
+There are no imports of live factories, sensors or Task Engine objects.
+
+Only explicitly selected ``historical_record`` inputs are currently qualified;
+raw input is rejected at binding construction until its complete operation-window
+acquisition contract is available. Missing or failed receipt qualification stays
+unavailable. A contact-backed Press event is not device activation, and the
+coarse Twist criterion is not silently upgraded to calibrated-setting success.
+The common physical report assembler accepts these bindings without filling
+missing final goals, past milestones or continuous trajectory requirements.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.control_evidence
+
+.. autosummary::
+
+   ControlEvidenceBinding
+   evaluate_control_evidence
+
+.. autoclass:: ControlEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_control_evidence
+
 embodichain.gen_sim.task_spec.evidence
 --------------------------------------
 
@@ -1042,7 +1071,7 @@ invariants. The ordinary TaskSpec evaluator remains the certificate authority.
 embodichain.gen_sim.task_spec.evidence_report
 ---------------------------------------------
 
-Combine verified placement, orientation and joint evidence using the existing
+Combine verified placement, orientation, joint and historical control evidence using the existing
 TaskSpec evaluator. Bindings must share the native row, episode and input-format
 contract. Final observations cannot fill past milestones; sparse boundary
 observations cannot establish continuous invariants or complete temporal windows.

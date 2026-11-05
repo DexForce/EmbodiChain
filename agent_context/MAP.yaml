@@ -499,7 +499,8 @@ topics:
   aliases: [task specification, normative task specification, 任务规范, 任务规范校验]
   keywords: [TaskSpec, TaskSpecCache, TaskRequirement, MilestoneSpec, evaluate_task_spec,
     validate_task_spec, semantic_hash, certificate_ready, SupportedPlacementEvidenceBinding, evaluate_placement_evidence_report,
-    ConditionEvidenceBinding, evaluate_condition_evidence, evaluate_physical_evidence_report]
+    ConditionEvidenceBinding, evaluate_condition_evidence, evaluate_physical_evidence_report,
+    ControlEvidenceBinding, evaluate_control_evidence]
   paths: [topics/task-spec/task-spec.md]
   source_of_truth:
   - embodichain/gen_sim/task_spec/spec.py
@@ -508,6 +509,7 @@ topics:
   - embodichain/gen_sim/task_spec/registry.py
   - embodichain/gen_sim/task_spec/evidence.py
   - embodichain/gen_sim/task_spec/condition_evidence.py
+  - embodichain/gen_sim/task_spec/control_evidence.py
   - embodichain/gen_sim/task_spec/evidence_report.py
   - embodichain/gen_sim/task_spec/canonicalization.py
   watch_paths: [embodichain/gen_sim/task_spec/, tests/gen_sim/task_spec/]

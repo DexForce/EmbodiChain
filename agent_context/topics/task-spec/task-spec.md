@@ -17,6 +17,7 @@ of those owners.
 | Structure validation and evidence evaluation | `validation.py` |
 | Placement bindings and physical proof checks | `evidence.py` |
 | Orientation/joint state and milestone qualification | `condition_evidence.py` |
+| Operation-bound historical Press/Twist qualification | `control_evidence.py` |
 | Common per-environment physical reports | `evidence_report.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
@@ -89,6 +90,15 @@ stability contract; missing or failed milestone evidence remains unavailable.
 Raw joint receipts additionally bind their actual environment-step acquisition
 clock and boundary. A common report owner combines supported physical families
 without filling absent predicates or historical boundaries.
+
+Control qualification consumes a plain sealed source route and exact execution
+occurrences, not a live Press/Twist factory. It retains source sampling-window,
+cleanup and clearance requirements and the explicitly declared coarse/calibrated
+criterion. Only explicit historical receipt replay is currently supported; raw
+control acquisition is rejected before observation until the complete window
+contract is implemented. A final control goal remains an operation-event proof,
+not a replacement for a current joint-position measurement. Failed or missing
+operation receipts remain unavailable.
 
 ## Focused validation
 
