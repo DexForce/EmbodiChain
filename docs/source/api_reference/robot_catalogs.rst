@@ -847,7 +847,3 @@ These APIs return declarations; they provide no physical effect evidence.
    :members:
 
 .. autofunction:: declare_task_source_execution_calibration
-
-.. currentmodule:: embodichain_robots.robotiq.deployment
-
-.. autofunction:: source_grip_effort_caps
