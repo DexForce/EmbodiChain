@@ -28,6 +28,7 @@ import sys
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
@@ -190,6 +191,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Object mesh to grasp in the coordinated pickment demo.",
     )
     parser.add_argument(
+        "--solver",
+        choices=("pytorch", "ur"),
+        default="pytorch",
+        help="IK solver for the UR dual-arm fixture.",
+    )
+    parser.add_argument(
         "--hand_interp_steps",
         type=int,
         default=PICKMENT_HAND_INTERP_STEPS,
@@ -217,6 +224,7 @@ def parse_arguments() -> argparse.Namespace:
 def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
+    solver: Literal["pytorch", "ur"] = "pytorch",
 ) -> Robot:
     """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
@@ -225,7 +233,7 @@ def create_dual_robot(
         uid=f"Dual{robot_type.title()}CoordinatedPickment",
         urdf_name=f"dual_{robot_type}_coordinated_pickment",
         tcp_z=GRIPPER_TCP_Z,
-        solver="pytorch",
+        solver=solver,
     )
 
 
@@ -770,7 +778,7 @@ def main() -> None:
         args,
         arena_space=3.0,
     )
-    robot = create_dual_robot(sim, args.robot)
+    robot = create_dual_robot(sim, args.robot, args.solver)
     run_coordinated_pickment_demo(args, sim, robot)
 
 
