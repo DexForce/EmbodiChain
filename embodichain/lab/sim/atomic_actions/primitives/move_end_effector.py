@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import ClassVar
+from ..articulation_continuation import ArticulationWithdrawalPlanningRecovery
 from collections.abc import Callable
 from embodichain.lab.sim.atomic_actions.policies import PlanningRecovery
 from embodichain.lab.sim.atomic_actions.released_continuation import (
@@ -91,7 +92,10 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
         ),
     )
     OptionsType: ClassVar[type] = MoveEndEffectorOptions
-    PlanningRecoveryType: ClassVar[type] = ReleasedHandClearanceRecovery
+    PlanningRecoveryType: ClassVar[tuple[type[PlanningRecovery], ...]] = (
+        ArticulationWithdrawalPlanningRecovery,
+        ReleasedHandClearanceRecovery,
+    )
 
     def plan_complete_request(
         self,
@@ -162,20 +166,54 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
                     "Free Cartesian end-effector segments require the source B1 grid without articulation recovery."
                 )
             return
-
-        raise ValueError(
-            "End-effector segment recovery requires explicit linear_segments in this layer."
-        )
+        if (
+            type(request.recovery_policy.planning_recovery)
+            is not ArticulationWithdrawalPlanningRecovery
+            or context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or request.motion_policy.segment_sample_count_retries != (260, 320)
+            or request.motion_policy.segment_continuous_ik_recovery
+        ):
+            raise ValueError(
+                "Source articulation segments require their typed B1 recovery and exact declared retry grid."
+            )
 
     def _plan(
         self,
         request: ResolvedActionRequest[EndEffectorPoseGoal, MoveEndEffectorOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        return self._plan_nominal(request, context)
+        if (
+            request.recovery_policy.planning_recovery is None
+            and self.planning_services.articulation_continuation_provider is None
+        ):
+            return self._plan_nominal(request, context)
+        from embodichain.lab.sim.atomic_actions.primitives._articulation_recovery import (
+            plan_articulation,
+        )
+
+        return plan_articulation(
+            self,
+            request,
+            context,
+            lambda selected, generate: self._plan_nominal(
+                selected, context, generate=generate
+            ),
+            kind="withdraw",
+        )
 
     def _qualify_final_plan(self, request, context, plan):
-        return None
+        if (
+            type(request.recovery_policy.planning_recovery)
+            is ReleasedHandClearanceRecovery
+        ):
+            return None
+        from embodichain.lab.sim.atomic_actions.primitives._articulation_recovery import (
+            reject_articulation_transform,
+        )
+
+        return reject_articulation_transform(self, request, plan)
 
     def _plan_nominal(
         self,

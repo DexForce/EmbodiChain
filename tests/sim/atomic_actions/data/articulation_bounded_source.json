@@ -1,0 +1,3475 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "recovery_sha256": "23fff507dd25546e6b60bee1557dea6bfa934c43bcb25df77291adb81072a51a",
+  "cases": [
+    {
+      "mode": "pull_recovered",
+      "expected": {
+        "commands": "cea07ee66119f34a1d0c8acf524af191d17d4d59b8e000d9ca4ec78e56e22bd2",
+        "success": [
+          true
+        ],
+        "positions": "a20b0ced3ce73325323157dc4a1429b7fa3f2c5392d8aae5a3d2feb8d20307dc",
+        "dt": "0daa7d704c26e1725b819e5a5d142e30359f9f0fcc2810839faa2446de79d4a9",
+        "shape": [
+          1,
+          180,
+          3
+        ],
+        "final": [
+          [
+            -0.04000002145767212,
+            0.0,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "approach",
+            0,
+            57
+          ],
+          [
+            "reach",
+            57,
+            114
+          ],
+          [
+            "close",
+            114,
+            119
+          ],
+          [
+            "pull",
+            119,
+            175
+          ],
+          [
+            "open",
+            175,
+            180
+          ]
+        ],
+        "metadata": {
+          "gen_sim_articulation_recovery": {
+            "method": "terminal_first",
+            "frames": 180,
+            "endpoint_seed_index": 0,
+            "kind": "slide",
+            "status": "accepted",
+            "collision": {
+              "valid": true,
+              "frames": 57,
+              "scope": "discrete_free_motion_meshes"
+            }
+          }
+        },
+        "calls": [
+          {
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "35384f4528a60b76a968617554fcaa03ab8df127c51867ef60f4fc8e94887d01"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "d5434b71a6b74371841cbf93238d3dd0182f64b11670217b0c52214acd64c5a7"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5328060c4bc07e1332d3de0b8623589bd9bb6e447085803af02e902faee0c6b5"
+          },
+          {
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.10000002384185791,
+                0.0
+              ]
+            ],
+            "targets": "a0643440e9b35e5b49b9df46745854cdbcd554047a494709bf0e30bcbc998b58"
+          },
+          {
+            "count": 36,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "cd073a0e88dbcabe0264ad9aea8832f8af8c6f21d294c535198630007670ddc7"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "682b7d8982665bafe06df21918e79540ed97414f4af40ca946a9bca400ef5188"
+          }
+        ],
+        "queries": [
+          {
+            "kind": "free",
+            "positions": "9618e9179917019fcb4539fa876146a3db451e95dbde73374c1175e82d0f7f7c",
+            "frames": 57,
+            "draws": [
+              0.7423504958550101,
+              0.9674489352480931,
+              0.3102136254310608
+            ]
+          }
+        ],
+        "prefixes": [],
+        "grasps": [
+          [
+            0.09457437706109717,
+            0.8494041876489168,
+            0.4474719762802124
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ]
+        ],
+        "ik_count": 805,
+        "ik_trace": "3b5cd2c60bbe8c3852fa805ad71fd2acfd93026eae07ae197f0c211d921c5a51",
+        "next_random": [
+          0.4774928231791734,
+          0.7590242754645633,
+          0.3003580570220947
+        ]
+      }
+    },
+    {
+      "mode": "pull_second",
+      "expected": {
+        "commands": "3e29672da9df3d2302bd0ad03b542b00f20529e97db983f1be0da3ea57bf854c",
+        "success": [
+          true
+        ],
+        "positions": "3005b4ea96a32a608f08b4b5709b625796b81bcc6fe244d760c2d785ae139ed6",
+        "dt": "0daa7d704c26e1725b819e5a5d142e30359f9f0fcc2810839faa2446de79d4a9",
+        "shape": [
+          1,
+          180,
+          3
+        ],
+        "final": [
+          [
+            -1.8782663345336914,
+            1.8382662534713745,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "approach",
+            0,
+            57
+          ],
+          [
+            "reach",
+            57,
+            114
+          ],
+          [
+            "close",
+            114,
+            119
+          ],
+          [
+            "pull",
+            119,
+            175
+          ],
+          [
+            "open",
+            175,
+            180
+          ]
+        ],
+        "metadata": {
+          "gen_sim_articulation_recovery": {
+            "method": "terminal_first",
+            "frames": 180,
+            "endpoint_seed_index": 26,
+            "kind": "slide",
+            "status": "accepted",
+            "collision": {
+              "valid": true,
+              "frames": 57,
+              "scope": "discrete_free_motion_meshes"
+            }
+          }
+        },
+        "calls": [
+          {
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "35384f4528a60b76a968617554fcaa03ab8df127c51867ef60f4fc8e94887d01"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "d5434b71a6b74371841cbf93238d3dd0182f64b11670217b0c52214acd64c5a7"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5328060c4bc07e1332d3de0b8623589bd9bb6e447085803af02e902faee0c6b5"
+          },
+          {
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.10000002384185791,
+                0.0
+              ]
+            ],
+            "targets": "a0643440e9b35e5b49b9df46745854cdbcd554047a494709bf0e30bcbc998b58"
+          },
+          {
+            "count": 36,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "cd073a0e88dbcabe0264ad9aea8832f8af8c6f21d294c535198630007670ddc7"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "682b7d8982665bafe06df21918e79540ed97414f4af40ca946a9bca400ef5188"
+          }
+        ],
+        "queries": [
+          {
+            "kind": "free",
+            "positions": "9618e9179917019fcb4539fa876146a3db451e95dbde73374c1175e82d0f7f7c",
+            "frames": 57,
+            "draws": [
+              0.7423504958550101,
+              0.9674489352480931,
+              0.3102136254310608
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "9dc694045398f88ec7243934ea5339d35755a91988efbc48e51d42d982b0aa1a",
+            "frames": 57,
+            "draws": [
+              0.6789542237623437,
+              0.012309856865166613,
+              0.6669285297393799
+            ]
+          }
+        ],
+        "prefixes": [],
+        "grasps": [
+          [
+            0.09457437706109717,
+            0.8494041876489168,
+            0.4474719762802124
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ],
+          [
+            0.9950940429393939,
+            0.049573833717674876,
+            0.9231586456298828
+          ]
+        ],
+        "ik_count": 922,
+        "ik_trace": "7b423b01ea90ba147a0453d0df7cec9b72e797021579c3982350626012f08b31",
+        "next_random": [
+          0.4774928231791734,
+          0.7590242754645633,
+          0.3003580570220947
+        ]
+      }
+    },
+    {
+      "mode": "pull_exhausted",
+      "expected": {
+        "commands": "33bb777155ca30efcc617976fbf7d0f7ff751a5ce8a013135bb22b725ff767e8",
+        "success": [
+          false
+        ],
+        "positions": "e34971e17a5da2b345254fd361ce293bdf2e246d3b7bd495f774dc5d0a8fc88e",
+        "dt": "14175f954854aeb3f30a609e5d0f4dd4a1915faca2db46041a0ce9c187a6ba15",
+        "shape": [
+          1,
+          120,
+          3
+        ],
+        "final": [
+          [
+            0.0,
+            0.0,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "approach",
+            0,
+            37
+          ],
+          [
+            "reach",
+            37,
+            74
+          ],
+          [
+            "close",
+            74,
+            79
+          ],
+          [
+            "pull",
+            79,
+            115
+          ],
+          [
+            "open",
+            115,
+            120
+          ]
+        ],
+        "metadata": {
+          "gen_sim_articulation_recovery": {
+            "kind": "slide",
+            "status": "exhausted"
+          }
+        },
+        "calls": [
+          {
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "35384f4528a60b76a968617554fcaa03ab8df127c51867ef60f4fc8e94887d01"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "d5434b71a6b74371841cbf93238d3dd0182f64b11670217b0c52214acd64c5a7"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5328060c4bc07e1332d3de0b8623589bd9bb6e447085803af02e902faee0c6b5"
+          },
+          {
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "a0643440e9b35e5b49b9df46745854cdbcd554047a494709bf0e30bcbc998b58"
+          },
+          {
+            "count": 36,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "cd073a0e88dbcabe0264ad9aea8832f8af8c6f21d294c535198630007670ddc7"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "682b7d8982665bafe06df21918e79540ed97414f4af40ca946a9bca400ef5188"
+          }
+        ],
+        "queries": [],
+        "prefixes": [],
+        "grasps": [
+          [
+            0.09457437706109717,
+            0.8494041876489168,
+            0.4474719762802124
+          ]
+        ],
+        "ik_count": 690,
+        "ik_trace": "0c29f839fb62788eca56c8f302ba4bb0435b0b43f4365aa036ac4435f7151669",
+        "next_random": [
+          0.4774928231791734,
+          0.7590242754645633,
+          0.3003580570220947
+        ]
+      }
+    },
+    {
+      "mode": "paired_short",
+      "expected": {
+        "commands": "cea07ee66119f34a1d0c8acf524af191d17d4d59b8e000d9ca4ec78e56e22bd2",
+        "success": [
+          true
+        ],
+        "positions": "a20b0ced3ce73325323157dc4a1429b7fa3f2c5392d8aae5a3d2feb8d20307dc",
+        "dt": "0daa7d704c26e1725b819e5a5d142e30359f9f0fcc2810839faa2446de79d4a9",
+        "shape": [
+          1,
+          180,
+          3
+        ],
+        "final": [
+          [
+            -0.04000002145767212,
+            0.0,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "approach",
+            0,
+            57
+          ],
+          [
+            "reach",
+            57,
+            114
+          ],
+          [
+            "close",
+            114,
+            119
+          ],
+          [
+            "pull",
+            119,
+            175
+          ],
+          [
+            "open",
+            175,
+            180
+          ]
+        ],
+        "metadata": {
+          "gen_sim_articulation_recovery": {
+            "method": "terminal_first",
+            "frames": 180,
+            "endpoint_seed_index": 0,
+            "kind": "slide",
+            "status": "accepted",
+            "collision": {
+              "valid": true,
+              "frames": 57,
+              "scope": "discrete_free_motion_meshes"
+            },
+            "withdrawal_preview": {
+              "scope": "kinematics_and_robot_meshes_not_future_scene",
+              "samples": 40,
+              "valid": true,
+              "route": "outward_20mm",
+              "robot_collision": {
+                "valid": true,
+                "frames": 40,
+                "scope": "discrete_robot_meshes"
+              },
+              "attempts": [
+                {
+                  "route": "nominal",
+                  "valid": false,
+                  "reason": "no_continuous_ik"
+                },
+                {
+                  "route": "outward_20mm",
+                  "valid": true,
+                  "robot_collision": {
+                    "valid": true,
+                    "frames": 40,
+                    "scope": "discrete_robot_meshes"
+                  }
+                }
+              ]
+            },
+            "withdrawal_candidates": [
+              {
+                "endpoint_seed_index": 0,
+                "scope": "kinematics_and_robot_meshes_not_future_scene",
+                "samples": 40,
+                "valid": false,
+                "route": "nominal",
+                "reason": "no_continuous_ik",
+                "attempts": [
+                  {
+                    "route": "nominal",
+                    "valid": false,
+                    "reason": "no_continuous_ik"
+                  }
+                ]
+              },
+              {
+                "endpoint_seed_index": 26,
+                "scope": "kinematics_and_robot_meshes_not_future_scene",
+                "samples": 40,
+                "valid": false,
+                "route": "nominal",
+                "reason": "no_continuous_ik",
+                "attempts": [
+                  {
+                    "route": "nominal",
+                    "valid": false,
+                    "reason": "no_continuous_ik"
+                  }
+                ]
+              },
+              {
+                "endpoint_seed_index": 18,
+                "scope": "kinematics_and_robot_meshes_not_future_scene",
+                "samples": 40,
+                "valid": false,
+                "route": "nominal",
+                "reason": "no_continuous_ik",
+                "attempts": [
+                  {
+                    "route": "nominal",
+                    "valid": false,
+                    "reason": "no_continuous_ik"
+                  }
+                ]
+              },
+              {
+                "endpoint_seed_index": 20,
+                "scope": "kinematics_and_robot_meshes_not_future_scene",
+                "samples": 40,
+                "valid": false,
+                "route": "nominal",
+                "reason": "no_continuous_ik",
+                "attempts": [
+                  {
+                    "route": "nominal",
+                    "valid": false,
+                    "reason": "no_continuous_ik"
+                  }
+                ]
+              },
+              {
+                "endpoint_seed_index": 0,
+                "scope": "kinematics_and_robot_meshes_not_future_scene",
+                "samples": 40,
+                "valid": true,
+                "route": "outward_20mm",
+                "robot_collision": {
+                  "valid": true,
+                  "frames": 40,
+                  "scope": "discrete_robot_meshes"
+                },
+                "attempts": [
+                  {
+                    "route": "nominal",
+                    "valid": false,
+                    "reason": "no_continuous_ik"
+                  },
+                  {
+                    "route": "outward_20mm",
+                    "valid": true,
+                    "robot_collision": {
+                      "valid": true,
+                      "frames": 40,
+                      "scope": "discrete_robot_meshes"
+                    }
+                  }
+                ]
+              }
+            ],
+            "withdrawal_selection_changed": true
+          }
+        },
+        "calls": [
+          {
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "35384f4528a60b76a968617554fcaa03ab8df127c51867ef60f4fc8e94887d01"
+          },
+          {
+            "count": 37,
+            "preserve": true,
+            "start": [
+              [
+                0.10000002384185791,
+                0.0
+              ]
+            ],
+            "targets": "a0643440e9b35e5b49b9df46745854cdbcd554047a494709bf0e30bcbc998b58"
+          },
+          {
+            "count": 36,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "cd073a0e88dbcabe0264ad9aea8832f8af8c6f21d294c535198630007670ddc7"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "682b7d8982665bafe06df21918e79540ed97414f4af40ca946a9bca400ef5188"
+          }
+        ],
+        "queries": [
+          {
+            "kind": "free",
+            "positions": "9618e9179917019fcb4539fa876146a3db451e95dbde73374c1175e82d0f7f7c",
+            "frames": 57,
+            "draws": [
+              0.7423504958550101,
+              0.9674489352480931,
+              0.3102136254310608
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "9dc694045398f88ec7243934ea5339d35755a91988efbc48e51d42d982b0aa1a",
+            "frames": 57,
+            "draws": [
+              0.6789542237623437,
+              0.012309856865166613,
+              0.6669285297393799
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "82d07ab0f175ec4c5efb177aa6355fb8d395b2a71e0b5c6b04b06b15629d26b7",
+            "frames": 57,
+            "draws": [
+              0.9350633352291986,
+              0.2758396146163694,
+              0.690900981426239
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "47f8c5542307c790e618e11f16fc1838a4c04026f4d5dc451b679109272f4f92",
+            "frames": 57,
+            "draws": [
+              0.6837498310616852,
+              0.8202254409317387,
+              0.15132391452789307
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "7a7799768a9ccdc0a666db32c404f0b24e1206a412745d05cc82f8df3e40cd93",
+            "frames": 40,
+            "draws": [
+              0.7432135664770799,
+              0.24040082188439826,
+              0.23465555906295776
+            ]
+          }
+        ],
+        "prefixes": [],
+        "grasps": [
+          [
+            0.09457437706109717,
+            0.8494041876489168,
+            0.4474719762802124
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ],
+          [
+            0.9950940429393939,
+            0.049573833717674876,
+            0.9231586456298828
+          ],
+          [
+            0.3339408259142309,
+            0.9909993193659687,
+            0.5246526002883911
+          ],
+          [
+            0.38544273529217143,
+            0.6461394394369481,
+            0.4380483031272888
+          ]
+        ],
+        "ik_count": 704,
+        "ik_trace": "f26e141cdd0e481ecc6017f179f4dc947d5aadfcefdb84a7e732b28f0fd557db",
+        "next_random": [
+          0.4774928231791734,
+          0.7590242754645633,
+          0.3003580570220947
+        ]
+      }
+    },
+    {
+      "mode": "withdraw_nominal",
+      "expected": {
+        "commands": "a04b441acfd2a55cd175f4105f076cfd89bfe3bb31e6899eb258f8b21f0f2a2c",
+        "success": [
+          false
+        ],
+        "positions": "dd9b8b341d3609047ee876eb5b8df517da050de03420b38d8e7d242cc83fbc42",
+        "dt": "fa83f931b8de1534b704714b71ddab74c9fdea48072475e6e0f49c0584be19f4",
+        "shape": [
+          1,
+          40,
+          3
+        ],
+        "final": [
+          [
+            0.0,
+            0.0,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "move_end_effector",
+            0,
+            40
+          ]
+        ],
+        "metadata": {
+          "gen_sim_articulation_recovery": {
+            "kind": "withdraw",
+            "status": "exhausted"
+          }
+        },
+        "calls": [
+          {
+            "count": 40,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "27962e3869641b6700d4db6384db3f2a33853262e269bc39fd24dc0cfce2d486"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "be25334a3cd9465a560d1885f7618db61d229740a269fa8b7c9e0a34dc7332cb"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "d005fea1a0d2d1978785fd387a4ae313f42e71d86ab9c501b101d2e9a3112f9f"
+          }
+        ],
+        "queries": [],
+        "prefixes": [],
+        "grasps": [],
+        "ik_count": 632,
+        "ik_trace": "527cd77dbb4ec64da94851b685e227a275790fc36ea3a451f7027c6fc10f4679",
+        "next_random": [
+          0.09457437706109717,
+          0.8494041876489168,
+          0.4474719762802124
+        ]
+      }
+    },
+    {
+      "mode": "withdraw_short",
+      "expected": {
+        "commands": "e35b6ed4a91a4ecdd91652f7e07421816e0def494d7b275fe354566fe0e63703",
+        "success": [
+          true
+        ],
+        "positions": "099b0efa36764012612db5fbd57ac1532d7b0c2c9de3ad8b49cca285d4c187e6",
+        "dt": "fa83f931b8de1534b704714b71ddab74c9fdea48072475e6e0f49c0584be19f4",
+        "shape": [
+          1,
+          40,
+          3
+        ],
+        "final": [
+          [
+            -0.019999980926513672,
+            0.0,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "move_end_effector",
+            0,
+            40
+          ]
+        ],
+        "metadata": {
+          "gen_sim_withdrawal_clearance": {
+            "valid": true,
+            "frames": 40,
+            "scope": "discrete_free_motion_meshes"
+          },
+          "gen_sim_withdrawal_target_recovery": {
+            "route": "outward_20mm",
+            "accepted": true,
+            "target_poses": [
+              [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    -2.0
+                  ],
+                  [
+                    -1.0,
+                    0.0,
+                    0.0,
+                    0.5
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ],
+                [
+                  [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.9800000190734863
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.0,
+                    -2.0
+                  ],
+                  [
+                    -1.0,
+                    0.0,
+                    0.0,
+                    0.5
+                  ],
+                  [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                ]
+              ]
+            ],
+            "nominal_diagnostics": {
+              "gen_sim_articulation_recovery": {
+                "kind": "withdraw",
+                "status": "exhausted"
+              }
+            },
+            "scope": "fresh_actual_open_hand_state_full_path_not_preview_replay"
+          }
+        },
+        "calls": [
+          {
+            "count": 40,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "27962e3869641b6700d4db6384db3f2a33853262e269bc39fd24dc0cfce2d486"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "be25334a3cd9465a560d1885f7618db61d229740a269fa8b7c9e0a34dc7332cb"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "d005fea1a0d2d1978785fd387a4ae313f42e71d86ab9c501b101d2e9a3112f9f"
+          },
+          {
+            "count": 40,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "44fe392403001542ca1aa8f47758b348f3553ab8fd7f01302e4f0cfd4a4a19d2"
+          }
+        ],
+        "queries": [
+          {
+            "kind": "free",
+            "positions": "3d6ca46f39bce067a531c0618521753b70506a6b2242d3284bdfb47c27e85c7d",
+            "frames": 40,
+            "draws": [
+              0.09457437706109717,
+              0.8494041876489168,
+              0.4474719762802124
+            ]
+          }
+        ],
+        "prefixes": [],
+        "grasps": [],
+        "ik_count": 671,
+        "ik_trace": "1b34e151e43b9c9999fc6db7db9d85f4fde780d40dffc24402c63f33d6f41292",
+        "next_random": [
+          0.4774928231791734,
+          0.7590242754645633,
+          0.3003580570220947
+        ]
+      }
+    },
+    {
+      "mode": "push_recovered",
+      "expected": {
+        "commands": "6cab9343db247e14fcdb09480b67267d938740769d281cc4132f729d8db41612",
+        "success": [
+          true
+        ],
+        "positions": "ad4da9c26b881e60aa7aac81b0d2ce3687433cd9e19d2da73747445a8298dadf",
+        "dt": "14175f954854aeb3f30a609e5d0f4dd4a1915faca2db46041a0ce9c187a6ba15",
+        "shape": [
+          1,
+          120,
+          3
+        ],
+        "final": [
+          [
+            -0.10000002384185791,
+            0.0,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "approach",
+            0,
+            28
+          ],
+          [
+            "reach",
+            28,
+            56
+          ],
+          [
+            "close",
+            56,
+            61
+          ],
+          [
+            "push",
+            61,
+            88
+          ],
+          [
+            "open",
+            88,
+            93
+          ],
+          [
+            "return",
+            93,
+            120
+          ]
+        ],
+        "metadata": {
+          "gen_sim_articulation_recovery": {
+            "method": "push_grasp_first",
+            "frames": 120,
+            "endpoint_seed_index": 0,
+            "kind": "slide",
+            "status": "accepted",
+            "collision": {
+              "valid": true,
+              "frames": 28,
+              "scope": "discrete_free_motion_meshes"
+            }
+          }
+        },
+        "calls": [
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "1d8f72230ebbac353844c5ee3830648848b09b6da4db2a8d5cd801f1f822ba5f"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "be04f3146352d4cc90d5ae5a83844b6c65cd6e7f7740cabe902991a1119c0853"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "39efb1e13871457cb2c1c2fa6902958934723406dfbef5e2a69087f382d95f86"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                -0.10000002384185791,
+                0.0
+              ]
+            ],
+            "targets": "bf811e1231db48fd9f3b5e0e03b40d1caa4a3ce6ca5e8c19ce102033cb2be60d"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5919ed90f43d925e8c4f79b1a6dbf000e0ed60c3495f6534b250ae25725f4f6e"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "8bd6cc27af120e6c70d96ae47b446d16b67780389cc3ae56f7e61cd61ceaed96"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.16000008583068848,
+                0.0
+              ]
+            ],
+            "targets": "a722d7a0707a0e6db91ae4cb61255ab49e196b114480a76d691e5ec02f13fa4a"
+          }
+        ],
+        "queries": [
+          {
+            "kind": "robot",
+            "positions": "07d8594b3bf64f670ac509bd5be1a201ea6d59baff830024117b7fd2ef3d5839",
+            "frames": 120,
+            "draws": [
+              0.7423504958550101,
+              0.9674489352480931,
+              0.3102136254310608
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "bdc69f0c0600ad3beb9ed6cb8e44b13096510bd505535db45c74a0fac6f973eb",
+            "frames": 28,
+            "draws": [
+              0.9950940429393939,
+              0.049573833717674876,
+              0.9231586456298828
+            ]
+          }
+        ],
+        "prefixes": [],
+        "grasps": [
+          [
+            0.09457437706109717,
+            0.8494041876489168,
+            0.4474719762802124
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ]
+        ],
+        "ik_count": 772,
+        "ik_trace": "0a81e581140294369416b6bc40ad6f39a803729b2ebbc4f04678fabd68f4052d",
+        "next_random": [
+          0.4774928231791734,
+          0.7590242754645633,
+          0.3003580570220947
+        ]
+      }
+    },
+    {
+      "mode": "push_prefix",
+      "expected": {
+        "commands": "e7c86b2cb1dfc8e954ed2ea3b4f9ca058b265c1a307249c32a580286a406b30e",
+        "success": [
+          true
+        ],
+        "positions": "8ba10376e29967365bb1a71e87e0e20c3efad382922958fcb148ebee79a4590b",
+        "dt": "14175f954854aeb3f30a609e5d0f4dd4a1915faca2db46041a0ce9c187a6ba15",
+        "shape": [
+          1,
+          120,
+          3
+        ],
+        "final": [
+          [
+            -0.10000002384185791,
+            0.0,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "approach",
+            0,
+            28
+          ],
+          [
+            "reach",
+            28,
+            56
+          ],
+          [
+            "close",
+            56,
+            61
+          ],
+          [
+            "push",
+            61,
+            88
+          ],
+          [
+            "open",
+            88,
+            93
+          ],
+          [
+            "return",
+            93,
+            120
+          ]
+        ],
+        "metadata": {
+          "gen_sim_articulation_free_approach": {
+            "valid": true,
+            "provider": "curobo",
+            "prefix_frames": 3,
+            "approach_budget": 28,
+            "robot": {
+              "valid": true,
+              "frames": 120,
+              "scope": "discrete_robot_meshes"
+            },
+            "scene": {
+              "valid": true,
+              "frames": 28,
+              "scope": "discrete_free_motion_meshes"
+            },
+            "contact_suffix_unchanged": true,
+            "hand_commands_unchanged": true
+          },
+          "gen_sim_articulation_recovery": {
+            "method": "push_grasp_first",
+            "frames": 120,
+            "endpoint_seed_index": 0,
+            "free_approach": {
+              "valid": true,
+              "provider": "curobo",
+              "prefix_frames": 3,
+              "approach_budget": 28,
+              "robot": {
+                "valid": true,
+                "frames": 120,
+                "scope": "discrete_robot_meshes"
+              },
+              "scene": {
+                "valid": true,
+                "frames": 28,
+                "scope": "discrete_free_motion_meshes"
+              },
+              "contact_suffix_unchanged": true,
+              "hand_commands_unchanged": true,
+              "original_collision": {
+                "valid": false,
+                "frame": 2,
+                "kind": "scene",
+                "pairs": [
+                  [
+                    "arm",
+                    "fixture_obstacle"
+                  ]
+                ]
+              }
+            },
+            "kind": "slide",
+            "status": "accepted",
+            "collision": {
+              "valid": true,
+              "frames": 28,
+              "scope": "discrete_free_motion_meshes"
+            }
+          }
+        },
+        "calls": [
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "1d8f72230ebbac353844c5ee3830648848b09b6da4db2a8d5cd801f1f822ba5f"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "be04f3146352d4cc90d5ae5a83844b6c65cd6e7f7740cabe902991a1119c0853"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "39efb1e13871457cb2c1c2fa6902958934723406dfbef5e2a69087f382d95f86"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                -0.10000002384185791,
+                0.0
+              ]
+            ],
+            "targets": "bf811e1231db48fd9f3b5e0e03b40d1caa4a3ce6ca5e8c19ce102033cb2be60d"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5919ed90f43d925e8c4f79b1a6dbf000e0ed60c3495f6534b250ae25725f4f6e"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "8bd6cc27af120e6c70d96ae47b446d16b67780389cc3ae56f7e61cd61ceaed96"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.16000008583068848,
+                0.0
+              ]
+            ],
+            "targets": "a722d7a0707a0e6db91ae4cb61255ab49e196b114480a76d691e5ec02f13fa4a"
+          }
+        ],
+        "queries": [
+          {
+            "kind": "robot",
+            "positions": "07d8594b3bf64f670ac509bd5be1a201ea6d59baff830024117b7fd2ef3d5839",
+            "frames": 120,
+            "draws": [
+              0.7423504958550101,
+              0.9674489352480931,
+              0.3102136254310608
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "bdc69f0c0600ad3beb9ed6cb8e44b13096510bd505535db45c74a0fac6f973eb",
+            "frames": 28,
+            "draws": [
+              0.9950940429393939,
+              0.049573833717674876,
+              0.9231586456298828
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "63a2c6f5d73e715aa65cd4213c8f05fa7b992884a9abc64d61af81099ef526ae",
+            "frames": 120,
+            "draws": [
+              0.3339408259142309,
+              0.9909993193659687,
+              0.5246526002883911
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "38f853337e1e32f339315b6a54e92e2335232aa7f462d287c116287e8a5946a6",
+            "frames": 28,
+            "draws": [
+              0.9350633352291986,
+              0.2758396146163694,
+              0.690900981426239
+            ]
+          }
+        ],
+        "prefixes": [
+          {
+            "part": "arm",
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "target": [
+              [
+                -0.10000002384185791,
+                0.0
+              ]
+            ],
+            "full": [
+              [
+                0.0,
+                0.0,
+                0.03999999910593033
+              ]
+            ],
+            "dt": 0.04
+          }
+        ],
+        "grasps": [
+          [
+            0.09457437706109717,
+            0.8494041876489168,
+            0.4474719762802124
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ],
+          [
+            0.6789542237623437,
+            0.012309856865166613,
+            0.6669285297393799
+          ]
+        ],
+        "ik_count": 772,
+        "ik_trace": "0a81e581140294369416b6bc40ad6f39a803729b2ebbc4f04678fabd68f4052d",
+        "next_random": [
+          0.4774928231791734,
+          0.7590242754645633,
+          0.3003580570220947
+        ]
+      }
+    },
+    {
+      "mode": "push_pregrasp",
+      "expected": {
+        "commands": "f191892692d574869153ca2420b675d3a39bf79932aa2ed94b7000b9d54e6c55",
+        "success": [
+          true
+        ],
+        "positions": "023696c0a76f8e7bba48caccc400fc0b7dfcb93768b5f0c6f0bbf2cc9378d04f",
+        "dt": "14175f954854aeb3f30a609e5d0f4dd4a1915faca2db46041a0ce9c187a6ba15",
+        "shape": [
+          1,
+          120,
+          3
+        ],
+        "final": [
+          [
+            -0.050000011920928955,
+            0.0,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "approach",
+            0,
+            28
+          ],
+          [
+            "reach",
+            28,
+            56
+          ],
+          [
+            "close",
+            56,
+            61
+          ],
+          [
+            "push",
+            61,
+            88
+          ],
+          [
+            "open",
+            88,
+            93
+          ],
+          [
+            "return",
+            93,
+            120
+          ]
+        ],
+        "metadata": {
+          "gen_sim_articulation_recovery": {
+            "method": "push_grasp_first",
+            "frames": 120,
+            "endpoint_seed_index": 0,
+            "kind": "slide",
+            "status": "accepted",
+            "collision": {
+              "valid": true,
+              "frames": 28,
+              "scope": "discrete_free_motion_meshes"
+            }
+          },
+          "gen_sim_push_pregrasp_recovery": {
+            "accepted": true,
+            "attempts": [
+              {
+                "pre_grasp_distance_m": 0.05,
+                "accepted": true,
+                "diagnostics": {
+                  "joint_target": {
+                    "articulation_id": "drawer",
+                    "joint_name": "rail",
+                    "position": 0.0,
+                    "already_satisfied": [
+                      false
+                    ]
+                  },
+                  "affordance_sample": {
+                    "grasp": {
+                      "pose_frame": "world",
+                      "selected_poses": [
+                        [
+                          [
+                            0.0,
+                            0.0,
+                            1.0,
+                            1.0
+                          ],
+                          [
+                            0.0,
+                            1.0,
+                            0.0,
+                            -2.0
+                          ],
+                          [
+                            -1.0,
+                            0.0,
+                            0.0,
+                            0.5
+                          ],
+                          [
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0
+                          ]
+                        ]
+                      ],
+                      "reference_poses": [
+                        [
+                          [
+                            1.0,
+                            0.0,
+                            0.0,
+                            1.0
+                          ],
+                          [
+                            0.0,
+                            1.0,
+                            0.0,
+                            -2.0
+                          ],
+                          [
+                            0.0,
+                            0.0,
+                            1.0,
+                            0.5
+                          ],
+                          [
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0
+                          ]
+                        ]
+                      ],
+                      "success": [
+                        true
+                      ],
+                      "env_ids": [
+                        0
+                      ],
+                      "key": "slide-source:grasp",
+                      "sampling": null,
+                      "candidate_ids": [
+                        0
+                      ],
+                      "valid_candidate_counts": [
+                        1
+                      ],
+                      "unique_candidate_counts": [
+                        1
+                      ],
+                      "reused": [
+                        false
+                      ]
+                    }
+                  },
+                  "gen_sim_articulation_recovery": {
+                    "method": "push_grasp_first",
+                    "frames": 120,
+                    "endpoint_seed_index": 0,
+                    "kind": "slide",
+                    "status": "accepted",
+                    "collision": {
+                      "valid": true,
+                      "frames": 28,
+                      "scope": "discrete_free_motion_meshes"
+                    }
+                  }
+                }
+              }
+            ],
+            "nominal_distance_m": 0.1,
+            "nominal_diagnostics": {
+              "joint_target": {
+                "articulation_id": "drawer",
+                "joint_name": "rail",
+                "position": 0.0,
+                "already_satisfied": [
+                  false
+                ]
+              },
+              "affordance_sample": {
+                "grasp": {
+                  "pose_frame": "world",
+                  "selected_poses": [
+                    [
+                      [
+                        0.0,
+                        0.0,
+                        1.0,
+                        1.0
+                      ],
+                      [
+                        0.0,
+                        1.0,
+                        0.0,
+                        -2.0
+                      ],
+                      [
+                        -1.0,
+                        0.0,
+                        0.0,
+                        0.5
+                      ],
+                      [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                      ]
+                    ]
+                  ],
+                  "reference_poses": [
+                    [
+                      [
+                        1.0,
+                        0.0,
+                        0.0,
+                        1.0
+                      ],
+                      [
+                        0.0,
+                        1.0,
+                        0.0,
+                        -2.0
+                      ],
+                      [
+                        0.0,
+                        0.0,
+                        1.0,
+                        0.5
+                      ],
+                      [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                      ]
+                    ]
+                  ],
+                  "success": [
+                    true
+                  ],
+                  "env_ids": [
+                    0
+                  ],
+                  "key": "slide-source:grasp",
+                  "sampling": null,
+                  "candidate_ids": [
+                    0
+                  ],
+                  "valid_candidate_counts": [
+                    1
+                  ],
+                  "unique_candidate_counts": [
+                    1
+                  ],
+                  "reused": [
+                    false
+                  ]
+                }
+              },
+              "gen_sim_articulation_recovery": {
+                "kind": "slide",
+                "status": "exhausted",
+                "collision": {
+                  "valid": false,
+                  "frame": 2,
+                  "kind": "scene",
+                  "pairs": [
+                    [
+                      "arm",
+                      "fixture_obstacle"
+                    ]
+                  ]
+                },
+                "free_approach_attempts": [
+                  {
+                    "valid": false,
+                    "provider": "curobo",
+                    "reason": "prefix_planning_failed",
+                    "original_collision": {
+                      "valid": false,
+                      "frame": 2,
+                      "kind": "scene",
+                      "pairs": [
+                        [
+                          "arm",
+                          "fixture_obstacle"
+                        ]
+                      ]
+                    }
+                  },
+                  {
+                    "valid": false,
+                    "provider": "curobo",
+                    "reason": "prefix_planning_failed",
+                    "original_collision": {
+                      "valid": false,
+                      "frame": 2,
+                      "kind": "scene",
+                      "pairs": [
+                        [
+                          "arm",
+                          "fixture_obstacle"
+                        ]
+                      ]
+                    }
+                  }
+                ],
+                "path_rejections": [
+                  {
+                    "stage": "grasp_endpoint",
+                    "count": 4
+                  }
+                ]
+              }
+            },
+            "joint_target_unchanged": true
+          }
+        },
+        "calls": [
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "1d8f72230ebbac353844c5ee3830648848b09b6da4db2a8d5cd801f1f822ba5f"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "be04f3146352d4cc90d5ae5a83844b6c65cd6e7f7740cabe902991a1119c0853"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "39efb1e13871457cb2c1c2fa6902958934723406dfbef5e2a69087f382d95f86"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                -0.10000002384185791,
+                0.0
+              ]
+            ],
+            "targets": "bf811e1231db48fd9f3b5e0e03b40d1caa4a3ce6ca5e8c19ce102033cb2be60d"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5919ed90f43d925e8c4f79b1a6dbf000e0ed60c3495f6534b250ae25725f4f6e"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "8bd6cc27af120e6c70d96ae47b446d16b67780389cc3ae56f7e61cd61ceaed96"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.16000008583068848,
+                0.0
+              ]
+            ],
+            "targets": "a722d7a0707a0e6db91ae4cb61255ab49e196b114480a76d691e5ec02f13fa4a"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5495dcbf2b8a5fb92e39c84c658d9ae07827730477937bfc4059042aaed00101"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5b5f66c3ce4bbbccc53cd771c92150b5ab2a568dd139b817833d3a41845e86fd"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "8b82fdabd58e0b1d3a1c7c02daddaca5b6a2bf38125c718bf3fd6d222bab4df4"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                -0.050000011920928955,
+                0.0
+              ]
+            ],
+            "targets": "45b66915cb3ff92800be659600ac2c33849ed93db8de57d5437cb6f0840ecc20"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5919ed90f43d925e8c4f79b1a6dbf000e0ed60c3495f6534b250ae25725f4f6e"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "8bd6cc27af120e6c70d96ae47b446d16b67780389cc3ae56f7e61cd61ceaed96"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.16000008583068848,
+                0.0
+              ]
+            ],
+            "targets": "e3e209c1acced8b9d388d0089d875a5d034357271881a4c942e284c366fc435a"
+          }
+        ],
+        "queries": [
+          {
+            "kind": "robot",
+            "positions": "07d8594b3bf64f670ac509bd5be1a201ea6d59baff830024117b7fd2ef3d5839",
+            "frames": 120,
+            "draws": [
+              0.7423504958550101,
+              0.9674489352480931,
+              0.3102136254310608
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "bdc69f0c0600ad3beb9ed6cb8e44b13096510bd505535db45c74a0fac6f973eb",
+            "frames": 28,
+            "draws": [
+              0.9950940429393939,
+              0.049573833717674876,
+              0.9231586456298828
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "78b53e273a9143609d75610c85754a3a47bb491d532ddcebddc9bc4a8dc8e748",
+            "frames": 120,
+            "draws": [
+              0.3339408259142309,
+              0.9909993193659687,
+              0.5246526002883911
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "0e5f0322fe7b89c9fa4ad674f4023f9cb03ca0c01de2d5d0a91b8cb14b5e826f",
+            "frames": 28,
+            "draws": [
+              0.9350633352291986,
+              0.2758396146163694,
+              0.690900981426239
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "1ae4b17a36886fc5edf793b67a05cfcbf30cee87e05b775f6c8e21b163d66994",
+            "frames": 120,
+            "draws": [
+              0.6837498310616852,
+              0.8202254409317387,
+              0.15132391452789307
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "fd6f8fd8d2d4d1848e8f8b788f5d004d6914ab2d7912776d5bbfb9cb7de6cfc2",
+            "frames": 28,
+            "draws": [
+              0.7432135664770799,
+              0.24040082188439826,
+              0.23465555906295776
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "8b06d5979d1f48e6229c40d84cccc9b6705a249972413c9c99ad550fe962fda5",
+            "frames": 120,
+            "draws": [
+              0.7607639630341582,
+              0.7415264537412967,
+              0.28076183795928955
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "e5ce5eefd44e8eaa000ecb02b54779074e2d027acb88023dca02fc3d85719d91",
+            "frames": 28,
+            "draws": [
+              0.9258277447583089,
+              0.3975417682545226,
+              0.6149411797523499
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "81020b77b40a0aae963c4958ecb53639813571cb1981d4e3ab344b50a02caa2c",
+            "frames": 120,
+            "draws": [
+              0.9950940429393939,
+              0.049573833717674876,
+              0.9231586456298828
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "c9089a2efe50fdc7c0790f29608c86d164250d83cd11e37a7bd6acc25f4b82fe",
+            "frames": 28,
+            "draws": [
+              0.6789542237623437,
+              0.012309856865166613,
+              0.6669285297393799
+            ]
+          }
+        ],
+        "prefixes": [
+          {
+            "part": "arm",
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "target": [
+              [
+                -0.10000002384185791,
+                0.0
+              ]
+            ],
+            "full": [
+              [
+                0.0,
+                0.0,
+                0.03999999910593033
+              ]
+            ],
+            "dt": 0.04
+          },
+          {
+            "part": "arm",
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "target": [
+              [
+                -1.9382662773132324,
+                1.8382662534713745
+              ]
+            ],
+            "full": [
+              [
+                0.0,
+                0.0,
+                0.03999999910593033
+              ]
+            ],
+            "dt": 0.04
+          }
+        ],
+        "grasps": [
+          [
+            0.09457437706109717,
+            0.8494041876489168,
+            0.4474719762802124
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ],
+          [
+            0.6789542237623437,
+            0.012309856865166613,
+            0.6669285297393799
+          ],
+          [
+            0.38544273529217143,
+            0.6461394394369481,
+            0.4380483031272888
+          ],
+          [
+            0.17843879564492515,
+            0.9826391418708428,
+            0.695827305316925
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ],
+          [
+            0.7423504958550101,
+            0.9674489352480931,
+            0.3102136254310608
+          ]
+        ],
+        "ik_count": 1796,
+        "ik_trace": "cba01625bb85d838c4a75b89350e048d7532f60c2db5d16635627a2fb8c47048",
+        "next_random": [
+          0.7423504958550101,
+          0.9674489352480931,
+          0.3102136254310608
+        ]
+      }
+    },
+    {
+      "mode": "push_prefix_exhausted",
+      "expected": {
+        "commands": "33bb777155ca30efcc617976fbf7d0f7ff751a5ce8a013135bb22b725ff767e8",
+        "success": [
+          false
+        ],
+        "positions": "e34971e17a5da2b345254fd361ce293bdf2e246d3b7bd495f774dc5d0a8fc88e",
+        "dt": "14175f954854aeb3f30a609e5d0f4dd4a1915faca2db46041a0ce9c187a6ba15",
+        "shape": [
+          1,
+          120,
+          3
+        ],
+        "final": [
+          [
+            0.0,
+            0.0,
+            0.03999999910593033
+          ]
+        ],
+        "segments": [
+          [
+            "approach",
+            0,
+            28
+          ],
+          [
+            "reach",
+            28,
+            56
+          ],
+          [
+            "close",
+            56,
+            61
+          ],
+          [
+            "push",
+            61,
+            88
+          ],
+          [
+            "open",
+            88,
+            93
+          ],
+          [
+            "return",
+            93,
+            120
+          ]
+        ],
+        "metadata": {
+          "gen_sim_articulation_recovery": {
+            "kind": "slide",
+            "status": "exhausted",
+            "collision": {
+              "valid": false,
+              "frame": 2,
+              "kind": "scene",
+              "pairs": [
+                [
+                  "arm",
+                  "fixture_obstacle"
+                ]
+              ]
+            },
+            "free_approach_attempts": [
+              {
+                "valid": false,
+                "provider": "curobo",
+                "reason": "prefix_planning_failed",
+                "original_collision": {
+                  "valid": false,
+                  "frame": 2,
+                  "kind": "scene",
+                  "pairs": [
+                    [
+                      "arm",
+                      "fixture_obstacle"
+                    ]
+                  ]
+                }
+              },
+              {
+                "valid": false,
+                "provider": "curobo",
+                "reason": "prefix_planning_failed",
+                "original_collision": {
+                  "valid": false,
+                  "frame": 2,
+                  "kind": "scene",
+                  "pairs": [
+                    [
+                      "arm",
+                      "fixture_obstacle"
+                    ]
+                  ]
+                }
+              }
+            ],
+            "path_rejections": [
+              {
+                "stage": "grasp_endpoint",
+                "count": 4
+              }
+            ]
+          },
+          "gen_sim_push_pregrasp_recovery": {
+            "accepted": false,
+            "attempts": [
+              {
+                "pre_grasp_distance_m": 0.05,
+                "accepted": false,
+                "diagnostics": {
+                  "joint_target": {
+                    "articulation_id": "drawer",
+                    "joint_name": "rail",
+                    "position": 0.0,
+                    "already_satisfied": [
+                      false
+                    ]
+                  },
+                  "affordance_sample": {
+                    "grasp": {
+                      "pose_frame": "world",
+                      "selected_poses": [
+                        [
+                          [
+                            0.0,
+                            0.0,
+                            1.0,
+                            1.0
+                          ],
+                          [
+                            0.0,
+                            1.0,
+                            0.0,
+                            -2.0
+                          ],
+                          [
+                            -1.0,
+                            0.0,
+                            0.0,
+                            0.5
+                          ],
+                          [
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0
+                          ]
+                        ]
+                      ],
+                      "reference_poses": [
+                        [
+                          [
+                            1.0,
+                            0.0,
+                            0.0,
+                            1.0
+                          ],
+                          [
+                            0.0,
+                            1.0,
+                            0.0,
+                            -2.0
+                          ],
+                          [
+                            0.0,
+                            0.0,
+                            1.0,
+                            0.5
+                          ],
+                          [
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0
+                          ]
+                        ]
+                      ],
+                      "success": [
+                        true
+                      ],
+                      "env_ids": [
+                        0
+                      ],
+                      "key": "slide-source:grasp",
+                      "sampling": null,
+                      "candidate_ids": [
+                        0
+                      ],
+                      "valid_candidate_counts": [
+                        1
+                      ],
+                      "unique_candidate_counts": [
+                        1
+                      ],
+                      "reused": [
+                        false
+                      ]
+                    }
+                  },
+                  "gen_sim_articulation_recovery": {
+                    "kind": "slide",
+                    "status": "exhausted",
+                    "collision": {
+                      "valid": false,
+                      "frame": 2,
+                      "kind": "scene",
+                      "pairs": [
+                        [
+                          "arm",
+                          "fixture_obstacle"
+                        ]
+                      ]
+                    },
+                    "free_approach_attempts": [
+                      {
+                        "valid": false,
+                        "provider": "curobo",
+                        "reason": "prefix_planning_failed",
+                        "original_collision": {
+                          "valid": false,
+                          "frame": 2,
+                          "kind": "scene",
+                          "pairs": [
+                            [
+                              "arm",
+                              "fixture_obstacle"
+                            ]
+                          ]
+                        }
+                      },
+                      {
+                        "valid": false,
+                        "provider": "curobo",
+                        "reason": "prefix_planning_failed",
+                        "original_collision": {
+                          "valid": false,
+                          "frame": 2,
+                          "kind": "scene",
+                          "pairs": [
+                            [
+                              "arm",
+                              "fixture_obstacle"
+                            ]
+                          ]
+                        }
+                      }
+                    ],
+                    "path_rejections": [
+                      {
+                        "stage": "grasp_endpoint",
+                        "count": 4
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "pre_grasp_distance_m": 0.03,
+                "accepted": false,
+                "diagnostics": {
+                  "joint_target": {
+                    "articulation_id": "drawer",
+                    "joint_name": "rail",
+                    "position": 0.0,
+                    "already_satisfied": [
+                      false
+                    ]
+                  },
+                  "affordance_sample": {
+                    "grasp": {
+                      "pose_frame": "world",
+                      "selected_poses": [
+                        [
+                          [
+                            0.0,
+                            0.0,
+                            1.0,
+                            1.0
+                          ],
+                          [
+                            0.0,
+                            1.0,
+                            0.0,
+                            -2.0
+                          ],
+                          [
+                            -1.0,
+                            0.0,
+                            0.0,
+                            0.5
+                          ],
+                          [
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0
+                          ]
+                        ]
+                      ],
+                      "reference_poses": [
+                        [
+                          [
+                            1.0,
+                            0.0,
+                            0.0,
+                            1.0
+                          ],
+                          [
+                            0.0,
+                            1.0,
+                            0.0,
+                            -2.0
+                          ],
+                          [
+                            0.0,
+                            0.0,
+                            1.0,
+                            0.5
+                          ],
+                          [
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0
+                          ]
+                        ]
+                      ],
+                      "success": [
+                        true
+                      ],
+                      "env_ids": [
+                        0
+                      ],
+                      "key": "slide-source:grasp",
+                      "sampling": null,
+                      "candidate_ids": [
+                        0
+                      ],
+                      "valid_candidate_counts": [
+                        1
+                      ],
+                      "unique_candidate_counts": [
+                        1
+                      ],
+                      "reused": [
+                        false
+                      ]
+                    }
+                  },
+                  "gen_sim_articulation_recovery": {
+                    "kind": "slide",
+                    "status": "exhausted",
+                    "collision": {
+                      "valid": false,
+                      "frame": 2,
+                      "kind": "scene",
+                      "pairs": [
+                        [
+                          "arm",
+                          "fixture_obstacle"
+                        ]
+                      ]
+                    },
+                    "free_approach_attempts": [
+                      {
+                        "valid": false,
+                        "provider": "curobo",
+                        "reason": "prefix_planning_failed",
+                        "original_collision": {
+                          "valid": false,
+                          "frame": 2,
+                          "kind": "scene",
+                          "pairs": [
+                            [
+                              "arm",
+                              "fixture_obstacle"
+                            ]
+                          ]
+                        }
+                      },
+                      {
+                        "valid": false,
+                        "provider": "curobo",
+                        "reason": "prefix_planning_failed",
+                        "original_collision": {
+                          "valid": false,
+                          "frame": 2,
+                          "kind": "scene",
+                          "pairs": [
+                            [
+                              "arm",
+                              "fixture_obstacle"
+                            ]
+                          ]
+                        }
+                      }
+                    ],
+                    "path_rejections": [
+                      {
+                        "stage": "grasp_endpoint",
+                        "count": 4
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "nominal_distance_m": 0.1,
+            "nominal_diagnostics": {
+              "joint_target": {
+                "articulation_id": "drawer",
+                "joint_name": "rail",
+                "position": 0.0,
+                "already_satisfied": [
+                  false
+                ]
+              },
+              "affordance_sample": {
+                "grasp": {
+                  "pose_frame": "world",
+                  "selected_poses": [
+                    [
+                      [
+                        0.0,
+                        0.0,
+                        1.0,
+                        1.0
+                      ],
+                      [
+                        0.0,
+                        1.0,
+                        0.0,
+                        -2.0
+                      ],
+                      [
+                        -1.0,
+                        0.0,
+                        0.0,
+                        0.5
+                      ],
+                      [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                      ]
+                    ]
+                  ],
+                  "reference_poses": [
+                    [
+                      [
+                        1.0,
+                        0.0,
+                        0.0,
+                        1.0
+                      ],
+                      [
+                        0.0,
+                        1.0,
+                        0.0,
+                        -2.0
+                      ],
+                      [
+                        0.0,
+                        0.0,
+                        1.0,
+                        0.5
+                      ],
+                      [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                      ]
+                    ]
+                  ],
+                  "success": [
+                    true
+                  ],
+                  "env_ids": [
+                    0
+                  ],
+                  "key": "slide-source:grasp",
+                  "sampling": null,
+                  "candidate_ids": [
+                    0
+                  ],
+                  "valid_candidate_counts": [
+                    1
+                  ],
+                  "unique_candidate_counts": [
+                    1
+                  ],
+                  "reused": [
+                    false
+                  ]
+                }
+              },
+              "gen_sim_articulation_recovery": {
+                "kind": "slide",
+                "status": "exhausted",
+                "collision": {
+                  "valid": false,
+                  "frame": 2,
+                  "kind": "scene",
+                  "pairs": [
+                    [
+                      "arm",
+                      "fixture_obstacle"
+                    ]
+                  ]
+                },
+                "free_approach_attempts": [
+                  {
+                    "valid": false,
+                    "provider": "curobo",
+                    "reason": "prefix_planning_failed",
+                    "original_collision": {
+                      "valid": false,
+                      "frame": 2,
+                      "kind": "scene",
+                      "pairs": [
+                        [
+                          "arm",
+                          "fixture_obstacle"
+                        ]
+                      ]
+                    }
+                  },
+                  {
+                    "valid": false,
+                    "provider": "curobo",
+                    "reason": "prefix_planning_failed",
+                    "original_collision": {
+                      "valid": false,
+                      "frame": 2,
+                      "kind": "scene",
+                      "pairs": [
+                        [
+                          "arm",
+                          "fixture_obstacle"
+                        ]
+                      ]
+                    }
+                  }
+                ],
+                "path_rejections": [
+                  {
+                    "stage": "grasp_endpoint",
+                    "count": 4
+                  }
+                ]
+              }
+            },
+            "joint_target_unchanged": true
+          }
+        },
+        "calls": [
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "1d8f72230ebbac353844c5ee3830648848b09b6da4db2a8d5cd801f1f822ba5f"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "be04f3146352d4cc90d5ae5a83844b6c65cd6e7f7740cabe902991a1119c0853"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "39efb1e13871457cb2c1c2fa6902958934723406dfbef5e2a69087f382d95f86"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                -0.10000002384185791,
+                0.0
+              ]
+            ],
+            "targets": "bf811e1231db48fd9f3b5e0e03b40d1caa4a3ce6ca5e8c19ce102033cb2be60d"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5919ed90f43d925e8c4f79b1a6dbf000e0ed60c3495f6534b250ae25725f4f6e"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "8bd6cc27af120e6c70d96ae47b446d16b67780389cc3ae56f7e61cd61ceaed96"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.16000008583068848,
+                0.0
+              ]
+            ],
+            "targets": "a722d7a0707a0e6db91ae4cb61255ab49e196b114480a76d691e5ec02f13fa4a"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5495dcbf2b8a5fb92e39c84c658d9ae07827730477937bfc4059042aaed00101"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5b5f66c3ce4bbbccc53cd771c92150b5ab2a568dd139b817833d3a41845e86fd"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "8b82fdabd58e0b1d3a1c7c02daddaca5b6a2bf38125c718bf3fd6d222bab4df4"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                -0.050000011920928955,
+                0.0
+              ]
+            ],
+            "targets": "45b66915cb3ff92800be659600ac2c33849ed93db8de57d5437cb6f0840ecc20"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5919ed90f43d925e8c4f79b1a6dbf000e0ed60c3495f6534b250ae25725f4f6e"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "8bd6cc27af120e6c70d96ae47b446d16b67780389cc3ae56f7e61cd61ceaed96"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.16000008583068848,
+                0.0
+              ]
+            ],
+            "targets": "e3e209c1acced8b9d388d0089d875a5d034357271881a4c942e284c366fc435a"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "6b61775ee2990b069270469510aeece5ba93511b7caca7ac533e03726473aa7b"
+          },
+          {
+            "count": 260,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "4d499ff3cb3f67720bee4bb3688918babde6b0f99a61d86047178e61cc698358"
+          },
+          {
+            "count": 320,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "23b434b67c56779c0ab90ddcc4916f0065ed2ef3e396dfbff60b867b04007130"
+          },
+          {
+            "count": 28,
+            "preserve": true,
+            "start": [
+              [
+                -0.029999971389770508,
+                0.0
+              ]
+            ],
+            "targets": "e90b43a9c1e1638da11b0123c8967a245b050d98230c818e87523fc866824e3a"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "targets": "5919ed90f43d925e8c4f79b1a6dbf000e0ed60c3495f6534b250ae25725f4f6e"
+          },
+          {
+            "count": 5,
+            "preserve": true,
+            "start": [
+              [
+                0.20000004768371582,
+                0.0
+              ]
+            ],
+            "targets": "8bd6cc27af120e6c70d96ae47b446d16b67780389cc3ae56f7e61cd61ceaed96"
+          },
+          {
+            "count": 27,
+            "preserve": true,
+            "start": [
+              [
+                0.16000008583068848,
+                0.0
+              ]
+            ],
+            "targets": "015f597f13037c115f436e252dfeed4e83e24f1d402456128af8948302b23bd3"
+          }
+        ],
+        "queries": [
+          {
+            "kind": "robot",
+            "positions": "07d8594b3bf64f670ac509bd5be1a201ea6d59baff830024117b7fd2ef3d5839",
+            "frames": 120,
+            "draws": [
+              0.7423504958550101,
+              0.9674489352480931,
+              0.3102136254310608
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "bdc69f0c0600ad3beb9ed6cb8e44b13096510bd505535db45c74a0fac6f973eb",
+            "frames": 28,
+            "draws": [
+              0.9950940429393939,
+              0.049573833717674876,
+              0.9231586456298828
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "78b53e273a9143609d75610c85754a3a47bb491d532ddcebddc9bc4a8dc8e748",
+            "frames": 120,
+            "draws": [
+              0.3339408259142309,
+              0.9909993193659687,
+              0.5246526002883911
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "0e5f0322fe7b89c9fa4ad674f4023f9cb03ca0c01de2d5d0a91b8cb14b5e826f",
+            "frames": 28,
+            "draws": [
+              0.9350633352291986,
+              0.2758396146163694,
+              0.690900981426239
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "1ae4b17a36886fc5edf793b67a05cfcbf30cee87e05b775f6c8e21b163d66994",
+            "frames": 120,
+            "draws": [
+              0.6837498310616852,
+              0.8202254409317387,
+              0.15132391452789307
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "fd6f8fd8d2d4d1848e8f8b788f5d004d6914ab2d7912776d5bbfb9cb7de6cfc2",
+            "frames": 28,
+            "draws": [
+              0.7432135664770799,
+              0.24040082188439826,
+              0.23465555906295776
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "8b06d5979d1f48e6229c40d84cccc9b6705a249972413c9c99ad550fe962fda5",
+            "frames": 120,
+            "draws": [
+              0.7607639630341582,
+              0.7415264537412967,
+              0.28076183795928955
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "e5ce5eefd44e8eaa000ecb02b54779074e2d027acb88023dca02fc3d85719d91",
+            "frames": 28,
+            "draws": [
+              0.9258277447583089,
+              0.3975417682545226,
+              0.6149411797523499
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "81020b77b40a0aae963c4958ecb53639813571cb1981d4e3ab344b50a02caa2c",
+            "frames": 120,
+            "draws": [
+              0.9950940429393939,
+              0.049573833717674876,
+              0.9231586456298828
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "c9089a2efe50fdc7c0790f29608c86d164250d83cd11e37a7bd6acc25f4b82fe",
+            "frames": 28,
+            "draws": [
+              0.6789542237623437,
+              0.012309856865166613,
+              0.6669285297393799
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "2e4d016bdda060ce93c9ef3168f836e130e3f1ed5c3833f9986172082486d70d",
+            "frames": 120,
+            "draws": [
+              0.9350633352291986,
+              0.2758396146163694,
+              0.690900981426239
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "d3011af21bfa2618746e82102ac49c62d91328276137fa64eea4da2da2c137e3",
+            "frames": 28,
+            "draws": [
+              0.38544273529217143,
+              0.6461394394369481,
+              0.4380483031272888
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "aa5f1c4f3cfbfb8ff55d6e6ed12c66e0a92b7c4e6599dd4d7c189e832fc61a2d",
+            "frames": 120,
+            "draws": [
+              0.7432135664770799,
+              0.24040082188439826,
+              0.23465555906295776
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "5451b7a5205f4092de1103002d29313ca21171e17b87ae2324f0edac6a914c06",
+            "frames": 28,
+            "draws": [
+              0.17843879564492515,
+              0.9826391418708428,
+              0.695827305316925
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "5f0c4d5fc5a4361c6d2ad4082906c5c964482ba8da37049802cad9292b5ea754",
+            "frames": 120,
+            "draws": [
+              0.9258277447583089,
+              0.3975417682545226,
+              0.6149411797523499
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "a328c49c33ed82b634325b00e1977b7c5394e7c732e1a25f855304c1ef5acc62",
+            "frames": 28,
+            "draws": [
+              0.031206913590484553,
+              0.3883310394829306,
+              0.748403787612915
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "293220664928feaac8f88b370c769c4cab3b8c8ab3516d21f00c1ab283ff47be",
+            "frames": 120,
+            "draws": [
+              0.9950940429393939,
+              0.049573833717674876,
+              0.9231586456298828
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "41e0cb5daa5500268594a84dc994465dd9cf6a1910c125bfe93764cb1f1b2023",
+            "frames": 28,
+            "draws": [
+              0.6789542237623437,
+              0.012309856865166613,
+              0.6669285297393799
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "e282f86eecc1b3282c9574d7c27ec4379fa5f1fe2dcac6c33c329218050045b6",
+            "frames": 120,
+            "draws": [
+              0.9350633352291986,
+              0.2758396146163694,
+              0.690900981426239
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "15dfb4b062a14dfef289f747123dc858ee0b9e7368cf4f6e55936196a5658886",
+            "frames": 28,
+            "draws": [
+              0.38544273529217143,
+              0.6461394394369481,
+              0.4380483031272888
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "6badb71156ae0be5a20eea3e90dd6b0d5338ac09dd7cf83dee85ccbbaa93e81f",
+            "frames": 120,
+            "draws": [
+              0.7432135664770799,
+              0.24040082188439826,
+              0.23465555906295776
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "2f111e13c1a6b74615d908c8e7ae9f1817834ef37a0a357cbc012d6b3d14e962",
+            "frames": 28,
+            "draws": [
+              0.17843879564492515,
+              0.9826391418708428,
+              0.695827305316925
+            ]
+          },
+          {
+            "kind": "robot",
+            "positions": "ccc8aaa0b9403752180d3c0eedcf49fcf1c1ce2188c16be75aad43838969a5d9",
+            "frames": 120,
+            "draws": [
+              0.9258277447583089,
+              0.3975417682545226,
+              0.6149411797523499
+            ]
+          },
+          {
+            "kind": "free",
+            "positions": "450ba5410f507d60c21f8c04113640b8d03efe3b96946a62f859dde550f00aca",
+            "frames": 28,
+            "draws": [
+              0.031206913590484553,
+              0.3883310394829306,
+              0.748403787612915
+            ]
+          }
+        ],
+        "prefixes": [
+          {
+            "part": "arm",
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "target": [
+              [
+                -0.10000002384185791,
+                0.0
+              ]
+            ],
+            "full": [
+              [
+                0.0,
+                0.0,
+                0.03999999910593033
+              ]
+            ],
+            "dt": 0.04
+          },
+          {
+            "part": "arm",
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "target": [
+              [
+                -1.9382662773132324,
+                1.8382662534713745
+              ]
+            ],
+            "full": [
+              [
+                0.0,
+                0.0,
+                0.03999999910593033
+              ]
+            ],
+            "dt": 0.04
+          },
+          {
+            "part": "arm",
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "target": [
+              [
+                -0.050000011920928955,
+                0.0
+              ]
+            ],
+            "full": [
+              [
+                0.0,
+                0.0,
+                0.03999999910593033
+              ]
+            ],
+            "dt": 0.04
+          },
+          {
+            "part": "arm",
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "target": [
+              [
+                -1.8882663249969482,
+                1.8382662534713745
+              ]
+            ],
+            "full": [
+              [
+                0.0,
+                0.0,
+                0.03999999910593033
+              ]
+            ],
+            "dt": 0.04
+          },
+          {
+            "part": "arm",
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "target": [
+              [
+                -0.029999971389770508,
+                0.0
+              ]
+            ],
+            "full": [
+              [
+                0.0,
+                0.0,
+                0.03999999910593033
+              ]
+            ],
+            "dt": 0.04
+          },
+          {
+            "part": "arm",
+            "start": [
+              [
+                0.0,
+                0.0
+              ]
+            ],
+            "target": [
+              [
+                -1.868266224861145,
+                1.8382662534713745
+              ]
+            ],
+            "full": [
+              [
+                0.0,
+                0.0,
+                0.03999999910593033
+              ]
+            ],
+            "dt": 0.04
+          }
+        ],
+        "grasps": [
+          [
+            0.09457437706109717,
+            0.8494041876489168,
+            0.4474719762802124
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ],
+          [
+            0.6789542237623437,
+            0.012309856865166613,
+            0.6669285297393799
+          ],
+          [
+            0.38544273529217143,
+            0.6461394394369481,
+            0.4380483031272888
+          ],
+          [
+            0.17843879564492515,
+            0.9826391418708428,
+            0.695827305316925
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ],
+          [
+            0.7423504958550101,
+            0.9674489352480931,
+            0.3102136254310608
+          ],
+          [
+            0.3339408259142309,
+            0.9909993193659687,
+            0.5246526002883911
+          ],
+          [
+            0.6837498310616852,
+            0.8202254409317387,
+            0.15132391452789307
+          ],
+          [
+            0.7607639630341582,
+            0.7415264537412967,
+            0.28076183795928955
+          ],
+          [
+            0.4774928231791734,
+            0.7590242754645633,
+            0.3003580570220947
+          ],
+          [
+            0.7423504958550101,
+            0.9674489352480931,
+            0.3102136254310608
+          ],
+          [
+            0.3339408259142309,
+            0.9909993193659687,
+            0.5246526002883911
+          ],
+          [
+            0.6837498310616852,
+            0.8202254409317387,
+            0.15132391452789307
+          ],
+          [
+            0.7607639630341582,
+            0.7415264537412967,
+            0.28076183795928955
+          ]
+        ],
+        "ik_count": 3072,
+        "ik_trace": "bc380b03808b79bd712241f4104df326ac75b48fac679bb77cce5d5f70a171e4",
+        "next_random": [
+          0.4774928231791734,
+          0.7590242754645633,
+          0.3003580570220947
+        ]
+      }
+    }
+  ]
+}

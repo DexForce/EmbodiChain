@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable, ContextManager
 from dataclasses import dataclass, replace
 import torch
 from .pour_projection import PourGraspProjectionInputs
+from embodichain.toolkits.graspkit.pg_grasp.preshape import PreshapeHandClearance
 from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
 from embodichain.lab.sim.scene.planar_observation import NativePlanarPlacement
 
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "HandOverSceneProvider",
+    "SlideHandClearanceProvider",
     "HeldStagingBinding",
     "HeldStagingProvider",
     "HeldArticulationStagingProvider",
@@ -573,4 +575,26 @@ class HandOverSceneProvider(Protocol):
         program or Task Engine objects. Missing source stamps or geometry reject
         instead of silently disabling receiver qualification.
         """
+        ...
+
+
+@runtime_checkable
+class SlideHandClearanceProvider(Protocol):
+    """Supply explicit nominal and fraction-specific hand sweep geometry."""
+
+    @property
+    def robot(self) -> Robot:
+        """Return the exact engine robot owning the hand geometry."""
+        ...
+
+    def nominal(
+        self, request: ResolvedActionRequest, context: PlanningContext
+    ) -> PreshapeHandClearance:
+        """Return declaration-time cached nominal geometry for this occurrence."""
+        ...
+
+    def measure(
+        self, request: ResolvedActionRequest, context: PlanningContext, fraction: float
+    ) -> PreshapeHandClearance:
+        """Capture one fractional sweep under the original native observation."""
         ...

@@ -43,8 +43,11 @@ from .plans import (
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .released_continuation import ReleasedHandContinuationProvider
+from .drawer_planning import DrawerPlanningProvider
+from .articulation_continuation import ArticulationContinuationProvider
 from .planning_probes import (
     HandOverSceneProvider,
+    SlideHandClearanceProvider,
     HeldStagingProvider,
     RetainedCommandProvider,
     JointPrefixPlanner,
@@ -100,6 +103,11 @@ class AtomicActionEngine:
         released_hand_provider: ReleasedHandContinuationProvider | None = None,
         handover_scene_provider: HandOverSceneProvider | None = None,
         coordinated_cargo_geometry: SceneMeshSnapshot | None = None,
+        slide_hand_clearance_provider: SlideHandClearanceProvider | None = None,
+        drawer_planning_provider: DrawerPlanningProvider | None = None,
+        articulation_continuation_provider: (
+            ArticulationContinuationProvider | None
+        ) = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -129,6 +137,9 @@ class AtomicActionEngine:
                 distal geometry for explicitly selected held-path recovery.
             retained_command_provider: Same-robot verified command provenance and
                 same-observation command snapshots; no physical success is implied.
+            slide_hand_clearance_provider: Explicit same-robot slide hand clearance service.
+            drawer_planning_provider: Explicit same-robot drawer planning service.
+            articulation_continuation_provider: Explicit same-robot articulation continuation service.
             released_hand_provider: Same-robot authority for the exact cleanup
                 and following Park occurrences.
             handover_scene_provider: Same-robot native hand/scene query port for
@@ -164,6 +175,9 @@ class AtomicActionEngine:
             released_hand_provider=released_hand_provider,
             handover_scene_provider=handover_scene_provider,
             coordinated_cargo_geometry=coordinated_cargo_geometry,
+            slide_hand_clearance_provider=slide_hand_clearance_provider,
+            drawer_planning_provider=drawer_planning_provider,
+            articulation_continuation_provider=articulation_continuation_provider,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}

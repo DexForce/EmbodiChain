@@ -565,8 +565,9 @@ the same engine and observation; it authorizes no task-state effect or physical
 success. Native measured paths retain their explicit single-environment scope.
 
 ``AxisAlignOptions`` rejects inherited Pick-only requirements that its planner
-does not implement. Drawer-specific Place remains unavailable in this layer and
-fails during options validation. Existing external nominal capabilities remain
+does not implement. Explicit drawer Place and held transport use the installed bounded
+drawer handler and declared physical provider; missing inputs fail before
+corresponding planning. Existing external nominal capabilities remain
 available; explicit measured source policies reject incompatible nominal input.
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
@@ -845,4 +846,31 @@ closed in Task Program configuration until the runtime-assembly owner is present
    HandOverSceneProvider
 
 .. autoclass:: HandOverSceneProvider
+
+Prismatic articulation and drawer planning
+------------------------------------------
+
+``SlidePlanningRecovery`` preserves explicit B1/env0 fixed-grid sequential IK,
+the original segment retry grid, 390-frame bound, endpoint order, push/withdrawal
+repair and RNG scopes. ``ArticulationWithdrawalPlanningRecovery`` and
+``ArticulationParkPlanningRecovery`` consume actual installed predecessor facts.
+Preview plans do not authorize later withdrawal or PARK. Generic PARK screening
+and bounded vias remain implemented once in ``primitives/_released_park.py``.
+
+Explicit drawer Place and held transport use declared ``DrawerPlanningProvider``
+inputs. The complete-plan builder retains bounded entry ranking, upright release
+lift choices, reverse entry, selected-transform rejection and containment checks
+before motion. Missing geometry or native ownership remains unavailable.
+``SlideHandClearanceProvider`` supplies measured preshape aperture facts; the
+optional 85%-to-75% retry retains original candidate and RNG boundaries.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.articulation_continuation
+   :members:
+
+.. automodule:: embodichain.lab.sim.atomic_actions.drawer_planning
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
+
+.. autoclass:: SlideHandClearanceProvider
    :members:

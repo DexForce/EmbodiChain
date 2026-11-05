@@ -461,3 +461,17 @@ fluid-transfer conclusions.
 
 .. autofunction:: measure_pour_receiver
    :no-index:
+
+Drawer proposal and containment arithmetic
+------------------------------------------
+
+Drawer algorithms consume explicit payload vertices, observed poses and declared
+region bounds. Entry proposals and containment reports preserve source order,
+world-up proposals and exposed-floor rules. They neither acquire native state
+nor select complete motion plans or establish physical retention.
+
+.. automodule:: embodichain.compute.geometry.drawer
+   :members:
+
+.. automodule:: embodichain.compute.geometry.drawer_path
+   :members:
