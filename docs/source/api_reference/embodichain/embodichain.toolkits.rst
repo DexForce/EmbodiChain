@@ -315,6 +315,50 @@ returning corrected candidates and a valid mask without changing their order.
    :members: refine, fit_contacts, query
 
 
+Explicit opening and geometry constraints
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The parallel-jaw package loads concrete backends only when requested. The
+numeric constraint and opening views below can be imported without loading
+simulation or target-decomposition backends. They are explicit per-call
+wrappers and leave the ordinary generator's defaults unchanged.
+
+``OpeningEnvelopeGraspPoseGenerator`` filters the complete object mesh after
+the delegate's ranking and retains its candidate order. The constrained view
+additionally binds the source vertex/topology digest to an explicit object-local
+region or release plane. Empty selections retain the source failure padding
+with infinite cost. ``NominalHandEnvelope`` supplies declared heuristic lengths;
+it does not replace actual collision geometry or certify physical release.
+
+.. automodule:: embodichain.toolkits.graspkit.hand_envelope
+   :members:
+
+.. automodule:: embodichain.toolkits.graspkit.pg_grasp.constraints
+   :members:
+
+.. automodule:: embodichain.toolkits.graspkit.pg_grasp.opening
+   :members:
+
+Preshape screening and deferred qualification
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``PreshapeHandClearance`` consumes an explicit captured whole-hand sweep and
+measured table height. Handle candidate generation preserves the original
+diagonal approach, bounded retreat increments and cross-axis fallback order.
+Its width facts describe geometric aperture availability, without choosing an
+Atomic recovery policy or taking a physical observation.
+
+``unqualified_center_proposals`` reuses the generator's prepared contact pairs
+and original direction draws, NMS and ranking. It rejects required ground
+filtering instead of bypassing that contract. The caller must qualify final
+TCP rolls and complete commands before selecting or executing a proposal.
+
+.. automodule:: embodichain.toolkits.graspkit.pg_grasp.preshape
+   :members:
+
+.. automodule:: embodichain.toolkits.graspkit.pg_grasp.proposals
+   :members:
+
 Paired grasp sampling
 ~~~~~~~~~~~~~~~~~~~~~
 
