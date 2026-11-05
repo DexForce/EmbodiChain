@@ -630,6 +630,20 @@ this separate API.
 
 .. autofunction:: capture_rigid_mesh
 
+Authored robot mounting frames
+------------------------------
+
+These readers consume exact source identities and declared control parts without
+constructing a robot or solving IK. Fixed attachment chains retain URDF transform
+order; moving/cyclic mounts reject. Explicit assembly component transforms take
+precedence over a single-file shoulder lookup. No model or hand is selected.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_robot_geometry
+
+.. autofunction:: source_fixed_frame_pose
+
+.. autofunction:: source_arm_base_position
+
 Same-observation native hand and motion queries
 -----------------------------------------------
 
@@ -719,3 +733,24 @@ physical task success; projection uses the caller's current observed poses.
 .. currentmodule:: embodichain.lab.sim.scene.planar_observation
 
 .. autofunction:: capture_planar_contents
+
+Observed distal robot input meshes
+----------------------------------
+
+The explicit distal adapter captures source-ordered collision-input points and
+world TCP/root frames for one active and one disjoint passive arm. It validates
+the actual full joint observation and arm FK, while preserving hand-owner frame
+discrepancies as diagnostics. Snapshots own read-only numerical data; they do not
+select a staging route or certify native collision freedom.
+
+.. currentmodule:: embodichain.lab.sim.scene.robot_distal
+
+.. autosummary::
+
+   RobotDistalMeshSnapshot
+   capture_robot_distal_meshes
+
+.. autoclass:: RobotDistalMeshSnapshot
+   :members:
+
+.. autofunction:: capture_robot_distal_meshes

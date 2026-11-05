@@ -202,6 +202,17 @@ fixed virtual TCP links may lie upstream or downstream. A stationary opposite-ar
 TCP is not a valid hand reference. The declared TCP must also remain fixed
 throughout hand actuation. Model-specific commands and TCP
 calibration remain in concrete robot/embodiment configuration.
+`utility/hand_tip.py` fits an explicit authored collision-tip aperture with the
+source twelve-step closed-side bisection, or reads the original closed native
+link-mesh tip. `utility/preshape_geometry.py` captures the original seven-state
+whole-hand sweep from an exact B=1 observation. They consume model-owned finger
+rosters and existing hand/TCP calibration; neither selects skills or certifies
+physical contact. GraspKit retains numeric preshape rejection.
+`scene/robot_distal.py` similarly captures owned distal input points and observed
+TCP/root frames for one active and one disjoint passive arm. It validates the
+actual joints and arm FK; hand-owner discrepancy remains diagnostic. Compute
+consumes the explicit snapshot to generate staging hints, without Robot access.
+
 `ordered_pad_line_world` validates the same explicit topology and reads only the
 two live pad poses in declaration order; use it for a jaw line without sampled
 FK or surface capture. This order is distinct from the sampled surfaces' TCP-X order.
@@ -213,8 +224,6 @@ a second robot registry or infer topology from model/control-part names.
 Retain that provider with its owning Robot/environment adapter across bridge,
 engine and episode resets while the model, calibration and commands are unchanged.
 Single-arm facade calls never trigger capture. A different Robot needs its own
-providers; model names are not cache identities. GraspKit receives explicit
-
 providers; model names are not cache identities. The provider's `clear_cache()`
 releases asset-query state without reading the Robot or recapturing its hand
 geometry; it does not replace rebuilding after calibration/command changes.
