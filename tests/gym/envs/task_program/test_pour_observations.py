@@ -66,7 +66,9 @@ _SOURCE = json.loads(
 )
 
 
-def _collector_case(name="nominal", *, count=1):
+def _collector_case(
+    name="nominal", *, count=1, robot_qpos=None, joint_valid=True, joint_timestamp=True
+):
     case = next(item for item in _SOURCE["cases"] if item["name"] == name)
     common = _SOURCE["common"]
     bodies = {}
@@ -94,6 +96,10 @@ def _collector_case(name="nominal", *, count=1):
         get_articulation=lambda uid: None,
     )
     robot = SimpleNamespace(get_qpos=lambda target=False: torch.zeros(count, 1))
+    if robot_qpos is not None:
+        robot.uid = "robot"
+        robot.device = robot_qpos.device
+        robot.cfg = SimpleNamespace(root_props=SimpleNamespace(fixed_base=True))
     scene = SimulationSceneBinding(
         registry_id="recorded_scene",
         rigid_objects=tuple(
@@ -211,12 +217,31 @@ def _collector_case(name="nominal", *, count=1):
             )
             for uid, value in states.items()
         }
+        if robot_qpos is not None:
+            fields["robot_qpos"] = ObservationSample(
+                ObservationDescriptor(
+                    robot.uid,
+                    "qpos",
+                    "joint",
+                    "joint_order",
+                    ("joint_units",),
+                    (robot_qpos.shape[2],),
+                    robot_qpos.dtype,
+                ),
+                robot_qpos[:, slot],
+                torch.full((count,), joint_valid, dtype=torch.bool),
+                (
+                    (None,) * count
+                    if joint_valid
+                    else ("joint acquisition unavailable",) * count
+                ),
+            )
         frame = ObservationFrame(
             None,
             fields,
             episodes.episode_ids,
             slot,
-            timestamp=slot * clock.step_dt,
+            timestamp=slot * clock.step_dt if joint_timestamp or slot != 1 else None,
             clock_domain="simulation_time",
             episode_owner=episodes,
         )
@@ -403,3 +428,166 @@ def test_pour_capture_rejects_unavailable_raw_acquisition(missing):
             start_frames=measured["start_frames"],
             end_frames=measured["end_frames"],
         )
+
+
+@pytest.mark.parametrize("final", [False, True])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_held_poses_preserve_source_fk_precision_and_exact_historical_boundary(
+    final, dtype
+):
+    # The original held observer case uses this exactly representable joint
+    # coordinate and an identity object pose. Slot 1 in the frozen source is I.
+    coordinate = 0.125 if dtype == torch.float32 else 0.125 + 2.0**-40
+    qpos = torch.full((1, 31, 1), coordinate, dtype=dtype)
+    collector, env, _, bodies, _ = _collector_case(robot_qpos=qpos)
+    env.step_dt = 0.04
+    collector._bridge.post_policy_port.bind_clock(collector._bridge.clock)
+    robot = env.robot
+    robot.get_joint_ids = lambda name: [0]
+    seen = []
+
+    def fk(qpos, name, to_matrix):
+        seen.append((name, qpos.clone()))
+        result = torch.eye(4, dtype=qpos.dtype).repeat(len(qpos), 1, 1)
+        result[:, 0, 3] = qpos[:, 0]
+        return result
+
+    robot.compute_fk = fk
+    robot.get_qpos = lambda: qpos[:, 1].clone()
+    bodies["cube"].get_local_pose = lambda to_matrix: torch.eye(4).unsqueeze(0)
+    packet = collector.capture_held_poses(
+        "cube", ["custom_arm"], [1], observation_kind="final" if final else "recorded"
+    )
+    assert len(seen) == (2 if final else 1)
+    assert all(
+        name == "custom_arm" and value.dtype == dtype and torch.equal(value, qpos[:, 1])
+        for name, value in seen
+    )
+    assert packet["object_pose"] == torch.eye(4).unsqueeze(0).tolist()
+    expected_tcp = torch.eye(4, dtype=torch.float64).unsqueeze(0)
+    expected_tcp[:, 0, 3] = coordinate
+    assert packet["tcp_poses"] == {"custom_arm": expected_tcp.tolist()}
+    assert packet["pose_frame"]["observation_revision"] == 1
+    assert (
+        packet["pose_frame"]["batches"]["robot.tcp_pose:custom_arm"]["value_dtype"]
+        == "torch.float64"
+    )
+    assert packet["recorded_acquisition"]["timestamps"] == [0.04]
+    assert packet["recorded_acquisition"]["observation_revisions"] == [1]
+    if final:
+        robot.get_qpos = lambda: qpos[:, 1] + 0.01
+        with pytest.raises(ValueError, match="recorded boundary"):
+            collector.capture_held_poses(
+                "cube", ["custom_arm"], [1], observation_kind="final"
+            )
+    else:
+        robot.get_qpos = lambda: pytest.fail(
+            "Historical FK cannot read live robot positions"
+        )
+        bodies["cube"].get_local_pose = lambda **kwargs: pytest.fail(
+            "Historical FK cannot read a live body pose"
+        )
+        collector.capture_held_poses(
+            "cube", ["custom_arm"], [1], observation_kind="recorded"
+        )
+
+
+def test_held_poses_reject_missing_robot_history_before_fk():
+    collector, env, _, _, _ = _collector_case()
+    env.robot.uid = "robot"
+    env.robot.device = torch.device("cpu")
+    env.robot.cfg = SimpleNamespace(root_props=SimpleNamespace(fixed_base=True))
+    env.robot.get_joint_ids = lambda name: pytest.fail(
+        "Missing raw joints cannot reach FK"
+    )
+    with pytest.raises(RuntimeError, match="qpos"):
+        collector.capture_held_poses("cube", ["arm"], [1], observation_kind="recorded")
+
+
+@pytest.mark.parametrize(
+    "damage", ["joint_validity", "timestamp", "episode_during_fk", "close_during_fk"]
+)
+def test_held_poses_keep_missing_acquisition_and_lifetime_failures_unavailable(damage):
+    qpos = torch.full((1, 31, 1), 0.125, dtype=torch.float32)
+    collector, env, _, _, _ = _collector_case(
+        robot_qpos=qpos,
+        joint_valid=damage != "joint_validity",
+        joint_timestamp=damage != "timestamp",
+    )
+    env.step_dt = 0.04
+    robot = env.robot
+    robot.get_joint_ids = lambda name: [0]
+
+    def fk(qpos, **kwargs):
+        if damage in {"joint_validity", "timestamp"}:
+            pytest.fail("Unavailable history cannot reach FK")
+        if damage == "episode_during_fk":
+            env.episode_context._begin_episode([0])
+        else:
+            env._closed = True
+        return torch.eye(4, dtype=qpos.dtype).unsqueeze(0)
+
+    robot.compute_fk = fk
+    with pytest.raises(
+        (ValueError, RuntimeError),
+        match={
+            "joint_validity": "joint acquisition unavailable",
+            "timestamp": "acquisition time",
+            "episode_during_fk": "another episode",
+            "close_during_fk": "after close",
+        }[damage],
+    ):
+        collector.capture_held_poses("cube", ["arm"], [1], observation_kind="recorded")
+
+
+def test_held_poses_read_only_selected_slots_once_and_return_owned_values(monkeypatch):
+    qpos = torch.full((1, 31, 1), 0.125, dtype=torch.float32)
+    collector, env, _, _, _ = _collector_case(robot_qpos=qpos)
+    env.step_dt = 0.04
+    env.robot.get_joint_ids = lambda name: [0]
+    env.robot.compute_fk = lambda **kwargs: torch.eye(4).unsqueeze(0)
+    reads = []
+    original = env.observation_manager.read_history
+
+    def read_history(*args, **kwargs):
+        reads.append((args, kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(env.observation_manager, "read_history", read_history)
+    monkeypatch.setattr(
+        env.observation_manager,
+        "snapshot_history",
+        lambda **kwargs: pytest.fail(
+            "Selected held slots must not copy complete history"
+        ),
+    )
+    packet = collector.capture_held_poses(
+        "cube", ["arm"], [1], observation_kind="recorded"
+    )
+    assert len(reads) == 1
+    assert reads[0][0] == ((1,),)
+    assert reads[0][1]["fields"] == ("cube", "robot_qpos")
+    assert packet["recorded_acquisition"]["frame_indices"] == [1]
+    packet["object_pose"][0][0][0] = 2
+    again = collector.capture_held_poses(
+        "cube", ["arm"], [1], observation_kind="recorded"
+    )
+    assert again["object_pose"][0][0][0] == 1
+
+
+@pytest.mark.parametrize("fixed_base", [False, None])
+def test_held_poses_reject_unsupported_robot_bases_before_reading_history(
+    monkeypatch, fixed_base
+):
+    qpos = torch.full((1, 31, 1), 0.125, dtype=torch.float32)
+    collector, env, _, _, _ = _collector_case(robot_qpos=qpos)
+    env.robot.cfg.root_props.fixed_base = fixed_base
+    monkeypatch.setattr(
+        env.observation_manager,
+        "read_history",
+        lambda *a, **k: pytest.fail(
+            "Unsupported robot base cannot acquire historical data"
+        ),
+    )
+    with pytest.raises(ValueError, match="fixed robot base"):
+        collector.capture_held_poses("cube", ["arm"], [1], observation_kind="recorded")

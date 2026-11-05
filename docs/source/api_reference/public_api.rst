@@ -4182,6 +4182,13 @@ during capture raises before a packet can be published.
 Current reads work without history. Native owners, episodes and clocks cannot be
 substituted, and recorded joint claims require the original executed policy.
 
+The explicit ``capture_held_poses`` API reads one exact boundary's raw pose and
+qpos together and applies the existing model-owned named TCP FK. It retains the
+source fixed-base/calibrated-mount scope, original joint precision and robot
+device, float64 matrix channels and final native-agreement check. Original raw
+availability and temporal metadata remain authoritative; no new sensor sample
+or inferred task outcome is produced. Unavailable history fails explicitly.
+
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
 
 .. autoclass:: SimulationStateObservationCollector
