@@ -23,7 +23,8 @@
     "@xyflow/react": "12.11.6",
     "lucide-react": "1.46.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "@embodichain/graph-ui": "file:../../../web/graph-ui"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
