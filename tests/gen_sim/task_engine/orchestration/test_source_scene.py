@@ -269,3 +269,57 @@ def test_source_discovery_rejects_ambiguous_nested_exports(tmp_path):
     with pytest.raises(ValueError, match="Multiple exported scene configs"):
         resolve_source_scene(tmp_path)
     assert is_prompt2scene_export(tmp_path) is False
+
+
+@pytest.mark.parametrize("remove", [False, True])
+def test_source_asset_identity_covers_shared_resolved_articulation_inputs(
+    tmp_path, monkeypatch, remove
+):
+    import hashlib
+
+    test_root = Path(__file__).parents[3]
+    monkeypatch.syspath_prepend(str(test_root / "sim/scene"))
+    from _control_source_fixture import knob_source
+
+    source_articulation = knob_source(tmp_path)
+    source_path = Path(source_articulation["fpath"])
+    asset = tmp_path / "shared.glb"
+    asset.write_bytes(
+        (test_root / "sim/scene/fixtures/source_ingress_mesh.glb").read_bytes()
+    )
+    config = {
+        "format": "embodichain.scene-export/v1",
+        "world_alignment_applied": True,
+        "background": [
+            {"uid": "bench", "shape": {"shape_type": "Mesh", "fpath": "shared.glb"}}
+        ],
+        "rigid_object": [
+            {"uid": "cup", "shape": {"shape_type": "Mesh", "fpath": str(asset)}}
+        ],
+        "articulation": [
+            dict(source_articulation, uid="control_a", fpath="./knob.usda"),
+            dict(source_articulation, uid="control_b"),
+        ],
+    }
+    path = tmp_path / "scene_config.json"
+    path.write_text(json.dumps(config))
+    scene = prepare_scene(path)
+    rigid_digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    articulation_digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    assert scene.asset_hashes == {
+        "table": rigid_digest,
+        "cup": rigid_digest,
+        "control_a": articulation_digest,
+        "control_b": articulation_digest,
+    }
+    assert {item["fpath"] for item in scene.articulations} == {
+        str(source_path.resolve())
+    }
+    assert json.loads(path.read_text()) == config
+    scene.assert_source_assets()
+    if remove:
+        source_path.unlink()
+    else:
+        source_path.write_bytes(source_path.read_bytes() + b"\n")
+    with pytest.raises(ValueError, match="changed since scene preparation"):
+        scene.assert_source_assets()

@@ -114,17 +114,23 @@ class PreparedScene:
         Existing source asset digests are checked without replacing their values
         or reading derived geometry. An unchanged declaration retains its identity
         and serialization. Frozen physical snapshots use their independent full
-        input checks instead.
+        input checks instead. Shape assets retain their existing digests;
+        articulation assets use their normalized top-level source path.
 
         Raises:
             ValueError: If a declared referenced source asset is missing or changed.
         """
-        for value in (*self.background, *self.rigid_objects, *self.articulations):
-            expected = self.asset_hashes.get(str(value["uid"]))
-            source_path = (value.get("shape") or {}).get("fpath") or value.get("fpath")
-            if expected is not None and source_path is not None:
-                path = Path(source_path).expanduser().resolve()
-                if not path.is_file() or _file_hash(path) != expected:
+        for role, values in (
+            ("background", self.background),
+            ("rigid_object", self.rigid_objects),
+            ("articulation", self.articulations),
+        ):
+            for value in values:
+                expected = self.asset_hashes.get(str(value["uid"]))
+                if expected is None:
+                    continue
+                path = _declared_source_asset_path(value, role=role)
+                if path is None or not path.is_file() or _file_hash(path) != expected:
                     raise ValueError(
                         f"Source asset changed since scene preparation: {path}"
                     )
@@ -327,9 +333,9 @@ def prepare_scene(
             requested=requested_scale,
         )
         _apply_world_z_rotation(normalized, rotation)
-        shape = normalized.get("shape")
-        if isinstance(shape, Mapping) and shape.get("fpath"):
-            asset_hashes[normalized["uid"]] = _file_hash(Path(str(shape["fpath"])))
+        asset_path = _declared_source_asset_path(normalized, role=role)
+        if asset_path is not None:
+            asset_hashes[normalized["uid"]] = _file_hash(asset_path)
 
         planner_objects.append(
             _planner_object(
@@ -612,6 +618,15 @@ def _file_hash(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _declared_source_asset_path(config: Mapping[str, Any], *, role: str) -> Path | None:
+    """Select the physical input after the existing source-path normalization."""
+    fpath = config.get("fpath") if role == "articulation" else None
+    shape = config.get("shape")
+    if not fpath and isinstance(shape, Mapping):
+        fpath = shape.get("fpath")
+    return Path(str(fpath)).expanduser().resolve() if fpath else None
 
 
 def _planner_object(

@@ -35,7 +35,9 @@ UID correspondence and immutable preparation provenance. It delegates physical
 properties and pose/scale normalization to shared Scene ingress, and reads
 mesh-top inputs through the public Scene geometry owner. Use `PreparedScene`'s
 asset identity check before later preparation; missing or changed original input
-cannot be replaced or given a new digest under its old identity. Asset baking
+cannot be replaced or given a new digest under its old identity. Articulation
+assets use their resolved top-level source path; shape-owned asset digests stay
+unchanged. Asset baking
 remains Scene Engine's existing owner; this importer does not publish bundles
 or connect a runtime/CLI.
 
