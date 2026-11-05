@@ -113,3 +113,8 @@ warmup may create a nonzero offset; unobserved advancement that changes the
 mapping invalidates the window. Legacy acquisition keeps the simulation clock
 and does not gain strong qualification. These domains must not be mixed in one
 evidence window.
+
+`qualified_support_heights` adapts an already qualified native COM/load patch;
+it returns the highest accepted contact or NaN for an unavailable row. It does
+not create a physical window or choose a Task Program verdict. Geometric world
+mesh envelopes are numerical Compute inputs, independent of this contact proof.

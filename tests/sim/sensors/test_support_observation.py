@@ -753,9 +753,9 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
             False,
         ]
         assert metadata["stable_seconds"] == [0.0, 0.0]
-        assert (
-            sim.query.fetches == 1
-        )  # Same completed physics step reuses its contact snapshot.8
+        # Every distinct physics substep is still sampled, even when its
+        # support clock mapping is unavailable; no source acquisition is skipped.
+        assert sim.query.fetches == 4 * (commands + 1)
         registry.close()
         return
     assert commands == (3 if startup == "row_reset" else 2)
@@ -818,3 +818,24 @@ def test_clock_bound_observer_invalidates_moved_bodies_for_both_metadata_modes(
     _window(sim, observer, clock)
     assert _observe(observer, contract_revision).support.values.all()
     assert sim.query.fetches == 8
+
+
+def test_support_height_uses_highest_qualified_contact_without_averaging():
+    from embodichain.lab.sim.sensors.support_observation import (
+        qualified_support_heights,
+    )
+
+    row = {
+        "contacts_world": [[-0.01, 0.0, 0.08], [0.01, 0.0, 0.12]],
+        "center_of_mass_world": [0.0, 0.0, 0.2],
+        "com_patch_distance_m": 0.0,
+        "com_tolerance_m": 0.003,
+        "upward_impulse": 0.1,
+    }
+    heights = qualified_support_heights(
+        torch.tensor([True, False]),
+        {"scope": "native_contact_support", "rows": [row, row]},
+        torch.zeros(2),
+    )
+    assert heights[0].item() == pytest.approx(0.12)
+    assert torch.isnan(heights[1])

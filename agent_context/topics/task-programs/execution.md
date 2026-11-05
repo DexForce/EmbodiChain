@@ -91,9 +91,19 @@ object/reference anchors, while a held-state failure stays latched for the row.
 Native support and qualified planar-region inputs remain distinct measurements;
 missing acquisition cannot become geometric success. Pure task/report matching
 stays outside Lab and can consume owned condition data without a runtime.
+Mesh-envelope math belongs to Compute; qualified contact-height adaptation
+belongs to sensors. Empty attachment selections perform no Robot query, and
+multi-arm attachment checks reuse one inverse without changing FK or sampling.
 
-The simulation factory owns support observer reuse across bridges and installs
-the same native sensor instances in the public environment suite. Closing an
+The simulation factory owns support observer reuse and installs the same native
+sensor instances in the public environment suite. A support-enabled factory
+rejects overlapping unfinished bridges before replacing the clock. The adapter
+checks ownership before live assembly and binds the actual returned bridge.
+`execution_finished` distinguishes safely ended iteration from successful
+`program_completed`: outstanding lazy segments and unacknowledged actions keep
+ownership until consumed/validated or explicitly aborted. Non-support factories
+retain existing assembly. Returned effect providers, live scene snapshots and
+drive-target holds share the factory lifetime guard. Closing an
 environment keeps the demo executor's existing abort handshake, discards/finalizes
 recorders, closes runtime hooks, then destroys simulation. Close never guesses an
 action acknowledgement or steps physics; incomplete manual execution remains

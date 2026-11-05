@@ -1250,6 +1250,7 @@ stability window. Normative task acceptance remains outside this module.
    NativeSupportResult
    NativeSupportObservation
    SupportObservationRegistry
+   qualified_support_heights
 
 .. autoclass:: NativeSupportResult
    :members:
@@ -1260,6 +1261,13 @@ stability window. Normative task acceptance remains outside this module.
 .. autoclass:: SupportObservationRegistry
    :members:
 
+
+Qualified contact-height adaptation remains sensor-owned. It uses only a
+positive-load COM-qualified patch and returns the highest point; invalid rows
+remain NaN. Pure transformed mesh envelopes live in
+``compute.geometry.rigid.support_mesh_envelope`` and establish no contact.
+
+.. autofunction:: qualified_support_heights
 
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
@@ -3674,3 +3682,24 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 
 .. autoclass:: DriverOpeningBinding
    :members:
+
+Stability execution ownership
+----------------------------
+
+A simulation factory with native support owns one unfinished bridge at a time.
+``validate_runtime_bridge_creation`` rejects overlap before rebinding clocks;
+``bind_runtime_bridge`` records the bridge created by the standard adapter.
+``TaskProgramDemoBridge.execution_finished`` requires closed segment iteration
+and a consumed/validated or explicitly aborted final segment, with no active
+action generator. It is distinct from ``program_completed`` and does not certify
+success or acknowledge commands. Non-support factories retain existing assembly.
+
+Factory-returned effect providers retain their public IDs/revisions and guard
+all collection through the shared lifetime. The same guard protects live scene
+snapshots and drive-target holds. Independently owned past reports remain readable.
+
+The source control grid, stability counters and held-failure latch are unchanged.
+CPU policy profiling can run with
+``python -m scripts.benchmark.task_program.stability --output /tmp/stability``.
+This measures constant-pose policy overhead and serialization separately from
+native contact acquisition, physical tasks and GPU execution.
