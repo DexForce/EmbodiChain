@@ -707,7 +707,7 @@ allowance are explicit; missing FCL or unavailable geometry raises.
 .. autofunction:: convex_input_clearance
 
 Owned planar proposal inputs
----------------------------
+----------------------------
 
 ``NativePlanarPlacement.source_geometry()`` returns independent scaled subject
 vertices and per-row planar floor copies for numeric proposal generation. It
