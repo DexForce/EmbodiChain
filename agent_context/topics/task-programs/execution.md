@@ -62,6 +62,14 @@ and per-row availability belong to the [contact boundary](../sensor-system/conta
 Raw traces are observations, while report serialization and TaskSpec verdicts
 remain frontend responsibilities.
 
+Fresh grip capture uses `SimulationStateObservationCollector` with the explicit
+`ObservationManager` owner. Its cheap `read_history_step_counts` query qualifies
+the current row boundaries without copying the full history. The runtime's
+`GripEvidenceObservationPort` performs one acquisition and owns that exact query;
+the standard factory preserves sensor, robot and runtime-scope checks around it.
+Collectors check episode, object, provider and clock identity before and after
+the read. Query time is not a claim of a native impulse refresh or task success.
+
 Stateful segment validators capture their incoming evidence through the optional
 `begin_segment` port immediately before runtime planning starts. Lift checks use
 that segment's measured baseline, including for lazy and repeated segments;
@@ -310,3 +318,19 @@ scope or completion. `control_observation.py` projects the canonical contact
 observer's exact generation with `record_count` and `snapshot(start)`, preserving
 raw clock identities and missing/capacity errors without fetching contacts.
 Standard post-policy producer assembly remains a separate integration owner.
+
+
+`SimulationSupportObservationCollector` receives the host's actual
+`ObservationManager` for historical reads. Full-footprint geometry is recomputed
+through the existing policy session's `measure_support_geometry` using exact
+recorded poses and original support metadata. It does not resample contacts or
+read current poses. Invalid raw history remains unavailable before reprojection;
+TaskSpec independently checks that recomputed geometry matches the bound proof.
+
+`simulation.observations.SimulationStateObservationCollector` binds the exact
+pre-execution bridge, sealed registration and initialized episode. Current pose
+and joint queries validate the selected native owner and observation clock.
+Historical pose reads require an explicitly supplied ObservationManager and
+reuse its semantic schema/raw store, including unavailable rows and original
+boundary/revision/timestamp metadata. It does not evaluate TaskSpec conditions,
+resample past state or alter execution targets.

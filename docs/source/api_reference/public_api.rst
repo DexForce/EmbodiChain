@@ -971,6 +971,35 @@ callables, byte strings and unordered sets are rejected before serialization.
    canonicalize
    json_snapshot
 
+embodichain.gen_sim.task_spec.condition_evidence
+------------------------------------------------
+
+Sealed state bindings select explicit orientation or articulation endpoint
+criteria, native and episode identities, and separate current or recorded input
+contracts. Current orientation uses the shared rigid-pose axis computation;
+current joints use the declared target tolerance. Neither implies task execution
+success. Historical milestones require their full successful occurrence prefix
+and the original policy receipts; E6 also verifies the exact semantic operation,
+joint validator, target bounds and one-second stability contract.
+
+New raw observations require their complete acquisition channels and cannot
+switch to the historical verifier by adding a record. Missing channels, failed
+milestone receipts and unbound episodes remain unavailable per environment.
+Cold import and binding normalization do not load a simulation or numeric backend.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.condition_evidence
+
+.. autosummary::
+
+   ConditionEvidenceBinding
+   evaluate_condition_evidence
+
+.. autoclass:: ConditionEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_condition_evidence
+
+
 embodichain.gen_sim.task_spec.contracts
 ---------------------------------------
 
@@ -1005,11 +1034,20 @@ Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
 raw/historical input contracts. Raw sampled-timeline collection is not yet
 implemented and cannot be substituted with the COM-patch channel.
 
-This slice supports rigid ``on`` relations with legacy ``native_contact_support``
-or the explicitly selected ``native_stable_reference_support/v2`` sampled window.
-It rejects revision-1 and full-footprint region declarations instead of evaluating
-them through a weaker scope. Import is standard-library-only; numerical proof
-re-evaluation lazily loads the shared Torch/NumPy/Shapely implementation.
+Legacy ``native_contact_support`` and explicit
+``native_stable_reference_support/v2`` sampled windows retain their scopes.
+``native_supported_placement`` requires revision 1 and rechecks release-phase
+windows, actor/episode identity, original stable clocks and raw contact patches.
+Its declared ``supported_region`` variant checks complete planar footprints for
+``on`` and ``inside`` without claiming general volume containment. Stronger
+measurements never select a stronger scope implicitly. E4/E5 still require
+separate transfer/coordinated-transport proofs and reject in this slice.
+
+Recorded region geometry is recomputed from the ObservationManager's exact,
+available history slots and the original owned geometry/support snapshot.
+It cannot borrow the old footprint after a boundary pose changes, resample
+contacts or substitute a live pose. Import is standard-library-only; numerical
+proof re-evaluation lazily uses shared Torch/NumPy/Shapely algorithms.
 
 The verifier distinguishes unavailable acquisition from measured negatives and
 checks measured release receipts independently of plan/segment success. Raw Lab
@@ -1040,6 +1078,23 @@ invariants. The ordinary TaskSpec evaluator remains the certificate authority.
 .. autofunction:: evaluate_supported_placement_evidence
 
 .. autofunction:: evaluate_placement_evidence_report
+
+embodichain.gen_sim.task_spec.evidence_report
+---------------------------------------------
+
+Combine verified placement, orientation and joint evidence using the existing
+TaskSpec evaluator. Bindings must share the native row, episode and input-format
+contract. Final observations cannot fill past milestones; sparse boundary
+observations cannot establish continuous invariants or complete temporal windows.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.evidence_report
+
+.. autosummary::
+
+   evaluate_physical_evidence_report
+
+.. autofunction:: evaluate_physical_evidence_report
+
 
 embodichain.gen_sim.task_spec.expressions
 -----------------------------------------
@@ -1562,6 +1617,12 @@ bindings and control-part/pad-link declarations. NativeGripEvidenceFactory uses
 the public control-part provider injection API and preserves its provider ID and
 revision. Each provider owns its observer and bounded raw-query trace.
 
+``capture_grip_observation`` performs one requested bilateral observation and
+returns an owned batch plus the exact query snapshot. The standard simulation
+factory forwards this capability through its lifetime and explicit runtime-scope
+guards; native sensor and engine ownership are checked around acquisition.
+It does not invoke effect collection or refresh a second contact sample.
+
 Physical interpretation revision 1 preserves the opposed positive-impulse
 criterion and absent-positive-contact observations. Revision 2 requires explicit
 opening calibration and opt-in; its one-sided open-hand release observation is
@@ -1628,11 +1689,20 @@ a historical pose or falls back to a live pose/previous frame.
 The result owns physical metadata and availability only; TaskSpec and Task Engine
 are not dependencies of this Lab collector.
 
+``SimulationStateObservationCollector.capture_current_grip`` requires the explicit
+``ObservationManager`` dependency and its current completed row boundaries. It
+selects the runtime's declared ``GripEvidenceObservationPort``, retaining raw
+validity, acquisition errors, actor identities and query revision. Environment,
+episode, robot, object, provider and clock ownership are checked around the read.
+Its timestamp describes the collection query clock; it does not claim that native
+impulses were refreshed at that time or establish task acceptance.
+
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
 
 .. autosummary::
 
    SimulationSupportObservationCollector
+   SimulationStateObservationCollector
 
 .. autoclass:: SimulationSupportObservationCollector
    :members:
@@ -4137,6 +4207,15 @@ are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrat
 
    GripContactObserver
    DriverOpeningBinding
+   GripEvidenceObservationPort
+
+``GripEvidenceObservationPort`` exposes one owned bilateral acquisition and its
+exact raw query without exposing the underlying provider or observer. Forwarders
+preserve their host and runtime lifetime checks. ``snapshot_latest_query`` rejects
+unrecorded or superseded query ordinals instead of substituting an older trace.
+
+.. autoclass:: GripEvidenceObservationPort
+   :members:
 
 ``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
 creating a per-environment reader. It performs no qpos read during binding;
@@ -4197,3 +4276,21 @@ pass the selected port to AtomicActionEngine.start.
 
 .. autoclass:: embodichain.lab.sim.evidence.RobotCommandObservation
    :members:
+
+
+State observation acquisition
+-----------------------------
+
+``SimulationStateObservationCollector`` binds the actual bridge/session and
+collects current poses or explicit joint positions without interpreting task
+acceptance. Recorded poses read the canonical ObservationManager's raw history;
+invalid finite values remain unavailable and original temporal metadata is kept.
+Current reads work without history. Native owners, episodes and clocks cannot be
+substituted, and recorded joint claims require the original executed policy.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
+
+.. autoclass:: SimulationStateObservationCollector
+   :members:
+
+.. autofunction:: embodichain.gen_sim.task_engine.evidence.project_condition_evidence_binding

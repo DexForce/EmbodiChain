@@ -425,3 +425,15 @@ physical retention certificate and reads no simulation or task objects.
    inside_carrier_envelope
 
 .. autofunction:: inside_carrier_envelope
+
+
+Qualified contact heights
+-------------------------
+
+``contact_support_heights`` selects the highest qualified patch point without
+averaging penetration away. Missing load, COM support or finite coordinates
+produce NaN and preserve the caller's conservative envelope. The sensor-facing
+``qualified_support_heights`` API delegates to this shared calculation; TaskSpec
+uses it without importing Lab or acquiring physical state.
+
+.. autofunction:: embodichain.compute.geometry.contact_support.contact_support_heights

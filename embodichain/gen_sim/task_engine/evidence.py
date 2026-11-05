@@ -27,6 +27,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from embodichain.gen_sim.task_spec import TaskSpec, canonical_hash, json_snapshot
+from embodichain.gen_sim.task_spec.condition_evidence import (
+    ConditionEvidenceBinding,
+    evaluate_condition_evidence,
+)
 from embodichain.gen_sim.task_spec.evidence import (
     SupportedPlacementEvidenceBinding,
     evaluate_supported_placement_evidence,
@@ -35,6 +39,7 @@ from embodichain.gen_sim.task_spec.evidence import (
 __all__ = [
     "project_placement_evidence_binding",
     "project_configured_placement_evidence_binding",
+    "project_condition_evidence_binding",
 ]
 
 
@@ -116,7 +121,9 @@ def _project_placement_evidence_binding(
     if len(matches) != 1:
         raise ValueError("Projection requires one exact declared predicate.")
     predicate, milestone = matches[0]
-    if predicate.name != "semantic_goal" or predicate.arguments.get("relation") != "on":
+    if predicate.name != "semantic_goal" or predicate.arguments.get("relation") not in (
+        {"on", "inside"} if evidence_scope == "native_supported_placement" else {"on"}
+    ):
         raise ValueError(
             "This projection supports the declared rigid on-relation slice."
         )
@@ -384,3 +391,204 @@ def project_placement_evidence_binding(
         episode_ids=episode_ids,
         num_envs=num_envs,
     )
+
+
+def project_condition_evidence_binding(
+    spec: TaskSpec | Mapping[str, Any],
+    graph: Mapping[str, Any],
+    validation: Mapping[str, Any],
+    program: Mapping[str, Any],
+    occurrences: Mapping[str, Mapping[str, Any]],
+    resolved_state: Mapping[str, Any],
+    *,
+    predicate_id: str,
+    boundary_node_id: str,
+    policy_node_id: str,
+    stability_preset: str,
+    evidence_kind: str,
+    evidence_format: str = "raw_snapshot",
+    episode_ids: Sequence[int] | None = None,
+    num_envs: int = 1,
+) -> ConditionEvidenceBinding:
+    """Project grounded orientation/joint declarations into normative identities.
+
+    Args:
+        spec: Frozen TaskSpec.
+        graph: Validated semantic graph, including exact group lineage.
+        validation: Matching program/spec/graph digests and coverage declaration.
+        program: Complete serialized program, retaining validators and policies.
+        occurrences: Compiled segment names and full source paths keyed by graph
+            node. Repeated executions must have distinct compiled occurrences.
+        resolved_state: Plain descriptor from the configured owner, containing
+            entity_id, native_uid, part_id and condition. Condition values are
+            already resolved public policy declarations; this adapter never
+            selects or changes controller thresholds or native calibration.
+        predicate_id: Exact declared goal or milestone predicate.
+        boundary_node_id: Explicit final/recorded observation boundary.
+        policy_node_id: Explicit occurrence selecting the named condition.
+        stability_preset: Exact configured policy name, without name inference.
+        evidence_kind: Explicit orientation or joint_endpoint qualification.
+        evidence_format: Explicit raw_snapshot or historical_record contract.
+        episode_ids: Optional static binding, required for raw evaluation.
+        num_envs: Native ordered row count.
+
+    Returns:
+        An independently owned TaskSpec binding. Goal/milestone association and
+        supported normative predicates are validated by TaskSpec itself.
+    """
+    normalized = TaskSpec.from_dict(spec)
+    graph, validation, program, occurrences, state = (
+        json_snapshot(value)
+        for value in (graph, validation, program, occurrences, resolved_state)
+    )
+    for key, value in (
+        ("task_spec_digest", normalized.to_dict()),
+        ("graph_digest", graph),
+        ("program_digest", program),
+    ):
+        if validation.get(key) != canonical_hash(value):
+            raise ValueError(f"Frozen state projection has a different {key}.")
+    if type(num_envs) is not int or num_envs < 1:
+        raise ValueError("num_envs must be a positive integer.")
+    coverage = validation["coverage"]
+    if coverage.get("status") != "covered" or coverage.get("issues"):
+        raise ValueError("State projection requires complete declared coverage.")
+    predicates = [(item, None) for item in normalized.goal] + [
+        (item, milestone.id)
+        for milestone in normalized.milestones
+        for item in milestone.achieve
+    ]
+    matches = [
+        (item, milestone) for item, milestone in predicates if item.id == predicate_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("State projection requires one exact predicate identity.")
+    predicate, milestone = matches[0]
+    selected = [
+        item
+        for item in coverage["goals" if milestone is None else "milestones"]
+        if item["id"] == (predicate_id if milestone is None else milestone)
+    ]
+    if len(selected) != 1 or len(selected[0]["groups"]) != 1:
+        raise ValueError("State projection requires one fully declared semantic group.")
+    group_id = selected[0]["groups"][0]
+    groups = [item for item in graph["task_groups"] if item["id"] == group_id]
+    if len(groups) != 1:
+        raise ValueError("State group is missing or ambiguous.")
+    group = groups[0]
+    role_id = predicate.arguments["subject"]
+    role = next(item for item in normalized.roles if item.name == role_id)
+    members = coverage["roles"][role_id]
+    if (
+        role.quantifier != "one"
+        or len(members) != 1
+        or members[0] != {"uid": state["entity_id"], "part_id": state.get("part_id")}
+    ):
+        raise ValueError(
+            "State descriptor differs from its complete single-role binding."
+        )
+    lineage = [
+        item
+        for entries in coverage["lineage"].values()
+        for item in entries
+        if item["group_id"] == group_id
+    ]
+    if (
+        len(lineage) != 1
+        or lineage[0]["object_uid"] != state["entity_id"]
+        or lineage[0].get("object_part_id") != state.get("part_id")
+    ):
+        raise ValueError("State descriptor differs from its grounded lineage.")
+    nodes = {item["id"]: item for item in graph["nodes"]}
+    if (
+        len(nodes) != len(graph["nodes"])
+        or not group["node_ids"]
+        or len(set(group["node_ids"])) != len(group["node_ids"])
+    ):
+        raise ValueError(
+            "State execution occurrences must be explicit and unambiguous."
+        )
+
+    def occurrence(node_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+        descriptor = occurrences[node_id]
+        declared = program
+        for component in descriptor["source_path"]:
+            if type(component) not in (str, int):
+                raise ValueError("State source path has an invalid component.")
+            declared = declared[component]
+        if (
+            declared.get("kind") != "segment"
+            or declared.get("name") != descriptor["segment_name"]
+            or declared["steps"].get("kind") != "invoke"
+            or canonical_hash(declared["steps"]["call"])
+            != canonical_hash(nodes[node_id]["call"])
+        ):
+            raise ValueError(
+                "Compiled state occurrence differs from its declared graph call."
+            )
+        return descriptor, declared
+
+    if policy_node_id not in group["node_ids"]:
+        raise ValueError("State policy does not belong to the declared group.")
+    if milestone is not None and boundary_node_id != group["node_ids"][-1]:
+        raise ValueError(
+            "Recorded state must use the declared terminal group boundary."
+        )
+    boundary, _ = occurrence(boundary_node_id)
+    policy, declared_policy = occurrence(policy_node_id)
+    if (
+        sum(
+            item.get("kind") == "wait_stable"
+            and item.get("entity") == state["entity_id"]
+            and item.get("preset") == stability_preset
+            for item in declared_policy.get("post", [])
+        )
+        != 1
+    ):
+        raise ValueError("The selected state occurrence lacks its exact named policy.")
+    condition = dict(state["condition"])
+    if condition.get("entity") != state["entity_id"]:
+        raise ValueError("State condition names another entity.")
+    if evidence_kind == "joint_endpoint":
+        if (
+            "target_state" in condition
+            and condition["target_state"] != predicate.arguments["target_state"]
+        ):
+            raise ValueError("State condition names another semantic endpoint.")
+        if "part_id" in condition and condition["part_id"] != state.get("part_id"):
+            raise ValueError("State condition names another grounded part.")
+        condition.update(
+            target_state=predicate.arguments["target_state"],
+            part_id=state.get("part_id"),
+        )
+    required = []
+    if milestone is not None:
+        for node_id in group["node_ids"]:
+            descriptor, _ = occurrence(node_id)
+            required.append(
+                {
+                    "segment_id": descriptor["segment_name"],
+                    "source_path": descriptor["source_path"],
+                }
+            )
+    result = ConditionEvidenceBinding(
+        task_spec_digest=validation["task_spec_digest"],
+        program_digest=validation["program_digest"],
+        predicate_id=predicate_id,
+        entity_id=state["entity_id"],
+        native_uid=state["native_uid"],
+        evidence_kind=evidence_kind,
+        observation_kind="final" if milestone is None else "recorded",
+        condition=condition,
+        evidence_format=evidence_format,
+        boundary_segment_id=boundary["segment_name"],
+        boundary_source_path=tuple(boundary["source_path"]),
+        policy_segment_id=policy["segment_name"],
+        policy_source_path=tuple(policy["source_path"]),
+        stability_preset=stability_preset,
+        required_execution=tuple(required),
+        env_ids=tuple(range(num_envs)),
+        episode_ids=None if episode_ids is None else tuple(episode_ids),
+    )
+    evaluate_condition_evidence(normalized, result, {}, program=program)
+    return result
