@@ -785,3 +785,36 @@ qualified public limit-cache repair, and measure declared support geometry.
 
 .. automodule:: embodichain.lab.sim.scene.prismatic_control
    :members:
+
+
+Authored source mesh inputs
+---------------------------
+
+These readers retain authored scene-node transforms and face order, convert the
+source glTF Y-up basis to object-local Z-up and apply body scale once. They read
+files without native simulation. The top estimator preserves unavailable input
+as None; it is not a cooked-collider observation or physical clearance proof.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autosummary::
+
+   read_gltf_z_up_mesh
+   estimate_source_mesh_top_z
+
+.. autofunction:: read_gltf_z_up_mesh
+
+.. autofunction:: estimate_source_mesh_top_z
+
+Local source vertices
+----------------------
+
+``read_source_vertices`` retains source-local ordering and one body scale for
+mesh and articulation geometry. Explicit local overrides already own their scale.
+It reads no native state and applies no world pose. Missing mesh geometry is an
+error, including primitive configurations without an explicit local override;
+this does not qualify cooked collision shapes or physical containment.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autofunction:: read_source_vertices
