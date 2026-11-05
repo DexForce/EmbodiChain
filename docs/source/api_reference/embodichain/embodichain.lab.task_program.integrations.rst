@@ -478,4 +478,3 @@ must not construct resources or read live state during this preflight.
 
 .. autoclass:: RegisteredSemanticLowererSceneValidator
    :members:
-

@@ -301,6 +301,7 @@ def collect_vector_program(
     on_started: Callable[[int], None] | None = None,
     expansion_profile: Any = None,
     recipe_indices: tuple[int, ...] | None = None,
+    reject_row: Callable[[int], bool] | None = None,
 ) -> ProgramBatchResult:
     """Run the canonical vector Task Program with explicit tail-row masking.
 
@@ -313,6 +314,9 @@ def collect_vector_program(
         on_started: First-command notification per assigned row.
         expansion_profile: Optional canonical combined motion profile.
         recipe_indices: Logical recipe indices for the full physical capacity.
+        reject_row: Optional measured rejection predicate checked after recording
+            each actual step. Rejected rows receive one recorded safe hold and
+            remain held while their peers finish on the normal World clock.
     Returns:
         Canonical row outcomes, segment annotations and expansion provenance.
     """
@@ -327,21 +331,53 @@ def collect_vector_program(
     )
     started = set()
     steps = 0
+    lengths = {row: 0 for row in env_ids}
+    requested = set()
+    stopped = set()
 
     def observe(mask, action, observation):
         nonlocal steps
-        ids = tuple(i for i, active in enumerate(mask) if active)
+        ids = tuple(i for i, active in enumerate(mask) if active and i not in stopped)
         for row in ids:
             if row not in started:
                 if on_started is not None:
                     on_started(row)
                 started.add(row)
         steps += 1
+        row_actions = {str(row): dict(action.metadata) for row in ids}
+        for row in action.metadata.get("rejected_env_ids", ()):
+            if str(row) in row_actions:
+                row_actions[str(row)][
+                    "bridge_action_kind"
+                ] = "runtime_row_rejection_hold"
         merged = ControllerAction(
             action.value,
-            metadata={"row_actions": {str(row): dict(action.metadata) for row in ids}},
+            metadata={"row_actions": row_actions},
         )
         observe_step(ids, merged, observation)
+        for row in ids:
+            lengths[row] += 1
+        stopped.update(action.metadata.get("rejected_env_ids", ()))
+        rejected = tuple(
+            row
+            for row in ids
+            if row not in requested and reject_row is not None and reject_row(row)
+        )
+        if rejected:
+            requested.update(rejected)
+            hold = env.robot.get_qpos(target=True).clone()
+            values = {"qpos": hold}
+            if not isinstance(action.value, torch.Tensor) and "qvel" in action.value:
+                values["qvel"] = torch.zeros_like(hold)
+            bridge.request_row_rejection(
+                rejected,
+                ControllerAction(
+                    hold
+                    if isinstance(action.value, torch.Tensor)
+                    else TensorDict(values, batch_size=[env.num_envs])
+                ),
+                reason="measured_validation_failed",
+            )
 
     with env.task_program_bridge_scope(bridge):
         result = execute_demo_episode(
@@ -360,14 +396,27 @@ def collect_vector_program(
         records = bridge.expansion_records
         return ProgramBatchResult(
             env_ids,
-            tuple(result.lengths[row] for row in env_ids),
-            tuple(bool(result.success[row] and completion[row]) for row in env_ids),
-            tuple(result.terminal_reasons[row] for row in env_ids),
+            tuple(lengths[row] for row in env_ids),
+            tuple(
+                bool(row not in requested and result.success[row] and completion[row])
+                for row in env_ids
+            ),
+            tuple(
+                (
+                    "measured_validation_failed"
+                    if row in requested
+                    else result.terminal_reasons[row]
+                )
+                for row in env_ids
+            ),
             tuple(
                 tuple(
-                    segment.to_metadata(env_id=row)
+                    {
+                        **segment.to_metadata(env_id=row),
+                        "end_step": min(segment.end_step, lengths[row]),
+                    }
                     for segment in result.segments
-                    if segment.active[row]
+                    if segment.active[row] and segment.start_step < lengths[row]
                 )
                 for row in env_ids
             ),
@@ -439,4 +488,5 @@ class TaskProgramBatchExecutor:
             on_started=on_started,
             expansion_profile=self.expansion_profile,
             recipe_indices=self.recipe_indices,
+            reject_row=reject_row,
         )

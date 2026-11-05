@@ -73,6 +73,11 @@ candidate. Assets with different topology require separate deployment Worlds.
 All rows reset and settle together. Only the owner steps physics, and row generators
 acknowledge commands only after successful steps. Early termination must drain the
 Task Program safe-stop handshake; completed rows stop contributing frames.
+Native vector rejection cancels the row across semantic lanes and masks retained
+commands. Its safe hold uses the next ordinary step, preserving surviving rows'
+post-policy observation clock. Expected Real2Sim acceptance rejection retains
+measured checks and rejects only that row; source corruption and runtime errors
+still stop collection.
 
 Native numerical evidence has T submitted actions and T+1 measured states. It includes
 all represented dynamic scene entities, source/action semantics, physical parameters
