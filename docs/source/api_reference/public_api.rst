@@ -1005,11 +1005,20 @@ Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
 raw/historical input contracts. Raw sampled-timeline collection is not yet
 implemented and cannot be substituted with the COM-patch channel.
 
-This slice supports rigid ``on`` relations with legacy ``native_contact_support``
-or the explicitly selected ``native_stable_reference_support/v2`` sampled window.
-It rejects revision-1 and full-footprint region declarations instead of evaluating
-them through a weaker scope. Import is standard-library-only; numerical proof
-re-evaluation lazily loads the shared Torch/NumPy/Shapely implementation.
+Legacy ``native_contact_support`` and explicit
+``native_stable_reference_support/v2`` sampled windows retain their scopes.
+``native_supported_placement`` requires revision 1 and rechecks release-phase
+windows, actor/episode identity, original stable clocks and raw contact patches.
+Its declared ``supported_region`` variant checks complete planar footprints for
+``on`` and ``inside`` without claiming general volume containment. Stronger
+measurements never select a stronger scope implicitly. E4/E5 still require
+separate transfer/coordinated-transport proofs and reject in this slice.
+
+Recorded region geometry is recomputed from the ObservationManager's exact,
+available history slots and the original owned geometry/support snapshot.
+It cannot borrow the old footprint after a boundary pose changes, resample
+contacts or substitute a live pose. Import is standard-library-only; numerical
+proof re-evaluation lazily uses shared Torch/NumPy/Shapely algorithms.
 
 The verifier distinguishes unavailable acquisition from measured negatives and
 checks measured release receipts independently of plan/segment success. Raw Lab

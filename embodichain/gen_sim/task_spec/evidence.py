@@ -44,6 +44,7 @@ _SCOPES = frozenset(
     {
         "native_contact_support",
         "native_stable_support",
+        "native_supported_placement",
     }
 )
 
@@ -210,14 +211,14 @@ class SupportedPlacementEvidenceBinding:
         if len({item["segment_id"] for item in requirements}) != len(requirements):
             raise ValueError("Required execution occurrences must be unique.")
         object.__setattr__(self, "required_execution", requirements)
-        if self.condition.get("kind") == "supported_region":
-            raise ValueError(
-                "Region placement requires its complete footprint evidence contract; it cannot use a contact-only scope."
-            )
         revision = self.condition.get("support_contract_revision")
-        if revision is not None:
+        if self.evidence_scope == "native_supported_placement":
+            from ._strong_support import _condition_values
+
+            _condition_values(self.condition)
+        elif revision is not None or self.condition.get("kind") == "supported_region":
             raise ValueError(
-                "A revision-1 declaration requires its separate strong evidence evaluator; it cannot use a legacy or version-2 timeline scope."
+                "Strong/full-footprint declarations require their explicit evidence scope; they cannot use a contact-only or version-2 verifier."
             )
         if self.evidence_scope == "native_stable_support" and len(ids) != 1:
             raise ValueError(
@@ -427,7 +428,14 @@ def evaluate_supported_placement_evidence(
         )
     if (
         predicate.name != "semantic_goal"
-        or predicate.arguments.get("relation") != "on"
+        or predicate.arguments.get("relation")
+        not in (
+            {"on", "inside"}
+            if selected.evidence_scope == "native_supported_placement"
+            else {"on"}
+        )
+        or predicate.arguments.get("relation") == "inside"
+        and selected.condition.get("kind") != "supported_region"
         or predicate.operator != "eq"
         or predicate.expected is not True
     ):
@@ -497,7 +505,12 @@ def evaluate_supported_placement_evidence(
                 or acquisition["timestamp"] < 0
                 or type(acquisition.get("observation_revision")) is not int
                 or acquisition["observation_revision"] < 0
-                or acquisition.get("clock_domain") != "simulation_time"
+                or acquisition.get("clock_domain")
+                != (
+                    "environment_step"
+                    if selected.evidence_scope == "native_supported_placement"
+                    else "simulation_time"
+                )
                 or acquisition.get("env_ids") != list(selected.env_ids)
                 or any(
                     type(value) is not int for value in acquisition.get("env_ids", [])
@@ -592,6 +605,22 @@ def evaluate_supported_placement_evidence(
                 "reference_uid": selected.reference_id,
                 "relation": predicate.arguments["relation"],
             }
+            if selected.evidence_scope == "native_supported_placement":
+                metrics = dict(
+                    scope=selected.evidence_scope,
+                    support_contract_revision=1,
+                    placement_node_id=selected.release_segment_id,
+                    support_boundary_node_id=selected.support_segment_id,
+                    boundary_node_id=selected.boundary_segment_id,
+                    stability_preset=selected.stability_preset,
+                    observation_kind=selected.observation_kind,
+                    native_support=native,
+                    reference_uid=selected.reference_id,
+                    relation=predicate.arguments["relation"],
+                )
+                for name in ("landing_region", "support_gap_m"):
+                    if name in snapshot:
+                        metrics[name] = snapshot[name]
             if "boundary_frames" in snapshot:
                 metrics["boundary_frames"] = snapshot["boundary_frames"]
             snapshot["record"] = {
@@ -601,7 +630,17 @@ def evaluate_supported_placement_evidence(
             }
         record = snapshot["record"]
         if acquisition is not None:
-            native = record["measurements"]
+            native = (
+                record["measurements"]["native_support"]
+                if selected.evidence_scope == "native_supported_placement"
+                else record["measurements"]
+            )
+            if selected.evidence_scope == "native_supported_placement" and acquisition[
+                "timestamp"
+            ] != native.get("observed_at"):
+                raise ValueError(
+                    "Strong support channel and native measurements have different observation times."
+                )
             if not _bool_rows(native.get("supported"), size) or any(
                 available and value != supported
                 for available, value, supported in zip(
@@ -616,7 +655,7 @@ def evaluate_supported_placement_evidence(
                 )
         if record.get("uid") != selected.object_id or record.get("part_id") is not None:
             raise ValueError("Placement record names another physical subject.")
-        released, release_available, receipt, _ = measured_release(
+        released, release_available, receipt, release_call = measured_release(
             release_segment["metadata"]["runtime"],
             boundary["metadata"]["runtime"],
             object_uid=selected.object_id,
@@ -637,6 +676,81 @@ def evaluate_supported_placement_evidence(
                 support_boundary,
                 require_claims=historical_record,
             )
+        elif selected.evidence_scope == "native_supported_placement":
+            from ._support_contract import release_window
+            from ._strong_support import (
+                _strong_support_trace,
+                _strong_support_flags,
+                _region_poses_match,
+            )
+            import torch
+
+            metrics = record["measurements"]
+            expected = {
+                "scope": selected.evidence_scope,
+                "support_contract_revision": 1,
+                "placement_node_id": selected.release_segment_id,
+                "support_boundary_node_id": selected.support_segment_id,
+                "boundary_node_id": selected.boundary_segment_id,
+                "stability_preset": selected.stability_preset,
+                "observation_kind": selected.observation_kind,
+                "reference_uid": selected.reference_id,
+                "relation": predicate.arguments["relation"],
+            }
+            if any(metrics.get(key) != value for key, value in expected.items()):
+                raise ValueError(
+                    "Strong placement differs from its selected declaration/occurrences."
+                )
+            trace = _strong_support_trace(
+                support_boundary,
+                selected.condition,
+                selected.stability_preset,
+                selected.object_id,
+                selected.reference_id,
+                size,
+            )
+            window = release_window(release_call, receipt, size)
+            if historical_record and (
+                metrics.get("released") != released
+                or metrics.get("release_window") != window
+            ):
+                raise ValueError("Strong placement has a foreign release phase window.")
+            native = metrics["native_support"]
+            if not _region_poses_match(
+                native,
+                torch.tensor(snapshot["boundary_poses"][selected.object_id]),
+                torch.tensor(snapshot["boundary_poses"][selected.reference_id]),
+                size,
+            ):
+                raise ValueError(
+                    "Strong support differs from its exact boundary poses."
+                )
+            if selected.observation_kind == "recorded":
+                if (
+                    native != trace["measurements"]["native_support"]
+                    or metrics.get("boundary_frames") != boundary.get("end_steps")
+                    or selected.condition["kind"] == "supported_region"
+                    and metrics.get("landing_region")
+                    != trace["measurements"].get("landing_region")
+                ):
+                    raise ValueError(
+                        "Recorded strong support differs from its own policy snapshot."
+                    )
+            physical = _strong_support_flags(
+                native,
+                metrics.get("landing_region"),
+                selected.condition,
+                window,
+                trace,
+                selected.object_id,
+                selected.reference_id,
+                size,
+                metrics.get("support_gap_m"),
+            )
+            flags = [
+                support and release
+                for support, release in zip(physical, released, strict=True)
+            ]
         elif selected.evidence_scope == "native_stable_support":
             from ._support_evidence import stable_support_flags
 
