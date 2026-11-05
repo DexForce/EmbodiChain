@@ -93,12 +93,14 @@ as a mapping with `name` and `cfg`.
 environment factory, and keys cannot also appear in its scalar configuration.
 Custom registered policies may implement `from_config(config, *, obs_space,
 action_space, device)` to own their configuration and space validation. A learning environment implements the
-`LearningVecEnv` protocol. Differentiable algorithms additionally require
-`DifferentiableVecEnv.detach_state()` as the truncated-backpropagation
+`LearningEnvProtocol` protocol. The former `LearningVecEnv`,
+`DifferentiableVecEnv` and `ScheduledDifferentiableVecEnv` names remain exact
+aliases for downstream import compatibility. Differentiable algorithms additionally require
+`DifferentiableEnvProtocol.detach_state()` as the truncated-backpropagation
 boundary.
 
 Variable-horizon APG environments may also implement
-`ScheduledDifferentiableVecEnv.prepare_differentiable_rollout()`. Its
+`ScheduledDifferentiableEnvProtocol.prepare_differentiable_rollout()`. Its
 `DifferentiableRolloutSpec` selects the next reset's complete horizon,
 per-environment objective scale, and scalar rollout metadata.
 
@@ -165,7 +167,7 @@ regression and a separate critic optimizer. Actor/critic parameter groups must
 be disjoint. Time truncations require the full pre-reset observation batch in
 `info["terminal_observation"]`; hard termination suppresses bootstrap. Optional
 soft continuation retains its input derivative. Task-data validity masks are
-detached. See the field contract in `DifferentiableVecEnv` and
+detached. See the field contract in `DifferentiableEnvProtocol` and
 `DifferentiableTransition`. Normalizer updates belong between optimizer updates.
 
 `DifferentiableTrainer.update_once()` provides the collection/update boundary

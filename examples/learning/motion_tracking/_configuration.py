@@ -78,6 +78,24 @@ def normalize_recipe(config: dict[str, Any]) -> dict[str, Any]:
     return dict(trainer=trainer, policy=policy, algorithm=algorithm, workflow=workflow)
 
 
+def validate_recipe(config: dict[str, Any]) -> None:
+    """Check the G1/SuperMimic composition before allocating its environment."""
+    for path, block, expected in (
+        (
+            "trainer.learning_env",
+            config["trainer"].get("learning_env"),
+            "MotionTrackingModelRL",
+        ),
+        ("policy", config["policy"], "motion_tracking"),
+        ("algorithm", config["algorithm"], "apg_actor_critic"),
+    ):
+        name = block.get("name") if isinstance(block, dict) else None
+        if name != expected:
+            raise ValueError(
+                f"G1 motion training requires {path}.name={expected!r}; got {name!r}."
+            )
+
+
 def recipe_identity(config: dict[str, Any]) -> dict[str, Any]:
     """Select learning settings that must match before restoring any live state."""
     result = normalize_recipe(config)

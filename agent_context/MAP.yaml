@@ -332,7 +332,7 @@ topics:
   title: RL Learning Pipeline
   aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
-    PPO, GRPO, APG, APGActorCritic, apg_actor_critic, SyncCollector, ScheduledDifferentiableVecEnv, DifferentiableRolloutSpec,
+    PPO, GRPO, APG, APGActorCritic, apg_actor_critic, SyncCollector, ScheduledDifferentiableEnvProtocol, DifferentiableRolloutSpec,
     complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
   paths: [topics/rl-learning/rl-learning.md]
   source_of_truth:
@@ -601,14 +601,14 @@ topics:
 - id: robot-world-model
   title: Robot World Model
   aliases: [robot world model, RWM, 机器人世界模型]
-  keywords: [RobotWorldModel, KinematicWorldModel, MotionTrackingPolicy, MotionModelEnv, OnlineLearningSchedule, RWMPredictor, TransitionReplay, build_rwm_trainer,
+  keywords: [RobotWorldModel, KinematicWorldModel, MotionTrackingPolicy, MotionModelEnv, OnlineModelBasedSchedule, RWMPredictor, TransitionReplay, build_rwm_trainer,
     replay_supervised_batch, learning/rwm]
   paths: [topics/robot-world-model/robot-world-model.md]
   source_of_truth:
   - extensions/embodichain_models/embodichain_models/dynamics/rwm/
   - examples/learning/rwm/
   - examples/learning/motion_tracking/
-  - embodichain/learning/dynamics/online.py
+  - embodichain/learning/dynamics/schedule.py
   - extensions/embodichain_models/embodichain_models/policies/motion_tracking.py
   - extensions/embodichain_tasks/embodichain_tasks/locomotion/tracking/motion_model.py
   watch_paths: [extensions/embodichain_models/embodichain_models/dynamics/rwm/,

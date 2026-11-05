@@ -29,17 +29,20 @@ from tensordict import TensorDict
 __all__ = [
     "DifferentiableObservation",
     "DifferentiableRolloutSpec",
+    "DifferentiableEnvProtocol",
     "DifferentiableVecEnv",
+    "LearningEnvProtocol",
     "LearningVecEnv",
     "build_learning_env",
     "get_registered_learning_env_names",
     "register_learning_env",
+    "ScheduledDifferentiableEnvProtocol",
     "ScheduledDifferentiableVecEnv",
     "stratified_rollout_value",
 ]
 
 DifferentiableObservation: TypeAlias = torch.Tensor | TensorDict
-LearningEnvFactory: TypeAlias = Callable[..., "LearningVecEnv"]
+LearningEnvFactory: TypeAlias = Callable[..., "LearningEnvProtocol"]
 
 _LEARNING_ENV_REGISTRY: dict[str, LearningEnvFactory] = {}
 
@@ -87,8 +90,14 @@ def stratified_rollout_value(index: int, minimum: int, maximum: int) -> int:
 
 
 @runtime_checkable
-class LearningVecEnv(Protocol):
-    """Structural interface shared by lightweight vector environments."""
+class LearningEnvProtocol(Protocol):
+    """Structural interface for batched learning environments.
+
+    ``num_envs`` is the leading dimension of actions and observations, including
+    each tensor in a structured observation. The single spaces describe one row;
+    rewards, termination flags and truncation flags have shape ``[num_envs]``.
+    Tensors reside on ``device``.
+    """
 
     num_envs: int
     device: torch.device
@@ -120,7 +129,7 @@ class LearningVecEnv(Protocol):
 
 
 @runtime_checkable
-class DifferentiableVecEnv(LearningVecEnv, Protocol):
+class DifferentiableEnvProtocol(LearningEnvProtocol, Protocol):
     """Batched env that preserves the autograd path through ``step``.
 
     ``detach_state`` is the truncated-backpropagation boundary: detach
@@ -143,7 +152,7 @@ class DifferentiableVecEnv(LearningVecEnv, Protocol):
 
 
 @runtime_checkable
-class ScheduledDifferentiableVecEnv(DifferentiableVecEnv, Protocol):
+class ScheduledDifferentiableEnvProtocol(DifferentiableEnvProtocol, Protocol):
     """Differentiable env that schedules variable independent rollouts.
 
     The trainer calls :meth:`prepare_differentiable_rollout` immediately before
@@ -165,6 +174,12 @@ class ScheduledDifferentiableVecEnv(DifferentiableVecEnv, Protocol):
             Full horizon, objective scaling, and optional metric metadata.
         """
         ...
+
+
+# Compatibility names preserve protocol identity for existing rollout consumers.
+LearningVecEnv = LearningEnvProtocol
+DifferentiableVecEnv = DifferentiableEnvProtocol
+ScheduledDifferentiableVecEnv = ScheduledDifferentiableEnvProtocol
 
 
 def _is_nested_package_shadow(existing: Any, candidate: Any) -> bool:
@@ -225,7 +240,7 @@ def build_learning_env(
     num_envs: int,
     device: torch.device | str,
     **cfg: Any,
-) -> LearningVecEnv:
+) -> LearningEnvProtocol:
     """Build a registered lightweight vector environment."""
     key = name.lower()
     if key not in _LEARNING_ENV_REGISTRY:

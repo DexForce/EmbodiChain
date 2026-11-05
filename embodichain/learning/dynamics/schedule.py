@@ -24,11 +24,11 @@ import math
 
 from embodichain.utils import configclass
 
-__all__ = ["OnlineLearningCfg", "OnlineLearningSchedule"]
+__all__ = ["OnlineModelBasedScheduleCfg", "OnlineModelBasedSchedule"]
 
 
 @configclass
-class OnlineLearningCfg:
+class OnlineModelBasedScheduleCfg:
     """Vector-step update ratio and distinct model-only warmup budget."""
 
     warmup_updates: int = 500
@@ -36,7 +36,7 @@ class OnlineLearningCfg:
     model_updates_per_cycle: int = 10
 
 
-class OnlineLearningSchedule:
+class OnlineModelBasedSchedule:
     """Drive supplied update operations synchronously at graph-safe boundaries.
 
     Collection commits detached physical data. Model updates finish before each
@@ -46,7 +46,7 @@ class OnlineLearningSchedule:
     environment count and network architecture.
     """
 
-    def __init__(self, cfg: OnlineLearningCfg) -> None:
+    def __init__(self, cfg: OnlineModelBasedScheduleCfg) -> None:
         if (
             cfg.warmup_updates < 0
             or cfg.model_updates_per_cycle < 0

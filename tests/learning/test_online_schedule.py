@@ -19,12 +19,15 @@
 from __future__ import annotations
 
 import pytest
-from embodichain.learning.dynamics import OnlineLearningCfg, OnlineLearningSchedule
+from embodichain.learning.dynamics import (
+    OnlineModelBasedScheduleCfg,
+    OnlineModelBasedSchedule,
+)
 
 
 def test_prefill_warmup_and_resumed_fractional_update_credit():
-    schedule = OnlineLearningSchedule(
-        OnlineLearningCfg(
+    schedule = OnlineModelBasedSchedule(
+        OnlineModelBasedScheduleCfg(
             warmup_updates=2, updates_per_collect=0.4, model_updates_per_cycle=3
         )
     )
@@ -50,7 +53,7 @@ def test_prefill_warmup_and_resumed_fractional_update_credit():
     schedule.step(collect, model, policy)
     schedule.step(collect, model, policy)
     assert events == ["collect", "model", "model", "collect", "collect"]
-    restored = OnlineLearningSchedule(schedule.cfg)
+    restored = OnlineModelBasedSchedule(schedule.cfg)
     restored.load_state_dict(schedule.state_dict())
     events.clear()
     for _ in range(3):

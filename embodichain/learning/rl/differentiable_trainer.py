@@ -34,8 +34,8 @@ from embodichain.learning.rl.collector import (
 )
 from embodichain.learning.rl.env import (
     DifferentiableRolloutSpec,
-    DifferentiableVecEnv,
-    ScheduledDifferentiableVecEnv,
+    DifferentiableEnvProtocol,
+    ScheduledDifferentiableEnvProtocol,
 )
 from embodichain.learning.rl.evaluation import evaluate_episodes
 from embodichain.learning.rl.policies import Policy
@@ -80,11 +80,11 @@ class DifferentiableTrainer:
     def __init__(
         self,
         cfg: DifferentiableTrainerCfg,
-        env: DifferentiableVecEnv,
+        env: DifferentiableEnvProtocol,
         policy: Policy,
         algorithm: APG,
         writer: SummaryWriter | None = None,
-        eval_env: DifferentiableVecEnv | None = None,
+        eval_env: DifferentiableEnvProtocol | None = None,
         observation_normalizer: RunningObservationNormalizer | None = None,
     ) -> None:
         if cfg.segment_length <= 0:
@@ -193,7 +193,7 @@ class DifferentiableTrainer:
             raise ValueError("total_updates cannot be negative.")
 
         scheduled = self.cfg.rollout_mode == "complete" and isinstance(
-            self.env, ScheduledDifferentiableVecEnv
+            self.env, ScheduledDifferentiableEnvProtocol
         )
         if total_updates is not None:
             estimated_updates = total_updates
@@ -376,7 +376,7 @@ class DifferentiableTrainer:
         return collected_steps, metrics
 
     def _prepare_complete_rollout(self) -> DifferentiableRolloutSpec:
-        if isinstance(self.env, ScheduledDifferentiableVecEnv):
+        if isinstance(self.env, ScheduledDifferentiableEnvProtocol):
             return self.env.prepare_differentiable_rollout(self._rollout_index)
         return DifferentiableRolloutSpec(num_steps=self.update_horizon)
 

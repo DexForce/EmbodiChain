@@ -26,7 +26,7 @@ from tensordict import TensorDict
 
 from embodichain.learning.rl.env import (
     DifferentiableObservation,
-    DifferentiableVecEnv,
+    DifferentiableEnvProtocol,
 )
 from embodichain.learning.rl.gradients import (
     BatchedGradientNormStats,
@@ -147,7 +147,7 @@ class DifferentiableCollector:
 
     def __init__(
         self,
-        env: DifferentiableVecEnv,
+        env: DifferentiableEnvProtocol,
         policy: Policy,
         device: torch.device,
         *,

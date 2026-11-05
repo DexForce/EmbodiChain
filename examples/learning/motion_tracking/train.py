@@ -36,7 +36,10 @@ import torch
 import yaml
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
-from embodichain.learning.dynamics import OnlineLearningCfg, OnlineLearningSchedule
+from embodichain.learning.dynamics import (
+    OnlineModelBasedScheduleCfg,
+    OnlineModelBasedSchedule,
+)
 from embodichain.learning.rl.algo import build_algo
 from embodichain.learning.rl.checkpoint import _atomic_write, _capture_rng, _restore_rng
 from embodichain.learning.rl.differentiable_trainer import (
@@ -62,7 +65,7 @@ from embodichain_tasks.locomotion.tracking import g1_motion  # Register physical
 from embodichain_tasks.locomotion.tracking.motion_model import replay_motion_starts
 
 from run_metadata import write_run_metadata
-from _configuration import normalize_recipe, recipe_identity
+from _configuration import normalize_recipe, recipe_identity, validate_recipe
 
 
 def _optimizer_steps(optimizer: torch.optim.Optimizer) -> dict[str, int]:
@@ -78,7 +81,12 @@ def _optimizer_steps(optimizer: torch.optim.Optimizer) -> dict[str, int]:
 
 
 class MotionTraining:
-    """Compose task-owned collection with shared SL, replay and differentiable RL."""
+    """Compose G1/SuperMimic training with shared SL and differentiable RL.
+
+    This entry fixes the kinematic world model, objective and replay schema,
+    task-derived policy dimensions, and APG Actor-Critic with separate actor and
+    critic optimizers. Recipe names are validated before environment allocation.
+    """
 
     def __init__(self, config: dict[str, Any], output: Path) -> None:
         self.invocation_started = time.perf_counter()
@@ -86,6 +94,7 @@ class MotionTraining:
         self.sampled_peak_process_gpu_bytes = 0
         self.sampled_peak_device_used_bytes = 0
         self.config, self.output = normalize_recipe(config), output
+        validate_recipe(self.config)
         config = self.workflow = self.config["workflow"]
         trainer_block = self.config["trainer"]
         if (
@@ -113,6 +122,16 @@ class MotionTraining:
         torch.backends.cuda.matmul.allow_tf32 = config.get("tf32", False)
         torch.backends.cudnn.allow_tf32 = config.get("tf32", False)
         gym = load_config(config["collection_env"])
+        self.evaluation_gym_config = load_config(config["evaluation_env"])
+        for name, environment in (
+            ("collection_env", gym),
+            ("evaluation_env", self.evaluation_gym_config),
+        ):
+            if environment.get("id") != "UnitreeG1MotionRL-v1":
+                raise ValueError(
+                    f"G1 motion training requires workflow.{name} to select "
+                    f"UnitreeG1MotionRL-v1; got {environment.get('id')!r}."
+                )
         gym["num_envs"] = config["num_envs"]
         gym["env"]["extensions"]["motion_tracking"]["clips"] = config.get("clips")
         gym["env"]["extensions"]["motion_tracking"].update(
@@ -122,7 +141,6 @@ class MotionTraining:
             "compile_mode", config.get("compile_mode")
         )
         self.gym_config = gym
-        self.evaluation_gym_config = load_config(config["evaluation_env"])
         evaluation_options = self.evaluation_gym_config["env"]["extensions"][
             "motion_tracking"
         ]
@@ -262,8 +280,8 @@ class MotionTraining:
                 self.algorithm.critic_optimizer,
             )
         ]
-        self.schedule = OnlineLearningSchedule(
-            OnlineLearningCfg(
+        self.schedule = OnlineModelBasedSchedule(
+            OnlineModelBasedScheduleCfg(
                 warmup_updates=config["warmup_updates"],
                 updates_per_collect=config["utd"],
                 model_updates_per_cycle=config["wm_batches"],

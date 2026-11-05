@@ -192,14 +192,30 @@ motion library.
 
 ## Train and resume
 
-The online recipe uses the shared `trainer / policy / algorithm` configuration
-blocks. `trainer.learning_env` selects the differentiable model environment;
-`policy` selects the goal-conditioned actor and critic; `algorithm` configures APG
-Actor-Critic and its two optimizers. `workflow.collection_env` and
-`workflow.evaluation_env` separately select physical task configurations. The
-workflow builds one WM and Replay, then injects that WM, motion library, task and
-Replay start provider into the registered learning environment. The model is
-frozen throughout each policy update.
+`MotionTraining` is the G1/SuperMimic composition entry point. Its recipe
+configures the following supported components:
+
+| Selection | Supported component |
+| --- | --- |
+| `workflow.collection_env` / `workflow.evaluation_env` | `UnitreeG1MotionRL-v1` task configurations |
+| `trainer.learning_env.name` | `MotionTrackingModelRL` |
+| `policy.name` | `motion_tracking` goal-conditioned actor and scalar critic |
+| `algorithm.name` | `apg_actor_critic`, with separate actor and critic optimizers |
+| Model and fitting objective | `KinematicWorldModel` and `RobotWorldModelObjective` |
+| Replay | `TransitionReplay` with frame, previous action, policy action and usability fields |
+
+The entry validates the named selections before constructing the physical
+environment. Policy dimensions derive from the G1 task and world-model features;
+explicit dimensions must match. It constructs the WM optimizer and manages the
+learning rates and recovery of all three optimizers. Alternative model families
+or algorithms require a corresponding composition entry and resource adapters.
+The reusable interfaces are the environment protocols and registries,
+`DifferentiableTrainer.update_once()`, `SupervisedLearner`, and
+`OnlineModelBasedSchedule` in `embodichain.learning.dynamics.schedule`.
+
+The workflow injects its live WM, motion library, task and replay-start provider
+into the registered model environment. The model is frozen throughout each
+policy update, while gradients propagate through its predicted states to the actor.
 
 When collection and evaluation resolve to the same environment file, evaluation
 uses the resolved collection motion settings, including workflow and CLI overrides.
@@ -213,6 +229,40 @@ budget. `trainer.num_envs` is the imagined rollout batch size. The saved
 `config.yaml` contains the complete resolved recipe; `run-manifest.json` records
 the execution environment. Existing checkpoints with flat recipe fields are
 normalized when loading their learning state.
+
+### Replay and ODS ownership
+
+| Component | Responsibility |
+| --- | --- |
+| ODS `OnlineDataEngine` and data sources | Production, shared storage, sample selection, validity and producer lifecycle |
+| ODS `ODSFlowController` | Refill, bounded waits, delivery limits and data-supply pacing |
+| `OnlineModelBasedSchedule` | Collection/model/policy ordering and ratios, model-only warmup, update credit and progress |
+| `TransitionReplay` | Device-resident measured transitions, episode-local windows/history and imagination starts |
+
+The synchronous G1 path uses device-resident replay. Append copies detached states,
+controls and successors before physical reset; sampled tensors own their storage.
+`terminated` and `truncated` close an episode after its final stored transition.
+Windows repeat the final transition beyond that boundary with `valid=False`.
+Oldest-first history repeats the earliest state within the episode;
+`history_valid` identifies padding, and `history_complete` distinguishes real
+reset padding from history lost to ring overwrite. G1 start sampling accepts reset
+padding and rejects overwritten or unusable history. Model fitting selects complete,
+usable windows before computing its loss.
+
+Replay `action` is the normalized joint setpoint after reference blending;
+`policy_action` is the executed policy control including collection noise. With
+resting position `q0`, action scale `s` and encoder bias `b`, the physical target is
+`q0 + s * action - b`. Context records friction, encoder bias and COM offset;
+frame and previous action retain reference progress and observation history.
+The supplied G1 configurations use a 0.02 s control period (50 Hz), checked against
+the task and motion library. Imagined clip suffixes expose `valid` and `next_valid`
+separately from differentiable continuation probabilities.
+
+A future ODS-fed model learner can adapt `BatchSource` / `SequenceBatchSource` to
+`SupervisedBatch` with these sequence and control semantics. The schedule remains
+the owner of collection triggers and update accounting; ODS supply pacing must use
+that trigger rather than schedule an additional collection. Learners and trainer
+callbacks own optimizer steps and complete backward passes before returning.
 
 Configuration paths below resolve through the installed task package:
 

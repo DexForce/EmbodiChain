@@ -68,16 +68,20 @@ progress. Clip suffixes use validity masks; a complete horizon retains gradients
 until the trainer finishes backward, then `detach_state()` preserves values and
 reference progress without drawing new noise.
 
-The online recipe keeps `trainer / policy / algorithm` blocks and a task-owned
+The G1/SuperMimic composition keeps `trainer / policy / algorithm` blocks and a task-owned
 `workflow` block. `trainer.learning_env` resolves `MotionTrackingModelRL` through
 `build_learning_policy_runtime(resources=...)`; `resources` shares the live WM,
 motion library, task and Replay start provider without copying their state.
 `MotionTrackingPolicy.from_config` owns network configuration and observation/action
 space validation. Collection and evaluation use separate `workflow.collection_env`
 and `workflow.evaluation_env` paths. Checkpoints retain the full recipe, and the
-entry normalizes earlier flat recipe fields before compatibility checks.
+entry normalizes earlier flat recipe fields before compatibility checks. It validates
+`MotionTrackingModelRL`, `motion_tracking` and `apg_actor_critic` selections before
+physical allocation. Model/objective/replay construction and three-optimizer
+recovery remain specific to this composition; provider factories belong with a
+second model integration.
 
-`learning/dynamics/online.py` owns prefill/warmup/update counters and fractional
+`learning/dynamics/schedule.py::OnlineModelBasedSchedule` owns prefill/warmup/update counters and fractional
 update credit. `examples/learning/motion_tracking/train.py` composes physical
 collection, shared SL and `DifferentiableTrainer.update_once()`. It freezes the WM
 around the full policy update. The recipe checkpoint includes all three networks,
@@ -140,3 +144,9 @@ the immutable revision. Evaluation loads it with `weights_only=True`.
 `replay.py` consumes the self-contained evaluation NPZ and uses public
 `RobotMarkers` and `SimulationManager.sync_render_state()` for FastRT playback
 without physics steps. The visualization interfaces are supplied by #833.
+
+ODS owns production/storage/supply pacing; the model-based schedule owns learning
+order and update credit, and device replay owns measured episode sequences. The
+[G1 workflow guide](../../../examples/learning/motion_tracking/README.md#replay-and-ods-ownership)
+defines padding, masks, controls and future source-adapter boundaries. Connecting
+ODS must preserve one collection trigger and keep autograd with learner callbacks.

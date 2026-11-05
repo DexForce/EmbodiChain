@@ -18,6 +18,6 @@
 
 from __future__ import annotations
 
-from .online import OnlineLearningCfg, OnlineLearningSchedule
+from .schedule import OnlineModelBasedScheduleCfg, OnlineModelBasedSchedule
 
-__all__ = ["OnlineLearningCfg", "OnlineLearningSchedule"]
+__all__ = ["OnlineModelBasedScheduleCfg", "OnlineModelBasedSchedule"]
