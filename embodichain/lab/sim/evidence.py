@@ -125,6 +125,44 @@ class PhysicalEvidenceBatch:
     observation_revision: int
 
     def __post_init__(self) -> None:
+        self._initialize()
+
+    @classmethod
+    def _from_owned_channel(
+        cls,
+        evidence_id: str,
+        values: torch.Tensor,
+        valid: torch.Tensor,
+        acquisition_errors: tuple[str | None, ...],
+        *,
+        request: PhysicalEvidenceRequest,
+    ) -> PhysicalEvidenceBatch:
+        """Transfer a freshly validated sampler channel under an owned request.
+
+        Only internal producers may call this after snapshotting the request and
+        computing channel shape, dtype, finite-row validity and acquisition
+        errors. Values/validity must be newly allocated and unexposed. The
+        metadata checks still run and each batch owns its environment IDs.
+        External or reused tensors must use the ordinary constructor/snapshot.
+        """
+        result = object.__new__(cls)
+        for name, value in (
+            ("evidence_id", evidence_id),
+            ("values", values),
+            ("valid", valid),
+            ("acquisition_errors", acquisition_errors),
+            ("timestamp", request.timestamp),
+            ("env_ids", request.env_ids),
+            ("observation_revision", request.observation_revision),
+        ):
+            object.__setattr__(result, name, value)
+        result._initialize(owned_request=request)
+        return result
+
+    def _initialize(
+        self, *, owned_request: PhysicalEvidenceRequest | None = None
+    ) -> None:
+        """Validate metadata and install independently owned channel data."""
         if (
             not isinstance(self.evidence_id, str)
             or not self.evidence_id
@@ -148,7 +186,8 @@ class PhysicalEvidenceBatch:
                 "acquisition_errors must contain one optional message per row."
             )
         if (
-            self.values.is_floating_point()
+            owned_request is None
+            and self.values.is_floating_point()
             and not torch.isfinite(self.values[self.valid]).all()
         ):
             raise ValueError("Valid floating evidence values must be finite.")
@@ -159,14 +198,29 @@ class PhysicalEvidenceBatch:
             raise TypeError("env_ids must be a torch.Tensor.")
         if self.env_ids.numel() == 0:
             raise ValueError("env_ids must contain at least one environment row.")
-        env_ids = _validate_env_ids(
-            self.env_ids,
-            device=self.values.device,
-            batch_size=self.values.shape[0],
-            name="env_ids",
+        if owned_request is None:
+            env_ids = _validate_env_ids(
+                self.env_ids,
+                device=self.values.device,
+                batch_size=self.values.shape[0],
+                name="env_ids",
+            )
+        else:
+            if (
+                self.env_ids is not owned_request.env_ids
+                or self.env_ids.shape != self.values.shape[:1]
+                or self.env_ids.device != self.values.device
+            ):
+                raise ValueError("Owned channel rows must match its validated request.")
+            env_ids = self.env_ids.clone()
+        object.__setattr__(
+            self,
+            "values",
+            self.values.clone() if owned_request is None else self.values,
         )
-        object.__setattr__(self, "values", self.values.clone())
-        object.__setattr__(self, "valid", self.valid.clone())
+        object.__setattr__(
+            self, "valid", self.valid.clone() if owned_request is None else self.valid
+        )
         object.__setattr__(self, "acquisition_errors", errors)
         object.__setattr__(self, "timestamp", timestamp)
         object.__setattr__(self, "env_ids", env_ids)
@@ -206,9 +260,9 @@ class PhysicalEvidenceFrame:
     ) -> PhysicalEvidenceFrame:
         """Take exclusive ownership of newly constructed, unexposed batches.
 
-        Only internal producers may use this immediately after the public batch
-        constructor has validated and copied all channel inputs. The producer
-        must not retain or expose the transferred batch objects. External or
+        Only internal producers may use this immediately after a batch constructor
+        or owned sampler-channel transfer has validated and owned all inputs.
+        The producer must not retain or expose the transferred batch objects. External or
         reused mutable inputs must use the ordinary frame constructor instead.
         Frame metadata/alignment checks and its independent env-ID copy remain.
         """

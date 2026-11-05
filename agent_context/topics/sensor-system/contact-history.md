@@ -71,11 +71,18 @@ earlier in the same step is reused; repeated reads do not advance history or
 repeat callbacks. Removal can supply `expected=observer` to retain a replacement
 registered under the same name. Closed owners make delayed callbacks no-ops.
 
-`lab/sim/sensors/contact/sampling.py` adapts sampled buffers to the shared
-`lab/sim/evidence.py` frame/batch types. It retains the validity mask, native actor
-IDs, Arena frames and impulses, with explicit unsupported, nonfinite, saturated
-or source-drift errors. Native and runtime observation revisions remain different
-identities. The provider's output device follows its request.
+`lab/sim/sensors/contact/sampling.py` snapshots and revalidates each request
+before acquisition. It validates channel shape/dtype and finite-row masks once,
+then privately transfers fresh channel tensors into evidence batches. Every
+batch owns its environment IDs and frame alignment checks remain complete.
+Public batch/frame constructors and snapshots still validate and copy mutable
+inputs; validation is never cached by tensor or object identity.
+
+The sampler adapts buffers to the shared `lab/sim/evidence.py` frame/batch types.
+It retains validity masks, native actor IDs, Arena frames and impulses, with
+explicit unsupported, nonfinite, saturated or source-drift errors. Native and
+runtime observation revisions remain different identities. The output device
+follows the request.
 
 `lab/sim/sensors/contact/timeline.py` owns bounded per-environment packed history,
 driven by an explicit host control clock. Keep it in the environment's sensor
