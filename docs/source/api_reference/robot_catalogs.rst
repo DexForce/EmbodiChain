@@ -785,3 +785,37 @@ physical component returns None; selected UR10 uses its declared world pose
 and arm-base frames. Asset preflight checks registered source files and model configuration,
 without constructing a Robot, solver or simulator.
 
+
+
+embodichain_robots.task_program
+-------------------------------
+
+These public model-owner entry points select the explicit component's native
+hand/deployment description. They preserve the existing Robotiq declarations for
+Franka and UR10 and use the existing native Marvin component for Tianji. Shared
+components stay unchanged; source integration additions are separate owned
+values, with original model/command units and physical endpoint identities.
+
+.. currentmodule:: embodichain_robots.task_program
+
+.. autosummary::
+
+   declare_source_task_embodiment
+   resolve_task_hand_calibrations
+   declare_task_robot_mount
+   declare_task_contact_pads
+   task_robot_lateral_positions
+   require_task_robot_assets
+
+.. autofunction:: declare_source_task_embodiment
+
+.. autofunction:: resolve_task_hand_calibrations
+
+.. autofunction:: declare_task_robot_mount
+
+.. autofunction:: declare_task_contact_pads
+
+.. autofunction:: task_robot_lateral_positions
+
+.. autofunction:: require_task_robot_assets
+
