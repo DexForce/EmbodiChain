@@ -110,3 +110,64 @@ def test_mass_only_lineage_preserves_part_identity_but_not_asset_hash(
     bound = binding._binding_from_candidate({**config, "uid": "control"}, parts[0])
     assert bound.source_sha256 == hashlib.sha256(runtime.read_bytes()).hexdigest()
     assert bound.source_sha256 != source_hash
+
+
+def test_spatial_reference_uses_catalog_body_not_fixed_grasp_child(monkeypatch):
+    import numpy as np
+    from embodichain.lab.sim.scene import spatial_reference as owner
+
+    body_pose = np.eye(4)
+    body_pose[:3, 3] = [1.0, 2.0, 0.0]
+    geometry = NS(
+        root_link="base",
+        link_vertices={
+            "drawer": np.array([[1.0, 2.0, 0.0], [2.0, 2.0, 0.0], [1.0, 3.0, 0.0]]),
+            "grasp_child": np.full((3, 3), 100.0),
+        },
+        link_poses={"drawer": body_pose, "grasp_child": np.eye(4)},
+    )
+    monkeypatch.setattr(owner, "read_articulation_geometry", lambda path: geometry)
+    monkeypatch.setattr(
+        owner,
+        "inspect_prismatic_part",
+        lambda config, part: NS(link="grasp_child", axis=(1.0, 0.0, 0.0)),
+    )
+    monkeypatch.setattr(
+        owner,
+        "discover_prismatic_parts",
+        lambda config: [NS(part_id="selected", link="drawer")],
+    )
+    config = dict(
+        fpath="explicit.usda",
+        body_scale=[2.0, 3.0, 1.0],
+        init_pos=[10.0, 20.0, 0.0],
+        init_rot=[0.0, 0.0, 0.0],
+    )
+    result = owner.read_spatial_reference(config, "selected")
+    assert result.link == "drawer"
+    assert np.array_equal(
+        result.vertices, [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 3.0, 0.0]]
+    )
+    assert np.array_equal(result.initial_pose[:3, 3], [12.0, 26.0, 0.0])
+    assert not result.vertices.flags.writeable
+    config["init_rot"] = [0.0, 90.0, 0.0]
+    with pytest.raises(ValueError, match="horizontal"):
+        owner.read_spatial_reference(config, "selected")
+
+
+def test_spatial_reference_reads_owned_scaled_root_geometry_from_actual_usd(tmp_path):
+    import numpy as np
+    from _control_source_fixture import knob_source
+    from embodichain.lab.sim.scene.spatial_reference import read_spatial_reference
+
+    config = knob_source(tmp_path)
+    config.update(body_scale=[2.0, 3.0, 1.0], init_pos=[10.0, 20.0, 0.8])
+    result = read_spatial_reference(config, None)
+    assert result.link == "base"
+    assert np.allclose(result.vertices[:, 0].min(), -0.2)
+    assert np.allclose(result.vertices[:, 0].max(), 0.2)
+    assert np.allclose(result.vertices[:, 1].min(), -0.3)
+    assert np.allclose(result.vertices[:, 1].max(), 0.3)
+    assert np.array_equal(result.initial_pose[:3, 3], [10.0, 20.0, 0.8])
+    assert not result.vertices.flags.writeable
+    assert not result.initial_pose.flags.writeable

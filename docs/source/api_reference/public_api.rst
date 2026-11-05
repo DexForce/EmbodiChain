@@ -2201,9 +2201,25 @@ embodichain.lab.sim.atomic_actions.core
 .. autosummary::
 
    AtomicAction
+   CompletePlanBuilder
    ObjectSemantics
    SkillDescriptor
    resolve_runtime_device
+
+``SkillDescriptor.supports_segment_motion_recovery`` is derived from the real
+Atomic override and cannot be supplied as a constructor or replace claim. Static
+semantic preflight validates motion policy against this capability. Canonical
+descriptor metadata omits false; enabled capabilities remain fingerprinted.
+
+``CompletePlanBuilder`` keeps complete-request sampling, caller transforms and
+final qualification inside the owning engine. A suffix preview retains the exact
+observed robot, world stamp, scene, rows, root and binding owner while declaring
+an independent occurrence and explicit preview role. Selected-candidate
+finalization transforms once and cannot replace the logical recovery proposal.
+
+.. autoclass:: CompletePlanBuilder
+   :members:
+
 
 embodichain.lab.sim.atomic_actions.effects
 ------------------------------------------
@@ -2322,6 +2338,13 @@ revision. Descriptors validate supported concrete types during static preflight;
 unimplemented source kinds remain rejected. PlanningBudget selects a complete
 request ledger and optional cooperative wall deadline; nested calls retain the
 parent ledger/deadline, while omission preserves ordinary planning.
+
+Whole-action sample retries, per-segment retries and final emitted-speed gates
+are independent explicit modes. Best-effort alternatives preserve declared
+order, the source Torch-only stream boundary and original-plan exhaustion.
+Segment recovery requires fixed-grid sequential IK; unsupported Atomic skills
+reject it before request/provider preparation. Final speed rejection retains
+its explicit hold or mask-only representation and cannot promote failed rows.
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions.policies
 
@@ -4074,9 +4097,19 @@ classes; sensor acquisition never imports Task Program or Atomic implementation.
 
 .. autosummary::
 
+   PhysicalObservationStamp
+
    PhysicalEvidenceRequest
    PhysicalEvidenceBatch
    PhysicalEvidenceFrame
+
+``PhysicalObservationStamp`` retains a real host lifetime/source identity, native
+revision kind and manager-relative time. Semantic scene versions do not replace
+this native source identity. Values are immutable and contain no simulator.
+
+.. autoclass:: PhysicalObservationStamp
+   :members:
+
 
 embodichain.compute.geometry.grip_contacts
 ------------------------------------------
@@ -4197,3 +4230,21 @@ or inferred task outcome is produced. Unavailable history fails explicitly.
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_condition_evidence_binding
 
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_pour_evidence_binding
+
+
+Selected-link source spatial geometry
+-------------------------------------
+
+The Scene reader supplies owned link-local input vertices and the original
+root-composed pose for an explicitly selected native root or horizontal
+prismatic part. A fixed grasp child does not replace its catalog body. Inputs
+retain their authored-unit, scale and root-frame contracts; missing geometry
+never becomes a proxy. These source inputs do not certify cooked native shapes,
+contact, motion or task acceptance.
+
+.. currentmodule:: embodichain.lab.sim.scene.spatial_reference
+
+.. autoclass:: SpatialReferenceGeometry
+   :members:
+
+.. autofunction:: read_spatial_reference
