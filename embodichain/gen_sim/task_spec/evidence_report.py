@@ -31,6 +31,11 @@ from .condition_group_evidence import (
 )
 from .control_evidence import ControlEvidenceBinding, evaluate_control_evidence
 from .pour_evidence import PourEvidenceBinding, evaluate_pour_evidence
+from .handover_evidence import HandOverEvidenceBinding, evaluate_handover_evidence
+from .coordinated_evidence import (
+    CoordinatedHoldEvidenceBinding,
+    evaluate_coordinated_hold_evidence,
+)
 
 if TYPE_CHECKING:
     from .spec import TaskSpec
@@ -47,6 +52,8 @@ def _binding(
     | ConditionEvidenceGroupBinding
     | ControlEvidenceBinding
     | PourEvidenceBinding
+    | HandOverEvidenceBinding
+    | CoordinatedHoldEvidenceBinding
 ):
     if isinstance(value, SupportedPlacementEvidenceBinding):
         return SupportedPlacementEvidenceBinding.from_dict(value)
@@ -58,6 +65,10 @@ def _binding(
         return ControlEvidenceBinding.from_dict(value)
     if isinstance(value, PourEvidenceBinding):
         return PourEvidenceBinding.from_dict(value)
+    if isinstance(value, HandOverEvidenceBinding):
+        return HandOverEvidenceBinding.from_dict(value)
+    if isinstance(value, CoordinatedHoldEvidenceBinding):
+        return CoordinatedHoldEvidenceBinding.from_dict(value)
     if isinstance(value, Mapping):
         version = value.get("schema_version")
         if version == "task_spec.placement_evidence_binding/v2":
@@ -68,6 +79,10 @@ def _binding(
             return ConditionEvidenceBinding.from_dict(value)
         if version == "task_spec.control_evidence_binding/v1":
             return ControlEvidenceBinding.from_dict(value)
+        if version == "task_spec.coordinated_hold_evidence_binding/v1":
+            return CoordinatedHoldEvidenceBinding.from_dict(value)
+        if version == "task_spec.handover_evidence_binding/v1":
+            return HandOverEvidenceBinding.from_dict(value)
         if version == "task_spec.pour_evidence_binding/v1":
             return PourEvidenceBinding.from_dict(value)
     raise ValueError(
@@ -83,6 +98,8 @@ def evaluate_physical_evidence_report(
         | ConditionEvidenceGroupBinding
         | ControlEvidenceBinding
         | PourEvidenceBinding
+        | HandOverEvidenceBinding
+        | CoordinatedHoldEvidenceBinding
         | Mapping[str, Any]
     ],
     evidence: Mapping[str, Mapping[str, Any]],
@@ -158,6 +175,8 @@ def evaluate_physical_evidence_report(
             ConditionEvidenceGroupBinding: evaluate_condition_group_evidence,
             ControlEvidenceBinding: evaluate_control_evidence,
             PourEvidenceBinding: evaluate_pour_evidence,
+            HandOverEvidenceBinding: evaluate_handover_evidence,
+            CoordinatedHoldEvidenceBinding: evaluate_coordinated_hold_evidence,
         }[type(binding)]
         outcomes = verifier(normalized, binding, snapshot, program=program)
         predicate = goals.get(

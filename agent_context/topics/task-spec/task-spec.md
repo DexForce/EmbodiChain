@@ -20,6 +20,8 @@ of those owners.
 | Complete finite orientation/part groups | `condition_group_evidence.py`; common member aggregation in `_group_evidence.py` |
 | Operation-bound historical Press/Twist qualification | `control_evidence.py` |
 | Rigid Pour motion qualification and exact occurrence selection | `pour_evidence.py` |
+| Transfer/receiver hold and coordinated single-object proof | `handover_evidence.py`, `coordinated_evidence.py`; shared raw/receipt checks in private proof helpers |
+| Data-only held acquisition requests from validated receipts | `observation_requests.py` |
 | Common per-environment physical reports | `evidence_report.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
@@ -121,6 +123,16 @@ window/boundary identities. The event proof
 cannot establish ``poured`` fluid transfer. Recorded milestones additionally
 require the successful operation prefix; valid measured negatives remain failed
 and missing channels remain unavailable per environment.
+
+HandOver and coordinated-hold proofs retain the original single-member scope
+(`one` or finite `count=1`); larger counts and unobserved universes remain
+unavailable. They seal exact resources/occurrences and recheck attachment, hold,
+raw pose/grip or historical receipt facts independently. Fresh grip requests
+carry original endpoint/query ordinals, not an inferred hand or cached trace.
+`held_observation_request` returns only plain acquisition declarations from
+validated receipts; Lab performs the reads. These predicates cannot certify
+transported cargo, placement or fluid transfer. The report dispatch adds only
+these supported proof families; the TaskSpec does not import live factories.
 
 ## Focused validation
 

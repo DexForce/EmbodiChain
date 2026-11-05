@@ -1047,6 +1047,29 @@ missing final goals, past milestones or continuous trajectory requirements.
 
 .. autofunction:: evaluate_control_evidence
 
+embodichain.gen_sim.task_spec.coordinated_evidence
+------------------------------------------------
+
+The coordinated-hold binding verifies the original single-object
+``held_by_both_grippers`` contract. It rechecks both resource attachments,
+declared hold criteria, exact execution boundary and current target-filtered
+grips where the source requires them. Raw pose/grip acquisition remains distinct
+from historical receipt replay; missing channels are unavailable and valid
+measured negatives remain failed. It does not establish transported cargo,
+placement or fluid transfer.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.coordinated_evidence
+
+.. autosummary::
+
+   CoordinatedHoldEvidenceBinding
+   evaluate_coordinated_hold_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_coordinated_hold_evidence
+
 embodichain.gen_sim.task_spec.evidence
 --------------------------------------
 
@@ -1146,6 +1169,43 @@ not-run outcomes; an incomplete always-window cannot certify success.
    evaluate_predicate
    evaluate_temporal_condition
    lookup_observation
+
+embodichain.gen_sim.task_spec.handover_evidence
+---------------------------------------------
+
+These data-only proofs seal source/destination resources, transfer/boundary
+occurrences, cadence, native identities and the unchanged TaskSpec/program.
+Transfer events, final receiver holding and recorded milestones retain their
+separate source criteria. Fresh raw receiver poses/grips require their exact
+acquisition rows, episodes, clocks and query ordinal; old traces cannot replace
+missing facts. ``one`` and finite ``count=1`` are supported while larger counts
+and an unobserved universe remain unavailable. No live lowerer or Lab factory
+is imported for qualification.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.handover_evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   evaluate_handover_evidence
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_handover_evidence
+
+embodichain.gen_sim.task_spec.observation_requests
+------------------------------------------------
+
+Request projection validates the normative/program identity and original
+execution receipts before returning plain boundary, motion-part and fresh-grip
+query declarations. Event-only transfer requests no pose/grip capture. Recorded
+coordinated boundaries retain the source requirement for fresh current grip
+facts. This function performs no physical read and changes no success rule.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.observation_requests
+
+.. autofunction:: held_observation_request
 
 embodichain.gen_sim.task_spec.pour_evidence
 -------------------------------------------
