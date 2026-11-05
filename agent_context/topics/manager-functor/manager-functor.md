@@ -98,10 +98,13 @@ The config attribute name is the stable functor identity.
 
 For a flat policy tensor, the environment calls manager processing, manager
 application, physics, event `interval`, observation, and reward in that order.
-A term can opt into physics-substep refresh, scheduled by `EmbodiedEnv`.
-Its first command is processed and applied normally; subsequent substeps
-call `update_substep` and apply only the
-opted-in terms. Inactive demo rows retain measured holds on every refresh.
+A term can opt into physics-substep refresh.
+`ActionManager.get_substep_callback(num_substeps)` creates a callback scoped to
+one control interval, or returns None when no refresh is needed. The manager
+counts remaining steps, refreshes opted-in terms only before another physics
+step, and preserves inactive demo rows' measured holds. The first command is
+processed and applied normally. `EmbodiedEnv` connects the callback after sensor
+sampling; simulation advancement and publication remain environment-owned.
 `expert_trajectory.use_action_manager` routes position-only expert commands
 through `ActionManager.process_joint_targets`. Relative substep DLS and binary
 gripper terms support that route, retaining exact FK targets and the expert

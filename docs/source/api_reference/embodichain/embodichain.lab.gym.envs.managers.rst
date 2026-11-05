@@ -201,8 +201,10 @@ Jacobian solve from measured joints before each physics substep and clips only
 joint-position limits. It shares solver-order mapping and arena/TCP Jacobian
 adaptation with the single-step relative controller. Its ``eef_pose.relative_substep_dls@1`` contract selects
 this behavior separately from the bounded, single-step relative-pose contract.
-``EmbodiedEnv`` refreshes action terms through the batched simulation callback,
-preserving intermediate recording and visualization frames.
+``ActionManager.get_substep_callback(num_substeps)`` owns the remaining-step
+count, action refresh and inactive-row holds for one control interval.
+``EmbodiedEnv`` connects that callback after sensor sampling through the batched
+simulation update, preserving intermediate recording and visualization frames.
 
 Configure the same arm and binary gripper terms for expert and policy execution.
 Set ``env.expert_trajectory.use_action_manager: true`` to route position-only

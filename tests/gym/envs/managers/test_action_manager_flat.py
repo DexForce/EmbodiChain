@@ -310,12 +310,29 @@ def test_substep_refresh_preserves_inactive_position_holds():
     )
     manager.process_action(torch.tensor([[0.2], [0.3]]))
     manager.mask_inactive(torch.tensor([True, False]))
-    manager.apply_substep_actions()
+    refresh = manager.get_substep_callback(3)
+    assert manager.get_substep_callback(1) is None
+    refresh(0.01)
+    refresh(0.01)
+    refresh(0.01)
     torch.testing.assert_close(
         manager.get_term("arm").processed_actions, torch.tensor([[0.8], [0.0]])
     )
+    assert manager.get_term("arm").apply_count == 2
     manager.process_action(torch.tensor([[0.4], [0.5]]))
-    manager.apply_substep_actions()
+    refresh = manager.get_substep_callback(2)
+    refresh(0.01)
+    refresh(0.01)
     torch.testing.assert_close(
         manager.get_term("arm").processed_actions, torch.full((2, 1), 0.8)
     )
+    assert manager.get_term("arm").apply_count == 3
+
+
+def test_manager_skips_substep_callback_for_static_actions():
+    manager = make_manager(
+        ("arm", {"action_dim": 1, "low": -1.0, "high": 1.0, "joint_ids": (0,)})
+    )
+    assert manager.get_substep_callback(5) is None
+    with pytest.raises(ValueError, match="positive num_substeps"):
+        manager.get_substep_callback(0)

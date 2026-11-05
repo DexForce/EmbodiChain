@@ -19,6 +19,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 import pytest
 from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnv
+from embodichain.lab.gym.envs.managers import ActionManager
 
 
 @pytest.mark.parametrize("env_type", (BaseEnv, EmbodiedEnv))
@@ -75,10 +76,14 @@ def test_substep_action_updates_interleave_with_physics_and_sensor_observation(
     env.cfg = SimpleNamespace(sim_steps_per_control=3)
     env.sim_cfg = SimpleNamespace(physics_dt=0.01)
     env._step_uses_action_manager = not controller_ready
-    env.action_manager = SimpleNamespace(
-        requires_substep_update=substep_actions,
-        apply_substep_actions=lambda: calls.append("control"),
+    manager = ActionManager.__new__(ActionManager)
+    term = SimpleNamespace(
+        update_substep=lambda: calls.append("control"),
+        apply_actions=lambda: None,
     )
+    manager._substep_terms = (term,) if substep_actions else ()
+    manager._substep_active_mask = None
+    env.action_manager = manager
 
     def update(dt, n, *, after_substep=None, render_final_step=True):
         assert render_final_step is False

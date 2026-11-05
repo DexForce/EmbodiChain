@@ -1596,6 +1596,7 @@ def test_final_substep_consumers_share_publication(camera, record, viser):
 def test_embodied_substep_actions_preserve_intermediate_window_frames():
     """Action refresh keeps physics-rate recording without extra camera captures."""
     from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.envs.managers import ActionManager
 
     sim, _, state, publications, rendered = _make_render_frame_sim()
     sim._window_record_state = _WindowRecordState(
@@ -1615,10 +1616,15 @@ def test_embodied_substep_actions_preserve_intermediate_window_frames():
     env.sim = sim
     env.sensors = {}
     env._step_uses_action_manager = True
-    env.action_manager = SimpleNamespace(
-        requires_substep_update=True,
-        apply_substep_actions=lambda: refreshed.append(state["value"]),
+    manager = ActionManager.__new__(ActionManager)
+    manager._substep_terms = (
+        SimpleNamespace(
+            update_substep=lambda: refreshed.append(state["value"]),
+            apply_actions=lambda: None,
+        ),
     )
+    manager._substep_active_mask = None
+    env.action_manager = manager
 
     env._advance_physics()
     with sim.render_frame():

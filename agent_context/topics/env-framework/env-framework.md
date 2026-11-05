@@ -204,9 +204,10 @@ the traceback can retain native resources not yet registered with the manager.
 
 `BaseEnv._advance_physics()` starts one simulation-manager update per control
 interval and samples participating sensors through its `after_substep` observer.
-`EmbodiedEnv._advance_physics()` owns ActionManager substep scheduling and delegates
-ordinary actions to the base implementation. It uses the same batched simulation
-update, sampling sensors before refreshing actions for the next substep. Intermediate
+`EmbodiedEnv._advance_physics()` connects an ActionManager control-interval callback
+to the batched simulation update after sensor sampling, and delegates ordinary
+actions to the base implementation. ActionManager owns the substep count, term
+refresh and inactive-row holds. Intermediate
 recording and visualization frames retain the simulation manager's publication cadence.
 Direct controller-ready commands bypass
 this refresh path; the explicit expert ActionManager route participates. See the sensor-owned [contact history contract](../sensor-system/contact-history.md)

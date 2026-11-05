@@ -2486,13 +2486,12 @@ class EmbodiedEnv(BaseEnv):
         return EmbodiedEnv._apply_controller_action(self, action)
 
     def _advance_physics(self) -> None:
-        """Refresh opted-in action terms between physics substeps."""
+        """Connect manager callbacks to physics and sensor sampling."""
         manager = getattr(self, "action_manager", None)
-        if (
-            not getattr(self, "_step_uses_action_manager", False)
-            or manager is None
-            or not manager.requires_substep_update
-        ):
+        if not getattr(self, "_step_uses_action_manager", False) or manager is None:
+            return super()._advance_physics()
+        refresh_actions = manager.get_substep_callback(self.cfg.sim_steps_per_control)
+        if refresh_actions is None:
             return super()._advance_physics()
 
         sensors = [
@@ -2500,15 +2499,11 @@ class EmbodiedEnv(BaseEnv):
         ]
         for sensor in sensors:
             sensor.begin_control_step()
-        substep = 0
 
         def observe_substep(dt: float) -> None:
-            nonlocal substep
             for sensor in sensors:
                 sensor.update_physics_step(dt)
-            substep += 1
-            if substep < self.cfg.sim_steps_per_control:
-                manager.apply_substep_actions()
+            refresh_actions(dt)
 
         self.sim.update(
             self.physics_dt,

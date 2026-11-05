@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Callable
 from dataclasses import replace
 from functools import cached_property
 import inspect
@@ -215,10 +216,40 @@ class ActionManager(ManagerBase):
         """Return previous complete raw policy actions."""
         return self._previous_action
 
-    @property
-    def requires_substep_update(self) -> bool:
-        """Whether any term refreshes its command between physics substeps."""
-        return bool(self._substep_terms)
+    def get_substep_callback(self, num_substeps: int) -> Callable[[float], None] | None:
+        """Create action refresh scheduling for one control interval.
+
+        Args:
+            num_substeps: Positive number of physics steps in the interval.
+
+        Returns:
+            An after-substep callback, or None when no refresh is needed.
+            The initial command must already be applied; the callback refreshes
+            only when another physics step remains.
+
+        Raises:
+            ValueError: If num_substeps is less than one.
+        """
+        if num_substeps < 1:
+            raise ValueError(f"Expected positive num_substeps, found {num_substeps}.")
+        if not self._substep_terms or num_substeps == 1:
+            return None
+        remaining = num_substeps
+
+        def refresh_actions(dt: float) -> None:
+            nonlocal remaining
+            del dt
+            remaining -= 1
+            if remaining <= 0:
+                return
+            for term in self._substep_terms:
+                term.update_substep()
+            if self._substep_active_mask is not None:
+                self.mask_inactive(self._substep_active_mask)
+            for term in self._substep_terms:
+                term.apply_actions()
+
+        return refresh_actions
 
     def process_joint_targets(self, qpos: torch.Tensor) -> None:
         """Process expert targets while preserving exact FK target poses.
@@ -245,15 +276,6 @@ class ActionManager(ManagerBase):
         self._action.copy_(
             torch.cat([term.raw_actions for term in self._terms.values()], dim=-1)
         )
-
-    def apply_substep_actions(self) -> None:
-        """Refresh and apply opted-in terms while preserving inactive-row holds."""
-        for term in self._substep_terms:
-            term.update_substep()
-        if self._substep_active_mask is not None:
-            self.mask_inactive(self._substep_active_mask)
-        for term in self._substep_terms:
-            term.apply_actions()
 
     @property
     def descriptors(self) -> tuple[ActionDescriptor, ...]:
