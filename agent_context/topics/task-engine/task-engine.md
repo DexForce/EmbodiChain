@@ -12,6 +12,9 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Candidate-to-normative-spec conversion | `task_spec.py` |
 | Semantic graph schema, ordering and canonical call validation | `semantic_graph.py` |
 | Pure program projection and explicit segment acceptance bindings | `program_declarations.py` |
+
+| Source upright/carrier/handover/return graph declarations | `source_graph_declarations.py`; geometry comes from public Scene/Compute |
+| Declared alignment/Pick aliases and held-resource transitions | `alignment_declarations.py`; nominal envelopes use the public hand protocol |
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
 | Semantic acquisition requests and normalized-asset view projection | `asset_preparation.py`; consumes public Scene Engine APIs |
@@ -145,3 +148,12 @@ The control_declarations.py, prismatic_declarations.py, drawer_declarations.py a
 drawer_graph_declarations.py modules construct no simulator, skill or planner.
 Shared Scene inspects source geometry, Lab executes recipes and collects facts,
 and TaskSpec owns normative judgments.
+
+Source graph refinements operate on fixed input graphs and explicit authored
+source views. They preserve graph target/call identity, insertion order and
+semantic first-use/held-resource relationships while Scene supplies target
+geometry and Compute constructs poses. Constrained aliases require explicit
+geometry; ordinary E2 retains its existing downward-entry declaration. Closed
+option/lowerer fragments remain declarations for later configured preflight,
+not a runtime factory or a skill registration patch. This surface does not
+connect bundle/CLI publication or claim physical success.

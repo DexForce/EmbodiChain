@@ -1058,3 +1058,33 @@ source targets and bounds do not certify physical fit or successful placement.
 
 .. automodule:: embodichain.lab.sim.scene.drawer
    :members:
+
+Authored source target geometry
+-------------------------------
+
+Adapt declared source geometry to vertical bounds, upright and handover poses,
+and explicit constrained-pick direction/release planes. Source frames, scaled
+mesh ordering and unavailable raw bounds retain their original conventions.
+Compute owns numerical pose construction; this Scene adapter reads authored
+inputs without native state, planning, semantic graphs or physical acceptance.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_target_geometry
+
+.. autosummary::
+   :nosignatures:
+
+   source_axis_vertical_component
+   source_vertical_bounds
+   source_upright_target
+   source_handover_staging_pose
+   source_constrained_pick_geometry
+
+.. autofunction:: source_axis_vertical_component
+
+.. autofunction:: source_vertical_bounds
+
+.. autofunction:: source_upright_target
+
+.. autofunction:: source_handover_staging_pose
+
+.. autofunction:: source_constrained_pick_geometry

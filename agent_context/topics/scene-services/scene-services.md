@@ -29,6 +29,8 @@ semantic scene graph, generation model client or task lifecycle.
 | Static source support/container/Pour target affordances and horizontal permission | `declaration_placement.py`; explicit source views/reserves, no semantic graph or runtime planning |
 | Enabled authored collision meshes in owning-link frames | `source_collisions.py`; shared source snapshot, ordered polygon-fan topology and uniform-scale boundary |
 | Authored moving drawer topology, local floor region and source payload pose | `drawer.py`; original source/link frames and uniform scale, no runtime success claim |
+
+| Source vertical/upright/handover poses and constrained-pick declarations | `source_target_geometry.py`; explicit authored geometry and caller-selected flags, no semantic graph or native observation |
 | Declared world source meshes and conservative slider envelopes | `source_geometry.py`, `source_envelopes.py`; static source/scale/pose only, no native collision claim |
 | Declared local source vertices | `source_geometry.read_source_vertices`; authored mesh/articulation data or an explicitly scaled local override, with no native observation |
 | Read-only source glTF basis/top inputs | `source_geometry.py`; original scene transforms, scale and topology, with no native acquisition |

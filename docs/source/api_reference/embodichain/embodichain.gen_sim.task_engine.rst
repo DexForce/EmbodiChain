@@ -224,3 +224,26 @@ selection; numeric drawer targets and runtime lowering stay with shared owners.
 
 .. automodule:: embodichain.gen_sim.task_engine.drawer_graph_declarations
    :members:
+
+Authored semantic graph refinements
+-----------------------------------
+
+Refine a fixed source graph into explicit upright, carrier, handover and return
+target declarations. Scene/Compute owns geometry and pose arithmetic; the
+frontend retains semantic first-use eligibility, resource transitions, target
+identity and graph ordering. Input graphs remain unchanged and identity collisions
+reject. These APIs do not construct a skill, planner, simulator or runtime.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.source_graph_declarations
+
+.. autofunction:: refine_source_manipulation_declarations
+
+.. autofunction:: refine_source_return_declarations
+
+.. currentmodule:: embodichain.gen_sim.task_engine.alignment_declarations
+
+.. autofunction:: resolve_alignment_pick_declarations
+
+.. autofunction:: resolve_alignment_lowerer_declarations
+
+.. autofunction:: resolve_handover_profile_declarations

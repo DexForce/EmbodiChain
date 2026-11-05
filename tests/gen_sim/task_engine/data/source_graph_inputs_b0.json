@@ -1,0 +1,921 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "fixture_source_commit": "e838e1086d6020308dd5607fb9a26039b35be6b2",
+  "original_file": "tests/gen_sim/task_engine/data/action_profiles_b0.json",
+  "original_file_sha256": "15d41ca566f7a299b4282f0fa6e2ab4a4007c7236970c5b12d7f66c2f615a7d9",
+  "graphs": {
+    "e4": {
+      "source_case": "e4-dual_franka-originalenv-v2",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "task2_1_long_handover_prefix_e4_step_03",
+        "instruction": "\u7528\u53f3\u81c2\u628a\u7d2b\u8272\u6613\u62c9\u7f50\u6276\u6b63\uff0c\u7136\u540e\u7528\u5de6\u81c2\u628a\u6a58\u8272\u7f50\u5934\u6276\u6b63,\u7136\u540e\u7528\u5de6\u81c2\u628a\u6a58\u8272\u7f50\u5934\u9012\u7ed9\u53f3\u81c2",
+        "planner_route": "offline",
+        "integration_fingerprint": "35cfb7118bfeeeeca8127270dfac54c22ce42da910e7e2d4e38ed4bca12e81f3",
+        "targets": {
+          "step_01_upright_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.0644991493225098
+                ],
+                "quaternion_xyzw": [
+                  -4.52573756248853e-09,
+                  1.9570753906350546e-08,
+                  0.9517493844032288,
+                  -0.3068764805793762
+                ]
+              }
+            ]
+          },
+          "step_01_upright_staging_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.2006122672106716
+                ],
+                "quaternion_xyzw": [
+                  -4.52573756248853e-09,
+                  1.9570753906350546e-08,
+                  0.9517493844032288,
+                  -0.3068764805793762
+                ]
+              }
+            ]
+          },
+          "step_02_upright_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.044291094545,
+                  -0.145416438243,
+                  1.0644991493225098
+                ],
+                "quaternion_xyzw": [
+                  -7.28302396169056e-09,
+                  4.213769955185853e-08,
+                  0.968684196472168,
+                  0.2482960969209671
+                ]
+              }
+            ]
+          },
+          "step_02_upright_staging_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.044291094545,
+                  -0.145416438243,
+                  1.192159001195691
+                ],
+                "quaternion_xyzw": [
+                  -7.28302396169056e-09,
+                  4.213769955185853e-08,
+                  0.968684196472168,
+                  0.2482960969209671
+                ]
+              }
+            ]
+          }
+        },
+        "nodes": [
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.pick.step_01",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_03"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_04"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_05"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_02__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.pick.step_02",
+              "arguments": {
+                "object": "interact_orange_soda_can",
+                "target": "step_02_upright_target"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_02",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_02__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_orange_soda_can",
+                "target": "step_02_upright_staging_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_02__call_01"
+            ],
+            "task_instance_id": "step_02",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_02__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_orange_soda_can",
+                "target": "step_02_upright_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_02__call_02"
+            ],
+            "task_instance_id": "step_02",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_02__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_orange_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_02__call_03"
+            ],
+            "task_instance_id": "step_02",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_02__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_orange_soda_can",
+                "target": "step_02_upright_staging_target"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_02__call_04"
+            ],
+            "task_instance_id": "step_02",
+            "task_type": "E2",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_02__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_02__call_05"
+            ],
+            "task_instance_id": "step_02",
+            "task_type": "E2",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_03__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.pick.handover_horizontal_source.interact_orange_soda_can",
+              "arguments": {
+                "object": "interact_orange_soda_can",
+                "target": "step_03_source_grasp"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_02__call_06"
+            ],
+            "task_instance_id": "step_03",
+            "task_type": "E4",
+            "role": "primary"
+          },
+          {
+            "id": "step_03__call_02",
+            "call": {
+              "kind": "hand_over",
+              "object": "interact_orange_soda_can",
+              "resources": {
+                "source": "left",
+                "destination": "right"
+              }
+            },
+            "depends_on": [
+              "step_03__call_01"
+            ],
+            "task_instance_id": "step_03",
+            "task_type": "E4",
+            "role": "primary"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E2",
+            "node_ids": [
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03",
+              "step_01__call_04",
+              "step_01__call_05",
+              "step_01__call_06"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "object_upright"
+            }
+          },
+          {
+            "id": "step_02",
+            "task_type": "E2",
+            "node_ids": [
+              "step_02__call_01",
+              "step_02__call_02",
+              "step_02__call_03",
+              "step_02__call_04",
+              "step_02__call_05",
+              "step_02__call_06"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_02",
+              "type": "object_upright"
+            }
+          },
+          {
+            "id": "step_03",
+            "task_type": "E4",
+            "node_ids": [
+              "step_03__call_01",
+              "step_03__call_02"
+            ],
+            "depends_on": [
+              "step_02"
+            ],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_03",
+              "type": "handover_complete"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "task2_1_long_handover_prefix_e4_step_03",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "object_upright"
+              },
+              {
+                "step_id": "step_02",
+                "type": "object_upright"
+              },
+              {
+                "step_id": "step_03",
+                "type": "handover_complete"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "e5": {
+      "source_case": "e5-franka-r7",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "demo",
+        "instruction": "Validated multi-stage task",
+        "planner_route": "offline",
+        "integration_fingerprint": "e47dd40fb9df35e435e4b964ff3f715d5e0ed66c1ae970f751cbb443066249f3",
+        "targets": {},
+        "nodes": [
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.coordinated_transport",
+              "arguments": {
+                "object": "plastic_tray",
+                "target": "step_01_coordinated_target",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "left": "left",
+                "right": "right"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E5",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E5",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E5",
+            "role": "cleanup"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E5",
+            "node_ids": [
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "semantic_goal"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "demo",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "semantic_goal"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "e3": {
+      "source_case": "e3-dual_franka-originalenv-v2",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "demo",
+        "instruction": "Validated multi-stage task",
+        "planner_route": "offline",
+        "integration_fingerprint": "a75791f8d7da4bb33d2d98234c58db81df1903e855bef4398f6af870e4350bba",
+        "targets": {
+          "step_01_return_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  0.1,
+                  -0.2,
+                  0.8059849900007248
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              }
+            ]
+          }
+        },
+        "nodes": [
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "pick",
+              "object": "bottle",
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E3",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.move_held_object",
+              "arguments": {
+                "object": "bottle",
+                "target": "step_01_pour_target",
+                "reference": "receiver"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E3",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.pour",
+              "arguments": {
+                "object": "bottle"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E3",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.move_held_object",
+              "arguments": {
+                "object": "bottle",
+                "target": "step_01_return_target"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_01__call_03"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E3",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "place",
+              "object": "bottle",
+              "at": {
+                "kind": "target_ref",
+                "target": "step_01_return_target"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_01__call_04"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E3",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_01__call_05"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E3",
+            "role": "cleanup"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E3",
+            "node_ids": [
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03",
+              "step_01__call_04",
+              "step_01__call_05",
+              "step_01__call_06"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "pour_motion"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "demo",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "pour_motion"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "e2": {
+      "source_case": "e2-dual_franka-originalenv-v2",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "task2_1_long_handover_prefix_step_01",
+        "instruction": "\u7528\u53f3\u81c2\u628a\u7d2b\u8272\u6613\u62c9\u7f50\u6276\u6b63",
+        "planner_route": "offline",
+        "integration_fingerprint": "4405811809b3df54e7357b000a4df648143dfdd76d330a4bce5506d1fa241118",
+        "targets": {
+          "step_01_upright_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.0644991493225098
+                ],
+                "quaternion_xyzw": [
+                  -4.52573756248853e-09,
+                  1.9570753906350546e-08,
+                  0.9517493844032288,
+                  -0.3068764805793762
+                ]
+              }
+            ]
+          },
+          "step_01_upright_staging_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.2006122672106716
+                ],
+                "quaternion_xyzw": [
+                  -4.52573756248853e-09,
+                  1.9570753906350546e-08,
+                  0.9517493844032288,
+                  -0.3068764805793762
+                ]
+              }
+            ]
+          }
+        },
+        "nodes": [
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.pick.step_01",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_03"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_04"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_05"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "cleanup"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E2",
+            "node_ids": [
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03",
+              "step_01__call_04",
+              "step_01__call_05",
+              "step_01__call_06"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "object_upright"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "task2_1_long_handover_prefix_step_01",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "object_upright"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

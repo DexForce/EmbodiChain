@@ -1,0 +1,2083 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "scope": "Actual complete B0 integration factory with fixed portable authored mesh declarations. No simulator, action execution or physical qualification.",
+  "source_function_sha256": "0f5c260d9826de8b13e1e35b2a467fa8ef87cba67f9114fc7b51f49622fbdbb5",
+  "cases": [
+    {
+      "name": "e1_tilted",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "task2_1_long_handover_prefix_step_01",
+        "instruction": "\u7528\u53f3\u81c2\u628a\u7d2b\u8272\u6613\u62c9\u7f50\u6276\u6b63",
+        "planner_route": "offline",
+        "integration_fingerprint": "4405811809b3df54e7357b000a4df648143dfdd76d330a4bce5506d1fa241118",
+        "targets": {
+          "step_01_upright_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.049999994635582
+                ],
+                "quaternion_xyzw": [
+                  4.074971027279162e-09,
+                  8.149942942736743e-09,
+                  0.914188027381897,
+                  -0.4052903950214386
+                ]
+              }
+            ]
+          },
+          "step_01_upright_staging_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.249999994635582
+                ],
+                "quaternion_xyzw": [
+                  4.074971027279162e-09,
+                  8.149942942736743e-09,
+                  0.914188027381897,
+                  -0.4052903950214386
+                ]
+              }
+            ]
+          }
+        },
+        "nodes": [
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.pick.step_01",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "current_object_pose",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "current_object_pose",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_03"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_04"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_05"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "cleanup"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E1",
+            "node_ids": [
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03",
+              "step_01__call_04",
+              "step_01__call_05",
+              "step_01__call_06"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "object_upright"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "task2_1_long_handover_prefix_step_01",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "object_upright"
+              }
+            ]
+          }
+        }
+      },
+      "sources": [
+        {
+          "runtime_uid": "interact_purple_soda_can",
+          "uid": "interact_purple_soda_can",
+          "role": "rigid_object",
+          "shape": {
+            "shape_type": "Mesh",
+            "fpath": "fixture.glb"
+          },
+          "body_scale": [
+            1,
+            1,
+            1.0
+          ],
+          "init_pos": [
+            0.3,
+            -0.4,
+            0.81
+          ],
+          "init_rot": [
+            65.0,
+            -20.0,
+            35.0
+          ]
+        },
+        {
+          "runtime_uid": "table",
+          "uid": "table",
+          "role": "background",
+          "shape": {
+            "shape_type": "Cube",
+            "size": [
+              4.0,
+              4.0,
+              0.1
+            ]
+          },
+          "init_pos": [
+            0.1,
+            0.2,
+            0.75
+          ],
+          "init_rot": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "table_top_z": 0.8,
+      "mesh_vertices": [
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          0.07999999821186066
+        ]
+      ],
+      "mesh_faces": [
+        [
+          1,
+          3,
+          0
+        ],
+        [
+          4,
+          1,
+          0
+        ],
+        [
+          0,
+          3,
+          2
+        ],
+        [
+          2,
+          4,
+          0
+        ],
+        [
+          1,
+          7,
+          3
+        ],
+        [
+          5,
+          1,
+          4
+        ],
+        [
+          5,
+          7,
+          1
+        ],
+        [
+          3,
+          7,
+          2
+        ],
+        [
+          6,
+          4,
+          2
+        ],
+        [
+          2,
+          7,
+          6
+        ],
+        [
+          6,
+          5,
+          4
+        ],
+        [
+          7,
+          5,
+          6
+        ]
+      ],
+      "world_axis_before_pick": [
+        -0.34202014332566877,
+        -0.8516507396391467,
+        0.39713126196710263
+      ],
+      "expected": {
+        "options": {
+          "gen_sim.pick.step_01": {
+            "kind": "pick_up",
+            "hand_interp_steps": 12,
+            "pre_grasp_distance": 0.08,
+            "grasp_settle_steps": 16,
+            "pick_object_part": "center",
+            "approach_direction": [
+              0.20460586643013554,
+              0.5094809205837078,
+              -0.8358023875196525
+            ]
+          }
+        },
+        "lowerers": [
+          {
+            "kind": "pick",
+            "call_id": "gen_sim.pick.step_01",
+            "routes": [
+              {
+                "object_id": "interact_purple_soda_can",
+                "target_id": "step_01_upright_target",
+                "release_clearance_object_pose": {
+                  "kind": "pose",
+                  "position": [
+                    -0.025032948307,
+                    0.24982032488,
+                    1.049999994635582
+                  ],
+                  "quaternion_xyzw": [
+                    4.074971027279162e-09,
+                    8.149942942736743e-09,
+                    0.914188027381897,
+                    -0.4052903950214386
+                  ]
+                },
+                "release_clearance_plane_z": 0.8,
+                "release_clearance_safety_margin": 0.02,
+                "grasp_region": "upper_half"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "e1_after_align",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "task2_1_long_handover_prefix_step_01",
+        "instruction": "\u7528\u53f3\u81c2\u628a\u7d2b\u8272\u6613\u62c9\u7f50\u6276\u6b63",
+        "planner_route": "offline",
+        "integration_fingerprint": "4405811809b3df54e7357b000a4df648143dfdd76d330a4bce5506d1fa241118",
+        "targets": {
+          "step_01_upright_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.049999994635582
+                ],
+                "quaternion_xyzw": [
+                  4.074971027279162e-09,
+                  8.149942942736743e-09,
+                  0.914188027381897,
+                  -0.4052903950214386
+                ]
+              }
+            ]
+          },
+          "step_01_upright_staging_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.249999994635582
+                ],
+                "quaternion_xyzw": [
+                  4.074971027279162e-09,
+                  8.149942942736743e-09,
+                  0.914188027381897,
+                  -0.4052903950214386
+                ]
+              }
+            ]
+          }
+        },
+        "nodes": [
+          {
+            "id": "prior_alignment",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "current_object_pose",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.pick.step_01",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "prior_alignment"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "current_object_pose",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "current_object_pose",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_03"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_04"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_05"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "cleanup"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E1",
+            "node_ids": [
+              "prior_alignment",
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03",
+              "step_01__call_04",
+              "step_01__call_05",
+              "step_01__call_06"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "object_upright"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "task2_1_long_handover_prefix_step_01",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "object_upright"
+              }
+            ]
+          }
+        }
+      },
+      "sources": [
+        {
+          "runtime_uid": "interact_purple_soda_can",
+          "uid": "interact_purple_soda_can",
+          "role": "rigid_object",
+          "shape": {
+            "shape_type": "Mesh",
+            "fpath": "fixture.glb"
+          },
+          "body_scale": [
+            1,
+            1,
+            1.0
+          ],
+          "init_pos": [
+            0.3,
+            -0.4,
+            0.81
+          ],
+          "init_rot": [
+            65.0,
+            -20.0,
+            35.0
+          ]
+        },
+        {
+          "runtime_uid": "table",
+          "uid": "table",
+          "role": "background",
+          "shape": {
+            "shape_type": "Cube",
+            "size": [
+              4.0,
+              4.0,
+              0.1
+            ]
+          },
+          "init_pos": [
+            0.1,
+            0.2,
+            0.75
+          ],
+          "init_rot": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "table_top_z": 0.8,
+      "mesh_vertices": [
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          0.07999999821186066
+        ]
+      ],
+      "mesh_faces": [
+        [
+          1,
+          3,
+          0
+        ],
+        [
+          4,
+          1,
+          0
+        ],
+        [
+          0,
+          3,
+          2
+        ],
+        [
+          2,
+          4,
+          0
+        ],
+        [
+          1,
+          7,
+          3
+        ],
+        [
+          5,
+          1,
+          4
+        ],
+        [
+          5,
+          7,
+          1
+        ],
+        [
+          3,
+          7,
+          2
+        ],
+        [
+          6,
+          4,
+          2
+        ],
+        [
+          2,
+          7,
+          6
+        ],
+        [
+          6,
+          5,
+          4
+        ],
+        [
+          7,
+          5,
+          6
+        ]
+      ],
+      "world_axis_before_pick": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "expected": {
+        "options": {
+          "gen_sim.pick.step_01": {
+            "kind": "pick_up",
+            "hand_interp_steps": 12,
+            "pre_grasp_distance": 0.08,
+            "grasp_settle_steps": 16,
+            "pick_object_part": "center",
+            "approach_direction": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          }
+        },
+        "lowerers": [
+          {
+            "kind": "pick",
+            "call_id": "gen_sim.pick.step_01",
+            "routes": [
+              {
+                "object_id": "interact_purple_soda_can",
+                "target_id": "step_01_upright_target",
+                "release_clearance_object_pose": {
+                  "kind": "pose",
+                  "position": [
+                    -0.025032948307,
+                    0.24982032488,
+                    1.049999994635582
+                  ],
+                  "quaternion_xyzw": [
+                    4.074971027279162e-09,
+                    8.149942942736743e-09,
+                    0.914188027381897,
+                    -0.4052903950214386
+                  ]
+                },
+                "release_clearance_plane_z": 0.8,
+                "release_clearance_safety_margin": 0.02,
+                "grasp_region": "upper_half"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "e1_downward",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "task2_1_long_handover_prefix_step_01",
+        "instruction": "\u7528\u53f3\u81c2\u628a\u7d2b\u8272\u6613\u62c9\u7f50\u6276\u6b63",
+        "planner_route": "offline",
+        "integration_fingerprint": "4405811809b3df54e7357b000a4df648143dfdd76d330a4bce5506d1fa241118",
+        "targets": {
+          "step_01_upright_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.049999994635582
+                ],
+                "quaternion_xyzw": [
+                  -4.371138828673793e-08,
+                  4.371138828673793e-08,
+                  4.371138828673793e-08,
+                  1.0
+                ]
+              }
+            ]
+          },
+          "step_01_upright_staging_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.249999994635582
+                ],
+                "quaternion_xyzw": [
+                  -4.371138828673793e-08,
+                  4.371138828673793e-08,
+                  4.371138828673793e-08,
+                  1.0
+                ]
+              }
+            ]
+          }
+        },
+        "nodes": [
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.pick.step_01",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "current_object_pose",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "current_object_pose",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_03"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_04"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_05"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "cleanup"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E1",
+            "node_ids": [
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03",
+              "step_01__call_04",
+              "step_01__call_05",
+              "step_01__call_06"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "object_upright"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "task2_1_long_handover_prefix_step_01",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "object_upright"
+              }
+            ]
+          }
+        }
+      },
+      "sources": [
+        {
+          "runtime_uid": "interact_purple_soda_can",
+          "uid": "interact_purple_soda_can",
+          "role": "rigid_object",
+          "shape": {
+            "shape_type": "Mesh",
+            "fpath": "fixture.glb"
+          },
+          "body_scale": [
+            1,
+            1,
+            1.0
+          ],
+          "init_pos": [
+            0.3,
+            -0.4,
+            0.81
+          ],
+          "init_rot": [
+            180.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "runtime_uid": "table",
+          "uid": "table",
+          "role": "background",
+          "shape": {
+            "shape_type": "Cube",
+            "size": [
+              4.0,
+              4.0,
+              0.1
+            ]
+          },
+          "init_pos": [
+            0.1,
+            0.2,
+            0.75
+          ],
+          "init_rot": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "table_top_z": 0.8,
+      "mesh_vertices": [
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          0.07999999821186066
+        ]
+      ],
+      "mesh_faces": [
+        [
+          1,
+          3,
+          0
+        ],
+        [
+          4,
+          1,
+          0
+        ],
+        [
+          0,
+          3,
+          2
+        ],
+        [
+          2,
+          4,
+          0
+        ],
+        [
+          1,
+          7,
+          3
+        ],
+        [
+          5,
+          1,
+          4
+        ],
+        [
+          5,
+          7,
+          1
+        ],
+        [
+          3,
+          7,
+          2
+        ],
+        [
+          6,
+          4,
+          2
+        ],
+        [
+          2,
+          7,
+          6
+        ],
+        [
+          6,
+          5,
+          4
+        ],
+        [
+          7,
+          5,
+          6
+        ]
+      ],
+      "world_axis_before_pick": [
+        0.0,
+        -1.2246467991473532e-16,
+        -1.0
+      ],
+      "expected": {
+        "options": {
+          "gen_sim.pick.step_01": {
+            "kind": "pick_up",
+            "hand_interp_steps": 12,
+            "pre_grasp_distance": 0.08,
+            "grasp_settle_steps": 16,
+            "pick_object_part": "center",
+            "approach_direction": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          }
+        },
+        "lowerers": [
+          {
+            "kind": "pick",
+            "call_id": "gen_sim.pick.step_01",
+            "routes": [
+              {
+                "object_id": "interact_purple_soda_can",
+                "target_id": "step_01_upright_target",
+                "release_clearance_object_pose": {
+                  "kind": "pose",
+                  "position": [
+                    -0.025032948307,
+                    0.24982032488,
+                    1.049999994635582
+                  ],
+                  "quaternion_xyzw": [
+                    -4.371138828673793e-08,
+                    4.371138828673793e-08,
+                    4.371138828673793e-08,
+                    1.0
+                  ]
+                },
+                "release_clearance_plane_z": 0.8,
+                "release_clearance_safety_margin": 0.02,
+                "grasp_region": "upper_half"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "e2_vertical",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "task2_1_long_handover_prefix_step_01",
+        "instruction": "\u7528\u53f3\u81c2\u628a\u7d2b\u8272\u6613\u62c9\u7f50\u6276\u6b63",
+        "planner_route": "offline",
+        "integration_fingerprint": "4405811809b3df54e7357b000a4df648143dfdd76d330a4bce5506d1fa241118",
+        "targets": {
+          "step_01_upright_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.049999994635582
+                ],
+                "quaternion_xyzw": [
+                  4.074971027279162e-09,
+                  8.149942942736743e-09,
+                  0.914188027381897,
+                  -0.4052903950214386
+                ]
+              }
+            ]
+          },
+          "step_01_upright_staging_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.0799999941885472
+                ],
+                "quaternion_xyzw": [
+                  4.074971027279162e-09,
+                  8.149942942736743e-09,
+                  0.914188027381897,
+                  -0.4052903950214386
+                ]
+              }
+            ]
+          }
+        },
+        "nodes": [
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.pick.step_01",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_03"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_04"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_05"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "cleanup"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E2",
+            "node_ids": [
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03",
+              "step_01__call_04",
+              "step_01__call_05",
+              "step_01__call_06"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "object_upright"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "task2_1_long_handover_prefix_step_01",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "object_upright"
+              }
+            ]
+          }
+        }
+      },
+      "sources": [
+        {
+          "runtime_uid": "interact_purple_soda_can",
+          "uid": "interact_purple_soda_can",
+          "role": "rigid_object",
+          "shape": {
+            "shape_type": "Mesh",
+            "fpath": "fixture.glb"
+          },
+          "body_scale": [
+            1,
+            1,
+            1.0
+          ],
+          "init_pos": [
+            0.3,
+            -0.4,
+            0.81
+          ],
+          "init_rot": [
+            65.0,
+            -20.0,
+            35.0
+          ]
+        },
+        {
+          "runtime_uid": "table",
+          "uid": "table",
+          "role": "background",
+          "shape": {
+            "shape_type": "Cube",
+            "size": [
+              4.0,
+              4.0,
+              0.1
+            ]
+          },
+          "init_pos": [
+            0.1,
+            0.2,
+            0.75
+          ],
+          "init_rot": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "table_top_z": 0.8,
+      "mesh_vertices": [
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          0.07999999821186066
+        ]
+      ],
+      "mesh_faces": [
+        [
+          1,
+          3,
+          0
+        ],
+        [
+          4,
+          1,
+          0
+        ],
+        [
+          0,
+          3,
+          2
+        ],
+        [
+          2,
+          4,
+          0
+        ],
+        [
+          1,
+          7,
+          3
+        ],
+        [
+          5,
+          1,
+          4
+        ],
+        [
+          5,
+          7,
+          1
+        ],
+        [
+          3,
+          7,
+          2
+        ],
+        [
+          6,
+          4,
+          2
+        ],
+        [
+          2,
+          7,
+          6
+        ],
+        [
+          6,
+          5,
+          4
+        ],
+        [
+          7,
+          5,
+          6
+        ]
+      ],
+      "world_axis_before_pick": [
+        -0.34202014332566877,
+        -0.8516507396391467,
+        0.39713126196710263
+      ],
+      "expected": {
+        "options": {
+          "gen_sim.pick.step_01": {
+            "kind": "pick_up",
+            "hand_interp_steps": 12,
+            "pre_grasp_distance": 0.08,
+            "grasp_settle_steps": 16,
+            "pick_object_part": "center",
+            "approach_direction": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          }
+        },
+        "lowerers": [
+          {
+            "kind": "pick",
+            "call_id": "gen_sim.pick.step_01",
+            "routes": [
+              {
+                "object_id": "interact_purple_soda_can",
+                "target_id": "step_01_upright_target",
+                "release_clearance_object_pose": {
+                  "kind": "pose",
+                  "position": [
+                    -0.025032948307,
+                    0.24982032488,
+                    1.049999994635582
+                  ],
+                  "quaternion_xyzw": [
+                    4.074971027279162e-09,
+                    8.149942942736743e-09,
+                    0.914188027381897,
+                    -0.4052903950214386
+                  ]
+                },
+                "release_clearance_plane_z": 0.8,
+                "release_clearance_safety_margin": 0.02,
+                "grasp_region": "upper_half"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "supported_upright",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "task2_1_long_handover_prefix_step_01",
+        "instruction": "\u7528\u53f3\u81c2\u628a\u7d2b\u8272\u6613\u62c9\u7f50\u6276\u6b63",
+        "planner_route": "offline",
+        "integration_fingerprint": "4405811809b3df54e7357b000a4df648143dfdd76d330a4bce5506d1fa241118",
+        "targets": {
+          "step_01_upright_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.1750253475246224
+                ],
+                "quaternion_xyzw": [
+                  4.074971027279162e-09,
+                  8.149942942736743e-09,
+                  0.914188027381897,
+                  -0.4052903950214386
+                ]
+              }
+            ]
+          },
+          "step_01_upright_staging_target": {
+            "kind": "cyclic_pose",
+            "values": [
+              {
+                "position": [
+                  -0.025032948307,
+                  0.24982032488,
+                  1.2050253470775876
+                ],
+                "quaternion_xyzw": [
+                  4.074971027279162e-09,
+                  8.149942942736743e-09,
+                  0.914188027381897,
+                  -0.4052903950214386
+                ]
+              }
+            ]
+          }
+        },
+        "nodes": [
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.pick.step_01",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.align_held",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_target",
+                "preserve_yaw": false
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.place_upright",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "other_support",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_03"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_04"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "cleanup"
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            },
+            "depends_on": [
+              "step_01__call_05"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E2",
+            "role": "cleanup"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E2",
+            "node_ids": [
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03",
+              "step_01__call_04",
+              "step_01__call_05",
+              "step_01__call_06"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "object_upright"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "task2_1_long_handover_prefix_step_01",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "object_upright"
+              }
+            ]
+          }
+        }
+      },
+      "sources": [
+        {
+          "runtime_uid": "interact_purple_soda_can",
+          "uid": "interact_purple_soda_can",
+          "role": "rigid_object",
+          "shape": {
+            "shape_type": "Mesh",
+            "fpath": "fixture.glb"
+          },
+          "body_scale": [
+            1,
+            1,
+            1.0
+          ],
+          "init_pos": [
+            0.3,
+            -0.4,
+            0.81
+          ],
+          "init_rot": [
+            65.0,
+            -20.0,
+            35.0
+          ]
+        },
+        {
+          "runtime_uid": "other_support",
+          "uid": "other_support",
+          "role": "rigid_object",
+          "shape": {
+            "shape_type": "Mesh",
+            "fpath": "fixture.glb"
+          },
+          "body_scale": [
+            1,
+            1,
+            1.0
+          ],
+          "init_pos": [
+            0.3,
+            -0.4,
+            0.81
+          ],
+          "init_rot": [
+            65.0,
+            -20.0,
+            35.0
+          ]
+        },
+        {
+          "runtime_uid": "table",
+          "uid": "table",
+          "role": "background",
+          "shape": {
+            "shape_type": "Cube",
+            "size": [
+              4.0,
+              4.0,
+              0.1
+            ]
+          },
+          "init_pos": [
+            0.1,
+            0.2,
+            0.75
+          ],
+          "init_rot": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "table_top_z": 0.8,
+      "mesh_vertices": [
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          -0.019999999552965164,
+          0.1599999964237213,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          -0.23999999463558197,
+          0.07999999821186066
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          -0.019999999552965164
+        ],
+        [
+          0.05999999865889549,
+          0.1599999964237213,
+          0.07999999821186066
+        ]
+      ],
+      "mesh_faces": [
+        [
+          1,
+          3,
+          0
+        ],
+        [
+          4,
+          1,
+          0
+        ],
+        [
+          0,
+          3,
+          2
+        ],
+        [
+          2,
+          4,
+          0
+        ],
+        [
+          1,
+          7,
+          3
+        ],
+        [
+          5,
+          1,
+          4
+        ],
+        [
+          5,
+          7,
+          1
+        ],
+        [
+          3,
+          7,
+          2
+        ],
+        [
+          6,
+          4,
+          2
+        ],
+        [
+          2,
+          7,
+          6
+        ],
+        [
+          6,
+          5,
+          4
+        ],
+        [
+          7,
+          5,
+          6
+        ]
+      ],
+      "world_axis_before_pick": [
+        -0.34202014332566877,
+        -0.8516507396391467,
+        0.39713126196710263
+      ],
+      "expected": {
+        "options": {
+          "gen_sim.pick.step_01": {
+            "kind": "pick_up",
+            "hand_interp_steps": 12,
+            "pre_grasp_distance": 0.08,
+            "grasp_settle_steps": 16,
+            "pick_object_part": "center",
+            "approach_direction": [
+              0.0,
+              0.0,
+              -1.0
+            ]
+          }
+        },
+        "lowerers": [
+          {
+            "kind": "pick",
+            "call_id": "gen_sim.pick.step_01",
+            "routes": [
+              {
+                "object_id": "interact_purple_soda_can",
+                "target_id": "step_01_upright_target",
+                "release_clearance_object_pose": {
+                  "kind": "pose",
+                  "position": [
+                    -0.025032948307,
+                    0.24982032488,
+                    1.1750253475246224
+                  ],
+                  "quaternion_xyzw": [
+                    4.074971027279162e-09,
+                    8.149942942736743e-09,
+                    0.914188027381897,
+                    -0.4052903950214386
+                  ]
+                },
+                "release_clearance_plane_z": 0.9250253528890404,
+                "release_clearance_safety_margin": 0.02,
+                "grasp_region": "upper_half"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
