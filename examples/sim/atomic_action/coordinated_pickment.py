@@ -577,9 +577,10 @@ def run_coordinated_pickment_demo(
             ids = data["user_ids"][data["is_valid"]].detach().cpu().flatten().tolist()
             return sorted(
                 {
-                    contact_sensor.get_actor_info(actor_id).path
+                    info.path + ("/" + info.link_name if info.link_name else "")
                     for actor_id in ids
                     if actor_id >= 0
+                    for info in (contact_sensor.get_actor_info(actor_id),)
                 }
             )
 
@@ -589,6 +590,15 @@ def run_coordinated_pickment_demo(
                     "stage": stage,
                     "index": index,
                     "contact_actor_paths": contact_paths(),
+                    "eef_poses": {
+                        arm: robot.compute_fk(
+                            robot.get_qpos(name=arm), name=arm, to_matrix=True
+                        )
+                        .detach()
+                        .cpu()
+                        .tolist()
+                        for arm in ("left_arm", "right_arm")
+                    },
                     "object_pose": obj.get_local_pose(to_matrix=True)
                     .detach()
                     .cpu()
