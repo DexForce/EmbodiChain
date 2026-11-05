@@ -10,6 +10,7 @@ Online sampling and demonstration persistence belong to
 
 | Request | Owner |
 |---|---|
+| Declared local source/dependency inventories | `embodichain/data/asset_dependencies.py`; file presence and URI resolution, without simulation |
 | Asset path lookup | `embodichain/data/dataset.py`: `get_data_path()`, `get_data_class()` |
 | Cache roots / mirror prefix | `embodichain/data/constants.py` |
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
@@ -41,6 +42,14 @@ base URL for asset archives (default: the hf-mirror.com copy of
 Lookup does not verify the final nested file. Check the shared index and installed
 entry points for missing IDs. Explicit loaded modules remain available through
 `extra_modules` after registered IDs; package re-exports do not register assets.
+
+Declared source inventories use `asset_dependency_files()` for local XML mesh,
+texture/include references and adjacent USD control annotations. Plain nested
+configuration fields are resolved by `collect_declared_asset_files()`, preferring
+the owner directory before registered asset lookup and retaining file-backed used
+USD layers. Both return resolved unique paths without editing sources or opening
+a simulator. They do not evaluate geometry, compute content identities or replace
+missing assets. Frozen-input consumers own their hashes and validity decisions.
 
 ## Download and registry boundaries
 
