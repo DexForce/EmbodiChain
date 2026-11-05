@@ -451,6 +451,8 @@ topics:
     hand_geometries,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
+    joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies,
+
     joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies, ContactEvidenceSampler, ContactTimeline, NativeGripEvidenceFactory,
     ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
   paths: [topics/task-programs/task-programs.md]
@@ -459,6 +461,7 @@ topics:
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
+
   - embodichain/lab/task_program/integrations/simulation/grip_evidence.py
   - embodichain/lab/task_program/integrations/invocation_policy.py
   - embodichain/lab/task_program/integrations/composition.py

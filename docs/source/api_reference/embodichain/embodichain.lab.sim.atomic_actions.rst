@@ -479,6 +479,18 @@ verifier.
    PhaseEffectGateRequest
    PhaseEffectGateResult
 
+Named held-object transport
+---------------------------
+
+``HeldObjectPoseGoal.object_id`` optionally identifies the exact object already
+held by the bound resource. A named goal validates that identity before native
+or external nominal planning and declares the unchanged attachment as its
+terminal effect. The execution owner verifies this effect before committing it;
+planning does not establish physical attachment. Motion and timing use the same
+path as an unnamed goal. Omitting the field preserves the existing effectless
+``MoveHeldObject`` behavior. Task Program's routed transport uses named goals
+and additionally selects a verified input-hold guard for its transport segment.
+
 
 Scoped grasp preparation
 ------------------------

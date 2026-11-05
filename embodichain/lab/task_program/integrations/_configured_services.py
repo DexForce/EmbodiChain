@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from .simulation.targets import _pose
+
 from dataclasses import dataclass
 import math
 from typing import TYPE_CHECKING, ClassVar
@@ -134,37 +136,6 @@ def _axis(value: tuple[float, float, float]) -> tuple[float, float, float]:
         or math.sqrt(sum(item * item for item in normalized)) <= 1.0e-6
     ):
         raise ValueError("translation_axis must contain three finite non-zero values.")
-    return normalized
-
-
-def _pose(value: tuple[float, ...]) -> tuple[float, ...]:
-    """Validate and own one flattened SE(3) transform."""
-    if type(value) is not tuple or len(value) != 16:
-        raise TypeError("relative_pose must be an exact 16-value tuple.")
-    normalized = tuple(float(item) for item in value)
-    if not all(math.isfinite(item) for item in normalized):
-        raise ValueError("relative_pose must contain only finite values.")
-    pose = torch.tensor(normalized, dtype=torch.float64).reshape(4, 4)
-    if not torch.allclose(
-        pose[3],
-        torch.tensor((0.0, 0.0, 0.0, 1.0), dtype=torch.float64),
-        atol=1.0e-6,
-        rtol=0.0,
-    ):
-        raise ValueError("relative_pose must have bottom row [0, 0, 0, 1].")
-    rotation = pose[:3, :3]
-    if not torch.allclose(
-        rotation.T @ rotation,
-        torch.eye(3, dtype=torch.float64),
-        atol=1.0e-6,
-        rtol=0.0,
-    ) or not torch.isclose(
-        torch.linalg.det(rotation),
-        torch.tensor(1.0, dtype=torch.float64),
-        atol=1.0e-6,
-        rtol=0.0,
-    ):
-        raise ValueError("relative_pose must contain a proper SE(3) rotation.")
     return normalized
 
 

@@ -172,6 +172,24 @@ the closed decoder in `configured.py` owns accepted options and route fields.
 Relative Place resolves a live reference plus world-axis displacement and
 requires the verified held-object transform. Coordinated transport must select
 the real primitive's release mode. Do not install frontend skill replacements.
+`move_held_object` additionally accepts an explicit `routes` declaration instead
+of its legacy single-target fields. Each route binds a canonical object, target
+ID and an inert absolute or scene-relative pose. These declarations live in
+`simulation/targets.py` and `simulation/transport.py`; lowering only constructs
+typed goals, retained-attachment effects and lookahead targets. It does not read
+live poses, select motion policy or replace the shared Atomic Skill. The original
+single-target decoder/factory and effect behavior remain unchanged. Mixed forms
+and duplicate target IDs are rejected. The optional
+`RegisteredSemanticLowererSceneValidator` contract lets an immutable factory
+preflight its references against `SceneManifest` before runtime assembly; routed
+transport uses it for canonical object/reference checks.
+The routed-2 factory uses named transport goals and verified retention-only
+phases: grounding checks the exact object and every eligible input-hold row,
+then guards `transport` and requests terminal attachment verification. Projected
+presets reject this contract before motion planning or dispatch. The legacy
+single-target factory keeps its existing effectless behavior and identity.
+
+
 Container affordances may declare a local-z release clearance while retaining
 their original semantic target for final acceptance.
 
