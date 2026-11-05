@@ -1543,3 +1543,22 @@ def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) ->
     """Malformed NRD values fail before entering the native renderer."""
     with pytest.raises(ValueError, match=field_name):
         sim_cfg.NRDCfg(**{field_name: invalid_value})
+
+
+def test_articulation_serialized_matrix_pose_preserves_value_and_array_input():
+    import numpy as np
+    from copy import deepcopy
+    from embodichain.lab.sim.cfg import ArticulationCfg
+
+    pose = np.eye(4)
+    pose[:3, 3] = [1.25, -2.5, 3.75]
+    serialized = {"init_local_pose": pose.tolist()}
+    before = deepcopy(serialized)
+    decoded = ArticulationCfg.from_dict(serialized)
+    np.testing.assert_array_equal(decoded.init_local_pose, pose)
+    assert decoded.init_pos == (1.25, -2.5, 3.75)
+    assert serialized == before
+    array = pose.astype(np.float32)
+    existing = ArticulationCfg.from_dict({"init_local_pose": array})
+    assert existing.init_local_pose.dtype == np.float32
+    np.testing.assert_array_equal(existing.init_local_pose, array)
