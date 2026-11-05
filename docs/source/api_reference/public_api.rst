@@ -1150,6 +1150,35 @@ not-run outcomes; an incomplete always-window cannot certify success.
    evaluate_temporal_condition
    lookup_observation
 
+embodichain.gen_sim.task_spec.pour_evidence
+-------------------------------------------
+
+Rigid Pour proof retains the source ``measured_tilt_restore/v1`` criterion:
+30 degrees of observed tilt, restore error at most 15 degrees, the gravity-top
+proxy above the receiver projection, and an independently measured release.
+This is not a detected spout or fluid-transfer witness. ``poured`` remains
+unqualified by these APIs.
+
+Bindings seal exact compiled segment/invocation IDs, source/receiver/resource
+identities, the actual compiled program fingerprint and recording cadence and explicit raw or historical input format.
+New Lab snapshots carry synchronized geometry channels; missing validity or
+release acquisition remains unavailable per environment. Recorded milestones
+also require their full successful occurrence prefix. Core imports and binding
+normalization are standard-library-only.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.pour_evidence
+
+.. autosummary::
+
+   PourEvidenceBinding
+   evaluate_pour_evidence
+
+.. autoclass:: PourEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_pour_evidence
+
+
 embodichain.gen_sim.task_spec.registry
 --------------------------------------
 
@@ -1509,6 +1538,26 @@ remain NaN. Pure transformed mesh envelopes live in
 ``compute.geometry.rigid.support_mesh_envelope`` and establish no contact.
 
 .. autofunction:: qualified_support_heights
+
+embodichain.lab.task_program.integrations.hand_calibration
+----------------------------------------------------------
+
+Model-owned task-hand descriptions carry explicit physical endpoints, joint
+commands and nominal reserves. ``physical_hand_resources`` resolves declared
+member aliases to unique physical hands without inferring roles from names.
+The interface creates no Robot, geometry observation, skill or TaskSpec result.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.hand_calibration
+
+.. autosummary::
+
+   TaskHandCalibration
+   physical_hand_resources
+
+.. autoclass:: TaskHandCalibration
+   :members:
+
+.. autofunction:: physical_hand_resources
 
 embodichain.lab.task_program.integrations.simulation.grip_evidence
 ------------------------------------------------------------------
@@ -4133,3 +4182,5 @@ substituted, and recorded joint claims require the original executed policy.
    :members:
 
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_condition_evidence_binding
+
+.. autofunction:: embodichain.gen_sim.task_engine.evidence.project_pour_evidence_binding
