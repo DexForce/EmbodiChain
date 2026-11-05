@@ -43,7 +43,8 @@ Lookup does not verify the final nested file. Check the shared index and install
 entry points for missing IDs. Explicit loaded modules remain available through
 `extra_modules` after registered IDs; package re-exports do not register assets.
 
-Declared source inventories use `asset_dependency_files()` for local XML mesh,
+Declared source inventories use `asset_dependency_files()` for external glTF/GLB
+buffers/images, OBJ material libraries and MTL texture references, plus local XML mesh,
 texture/include references and adjacent USD control annotations. Plain nested
 configuration fields are resolved by `collect_declared_asset_files()`, preferring
 the owner directory before registered asset lookup and retaining file-backed used

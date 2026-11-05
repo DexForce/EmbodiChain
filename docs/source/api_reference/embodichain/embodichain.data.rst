@@ -75,7 +75,9 @@ Declared Source Dependencies
 ----------------------------
 
 These readers enumerate supported local source files without loading simulation.
-They preserve original bytes and leave content hashing and model qualification
+They include glTF/GLB external buffers/images and OBJ/MTL material/texture files.
+Embedded data stays covered by container bytes. They preserve original bytes and
+leave content hashing and model qualification
 with their callers. XML references and file-backed used USD layers retain their
 existing local resolution; remote dependencies reject explicitly.
 
