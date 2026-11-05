@@ -303,7 +303,7 @@ class ControlOperationRuntime:
         """Return owned declared provenance without consulting live native state.
 
         Returns:
-            dict: JSON metadata for the declared program, episode, operation,
+            dict[str, builtins.object]: JSON metadata for the declared program, episode, operation,
             clock, native actors and observer identity. These declarations do
             not certify that a physical observation is current or available.
         """
