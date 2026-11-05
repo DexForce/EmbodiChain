@@ -108,9 +108,16 @@ Lab reads recorded values through the canonical ObservationManager schema/raw
 history, never live poses or a second trajectory buffer. Historical control
 receipts remain qualified by the separate `control_evidence.py` owner.
 
-Historical Press/Twist control proof lives in `control_evidence.py`. Bindings
-seal explicit predicate/joint/direction/resource and compiled occurrence identity.
-TaskSpec replays the original acceptance receipt and complete execution prefix;
-program success alone cannot certify a physical control effect. Missing acquisition
-remains unavailable, and an original measured rejection remains rejected. This
-verifier collects no state and changes no physics or acceptance thresholds.
+Press/Twist control proof lives in `control_evidence.py` with raw rechecks in
+`_raw_control_evidence.py`. Historical version-1 bindings keep their exact hash
+and serialization. Raw version 2 is explicit: it seals the actual operation,
+episode/native actor/clock identity and complete compiled policy occurrences;
+adding old records never selects or downgrades that verifier. The common report
+owner dispatches both versions without changing other evidence families.
+
+Raw reevaluation uses the published `compute.articulation` event algorithms. It
+rechecks original frames, availability, shapes, native revisions, exact windows,
+acknowledged hold grids and invocation selectors before replaying the source
+criterion. Missing or inconsistent proof remains unavailable. Binding decode
+stays standard-library-only; evaluation imports no Lab, Task Engine or native SDK.
+The verifier acquires no state and changes no physics or acceptance thresholds.

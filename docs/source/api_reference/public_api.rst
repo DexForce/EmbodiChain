@@ -1026,11 +1026,23 @@ the same operation/source-asset/route digest, sampling window, cleanup, clearanc
 and declared coarse or calibrated criterion as the original source observer.
 There are no imports of live factories, sensors or Task Engine objects.
 
-Only explicitly selected ``historical_record`` inputs are currently qualified;
-raw input is rejected at binding construction until its complete operation-window
-acquisition contract is available. Missing or failed receipt qualification stays
-unavailable. A contact-backed Press event is not device activation, and the
-coarse Twist criterion is not silently upgraded to calibrated-setting success.
+Binding version 1 remains explicitly ``historical_record`` with unchanged
+serialization and hashes. Version 2 explicitly selects ``raw_snapshot`` and seals
+the complete actual control identity and compiled policy occurrences. Old records
+are never upgraded or re-signed automatically, and a raw contract cannot borrow a
+historical accepted claim. Raw binding decode is standard-library-only; numerical
+reevaluation lazily calls the published pure Compute articulation owner.
+
+The raw verifier rechecks exact B1 rows, episodes, native actor/topology identity,
+original revisions/timestamps, complete windows, hold grids and actual invocation
+selectors. Press retains released onset, contact-backed event, retreat, parent
+release and terminal clearance rules. Twist retains startup/table checks, contact
+path, stable held chunks, retained turn and non-target joint baselines. Missing
+channels, invalid finite data, incomplete shapes/windows and foreign boundaries
+remain unavailable; no Lab, Task Engine or native SDK is imported.
+
+A contact-backed Press event is not device activation, and the coarse Twist
+criterion is not silently upgraded to calibrated-setting success.
 The common physical report assembler accepts these bindings without filling
 missing final goals, past milestones or continuous trajectory requirements.
 

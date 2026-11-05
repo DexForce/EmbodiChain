@@ -113,7 +113,9 @@ def qualified_control_record(
     if terminal_item.get("name") != terminal or terminal_item.get("post") != [
         {
             "kind": "wait_stable",
-            "entity": declared_binding["object_id"],
+            "entity": declaration.get(
+                "policy_entity_id", declared_binding["object_id"]
+            ),
             "preset": expected_preset,
         }
     ]:
@@ -214,3 +216,10 @@ def qualified_control_record(
             "result": deepcopy(result),
         },
     }
+
+
+def one(values: Any) -> Any:
+    values = list(values)
+    if len(values) != 1:
+        raise ValueError("Held evidence requires one exact occurrence.")
+    return values[0]
