@@ -86,6 +86,10 @@ disjoint names, but duplicate ownership is rejected. Ordinary monitor fields
 retain `DynamicSettleMonitorCfg`; explicit `measurement` selects
 `SimulationSettleMonitorCfg`. A declared condition `kind` selects
 `SimulationStabilityConditionCfg`, with normalized owned geometry and timing.
+The explicit `joint_position_and_stability` kind selects
+`SimulationJointStabilityConditionCfg` and requires a canonical articulation,
+exact native joint, target and tolerance. These are policy parameters, not
+static articulation geometry or names inferred by an engine.
 Support conditions include an explicit sensor UID/capacity declaration. The
 scene binding supplies native pair UIDs, and the full definition is fingerprinted.
 
