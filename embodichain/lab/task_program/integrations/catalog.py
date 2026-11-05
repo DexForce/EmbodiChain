@@ -27,7 +27,7 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
-from typing import cast
+from typing import TYPE_CHECKING, cast
 import torch
 
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
@@ -126,6 +126,11 @@ from .simulation.policies import (
     SimulationSettleMonitorCfg,
     default_simulation_settle_presets,
 )
+from .simulation.planning_services import SimulationPlanningServicesCfg
+
+if TYPE_CHECKING:
+    from .invocation_policy import InvocationPolicyBinding
+
 from .simulation.stability import (
     SimulationStabilityConditionCfg,
     SimulationJointStabilityConditionCfg,
@@ -222,6 +227,11 @@ def _canonical_value(value: object) -> object:
             metadata.pop("final_velocity_rejection")
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
+        if (
+            type(value) is SimulationPlanningServicesCfg
+            and value.native_handover_scene is False
+        ):
+            metadata.pop("native_handover_scene")
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "
@@ -570,6 +580,11 @@ class TaskProgramIntegrationCatalog:
     )
     """Immutable preset-to-entity binding for declared geometric conditions."""
 
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = field(
+        default=(), kw_only=True
+    )
+    """Exact program-bound named presets for sequential execution occurrences."""
+
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
             value = getattr(self, field_name)
@@ -832,6 +847,10 @@ class TaskProgramIntegrationCatalog:
             call_catalog=self.call_catalog,
             runtime_preset=program.integration.runtime_preset,
         )
+        selected_presets = {
+            binding.invocation_id: binding.preset_id
+            for binding in self.invocation_policy_bindings
+        }
         for segment in compiled.iter_segments():
             for policy in segment.post_policies:
                 if (
@@ -850,7 +869,31 @@ class TaskProgramIntegrationCatalog:
                     "physical safety-validator factory.",
                 )
             for call in segment.calls:
-                linked = manifest.link_call(call.call, path=call.source_path)
+                occurrence = f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+                linked = manifest.link_call(
+                    call.call,
+                    path=call.source_path,
+                    preset_id=selected_presets.get(occurrence),
+                )
+                if linked.descriptor.target_descriptor.skill_id == "hand_over":
+                    occurrence = f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+                    preset = self.robot_profile.presets[
+                        selected_presets.get(occurrence, linked.preset_id)
+                    ]
+                    options = preset.action_option_template(call.call.semantic_id)
+                    if options.linear_segments:
+                        policy = preset.motion_policy
+                        if (
+                            policy.strategy != "ik_interp"
+                            or policy.interpolation_mode != "fixed_grid"
+                            or policy.ik_seed_mode != "sequential"
+                            or policy.dynamic_collision_mode != "off"
+                            or policy.segment_sample_count_retries != (260, 320)
+                            or policy.segment_continuous_ik_recovery
+                        ):
+                            raise ValueError(
+                                "Cartesian HandOver requires its declared fixed-grid sequential IK source policy."
+                            )
                 if type(linked.call) is Place and linked.call.at is None:
                     destination = linked.affordances.get("destination")
                     if destination is None:
@@ -863,6 +906,12 @@ class TaskProgramIntegrationCatalog:
                         affordance=destination,
                         path=call.source_path,
                     )
+        if self.invocation_policy_bindings:
+            from .invocation_policy import BoundInvocationPolicies
+
+            BoundInvocationPolicies(
+                compiled, self.invocation_policy_bindings
+            ).validate_manifest(compiled, manifest)
         return compiled
 
     def validate_engine(self, engine: AtomicActionEngine) -> None:
@@ -1089,9 +1138,11 @@ def _registration_payload(
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
+    planning_services: SimulationPlanningServicesCfg | None = None,
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
-    return {
+    payload = {
         "schema_version": _CATALOG_FINGERPRINT_SCHEMA_VERSION,
         "scene_binding": scene_binding,
         "scene_manifest": scene.entries,
@@ -1200,6 +1251,14 @@ def _registration_payload(
         "validator_kinds": _VALIDATOR_KINDS,
     }
 
+    if planning_services is not None:
+        payload["planning_services"] = planning_services.snapshot().to_dict()
+        if payload["planning_services"]["native_handover_scene"] is False:
+            payload["planning_services"].pop("native_handover_scene")
+    if invocation_policy_bindings:
+        payload["invocation_policy_bindings"] = invocation_policy_bindings
+    return payload
+
 
 @dataclass(frozen=True, slots=True)
 class SimulationTaskProgramRegistration:
@@ -1225,6 +1284,12 @@ class SimulationTaskProgramRegistration:
     registered_semantic_lowerer_factories: tuple[
         RegisteredSemanticLowererFactory, ...
     ] = ()
+    planning_services: SimulationPlanningServicesCfg | None = field(
+        default=None, kw_only=True
+    )
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = field(
+        default=(), kw_only=True
+    )
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1258,6 +1323,34 @@ class SimulationTaskProgramRegistration:
     )
 
     def __post_init__(self) -> None:
+        from .invocation_policy import InvocationPolicyBinding
+
+        if type(self.invocation_policy_bindings) is not tuple or not all(
+            type(item) is InvocationPolicyBinding
+            for item in self.invocation_policy_bindings
+        ):
+            raise TypeError(
+                "invocation_policy_bindings must be an immutable tuple of InvocationPolicyBinding."
+            )
+        if (
+            len({item.program_fingerprint for item in self.invocation_policy_bindings})
+            > 1
+        ):
+            raise ValueError(
+                "Configured invocation bindings must select one program fingerprint."
+            )
+        if len({item.invocation_id for item in self.invocation_policy_bindings}) != len(
+            self.invocation_policy_bindings
+        ):
+            raise ValueError("Duplicate invocation policy occurrence.")
+        if self.planning_services is not None:
+            if type(self.planning_services) is not SimulationPlanningServicesCfg:
+                raise TypeError(
+                    "planning_services must be SimulationPlanningServicesCfg or None."
+                )
+            object.__setattr__(
+                self, "planning_services", self.planning_services.snapshot()
+            )
         if type(self.scene_binding) is not SimulationSceneBinding:
             raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
         if type(self.robot_profile_binding) is not SimulationRobotSkillProfileBinding:
@@ -1327,6 +1420,43 @@ class SimulationTaskProgramRegistration:
 
         scene = self.scene_binding.declare()
         profile = self.robot_profile_binding.declare()
+        if (
+            self.planning_services is not None
+            and self.planning_services.native_handover_scene
+        ):
+            native_rigids = {
+                uid for _, uid in self.planning_services.collision_roster.rigid_objects
+            }
+            if not native_rigids or any(
+                item.simulation_uid not in native_rigids
+                for item in self.scene_binding.rigid_objects
+            ):
+                raise ValueError(
+                    "Native HandOver collision_roster must cover declared rigid owners."
+                )
+        from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
+            HandOverOptions,
+            HandOverPlanningRecovery,
+        )
+
+        for preset in profile.presets.values():
+            for options in preset.action_option_templates.values():
+                if type(options) is HandOverOptions:
+                    adaptive = (
+                        type(preset.recovery_policy.planning_recovery)
+                        is HandOverPlanningRecovery
+                    )
+                    if options.adaptive_receive != adaptive:
+                        raise ValueError(
+                            "Adaptive receiving and its bounded recovery must be declared together."
+                        )
+                    if options.require_receiver_scene and (
+                        self.planning_services is None
+                        or not self.planning_services.native_handover_scene
+                    ):
+                        raise ValueError(
+                            "Native receiver qualification requires declared native_handover_scene services."
+                        )
         _validate_standard_effect_monitors(profile)
         _validate_standard_tracking_metrics(profile)
         extensions = build_standard_extension_declarations(
@@ -1396,12 +1526,15 @@ class SimulationTaskProgramRegistration:
                 registered_semantic_lowerer_factories=(
                     self.registered_semantic_lowerer_factories
                 ),
+                planning_services=self.planning_services,
+                invocation_policy_bindings=self.invocation_policy_bindings,
             )
         )
         object.__setattr__(
             self,
             "catalog",
             TaskProgramIntegrationCatalog(
+                invocation_policy_bindings=self.invocation_policy_bindings,
                 scene_registry_id=self.scene_binding.registry_id,
                 robot_profile_id=self.robot_profile_binding.profile_id,
                 scene=scene,
@@ -1447,6 +1580,37 @@ class SimulationTaskProgramRegistration:
         object.__setattr__(self, "_control_part_evidence_provider_lock", Lock())
         object.__setattr__(self, "_registered_semantic_lowerer_history", [])
         object.__setattr__(self, "_registered_semantic_lowerer_lock", Lock())
+
+    def validate_num_envs(self, num_envs: object) -> None:
+        """Preflight the unchanged single-environment scope of explicit services.
+
+        Args:
+            num_envs: Positive environment count declared by the host.
+        """
+        self.assert_unchanged()
+        if self.planning_services is not None:
+            self.planning_services.validate_num_envs(num_envs)
+        from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
+            HandOverOptions,
+        )
+
+        adaptive = any(
+            type(options) is HandOverOptions and options.adaptive_receive
+            for preset in self.catalog.robot_profile.presets.values()
+            for options in preset.action_option_templates.values()
+        )
+        if adaptive and (type(num_envs) is not int or num_envs != 1):
+            raise ValueError("Adaptive HandOver requires B=1.")
+
+    def validate_physics(self, physics: object) -> None:
+        """Preflight declared native observation capabilities without starting Sim.
+
+        Args:
+            physics: Explicit environment-owned backend name.
+        """
+        self.assert_unchanged()
+        if self.planning_services is not None:
+            self.planning_services.validate_physics(physics)
 
     @property
     def fingerprint(self) -> str:
@@ -1501,6 +1665,8 @@ class SimulationTaskProgramRegistration:
                 registered_semantic_lowerer_factories=(
                     self.registered_semantic_lowerer_factories
                 ),
+                planning_services=self.planning_services,
+                invocation_policy_bindings=self.invocation_policy_bindings,
             )
             current = _digest(payload)
         except (TypeError, ValueError) as exc:

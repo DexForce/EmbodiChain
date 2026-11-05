@@ -50,6 +50,8 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
         "registered_semantic_lowerers",
         "control_part_evidence",
         "settle_presets",
+        "planning_services",
+        "invocation_policy_bindings",
     }
 )
 _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
@@ -275,6 +277,24 @@ def _merge_runtime_services(
         if duplicate:
             raise ValueError(f"Duplicate settle-preset ownership: {sorted(duplicate)}.")
         result["settle_presets"] = {**profile_presets, **task_presets}
+    if "planning_services" in skill_profile and "planning_services" in task:
+        raise ValueError("Planning services must have exactly one component owner.")
+    owner = task if "planning_services" in task else skill_profile
+    if "planning_services" in owner:
+        result["planning_services"] = _owned_mapping(
+            owner["planning_services"], path="runtime_services.planning_services"
+        )
+    if (
+        "invocation_policy_bindings" in skill_profile
+        and "invocation_policy_bindings" in task
+    ):
+        raise ValueError("Invocation bindings must have one component owner.")
+    owner = task if "invocation_policy_bindings" in task else skill_profile
+    if "invocation_policy_bindings" in owner:
+        result["invocation_policy_bindings"] = _owned_sequence(
+            owner["invocation_policy_bindings"],
+            path="runtime_services.invocation_policy_bindings",
+        )
     return result
 
 
@@ -327,7 +347,7 @@ def _resolve_execution_policy(
                     "effect_assurance",
                 }
             ),
-            optional=frozenset({"required_planner", "planner"}),
+            optional=frozenset({"required_planner", "planner", "presets"}),
         )
     )
     _identifier(policy["policy_id"], path="execution policy.policy_id")
@@ -505,7 +525,7 @@ def _compose_integration_payload(
         task["profile"],
         path="task integration.profile",
         required=frozenset({"defaults", "action_options", "effect_monitors"}),
-        optional=frozenset({"skill_presets", "grounding_providers"}),
+        optional=frozenset({"skill_presets", "grounding_providers", "preset_options"}),
     )
     preset = {
         "preset_id": deepcopy(policy["preset_id"]),
@@ -523,6 +543,56 @@ def _compose_integration_payload(
     elif "required_planner" in policy:
         preset["required_planner"] = deepcopy(policy["required_planner"])
 
+    presets = [preset]
+    named = _owned_mapping(policy.get("presets", {}), path="execution policy.presets")
+    option_sets = _owned_mapping(
+        profile.get("preset_options", {}),
+        path="task integration.profile.preset_options",
+    )
+    if set(option_sets) - set(named):
+        raise ValueError("Preset options must select a named execution-policy preset.")
+    for name, raw in named.items():
+        name = _identifier(name, path="execution policy.presets keys")
+        if name == preset["preset_id"]:
+            raise ValueError("Named presets must not replace the base preset.")
+        patch = _mapping(
+            raw,
+            path=f"execution policy.presets.{name}",
+            required=frozenset(),
+            optional=frozenset(
+                {
+                    "motion",
+                    "tracking",
+                    "recovery",
+                    "workflow_recovery",
+                    "runner",
+                    "effect_assurance",
+                }
+            ),
+        )
+        selected = deepcopy(preset)
+        selected["preset_id"] = name
+        for field, value in patch.items():
+            if field == "effect_assurance":
+                selected[field] = deepcopy(value)
+            else:
+                selected[field] = {
+                    **_owned_mapping(selected[field], path=f"base.{field}"),
+                    **_owned_mapping(value, path=f"presets.{name}.{field}"),
+                }
+        options = _mapping(
+            option_sets.get(name, {}),
+            path=f"profile.preset_options.{name}",
+            required=frozenset(),
+            optional=frozenset({"action_options", "effect_monitors"}),
+        )
+        for field, value in options.items():
+            selected[field] = {
+                **_owned_mapping(selected[field], path=f"base.{field}"),
+                **_owned_mapping(value, path=f"preset_options.{name}.{field}"),
+            }
+        presets.append(selected)
+
     scene_payload = {
         key: deepcopy(value) for key, value in scene.items() if key != "contract_id"
     }
@@ -531,7 +601,7 @@ def _compose_integration_payload(
         "resources": deepcopy(skill_profile["resources"]),
         "command_presets": deepcopy(skill_profile["command_presets"]),
         "defaults": deepcopy(profile["defaults"]),
-        "presets": [preset],
+        "presets": presets,
         "default_preset": None,
         "skill_presets": deepcopy(profile.get("skill_presets", {})),
         "grounding_providers": deepcopy(profile.get("grounding_providers", {})),
@@ -611,7 +681,10 @@ def _load_configured_task_program_deployment(
         ),
     )
     factory = cast(_ConfiguredTaskProgramAdapterFactory, integration.adapter_factory)
-    if factory.nominal_motion_sources:
+    if (
+        factory.nominal_motion_sources
+        or integration.registration.invocation_policy_bindings
+    ):
         from embodichain.lab.task_program import load_task_program
         from .nominal import _ConfiguredTaskProgramNominalSources
 
@@ -624,7 +697,10 @@ def _load_configured_task_program_deployment(
                 "configured nominal sources require the integration's program_id"
             )
         compiled = catalog.preflight(program)
-        _ConfiguredTaskProgramNominalSources(compiled, factory.nominal_motion_sources)
+        if factory.nominal_motion_sources:
+            _ConfiguredTaskProgramNominalSources(
+                compiled, factory.nominal_motion_sources
+            )
     return _ConfiguredTaskProgramDeployment(
         integration_id=integration_id,
         program_id=program_id,

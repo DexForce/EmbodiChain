@@ -93,6 +93,7 @@ from embodichain.lab.sim.atomic_actions import (
     DynamicCollisionMode,
     ExecutionRunnerCfg,
     HandOverOptions,
+    HandOverPlanningRecovery,
     MotionPolicy,
     MoveEndEffectorOptions,
     MoveHeldObjectOptions,
@@ -135,6 +136,12 @@ from embodichain.toolkits.graspkit import (
 
 if TYPE_CHECKING:
     from .environment import TaskProgramEnvironmentAdapter
+
+from .simulation.planning_services import (
+    CollisionSceneRosterCfg,
+    SimulationPlanningServicesCfg,
+)
+from .invocation_policy import InvocationPolicyBinding
 
 __all__: list[str] = []
 
@@ -1035,6 +1042,12 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "preserve_vertical",
                 "drawer_containment",
                 "qualify_hand_clearance",
+                "adaptive_receive",
+                "linear_segments",
+                "require_receiver_scene",
+                "receive_region",
+                "existing_hold_hand_source",
+                "source_retreat_mode",
             }
         ),
     )
@@ -1655,10 +1668,20 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "receive_pick_object_part",
                     "release_at_target",
                     "arm_selection",
+                    "adaptive_receive",
+                    "linear_segments",
+                    "require_receiver_scene",
+                    "receive_region",
+                    "existing_hold_hand_source",
+                    "source_retreat_mode",
                 }
             ),
         )
         kwargs = {}
+        if "linear_segments" in config:
+            kwargs["linear_segments"] = _boolean(
+                config["linear_segments"], path=f"{path}.linear_segments"
+            )
         for field_name in (
             "pre_grasp_distance",
             "lift_height",
@@ -1698,6 +1721,23 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 config["arm_selection"],
                 path=f"{path}.arm_selection",
             )
+        if "require_receiver_scene" in config:
+            kwargs["require_receiver_scene"] = _boolean(
+                config["require_receiver_scene"], path=f"{path}.require_receiver_scene"
+            )
+        if "adaptive_receive" in config:
+            kwargs["adaptive_receive"] = _boolean(
+                config["adaptive_receive"], path=f"{path}.adaptive_receive"
+            )
+        for field_name in (
+            "receive_region",
+            "existing_hold_hand_source",
+            "source_retreat_mode",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _identifier(
+                    config[field_name], path=f"{path}.{field_name}"
+                )
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
@@ -1944,6 +1984,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 "goal_rotation_threshold",
                 "action_timeout",
                 "planning_budget",
+                "planning_recovery",
                 "retry_all_failed_plans",
                 "planning_recovery",
             }
@@ -2012,6 +2053,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
         declarations = {
             "twist_bounded": TwistPlanningRecovery,
             "press_bounded": PressPlanningRecovery,
+            "handover_bounded": HandOverPlanningRecovery,
             "slide_bounded": SlidePlanningRecovery,
             "articulation_withdrawal": ArticulationWithdrawalPlanningRecovery,
             "articulation_park": ArticulationParkPlanningRecovery,
@@ -2939,6 +2981,9 @@ def _decode_control_part_evidence(
 class _DecodedRuntimeServices:
     """Typed configured services separated by registration ownership."""
 
+    planning_services: SimulationPlanningServicesCfg | None = None
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = ()
+
     grasp_pose_generators: tuple[
         tuple[str, _AntipodalGraspPoseGeneratorFactory], ...
     ] = ()
@@ -3075,6 +3120,8 @@ def _decode_runtime_services(
                 "control_part_evidence",
                 "nominal_motion_sources",
                 "settle_presets",
+                "planning_services",
+                "invocation_policy_bindings",
             }
         ),
     )
@@ -3254,7 +3301,49 @@ def _decode_runtime_services(
         nominal.append(declaration)
     if len({item.call_index for item in nominal}) != len(nominal):
         raise ValueError(f"{path}.nominal_motion_sources has duplicate call indices")
+    planning = None
+    if "planning_services" in config:
+        planning = _mapping(
+            config["planning_services"],
+            path=f"{path}.planning_services",
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "revision",
+                    "free_motion_query",
+                    "collision_roster",
+                    "native_handover_scene",
+                    "capture_root_pose",
+                    "capture_native_revision",
+                    "hold_qpos_source",
+                }
+            ),
+        )
+        planning = deepcopy(dict(planning))
+        if "collision_roster" in planning:
+            roster = _mapping(
+                planning["collision_roster"],
+                path=f"{path}.planning_services.collision_roster",
+                required=frozenset({"rigid_objects", "articulation_links"}),
+            )
+            planning["collision_roster"] = CollisionSceneRosterCfg(**roster).snapshot()
+        planning = SimulationPlanningServicesCfg(**planning).snapshot()
+    bindings = []
+    for index, raw in enumerate(
+        _sequence(
+            config.get("invocation_policy_bindings", ()),
+            path=f"{path}.invocation_policy_bindings",
+        )
+    ):
+        item = _mapping(
+            raw,
+            path=f"{path}.invocation_policy_bindings[{index}]",
+            required=frozenset({"program_fingerprint", "invocation_id", "preset_id"}),
+        )
+        bindings.append(InvocationPolicyBinding(**item))
     return _DecodedRuntimeServices(
+        planning_services=planning,
+        invocation_policy_bindings=tuple(bindings),
         grasp_pose_generators=generators,
         hand_geometries=hand_geometries,
         handover_pose_providers=handover,
@@ -3332,6 +3421,8 @@ def _decode_configured_task_program_integration(
     registration = SimulationTaskProgramRegistration(
         scene_binding=scene_binding,
         robot_profile_binding=robot_profile_binding,
+        planning_services=services.planning_services,
+        invocation_policy_bindings=services.invocation_policy_bindings,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,
         control_part_evidence_factory=services.control_part_evidence,

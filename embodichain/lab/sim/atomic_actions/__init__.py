@@ -330,7 +330,13 @@ from .planning_probes import (
     RetainedCommandProvider,
 )
 
+from .primitives.hand_over import HandOverPlanningRecovery
+
+from .planning_probes import HandOverSceneProvider
+
 __all__ = [
+    "HandOverSceneProvider",
+    "HandOverPlanningRecovery",
     "MoveHeldObjectPlanningRecovery",
     "JointOffsetTarget",
     "RetainedPourGoal",

@@ -893,4 +893,41 @@ optional 85%-to-75% retry retains original candidate and RNG boundaries.
 .. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
 
 .. autoclass:: SlideHandClearanceProvider
+
+Bounded handover and coordinated hold continuation
+--------------------------------------------------
+
+``HandOverPlanningRecovery`` names the preserved bounded receiver-direction and
+exchange-station search. Select it together with explicit adaptive-receive
+options; native receiver/scene screening additionally requires the exact borrowed
+``HandOverSceneProvider``. The action closes each owned query, retains declared
+participant resources and preserves source grasp/release/retreat timing. Screening
+is geometric planning evidence and cannot certify a physical acquisition.
+
+``CoordinatedPickmentOptions.continue_verified_holds`` keeps both verified grasp
+transforms instead of resampling. ``prefer_cargo_clearance`` adds the explicit
+observed-content preference to the existing paired sampler. Static cargo geometry
+is copied at the engine boundary. Missing observations keep base costs; an
+accepted envelope or preferred candidate does not establish retention.
+
+These modes do not replace the default implementations, infer presets from task
+names, or register another skill set. Unsupported source declarations remain
+closed in Task Program configuration until the runtime-assembly owner is present.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+.. autosummary::
+   :nosignatures:
+
+   HandOverPlanningRecovery
+   HandOverSceneProvider
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
+
+.. autosummary::
+   :nosignatures:
+
+   HandOverSceneProvider
+
+.. autoclass:: HandOverSceneProvider
    :members:

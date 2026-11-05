@@ -383,7 +383,14 @@ preset selection.
 Bindings targeting parallel branches are explicitly rejected. Unbound parallel
 calls remain supported. The compiled-program fingerprint uses the same format as
 nominal motion sources; it includes the instruction and integration selection.
-These declarations do not add YAML fields, execute providers, or mutate an engine.
+Configured integrations may declare the same tuple under
+``runtime_services.invocation_policy_bindings``. Its entries contain exactly
+``program_fingerprint``, ``invocation_id``, and ``preset_id``. The public deployment
+loader validates them against the compiled program before returning its lazy
+factory. The bridge uses these sealed bindings; an explicit second binding tuple
+is rejected. Named execution-policy ``presets`` patch policy groups, while
+``profile.preset_options`` owns action-option and monitor additions for those
+names. Neither path executes providers or mutates an engine.
 ``validate_manifest`` checks profile identity, runtime-preset selection and each
 selected call's policy contract. A scene manifest carries entity metadata rather
 than the host's scene-registry selection ID; the standard adapter validates that
@@ -528,3 +535,48 @@ interfaces do not install the standard Press/Twist post-policy producer.
 
 .. automodule:: embodichain.lab.task_program.integrations.simulation.slide_preshape
    :members:
+
+Configured geometry planning
+----------------------------
+
+``runtime_services.planning_services`` is a closed, explicitly enabled geometry
+service declaration. Composition snapshots and fingerprints it without starting
+Sim, reading native state, performing IK or constructing collision queries.
+It selects discrete input-mesh collision queries and optional native receiver
+geometry from the shared Motion and Scene owners. Native receiver geometry
+requires an ordered collision roster covering all declared rigid owners, actual
+root observations, and Default contact revisions. The host checks backend and
+batch eligibility before simulation; these geometry queries retain their B=1
+scope. Unconfigured calls retain their defaults and registration fingerprints.
+
+The observation provider reads the actual native source stamp before and after
+capturing robot and scene state; drift rejects the observation. Native HandOver
+preparation checks that full stamp, observed start, explicit receiver resources
+and physical owner inventory. It captures a fresh borrowed-scene query whose
+Atomic caller closes. A closed factory cannot authorize further native reads.
+HandOver's bounded recovery is selected explicitly by its typed options and
+``handover_bounded`` declaration. Unpublished planning-service fields fail the
+closed decoder; this interface does not imply that every source capability is
+already available from configuration.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.planning_services
+
+.. autosummary::
+
+   CollisionSceneRosterCfg
+   SimulationPlanningServicesCfg
+
+.. autoclass:: CollisionSceneRosterCfg
+   :members: snapshot
+
+.. autoclass:: SimulationPlanningServicesCfg
+   :members: snapshot, validate_num_envs, validate_physics
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.handover_scene
+
+.. autosummary::
+
+   SimulationHandOverSceneProvider
+
+.. autoclass:: SimulationHandOverSceneProvider
+   :members: prepare

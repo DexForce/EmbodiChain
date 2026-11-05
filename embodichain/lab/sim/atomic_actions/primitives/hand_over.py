@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import ClassVar, Literal
+from dataclasses import dataclass, field
+from typing import ClassVar, Literal, TYPE_CHECKING
 
 import torch
 
@@ -43,6 +43,7 @@ from embodichain.lab.sim.atomic_actions.control import (
     JointPositionCommand,
 )
 from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.policies import PlanningRecovery
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.goals import (
     ObjectActionGoal,
@@ -86,6 +87,11 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     translate_pose_world,
 )
 
+if TYPE_CHECKING:
+    from embodichain.lab.sim.atomic_actions.primitives._handover_recovery import (
+        ReceivePlanningState,
+    )
+
 
 @dataclass(frozen=True, slots=True, eq=False)
 class HandOverGoal(ObjectActionGoal):
@@ -102,6 +108,26 @@ class HandOverGoal(ObjectActionGoal):
 @dataclass(frozen=True, slots=True, eq=False)
 class HandOverOptions(ActionOptions):
     """Per-invocation pick-up, handover, and placement behavior."""
+
+    linear_segments: bool = field(default=False, kw_only=True)
+    """Explicitly sample each arm phase with the shared source Cartesian grid."""
+
+    receive_region: Literal["mesh_extent", "supported_end"] = field(
+        default="mesh_extent", kw_only=True
+    )
+    """Use full-mesh end regions or the original collision-supported end selector."""
+    require_receiver_scene: bool = field(default=False, kw_only=True)
+    """Require same-observation native receiver candidate and command clearance."""
+    adaptive_receive: bool = field(default=False, kw_only=True)
+    """Select the opposite object end with the declared bounded direction policy."""
+    existing_hold_hand_source: Literal["observed", "grasp_command"] = field(
+        default="observed", kw_only=True
+    )
+    """Retain the measured held hand or its explicit closing drive command."""
+    source_retreat_mode: Literal["approach", "root_separation"] = field(
+        default="approach", kw_only=True
+    )
+    """Optionally separate the final lifted source samples along bound arm roots."""
 
     pre_grasp_distance: float = 0.10
     """Distance from each grasp pose to its approach pose, in metres."""
@@ -141,6 +167,35 @@ class HandOverOptions(ActionOptions):
     """
 
     def __post_init__(self) -> None:
+        if type(self.linear_segments) is not bool:
+            raise TypeError("linear_segments must be bool.")
+        if self.receive_region not in {"mesh_extent", "supported_end"}:
+            raise ValueError("Unknown receive end-region policy.")
+        if self.receive_region != "mesh_extent" and not self.adaptive_receive:
+            raise ValueError("Supported receive regions require adaptive receiving.")
+        if type(self.require_receiver_scene) is not bool:
+            raise TypeError("require_receiver_scene must be bool.")
+        if self.require_receiver_scene and not self.adaptive_receive:
+            raise ValueError("Native receiver scene checks require adaptive receiving.")
+        if type(self.adaptive_receive) is not bool:
+            raise TypeError("adaptive_receive must be bool.")
+        if self.adaptive_receive and (
+            self.release_at_target
+            or self.arm_selection != "bound"
+            or self.existing_hold_hand_source != "grasp_command"
+        ):
+            raise ValueError(
+                "Adaptive receiving requires bound transfer-only participants and the source closing command."
+            )
+        if self.existing_hold_hand_source not in {"observed", "grasp_command"}:
+            raise ValueError("Unknown existing-hold hand source.")
+        if self.source_retreat_mode not in {"approach", "root_separation"}:
+            raise ValueError("Unknown source retreat mode.")
+        if self.source_retreat_mode == "root_separation" and not self.adaptive_receive:
+            raise ValueError(
+                "Root-separation retreat requires declared adaptive receiving."
+            )
+
         for name in ("pre_grasp_distance", "lift_height", "retreat_distance"):
             value = getattr(self, name)
             if not math.isfinite(value) or value < 0.0:
@@ -162,6 +217,18 @@ class HandOverOptions(ActionOptions):
             raise TypeError("release_at_target must be a bool.")
         if self.arm_selection not in ("nearest", "bound"):
             raise ValueError("arm_selection must be exactly 'nearest' or 'bound'.")
+
+
+@dataclass(frozen=True, slots=True)
+class HandOverPlanningRecovery(PlanningRecovery):
+    """At most two original receive directions for one existing-hold transfer."""
+
+    kind: str = field(default="handover_bounded", init=False)
+    skill_id: str = field(default="hand_over", init=False)
+    revision: int = field(default=1, init=False)
+    max_direction_attempts: int = field(default=2, init=False)
+    max_exchange_stations: int = field(default=3, init=False)
+    max_exchange_ik_queries: int = field(default=9, init=False)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -228,6 +295,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
     skill_id: ClassVar[str] = "hand_over"
     GoalType: ClassVar[type] = HandOverGoal
     OptionsType: ClassVar[type] = HandOverOptions
+    PlanningRecoveryType: ClassVar[type] = HandOverPlanningRecovery
     open_loop: ClassVar[bool] = True
     _SURFACE_POINT_COUNT: ClassVar[int] = 1000
     _VERTICAL_MODE_MIN_ABS_Z: ClassVar[float] = math.sqrt(0.5)
@@ -339,6 +407,21 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             ),
         )
 
+    def _validate_segment_motion_recovery(self, request, context) -> None:
+        if not request.skill_options.linear_segments or (
+            context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or request.motion_policy.strategy != "ik_interp"
+            or request.motion_policy.interpolation_mode != "fixed_grid"
+            or request.motion_policy.ik_seed_mode != "sequential"
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or request.motion_policy.segment_sample_count_retries != (260, 320)
+            or request.motion_policy.segment_continuous_ik_recovery
+        ):
+            raise ValueError(
+                "Cartesian HandOver requires the explicit source B1 fixed-grid sequential IK policy."
+            )
+
     def _plan(
         self,
         request: ResolvedActionRequest[HandOverGoal, HandOverOptions],
@@ -347,7 +430,34 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         """Plan pickup and transfer, with optional placement and release."""
         goal = self.require_goal(request)
         options = request.skill_options
+        if options.linear_segments:
+            self._validate_segment_motion_recovery(request, context)
         resources = self._resolve_resources(request)
+        if options.adaptive_receive != (
+            request.recovery_policy.planning_recovery is not None
+        ):
+            raise ValueError(
+                "Adaptive receiving and its bounded recovery must be declared together."
+            )
+        if options.adaptive_receive and (
+            context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or options.release_at_target
+            or options.arm_selection != "bound"
+            or options.existing_hold_hand_source != "grasp_command"
+        ):
+            raise ValueError(
+                "Adaptive HandOver requires B1/env0 bound transfer-only participants and the declared source closing command."
+            )
+
+        if (
+            options.require_receiver_scene
+            and self.planning_services.handover_scene_provider is None
+        ):
+            raise ValueError(
+                "Native receiver scene checks require their declared query provider."
+            )
+
         # Each segment plans one explicitly named arm. The task layer merges
         # their trajectories; this does not require a coupled dual-arm solver.
         if not isinstance(goal.semantics.affordance, AntipodalAffordance):
@@ -371,6 +481,11 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 return self._plan_existing_hold(
                     request, context, resources, source_held
                 )
+
+        if options.adaptive_receive:
+            raise ValueError(
+                "Adaptive HandOver requires the declared exclusive source attachment."
+            )
 
         object_pose = _resolve_object_pose(
             goal.semantics,
@@ -676,6 +791,24 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         resources: _HandOverResources,
         held: HeldObjectState,
     ) -> ActionPlan:
+        """Dispatch the explicitly declared receiving strategy for a verified hold."""
+        if request.skill_options.adaptive_receive:
+            from embodichain.lab.sim.atomic_actions.primitives._handover_recovery import (
+                plan_receive,
+            )
+
+            return plan_receive(self, request, context, resources, held)
+        return self._build_existing_hold(request, context, resources, held)
+
+    def _build_existing_hold(
+        self,
+        request: ResolvedActionRequest[HandOverGoal, HandOverOptions],
+        context: PlanningContext,
+        resources: _HandOverResources,
+        held: HeldObjectState,
+        *,
+        receive_state: ReceivePlanningState | None = None,
+    ) -> ActionPlan:
         """Transfer a verified source attachment to the destination hand.
 
         This is the canonical continuation used by ``Pick -> HandOver``.  It
@@ -764,7 +897,6 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         exchange_pose[:, :3, :3] = current_object_pose[:, :3, :3]
 
-        source_exchange_eef = torch.bmm(exchange_pose, source_object_to_eef)
         destination_eef = self.robot.compute_fk(
             qpos=destination_start_qpos,
             name=resources.second.arm.control_part,
@@ -811,17 +943,26 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             receive_positive = torch.ones(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
-        destination_sample = self._resolve_grasp(
-            affordance,
-            exchange_pose,
-            approach_direction,
-            resources.second.hand.target_id,
-            obj_longest_axis=receive_axis,
-            is_positive_part=receive_positive,
-            center_axis=receive_center_axis,
-            context=context,
-            sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
-        )
+        if receive_state is None:
+            destination_sample = self._resolve_grasp(
+                affordance,
+                exchange_pose,
+                approach_direction,
+                resources.second.hand.target_id,
+                obj_longest_axis=receive_axis,
+                is_positive_part=receive_positive,
+                center_axis=receive_center_axis,
+                context=context,
+                sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
+            )
+        else:
+            receive_state.exchange_pose = exchange_pose
+            receive_state.root_poses = (source_root, destination_root)
+            destination_sample = receive_state.sample(
+                self, request, context, affordance, exchange_pose
+            )
+            exchange_pose = receive_state.exchange_pose
+        source_exchange_eef = torch.bmm(exchange_pose, source_object_to_eef)
         destination_grasp = destination_sample.poses
         grasp_success = destination_sample.success
         destination_pre_grasp = translate_pose_world(
@@ -839,6 +980,21 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             retreat_distance=options.retreat_distance,
             lift_height=options.lift_height,
         )
+
+        if options.source_retreat_mode == "root_separation":
+            direction = (source_root[:, :3, 3] - destination_root[:, :3, 3]).clone()
+            direction[:, 2] = 0
+            length = torch.linalg.vector_norm(direction, dim=-1, keepdim=True)
+            if not torch.isfinite(direction).all() or (length <= 1e-6).any():
+                raise ValueError(
+                    "Post-handover withdrawal has no horizontal arm separation."
+                )
+            source_retreat_waypoints[:, -2:, :3, 3] += (
+                direction[:, None]
+                / length[:, None]
+                * source_retreat_waypoints.new_tensor([0.5, 1.0])[None, :, None]
+                * options.retreat_distance
+            )
 
         lengths = self._compute_existing_hold_segment_lengths(
             request.motion_policy.sample_count,
@@ -904,6 +1060,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 lengths["transfer"],
                 request.motion_policy,
                 context.control_dt,
+                linear_segments=request.skill_options.linear_segments,
             )
         success &= normalize_success_mask(
             phase_success,
@@ -926,6 +1083,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 lengths["approach"],
                 request.motion_policy,
                 context.control_dt,
+                linear_segments=request.skill_options.linear_segments,
             )
         success &= normalize_success_mask(
             phase_success,
@@ -943,6 +1101,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             lengths["retreat"],
             request.motion_policy,
             context.control_dt,
+            linear_segments=request.skill_options.linear_segments,
         )
         success &= normalize_success_mask(
             phase_success,
@@ -953,10 +1112,13 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         lengths["retreat"] = source_retreat.shape[1]
 
         # An existing hold is already physically established.  Preserve the
-        # observed source-hand closure until the release phase instead of
-        # commanding a configured grasp setpoint that may be tighter than the
-        # contact-supported pose.
-        source_hand_qpos = context.last_qpos[:, list(resources.first.hand.joint_ids)]
+        # observed source-hand closure by default. An explicit command policy
+        # retains closing drive when that behavior belongs to the invocation.
+        source_hand_qpos = (
+            resources.first.hand_grasp_qpos
+            if options.existing_hold_hand_source == "grasp_command"
+            else context.last_qpos[:, list(resources.first.hand.joint_ids)]
+        )
         destination_hand_qpos = context.last_qpos[
             :, list(resources.second.hand.joint_ids)
         ]
@@ -1445,6 +1607,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             segment_lengths["pickup_approach"],
             request.motion_policy,
             context.control_dt,
+            linear_segments=request.skill_options.linear_segments,
         )
         pickup_approach_success = normalize_success_mask(
             phase_success,
@@ -1471,6 +1634,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             segment_lengths["pickup_reach"] + 1,
             request.motion_policy,
             context.control_dt,
+            linear_segments=request.skill_options.linear_segments,
         )
         pickup_reach_success = normalize_success_mask(
             phase_success,
@@ -1533,6 +1697,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 segment_lengths["pickup_transport"],
                 request.motion_policy,
                 context.control_dt,
+                linear_segments=request.skill_options.linear_segments,
             )
         pickup_transport_success = normalize_success_mask(
             phase_success,
@@ -1564,6 +1729,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 segment_lengths["receive_approach"],
                 request.motion_policy,
                 context.control_dt,
+                linear_segments=request.skill_options.linear_segments,
             )
         receive_approach_success = normalize_success_mask(
             phase_success,
@@ -1602,6 +1768,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 segment_lengths["source_retreat"],
                 request.motion_policy,
                 context.control_dt,
+                linear_segments=request.skill_options.linear_segments,
             )
             source_retreat_success = normalize_success_mask(
                 phase_success,
@@ -1642,6 +1809,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 segment_lengths["place"],
                 request.motion_policy,
                 context.control_dt,
+                linear_segments=request.skill_options.linear_segments,
             )
             placement_success = normalize_success_mask(
                 phase_success,
@@ -2233,4 +2401,4 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
 
 
-__all__ = ["HandOver", "HandOverGoal", "HandOverOptions"]
+__all__ = ["HandOver", "HandOverGoal", "HandOverOptions", "HandOverPlanningRecovery"]

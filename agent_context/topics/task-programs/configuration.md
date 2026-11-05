@@ -120,7 +120,8 @@ and the deployment's Task Program selectors, returning a fresh
 lazy `TaskProgramAdapterFactory`. It does not register a Gym ID or create a live
 simulator or adapter. Physical component checks and ordinary program loading
 remain host responsibilities; configured nominal sources retain their static
-program preflight. Private loader aliases remain available for existing internal
+program preflight. Configured occurrence bindings likewise preflight the exact
+program before composition returns. Private loader aliases remain available for existing internal
 callers, with the same result types and composition rules.
 
 Ownership is explicit rather than a generic deep merge:
@@ -149,6 +150,26 @@ assurance remain component-owned. Paths in either form resolve from the runnable
 deployment. Reuse the base policy and declare tuning in the selector instead of
 copying a policy for each robot or sampling rate; the supported fields and
 example are in the [task package usage](../../../extensions/embodichain_tasks/README.md).
+
+Named execution-policy `presets` patch policy groups over the unchanged base
+preset. Task `profile.preset_options` owns action options and effect monitors for
+those names. `runtime_services.invocation_policy_bindings` binds the complete
+compiled-program fingerprint, a sequential execution occurrence, and one declared
+preset. Repeated calls retain separate occurrence IDs. The catalog validates the
+selected preset during linking, and the bridge consumes the same immutable
+bindings; configured and explicit binding tuples cannot be combined.
+
+`simulation/planning_services.py` owns the closed geometry-service declaration.
+Exactly one component owns it; composition snapshots it and stores it in the
+integration fingerprint without native work. The standard simulation factory
+creates the explicitly selected shared Motion collision and Scene receiver
+providers only after the host exists. Configured native receiver geometry needs
+a complete ordered collision roster, observed root and actual native revision;
+it retains Default/B=1 qualification. Gym checks declared backend/batch eligibility
+before creating Sim. Planning observations compare the full native source stamp
+before and after capture, and closed factories cannot authorize new captures.
+Unavailable service fields are rejected at decoding rather than selecting a
+fallback. The decoder is the authority for currently supported fields.
 
 Configured `motion` policies accept optional finite, strictly positive
 `velocity_limit` and `acceleration_limit` values. Configured Pour action options

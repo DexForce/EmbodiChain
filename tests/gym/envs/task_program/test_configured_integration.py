@@ -2363,6 +2363,7 @@ def test_integration_config_rejects_unknown_fields_before_live_construction() ->
         ("place", "measured_inside", True),
         ("move_held_object", "linear_segments", True),
         ("move_joints", "require_free_motion", True),
+        ("coordinated_pickment", "continue_verified_holds", True),
     ],
 )
 def test_source_manipulation_config_requires_its_published_service_decoder(
@@ -3532,3 +3533,258 @@ def test_final_velocity_rejection_representation_is_explicit_and_default_identit
         _decode_motion_policy(
             {"sample_count": 50, "final_velocity_rejection": "unknown"}, path="motion"
         )
+
+
+def test_planning_services_are_closed_owned_sealed_and_deferred(monkeypatch):
+    from embodichain.lab.sim.motion import mesh_collision
+    from embodichain.lab.task_program.integrations.catalog import (
+        IntegrationFingerprintMismatch,
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Static composition constructed a live geometry query.")
+
+    monkeypatch.setattr(mesh_collision, "SimulationFreeMotionQuery", forbidden)
+    payload = _integration_payload("repeated_pick_place")
+    declaration = {
+        "kind": "simulation_geometry",
+        "free_motion_query": "discrete_mesh",
+        "capture_root_pose": True,
+        "hold_qpos_source": "observed",
+    }
+    payload.setdefault("runtime_services", {})["planning_services"] = declaration
+    registration = _decode_configured_task_program_integration(payload).registration
+    assert registration.planning_services.free_motion_query == "discrete_mesh"
+    assert registration.planning_services.capture_root_pose
+    declaration["capture_root_pose"] = False
+    registration.assert_unchanged()
+    assert registration.planning_services.capture_root_pose
+    registration.planning_services.capture_root_pose = False
+    with pytest.raises(IntegrationFingerprintMismatch):
+        registration.assert_unchanged()
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"free_motion_query": "auto_by_object"},
+        {"revision": 2},
+        {"capture_root_pose": 1},
+        {"class_type": "arbitrary.Factory"},
+        {"drawer_bindings": []},
+    ],
+)
+def test_planning_services_reject_unknown_explicit_capabilities(invalid):
+    payload = _integration_payload("repeated_pick_place")
+    payload.setdefault("runtime_services", {})["planning_services"] = {
+        "kind": "simulation_geometry",
+        **invalid,
+    }
+    with pytest.raises((TypeError, ValueError)):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_configured_occurrence_presets_preflight_and_seal_without_runtime(tmp_path):
+    from embodichain.lab.task_program import load_task_program
+    from embodichain.lab.task_program.integrations import task_program_fingerprint
+    from embodichain.utils.utility import save_config
+
+    path = _config_path("repeated_pick_place")
+    physical = _physical_components(path, _gym_config("repeated_pick_place"))
+    original_program, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    task, policy = deepcopy(task), deepcopy(policy)
+    policy["presets"] = {"careful": {"motion": {"sample_count": 141}}}
+    pick = deepcopy(task["profile"]["action_options"]["pick"])
+    pick["lift_height"] = 0.17
+    task["profile"]["preset_options"] = {"careful": {"action_options": {"pick": pick}}}
+    save_config(tmp_path / "program.yaml", load_config(original_program))
+    save_config(tmp_path / "integration.yaml", task)
+    save_config(tmp_path / "policy.yaml", policy)
+    selection = {
+        "program": "program.yaml",
+        "integration": "integration.yaml",
+        "execution_policy": "policy.yaml",
+    }
+
+    def load():
+        return load_configured_task_program_deployment(
+            task_program=selection,
+            skill_profile=physical.embodiment_skill_profile,
+            base_dir=tmp_path,
+        )
+
+    initial = load()
+    compiled = initial.integration.registration.catalog.preflight(
+        load_task_program(initial.program_path, integration=initial.selection)
+    )
+    segments = tuple(compiled.iter_segments())
+    picks = tuple(
+        segment for segment in segments if segment.calls[0].call.semantic_id == "pick"
+    )
+    assert len(picks) >= 2
+    selected = picks[0]
+    binding = {
+        "program_fingerprint": task_program_fingerprint(compiled),
+        "invocation_id": f"{compiled.program_id}/{selected.segment_id}:0",
+        "preset_id": "careful",
+    }
+    other_binding = {
+        **binding,
+        "invocation_id": f"{compiled.program_id}/{picks[1].segment_id}:0",
+        "preset_id": policy["preset_id"],
+    }
+    task.setdefault("runtime_services", {})["invocation_policy_bindings"] = [
+        binding,
+        other_binding,
+    ]
+    save_config(tmp_path / "integration.yaml", task)
+    configured = load()
+    registered = configured.integration.registration
+    assert len(registered.invocation_policy_bindings) == 2
+    assert (
+        registered.invocation_policy_bindings[0].invocation_id
+        != registered.invocation_policy_bindings[1].invocation_id
+    )
+    assert registered.invocation_policy_bindings[1].preset_id == policy["preset_id"]
+    assert (
+        registered.invocation_policy_bindings[0].invocation_id
+        == binding["invocation_id"]
+    )
+    assert (
+        configured.integration.integration_fingerprint
+        != initial.integration.integration_fingerprint
+    )
+    checked = registered.catalog.preflight(
+        load_task_program(configured.program_path, integration=configured.selection)
+    )
+    assert task_program_fingerprint(checked) == task_program_fingerprint(compiled)
+    preset = next(
+        item
+        for item in registered.robot_profile_binding.presets
+        if item.preset_id == "careful"
+    )
+    assert preset.motion_policy.sample_count == 141
+    assert preset.action_option_template("pick").lift_height == 0.17
+    for key, value in (
+        ("program_fingerprint", "0" * 64),
+        ("invocation_id", "foreign/occurrence:0"),
+        ("preset_id", "missing"),
+    ):
+        broken = deepcopy(task)
+        broken["runtime_services"]["invocation_policy_bindings"][0][key] = value
+        save_config(tmp_path / "integration.yaml", broken)
+        with pytest.raises(ValueError):
+            load()
+    broken = deepcopy(task)
+    broken["runtime_services"]["invocation_policy_bindings"].append(deepcopy(binding))
+    save_config(tmp_path / "integration.yaml", broken)
+    with pytest.raises(ValueError, match="Duplicate"):
+        load()
+
+
+def test_native_handover_service_is_explicit_closed_and_preflighted():
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        CollisionSceneRosterCfg,
+        SimulationPlanningServicesCfg,
+    )
+
+    ordinary = SimulationPlanningServicesCfg()
+    assert "native_handover_scene" not in _canonical_value(ordinary)["fields"]
+    for values in ({"native_handover_scene": True}, {"native_handover_scene": 1}):
+        with pytest.raises((ValueError, TypeError)):
+            SimulationPlanningServicesCfg(**values)
+    services = SimulationPlanningServicesCfg(
+        native_handover_scene=True,
+        capture_root_pose=True,
+        capture_native_revision=True,
+        collision_roster=CollisionSceneRosterCfg(
+            rigid_objects=(("object", "native-object"),)
+        ),
+    )
+    assert _canonical_value(services)["fields"]["native_handover_scene"] is True
+    services.validate_num_envs(1)
+    with pytest.raises(ValueError, match="B=1"):
+        services.validate_num_envs(2)
+    ordinary.validate_num_envs(2)
+    ordinary.native_handover_scene = None
+    assert _canonical_value(ordinary)["fields"]["native_handover_scene"] is None
+
+    payload = _integration_payload("hand_over")
+    preset = payload["robot_profile"]["presets"][0]
+    preset["action_options"]["hand_over"] = {
+        "kind": "hand_over",
+        "adaptive_receive": True,
+        "require_receiver_scene": True,
+        "release_at_target": False,
+        "existing_hold_hand_source": "grasp_command",
+        "arm_selection": "bound",
+    }
+    preset["recovery"]["planning_recovery"] = {
+        "kind": "handover_bounded",
+        "revision": 1,
+    }
+    with pytest.raises(ValueError, match="native_handover_scene"):
+        _decode_configured_task_program_integration(payload)
+
+    payload.setdefault("runtime_services", {})["planning_services"] = {
+        "kind": "simulation_geometry",
+        "native_handover_scene": True,
+        "capture_root_pose": True,
+        "capture_native_revision": True,
+        "collision_roster": {
+            "rigid_objects": [
+                [item["entity_id"], item.get("simulation_uid", item["entity_id"])]
+                for item in payload["scene"]["rigid_objects"]
+            ],
+            "articulation_links": [],
+        },
+    }
+    result = _decode_configured_task_program_integration(payload)
+    assert result.registration.planning_services.native_handover_scene is True
+    result.registration.validate_num_envs(1)
+    result.registration.validate_physics("default")
+    with pytest.raises(ValueError, match="B=1"):
+        result.registration.validate_num_envs(2)
+    with pytest.raises(ValueError, match="Default physics"):
+        result.registration.validate_physics("newton")
+    payload["runtime_services"]["planning_services"]["collision_roster"][
+        "rigid_objects"
+    ] = []
+    with pytest.raises(ValueError, match="cover declared rigid owners"):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_configured_geometry_physical_scope_fails_before_environment_registration(
+    tmp_path: Path, registered_test_ids: list[str]
+) -> None:
+    """The runnable config rejects an unsupported batch without Sim."""
+    from embodichain.utils.utility import save_config
+
+    original_path = _config_path("repeated_pick_place")
+    physical = _physical_components(original_path, _gym_config("repeated_pick_place"))
+    program_path, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=original_path.parent
+    )
+    task = deepcopy(task)
+    task.setdefault("runtime_services", {})["planning_services"] = {
+        "kind": "simulation_geometry",
+        "free_motion_query": "discrete_mesh",
+        "capture_native_revision": True,
+    }
+    save_config(tmp_path / "integration.yaml", task)
+    save_config(tmp_path / "policy.yaml", policy)
+    config = _gym_config("repeated_pick_place")
+    config["id"] = _TEST_ENV_ID
+    config["task_program"] = {
+        "program": str(program_path),
+        "integration": str(tmp_path / "integration.yaml"),
+        "execution_policy": str(tmp_path / "policy.yaml"),
+    }
+    config["num_envs"] = 2
+    registered_test_ids.append(_TEST_ENV_ID)
+    with pytest.raises(ValueError, match="B=1"):
+        config_to_cfg(config, source_path=original_path)
+    assert _TEST_ENV_ID not in REGISTERED_ENVS

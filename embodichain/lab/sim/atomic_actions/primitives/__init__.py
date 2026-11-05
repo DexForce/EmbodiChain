@@ -90,7 +90,10 @@ from .move_held_object import MoveHeldObjectPlanningRecovery
 from .move_joints import JointOffsetTarget
 from .pour import RetainedPourGoal, JawPourGoal
 
+from .hand_over import HandOverPlanningRecovery
+
 __all__ = [
+    "HandOverPlanningRecovery",
     "MoveHeldObjectPlanningRecovery",
     "JointOffsetTarget",
     "RetainedPourGoal",

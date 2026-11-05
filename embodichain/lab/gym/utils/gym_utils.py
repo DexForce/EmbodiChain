@@ -827,6 +827,8 @@ def config_to_cfg(
             registration = configured_task_program_integration.registration
         if registration is not None:
             registration.assert_unchanged()
+            registration.validate_num_envs(config.get("num_envs", 1))
+            registration.validate_physics(config["physics"])
         task_program = load_task_program(
             task_program_path_text,
             integration=configured_task_program_selection,

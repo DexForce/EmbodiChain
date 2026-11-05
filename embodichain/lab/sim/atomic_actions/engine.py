@@ -24,6 +24,7 @@ from types import MappingProxyType
 from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
 import torch
+from embodichain.lab.sim.scene.mesh_snapshot import SceneMeshSnapshot
 
 from .affordance_sampling import AffordanceSamplingContext
 from .bindings import ActionBinding
@@ -48,6 +49,7 @@ from .drawer_planning import DrawerPlanningProvider
 from .articulation_continuation import ArticulationContinuationProvider
 from .planning_probes import (
     SlideHandClearanceProvider,
+    HandOverSceneProvider,
     HeldStagingProvider,
     RetainedCommandProvider,
     JointPrefixPlanner,
@@ -107,6 +109,8 @@ class AtomicActionEngine:
         articulation_continuation_provider: (
             ArticulationContinuationProvider | None
         ) = None,
+        handover_scene_provider: HandOverSceneProvider | None = None,
+        coordinated_cargo_geometry: SceneMeshSnapshot | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -143,6 +147,10 @@ class AtomicActionEngine:
             articulation_continuation_provider: Explicit same-robot articulation continuation service.
             released_hand_provider: Same-robot authority for the exact cleanup
                 and following Park occurrences.
+            handover_scene_provider: Same-robot native hand/scene query port for
+                explicitly selected bounded receiving.
+            coordinated_cargo_geometry: Static owned cargo envelopes for explicit
+                coordinated-grasp preference; no success certificate is implied.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             tracking_runtime: Optional exact-version feedback, projector, and
@@ -174,6 +182,8 @@ class AtomicActionEngine:
             slide_hand_clearance_provider=slide_hand_clearance_provider,
             drawer_planning_provider=drawer_planning_provider,
             articulation_continuation_provider=articulation_continuation_provider,
+            handover_scene_provider=handover_scene_provider,
+            coordinated_cargo_geometry=coordinated_cargo_geometry,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}

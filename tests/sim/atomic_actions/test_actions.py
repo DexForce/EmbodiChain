@@ -6641,7 +6641,10 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         n_waypoints: int,
         motion_policy: MotionPolicy,
         interpolation_dt: float | None,
+        *,
+        linear_segments: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert linear_segments is False
         del motion_generator, motion_policy, interpolation_dt
         planned_parts.append(control_part)
         planned_targets.append(target_poses.clone())
@@ -6832,7 +6835,10 @@ def test_handover_preserves_extended_pickup_phase_boundaries(
         n_waypoints: int,
         motion_policy: MotionPolicy,
         interpolation_dt: float | None,
+        *,
+        linear_segments: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert linear_segments is False
         del (
             motion_generator,
             control_part,
@@ -6997,7 +7003,10 @@ def test_handover_can_end_with_receiving_resource_holding_object(
         n_waypoints: int,
         motion_policy: MotionPolicy,
         interpolation_dt: float | None,
+        *,
+        linear_segments: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert linear_segments is False
         del (
             motion_generator,
             control_part,
@@ -7096,7 +7105,10 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
         n_waypoints: int,
         motion_policy: MotionPolicy,
         interpolation_dt: float | None,
+        *,
+        linear_segments: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert linear_segments is False
         del motion_generator, control_part, motion_policy, interpolation_dt
         planned_targets.append(target_poses.clone())
         trajectory = start_qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
@@ -7461,7 +7473,10 @@ def test_handover_reports_path_failure_between_reachable_waypoints(
         n_waypoints: int,
         motion_policy: MotionPolicy,
         interpolation_dt: float | None,
+        *,
+        linear_segments: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert linear_segments is False
         nonlocal phase_call_count
         del (
             motion_generator,

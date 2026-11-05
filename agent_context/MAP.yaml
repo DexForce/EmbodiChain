@@ -443,7 +443,7 @@ topics:
 - id: atomic-actions
   title: Atomic Skills
   aliases: [atomic action, atomic skill, 原子动作, 原子技能]
-  keywords: [TwistPlanningRecovery, compute.articulation, ReleasedHandClearanceRecovery, MoveHeldObjectPlanningRecovery, RetainedPourGoal, JointOffsetTarget, PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation, SlidePlanningRecovery, DrawerPlanningProvider,
+  keywords: [TwistPlanningRecovery, compute.articulation, ReleasedHandClearanceRecovery, MoveHeldObjectPlanningRecovery, RetainedPourGoal, JointOffsetTarget, PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation, SlidePlanningRecovery, DrawerPlanningProvider, HandOverPlanningRecovery, HandOverSceneProvider, continue_verified_holds,
     hand_geometry_cfgs, GraspOpeningTarget, prepare_grasp_query, scoped grasp preparation,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
@@ -480,7 +480,8 @@ topics:
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
     joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies,
     ContactEvidenceSampler, ContactTimeline, NativeGripEvidenceFactory, SimulationSupportObservationCollector,
-    ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
+    ConfiguredTaskProgramDeployment, load_configured_task_program_deployment,
+    SimulationPlanningServicesCfg, CollisionSceneRosterCfg, SimulationHandOverSceneProvider]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/
