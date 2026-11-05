@@ -1115,3 +1115,22 @@ def test_pose_source_revision_requires_a_provider_and_defaults_to_none() -> None
         ValueError, match="pose_source_revision requires state_provider"
     ):
         SceneEntityRegistration(**declaration, pose_source_revision="pose-v1")
+
+
+def test_uninstalled_recovery_is_static_preflight_error_without_acquisition():
+    from embodichain.lab.sim.atomic_actions import PlanningRecovery, RecoveryPolicy
+
+    registry, provider = _scene_registry(with_default=True)
+    integration = _semantic_integration(
+        registry,
+        preset=_preset(
+            "default",
+            recovery_policy=RecoveryPolicy(
+                planning_recovery=PlanningRecovery("not_installed", "pick_up", 1)
+            ),
+        ),
+    )
+    with pytest.raises(SemanticValidationError) as failure:
+        integration.link_call(Pick(object=SceneObjectRef("cube")))
+    assert failure.value.diagnostic.code == "incompatible_planning_recovery"
+    assert provider.calls == 0

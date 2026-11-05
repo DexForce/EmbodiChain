@@ -56,12 +56,16 @@ embodichain.compute.trajectory.limits
 Per-environment sampled joint-speed checks with explicit arrival intervals.
 The result checks finite positions and declared speeds; it does not establish
 continuous collision freedom or acceleration compliance.
+``joint_velocity_diagnostics`` retains the worst row, interval, joint and
+original operands, representing nonfinite ratios as None. These diagnostics
+do not make an invalid trajectory valid.
 
 .. currentmodule:: embodichain.compute.trajectory.limits
 
 .. autosummary::
 
    joint_velocity_validity
+   joint_velocity_diagnostics
 
 embodichain.data
 ----------------
@@ -1151,6 +1155,9 @@ Explicit call-local search ledgers and cooperative wall deadlines. Nested
 scopes reuse the outer ledger, timings may overlap, and native work is not
 preempted. Hosts choose budgets; no deadline is enabled by default.
 
+PlanningRandomState captures only explicitly selected Python/NumPy/Torch streams
+and restores them without a new seed or draw. It is transient runtime state.
+
 .. currentmodule:: embodichain.lab.sim.motion.search
 
 .. autosummary::
@@ -1161,6 +1168,8 @@ preempted. Hosts choose budgets; no deadline is enabled by default.
    search_cost_scope
    record_search
    measure_search
+
+   PlanningRandomState
 
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------
@@ -1913,6 +1922,10 @@ embodichain.lab.sim.atomic_actions.engine
 embodichain.lab.sim.atomic_actions.execution
 --------------------------------------------
 
+An explicit host lifecycle observes owned installed plans before dispatch. A
+rejected installation blocks ticks and revisions until the runner completes its
+ordinary safe stop and invalidates the lifecycle. Omission preserves execution.
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions.execution
 
 .. autosummary::
@@ -1923,6 +1936,8 @@ embodichain.lab.sim.atomic_actions.execution
    ExecutionSession
    ExecutionStatus
    ExecutionTick
+
+   ExecutionPlanLifecycle
 
 embodichain.lab.sim.atomic_actions.verification
 ------------------------------------------------
@@ -1975,6 +1990,10 @@ embodichain.lab.sim.atomic_actions.invocation
 embodichain.lab.sim.atomic_actions.plans
 ----------------------------------------
 
+Qualification masks and immutable recovery proposals carry planned information.
+A proposal identifies its invocation and plan, and is never a physical effect
+or an automatic state commit. ActionPlan snapshots own these values.
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions.plans
 
 .. autosummary::
@@ -1988,8 +2007,17 @@ embodichain.lab.sim.atomic_actions.plans
    TrajectorySegment
    normalize_success_mask
 
+   PlanQualification
+   PlanningRecoveryOutcome
+
 embodichain.lab.sim.atomic_actions.policies
 -------------------------------------------
+
+PlanningRecovery is immutable finite scalar/tuple data for an exact skill and
+revision. Descriptors validate supported concrete types during static preflight;
+unimplemented source kinds remain rejected. PlanningBudget selects a complete
+request ledger and optional cooperative wall deadline; nested calls retain the
+parent ledger/deadline, while omission preserves ordinary planning.
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions.policies
 
@@ -1998,6 +2026,9 @@ embodichain.lab.sim.atomic_actions.policies
    DynamicCollisionMode
    MotionPolicy
    RecoveryPolicy
+
+   PlanningRecovery
+   PlanningBudget
 
 embodichain.lab.sim.atomic_actions.primitives
 ---------------------------------------------
@@ -3802,3 +3833,25 @@ CPU policy profiling can run with
 ``python -m scripts.benchmark.task_program.stability --output /tmp/stability``.
 This measures constant-pose policy overhead and serialization separately from
 native contact acquisition, physical tasks and GPU execution.
+
+
+embodichain.lab.task_program.runtime.lifecycle
+----------------------------------------------
+
+Provider-free runtime factory interfaces select one explicit lifecycle for a
+grounded occurrence. Composite factories reject duplicate or competing owners;
+construction does not plan, transform commands or start a simulator. Hosts can
+pass the selected port to AtomicActionEngine.start.
+
+.. currentmodule:: embodichain.lab.task_program.runtime.lifecycle
+
+.. autosummary::
+
+   TaskProgramPlanLifecycleFactory
+   CompositeTaskProgramPlanLifecycleFactory
+
+.. autoclass:: TaskProgramPlanLifecycleFactory
+   :members:
+
+.. autoclass:: CompositeTaskProgramPlanLifecycleFactory
+   :members:
