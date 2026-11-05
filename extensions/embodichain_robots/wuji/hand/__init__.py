@@ -14,8 +14,23 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Wuji Hand asset package; implementations load on demand."""
+"""WujiHand hand configurations, imported lazily."""
 
 from __future__ import annotations
 
-__all__ = []
+from importlib import import_module
+from typing import Any
+
+__all__ = ["WujiHandCfg"]
+
+
+def __getattr__(name: str) -> Any:
+    if name != "WujiHandCfg":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(".cfg", __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

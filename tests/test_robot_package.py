@@ -140,6 +140,7 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         owner = output.joinpath(*module.split(".")[:-1])
         assert (owner / "assets.py").is_file()
         assert (owner / "README.md").is_file()
+    assert (output / "embodichain_robots/wuji/hand/cfg.py").is_file()
     for filename in ("cfg.py", "_specs.py"):
         assert (output / "embodichain_robots/brainco/revo1" / filename).is_file()
     for retired in ("franka_panda.py", "ur_robot.py", "so101.py", "dexforce_w1"):

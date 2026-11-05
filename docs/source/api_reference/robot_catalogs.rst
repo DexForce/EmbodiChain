@@ -645,3 +645,27 @@ and cache prefixes while using the shared core download and locking services.
    :no-index:
 
    Dataset class for the Universal Robots.
+
+
+embodichain_robots.wuji.hand
+-----------------------------
+
+.. py:class:: embodichain_robots.WujiHandCfg
+   :no-index:
+
+   Standalone fixed-base Wuji Hand, with left/right variants and 20
+   independent joint commands. No serial-chain solver or single TCP is declared.
+
+.. py:class:: embodichain_robots.wuji.hand.WujiHandCfg
+   :no-index:
+
+   Model-local lazy export of :class:`embodichain_robots.WujiHandCfg`.
+
+.. py:class:: embodichain_robots.wuji.hand.cfg.WujiHandCfg
+   :no-index:
+
+   Implementation of the source-preserving standalone hand configuration.
+
+.. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.from_dict
+
+.. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.build_pk_serial_chain

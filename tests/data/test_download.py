@@ -325,7 +325,7 @@ EEF_ARCHIVES = {
     "Robotiq2F85": ("Robotiq2F85.zip", "53ecbf2c953f43f1134aa7223e592292"),
     "WheelTecFA2F": ("WheelTecFA2F.zip", "feaf13f25b1c6ce58d011b1f2fa72f58"),
     "PikaGripper": ("PikaGripper.zip", "8a9d0779e7dbfa7bf5d4713175df014e"),
-    "WujiHand": ("WujiHandV1.zip", "898dec6518c33b96cc5a769c19fd9c14"),
+    "WujiHand": ("WujiHandV2.zip", "d00115e853cfe0e9c4b096c26740354b"),
 }
 
 
@@ -392,7 +392,7 @@ def test_eef_download_descriptors_and_cache_prefix_are_preserved(
     for (prefix, descriptor, root), expected_root in zip(
         captured, (EMBODICHAIN_DEFAULT_DATA_ROOT, str(tmp_path))
     ):
-        expected_prefix = "WujiHandV1" if name == "WujiHand" else name
+        expected_prefix = "WujiHandV2" if name == "WujiHand" else name
         assert prefix == expected_prefix
         assert list(descriptor.urls) == expected_urls
         assert descriptor.md5 == md5

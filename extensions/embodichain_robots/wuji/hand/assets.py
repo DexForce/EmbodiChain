@@ -33,26 +33,27 @@ class WujiHand(EmbodiChainDataset):
     """Left and right Wuji Hand assets with 20 active joints per hand.
 
     Resolve a URDF with
-    ``get_data_path("WujiHand/urdf/right.urdf")``.
+    ``get_data_path("WujiHand/right.urdf")``.
     The bundle also retains the upstream MJCF models, mesh dependencies,
-    licensing and a source/checksum manifest. It provides no robot preset,
-    controller, tactile simulation or trained manipulation policy.
+    licensing and a source/checksum manifest. Configure the standalone preset
+    separately with :class:`embodichain_robots.WujiHandCfg`; tactile
+    simulation and trained policies are not bundled.
 
     Args:
         data_root: Optional cache root; defaults to ``EMBODICHAIN_DATA_ROOT``.
     """
 
-    cache_prefix = "WujiHandV1"
+    cache_prefix = "WujiHandV2"
 
     def __init__(self, data_root: str | None = None) -> None:
-        filename = "eef_assets/WujiHandV1.zip"
+        filename = "eef_assets/WujiHandV2.zip"
         hub_prefix = (
             "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
         )
         urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
         if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
             urls.append(f"{hub_prefix}{filename}")
-        descriptor = o3d.data.DataDescriptor(urls, "898dec6518c33b96cc5a769c19fd9c14")
+        descriptor = o3d.data.DataDescriptor(urls, "d00115e853cfe0e9c4b096c26740354b")
         super().__init__(
             self.cache_prefix,
             descriptor,
