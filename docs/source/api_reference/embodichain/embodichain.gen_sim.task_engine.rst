@@ -197,3 +197,30 @@ collect contact facts or decide whether a physical objective succeeded.
 
 .. automodule:: embodichain.gen_sim.task_engine.stability_declarations
    :members:
+
+Control and articulation declarations
+-------------------------------------
+
+Resolve complete source-control recipes into the existing typed Task Program
+bindings, action options and conditions. Authored joint/link inspection belongs
+to shared Scene; hand calibration stays with the robot owner. Task Engine retains
+logical entities and named presets, while explicit post-policy occurrence tables
+select the physical terminal condition. These declarations construct no native
+runtime and do not evaluate contact facts or certify physical success.
+
+.. automodule:: embodichain.gen_sim.task_engine.control_declarations
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.prismatic_declarations
+   :members:
+
+Drawer declarations preserve explicit payload/container relations, per-occurrence
+release acceptance and the original acquisition-to-close ordering. Graph
+refinement keeps the declared roles, canonical calls and explicit resource
+selection; numeric drawer targets and runtime lowering stay with shared owners.
+
+.. automodule:: embodichain.gen_sim.task_engine.drawer_declarations
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.drawer_graph_declarations
+   :members:

@@ -133,3 +133,15 @@ Task Engine chooses semantic targets and produces existing declarative formats.
 factory), then returns detached typed conditions for the integration preset table.
 It neither constructs sensors nor acquires evidence. Runtime policy evaluation
 and physical observation remain Task Program and Lab responsibilities.
+
+## Authored control declarations
+
+Control declarations consume authored Press/Twist bindings and explicit model
+calibration, then select typed options, conditions and post-policy occurrence
+presets. Prismatic declarations preserve the complete Slide/withdraw/Park
+recipe. Drawer declarations bind source payload/container relations and explicit
+execution occurrences; drawer graph refinement owns semantic resource selection.
+The control_declarations.py, prismatic_declarations.py, drawer_declarations.py and
+drawer_graph_declarations.py modules construct no simulator, skill or planner.
+Shared Scene inspects source geometry, Lab executes recipes and collects facts,
+and TaskSpec owns normative judgments.
