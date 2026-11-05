@@ -9,6 +9,7 @@ semantic scene graph, generation model client or task lifecycle.
 
 | Request | Owner |
 |---|---|
+| Explicit source property/pose/scale ingress | `source_physics.py`, `source_transforms.py`; owned declarations only, no physical acquisition or host lifecycle |
 | Compose existing configurations and anchors | `embodichain/lab/sim/scene/composition.py` |
 | Seeded proposals and measured XY layout checks | `embodichain/lab/sim/scene/procedural.py` |
 | UID-based support geometry and group placement | `embodichain/lab/sim/scene/geometry.py`, `placement.py` |

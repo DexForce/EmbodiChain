@@ -629,3 +629,35 @@ this separate API.
    :members:
 
 .. autofunction:: capture_rigid_mesh
+
+
+Source scene ingress declarations
+--------------------------------
+
+These explicit adapters normalize owned source mappings without constructing a
+simulation or changing shared physical defaults. The source physics adapter
+retains authored/grouped property precedence and legacy collider declarations.
+Pose/scale adapters preserve matrix authority, intrinsic XYZ degree rotations
+and original world-Z rounding; callers supply owned declarations.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_physics
+
+.. autosummary::
+
+   source_scene_object_declaration
+
+.. autofunction:: source_scene_object_declaration
+
+.. currentmodule:: embodichain.lab.sim.scene.source_transforms
+
+.. autosummary::
+
+   normalize_source_pose
+   apply_source_body_scale
+   rotate_source_world_z
+
+.. autofunction:: normalize_source_pose
+
+.. autofunction:: apply_source_body_scale
+
+.. autofunction:: rotate_source_world_z
