@@ -17,8 +17,8 @@ it does not register a RobotCfg, controller, tactile model or RL task.
   the preparation changes. `UPSTREAM_README.md` preserves publisher guidance.
 
 The downloader uses `EMBODICHAIN_DOWNLOAD_PREFIX` first and the official
-`DexForceAI/embodichain_data` Hub as fallback. The versioned archive is prepared
-locally; publication is required before its first public download.
+`DexForceAI/embodichain_data` Hub as fallback. The versioned archive is
+[published on Hugging Face](https://huggingface.co/datasets/DexForceAI/embodichain_data/blob/541650b05674ead90b58e9edcac650e87d1a35a6/eef_assets/SharpaWaveV1.zip).
 
 ```python
 from embodichain.data import get_data_path
