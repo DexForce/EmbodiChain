@@ -23,9 +23,10 @@ move the object to an object-centric target pose while both grippers stay closed
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -42,12 +43,15 @@ from embodichain.lab.sim.atomic_actions import (
     CoordinatedPickGoal,
     CoordinatedPickmentOptions,
     MotionPolicy,
+    HeldObjectState,
+    TaskState,
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
+from embodichain.lab.sim.sensors import ContactSensorCfg
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
-from embodichain.utils.math import matrix_from_euler
+from embodichain.utils.math import matrix_from_euler, pose_inv
 from examples.sim.atomic_action.scenario import (
     add_dual_tutorial_robot,
     add_support_surface,
@@ -74,6 +78,8 @@ from examples.sim.atomic_action.support import (
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
+    start_auto_play_recording,
+    stop_auto_play_recording,
 )
 
 PICKMENT_ASSET_ROOT = "CoordinatedPlacementAndPickment"
@@ -182,6 +188,28 @@ def parse_arguments() -> argparse.Namespace:
         choices=sorted(OBJECT_PRESETS),
         default="plastic_tray",
         help="Object mesh to grasp in the coordinated pickment demo.",
+    )
+    parser.add_argument(
+        "--hand_interp_steps",
+        type=int,
+        default=PICKMENT_HAND_INTERP_STEPS,
+        help="Samples for simultaneous gripper closure.",
+    )
+    parser.add_argument(
+        "--sample_count",
+        type=int,
+        default=PICKMENT_SAMPLE_INTERVAL,
+        help="Pickup motion samples; increase for slower physical playback.",
+    )
+    parser.add_argument(
+        "--resume_held",
+        action="store_true",
+        help="After pickup, observe the existing dual hold and continue through two waypoints.",
+    )
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Release after resumed transport; requires --resume_held.",
     )
     return parser.parse_args()
 
@@ -373,6 +401,12 @@ def run_coordinated_pickment_demo(
     robot: Robot,
 ) -> None:
     """Plan and optionally execute coordinated object pickment."""
+    if args.resume_held and args.num_envs != 1:
+        raise ValueError(
+            "The observed shared-hold demonstration currently requires one environment."
+        )
+    if args.release and not args.resume_held:
+        raise ValueError("--release requires --resume_held in this example.")
     preset = OBJECT_PRESETS[args.object]
     create_support_surface(sim)
     obj = create_pickment_object(sim, preset)
@@ -387,6 +421,18 @@ def run_coordinated_pickment_demo(
         label=preset.label,
     )
     left_to_right_arm_direction = compute_left_to_right_arm_direction(robot, sim.device)
+    contact_sensor = (
+        sim.add_sensor(
+            ContactSensorCfg(
+                uid="pickment_contacts",
+                rigid_uid_list=[obj.uid],
+                filter_need_both_actor=False,
+                max_contacts_per_env=64,
+            )
+        )
+        if args.resume_held
+        else None
+    )
     motion_gen = create_toppra_motion_generator(
         robot,
         planner=getattr(args, "planner", "trapezoidal"),
@@ -408,7 +454,7 @@ def run_coordinated_pickment_demo(
     pickment_options = CoordinatedPickmentOptions(
         pre_grasp_distance=PICKMENT_PRE_GRASP_DISTANCE,
         lift_height=PICKMENT_LIFT_HEIGHT,
-        hand_interp_steps=PICKMENT_HAND_INTERP_STEPS,
+        hand_interp_steps=args.hand_interp_steps,
         hold_steps=PICKMENT_HOLD_STEPS,
         object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
         left_to_right_arm_direction=left_to_right_arm_direction,
@@ -469,7 +515,7 @@ def run_coordinated_pickment_demo(
                 },
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
-                    sample_count=PICKMENT_SAMPLE_INTERVAL,
+                    sample_count=args.sample_count,
                 ),
                 skill_options=pickment_options,
             ),
@@ -508,17 +554,201 @@ def run_coordinated_pickment_demo(
         ):
             log_execution_state(robot, obj, step_idx, total_steps)
 
-    replay_trajectory(
-        sim,
-        robot,
-        compiled.trajectory,
-        args,
-        video_prefix=f"coordinated_pickment_{args.object}_auto_play",
-        hold_steps=0,
-        trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
-        on_trajectory_step=log_execution,
-        look_at=PICKMENT_RECORD_LOOK_AT,
-    )
+    if not args.resume_held:
+        replay_trajectory(
+            sim,
+            robot,
+            compiled.trajectory,
+            args,
+            video_prefix=f"coordinated_pickment_{args.object}_auto_play",
+            hold_steps=0,
+            trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
+            on_trajectory_step=log_execution,
+            look_at=PICKMENT_RECORD_LOOK_AT,
+        )
+    else:
+        observations: list[dict[str, object]] = []
+        stage = "pickup"
+
+        def contact_paths() -> list[str]:
+            assert contact_sensor is not None
+            contact_sensor.update()
+            data = contact_sensor.get_data()
+            ids = data["user_ids"][data["is_valid"]].detach().cpu().flatten().tolist()
+            return sorted(
+                {
+                    contact_sensor.get_actor_info(actor_id).path
+                    for actor_id in ids
+                    if actor_id >= 0
+                }
+            )
+
+        def observe(index: int, count: int) -> None:
+            observations.append(
+                {
+                    "stage": stage,
+                    "index": index,
+                    "contact_actor_paths": contact_paths(),
+                    "object_pose": obj.get_local_pose(to_matrix=True)
+                    .detach()
+                    .cpu()
+                    .tolist(),
+                    "left_hand_qpos": robot.get_qpos(name="left_eef")
+                    .detach()
+                    .cpu()
+                    .tolist(),
+                    "right_hand_qpos": robot.get_qpos(name="right_eef")
+                    .detach()
+                    .cpu()
+                    .tolist(),
+                }
+            )
+
+        recording = start_auto_play_recording(
+            sim, args, "coordinated_pickment_resume", look_at=PICKMENT_RECORD_LOOK_AT
+        )
+        try:
+            replay_trajectory(
+                sim,
+                robot,
+                compiled.trajectory,
+                args,
+                video_prefix="",
+                record=False,
+                hold_steps=50,
+                on_trajectory_step=observe,
+            )
+            # Acquire one measured relation per hand after physical pickup.
+            # These seed the observed input hold; continuation never re-samples
+            # grasps or re-estimates either attachment transform.
+            held_pose = obj.get_local_pose(to_matrix=True).clone()
+            initial_bottom = compute_world_bounds(object_pose, object_vertices)[0][2]
+            held_bottom = compute_world_bounds(held_pose[0], object_vertices)[0][2]
+            if float(held_bottom - initial_bottom) < 0.04:
+                raise RuntimeError(
+                    "Object was not lifted; refusing to assert a shared hold."
+                )
+            acquisition_contacts = sorted(
+                set(contact_paths()).union(
+                    *(row["contact_actor_paths"] for row in observations[-20:])
+                )
+            )
+            logger.log_info(
+                f"Acquisition bottom: initial={float(initial_bottom):.6f}, held={float(held_bottom):.6f}; recent contacts={acquisition_contacts}"
+            )
+            if not all(
+                any(f"{side}_gripper_finger" in path for path in acquisition_contacts)
+                for side in ("left", "right")
+            ):
+                raise RuntimeError(
+                    f"Shared hold lacks bilateral gripper contacts: {acquisition_contacts}"
+                )
+            held_states = {}
+            for arm in ("left_arm", "right_arm"):
+                eef = robot.compute_fk(
+                    robot.get_qpos(name=arm), name=arm, to_matrix=True
+                )
+                held_states[arm] = HeldObjectState(
+                    object_semantics, pose_inv(held_pose) @ eef, eef
+                )
+            held_task = TaskState(
+                batch_size=num_envs, device=sim.device, held_objects=held_states
+            )
+            waypoints = held_pose[:, None].repeat(1, 2, 1, 1)
+            waypoints[:, 0, 2, 3] += 0.03
+            waypoints[:, 1, 0, 3] += 0.04
+            if args.release:
+                waypoints[:, 1, 2, 3] += SUPPORT_SURFACE_Z + 0.008 - held_bottom
+            resumed = engine.compile(
+                (
+                    engine.make_invocation(
+                        "coordinated_pickment",
+                        CoordinatedPickGoal(
+                            object_semantics, waypoints, resume_held=True
+                        ),
+                        control_parts={
+                            "left": {"motion": "left_arm", "grasp": "left_eef"},
+                            "right": {"motion": "right_arm", "grasp": "right_eef"},
+                        },
+                        motion_policy=MotionPolicy(
+                            strategy="ik_interp", sample_count=240
+                        ),
+                        skill_options=replace(
+                            pickment_options,
+                            release=args.release,
+                            release_steps=30,
+                            retreat_steps=40,
+                        ),
+                    ),
+                ),
+                engine.initial_context(
+                    task=held_task, control_dt=sim.sim_config.physics_dt
+                ),
+            )
+            if not resumed.plan_success.all():
+                raise RuntimeError(
+                    f"Resumed planning failed: {resumed.plan_success.tolist()}"
+                )
+            stage = "resume_release" if args.release else "resume_hold"
+            replay_trajectory(
+                sim,
+                robot,
+                resumed.trajectory,
+                args,
+                video_prefix="",
+                record=False,
+                hold_steps=50,
+                on_trajectory_step=observe,
+            )
+            report = {
+                "physics": args.physics,
+                "renderer": args.renderer,
+                "control_dt": sim.sim_config.physics_dt,
+                "pickup_plan_success": compiled.plan_success.detach().cpu().tolist(),
+                "resume_plan_success": resumed.plan_success.detach().cpu().tolist(),
+                "resume_segments": [
+                    {"name": segment.name, "start": segment.start, "stop": segment.stop}
+                    for segment in resumed.action_plans[0].segments
+                ],
+                "acquisition_contact_actor_paths": acquisition_contacts,
+                "held_input_source": "Measured object pose and robot FK after physical pickup; no attachment or object teleport during playback.",
+                "input_object_to_eef": {
+                    key: held.object_to_eef.detach().cpu().tolist()
+                    for key, held in held_states.items()
+                },
+                "target_object_pose": waypoints[:, -1].detach().cpu().tolist(),
+                "final_object_pose": obj.get_local_pose(to_matrix=True)
+                .detach()
+                .cpu()
+                .tolist(),
+                "release": args.release,
+                "observations": observations,
+            }
+            if args.auto_play_video_path:
+                Path(args.auto_play_video_path).with_suffix(".json").write_text(
+                    json.dumps(report, indent=2) + "\n"
+                )
+            logger.log_info(
+                f"Recorded physical pickup and continued shared hold: {len(observations)} samples."
+            )
+        except Exception as exc:
+            if args.auto_play_video_path:
+                Path(args.auto_play_video_path).with_suffix(".json").write_text(
+                    json.dumps(
+                        {
+                            "status": "failed",
+                            "error": str(exc),
+                            "physics": args.physics,
+                            "renderer": args.renderer,
+                            "observations": observations,
+                        },
+                        indent=2,
+                    )
+                    + "\n"
+                )
+            raise
+        finally:
+            stop_auto_play_recording(sim, recording)
     if wait_for_user:
         input("Press Enter to exit the simulation...")
 
