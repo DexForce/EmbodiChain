@@ -458,7 +458,8 @@ def test_curobo_cache_changes_with_limits_and_closes_stale_backend(change: str) 
     planner.robot = robot
     planner.cfg = CuroboPlannerCfg(robot_uid="robot", use_cuda_graph=False)
     key = planner._robot_yaml_cache_key("", "arm", None, planner.cfg.auto_gen)
-    cached = SimpleNamespace(motion_limits_key=key, planner=Mock())
+    cached = SimpleNamespace(motion_limits_key=key, gravity=None, planner=Mock())
+    planner.cfg.enable_timeopt = False
     backend_key = ("arm", 2, False, MoveType.EEF_MOVE)
     planner._backend_cache = {backend_key: cached}
     assert planner._get_backend("arm", 2) is cached
