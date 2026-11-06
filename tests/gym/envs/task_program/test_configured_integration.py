@@ -3511,3 +3511,69 @@ def test_final_velocity_rejection_representation_is_explicit_and_default_identit
         _decode_motion_policy(
             {"sample_count": 50, "final_velocity_rejection": "unknown"}, path="motion"
         )
+
+
+def test_physical_component_snapshot_matches_files_without_component_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.gym.utils import _component_composition as composition
+    from embodichain.utils.config_paths import resolve_config_path
+
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    expected = resolve_gym_components(config, base_dir=path.parent)
+    binding = _deployment_from_path(path).scene_binding
+    selected = deepcopy(config)
+    sources = {}
+    for owner in ("environment", "embodiment", "scene"):
+        if owner not in selected:
+            continue
+        declaration = selected[owner]
+        reference = declaration.get("component", declaration.get("default"))
+        if isinstance(reference, dict):
+            reference = reference["component"]
+        component = resolve_config_path(reference, base_dir=path.parent).resolve()
+        sources[str(component)] = load_config(component)
+        selected[owner] = {"component": str(component)}
+        if "overrides" in declaration:
+            selected[owner]["overrides"] = deepcopy(declaration["overrides"])
+    original = deepcopy(sources)
+    physical_only = deepcopy(selected)
+    physical_only.pop("task_program")
+    expected_cfg = config_to_cfg(physical_only, source_path=path)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Snapshot parsing reopened a component file")
+
+    monkeypatch.setattr(composition, "load_config", forbidden)
+    monkeypatch.setattr(composition, "resolve_config_path", forbidden)
+    actual = resolve_gym_components(
+        selected, base_dir=path.parent, component_sources=sources
+    )
+    assert actual == expected
+    actual_cfg = config_to_cfg(
+        physical_only, source_path=path, component_sources=sources
+    )
+    import numpy as np
+
+    np.testing.assert_equal(actual_cfg.to_dict(), expected_cfg.to_dict())
+    actual.validate_scene_bindings(binding)
+    with pytest.raises(ValueError, match="not declared"):
+        actual.validate_scene_bindings(
+            {"rigid_objects": [{"entity_id": "missing_native_root"}]}
+        )
+    assert sources == original
+    sources[next(iter(sources))].clear()
+    assert actual == expected
+    missing = dict(original)
+    missing.pop(next(iter(missing)))
+    with pytest.raises(ValueError, match="absent from"):
+        resolve_gym_components(
+            selected, base_dir=path.parent, component_sources=missing
+        )
+    duplicate = deepcopy(selected)
+    duplicate["robot"] = {"uid": "duplicate_owner"}
+    with pytest.raises(ValueError, match="owns robot"):
+        resolve_gym_components(
+            duplicate, base_dir=path.parent, component_sources=original
+        )
