@@ -279,7 +279,7 @@ def evaluate_pour_evidence(
     try:
         roles = {role.name: role for role in normalized.roles}
         if any(
-            roles[predicate.arguments[key]].quantifier != "one"
+            not roles[predicate.arguments[key]].is_single_member
             for key in ("subject", "reference")
         ):
             raise ValueError("Complete selector-universe evidence was not provided.")

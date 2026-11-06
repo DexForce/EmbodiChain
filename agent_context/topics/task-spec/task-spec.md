@@ -37,6 +37,9 @@ metadata do not participate in normative identity.
 semantic identity. Larger counts and `all` require complete separate binding
 and evidence; they cannot be reduced to an available subset.
 
+Pour's source and receiver proof accepts either single-member form, including
+explicit `count=1`, while preserving the authored selector and its identity.
+
 Milestone dependencies must be acyclic. All predicates for one milestone must
 hold at the same snapshot strictly after its predecessors. Missing evidence and
 incomplete temporal windows cannot certify success. Only an entirely satisfied
