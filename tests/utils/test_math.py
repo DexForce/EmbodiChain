@@ -469,3 +469,27 @@ def test_small_rotation_interpolation_has_finite_analytic_gradient(
 def test_rotation_interpolation_requires_a_positive_interval_count() -> None:
     with pytest.raises(ValueError, match="num_steps must be positive"):
         interpolate_rotations(torch.eye(3), torch.eye(3), 0)
+
+
+@pytest.mark.parametrize(
+    ("interior_count", "device"),
+    [(0, "cpu"), (2, "cpu"), pytest.param(0, "cuda:0", marks=pytest.mark.gpu)],
+)
+def test_pose_interpolation_has_a_uniform_return_contract(
+    interior_count: int, device: str
+) -> None:
+    start = torch.eye(4, dtype=torch.float64, device=device)
+    start[:3, 3] = start.new_tensor([0.1, 0.2, 0.3])
+    end = torch.eye(4, dtype=torch.float64, device=device)
+    end[:3, :3] = end.new_tensor([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+    end[:3, 3] = end.new_tensor([1.0, 2.0, 3.0])
+    original_start, original_end = start.clone(), end.clone()
+
+    poses, count = interpolate_poses(start, end, num_steps=interior_count)
+
+    assert count == interior_count
+    assert poses.shape == (interior_count + 2, 4, 4)
+    torch.testing.assert_close(poses[0], start)
+    torch.testing.assert_close(poses[-1], end)
+    torch.testing.assert_close(start, original_start, rtol=0, atol=0)
+    torch.testing.assert_close(end, original_end, rtol=0, atol=0)
