@@ -1,0 +1,694 @@
+{
+  "adaptive": {
+    "nominal": {
+      "success": [
+        true
+      ],
+      "positions_sha256": "c7db9a23c0683e510d7cec6ed92fb21734ec25267f4110a6e1687b761ab709f2",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "after_rng": [
+        "a84f890193a363855fe8a820d3962ecb90770d089ca7b38701a1694531c2dc75",
+        0.35781360448354893,
+        0.3841711045442975
+      ],
+      "ik_sha256": "c9bb57a8845d49219b79fb9b0d19dc8cc027d76eea4ecbbcc9601be5172caa48",
+      "grasps_sha256": "c21014261eff1b37cbb2eb9af9e8bbd57eedc274d3ac78dd360c54d1a45fd94f",
+      "metadata_sha256": "c8fe4235e9bdd88ee7647a7a61e275389802d33c8b1ffdce8a2ddb06af2c945f"
+    },
+    "retry": {
+      "success": [
+        true
+      ],
+      "positions_sha256": "8219deaf51f438559a83d3b432125fe0be129fb43222f7e899324bc5a3a20097",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "after_rng": [
+        "a84f890193a363855fe8a820d3962ecb90770d089ca7b38701a1694531c2dc75",
+        0.4835286243100021,
+        0.0621927912524467
+      ],
+      "ik_sha256": "20c997823a371b12d4ea165fbf5418147d32d2c811854e2bc326242df76caac6",
+      "grasps_sha256": "31bfbaa3bd1c1cfec716575e437053ec60bf036245990670f66544be1f0a9980",
+      "metadata_sha256": "ac609846d7d652cd6d952ea243ea80065f6f05c02c24e01660ba1c108c63d9fe"
+    },
+    "failed": {
+      "success": [
+        false
+      ],
+      "positions_sha256": "cb049bbdc67126830a23198b7c3b50e9855ec7d03d6568e7443df5b30ca168e9",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "after_rng": [
+        "a84f890193a363855fe8a820d3962ecb90770d089ca7b38701a1694531c2dc75",
+        0.4835286243100021,
+        0.0621927912524467
+      ],
+      "ik_sha256": "86b0b86cc95e68be9b18fdd943afc81fc346b6843848891904fb9537fff70fc0",
+      "grasps_sha256": "31bfbaa3bd1c1cfec716575e437053ec60bf036245990670f66544be1f0a9980",
+      "metadata_sha256": "640921f5db3797afa475b45ea3d18c6151162732ca6cdf8c476957d387e3c500"
+    },
+    "exit": {
+      "success": [
+        true
+      ],
+      "positions_sha256": "a71fc72cd255d35b47405bea8d3de32b6db3bff4572e3fc10f8ed2a0aeaa08bc",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "after_rng": [
+        "a84f890193a363855fe8a820d3962ecb90770d089ca7b38701a1694531c2dc75",
+        0.35781360448354893,
+        0.3841711045442975
+      ],
+      "ik_sha256": "17c76082cdbf33aa9659c11d627a1263e67d387d61a18a6fbdb9b4ec3bd001d2",
+      "grasps_sha256": "c21014261eff1b37cbb2eb9af9e8bbd57eedc274d3ac78dd360c54d1a45fd94f",
+      "metadata_sha256": "3f08d9c9346bc396686804f926d0f423664db0655bac70eab68c03a90edfb602"
+    }
+  },
+  "native": {
+    "clear": {
+      "success": [
+        true
+      ],
+      "positions_sha256": "3f065916909b7e44dddfa9628cf8a857c95c8abddf701cb5b59418571bf447bc",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "a84f890193a363855fe8a820d3962ecb90770d089ca7b38701a1694531c2dc75",
+        0.35781360448354893,
+        0.3841711045442975
+      ],
+      "grasps_sha256": "6fd9253658d0224c8e6150aca4e71cc4e1585ce27dd2db0e1e53a0c3790002e7",
+      "ik_sha256": "e4a4e156a68f91a3fdb954d64e0ed5f16819f0c1deefefbc48008445150eae6c",
+      "fk_sha256": "edb465a00df8702b5dc684a27ae2b9fa4e4413d3969c48770e030cebf78603bb",
+      "metadata_sha256": "edba1730a9562b61ea1efd9ee27fdb54c3e9f31ac875727d228eac368e904917"
+    },
+    "exchange": {
+      "success": [
+        true
+      ],
+      "positions_sha256": "428867698d1d719e19163febbbe100b72c3628217f87aa9b229f546e424ce52b",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "a84f890193a363855fe8a820d3962ecb90770d089ca7b38701a1694531c2dc75",
+        0.35781360448354893,
+        0.3841711045442975
+      ],
+      "grasps_sha256": "6fd9253658d0224c8e6150aca4e71cc4e1585ce27dd2db0e1e53a0c3790002e7",
+      "ik_sha256": "5c001db978b7c08a7c861fd148c07cc4863d760d0cf9b1853a71a6114513a0fc",
+      "fk_sha256": "706d4507e6340b0a3447fd042384846efb866d90d18d46ba9e48880f9698e972",
+      "metadata_sha256": "10e4b934bd52218fbb7e1dd1a9d26ea6a225a4cd95a48466f9848e315305c2e3"
+    },
+    "reject": {
+      "success": [
+        false
+      ],
+      "positions_sha256": "ae2c18dcf410f1294a16203051253a2db166f0b8cab643c04b62992bb187bb0a",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "a84f890193a363855fe8a820d3962ecb90770d089ca7b38701a1694531c2dc75",
+        0.4835286243100021,
+        0.0621927912524467
+      ],
+      "grasps_sha256": "9eec9a05237f77ea6aa040f689637c4193d8f90be59db55a973688a6ccac0600",
+      "ik_sha256": "18e81d5c3835bafb5f376ce6e66c16007a14095cd39cb2c17ccf640375973d94",
+      "fk_sha256": "fa4417cd4ce4d0268abe71f8f8ab68ca95b70a0150a8c8112d64bf3f37bc37d5",
+      "metadata_sha256": "78347650bf6aa1b0d2f62ef63f4688dd15a1d37c6d6a2eab259e22fa18b9aa1b"
+    },
+    "bad_command": {
+      "success": [
+        false
+      ],
+      "positions_sha256": "9a6f4d6879de1fc1a03f4af13568429521eb082de95cbc992c43291f59a1d498",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "a84f890193a363855fe8a820d3962ecb90770d089ca7b38701a1694531c2dc75",
+        0.4835286243100021,
+        0.0621927912524467
+      ],
+      "grasps_sha256": "9eec9a05237f77ea6aa040f689637c4193d8f90be59db55a973688a6ccac0600",
+      "ik_sha256": "43a874c3e816d2fd19126fc42284a487c12d7116ddf3c7a22becead93be68e36",
+      "fk_sha256": "7071252749f811a4f84c3a9f24115bbaed0eacb54e39a1c8af28498f29572d49",
+      "metadata_sha256": "761972997306d64bcd74abc5390ceffccb09b4c7b106ae7b9bf5131ceaf2d8bc"
+    },
+    "late_reject": {
+      "success": [
+        false
+      ],
+      "positions_sha256": "ae2c18dcf410f1294a16203051253a2db166f0b8cab643c04b62992bb187bb0a",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "a84f890193a363855fe8a820d3962ecb90770d089ca7b38701a1694531c2dc75",
+        0.4835286243100021,
+        0.0621927912524467
+      ],
+      "grasps_sha256": "9eec9a05237f77ea6aa040f689637c4193d8f90be59db55a973688a6ccac0600",
+      "ik_sha256": "2a79f0f187b42b5ae8cae39174edaedb9a8a52ff3d4e2c05bf22f8e94d834282",
+      "fk_sha256": "fa4417cd4ce4d0268abe71f8f8ab68ca95b70a0150a8c8112d64bf3f37bc37d5",
+      "metadata_sha256": "57bb37cb0c6a49e48119b61191e36a8f9a65a059c3d00d8fb27cdaf2f9fc4f6f"
+    }
+  },
+  "cartesian_source": {
+    "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+    "scope": "Complete native HandOver under original Cartesian outer scope",
+    "diagnostic_key_renames": {
+      "gen_sim_handover_candidate_environment": "handover_candidate_environment",
+      "gen_sim_handover_environment": "handover_environment"
+    }
+  },
+  "cartesian": {
+    "clear": {
+      "success": [
+        true
+      ],
+      "positions_sha256": "9268e5c7248910ed9fcaff895296ca97b6b5d97ebefa18713752b92e11cd7e2e",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "dc6cccb034101ad8658165e22d1e561ffde7d48d0f8687d3378e4d3242f032fd",
+        0.30893876440744794,
+        0.7517321796613282
+      ],
+      "grasps_sha256": "6fd9253658d0224c8e6150aca4e71cc4e1585ce27dd2db0e1e53a0c3790002e7",
+      "ik_sha256": "c19241c4ef5887e1ffcd1d8c3049528ac84e4ddd2d7c1a95af4a0ecdac0e5ff2",
+      "fk_sha256": "2bedee420914a1dab84f32709712bff966c12e4c81afdd5bdba78503644fd8a3",
+      "metadata_sha256": "edba1730a9562b61ea1efd9ee27fdb54c3e9f31ac875727d228eac368e904917"
+    },
+    "exchange": {
+      "success": [
+        true
+      ],
+      "positions_sha256": "37756997083ef297e4b47ec9f98239e1ed043633409c99052d1616a2b5d2cb1c",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "dc6cccb034101ad8658165e22d1e561ffde7d48d0f8687d3378e4d3242f032fd",
+        0.30893876440744794,
+        0.7517321796613282
+      ],
+      "grasps_sha256": "6fd9253658d0224c8e6150aca4e71cc4e1585ce27dd2db0e1e53a0c3790002e7",
+      "ik_sha256": "8805256621bbdf6db55bdff9bed6eae41e50c5166153d7d3c327d8feead4a346",
+      "fk_sha256": "4b840e3a252c9dc9fe89a74c3d3fa1dd2bcd9ebfa561d0370522e19936dfd48d",
+      "metadata_sha256": "10e4b934bd52218fbb7e1dd1a9d26ea6a225a4cd95a48466f9848e315305c2e3"
+    },
+    "reject": {
+      "success": [
+        false
+      ],
+      "positions_sha256": "ae2c18dcf410f1294a16203051253a2db166f0b8cab643c04b62992bb187bb0a",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "dc6cccb034101ad8658165e22d1e561ffde7d48d0f8687d3378e4d3242f032fd",
+        0.3692533101705139,
+        0.25064449386576815
+      ],
+      "grasps_sha256": "9eec9a05237f77ea6aa040f689637c4193d8f90be59db55a973688a6ccac0600",
+      "ik_sha256": "3457ba0a02a526c6600fdff2a47284bbfe2843ded03f657d55a55b98a5cdcb3c",
+      "fk_sha256": "fa4417cd4ce4d0268abe71f8f8ab68ca95b70a0150a8c8112d64bf3f37bc37d5",
+      "metadata_sha256": "78347650bf6aa1b0d2f62ef63f4688dd15a1d37c6d6a2eab259e22fa18b9aa1b"
+    },
+    "bad_command": {
+      "success": [
+        false
+      ],
+      "positions_sha256": "46e746eff0fc4dc69313086042e334b3316a94e94d86aa680c6d4ff75f6c7e1b",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "dc6cccb034101ad8658165e22d1e561ffde7d48d0f8687d3378e4d3242f032fd",
+        0.3692533101705139,
+        0.25064449386576815
+      ],
+      "grasps_sha256": "9eec9a05237f77ea6aa040f689637c4193d8f90be59db55a973688a6ccac0600",
+      "ik_sha256": "b82fcdd9e2094a4a53dd2cfb3d1e2bc35a3839ca1e296ac7b3cafb87d54fa6a1",
+      "fk_sha256": "a5fcdea9bdf8c48a8b0f06c549151b5bc3a9f37a9561c55d56255f90390e994d",
+      "metadata_sha256": "bfacd2dd5cab9161c300afbc1f12052cca6ea2f22565d121118482bf9a3f60a2"
+    },
+    "late_reject": {
+      "success": [
+        false
+      ],
+      "positions_sha256": "ae2c18dcf410f1294a16203051253a2db166f0b8cab643c04b62992bb187bb0a",
+      "dt_sha256": "a2fb388ef0310976901ed63cb1f9a24e312896e7c2e284294aceff5be56f553a",
+      "segments": [
+        [
+          "transfer",
+          0,
+          50
+        ],
+        [
+          "receive_approach",
+          50,
+          100
+        ],
+        [
+          "receive_close",
+          100,
+          110
+        ],
+        [
+          "receive_hold",
+          110,
+          114
+        ],
+        [
+          "handover_release",
+          114,
+          124
+        ],
+        [
+          "source_retreat",
+          124,
+          144
+        ]
+      ],
+      "captures": 1,
+      "after_rng": [
+        "dc6cccb034101ad8658165e22d1e561ffde7d48d0f8687d3378e4d3242f032fd",
+        0.3692533101705139,
+        0.25064449386576815
+      ],
+      "grasps_sha256": "9eec9a05237f77ea6aa040f689637c4193d8f90be59db55a973688a6ccac0600",
+      "ik_sha256": "b0e9e9cbf49105e89fe8c98b8de41f1589b00fe8d05ff362526ff362423eb14e",
+      "fk_sha256": "fa4417cd4ce4d0268abe71f8f8ab68ca95b70a0150a8c8112d64bf3f37bc37d5",
+      "metadata_sha256": "57bb37cb0c6a49e48119b61191e36a8f9a65a059c3d00d8fb27cdaf2f9fc4f6f"
+    }
+  }
+}

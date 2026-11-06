@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 from pathlib import Path
-from collections.abc import Mapping
 from dataclasses import replace
 import json, hashlib, random
 import numpy as np
@@ -34,15 +33,11 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
 )
 from embodichain.lab.sim.atomic_actions.primitives import _handover_recovery
-from ._handover_adaptive_fixture import handover_fixture
-
-
-def plain(value):
-    if isinstance(value, Mapping):
-        return {k.removeprefix("gen_sim_"): plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [plain(v) for v in value]
-    return value
+from ._handover_adaptive_fixture import (
+    handover_fixture,
+    plain_metadata as plain,
+    reference_record,
+)
 
 
 def configured_handover(tmp_path, mode):
@@ -120,9 +115,9 @@ def test_adaptive_handover_matches_source_direction_rng_and_held_commands(
         ],
     }
     expected = json.loads(
-        (Path(__file__).parent / f"data/handover_{mode}_reference.json").read_text()
-    )
-    assert actual == expected
+        (Path(__file__).parent / "data/handover_reference.json").read_text()
+    )["adaptive"][mode]
+    assert reference_record(actual) == expected
     assert context.task.get_held_object("source_arm") is not None
     assert context.task.get_held_object("destination_arm") is None
     if plan.plan_success.all():
