@@ -31,6 +31,8 @@ python -m examples.sim.atomic_action.press --headless --auto_play --renderer fas
 
 `--headless` disables the interactive window; FastRT still renders all recorded
 frames. Both runs report planning success and complete physical playback.
+New runs save measurements in `.observations.json`, separately from the configured
+launcher's `.json` replay record.
 The JSON Lines files contain one metadata record followed by per-phase measured EEF, gripper and articulation states.
 The video shows the complete approach, press, dwell (when requested), retract,
 and final settling; no phase is cut out.

@@ -339,7 +339,7 @@ def run(args: argparse.Namespace) -> None:
         "observations": observed,
     }
     if args.auto_play_video_path:
-        Path(args.auto_play_video_path).with_suffix(".json").write_text(
+        Path(args.auto_play_video_path).with_suffix(".observations.json").write_text(
             json.dumps(report, indent=2) + "\n"
         )
     logger.log_info(
