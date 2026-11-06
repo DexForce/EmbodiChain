@@ -23,6 +23,7 @@ from pathlib import Path
 import json
 import ast
 
+import numpy as np
 import pytest
 import torch
 
@@ -264,9 +265,16 @@ def test_contact_metrics_preserve_source_sampling_frames_and_dtype(tmp_path, ref
     factory = _factory(data)
     qpos = torch.tensor([[reference["qpos_x"], 0.0, 0.0]])
     with _query(factory, data) as query:
-        assert query.contact_metrics(qpos, torch.zeros_like(qpos)) == tuple(
-            reference["metrics"]
+        near, distance, displacement = query.contact_metrics(
+            qpos, torch.zeros_like(qpos)
         )
+        expected_near, expected_distance, expected_displacement = reference["metrics"]
+        assert near == expected_near
+        assert displacement == expected_displacement
+        # CPU/Torch distance reductions can differ by one float32 ULP across
+        # runners. Keep the frozen reference and bound only that final rounding.
+        distance_ulp = float(np.spacing(np.float32(expected_distance)))
+        assert distance == pytest.approx(expected_distance, rel=0, abs=distance_ulp)
     factory.close()
 
 
