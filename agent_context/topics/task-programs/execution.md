@@ -62,6 +62,14 @@ and per-row availability belong to the [contact boundary](../sensor-system/conta
 Raw traces are observations, while report serialization and TaskSpec verdicts
 remain frontend responsibilities.
 
+Fresh grip capture uses `SimulationStateObservationCollector` with the explicit
+`ObservationManager` owner. Its cheap `read_history_step_counts` query qualifies
+the current row boundaries without copying the full history. The runtime's
+`GripEvidenceObservationPort` performs one acquisition and owns that exact query;
+the standard factory preserves sensor, robot and runtime-scope checks around it.
+Collectors check episode, object, provider and clock identity before and after
+the read. Query time is not a claim of a native impulse refresh or task success.
+
 Stateful segment validators capture their incoming evidence through the optional
 `begin_segment` port immediately before runtime planning starts. Lift checks use
 that segment's measured baseline, including for lazy and repeated segments;
@@ -224,6 +232,25 @@ explicitly; source-specific lowerers and services remain with their owning
 integration layers. Semantic preflight checks planning recovery against the
 actual target SkillDescriptor before grounding or physical acquisition.
 
+## Explicit runtime observation scope
+
+`TaskProgramEnvironmentAdapter.assemble_runtime()` and `create_bridge()` accept
+an optional `runtime_scope_guard`. The standard factory forwards this host-owned
+validator to `SimulationPlanningObservationProvider` and its shared scene cache.
+`validate_runtime_scope()` checks both the factory lifetime and that explicit
+scope without reading robot state, sensors or simulation samples. Hosts bind
+actual session/episode/owner epochs; a factory-open check alone cannot establish
+that an earlier bridge is still current.
+
+One internal validator combines factory lifetime and the optional host scope.
+Planning observations and the shared scene cache run that check before and after
+cached or live reads. Closing the factory during acquisition rejects the result
+even without a host callback; a replaced scope cannot publish a context or
+snapshot. The default `None` performs no host callback and leaves legacy custom
+factory calls unchanged; callers requesting a scope must use a factory
+implementing the optional keyword. These checks do not acquire evidence,
+create control services or select atomic skills.
+
 ## Evidence ownership across integrations
 
 Task Engine selects declared evidence requirements and named policies from skill,
@@ -293,8 +320,18 @@ TaskSpec independently checks that recomputed geometry matches the bound proof.
 
 `simulation.observations.SimulationStateObservationCollector` binds the exact
 pre-execution bridge, sealed registration and initialized episode. Current pose
-and joint queries validate the selected native owner and observation clock.
+and joint queries validate the selected native owner before and after acquisition
+and validate the observation clock.
 Historical pose reads require an explicitly supplied ObservationManager and
 reuse its semantic schema/raw store, including unavailable rows and original
-boundary/revision/timestamp metadata. It does not evaluate TaskSpec conditions,
+boundary/revision/timestamp metadata. A missing original timestamp leaves only
+its affected row unavailable; the read timestamp cannot substitute for it.
+It does not evaluate TaskSpec conditions,
 resample past state or alter execution targets.
+
+`SimulationStateObservationCollector.capture_recorded_pour_geometry` reads one
+owned snapshot from the explicitly supplied ObservationManager, then selects
+exact inclusive source slots and receiver slots at the first maximum tilt.
+Raw validity/errors, episode and written-boundary identity remain authoritative.
+Geometry functions live in Compute and choose no Pour thresholds or release
+verdicts. The collector does not read live poses or acquire new sensor samples.

@@ -1,0 +1,429 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "source_function": "control_evidence.measure_control_operation",
+  "cases": [
+    {
+      "kind": "press",
+      "declaration": {
+        "control_kind": "press",
+        "route_payload": {
+          "operation_id": "opaque-operation",
+          "binding": {
+            "object_id": "appliance",
+            "joint": "authored_joint",
+            "link": "authored_link",
+            "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "arm": "right"
+        },
+        "terminal_segment_id": "terminal",
+        "terminal_source_path": [
+          "program",
+          "items",
+          1
+        ],
+        "preset": "terminal_preset",
+        "required_execution": [
+          {
+            "segment_id": "prepare",
+            "source_path": [
+              "program",
+              "items",
+              0
+            ]
+          },
+          {
+            "segment_id": "terminal",
+            "source_path": [
+              "program",
+              "items",
+              1
+            ]
+          }
+        ]
+      },
+      "program": {
+        "program": {
+          "items": [
+            {
+              "name": "prepare"
+            },
+            {
+              "name": "terminal",
+              "post": [
+                {
+                  "kind": "wait_stable",
+                  "entity": "appliance",
+                  "preset": "terminal_preset"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "evidence": {
+        "record": {
+          "group_id": "opaque-operation",
+          "uid": "appliance",
+          "part_id": null,
+          "accepted": [
+            true
+          ],
+          "measurements": {
+            "scope": "measured_control_operation",
+            "boundary_frames": [
+              9
+            ],
+            "control": {
+              "revision": 1,
+              "operation_id": "opaque-operation",
+              "object_id": "appliance",
+              "joint": "authored_joint",
+              "link": "authored_link",
+              "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "route_digest": "3d79ff92a3af35f69f8ba7cd11de1cc11a65691c72e0ca4dceba3cb0ed553eb1",
+              "criterion": "contact_backed_press",
+              "sample_count": 3,
+              "window": [
+                0.1,
+                0.5
+              ]
+            },
+            "result": {
+              "kind": "control_operation",
+              "preset": "terminal_preset",
+              "control": {
+                "revision": 1,
+                "operation_id": "opaque-operation",
+                "object_id": "appliance",
+                "joint": "authored_joint",
+                "link": "authored_link",
+                "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "route_digest": "3d79ff92a3af35f69f8ba7cd11de1cc11a65691c72e0ca4dceba3cb0ed553eb1",
+                "criterion": "contact_backed_press",
+                "sample_count": 3,
+                "window": [
+                  0.1,
+                  0.5
+                ]
+              },
+              "accepted": true,
+              "terminal": true,
+              "contact_released": true,
+              "event_accepted": true,
+              "retreat_verified": true,
+              "housing_contact_released": true,
+              "terminal_clearance": 0.05
+            }
+          }
+        },
+        "segments": [
+          {
+            "name": "prepare",
+            "successes": [
+              true
+            ],
+            "active": [
+              true
+            ],
+            "end_steps": [
+              3
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                0
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "terminal",
+            "successes": [
+              true
+            ],
+            "active": [
+              true
+            ],
+            "end_steps": [
+              9
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                1
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "policy_index": 0,
+                  "source_path": [
+                    "program",
+                    "items",
+                    1,
+                    "post",
+                    0
+                  ],
+                  "result_mask": [
+                    true
+                  ],
+                  "result": {
+                    "kind": "control_operation",
+                    "preset": "terminal_preset",
+                    "control": {
+                      "revision": 1,
+                      "operation_id": "opaque-operation",
+                      "object_id": "appliance",
+                      "joint": "authored_joint",
+                      "link": "authored_link",
+                      "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "route_digest": "3d79ff92a3af35f69f8ba7cd11de1cc11a65691c72e0ca4dceba3cb0ed553eb1",
+                      "criterion": "contact_backed_press",
+                      "sample_count": 3,
+                      "window": [
+                        0.1,
+                        0.5
+                      ]
+                    },
+                    "accepted": true,
+                    "terminal": true,
+                    "contact_released": true,
+                    "event_accepted": true,
+                    "retreat_verified": true,
+                    "housing_contact_released": true,
+                    "terminal_clearance": 0.05
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "twist",
+      "declaration": {
+        "control_kind": "twist",
+        "route_payload": {
+          "operation_id": "opaque-operation",
+          "binding": {
+            "object_id": "appliance",
+            "joint": "authored_joint",
+            "link": "authored_link",
+            "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "arm": "right",
+          "success_criterion": "contact_backed_coarse_turn"
+        },
+        "terminal_segment_id": "terminal",
+        "terminal_source_path": [
+          "program",
+          "items",
+          1
+        ],
+        "preset": "terminal_preset",
+        "required_execution": [
+          {
+            "segment_id": "prepare",
+            "source_path": [
+              "program",
+              "items",
+              0
+            ]
+          },
+          {
+            "segment_id": "terminal",
+            "source_path": [
+              "program",
+              "items",
+              1
+            ]
+          }
+        ]
+      },
+      "program": {
+        "program": {
+          "items": [
+            {
+              "name": "prepare"
+            },
+            {
+              "name": "terminal",
+              "post": [
+                {
+                  "kind": "wait_stable",
+                  "entity": "appliance",
+                  "preset": "terminal_preset"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "evidence": {
+        "record": {
+          "group_id": "opaque-operation",
+          "uid": "appliance",
+          "part_id": null,
+          "accepted": [
+            true
+          ],
+          "measurements": {
+            "scope": "measured_control_operation",
+            "boundary_frames": [
+              9
+            ],
+            "control": {
+              "revision": 1,
+              "operation_id": "opaque-operation",
+              "object_id": "appliance",
+              "joint": "authored_joint",
+              "link": "authored_link",
+              "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "route_digest": "3fbb5dd5a606f660ae8398283abdb8237aecfbfd5c98110c6101d5430bb1d8da",
+              "criterion": "contact_backed_coarse_turn",
+              "sample_count": 3,
+              "window": [
+                0.1,
+                0.5
+              ]
+            },
+            "result": {
+              "kind": "control_operation",
+              "preset": "terminal_preset",
+              "control": {
+                "revision": 1,
+                "operation_id": "opaque-operation",
+                "object_id": "appliance",
+                "joint": "authored_joint",
+                "link": "authored_link",
+                "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "route_digest": "3fbb5dd5a606f660ae8398283abdb8237aecfbfd5c98110c6101d5430bb1d8da",
+                "criterion": "contact_backed_coarse_turn",
+                "sample_count": 3,
+                "window": [
+                  0.1,
+                  0.5
+                ]
+              },
+              "accepted": true,
+              "terminal": true,
+              "contact_released": true,
+              "stable": true,
+              "others_unchanged": true,
+              "contact_path": 0.3490658503988659,
+              "target_qpos_reached": true,
+              "target_error": 0.01,
+              "clearance": 0.05
+            }
+          }
+        },
+        "segments": [
+          {
+            "name": "prepare",
+            "successes": [
+              true
+            ],
+            "active": [
+              true
+            ],
+            "end_steps": [
+              3
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                0
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": []
+            }
+          },
+          {
+            "name": "terminal",
+            "successes": [
+              true
+            ],
+            "active": [
+              true
+            ],
+            "end_steps": [
+              9
+            ],
+            "metadata": {
+              "program_segment_source_path": [
+                "program",
+                "items",
+                1
+              ],
+              "runtime": {
+                "env_ids": [
+                  0
+                ]
+              },
+              "post_policies": [
+                {
+                  "policy_index": 0,
+                  "source_path": [
+                    "program",
+                    "items",
+                    1,
+                    "post",
+                    0
+                  ],
+                  "result_mask": [
+                    true
+                  ],
+                  "result": {
+                    "kind": "control_operation",
+                    "preset": "terminal_preset",
+                    "control": {
+                      "revision": 1,
+                      "operation_id": "opaque-operation",
+                      "object_id": "appliance",
+                      "joint": "authored_joint",
+                      "link": "authored_link",
+                      "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "route_digest": "3fbb5dd5a606f660ae8398283abdb8237aecfbfd5c98110c6101d5430bb1d8da",
+                      "criterion": "contact_backed_coarse_turn",
+                      "sample_count": 3,
+                      "window": [
+                        0.1,
+                        0.5
+                      ]
+                    },
+                    "accepted": true,
+                    "terminal": true,
+                    "contact_released": true,
+                    "stable": true,
+                    "others_unchanged": true,
+                    "contact_path": 0.3490658503988659,
+                    "target_qpos_reached": true,
+                    "target_error": 0.01,
+                    "clearance": 0.05
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -51,6 +51,35 @@ values contain only immutable finite data and name their skill/revision.
 tuple; unsupported declarations fail before skill preparation. These contracts
 add no alternate built-in skill implementation or source-specific decoder.
 
+Press keeps its default open-loop path. Explicit `PressPlanningRecovery` permits
+at most two complete B1 plans, including nominal, and consumes the declared
+contact-roll alternative only after failure. Failed phases use Motion's existing
+continuous IK on the same targets and time grid: `lab/sim/motion/ik.py` adapts the
+robot while `compute/kinematics/ik_path.py` owns bounded seed search. Press owns
+only the failed-phase trigger and contact-roll alternative. Robot's
+`compute_batch_ik(continuous=True)` selects solver candidate branches; it does
+not implement this recovery's velocity window, perturbation order or RNG scope
+and is not an interchangeable recovery backend. Final emitted full-robot velocity
+qualification remains rejection-only; no transformed plan triggers another search.
+The configured decoder accepts only the fixed `press_bounded` revision-one
+declaration. `validate_press_extra_distance` validates declaration-owned extra
+travel without changing skill defaults or deciding measured Press success.
+
+`SkillDescriptor.supports_segment_motion_recovery` is read-only and derived
+from the actual Atomic validation override. A copied class marker does not
+advertise a handler. Semantic preflight rejects unsupported segment policy
+before acquisition; the default false field is omitted from canonical descriptor
+metadata, while true capabilities participate in the effective fingerprint.
+
+`MotionPolicy` separates whole-action sample retries, segment recovery and a
+final full-robot speed gate. The complete builder retains exact request/engine
+identity, applies scoped transforms and performs rejection-only qualification.
+`plan_preview` accepts only a same-observation projected context with explicit
+preview role and a different occurrence; it uses the same engine. Preview
+callbacks never become global engine configuration. Unsupported segment recovery
+rejects before provider preparation, and external nominal motion is not replaced
+by native sampling retries. No new Source skill implementation is registered.
+
 `ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
 owned validated attempt before dispatch. Installation rejection latches the
 session: later ticks/revisions cannot resume commands. `ExecutionRunner` keeps
@@ -127,6 +156,17 @@ already-satisfied rows hold, invalid observations fail, and mixed active directi
 are rejected. Omitting the target preserves fixed-distance `SlideOptions` and the
 original Slide tutorial. Slide remains open-loop; this extension does not certify
 contact or physical goal satisfaction.
+
+`source_native_contact` composes preserved explicit source policies with the
+shared Newton collision pipeline over the same GraspKit closing/opening/rest
+algorithms. Contact decisions retain the query owner's conservative interval
+semantics; threshold ambiguity remains unavailable. Scene keeps
+native geometry capture, including the caller-selected sampling grid. The source
+adapter owns only policy mapping, provenance and query cleanup; ordinary
+`ActionPlanningServices.prepare_grasp_query` retains Newton and shared defaults.
+`grasp_geometry.GraspOpeningTarget` is the single value definition, re-exported
+with the same identity from the existing Atomic/runtime imports. No concrete
+skill or alternate registry is installed by these query builders.
 
 ## Package map
 

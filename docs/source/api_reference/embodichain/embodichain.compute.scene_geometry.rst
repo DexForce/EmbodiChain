@@ -402,7 +402,6 @@ uses it without importing Lab or acquiring physical state.
 
 .. autofunction:: embodichain.compute.geometry.contact_support.contact_support_heights
 
-
 Declared alignment targets
 --------------------------
 
@@ -424,3 +423,19 @@ resource identity and motion/recovery policy.
 .. autofunction:: alignment_target_axis
 
 .. autofunction:: held_alignment_targets
+
+Recorded rigid Pour measurements
+--------------------------------
+
+These pure numeric functions measure a recorded rigid tilt/restore window and
+receiver projection. They take explicit source vertices and poses, preserve
+input precision and first-maximum order, and set no acceptance thresholds or
+fluid-transfer conclusions.
+
+.. currentmodule:: embodichain.compute.geometry.pouring
+
+.. autofunction:: measure_pour_tilt
+   :no-index:
+
+.. autofunction:: measure_pour_receiver
+   :no-index:

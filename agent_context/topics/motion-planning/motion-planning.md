@@ -109,6 +109,12 @@ share an outer caller-owned deadline across nested previews and isolate separate
 contexts. They do not replace `_budget.py`'s existing automatic planning hooks,
 preempt native work, or certify physical task success.
 
+Atomic policy propagation keeps whole-request sample alternatives separate from
+MotionGenerator's segment alternatives. Required final speed
+qualification checks emitted full-robot samples after transforms/recovery; it
+never treats zero-speed rejected holds as original candidate evidence. The
+ordinary automatic planning/cancellation hooks remain on AtomicAction.plan.
+
 Normalization must preserve the meaning of timing, derivatives, failure rows
 and backend diagnostics together. Read the
 [result contract](planner-details.md#normalization-and-capabilities) before
@@ -206,7 +212,14 @@ hands provide their own geometry. Sampling/collision stays in the canonical
 contact frame, and public poses map once to the declared runtime TCP. Do not
 add a second hand-specific conversion. GraspKit owns collision-qualified end-region
 selection through `pg_grasp.regions`; callers select a policy without supplying
-a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
+a Task Engine implementation. Explicit `pg_grasp.constraints` and `opening`
+views filter complete object geometry after ordinary ranking and preserve source
+order and infinite-cost failure padding. `preshape` consumes captured numeric
+hand sweeps; `proposals` defers final-TCP qualification without bypassing required
+ground filtering. These APIs import without a Robot, simulation or target
+decomposition backend; `pg_grasp` resolves concrete implementations lazily. Nominal dimensions
+in `hand_envelope` remain separate from physical collision geometry.
+The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
 sampling and physical contact evidence remain Lab responsibilities.
 `pg_grasp.native_contact` owns discrete convex closing/opening and rigid-clearance
