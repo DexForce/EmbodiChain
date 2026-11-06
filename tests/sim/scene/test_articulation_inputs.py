@@ -157,7 +157,7 @@ def test_spatial_reference_uses_catalog_body_not_fixed_grasp_child(monkeypatch):
 
 def test_spatial_reference_reads_owned_scaled_root_geometry_from_actual_usd(tmp_path):
     import numpy as np
-    from _control_source_fixture import knob_source
+    from ._control_source_fixture import knob_source
     from embodichain.lab.sim.scene.spatial_reference import read_spatial_reference
 
     config = knob_source(tmp_path)
