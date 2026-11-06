@@ -238,6 +238,19 @@ Slide receive exact payload/physical-part bindings, including every close payloa
 The exact native transport occurrence retains the source acceleration budget of
 `0.5`; ordinary sampled fixed-grid policies keep `acceleration_limit=None`.
 
+An explicitly authored source `motion_gen` strategy selects the public configured
+cuRobo planner and rigid collision roles, even when the physical policy omitted
+a planner or named another default backend. Its generic source settings retain
+one warmup iteration, `interpolation_dt=0.025`, native-sample preservation disabled
+and the original two-million-voxel capacity. Pick and Place keep their combined
+native queries, without forcing Cartesian IK segments or waypoint recovery.
+The source policy decoder supplies its implicit limits; the producer does not
+substitute the observed payload query's timing or acceleration defaults.
+Source checked generators explicitly select `mask_generation_overspeed` after
+normalization. Fresh prefix/Place recovery queries and the exact drawer payload
+override leave it disabled because those source paths bypassed that facade.
+Explicit Press/Twist forced-IK occurrences retain their sampled source modes.
+
 Native Pick permissions retain the original global revision and explicit
 source-node override forms. Their generated closing bindings use exact compiled
 occurrences; ordinary on-release openings bind the final Place identity and read

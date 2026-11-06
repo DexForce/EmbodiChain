@@ -187,6 +187,7 @@ def _ordinary_integration(
     pour_proxy_position_tolerance_m=None,
     verify_pick_phases=False,
     idle_routes=(),
+    collision_world=False,
 ):
     scene = physical.scene
     embodiment = physical.embodiment if embodiment is None else embodiment
@@ -236,6 +237,7 @@ def _ordinary_integration(
         scene,
         embodiment,
         program_id=program_id,
+        collision_world=collision_world,
         link_declarations=controls.link_declarations() + prismatic.link_declarations(),
         container_declarations={
             route.target_id: route.container_declaration() for route in drawers
@@ -939,6 +941,10 @@ def prepare_generated_task_program_bundle(
         coarse_groups = {
             entry["group_id"] for name in coarse_steps for entry in step_lineage[name]
         }
+    generic_native = (
+        physical.execution_policy.get("motion", {}).get("strategy", "ik_interp")
+        == "motion_gen"
+    )
     integration, program, control_sensors, drawers = _ordinary_integration(
         selected,
         physical,
@@ -952,6 +958,7 @@ def prepare_generated_task_program_bundle(
         pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
         verify_pick_phases=verify_pick_phases,
         idle_routes=idle_clearance_routes or (),
+        collision_world=generic_native,
     )
     sensor_ids = {sensor["uid"] for sensor in runtime_embodiment.get("sensor", ())}
     if sensor_ids & {sensor["uid"] for sensor in control_sensors}:
@@ -965,13 +972,42 @@ def prepare_generated_task_program_bundle(
         ]
     policy = deepcopy(physical.execution_policy)
     motion = policy.setdefault("motion", {})
-    motion.update(
-        interpolation_mode="fixed_grid",
-        ik_seed_mode="sequential",
-        acceleration_limit=None,
-        sample_count_retries=[260, 320],
-        require_final_velocity=False,
-    )
+    motion["mask_generation_overspeed"] = True
+    if generic_native:
+        if {"velocity_limit", "acceleration_limit"} & motion.keys():
+            raise ValueError(
+                "Sampled GenSim cannot discard explicit motion limits; select lab.motion_limits/v1."
+            )
+        motion.update(
+            interpolation_mode="adaptive",
+            ik_seed_mode="batched",
+            sample_count_retries=[260, 320],
+            require_final_velocity=False,
+        )
+        # Source selected this backend from the effective policy, independently
+        # of an optional planner declaration. Preserve its generic defaults;
+        # observed payload/prefix queries have a separate timing contract.
+        policy["planner"] = dict(
+            type="curobo",
+            config=dict(
+                use_cuda_graph=False,
+                warmup_iterations=1,
+                interpolation_dt=0.025,
+                preserve_plan_samples=False,
+                world=dict(max_voxel_count=2_000_000),
+                graph_planner_algorithm="prm",
+                enable_timeopt=False,
+                fit_graph_seed_to_bspline=False,
+            ),
+        )
+    else:
+        motion.update(
+            interpolation_mode="fixed_grid",
+            ik_seed_mode="sequential",
+            acceleration_limit=None,
+            sample_count_retries=[260, 320],
+            require_final_velocity=False,
+        )
     policy.setdefault("recovery", {})["planning_budget"] = {}
     if "presets" in policy:
         raise ValueError(
@@ -1154,6 +1190,9 @@ def prepare_generated_task_program_bundle(
         node = nodes[segment.name]
         call = node["call"]
         identity = call["kind"] if call["kind"] != "registered" else call["call_id"]
+        source_ik = not generic_native or identity.startswith(
+            ("gen_sim.press", "gen_sim.twist")
+        )
         name = f"gen_sim.{segment.name}.execution"
         presets[segment.name] = name
         minimum = (
@@ -1173,11 +1212,11 @@ def prepare_generated_task_program_bundle(
             options.update(
                 adaptive_grasp="pour" if node["task_type"] == "E3" else "ordinary",
                 full_opening_clearance=True,
-                require_qualified_approach=node["task_type"] != "E3",
+                require_qualified_approach=source_ik and node["task_type"] != "E3",
             )
             if native_pick_exploration and node["task_type"] != "E3":
                 options["native_scene_trial"] = True
-            if node["task_type"] != "E3":
+            if source_ik and node["task_type"] != "E3":
                 current["recovery"] = dict(
                     planning_recovery=dict(kind="pick_bounded", revision=1)
                 )
@@ -1200,7 +1239,7 @@ def prepare_generated_task_program_bundle(
                     full_opening_clearance=True,
                     require_qualified_approach=False,
                 )
-            if constrained:
+            if constrained and source_ik:
                 current["recovery"] = dict(
                     planning_recovery=dict(
                         kind="pick_bounded", revision=1, constrained_roll=True
@@ -1208,7 +1247,7 @@ def prepare_generated_task_program_bundle(
                 )
         elif identity == "gen_sim.align_held":
             options.update(lift_clearance=0.06, report_retained_attachment=True)
-            if call["arguments"].get("preserve_yaw") is False:
+            if source_ik and call["arguments"].get("preserve_yaw") is False:
                 current["recovery"] = dict(
                     planning_recovery=dict(
                         kind="held_alignment_bounded",
@@ -1218,15 +1257,16 @@ def prepare_generated_task_program_bundle(
                 )
         elif identity == "hand_over":
             options.update(handover_options[node["id"]])
-            if options["adaptive_receive"]:
+            if source_ik and options["adaptive_receive"]:
                 current["recovery"] = dict(
                     planning_recovery=dict(kind="handover_bounded", revision=1)
                 )
         elif identity in {"place", "simulation.place_relative"}:
             options.update(
-                linear_segments=True,
+                linear_segments=source_ik,
                 qualify_required_waypoints=(
-                    node.get("task_instance_id", node["id"]) not in cartesian_groups
+                    source_ik
+                    and node.get("task_instance_id", node["id"]) not in cartesian_groups
                 ),
                 monitor_scene_until_approach=True,
             )
@@ -1234,14 +1274,18 @@ def prepare_generated_task_program_bundle(
                 # Source Pour-return policy revision 1 selected only this exact
                 # occurrence; ordinary Place and the shared default keep theirs.
                 options["lift_height"] = 0.12
-            current["motion"].update(
-                segment_sample_count_retries=[260, 320],
-                segment_continuous_ik_recovery=True,
-            )
+            if source_ik:
+                current["motion"].update(
+                    segment_sample_count_retries=[260, 320],
+                    segment_continuous_ik_recovery=True,
+                )
             # Source Cartesian Place bypasses both the required-waypoint probe
             # and its bounded waypoint recovery, retaining ordinary nominal
             # planning and the independent segment motion retries below.
-            if node.get("task_instance_id", node["id"]) not in cartesian_groups:
+            if (
+                source_ik
+                and node.get("task_instance_id", node["id"]) not in cartesian_groups
+            ):
                 current["recovery"] = dict(
                     planning_recovery=dict(
                         kind="place_bounded", revision=1, variant="waypoint"
@@ -1281,16 +1325,17 @@ def prepare_generated_task_program_bundle(
                 "gen_sim.articulation_withdraw": "articulation_withdrawal",
                 "gen_sim.articulation_park": "articulation_park",
             }
-            current["motion"].update(
-                segment_sample_count_retries=(
-                    [] if identity == "gen_sim.articulation_park" else [260, 320]
-                ),
-                segment_continuous_ik_recovery=False,
-            )
-            current["recovery"] = dict(
-                planning_recovery=dict(kind=kinds[identity], revision=1)
-            )
-            if identity == "gen_sim.articulation_slide":
+            if source_ik:
+                current["motion"].update(
+                    segment_sample_count_retries=(
+                        [] if identity == "gen_sim.articulation_park" else [260, 320]
+                    ),
+                    segment_continuous_ik_recovery=False,
+                )
+                current["recovery"] = dict(
+                    planning_recovery=dict(kind=kinds[identity], revision=1)
+                )
+            if source_ik and identity == "gen_sim.articulation_slide":
                 options["qualify_hand_clearance"] = True
                 current["recovery"]["planning_recovery"][
                     "preshape_aperture_recovery"
@@ -1307,6 +1352,11 @@ def prepare_generated_task_program_bundle(
         elif identity.startswith("gen_sim.press") or identity.startswith(
             "gen_sim.twist"
         ):
+            current["motion"].update(
+                interpolation_mode="fixed_grid",
+                ik_seed_mode="sequential",
+                acceleration_limit=None,
+            )
             if identity.startswith("gen_sim.press.") or identity == "gen_sim.press":
                 current["motion"].update(
                     strategy="ik_interp",
@@ -1323,7 +1373,7 @@ def prepare_generated_task_program_bundle(
                     max_action_retries=0,
                     planning_recovery=dict(kind="twist_bounded", revision=1),
                 )
-        if node["id"] in post_handover_nodes:
+        if source_ik and node["id"] in post_handover_nodes:
             options.update(
                 linear_segments=True,
                 qualify_required_waypoints=False,
@@ -1399,14 +1449,24 @@ def prepare_generated_task_program_bundle(
                         strategy="motion_gen",
                         interpolation_mode="adaptive",
                         acceleration_limit=0.5,
+                        mask_generation_overspeed=False,
                         ik_seed_mode="batched",
                         segment_sample_count_retries=[],
                         segment_continuous_ik_recovery=False,
                     )
                     current.pop("recovery", None)
-        if node.get("task_instance_id", node["id"]) in cartesian_groups and options[
-            "kind"
-        ] in {"pick_up", "place", "move_held_object", "move_end_effector", "hand_over"}:
+        if (
+            source_ik
+            and node.get("task_instance_id", node["id"]) in cartesian_groups
+            and options["kind"]
+            in {
+                "pick_up",
+                "place",
+                "move_held_object",
+                "move_end_effector",
+                "hand_over",
+            }
+        ):
             if (
                 identity
                 not in {
@@ -1421,7 +1481,7 @@ def prepare_generated_task_program_bundle(
                     segment_continuous_ik_recovery=False,
                 )
         occurrence = occurrence_ids[segment.name]
-        if occurrence in released_clearances:
+        if source_ik and occurrence in released_clearances:
             options["linear_segments"] = True
             current["motion"].update(
                 segment_sample_count_retries=[260, 320],

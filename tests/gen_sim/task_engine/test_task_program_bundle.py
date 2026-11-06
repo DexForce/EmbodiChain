@@ -36,7 +36,7 @@ from embodichain.gen_sim.task_spec import canonical_hash
 from embodichain.data.asset_dependencies import collect_declared_asset_files
 
 
-def _frozen(tmp_path, *, slender=False, slender_pad=False):
+def _frozen(tmp_path, *, slender=False, slender_pad=False, execution_policy=None):
     files = json.loads(
         (Path(__file__).parent / "data/e1_bundle_declarations.json").read_text()
     )["files"]
@@ -92,6 +92,8 @@ def _frozen(tmp_path, *, slender=False, slender_pad=False):
     )
     policy = values["components/execution_policy.yaml"]
     policy.pop("presets")
+    if execution_policy is not None:
+        policy = deepcopy(execution_policy)
     deployment = {
         key: value
         for key, value in values["task_program_deployment.yaml"].items()
@@ -122,6 +124,287 @@ def _frozen(tmp_path, *, slender=False, slender_pad=False):
         )
     )
     return values, replace(frozen, physical_digest=digest)
+
+
+@pytest.mark.parametrize("authored_planner", [None, {"type": "toppra", "config": {}}])
+def test_source_generic_motion_gen_preserves_configured_backend_and_native_policy(
+    tmp_path, monkeypatch, authored_planner
+):
+    from types import SimpleNamespace as NS
+    from unittest.mock import MagicMock
+    import torch
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.task_program.integrations import SimulationTaskProgramFactory
+    from embodichain.lab.task_program.integrations.simulation import environment as host
+    from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+        CuroboPlannerCfg,
+    )
+
+    # This owned policy is also valid Source89d sampled input: select only the
+    # public strategy, without authoring the scalar limit keys it rejected.
+    policy = yaml.safe_load(
+        (
+            Path(__file__).parents[3]
+            / "extensions/embodichain_tasks/configs/components/execution_policies"
+            / "dual_arm_trajectory_verified.yaml"
+        ).read_text()
+    )
+    policy["motion"]["strategy"] = "motion_gen"
+    if authored_planner is not None:
+        policy["planner"] = deepcopy(authored_planner)
+    values, physical = _frozen(tmp_path, execution_policy=policy)
+    _, paths = generate_task_program_bundle(
+        values["semantic_task_graph.json"],
+        physical,
+        tmp_path / "native",
+        robot_profile="dual_franka",
+        implementation_revisions={"embodichain": "test-source"},
+    )
+    loaded = load_configured_bundle(
+        paths.root,
+        external_input_digests={
+            **physical.input_files,
+            **resolve_source_hand_services(physical.embodiment)[2],
+        },
+        implementation_revisions={"embodichain": "test-source"},
+    )
+    registration = loaded.deployment.integration.registration
+    assert loaded.deployment.planner_config["type"] == "curobo"
+    release = next(
+        node
+        for node in values["semantic_task_graph.json"]["nodes"]
+        if node["call"].get("call_id") == "simulation.place_relative"
+    )
+    native = next(
+        preset
+        for preset in registration.robot_profile_binding.presets
+        if preset.preset_id == f"gen_sim.{release['id']}.execution"
+    )
+    assert native.motion_policy.strategy == "motion_gen"
+    assert native.motion_policy.interpolation_mode == "adaptive"
+    assert native.motion_policy.ik_seed_mode == "batched"
+    # Source policy decoding supplies .5; its generic Checked native branch
+    # forwards it. Do not infer this from a new planner/Drawer config default.
+    assert native.motion_policy.acceleration_limit == 0.5
+    assert not native.motion_policy.segment_sample_count_retries
+    assert not native.motion_policy.segment_continuous_ik_recovery
+    assert native.recovery_policy.planning_recovery is None
+    action = native.action_option_template("simulation.place_relative")
+    assert not action.linear_segments and not action.qualify_required_waypoints
+
+    robot = MagicMock()
+    robot.uid = physical.embodiment["simulation"]["uid"]
+    robot.device = torch.device("cpu")
+    robot.num_instances = 1
+    robot.control_parts = physical.embodiment["simulation"]["control_parts"]
+    robot.joint_names = list(
+        dict.fromkeys(name for names in robot.control_parts.values() for name in names)
+    )
+    robot.dof = len(robot.joint_names)
+    robot.get_qpos.return_value = torch.zeros(1, robot.dof)
+    robot.get_joint_ids.side_effect = lambda name=None: (
+        list(range(robot.dof))
+        if name is None
+        else [robot.joint_names.index(joint) for joint in robot.control_parts[name]]
+    )
+    vertices = torch.as_tensor(trimesh.creation.box().vertices, dtype=torch.float32)[
+        None
+    ]
+    entities = {
+        key: NS(
+            uid=key,
+            get_vertices=lambda **kwargs: vertices,
+            get_local_pose=lambda **kwargs: torch.eye(4)[None],
+        )
+        for key in ("table", "cylinder", "pad")
+    }
+    sim = NS(
+        num_envs=1,
+        instance_id=23,
+        physics_backend="default",
+        simulation_time=0.0,
+        get_robot=lambda uid: robot if uid == robot.uid else None,
+        get_rigid_object=lambda uid: entities.get(uid),
+    )
+
+    class PostPolicies:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def close_runtime_resources(self):
+            pass
+
+    # This check observes backend construction, not contact sensor acquisition.
+    monkeypatch.setattr(host, "SimulationSegmentPolicyPort", PostPolicies)
+    factory = SimulationTaskProgramFactory.from_environment(
+        NS(sim=sim, robot=robot, sensors={}, step_dt=0.04),
+        registration=registration,
+        planner_config=loaded.deployment.planner_config,
+    )
+    captured = []
+
+    class CapturedPlanner(RuntimeError):
+        pass
+
+    class PlannerPort:
+        def __init__(self, cfg):
+            captured.append(cfg)
+            raise CapturedPlanner
+
+    monkeypatch.setitem(
+        MotionGenerator._support_planner_dict, "curobo", (PlannerPort, CuroboPlannerCfg)
+    )
+    try:
+        with pytest.raises(CapturedPlanner):
+            factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    finally:
+        factory.close_runtime_resources()
+    (cfg,) = captured
+    assert cfg.robot_uid == robot.uid and cfg.sim_instance_id == 23
+    assert cfg.use_cuda_graph is False
+    assert cfg.warmup_iterations == 1
+    assert cfg.interpolation_dt == 0.025
+    assert cfg.preserve_plan_samples is False
+    assert cfg.world.max_voxel_count == 2_000_000
+    assert dict(cfg.world.rigid_objects) == entities
+    assert cfg.world.dynamic_obstacle_names == ["cylinder", "pad"]
+    assert native.motion_policy.mask_generation_overspeed is True
+
+    from sim.atomic_actions.test_ordinary_pick import _inputs
+    from sim.atomic_actions._ordinary_pick_fixture import place_fixture
+    from embodichain.lab.sim.atomic_actions import AtomicActionEngine
+    from embodichain.lab.sim.motion.planners.utils import PlanResult
+
+    native_calls = []
+
+    class NativePort:
+        collision_world_info = None
+        preserve_plan_samples = False
+        supports_heterogeneous_waypoints = True
+
+        def __init__(self):
+            self.cfg = cfg
+
+        def supports_move_type(self, move):
+            return True
+
+        def with_motion_context(self, options, *, start_qpos, control_part):
+            options.start_qpos, options.control_part = start_qpos, control_part
+            return options
+
+        def plan(self, target_states, options):
+            native_calls.append((options.max_acceleration, len(target_states)))
+            start = options.start_qpos
+            pieces, indices, count = [start[:, None]], [], 1
+            for target in target_states:
+                stop = target.xpos[:, :3, 3]
+                t = torch.linspace(0, 1, 101)[1:]
+                weight = 10 * t**3 - 15 * t**4 + 6 * t**5
+                pieces.append(
+                    torch.lerp(start[:, None], stop[:, None], weight[None, :, None])
+                )
+                start, count = stop, count + len(t)
+                indices.append(count - 1)
+            positions = torch.cat(pieces, dim=1)
+            dt = positions.new_full(positions.shape[:2], cfg.interpolation_dt)
+            dt[:, 0] = 0
+            return PlanResult(
+                success=torch.tensor([True]),
+                positions=positions,
+                dt=dt,
+                waypoint_indices=torch.tensor([indices]),
+            )
+
+    pick_dir = tmp_path / "pick_request"
+    pick_dir.mkdir()
+    old_engine, old_call, observed, *_ = _inputs(pick_dir, monkeypatch)
+    ordinary_dir = tmp_path / "place_request"
+    ordinary_dir.mkdir()
+    _, placed, goal, *_ = place_fixture(ordinary_dir)
+    for kind, goal, current in (
+        ("pick_up", old_call.goal, observed),
+        ("place", goal, placed),
+    ):
+        facade = object.__new__(MotionGenerator)
+        facade.robot, facade.device, facade.planner = (
+            old_engine.robot,
+            torch.device("cpu"),
+            NativePort(),
+        )
+        facade.robot.get_qpos.return_value = current.robot.qpos
+        engine = AtomicActionEngine(
+            facade,
+            control_profiles=old_engine.planning_services.control_profiles,
+            grasp_pose_generators=old_engine.planning_services.grasp_pose_generators,
+            free_motion_query=old_engine.planning_services.free_motion_query,
+        )
+        identity = "pick" if kind == "pick_up" else "simulation.place_relative"
+        source_node = next(
+            node
+            for node in values["semantic_task_graph.json"]["nodes"]
+            if node["call"].get("call_id", node["call"]["kind"]) == identity
+        )
+        selected = next(
+            item
+            for item in registration.robot_profile_binding.presets
+            if item.preset_id == f"gen_sim.{source_node['id']}.execution"
+        )
+        call = engine.make_invocation(
+            kind,
+            goal,
+            control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
+            skill_options=selected.action_option_template(identity),
+            motion_policy=selected.motion_policy,
+            recovery_policy=selected.recovery_policy,
+        )
+        ik_before = (
+            facade.robot.compute_ik.call_count,
+            facade.robot.compute_batch_ik.call_count,
+        )
+        planned = engine.plan(call, current)
+        assert planned.plan_success.all()
+        assert torch.allclose(
+            planned.joint_trajectory.dt[:, 1:],
+            planned.joint_trajectory.dt[:, 1:].new_full(
+                planned.joint_trajectory.dt[:, 1:].shape, 0.04
+            ),
+        )
+        if kind == "place":
+            assert (
+                facade.robot.compute_ik.call_count,
+                facade.robot.compute_batch_ik.call_count,
+            ) == ik_before
+    # Source's native Pick combines pre-grasp/grasp/lift; Place retains its
+    # two-keyframe translation law in one combined down/retract query.
+    assert native_calls == [(0.5, 3), (0.5, 6)]
+    physical.assert_unchanged()
+
+
+@pytest.mark.parametrize("field", ["velocity_limit", "acceleration_limit"])
+@pytest.mark.parametrize("value", [None, 0.5])
+def test_source_generic_motion_gen_keeps_authored_limit_rejection(
+    tmp_path, field, value
+):
+    policy = yaml.safe_load(
+        (
+            Path(__file__).parents[3]
+            / "extensions/embodichain_tasks/configs/components/execution_policies"
+            / "dual_arm_trajectory_verified.yaml"
+        ).read_text()
+    )
+    policy["motion"].update(strategy="motion_gen", **{field: value})
+    values, physical = _frozen(tmp_path, execution_policy=policy)
+    output = tmp_path / "rejected"
+    with pytest.raises(ValueError, match="cannot discard explicit motion limits"):
+        generate_task_program_bundle(
+            values["semantic_task_graph.json"],
+            physical,
+            output,
+            robot_profile="dual_franka",
+            implementation_revisions={"embodichain": "test-source"},
+        )
+    assert not output.exists()
+    physical.assert_unchanged()
 
 
 @pytest.mark.parametrize("with_frozen_cache", [False, True])
@@ -566,6 +849,7 @@ def test_generated_drawer_native_transport_keeps_source_acceleration_cap(
         for item in registration.robot_profile_binding.presets
         if item.preset_id == selected.preset_id
     )
+    assert preset.motion_policy.mask_generation_overspeed is False
     fixture_dir = tmp_path / "native_port"
     fixture_dir.mkdir()
     base, generator, context, invocation, *_ = drawer_transport_fixture(fixture_dir)
