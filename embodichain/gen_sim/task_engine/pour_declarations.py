@@ -28,6 +28,24 @@ from embodichain.lab.task_program.integrations.hand_calibration import (
 __all__ = ["resolve_pour_lowerer_declarations", "supports_ordinary_pour"]
 
 
+def _pour_return_call_declarations(graph: Mapping[str, Any]) -> list[str]:
+    """Select the first absolute Place after the same source recipe's Pour."""
+    pending: set[tuple[str, str]] = set()
+    result = []
+    for node in graph["nodes"]:
+        if node["task_type"] != "E3":
+            continue
+        call = node["call"]
+        if call.get("call_id") == "simulation.pour":
+            pending.add((node["task_instance_id"], call["arguments"]["object"]))
+        elif call["kind"] == "place" and call.get("at") is not None:
+            key = (node["task_instance_id"], call["object"])
+            if key in pending:
+                result.append(node["id"])
+                pending.remove(key)
+    return result
+
+
 def resolve_pour_lowerer_declarations(
     graph: Mapping[str, Any],
     objects: Mapping[str, Mapping[str, Any]],

@@ -205,6 +205,7 @@ def test_original_generation_api_publishes_from_frozen_declarations_without_sim(
     )
     assert oracle["cartesian_calls"]["e1-franka-originalenv-v2"] == []
     assert place["qualify_required_waypoints"] is True
+    assert place["lift_height"] == 0.1
     assert later[0]["recovery"]["planning_recovery"]["variant"] == "waypoint"
     (continuation,) = registration.planning_services.place_continuation_bindings
     assert (
@@ -417,6 +418,8 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
         (paths.root / "task_program/integration.yaml").read_text()
     )
     services = declaration["runtime_services"]
+    # Source pour-return policy revision 1 overrides only occurrence options.
+    assert declaration["profile"]["action_options"]["place"]["lift_height"] == 0.05
     if runtime_profile == "auto":
         assert (
             json.loads((paths.root / "runtime_profile_selection.json").read_text())[
@@ -454,6 +457,12 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
             else {}
         )
         if node["call"]["kind"] == "place":
+            assert (
+                declaration["profile"]["preset_options"][name]["action_options"][
+                    "place"
+                ]["lift_height"]
+                == 0.12
+            )
             assert (
                 declaration["profile"]["preset_options"][name]["action_options"][
                     "place"
@@ -508,9 +517,12 @@ def test_generated_pour_return_keeps_source_nominal_future_place(tmp_path, monke
         for item in registration.invocation_policy_bindings
         if item.preset_id == preset_id
     )
+    # This is the effective public deployment value, after occurrence linking,
+    # matching B0 InvocationPolicy._resolve for its exact Pour-return call.
+    assert preset.action_option_template("place").lift_height == 0.12
     fixture_dir = tmp_path / "future_return"
     fixture_dir.mkdir()
-    engine, invocation, context, session, check, *_ = continuation_fixture(
+    engine, invocation, context, session, check, calls, *_ = continuation_fixture(
         fixture_dir, "success"
     )
     monkeypatch.setattr(mesh_collision, "_make_checker", lambda *args, **kwargs: check)
@@ -540,6 +552,12 @@ def test_generated_pour_return_keeps_source_nominal_future_place(tmp_path, monke
             recovery_policy=preset.recovery_policy,
         )
         preview = build.plan_preview(future, projected)
+        # Observe the actual controlled Motion port, rather than only the
+        # serialized option: its final retract target retains the source lift.
+        retract_target = torch.as_tensor(calls[-1]["targets"][-1])
+        torch.testing.assert_close(
+            retract_target[:, 2, 3], future.goal.xpos[:, 2, 3] + 0.12
+        )
         assert torch.equal(
             preview.joint_trajectory.positions[:, 0], projected.robot.qpos
         )
