@@ -39,8 +39,9 @@ def test_production_composition_replays_frozen_held_outcomes(index, raw):
     declaration = TaskEngineManipulationBinding(runtime, acceptance)
     sealed = declaration.to_dict()
     decoded = TaskEngineManipulationBinding.from_dict(sealed)
+    assert decoded.to_dict() == sealed
     result = evaluate_task_engine_evidence(
-        spec, [decoded], {"proof": evidence}, program=program, num_envs=1
+        spec, [sealed], {"proof": evidence}, program=program, num_envs=1
     )
     # Historical truth is pinned by the owning frozen source fixture.
     pred = result[0].to_dict()[

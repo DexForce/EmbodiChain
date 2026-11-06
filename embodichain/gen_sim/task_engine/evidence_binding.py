@@ -235,6 +235,47 @@ def _acceptance(
     )
 
 
+def _decode_binding(value: Any) -> Any:
+    """Decode live or archived declarations through the same checked public types."""
+    from embodichain.gen_sim.task_spec.evidence import SupportedPlacementEvidenceBinding
+    from embodichain.gen_sim.task_spec.placement_group_evidence import (
+        PlacementEvidenceGroupBinding,
+    )
+    from embodichain.gen_sim.task_spec.condition_evidence import (
+        ConditionEvidenceBinding,
+    )
+    from embodichain.gen_sim.task_spec.condition_group_evidence import (
+        ConditionEvidenceGroupBinding,
+    )
+    from embodichain.gen_sim.task_spec.pour_evidence import PourEvidenceBinding
+    from embodichain.gen_sim.task_spec.control_evidence import ControlEvidenceBinding
+
+    schemas = {
+        "condition_evidence_binding": ConditionEvidenceBinding,
+        "condition_group_evidence_binding": ConditionEvidenceGroupBinding,
+        "pour_evidence_binding": PourEvidenceBinding,
+        "control_evidence_binding": ControlEvidenceBinding,
+        "placement_evidence_binding": SupportedPlacementEvidenceBinding,
+        "placement_group_evidence_binding": PlacementEvidenceGroupBinding,
+    }
+    if type(value) in (
+        *schemas.values(),
+        *_RUNTIME_TYPES,
+        TaskEngineManipulationBinding,
+    ):
+        return type(value).from_dict(value)
+    if isinstance(value, Mapping):
+        schema = value.get("schema_version", "")
+        if schema == "task_engine.manipulation_evidence_binding/v1":
+            return TaskEngineManipulationBinding.from_dict(value)
+        for name, cls in schemas.items():
+            if type(schema) is str and schema.startswith("task_spec." + name + "/"):
+                return cls.from_dict(value)
+    raise ValueError(
+        "Evidence requires an explicit supported binding schema; regenerate old declarations."
+    )
+
+
 def _normalize(
     spec: TaskSpec, binding: Any, packet: Mapping[str, Any], program: Mapping[str, Any]
 ) -> tuple[Any, dict[str, Any]]:
@@ -295,7 +336,8 @@ def evaluate_task_engine_evidence(
 
     Args:
         spec: Frozen normative specification.
-        bindings: Explicit runtime/acceptance declarations, or other supported bindings.
+        bindings: Checked objects or archived JSON declarations for runtime/acceptance
+            associations and other supported binding families.
         evidence: Raw packets keyed by predicate identity.
         program: Complete immutable program declaration.
         num_envs: Exact number of environment rows.
@@ -308,9 +350,10 @@ def evaluate_task_engine_evidence(
     )
 
     normalized = TaskSpec.from_dict(spec)
+    selected = [_decode_binding(value) for value in bindings]
     pairs = [
         _normalize(normalized, binding, evidence.get(binding.predicate_id, {}), program)
-        for binding in bindings
+        for binding in selected
     ]
     return evaluate_physical_evidence_report(
         normalized,

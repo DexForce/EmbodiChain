@@ -55,6 +55,7 @@ from embodichain.lab.task_program.integrations.evidence import (
 from .evidence_binding import (
     TaskEngineManipulationBinding,
     evaluate_task_engine_evidence,
+    _decode_binding,
 )
 from .bundle_deployment import LoadedTaskProgramBundle
 from .bundle_io import BundleSnapshot
@@ -80,42 +81,6 @@ _Binding = (
     | ControlEvidenceBinding
     | TaskEngineManipulationBinding
 )
-_TYPES = (
-    SupportedPlacementEvidenceBinding,
-    PlacementEvidenceGroupBinding,
-    ConditionEvidenceBinding,
-    ConditionEvidenceGroupBinding,
-    PourEvidenceBinding,
-    HandOverEvidenceBinding,
-    CoordinatedHoldEvidenceBinding,
-    CoordinatedTransportEvidenceBinding,
-    ControlEvidenceBinding,
-    TaskEngineManipulationBinding,
-)
-_SCHEMAS = {
-    "condition_evidence_binding": ConditionEvidenceBinding,
-    "condition_group_evidence_binding": ConditionEvidenceGroupBinding,
-    "pour_evidence_binding": PourEvidenceBinding,
-    "handover_evidence_binding": HandOverEvidenceBinding,
-    "coordinated_hold_evidence_binding": CoordinatedHoldEvidenceBinding,
-    "coordinated_transport_evidence_binding": CoordinatedTransportEvidenceBinding,
-    "control_evidence_binding": ControlEvidenceBinding,
-    "placement_evidence_binding": SupportedPlacementEvidenceBinding,
-    "placement_group_evidence_binding": PlacementEvidenceGroupBinding,
-}
-
-
-def _binding(value: _Binding | Mapping[str, Any]) -> _Binding:
-    if type(value) in _TYPES:
-        return type(value).from_dict(value)
-    if isinstance(value, Mapping):
-        schema = value.get("schema_version", "")
-        if schema == "task_engine.manipulation_evidence_binding/v1":
-            return TaskEngineManipulationBinding.from_dict(value)
-        for name, cls in _SCHEMAS.items():
-            if type(schema) is str and schema.startswith("task_spec." + name + "/"):
-                return cls.from_dict(value)
-    raise ValueError("Evidence sessions require an explicit supported binding schema.")
 
 
 def _one(values: Any, description: str) -> Any:
@@ -383,7 +348,7 @@ class TaskEngineEvidenceSession:
             raise ValueError(
                 "A bundle without TaskSpec cannot bind normative evidence."
             )
-        declaration = _binding(value)
+        declaration = _decode_binding(value)
         if isinstance(
             declaration,
             (
