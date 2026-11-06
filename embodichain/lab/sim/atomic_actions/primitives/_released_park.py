@@ -440,6 +440,8 @@ def recover(
 
 def qualify_and_recover_park(action, request, context, plan, build):
     """Retain recursive source qualification on the same observed Park commands."""
+    from embodichain.lab.sim.motion.search import measure_search
+
     endpoint = request.binding.endpoint("primary", "motion")
     motion = endpoint.require_target(JointPositionTarget)
     query = action.planning_services.free_motion_query
@@ -450,15 +452,20 @@ def qualify_and_recover_park(action, request, context, plan, build):
         else validate_motion(plan, context, action.robot, query, motion.control_part)
     )
     original = plan
+
+    def rebuild(selected: Any, current: Any) -> Any:
+        with measure_search("complete_plan_request"):
+            return qualify_and_recover_park(
+                action, selected, current, build(selected), build
+            )
+
     plan = recover(
         action,
         request,
         context,
         plan,
         acceptance=acceptance,
-        build=lambda selected, current: qualify_and_recover_park(
-            action, selected, current, build(selected), build
-        ),
+        build=rebuild,
         query=query,
     )
     if plan is not original and plan.plan_success.all():

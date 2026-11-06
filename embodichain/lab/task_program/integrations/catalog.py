@@ -698,6 +698,11 @@ class TaskProgramIntegrationCatalog:
 
     idle_factories: tuple[IdleClearanceFactory, ...] = field(default=(), kw_only=True)
 
+    prismatic_factories: tuple[RegisteredSemanticLowererFactory, ...] = field(
+        default=(), kw_only=True, repr=False
+    )
+    """Immutable source factories used for pre-simulation occurrence validation."""
+
     control_calls: tuple[tuple[str, ControlOperationDeclaration, bool], ...] = field(
         default=(), kw_only=True
     )
@@ -1359,6 +1364,17 @@ class TaskProgramIntegrationCatalog:
             free_motion_query=self.native_pick_free_motion,
             continuation_routes=continuation_routes,
         )
+        if self.prismatic_factories:
+            from .simulation.articulation_session import _bind_articulation_declarations
+
+            _bind_articulation_declarations(
+                compiled,
+                self.robot_profile,
+                self.scene,
+                self.call_catalog,
+                self.prismatic_factories,
+                self.invocation_policy_bindings,
+            )
         from .simulation.slide_preshape import _validate_slide_preshape_program
 
         _validate_slide_preshape_program(
@@ -2481,7 +2497,10 @@ class SimulationTaskProgramRegistration:
                 recorded_contacts_cfg=self.recorded_contacts_cfg,
             )
         )
-        from .simulation.prismatic_lowering import ArticulationParkFactory
+        from .simulation.prismatic_lowering import (
+            ArticulationSlideFactory,
+            ArticulationParkFactory,
+        )
 
         object.__setattr__(
             self,
@@ -2561,6 +2580,13 @@ class SimulationTaskProgramRegistration:
                     else self.planning_services.slide_preshape_bindings
                 ),
                 idle_factories=idle_factories,
+                prismatic_factories=tuple(
+                    factory
+                    for factory in self.registered_semantic_lowerer_factories
+                    if isinstance(
+                        factory, (ArticulationSlideFactory, ArticulationParkFactory)
+                    )
+                ),
                 scene_registry_id=self.scene_binding.registry_id,
                 robot_profile_id=self.robot_profile_binding.profile_id,
                 scene=scene,
@@ -2665,9 +2691,14 @@ class SimulationTaskProgramRegistration:
         """Preflight declared native observation capabilities without starting Sim.
 
         Args:
-            physics: Explicit environment-owned backend name.
+            physics: Explicit environment-owned backend name, ``default`` or
+                ``newton``.
         """
         self.assert_unchanged()
+        if type(physics) is not str or physics not in {"default", "newton"}:
+            raise ValueError(
+                "Declare an explicit supported physics backend: default or newton."
+            )
         if self.recorded_contacts_cfg is not None and physics != "default":
             raise ValueError("Recorded source contacts require Default physics.")
         if self.planning_services is not None:

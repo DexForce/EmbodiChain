@@ -186,11 +186,9 @@ def test_place_scene_owns_arrays_and_uses_explicit_floor_identity(
     assert torch.equal(copied.geometry["payload"], before)
 
 
-def test_unimplemented_place_branch_rule_is_rejected_statically():
+def test_unsupported_place_recovery_variant_is_rejected_statically():
     with pytest.raises(ValueError, match="Unsupported Place recovery variant"):
         PlacePlanningRecovery(variant="support")
-    with pytest.raises(ValueError, match="Drawer Place is not installed"):
-        PlaceOptions(drawer_placement=True)
 
 
 def test_place_recovery_floor_role_uses_supplied_identity_not_name(

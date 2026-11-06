@@ -25,6 +25,8 @@ import pytest
 import torch
 from ._released_clearance_fixture import fixture, record
 from embodichain.lab.sim.atomic_actions.primitives._released_clearance import recover
+from embodichain.lab.sim.motion import search
+from embodichain.lab.sim.motion.mesh_collision import MotionCollisionReport
 
 
 @pytest.mark.parametrize(
@@ -171,3 +173,63 @@ def test_suffix_preview_rejects_a_request_owned_by_another_engine(tmp_path):
     assert result.plan_success.tolist() == [False] and foreign_calls == []
     attempt = result.diagnostics.metadata["gen_sim_clearance_recovery"]["attempts"][0]
     assert attempt["reason"] == "park_planning_error" and "identity" in attempt["error"]
+
+
+def _released_park_with_collision(tmp_path, *, collision, clock=None, expires_at=None):
+    engine, _, context, session, query, calls = fixture(
+        tmp_path, "nominal", enabled=True
+    )
+    request = session.resolve_park(0, context)
+    inspect = query.inspect
+
+    def observed(positions, *, control_part):
+        report = inspect(positions, control_part=control_part)
+        if clock is not None and len(query.reads) == expires_at:
+            clock[0] = 1.0
+        if collision and len(query.reads) == 1:
+            return MotionCollisionReport(
+                False, frame=3, kind="scene", pairs=(("arm", "fixture"),)
+            )
+        return report
+
+    query.inspect = observed
+    return engine, request, context, query, calls
+
+
+@pytest.mark.parametrize("collision", [False, True])
+def test_released_park_counts_complete_candidates_without_counting_nominal_twice(
+    tmp_path, collision
+):
+    engine, request, context, query, calls = _released_park_with_collision(
+        tmp_path, collision=collision
+    )
+    with search.search_cost_scope() as parent:
+        with search.search_cost_scope(wall_seconds=0.1) as nested:
+            assert nested is parent and nested.wall_seconds is None
+            result = engine.plan_request(request, context)
+        assert parent.counters["complete_plan_request"] == (2 if collision else 1)
+    assert result.plan_success.tolist() == [True]
+    assert len(calls) == (2 if collision else 1)
+    assert len(query.reads) == (3 if collision else 1)
+    assert search.current_search_cost() is None
+
+
+@pytest.mark.parametrize("expires_at", [1, 2])
+def test_released_park_checks_inherited_deadline_before_and_after_rebuild(
+    tmp_path, monkeypatch, expires_at
+):
+    clock = [0.0]
+    monkeypatch.setattr(search, "perf_counter", lambda: clock[0])
+    engine, request, context, query, calls = _released_park_with_collision(
+        tmp_path, collision=True, clock=clock, expires_at=expires_at
+    )
+    with pytest.raises(search.PlanningBudgetExceeded) as failure:
+        with search.search_cost_scope(wall_seconds=1.0) as parent:
+            engine.plan_request(request, context)
+    assert failure.value.operation == "complete_plan_request"
+    assert parent.counters["complete_plan_request"] == expires_at
+    # Expiry before rebuilding permits no second complete plan. Expiry after
+    # recursive qualification permits no outer revalidation query.
+    assert len(calls) == expires_at
+    assert len(query.reads) == expires_at
+    assert search.current_search_cost() is None
