@@ -700,6 +700,212 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
             policy_result=receipt,
         )
 
+    def capture_recorded_pour_geometry(
+        self,
+        object_id: str,
+        reference_id: str,
+        *,
+        start_frames: Sequence[int],
+        end_frames: Sequence[int],
+    ) -> dict[str, Any]:
+        """Measure the source rigid tilt/restore proxy from exact recorded slots.
+
+        Args:
+            object_id: Registered rigid source identity.
+            reference_id: Distinct registered rigid receiver identity.
+            start_frames: Exact inclusive source-window starts.
+            end_frames: Exact inclusive source-window ends.
+
+        Returns:
+            Owned geometry channels and their recording/acquisition identities.
+            The gravity-top proxy and receiver projection are measurements only;
+            this collector decides neither release nor a Pour/fluid outcome.
+
+        Raises:
+            ValueError: Identities, recording, mesh geometry or the B=1 scope are
+                unavailable. There is no live-pose or previous-frame fallback.
+        """
+        import torch
+        from ..invocation_policy import task_program_fingerprint
+        from embodichain.compute.geometry.pouring import (
+            measure_pour_tilt,
+            measure_pour_receiver,
+        )
+        from embodichain.lab.sim.scene.rigid_mesh import capture_rigid_mesh
+        from embodichain.lab.sim.evidence import (
+            PhysicalEvidenceBatch,
+            PhysicalEvidenceFrame,
+        )
+
+        self._check_episode()
+        if self._observations is None:
+            raise RuntimeError("Observation history is unavailable.")
+        size = len(self._episodes)
+        if object_id == reference_id:
+            raise ValueError("Pour source and receiver must be distinct native bodies.")
+        starts, ends = tuple(start_frames), tuple(end_frames)
+        if (
+            len(starts) != size
+            or len(ends) != size
+            or any(
+                type(start) is not int or type(end) is not int or not 0 <= start < end
+                for start, end in zip(starts, ends, strict=True)
+            )
+        ):
+            raise ValueError(
+                "Pour geometry requires exact nonempty recorded intervals."
+            )
+        object_uid, _ = self._native(object_id, articulated=False)
+        reference_uid, _ = self._native(reference_id, articulated=False)
+        if object_uid == reference_uid:
+            raise ValueError("Pour source and receiver cannot alias one native body.")
+        source = capture_rigid_mesh(self._env.sim, object_uid, batch_size=size)
+        receiver = capture_rigid_mesh(self._env.sim, reference_uid, batch_size=size)
+        from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
+        from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+        history = self._observations.snapshot_history(device="cpu")
+        if (
+            tuple(history["env_ids"]) != tuple(range(size))
+            or tuple(history["episode_ids"]) != self._episodes
+        ):
+            raise ValueError("Pour history belongs to another native row or episode.")
+
+        def recorded_poses(uid: str, first: Sequence[int], last: Sequence[int]):
+            candidates = [
+                name
+                for name, descriptor in self._observations.schema.items()
+                if descriptor.entity_uid == uid
+                and descriptor.quantity == "pose"
+                and descriptor.coordinate_frame == "arena"
+                and descriptor.representation == "xyz_xyzw"
+                and descriptor.shape == (7,)
+                and descriptor.units == ("m", "unitless")
+            ]
+            if not candidates:
+                raise RuntimeError(
+                    f"Recorded raw arena pose for {uid!r} is unavailable."
+                )
+            field = self._observations.field_ids[candidates[0]]
+            channel = history["fields"][field]
+            result = []
+            for row, (begin, end) in enumerate(zip(first, last, strict=True)):
+                if end > int(history["lengths"][row]) or bool(
+                    (history["revisions"][row, begin : end + 1] < 0).any()
+                ):
+                    raise ValueError("The requested Pour window is not fully recorded.")
+                slots = slice(begin, end + 1)
+                if not bool(history["timestamp_valid"][row, slots].all()):
+                    raise RuntimeError("Recorded Pour acquisition time is unavailable.")
+                if not bool(channel["valid"][row, slots].all()):
+                    raise RuntimeError(
+                        f"Recorded raw pose acquisition for {uid!r} is unavailable: "
+                        f"{channel['acquisition_errors'][row]}"
+                    )
+                poses = xyz_quat_to_4x4_matrix(channel["values"][row, slots])
+                validate_rigid_pose_batch(poses, end - begin + 1)
+                result.append(poses)
+            return tuple(result)
+
+        poses_by_row = recorded_poses(object_uid, starts, ends)
+        measured = []
+        peak_frames = []
+        for row, poses in enumerate(poses_by_row):
+            peak, maximum_tilt, restore_error, anchor = measure_pour_tilt(
+                source.vertices[row], poses
+            )
+            peak_frames.append(starts[row] + peak)
+            measured.append((maximum_tilt, restore_error, anchor))
+        observed_receiver = recorded_poses(reference_uid, peak_frames, peak_frames)
+        rows, projected = [], []
+        for row, (maximum_tilt, restore_error, anchor) in enumerate(measured):
+            reference_pose = observed_receiver[row][0]
+            distance, clearance, inside = measure_pour_receiver(
+                anchor, receiver.vertices[row], receiver.triangles[row], reference_pose
+            )
+            rows.append(
+                [maximum_tilt, restore_error, *anchor.tolist(), distance, clearance]
+            )
+            projected.append(inside)
+        # Float64 preserves both source Float32-derived scalars and GEOS doubles.
+        metrics = torch.tensor(rows, dtype=torch.float64)
+        projected_inside = torch.tensor(projected, dtype=torch.bool)
+        self._capture_revision += 1
+        timestamp = float(self._env.sim.simulation_time)
+        revision = self._capture_revision
+        env_ids = torch.arange(size, dtype=torch.long)
+        # These fresh batches have no external aliases; ownership transfers to
+        # the common frame without a second copy of the channel tensors.
+        frame = PhysicalEvidenceFrame._from_owned_batches(
+            timestamp,
+            revision,
+            env_ids,
+            {
+                name: PhysicalEvidenceBatch(
+                    name,
+                    values,
+                    torch.ones(size, dtype=torch.bool),
+                    (None,) * size,
+                    timestamp,
+                    env_ids,
+                    revision,
+                )
+                for name, values in (
+                    ("pour.motion_geometry", metrics),
+                    ("pour.anchor_projected_inside", projected_inside),
+                )
+            },
+        )
+        self._check_episode()
+        self._observations.validate_history_owner(self._env.episode_context)
+        self._native(object_id, articulated=False)
+        self._native(reference_id, articulated=False)
+        return {
+            "schema_version": "simulation.pour_geometry_observation/v1",
+            "program_id": self._bridge.program.program_id,
+            "program_fingerprint": task_program_fingerprint(self._bridge.program),
+            "object_id": object_id,
+            "reference_id": reference_id,
+            "object_native_uid": object_uid,
+            "reference_native_uid": reference_uid,
+            "episode_ids": list(self._episodes),
+            "start_frames": list(starts),
+            "end_frames": list(ends),
+            "peak_frames": peak_frames,
+            "sample_counts": [len(poses) for poses in poses_by_row],
+            "recording_clock": "environment_step",
+            "recording_step_dt": self._bridge.clock.step_dt,
+            "geometry_columns": [
+                "maximum_tilt_rad",
+                "restore_error_rad",
+                "anchor_world_x_m",
+                "anchor_world_y_m",
+                "anchor_world_z_m",
+                "receiver_projection_distance_m",
+                "receiver_top_clearance_m",
+            ],
+            "geometry_frame": {
+                "timestamp": frame.timestamp,
+                "observation_revision": frame.observation_revision,
+                "env_ids": frame.env_ids.tolist(),
+                "clock_domain": "simulation_time",
+                "revision_kind": "recorded_geometry_acquisition",
+                "batches": {
+                    name: {
+                        "evidence_id": batch.evidence_id,
+                        "values": batch.values.tolist(),
+                        "value_dtype": str(batch.values.dtype),
+                        "valid": batch.valid.tolist(),
+                        "acquisition_errors": list(batch.acquisition_errors),
+                        "timestamp": batch.timestamp,
+                        "observation_revision": batch.observation_revision,
+                        "env_ids": batch.env_ids.tolist(),
+                    }
+                    for name, batch in frame.batches.items()
+                },
+            },
+        }
+
     def capture_current_grip(
         self,
         object_id: str,
