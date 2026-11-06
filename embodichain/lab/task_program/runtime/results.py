@@ -425,6 +425,11 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
         "ik_seed_mode": policy.ik_seed_mode,
         "sample_count_retries": list(policy.sample_count_retries),
         "require_final_velocity": policy.require_final_velocity,
+        **(
+            {"mask_generation_overspeed": True}
+            if policy.mask_generation_overspeed
+            else {}
+        ),
         "final_velocity_rejection": policy.final_velocity_rejection,
         "segment_sample_count_retries": list(policy.segment_sample_count_retries),
         "segment_continuous_ik_recovery": policy.segment_continuous_ik_recovery,

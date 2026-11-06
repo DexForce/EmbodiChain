@@ -137,6 +137,15 @@ Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
 owned original positions, intervals and rejected-row identities for retries and
 audit; checking the zero-speed hold is not evidence that the candidate passed.
 
+`mask_generation_overspeed=True` is an independent, default-off MotionPolicy /
+MotionGenOptions choice. With an explicit control part, it checks the normalized
+generation result against the same ordered authored/runtime velocity limits and
+`1e-5` interval tolerance, then masks success without changing the proposal's
+positions or timing. The explicit check replaces the earlier fixed-grid mask;
+ordinary fixed-grid defaults retain their existing hold/candidate behavior.
+This per-generation boundary is distinct from complete-action final-velocity
+qualification, planner retry selection and physical acceptance.
+
 `compute.trajectory.interpolation.interpolate_velocity_grid` allocates fixed
 B=1 joint-edge intervals from explicit speed caps. It preserves ordered mandatory
 endpoints and requested sample count, rejecting insufficient duration instead of
