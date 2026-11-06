@@ -123,9 +123,11 @@ def resolve_pour_lowerer_declarations(
         raise ValueError("The source bundle supports at most one Pour object.")
     result = []
     if routes:
-        transport = dict(kind="move_held_object", routes=routes)
-        if not staging:
-            transport["effect_contract"] = "terminal_attachment"
+        transport = dict(
+            kind="move_held_object",
+            routes=routes,
+            effect_contract="terminal_attachment",
+        )
         if staging:
             transport.update(
                 kind=(

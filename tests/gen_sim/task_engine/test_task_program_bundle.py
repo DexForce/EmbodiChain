@@ -442,6 +442,18 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
         assert len(services["planning_services"]["pour_projection_bindings"]) == 1
         kind = "pour_transport" if revision == 1 else "pour_region_transport"
         assert lowerers[kind]["staging_routes"][0]["receiver_id"] == "pad"
+    transport_kind = (
+        "move_held_object"
+        if revision is None
+        else "pour_transport" if revision == 1 else "pour_region_transport"
+    )
+    assert lowerers[transport_kind]["effect_contract"] == "terminal_attachment"
+    assert (
+        declaration["profile"]["action_options"]["simulation.move_held_object"][
+            "report_retained_attachment"
+        ]
+        is True
+    )
     policy = yaml.safe_load(
         (paths.root / "components/execution_policy.yaml").read_text()
     )
@@ -492,6 +504,208 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
             # routes bypassed the source batched-tensor-only lift prelude.
             assert options.get("lift_clearance") is None
             assert options["report_retained_attachment"] is True
+    physical.assert_unchanged()
+
+
+@pytest.mark.parametrize("revision", [1, 2])
+def test_generated_pour_transport_keeps_source_terminal_attachment(tmp_path, revision):
+    from gym.envs.task_program.test_pour_transport import fixture as transport_fixture
+    from lab.task_program.test_semantic_compiler import _dual_profile, _engine
+    from types import SimpleNamespace as NS
+    import random
+    import torch
+    from embodichain.lab.sim.atomic_actions import (
+        Affordance,
+        HeldObjectState,
+        ObjectSemantics,
+        RobotObservation,
+        SceneSnapshot,
+        TaskState,
+    )
+    from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+    from embodichain.lab.task_program.compiler.lowering import SemanticCallCompiler
+    from embodichain.lab.task_program.integrations.simulation.effect_contracts import (
+        TransportEffectContract,
+    )
+    from embodichain.lab.task_program.semantics import (
+        BinaryEffectClause,
+        PoseRelationClause,
+        RegisteredSemanticCall,
+        SceneEntityRegistration,
+        SceneManifest,
+        SceneObjectRef,
+        SceneRegistry,
+        SemanticEffectKind,
+        SemanticIntegrationManifest,
+    )
+
+    graph, physical, paths = _pour_bundle(tmp_path, revision)
+    loaded = load_configured_bundle(
+        paths.root,
+        external_input_digests={
+            **physical.input_files,
+            **resolve_source_hand_services(physical.embodiment)[2],
+        },
+        implementation_revisions={"embodichain": "test-source"},
+    )
+    registration = loaded.deployment.integration.registration
+    factory = next(
+        item
+        for item in registration.registered_semantic_lowerer_factories
+        if item.call_id == "simulation.move_held_object"
+    )
+    # Reuse the actual native-geometry test ports, with generated semantic IDs.
+    # The real factory/region owner still builds both targets; no planner runs.
+    _, _, observed, _, _, data = transport_fixture(revision == 2)
+    mapping = {"cylinder": "source", "pad": "receiver"}
+    registry = SceneRegistry(
+        tuple(
+            SceneEntityRegistration(
+                SceneObjectRef(identifier),
+                state_provider=NS(
+                    entity=NS(
+                        num_instances=1,
+                        get_vertices=lambda *, env_ids, scale, name=name: data[name][
+                            0
+                        ].clone(),
+                        get_triangles=lambda *, env_ids, name=name: data[name][
+                            1
+                        ].clone(),
+                    ),
+                    observe=lambda **kwargs: pytest.fail(
+                        "geometry/compile used a hidden observation"
+                    ),
+                ),
+            )
+            for identifier, name in mapping.items()
+        )
+    )
+    simulation = NS(
+        num_envs=1,
+        physics_backend="default",
+        sim_config=NS(physics_cfg=NS(gravity=(0.0, 0.0, -9.81))),
+    )
+    held = HeldObjectState(
+        semantics=ObjectSemantics(
+            affordance=Affordance(), geometry={}, entity_id="cylinder"
+        ),
+        object_to_eef=torch.eye(4)[None],
+        grasp_xpos=torch.eye(4)[None],
+    )
+    context = replace(
+        observed,
+        robot=RobotObservation(
+            timestamp=0.0, qpos=torch.zeros(1, 4), qvel=torch.zeros(1, 4)
+        ),
+        task=TaskState(batch_size=1, device="cpu", held_objects={"left": held}),
+        scene=SceneSnapshot(
+            timestamp=observed.scene.timestamp,
+            version=observed.scene.version,
+            entities={
+                key: observed.scene.entities[name] for key, name in mapping.items()
+            },
+        ),
+    )
+    geometry_records = []
+    for node in graph["nodes"]:
+        if node["call"].get("call_id") != factory.call_id:
+            continue
+        preset = next(
+            item
+            for item in registration.robot_profile_binding.presets
+            if item.preset_id == "gen_sim." + node["id"] + ".execution"
+        )
+        profile = replace(
+            _dual_profile(),
+            presets={preset.preset_id: preset},
+            default_preset=preset.preset_id,
+        )
+        engine = _engine(profile)
+        engine.robot.get_qpos.return_value = context.robot.qpos.clone()
+        engine.robot.get_qvel.return_value = context.robot.qvel.clone()
+        engine.robot.get_solver.return_value = NS(root_link_name="custom_root")
+        engine.robot.get_link_pose.return_value = torch.eye(4)[None]
+        lowerer = factory.create(
+            simulation=simulation,
+            robot=engine.robot,
+            scene_registry=registry,
+            engine=engine,
+        )
+        compiler = SemanticCallCompiler(
+            SemanticIntegrationManifest(
+                scene=SceneManifest.from_registry(registry),
+                robot_profile=profile,
+                call_catalog=registration.call_catalog,
+            ).bind(registry, engine),
+            registered_lowerers=(lowerer,),
+        )
+        call = RegisteredSemanticCall(
+            call_id=factory.call_id,
+            arguments=node["call"]["arguments"],
+            resources=node["call"]["resources"],
+        )
+        before_torch = torch.get_rng_state().clone()
+        before_np = np.random.get_state()
+        before_python = random.getstate()
+        workflow = compiler.analyze((call,))
+        grounded = compiler.ground(workflow, 0, context)
+        assert grounded.effect_guards == ()
+        assert grounded.effect_gates == ()
+        assert grounded.effect_spec.effect_kind is SemanticEffectKind.ATTACH
+        pose, constraint = grounded.effect_spec.clauses
+        assert type(pose) is PoseRelationClause
+        assert type(constraint) is BinaryEffectClause and constraint.expected is True
+        assert grounded.invocation.skill_options.report_retained_attachment is True
+        target = resolve_pose_goal(
+            grounded.invocation.goal.object_target_pose,
+            context,
+            name="generated transport",
+        )
+        # The public default differs only in retention qualification. Exercise
+        # its same native geometry owner as an independent unchanged-target port.
+        guarded = replace(
+            factory, effect_contract=TransportEffectContract.GUARDED_ATTACHMENT
+        ).create(
+            simulation=simulation,
+            robot=engine.robot,
+            scene_registry=registry,
+            engine=engine,
+        )
+        prior = guarded.lower(
+            call,
+            context=context,
+            bound=workflow.calls[0].bound,
+            option_template=preset.action_option_template(factory.call_id),
+        )
+        torch.testing.assert_close(
+            target,
+            resolve_pose_goal(
+                prior.goal.object_target_pose, context, name="shared target"
+            ),
+            rtol=0,
+            atol=0,
+        )
+        assert lowerer.staging_routes == guarded.staging_routes
+        assert lowerer.gravity_world == guarded.gravity_world
+        for identifier, vertices in lowerer.scene_vertices.items():
+            np.testing.assert_array_equal(vertices, guarded.scene_vertices[identifier])
+        assert torch.equal(before_torch, torch.get_rng_state())
+        assert before_python == random.getstate()
+        after_np = np.random.get_state()
+        assert before_np[0] == after_np[0] and np.array_equal(before_np[1], after_np[1])
+        assert before_np[2:] == after_np[2:]
+        geometry_records.append(target)
+    assert len(geometry_records) == 2
+    assert geometry_records[1].shape == (4, 4)
+    # Source physical declaration refinement may adjust the return height; the
+    # actual route must agree with the published semantic target, not its draft.
+    emitted_graph = json.loads((paths.root / "semantic_task_graph.json").read_text())
+    torch.testing.assert_close(
+        geometry_records[1][:3, 3],
+        torch.tensor(
+            emitted_graph["targets"]["step_01_return_target"]["values"][0]["position"]
+        ),
+    )
     physical.assert_unchanged()
 
 
