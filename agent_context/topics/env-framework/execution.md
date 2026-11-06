@@ -105,6 +105,10 @@ stable online language IDs. Language intent does not establish physical success.
   `DemoExecutionCfg` keeps continuous episodes as the default and can instead
   make each eligible natural segment an independent dataset fragment. This
   mode does not restore state or resume after failure.
+- `execute_demo_episode(on_segment_completed=...)` observes each finalized result
+  after segment recording and before the next lazy segment, including ordinary
+  failure and cancellation boundaries. The optional callback must not step or
+  reset the environment; its exceptions propagate without changing acceptance.
 - Environments without a Task Program keep the ordinary `BaseEnv.is_task_success()`
   behavior and task-specific overrides.
 
