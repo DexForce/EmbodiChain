@@ -255,7 +255,7 @@ def raw_held_poses(
     *,
     observation_kind: str | None = None,
 ) -> tuple[Any, Any]:
-    """Validate exact raw body/TCP channels without accepting attached claims."""
+    """Validate body/TCP channels against their original native history boundary."""
     count = len(binding.env_ids)
     if (
         snapshot.get("schema_version") != "simulation.held_pose_observation/v1"
@@ -286,6 +286,43 @@ def raw_held_poses(
         or frame.get("revision_kind") != "held_pose_acquisition"
     ):
         raise ValueError("Held pose acquisition has another clock or row scope.")
+    # The frame time is native collection time, not episode step * step_dt.
+    # Bind recorded source rows separately so warmup/reset offsets and delayed
+    # historical reads retain their real acquisition clocks.
+    history = snapshot["recorded_acquisition"]
+    field_ids = history.get("field_ids")
+    if (
+        history.get("env_ids") != list(binding.env_ids)
+        or history.get("episode_ids") != list(binding.episode_ids)
+        or history.get("frame_indices") != boundary
+        or history.get("clock_domain") != "simulation_time"
+        or not isinstance(field_ids, Mapping)
+        or set(field_ids) != {"pose", "qpos"}
+        or any(type(value) is not str or not value for value in field_ids.values())
+    ):
+        raise ValueError("Held pose source history has another step or owner identity.")
+    for name in ("env_ids", "episode_ids", "frame_indices", "observation_revisions"):
+        rows = history.get(name)
+        if (
+            not isinstance(rows, list)
+            or len(rows) != count
+            or any(type(value) is not int or value < 0 for value in rows)
+        ):
+            raise ValueError(
+                "Held pose source history has invalid temporal row identities."
+            )
+    times = history.get("timestamps")
+    if not isinstance(times, list) or len(times) != count:
+        raise ValueError("Held pose source acquisition times are missing.")
+    for timestamp in times:
+        if number(timestamp) > frame["timestamp"] + 1e-8:
+            raise ValueError("Held pose source time follows its collection time.")
+        if snapshot["observation_kind"] == "final" and not math.isclose(
+            timestamp, frame["timestamp"], rel_tol=0, abs_tol=1e-8
+        ):
+            raise ValueError(
+                "Final held pose acquisition does not match its selected source time."
+            )
     values = []
     for name, reported in (
         ("rigid.pose", snapshot["object_pose"]),
