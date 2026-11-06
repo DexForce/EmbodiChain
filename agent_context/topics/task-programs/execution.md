@@ -88,7 +88,9 @@ they do not observe at compile time or reset physical state. Results remain
 row-local and exclude rows that were ineligible when the segment started.
 
 `HandOver` starting from free resources covers pickup, transfer, delivery and
-final release. Its intermediate acquisition gates require attachment, while
+final release. The receiver enters from its side; after source release, the
+source withdraws before delivery, and the open receiver retracts before settling.
+These motions retain explicit phase boundaries. Its acquisition gates require attachment, while
 the terminal effect requires both participants detached. With an already
 verified source hold and an explicit policy preset selecting
 `HandOverOptions.release_at_target=False`, it transfers to the destination and
@@ -331,10 +333,13 @@ TaskSpec independently checks that recomputed geometry matches the bound proof.
 
 `simulation.observations.SimulationStateObservationCollector` binds the exact
 pre-execution bridge, sealed registration and initialized episode. Current pose
-and joint queries validate the selected native owner and observation clock.
+and joint queries validate the selected native owner before and after acquisition
+and validate the observation clock.
 Historical pose reads require an explicitly supplied ObservationManager and
 reuse its semantic schema/raw store, including unavailable rows and original
-boundary/revision/timestamp metadata. It does not evaluate TaskSpec conditions,
+boundary/revision/timestamp metadata. A missing original timestamp leaves only
+its affected row unavailable; the read timestamp cannot substitute for it.
+It does not evaluate TaskSpec conditions,
 resample past state or alter execution targets.
 
 `SimulationStateObservationCollector.capture_recorded_pour_geometry` reads one
