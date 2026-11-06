@@ -14,9 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Original FCL query traces for the explicit source-policy adapter."""
+"""Frozen source query inputs and backend-independent decision projections for the explicit source-policy adapter."""
 
 from __future__ import annotations
+
+from scene._native_hand_fixture import decisions, recording_manager
 
 import numpy as np
 import torch
@@ -121,51 +123,3 @@ def stable_report(value):
     if isinstance(value, (tuple, list)):
         return [stable_report(item) for item in value]
     return deepcopy(value)
-
-
-def recording_manager(original):
-    trace = []
-    created = []
-
-    class Manager:
-        def __init__(self):
-            self.index = len(created)
-            self.inner = original()
-            created.append(self)
-
-        def add_object(self, name, mesh, transform=None):
-            trace.append(
-                {
-                    "op": "add",
-                    "manager": self.index,
-                    "name": name,
-                    "vertices": len(mesh.vertices),
-                    "faces": len(mesh.faces),
-                }
-            )
-            return self.inner.add_object(name, mesh, transform=transform)
-
-        def set_transform(self, name, matrix):
-            trace.append(
-                {
-                    "op": "transform",
-                    "manager": self.index,
-                    "name": name,
-                    "matrix": np.asarray(matrix).tolist(),
-                }
-            )
-            return self.inner.set_transform(name, matrix)
-
-        def min_distance_other(self, other):
-            distance = float(self.inner.min_distance_other(other.inner))
-            trace.append(
-                {
-                    "op": "distance",
-                    "manager": self.index,
-                    "other": other.index,
-                    "distance": distance,
-                }
-            )
-            return distance
-
-    return Manager, trace

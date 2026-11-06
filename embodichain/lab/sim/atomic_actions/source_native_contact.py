@@ -16,7 +16,7 @@
 
 """Explicit source-policy composition of shared native capture and GraspKit queries.
 
-This module selects the preserved experimental policy and FCL backend. Closing,
+This module selects the preserved experimental policy over the shared Newton backend. Closing,
 opening and rigid-clearance algorithms are implemented only in GraspKit.
 """
 
@@ -28,8 +28,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 import trimesh
-from embodichain.lab.sim.scene._collision_backends import _require_fcl
-from embodichain.lab.sim.scene._fcl_queries import _FclCollection
+from embodichain.lab.sim.scene._collision_backends import _require_newton
+from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 from embodichain.lab.sim.scene.native_hand import (
     NativeHandGeometry,
     capture_native_hand_geometry,
@@ -103,7 +103,7 @@ class NativeClosingQuery(_ClosingQuery):
             target_contact_offset: Native contact offset for policies using halos.
             gravity_in_object: Object-frame gravity for horizontal pad-line checks.
         """
-        _require_fcl()
+        _require_newton()
         self._source_revision = revision
         self._geometry: NativeHandGeometry | None = None
         super().__init__(
@@ -112,8 +112,8 @@ class NativeClosingQuery(_ClosingQuery):
             target_rest_offset,
             scope=scope,
             policy=_source_policy(revision),
-            collision_factory=_FclCollection,
-            collision_metadata=_FclCollection.metadata(),
+            collision_factory=_ConvexCollection,
+            collision_metadata=_ConvexCollection.metadata(),
             report_metadata={"revision": revision},
             target_contact_offset=target_contact_offset,
             gravity_in_object=gravity_in_object,
@@ -178,7 +178,7 @@ def build_native_closing_query(
     Returns:
         Fresh owned query. Close it in a context manager or finally block.
     """
-    _require_fcl()
+    _require_newton()
     if not isinstance(scope, NativeQueryScope):
         raise TypeError("scope must be NativeQueryScope.")
     policy = _source_policy(revision)
@@ -271,7 +271,7 @@ def build_native_rigid_rest_scene(
         closing.parts,
         capture_native_rigid_obstacles(simulation, closing._geometry),
         scope=closing.scope,
-        collision_factory=_FclCollection,
+        collision_factory=_ConvexCollection,
     )
     closing.rigid_scene_screen = result
     return result

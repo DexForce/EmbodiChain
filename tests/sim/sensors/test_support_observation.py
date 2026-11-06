@@ -784,6 +784,39 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
     assert sim.query.fetches == (
         8 if startup == "cold" else 16 if startup == "row_reset" else 12
     )
+    if kind == "supported_region":
+        native = metadata["measurements"]["native_support"]
+        # Historical projection consumes the captured poses and original load,
+        # not a new contact read or a live pose after the boundary.
+        before_fetches = sim.query.fetches
+
+        def no_live_pose(**kwargs):
+            raise AssertionError("historical geometry reread a live pose")
+
+        for body in sim.objects.values():
+            body.get_local_pose = no_live_pose
+        measured = port.measure_support_geometry(
+            "held_surface",
+            native_support=native,
+            object_pose=native["object_pose"],
+            reference_pose=native["reference_pose"],
+        )
+        assert measured["landing_region"] == metadata["measurements"]["landing_region"]
+        assert measured["support_gap_m"] == metadata["measurements"]["support_gap"]
+        assert sim.query.fetches == before_fetches
+        changed = deepcopy(native["object_pose"])
+        changed[0][0][3] += 0.02
+        other = port.measure_support_geometry(
+            "held_surface",
+            native_support=native,
+            object_pose=changed,
+            reference_pose=native["reference_pose"],
+        )
+        assert (
+            other["landing_region"]["object_pose"]
+            != measured["landing_region"]["object_pose"]
+        )
+        assert sim.query.fetches == before_fetches
     registry.close()
 
 
@@ -847,7 +880,9 @@ def test_support_height_uses_highest_qualified_contact_without_averaging():
     assert torch.isnan(heights[1])
 
 
-def _support_policy_fixture(*, com_tolerance=None, com_x=0.0, extra_preset=False):
+def _support_policy_fixture(
+    *, com_tolerance=None, com_x=0.0, extra_preset=False, region=False
+):
     from embodichain.lab.task_program.integrations.simulation.bindings import (
         SimulationSceneBinding,
         SimulationRigidObjectBinding,
@@ -875,7 +910,8 @@ def _support_policy_fixture(*, com_tolerance=None, com_x=0.0, extra_preset=False
     cfg = SimulationStabilityConditionCfg(
         entity="item",
         reference="surface",
-        kind="supported_placement",
+        kind="supported_region" if region else "supported_placement",
+        support_contract_revision=1 if region else None,
         displacement=(0.0, 0.0, 0.2),
         com_tolerance=com_tolerance,
         duration=0.04,
@@ -925,6 +961,8 @@ def test_current_capture_rejects_superseded_session_but_same_clock_bind_is_idemp
     "declaration_case",
     [
         "normal",
+        "recorded_region",
+        "invalid_region_history",
         "foreign_scene",
         "missing_preset",
         "equivalent_snapshot",
@@ -965,7 +1003,10 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     )
 
     sim, robot, registry, template, binding, cfg = _support_policy_fixture(
-        com_tolerance=0.1, com_x=0.04, extra_preset=True
+        com_tolerance=0.1,
+        com_x=0.04,
+        extra_preset=True,
+        region=declaration_case in {"recorded_region", "invalid_region_history"},
     )
     profile = SimulationRobotSkillProfileBinding(
         "robot",
@@ -1186,6 +1227,25 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         assert sim.query.fetches == before
         registry.close()
         return
+    if declaration_case == "invalid_region_history":
+        env._rollout_storage["raw_valid"]["poses/payload"][0, 1] = False
+        with pytest.raises(RuntimeError, match="unavailable"):
+            collector.capture_recorded(
+                "support",
+                segment_id=segment.name,
+                source_path=segment.source_path,
+                frame_indices=[1, 1],
+            )
+        assert sim.query.fetches == before
+        registry.close()
+        return
+    if declaration_case == "recorded_region":
+
+        def no_live_pose(**kwargs):
+            raise AssertionError("Recorded region must not query current poses")
+
+        for body in sim.objects.values():
+            body.get_local_pose = no_live_pose
     recorded = collector.capture_recorded(
         "support",
         segment_id=segment.name,
@@ -1197,6 +1257,26 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
     assert recorded["boundary_frames"] == [1, 1]
     assert recorded["native_support"]["supported"] == [True, True]
     assert recorded["native_support"]["rows"][0]["com_tolerance_m"] == 0.1
+    if declaration_case == "recorded_region":
+        expected = bridge.post_policy_port.post_policy_metadata(
+            policy, segment=segment
+        )["measurements"]
+        assert recorded["landing_region"] == expected["landing_region"]
+        assert recorded["support_gap_m"] == expected["support_gap"]
+        env._rollout_storage["raw_obs"]["poses/payload"][0, 1, 0] += 0.001
+        changed = collector.capture_recorded(
+            "support",
+            segment_id=segment.name,
+            source_path=segment.source_path,
+            frame_indices=[1, 1],
+        )
+        assert (
+            changed["landing_region"]["object_pose"]
+            != recorded["landing_region"]["object_pose"]
+        )
+        assert sim.query.fetches == before
+        registry.close()
+        return
     recorded["native_support"]["rows"][0]["contacts_world"][0][0] = 100.0
     again = collector.capture_recorded(
         "support",

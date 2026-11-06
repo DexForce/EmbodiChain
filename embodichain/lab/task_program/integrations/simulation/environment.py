@@ -43,6 +43,9 @@ from typing import Literal, Protocol, TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
+from embodichain.lab.sim.atomic_actions.grip_evidence import GripEvidenceObservationPort
+
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
@@ -121,6 +124,23 @@ class _RuntimeOwner:
             raise RuntimeError("Simulation Task Program runtime resources are closed.")
 
 
+def _runtime_scope_validator(
+    require_open: Callable[[], None] | None,
+    runtime_scope_guard: Callable[[], None] | None,
+) -> Callable[[], None]:
+    """Bind lifetime and optional host authority into one read-only check."""
+    if runtime_scope_guard is not None and not callable(runtime_scope_guard):
+        raise TypeError("runtime_scope_guard must be callable or None.")
+
+    def validate() -> None:
+        if require_open is not None:
+            require_open()
+        if runtime_scope_guard is not None:
+            runtime_scope_guard()
+
+    return validate
+
+
 class _OwnedEffectEvidenceProvider(EffectEvidenceProvider):
     """Keep factory-provided live evidence inside the factory lifetime."""
 
@@ -137,6 +157,35 @@ class _OwnedEffectEvidenceProvider(EffectEvidenceProvider):
     ) -> Mapping[str, EffectEvidenceBatch]:
         self._owner.require_open()
         return self._provider.collect(queries, context)
+
+
+class _OwnedGripEvidenceProvider(_OwnedEffectEvidenceProvider):
+    """Forward only an explicitly declared physical observation capability."""
+
+    def __init__(
+        self,
+        provider: EffectEvidenceProvider,
+        owner: _RuntimeOwner,
+        scope_guard: Callable[[], None],
+    ) -> None:
+        if not isinstance(provider, GripEvidenceObservationPort):
+            raise TypeError("Grip observation forwarding requires its explicit port.")
+        super().__init__(provider, owner)
+        self._grip_port = provider
+        self._scope_guard = scope_guard
+
+    def capture_grip_observation(
+        self, request: PhysicalEvidenceRequest, *, object_id: str, control_part: str
+    ) -> tuple[PhysicalEvidenceBatch, dict[str, object]]:
+        self._owner.require_open()
+        self._scope_guard()
+        try:
+            return self._grip_port.capture_grip_observation(
+                request, object_id=object_id, control_part=control_part
+            )
+        finally:
+            self._owner.require_open()
+            self._scope_guard()
 
 
 _PLANNER_CFG_TYPES: Mapping[str, type[BasePlannerCfg]] = {
@@ -308,6 +357,8 @@ class SharedTickSceneProvider(SceneProvider):
         delegate: Authoritative native scene observer.
         full_env_ids: Complete ordered environment identity selection.
         require_open: Optional host-lifetime check, called before cached or live reads.
+        runtime_scope_guard: Optional host epoch validator, checked around cached
+            or live reads without acquiring additional physical data.
     """
 
     def __init__(
@@ -316,6 +367,7 @@ class SharedTickSceneProvider(SceneProvider):
         full_env_ids: torch.Tensor,
         *,
         require_open: Callable[[], None] | None = None,
+        runtime_scope_guard: Callable[[], None] | None = None,
     ) -> None:
         if type(delegate) is not RegistrySceneProvider:
             raise TypeError("delegate must be exactly RegistrySceneProvider.")
@@ -328,7 +380,9 @@ class SharedTickSceneProvider(SceneProvider):
             raise ValueError("full_env_ids must be a non-empty 1D int64 tensor.")
         if torch.unique(full_env_ids).numel() != full_env_ids.numel():
             raise ValueError("full_env_ids must be unique.")
-        self._require_open = require_open
+        self._validate_scope = _runtime_scope_validator(
+            require_open, runtime_scope_guard
+        )
         self._delegate = delegate
         self._full_env_ids = full_env_ids.clone()
         self._row_by_env_id = {
@@ -350,8 +404,7 @@ class SharedTickSceneProvider(SceneProvider):
         env_ids: torch.Tensor,
     ) -> SceneSnapshot:
         """Return the single shared snapshot for ``timestamp`` and ``env_ids``."""
-        if self._require_open is not None:
-            self._require_open()
+        self._validate_scope()
         if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
             raise TypeError("timestamp must be a real number.")
         normalized_timestamp = float(timestamp)
@@ -383,7 +436,9 @@ class SharedTickSceneProvider(SceneProvider):
                 raise ValueError("Shared scene snapshot timestamps must be monotonic.")
             if normalized_timestamp == self._timestamp:
                 assert self._snapshot is not None
-                return self._select_rows(self._snapshot, rows)
+                result = self._select_rows(self._snapshot, rows)
+                self._validate_scope()
+                return result
 
         snapshot = self._delegate.snapshot(
             timestamp=normalized_timestamp,
@@ -395,9 +450,11 @@ class SharedTickSceneProvider(SceneProvider):
             )
         if snapshot.timestamp != normalized_timestamp:
             raise ValueError("Scene snapshot timestamp must match the requested tick.")
+        result = self._select_rows(snapshot, rows)
+        self._validate_scope()
         self._timestamp = normalized_timestamp
         self._snapshot = snapshot
-        return self._select_rows(snapshot, rows)
+        return result
 
     def _select_rows(
         self,
@@ -460,6 +517,8 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         clock: Environment control clock.
         env_ids: Stable IDs in native robot row order.
         owner_token: Factory identity used to reject mixed runtime components.
+        runtime_scope_guard: Optional host epoch/lifetime validator. It must read
+            no robot/sensor state and must not advance simulation.
         capture_root_pose: Capture the robot's arena-local root transform in
             each observation. The default leaves ``RobotObservation.root_pose``
             unset and performs no root-pose query.
@@ -477,6 +536,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         env_ids: torch.Tensor,
         *,
         owner_token: object,
+        runtime_scope_guard: Callable[[], None] | None = None,
         capture_root_pose: bool = False,
         hold_qpos_source: Literal["observed", "drive_target"] = "observed",
         world_stamp_reader: Callable[[], PhysicalObservationStamp] | None = None,
@@ -489,6 +549,15 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             raise TypeError("capture_root_pose must be a bool.")
         if hold_qpos_source not in ("observed", "drive_target"):
             raise ValueError("hold_qpos_source must be observed or drive_target.")
+        validate_scope = _runtime_scope_validator(
+            (
+                owner_token.require_open
+                if isinstance(owner_token, _RuntimeOwner)
+                else None
+            ),
+            runtime_scope_guard,
+        )
+        validate_scope()
         qpos = _full_robot_tensor(robot, "get_qpos", required=True)
         assert qpos is not None
         if (
@@ -509,6 +578,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         if world_stamp_reader is not None and not callable(world_stamp_reader):
             raise TypeError("world_stamp_reader must be callable or None.")
         self._world_stamp_reader = world_stamp_reader
+        self._validate_scope = validate_scope
         self._capture_root_pose = capture_root_pose
         self._hold_qpos_source = hold_qpos_source
         super().__init__(self._capture)
@@ -527,6 +597,24 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         """Return whether this provider belongs to one factory instance."""
         return self._owner_token is owner_token
 
+    def validate_runtime_scope(self) -> None:
+        """Validate factory lifetime and the explicit host scope without data reads."""
+        self._validate_scope()
+
+    def current_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Return owned cached joints only while their runtime scope is current.
+
+        Args:
+            env_ids: Ordered subset of this provider's stable environment IDs.
+
+        Returns:
+            Owned cached positions without querying the robot.
+        """
+        self.validate_runtime_scope()
+        result = super().current_qpos(env_ids)
+        self.validate_runtime_scope()
+        return result
+
     def hold_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
         """Return the configured source for unaddressed robot joint holds.
 
@@ -540,10 +628,9 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         Returns:
             Owned full hold positions in the requested order.
         """
-        if isinstance(self._owner_token, _RuntimeOwner):
-            self._owner_token.require_open()
         if self._hold_qpos_source == "observed":
             return self.current_qpos(env_ids)
+        self.validate_runtime_scope()
         if (
             not isinstance(env_ids, torch.Tensor)
             or env_ids.dtype != torch.long
@@ -581,12 +668,13 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
                 "shape (num_envs, robot_dof) on the simulation device."
             )
         index = torch.tensor(rows, dtype=torch.long, device=target_qpos.device)
-        return target_qpos.index_select(0, index).clone()
+        result = target_qpos.index_select(0, index).clone()
+        self.validate_runtime_scope()
+        return result
 
     def _capture(self, task_state: TaskState) -> PlanningContext:
         """Capture one synchronized robot and scene observation."""
-        if isinstance(self._owner_token, _RuntimeOwner):
-            self._owner_token.require_open()
+        self.validate_runtime_scope()
         world_stamp = (
             None if self._world_stamp_reader is None else self._world_stamp_reader()
         )
@@ -629,7 +717,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             raise RuntimeError(
                 "Native world source changed during planning observation."
             )
-        return PlanningContext(
+        context = PlanningContext(
             world_source_stamp=world_stamp,
             robot=RobotObservation(
                 timestamp=timestamp,
@@ -643,6 +731,8 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             env_ids=self._env_ids,
             control_dt=self._clock.step_dt,
         )
+        self.validate_runtime_scope()
+        return context
 
 
 class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
@@ -1090,9 +1180,11 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         scene_registry: SceneRegistry,
         engine: AtomicActionEngine,
         clock: EnvironmentStepClock,
+        runtime_scope_guard: Callable[[], None] | None = None,
     ) -> PlanningObservationPort:
         """Create one planning port and planner-validated shared scene provider."""
         self.validate_runtime_bridge_creation()
+        _runtime_scope_validator(None, runtime_scope_guard)()
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
         if not isinstance(engine, AtomicActionEngine):
@@ -1110,7 +1202,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             rotation_threshold=self._rotation_threshold,
         )
         shared = SharedTickSceneProvider(
-            provider, self._env_ids, require_open=self._owner_token.require_open
+            provider,
+            self._env_ids,
+            require_open=self._owner_token.require_open,
+            runtime_scope_guard=runtime_scope_guard,
         )
         self._segment_policy_port.bind_clock(clock)
         self._support_clock = clock
@@ -1120,6 +1215,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             clock,
             self._env_ids,
             owner_token=self._owner_token,
+            runtime_scope_guard=runtime_scope_guard,
             capture_root_pose=self._capture_root_pose,
             hold_qpos_source=self._hold_qpos_source,
             world_stamp_reader=(
@@ -1172,8 +1268,20 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         providers.append(
             SceneArticulationEvidenceProvider(scene_provider=scene_provider)
         )
+
+        def require_grip_scope() -> None:
+            observation_provider.validate_runtime_scope()
+            if self._simulation.get_robot(self._robot.uid) is not self._robot:
+                raise ValueError("Native grip runtime robot ownership changed.")
+
         return tuple(
-            _OwnedEffectEvidenceProvider(provider, self._owner_token)
+            (
+                _OwnedGripEvidenceProvider(
+                    provider, self._owner_token, require_grip_scope
+                )
+                if isinstance(provider, GripEvidenceObservationPort)
+                else _OwnedEffectEvidenceProvider(provider, self._owner_token)
+            )
             for provider in providers
         )
 

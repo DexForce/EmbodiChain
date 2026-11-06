@@ -28,7 +28,7 @@ from embodichain.lab.sim.atomic_actions.source_native_contact import (
     NativeContactPart,
     NativeQueryScope,
 )
-from embodichain.lab.sim.scene._fcl_queries import _FclCollection
+from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
 from embodichain.lab.sim.atomic_actions import RecoveryPolicy, TimedTrajectory
 from .test_ordinary_pick import _inputs
@@ -488,7 +488,7 @@ class RigidQueryProvider(QueryProvider):
 
         assert query.rigid_scene_screen is None
         scene = NativeRigidRestScene(
-            query.parts, [], scope=query.scope, collision_factory=_FclCollection
+            query.parts, [], scope=query.scope, collision_factory=_ConvexCollection
         )
         query.rigid_scene_screen = scene
         self.scenes.append(scene)
@@ -708,7 +708,7 @@ def test_native_rigid_scene_partial_failure_closes_only_owned_queries(
         scene = NativeRigidRestScene(
             query.parts,
             [],
-            collision_factory=_FclCollection,
+            collision_factory=_ConvexCollection,
             scope=NativeQueryScope(
                 "other", query.scope.observation_timestamp, query.scope.scene_version
             ),

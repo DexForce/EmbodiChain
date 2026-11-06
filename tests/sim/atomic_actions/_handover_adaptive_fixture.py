@@ -19,6 +19,8 @@
 from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
+import hashlib
+import json
 import random
 import numpy as np
 import torch
@@ -162,3 +164,15 @@ def plain_metadata(value):
     if isinstance(value, (list, tuple)):
         return [plain_metadata(item) for item in value]
     return value
+
+
+def reference_record(record):
+    """Keep observable fields readable and freeze complete diagnostic metadata."""
+    result = dict(record)
+    metadata = result.pop("metadata")
+    result["metadata_sha256"] = hashlib.sha256(
+        json.dumps(
+            metadata, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+    return result

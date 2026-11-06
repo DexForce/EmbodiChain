@@ -38,7 +38,7 @@ from embodichain.lab.sim.scene.native_hand_scene import (
     NativeSceneBody,
 )
 from ._handover_native_fixture import native_transfer_fixture, transfer_scene
-from ._handover_adaptive_fixture import plain_metadata as plain
+from ._handover_adaptive_fixture import plain_metadata as plain, reference_record
 
 
 def native_inputs(tmp_path, mode):
@@ -141,11 +141,9 @@ def test_native_receiver_station_and_command_guards_match_source(tmp_path, mode)
             json.dumps(value, sort_keys=True).encode()
         ).hexdigest()
     expected = json.loads(
-        (
-            Path(__file__).parent / f"data/handover_native_{mode}_reference.json"
-        ).read_text()
-    )
-    assert record == expected
+        (Path(__file__).parent / "data/handover_reference.json").read_text()
+    )["native"][mode]
+    assert reference_record(record) == expected
     assert all(query.closed for query in queries)
 
 
@@ -219,7 +217,7 @@ def test_complete_cartesian_handover_matches_source_outer_scope(tmp_path, mode):
             json.dumps(value, sort_keys=True).encode()
         ).hexdigest()
     expected = json.loads(
-        (Path(__file__).parent / f"data/handover_cartesian_{mode}_b0.json").read_text()
-    )["record"]
-    assert record == expected
+        (Path(__file__).parent / "data/handover_reference.json").read_text()
+    )["cartesian"][mode]
+    assert reference_record(record) == expected
     assert all(query.closed for query in queries)

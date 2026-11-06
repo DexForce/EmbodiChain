@@ -94,7 +94,7 @@ def test_verified_dual_continuation_matches_source_without_resampling(tmp_path, 
         ],
     }
     expected = json.loads(
-        (Path(__file__).parent / f"data/coordinated_{mode}_reference.json").read_text()
-    )
+        (Path(__file__).parent / "data/coordinated_reference.json").read_text()
+    )[mode]
     assert actual == expected
     assert not grasps
