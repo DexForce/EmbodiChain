@@ -367,6 +367,54 @@ def test_current_loader_rejects_current_implementation_drift_during_preflight(
         load_current_task_program_bundle(path)
 
 
+@pytest.mark.parametrize(
+    "changed_version", ["0.9.0", None], ids=["upgraded", "missing"]
+)
+def test_current_loader_seals_optional_curobo_distribution_version(
+    tmp_path, monkeypatch, changed_version
+):
+    from embodichain.gen_sim.task_engine import task_program_bundle
+
+    actual_version = task_program_bundle.metadata.version
+    selected = {"version": "0.8.0"}
+
+    def distribution_version(name):
+        if name == "nvidia-curobo":
+            if selected["version"] is None:
+                raise task_program_bundle.metadata.PackageNotFoundError(name)
+            return selected["version"]
+        return actual_version(name)
+
+    monkeypatch.setattr(task_program_bundle.metadata, "version", distribution_version)
+    path, _, original = fixture(tmp_path)
+    loaded = load_current_task_program_bundle(path)
+    selected["version"] = changed_version
+    with pytest.raises(ValueError, match="implementation"):
+        load_current_task_program_bundle(path)
+    with pytest.raises(ValueError, match="implementation changed after loading"):
+        loaded.configure_environment()
+
+    revisions = task_program_implementation_revisions()
+    assert revisions["nvidia-curobo"] == (changed_version or "unavailable")
+    envelope = original.identity.to_dict()
+    assert {k: v for k, v in revisions.items() if k != "nvidia-curobo"} == {
+        k: v
+        for k, v in envelope["implementation_revisions"].items()
+        if k != "nvidia-curobo"
+    }
+    regenerated = prepare_configured_bundle(
+        original.files,
+        base_dir=tmp_path,
+        external_input_digests=envelope["external_inputs"],
+        implementation_revisions=revisions,
+    )
+    assert regenerated.identity.digest != original.identity.digest
+    for key in ("program_fingerprint", "task_spec_digest"):
+        assert regenerated.identity.to_dict()[key] == envelope[key]
+    for name in ("task_program/program.yaml", "task_spec.json"):
+        assert regenerated.files[name] == original.files[name]
+
+
 @pytest.mark.parametrize("omitted", ["mesh.glb", "robot.urdf", "hand.obj"])
 def test_current_loader_derives_missing_inputs_from_runtime_declarations(
     tmp_path, omitted, monkeypatch

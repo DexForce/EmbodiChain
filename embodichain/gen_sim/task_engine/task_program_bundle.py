@@ -157,7 +157,15 @@ def task_program_implementation_revisions() -> dict[str, str]:
                 digest.update(path.relative_to(root).as_posix().encode() + b"\0")
                 digest.update(hashlib.sha256(path.read_bytes()).digest())
         result[name + ".source_sha256"] = digest.hexdigest()
-    for name in ("dexsim", "torch", "numpy", "scipy", "trimesh", "shapely"):
+    for name in (
+        "dexsim",
+        "nvidia-curobo",
+        "torch",
+        "numpy",
+        "scipy",
+        "trimesh",
+        "shapely",
+    ):
         try:
             result[name] = metadata.version(name)
         except metadata.PackageNotFoundError:
