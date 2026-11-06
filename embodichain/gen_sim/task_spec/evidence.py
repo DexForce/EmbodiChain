@@ -38,8 +38,6 @@ __all__ = [
     "SupportedPlacementEvidenceBinding",
     "evaluate_supported_placement_evidence",
     "evaluate_placement_evidence_report",
-    "sampled_support_window",
-    "directional_observation_axes",
 ]
 
 _SCOPES = frozenset(
@@ -292,9 +290,13 @@ class SupportedPlacementEvidenceBinding:
                 "sampled_contact_identity",
                 json_snapshot(self.sampled_contact_identity),
             )
-            from ._sampled_contact_evidence import validate_sampled_identity
-
-            validate_sampled_identity(self)
+            if (
+                not isinstance(self.sampled_contact_identity, Mapping)
+                or not self.sampled_contact_identity
+            ):
+                raise ValueError(
+                    "Sampled source identity must be an explicit declaration."
+                )
         if self.operation_evidence is not None:
             object.__setattr__(
                 self, "operation_evidence", json_snapshot(self.operation_evidence)
@@ -410,62 +412,6 @@ class SupportedPlacementEvidenceBinding:
                 "Unsupported placement binding schema or operation linkage; rebuild bindings from explicit declarations."
             )
         return cls(**raw)
-
-
-def sampled_support_window(
-    binding: SupportedPlacementEvidenceBinding | Mapping[str, Any],
-    boundary_frames: Sequence[int],
-) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    """Select the original inclusive sampled-support window from its declaration.
-
-    Args:
-        binding: Exact raw sampled-support binding with source recording cadence.
-        boundary_frames: Actual completed native boundary slots supplied by the host.
-
-    Returns:
-        Inclusive start and end slots for the Lab recording API. Window length
-        retains the original ``ceil(duration / step_dt)`` rule.
-
-    Raises:
-        ValueError: The scope, row count or completed history is insufficient.
-    """
-    selected = SupportedPlacementEvidenceBinding.from_dict(binding)
-    ends = tuple(boundary_frames)
-    if (
-        selected.evidence_scope != "native_stable_support"
-        or selected.sampled_contact_identity is None
-        or len(ends) != 1
-        or any(type(value) is not int or value <= 0 for value in ends)
-    ):
-        raise ValueError(
-            "Sampled support requires its bound single-row completed boundary."
-        )
-    start = ends[0] - math.ceil(
-        selected.condition["duration"] / selected.sampled_contact_identity["step_dt"]
-    )
-    if start < 0:
-        raise ValueError("Sampled support window predates the initialized episode.")
-    return (start,), ends
-
-
-def directional_observation_axes(
-    binding: SupportedPlacementEvidenceBinding | Mapping[str, Any],
-) -> tuple[tuple[int, int], ...]:
-    """Return the exact numeric world-axis query selected by a side predicate.
-
-    Args:
-        binding: Sealed directional spatial-route declaration.
-
-    Returns:
-        Ordered (axis,sign) operands for Lab geometry acquisition. This helper
-        performs no physical read and does not infer capability from entity names.
-    """
-    selected = SupportedPlacementEvidenceBinding.from_dict(binding)
-    if selected.directional_geometry is None:
-        raise ValueError("Directional observation requires its explicit spatial route.")
-    from ._directional_evidence import AXES
-
-    return AXES[selected.directional_geometry["relation"]]
 
 
 def _bool_rows(value: Any, size: int) -> bool:
@@ -725,6 +671,10 @@ def _evaluate_placement_member(
                     "Unavailable evidence must retain a nonempty acquisition reason."
                 )
             raise ValueError(message)
+        if snapshot.get("normalization_hash") != canonical_hash(
+            {k: v for k, v in snapshot.items() if k != "normalization_hash"}
+        ):
+            raise ValueError("Placement normalization identity is missing or changed.")
         historical_record = selected.evidence_format == "historical_record"
         if historical_record:
             if "record" not in snapshot or "native_support" in snapshot:
@@ -875,10 +825,13 @@ def _evaluate_placement_member(
                 "Final placement requires its actual last runtime boundary."
             )
         if not historical_record and selected.evidence_scope == "native_stable_support":
-            from ._sampled_contact_evidence import prepare_sampled_support
+            from ._placement_linkage import _normalized
 
-            metrics, timeline, poses = prepare_sampled_support(
-                selected, snapshot, boundary
+            prepared = _normalized(selected, snapshot)
+            metrics, timeline, poses = (
+                json_snapshot(prepared["metrics"]),
+                json_snapshot(prepared["timeline"]),
+                json_snapshot(prepared["poses"]),
             )
             snapshot["record"] = {
                 "uid": selected.object_id,
@@ -891,9 +844,9 @@ def _evaluate_placement_member(
             not historical_record
             and selected.evidence_scope == "measured_planar_landing_region"
         ):
-            from ._planar_evidence import raw_planar_metrics
+            from ._placement_linkage import _normalized
 
-            metrics = raw_planar_metrics(selected, snapshot, boundary)
+            metrics = json_snapshot(_normalized(selected, snapshot)["metrics"])
             metrics.update(
                 reference_uid=selected.reference_id,
                 relation=predicate.arguments["relation"],
@@ -905,9 +858,9 @@ def _evaluate_placement_member(
                 "measurements": metrics,
             }
         elif not historical_record and selected.directional_geometry is not None:
-            from ._directional_evidence import raw_directional_metrics
+            from ._placement_linkage import _normalized
 
-            metrics = raw_directional_metrics(selected, snapshot, boundary)
+            metrics = json_snapshot(_normalized(selected, snapshot)["metrics"])
             snapshot["record"] = {
                 "uid": selected.object_id,
                 "part_id": None,
@@ -998,7 +951,7 @@ def _evaluate_placement_member(
             raise ValueError("Placement record names another physical subject.")
         if (
             selected.operation_evidence is not None
-            and selected.operation_evidence["family"] == "E5"
+            and snapshot.get("normalized_placement", {}).get("dual_release") is True
         ):
             from ._placement_linkage import transport_release
 
@@ -1040,8 +993,11 @@ def _evaluate_placement_member(
                 raise ValueError(
                     "Directional evidence differs from its exact measured release."
                 )
+            from ._placement_linkage import _normalized
+
+            verified_metrics = json_snapshot(_normalized(selected, snapshot)["metrics"])
             flags = directional_flags(
-                selected, metrics, released, boundary, program, family=family
+                selected, verified_metrics, released, boundary, program, family=None
             )
         elif selected.evidence_scope == "measured_planar_landing_region":
             from ._planar_evidence import planar_flags

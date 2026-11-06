@@ -69,7 +69,7 @@ class TaskProgramBundleEpisode:
         if self.binding_declarations is None:
             raise ValueError("Raw evidence requires effective binding declarations.")
         result = dict(
-            schema_version="task_engine.raw_evidence/v1",
+            schema_version="task_engine.raw_evidence/v2",
             bundle_digest=self.evidence.bundle_digest,
             run_id=self.evidence.run_id,
             episode_ids=list(self.evidence.episode_ids),

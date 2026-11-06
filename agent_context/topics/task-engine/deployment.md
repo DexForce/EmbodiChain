@@ -63,7 +63,7 @@ semantic front end. Provider calls and physical simulation are not needed for
 these checks. Physical program effects and strict TaskSpec acceptance remain
 separate from a workflow stage being marked complete.
 
-The shared-runtime bundle envelope is version 4 (`shared/v2`) and rejects predecessor adapter
+The shared-runtime bundle envelope is version 5 (`shared/v3`) and rejects predecessor adapter
 contracts before runtime composition. `prepare_configured_bundle()` consumes
 canonical declaration files, preflights public owner contracts, verifies the
 source graph's exact program projection, and seals identity without writing.
@@ -398,3 +398,14 @@ in Lab runtime services. Physical child-link identity and terminal clearance
 remain control-owner declarations. Runtime evidence resolves these same public
 bindings before selecting terminal measurement scope. Program/TaskSpec formats,
 hold grids and success criteria do not change.
+
+Runtime manipulation evidence uses `evidence_binding.TaskEngineManipulationBinding`
+to seal a Lab observation declaration and a distinct TaskSpec acceptance binding.
+Projection reads the complete frozen owner condition or explicit caller criteria,
+never a runtime monitor's resolved parameters. Their identities and predicate,
+program, episode and row scopes must agree. `runtime_evidence` passes only the Lab
+declaration to collectors, archives both declarations and original measurements,
+then `evaluate_task_engine_evidence` normalizes facts before TaskSpec evaluation.
+The raw archive contract is `task_engine.raw_evidence/v2`; predecessor runtime
+bundles must be regenerated from frozen declarations. Existing historical results
+retain their original identities and are not qualifications of changed code.

@@ -52,6 +52,8 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Pure source physical reset/cadence declarations | `embodichain/lab/task_program/integrations/simulation/source_deployment.py` |
 | Physical acquisition, history and support observations | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py`, `support_observation.py` |
 | Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
+| Offline receipt/query/actor normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
+| SDK-independent shared physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
 | Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
@@ -59,7 +61,16 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | MLLM untrusted-JSON frontend | `embodichain/agents/mllm/task_program.py` |
 
 The core `language`, `semantics`, `compiler`, and `runtime` packages must not
-import Gym. Provider-specific dependencies are confined to `integrations`.
+import Gym. Provider-specific dependencies are confined to `integrations`. Both public
+package roots resolve exports lazily, allowing offline evidence declarations to
+load without a simulator or a normative frontend.
+
+The offline evidence adapter validates raw execution, actor, query, clock and
+release protocols, then emits source-bound measurements through the existing
+physical frame/batch contract. It imports neither TaskSpec nor Task Engine and
+decides no task predicate. Held observation requests select exact parts and fresh
+query revisions here. Normative criteria are supplied separately by the consumer;
+mutable runtime receipts never define task acceptance thresholds.
 Gym retains only lifecycle coupling; it does not own schemas, compilers,
 catalogs, lowerers, or simulation assembly.
 

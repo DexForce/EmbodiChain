@@ -41,12 +41,11 @@ for info in pkgutil.iter_modules(task_spec.__path__, task_spec.__name__ + '.'):
     module = importlib.import_module(info.name)
     for name in module.__all__:
         assert hasattr(module, name), (info.name, name)
-from embodichain.gen_sim.task_spec.evidence import (
-    sampled_support_window, directional_observation_axes)
-from embodichain.gen_sim.task_spec.observation_requests import held_observation_request
+from embodichain.gen_sim.task_spec.manipulation_evidence import (
+    HoldAcceptanceCriteria, ManipulationEvidenceBinding, evaluate_manipulation_evidence)
 from embodichain.gen_sim.task_spec.evidence_report import evaluate_physical_evidence_report
-assert all(callable(value) for value in (sampled_support_window,
-    directional_observation_axes, held_observation_request, evaluate_physical_evidence_report))
+assert all(callable(value) for value in (HoldAcceptanceCriteria, ManipulationEvidenceBinding,
+    evaluate_manipulation_evidence, evaluate_physical_evidence_report))
 """
     result = subprocess.run(
         [sys.executable, "-I", "-c", script],

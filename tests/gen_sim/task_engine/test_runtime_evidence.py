@@ -447,7 +447,7 @@ def test_raw_archive_keeps_effective_bindings_and_replays_original_report(
     archive_path = tmp_path / "raw_evidence.json"
     archive_path.write_text(json.dumps(result.to_raw_evidence()))
     archived = json.loads(archive_path.read_text())
-    assert archived["schema_version"] == "task_engine.raw_evidence/v1"
+    assert archived["schema_version"] == "task_engine.raw_evidence/v2"
     assert archived["bundle_digest"] == bundle.snapshot.identity.digest
     assert archived["run_id"] == report.run_id
     assert archived["episode_ids"] == list(session.episode_ids)

@@ -253,7 +253,7 @@ def test_normal_worker_preserves_program_unavailable_and_fresh_output(
         == physical["run_id"]
     )
     archived = json.loads((case.output / "raw_evidence.json").read_text())
-    assert archived["schema_version"] == "task_engine.raw_evidence/v1"
+    assert archived["schema_version"] == "task_engine.raw_evidence/v2"
     assert archived["bundle_digest"] == case.bundle.snapshot.identity.digest
     assert archived["run_id"] == physical["run_id"]
     assert archived["bindings"] == []

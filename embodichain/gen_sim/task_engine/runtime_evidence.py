@@ -29,16 +29,14 @@ from embodichain.gen_sim.task_spec import canonical_hash
 from .bundle_spec import decode_bundle_task_spec, bundle_task_spec_payload
 from embodichain.gen_sim.task_spec.evidence import (
     SupportedPlacementEvidenceBinding,
-    sampled_support_window,
-    directional_observation_axes,
 )
 from embodichain.gen_sim.task_spec.condition_evidence import ConditionEvidenceBinding
 from embodichain.gen_sim.task_spec.pour_evidence import PourEvidenceBinding
-from embodichain.gen_sim.task_spec.handover_evidence import HandOverEvidenceBinding
-from embodichain.gen_sim.task_spec.coordinated_evidence import (
+from embodichain.lab.task_program.integrations.evidence import HandOverEvidenceBinding
+from embodichain.lab.task_program.integrations.evidence import (
     CoordinatedHoldEvidenceBinding,
 )
-from embodichain.gen_sim.task_spec.transport_evidence import (
+from embodichain.lab.task_program.integrations.evidence import (
     CoordinatedTransportEvidenceBinding,
 )
 from embodichain.gen_sim.task_spec.placement_group_evidence import (
@@ -48,9 +46,15 @@ from embodichain.gen_sim.task_spec.condition_group_evidence import (
     ConditionEvidenceGroupBinding,
 )
 from embodichain.gen_sim.task_spec.control_evidence import ControlEvidenceBinding
-from embodichain.gen_sim.task_spec.observation_requests import held_observation_request
-from embodichain.gen_sim.task_spec.evidence_report import (
-    evaluate_physical_evidence_report,
+from embodichain.lab.task_program.integrations.evidence import (
+    held_observation_request,
+    sampled_support_window,
+    directional_observation_axes,
+    validate_placement_declaration,
+)
+from .evidence_binding import (
+    TaskEngineManipulationBinding,
+    evaluate_task_engine_evidence,
 )
 from .bundle_deployment import LoadedTaskProgramBundle
 from .bundle_io import BundleSnapshot
@@ -74,6 +78,7 @@ _Binding = (
     | CoordinatedHoldEvidenceBinding
     | CoordinatedTransportEvidenceBinding
     | ControlEvidenceBinding
+    | TaskEngineManipulationBinding
 )
 _TYPES = (
     SupportedPlacementEvidenceBinding,
@@ -85,6 +90,7 @@ _TYPES = (
     CoordinatedHoldEvidenceBinding,
     CoordinatedTransportEvidenceBinding,
     ControlEvidenceBinding,
+    TaskEngineManipulationBinding,
 )
 _SCHEMAS = {
     "condition_evidence_binding": ConditionEvidenceBinding,
@@ -104,6 +110,8 @@ def _binding(value: _Binding | Mapping[str, Any]) -> _Binding:
         return type(value).from_dict(value)
     if isinstance(value, Mapping):
         schema = value.get("schema_version", "")
+        if schema == "task_engine.manipulation_evidence_binding/v1":
+            return TaskEngineManipulationBinding.from_dict(value)
         for name, cls in _SCHEMAS.items():
             if type(schema) is str and schema.startswith("task_spec." + name + "/"):
                 return cls.from_dict(value)
@@ -272,6 +280,7 @@ class TaskEngineEvidenceSession:
             raise
 
         self._bindings: dict[str, _Binding] = {}
+        self._declarations: dict[str, Any] = {}
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._segments: list[dict[str, Any]] = []
         self._errors: dict[str, str] = {}
@@ -344,7 +353,9 @@ class TaskEngineEvidenceSession:
             This performs no projection, acquisition or identity reconstruction
             and remains available after the session closes.
         """
-        return tuple(self._bindings[key].to_dict() for key in sorted(self._bindings))
+        return tuple(
+            self._declarations[key].to_dict() for key in sorted(self._bindings)
+        )
 
     def _guard(self) -> None:
         from embodichain.lab.task_program.integrations.invocation_policy import (
@@ -372,7 +383,23 @@ class TaskEngineEvidenceSession:
             raise ValueError(
                 "A bundle without TaskSpec cannot bind normative evidence."
             )
-        binding = _binding(value)
+        declaration = _binding(value)
+        if isinstance(
+            declaration,
+            (
+                HandOverEvidenceBinding,
+                CoordinatedHoldEvidenceBinding,
+                CoordinatedTransportEvidenceBinding,
+            ),
+        ):
+            raise ValueError(
+                "Manipulation evidence requires explicit paired acceptance criteria; regenerate the bundle."
+            )
+        binding = (
+            declaration.runtime
+            if isinstance(declaration, TaskEngineManipulationBinding)
+            else declaration
+        )
         if binding.evidence_format != "raw_snapshot":
             raise ValueError(
                 "Live evidence sessions do not replay historical record formats."
@@ -399,11 +426,14 @@ class TaskEngineEvidenceSession:
             else (binding,)
         ):
             self._validate_native_binding_owner(member)
+            if isinstance(member, SupportedPlacementEvidenceBinding):
+                validate_placement_declaration(member.to_dict())
         # Public TaskSpec validation checks predicate/family/goal-versus-milestone
         # association without reading a simulator or inventing missing evidence.
-        evaluate_physical_evidence_report(
-            self._spec, (binding,), {}, program=self._program, num_envs=self._count
+        evaluate_task_engine_evidence(
+            self._spec, (declaration,), {}, program=self._program, num_envs=self._count
         )
+        self._declarations[binding.predicate_id] = declaration
         return binding
 
     def _validate_native_binding_owner(self, binding: _Binding) -> None:
@@ -428,7 +458,7 @@ class TaskEngineEvidenceSession:
         """Install explicit declarations before any boundary can be missed.
 
         Args:
-            bindings: Raw bindings already projected from their configured owners.
+            bindings: Sealed evidence declarations, including separate manipulation acceptance criteria.
         """
         self._guard()
         if self._bridge.clock.step_index or self._segments:
@@ -614,7 +644,7 @@ class TaskEngineEvidenceSession:
         recorded = binding.observation_kind == "recorded"
         if isinstance(binding, SupportedPlacementEvidenceBinding):
             if binding.sampled_contact_identity is not None:
-                starts, ends = sampled_support_window(binding, frames)
+                starts, ends = sampled_support_window(binding.to_dict(), frames)
                 packet = self._once(
                     self._timeline.capture,
                     binding.object_id,
@@ -640,7 +670,7 @@ class TaskEngineEvidenceSession:
                     binding.reference_id,
                     source["table_id"],
                     frames,
-                    axes=directional_observation_axes(binding),
+                    axes=directional_observation_axes(binding.to_dict()),
                     observation_kind=binding.observation_kind,
                     preset_id=binding.stability_preset,
                     reference_part=source["reference_part"],
@@ -697,9 +727,7 @@ class TaskEngineEvidenceSession:
         if isinstance(
             binding, (HandOverEvidenceBinding, CoordinatedHoldEvidenceBinding)
         ):
-            request = held_observation_request(
-                self._spec, binding, runtime, program=self._program
-            )
+            request = held_observation_request(binding, runtime, program=self._program)
             common.update(
                 boundary_frames=request["boundary_frames"],
                 program_fingerprint=self._program_fingerprint,
@@ -1010,9 +1038,9 @@ class TaskEngineEvidenceSession:
             else:
                 reports = tuple(
                     report.to_dict()
-                    for report in evaluate_physical_evidence_report(
+                    for report in evaluate_task_engine_evidence(
                         self._spec,
-                        tuple(self._bindings.values()),
+                        tuple(self._declarations[key] for key in self._bindings),
                         self._snapshots,
                         program=self._program,
                         num_envs=self._count,

@@ -16,7 +16,7 @@ Importing the instruction/candidate front end initializes neither Lab nor Sim.
 | Pure program projection and explicit segment acceptance bindings | `program_declarations.py` |
 | Pure bundle declarations, preflight and atomic publication | `task_program_bundle.py`, `bundle_assembly.py`, `bundle_deployment.py`, `bundle_identity.py`, `bundle_io.py` |
 | Installed current-bundle loading and source revision/input inventory | `bundle_loading.py`, `bundle_inputs.py` |
-| Execution and occurrence-bound evidence projection | `execution.py`, `runtime_bindings.py`, `runtime_evidence.py` |
+| Execution and occurrence-bound evidence projection | `execution.py`, `runtime_bindings.py`, `runtime_evidence.py`, `evidence_binding.py` |
 | Workflow, child lifecycle and fresh run allocation | `workflow.py`, `run_directory.py`, `orchestration/execution_resources.py` |
 | Unified public CLI and worker | `cli.py`, `_bundle_runner.py`; dispatch in `embodichain/cli/main.py` |
 

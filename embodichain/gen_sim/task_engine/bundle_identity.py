@@ -41,8 +41,8 @@ __all__ = [
     "verify_bundle_files",
 ]
 
-BUNDLE_IDENTITY_SCHEMA: Final = "semantic_integration_fingerprint/v4"
-SHARED_RUNTIME_CONTRACT: Final = "gen_sim.task_program/shared/v2"
+BUNDLE_IDENTITY_SCHEMA: Final = "semantic_integration_fingerprint/v5"
+SHARED_RUNTIME_CONTRACT: Final = "gen_sim.task_program/shared/v3"
 _FIELDS = frozenset(
     {
         "schema_version",

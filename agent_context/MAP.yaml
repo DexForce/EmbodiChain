@@ -169,6 +169,7 @@ topics:
   - embodichain/lab/sim/sensors/contact/timeline.py
   - embodichain/lab/sim/sensors/contact/observation.py
   - embodichain/lab/sim/sensors/support_observation.py
+  - embodichain/lab/evidence.py
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
@@ -559,6 +560,7 @@ topics:
   - embodichain/gen_sim/task_spec/registry.py
   - embodichain/gen_sim/task_spec/evidence.py
   - embodichain/gen_sim/task_spec/evidence_report.py
+  - embodichain/gen_sim/task_spec/manipulation_evidence.py
   - embodichain/gen_sim/task_spec/condition_evidence.py
   - embodichain/gen_sim/task_spec/control_evidence.py
   - embodichain/gen_sim/task_spec/pour_evidence.py

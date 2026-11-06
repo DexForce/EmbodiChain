@@ -26,10 +26,10 @@ from embodichain.gen_sim.task_spec import (
     MilestoneSpec,
     canonical_hash,
 )
-from embodichain.gen_sim.task_spec.handover_evidence import (
+from embodichain.lab.task_program.integrations.evidence.handover_evidence import (
     HandOverEvidenceBinding,
-    evaluate_handover_evidence,
 )
+from ._evaluation import evaluate_handover_evidence
 
 _SOURCE = json.loads(
     (Path(__file__).parent / "data/handover_source_reference.json").read_text()
@@ -76,6 +76,7 @@ def _case(index, name="held", *, raw=False):
         operation,
         "final" if case["final"] else "recorded",
         0.04,
+        query_kind=name,
         evidence_format="raw_snapshot" if raw else "historical_record",
         episode_ids=(7,),
         program_fingerprint="a" * 64,
@@ -227,9 +228,7 @@ def test_handover_fresh_valid_empty_contacts_are_a_negative():
 
 
 def test_handover_common_report_preserves_exact_declarations():
-    from embodichain.gen_sim.task_spec.evidence_report import (
-        evaluate_physical_evidence_report,
-    )
+    from ._evaluation import evaluate_physical_evidence_report
 
     spec, binding, evidence, program = _case(3, raw=True)
     normalized = HandOverEvidenceBinding.from_dict(binding.to_dict())
@@ -246,12 +245,12 @@ def test_handover_common_report_preserves_exact_declarations():
 
 @pytest.mark.parametrize("index", range(4))
 def test_held_observation_request_uses_exact_receipt_endpoints_and_revision(index):
-    from embodichain.gen_sim.task_spec.observation_requests import (
+    from embodichain.lab.task_program.integrations.evidence.observation_requests import (
         held_observation_request,
     )
 
     spec, binding, evidence, program = _case(index, "held", raw=False)
-    request = held_observation_request(spec, binding, evidence, program=program)
+    request = held_observation_request(binding, evidence, program=program)
     metrics = evidence["record"]["measurements"]
     assert request["motion_parts"] == [metrics["motion_part"]]
     assert request["boundary_frames"] == metrics["boundary_frames"]

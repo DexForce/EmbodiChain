@@ -72,11 +72,11 @@ def test_provenance_seals_complete_owner_groups_and_owns_values(tmp_path):
     assert snapshot.identity.to_dict()["external_inputs"] == inputs
     assert (
         snapshot.identity.to_dict()["schema_version"]
-        == "semantic_integration_fingerprint/v4"
+        == "semantic_integration_fingerprint/v5"
     )
     assert (
         snapshot.identity.to_dict()["adapter_contract"]
-        == "gen_sim.task_program/shared/v2"
+        == "gen_sim.task_program/shared/v3"
     )
 
 

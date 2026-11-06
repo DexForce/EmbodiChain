@@ -47,8 +47,8 @@ from embodichain.gen_sim.task_spec.condition_group_evidence import (
     evaluate_condition_group_evidence,
 )
 
-from embodichain.gen_sim.task_spec.handover_evidence import HandOverEvidenceBinding
-from embodichain.gen_sim.task_spec.coordinated_evidence import (
+from embodichain.lab.task_program.integrations.evidence import HandOverEvidenceBinding
+from embodichain.lab.task_program.integrations.evidence import (
     CoordinatedHoldEvidenceBinding,
 )
 
@@ -57,10 +57,14 @@ from embodichain.gen_sim.task_spec.pour_evidence import (
     evaluate_pour_evidence,
 )
 
-from embodichain.gen_sim.task_spec.transport_evidence import (
+from embodichain.lab.task_program.integrations.evidence import (
     CoordinatedTransportEvidenceBinding,
-    evaluate_coordinated_transport_evidence,
 )
+from embodichain.gen_sim.task_spec.manipulation_evidence import (
+    HoldAcceptanceCriteria,
+    evaluate_manipulation_evidence,
+)
+from .evidence_binding import TaskEngineManipulationBinding, _acceptance
 
 from embodichain.gen_sim.task_spec.control_evidence import (
     ControlEvidenceBinding,
@@ -1282,7 +1286,8 @@ def project_handover_evidence_binding(
     program_fingerprint: str | None = None,
     object_native_uid: str | None = None,
     robot_uid: str | None = None,
-) -> HandOverEvidenceBinding:
+    acceptance_criteria: HoldAcceptanceCriteria | Mapping[str, Any] | None = None,
+) -> TaskEngineManipulationBinding:
     """Project a frozen E4 declaration without reading physical state.
 
     Args:
@@ -1301,14 +1306,11 @@ def project_handover_evidence_binding(
         program_fingerprint: Actual compiled program fingerprint.
         object_native_uid: Resolved native object identity.
         robot_uid: Resolved native robot identity.
+        acceptance_criteria: Explicit normative limits; otherwise use the complete frozen hold condition.
 
     Returns:
         Sealed TaskSpec HandOver evidence binding.
     """
-    from embodichain.gen_sim.task_spec.handover_evidence import (
-        HandOverEvidenceBinding,
-        evaluate_handover_evidence,
-    )
 
     normalized = TaskSpec.from_dict(spec)
     graph, validation, program, operation = (
@@ -1400,6 +1402,7 @@ def project_handover_evidence_binding(
         operation,
         "final" if milestone is None else "recorded",
         step_dt,
+        query_kind=predicate.name,
         evidence_format=evidence_format,
         env_ids=tuple(range(num_envs)),
         episode_ids=None if episode_ids is None else tuple(episode_ids),
@@ -1407,8 +1410,19 @@ def project_handover_evidence_binding(
         object_native_uid=object_native_uid,
         robot_uid=robot_uid,
     )
-    evaluate_handover_evidence(normalized, result, {}, program=program)
-    return result
+    deployment = _acceptance(
+        result,
+        {
+            "handover_complete": "handover_complete",
+            "held": "receiver_hold",
+            "orientation": "receiver_orientation",
+        }[predicate.name],
+        acceptance_criteria,
+    )
+    evaluate_manipulation_evidence(
+        normalized, deployment.acceptance, {}, program=program
+    )
+    return deployment
 
 
 def project_coordinated_hold_evidence_binding(
@@ -1427,7 +1441,8 @@ def project_coordinated_hold_evidence_binding(
     program_fingerprint: str | None = None,
     object_native_uid: str | None = None,
     robot_uid: str | None = None,
-) -> CoordinatedHoldEvidenceBinding:
+    acceptance_criteria: HoldAcceptanceCriteria | Mapping[str, Any] | None = None,
+) -> TaskEngineManipulationBinding:
     """Project a frozen E5 declaration without reading physical state.
 
     Args:
@@ -1445,14 +1460,11 @@ def project_coordinated_hold_evidence_binding(
         program_fingerprint: Actual compiled program fingerprint.
         object_native_uid: Resolved native object identity.
         robot_uid: Resolved native robot identity.
+        acceptance_criteria: Explicit normative limits; otherwise use the complete frozen hold condition.
 
     Returns:
         Sealed TaskSpec Coordinated hold evidence binding.
     """
-    from embodichain.gen_sim.task_spec.coordinated_evidence import (
-        CoordinatedHoldEvidenceBinding,
-        evaluate_coordinated_hold_evidence,
-    )
 
     normalized = TaskSpec.from_dict(spec)
     graph, validation, program, operation = (
@@ -1558,8 +1570,11 @@ def project_coordinated_hold_evidence_binding(
         object_native_uid=object_native_uid,
         robot_uid=robot_uid,
     )
-    evaluate_coordinated_hold_evidence(normalized, result, {}, program=program)
-    return result
+    deployment = _acceptance(result, "coordinated_hold", acceptance_criteria)
+    evaluate_manipulation_evidence(
+        normalized, deployment.acceptance, {}, program=program
+    )
+    return deployment
 
 
 def project_coordinated_transport_evidence_binding(
@@ -1577,7 +1592,7 @@ def project_coordinated_transport_evidence_binding(
     evidence_format: str = "raw_snapshot",
     episode_ids: Sequence[int] | None = None,
     sampled_contact_identity: Mapping[str, Any] | None = None,
-) -> CoordinatedTransportEvidenceBinding:
+) -> TaskEngineManipulationBinding:
     """Project a recorded E5 acquisition event without treating it as final holding.
 
     Args:
@@ -1708,8 +1723,11 @@ def project_coordinated_transport_evidence_binding(
         episode_ids=None if episode_ids is None else tuple(episode_ids),
         sampled_contact_identity=sampled_contact_identity,
     )
-    evaluate_coordinated_transport_evidence(normalized, result, {}, program=program)
-    return result
+    deployment = _acceptance(result, "coordinated_acquisition", None)
+    evaluate_manipulation_evidence(
+        normalized, deployment.acceptance, {}, program=program
+    )
+    return deployment
 
 
 def project_control_evidence_binding(
