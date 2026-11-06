@@ -62,6 +62,14 @@ and per-row availability belong to the [contact boundary](../sensor-system/conta
 Raw traces are observations, while report serialization and TaskSpec verdicts
 remain frontend responsibilities.
 
+Fresh grip capture uses `SimulationStateObservationCollector` with the explicit
+`ObservationManager` owner. Its cheap `read_history_step_counts` query qualifies
+the current row boundaries without copying the full history. The runtime's
+`GripEvidenceObservationPort` performs one acquisition and owns that exact query;
+the standard factory preserves sensor, robot and runtime-scope checks around it.
+Collectors check episode, object, provider and clock identity before and after
+the read. Query time is not a claim of a native impulse refresh or task success.
+
 Stateful segment validators capture their incoming evidence through the optional
 `begin_segment` port immediately before runtime planning starts. Lift checks use
 that segment's measured baseline, including for lazy and repeated segments;
