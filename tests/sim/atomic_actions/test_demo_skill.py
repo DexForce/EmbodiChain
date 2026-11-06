@@ -169,14 +169,25 @@ def test_specialized_motion_is_one_nonreplannable_atomic_plan_on_selected_row():
     engine.motion_generator.generate.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["none", "source", "semantic"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "none",
+        "source",
+        "semantic",
+        "explicit_success",
+        "explicit_failure",
+        "explicit_unresolved",
+        "explicit_mismatched",
+    ],
+)
 def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
     engine, provider, invocation, evidence = _setup()
     current = [0.0]
     context = _context()
     transform = None
     verifier = None
-    if failure == "semantic":
+    if failure == "semantic" or failure.startswith("explicit_"):
         from embodichain.lab.sim.atomic_actions import (
             StateDelta,
             ArticulationJointState,
@@ -192,14 +203,16 @@ def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
             ),
         )
 
-        def verifier(ctx, request):
-            return EffectVerificationResult(
-                verification_id=request.verification_id,
-                success_mask=torch.zeros_like(request.env_mask),
-                failure_mask=request.env_mask,
-                invalidation_mask=torch.zeros_like(request.env_mask),
-                retry_mask=torch.zeros_like(request.env_mask),
-            )
+        if failure == "semantic":
+
+            def verifier(ctx, request):
+                return EffectVerificationResult(
+                    verification_id=request.verification_id,
+                    success_mask=torch.zeros_like(request.env_mask),
+                    failure_mask=request.env_mask,
+                    invalidation_mask=torch.zeros_like(request.env_mask),
+                    retry_mask=torch.zeros_like(request.env_mask),
+                )
 
     session = engine.start(
         (invocation,), context, nominal_source=provider, plan_transform=transform
@@ -216,10 +229,11 @@ def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
         def sleep(self, duration):
             current[0] += duration
 
-    sink = Mock()
-    sink.send.return_value = CommandAcknowledgement.accepted_ack()
-    sink.hold.return_value = CommandAcknowledgement.accepted_ack()
-    sink.cancel.return_value = CommandAcknowledgement.accepted_ack()
+    sink = SimpleNamespace(
+        send=Mock(return_value=CommandAcknowledgement.accepted_ack()),
+        hold=Mock(return_value=CommandAcknowledgement.accepted_ack()),
+        cancel=Mock(return_value=CommandAcknowledgement.accepted_ack()),
+    )
     if failure == "source":
         evidence.observe = lambda context: DemoSkillObservation(
             context.robot.timestamp, 0, {}, metrics={"observed_success": 0.0}
@@ -227,18 +241,69 @@ def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
     runner = ExecutionRunner(
         session, Observations(), sink, clock=Clock(), cfg=ExecutionRunnerCfg()
     )
+    supplied = None
     for _ in range(30):
-        result = runner.step(effect_verifier=verifier)
-        if result.status != RunnerStatus.RUNNING:
+        pending = session.pending_effect
+        if failure.startswith("explicit_") and pending is not None:
+            supplied = EffectVerificationResult(
+                verification_id=pending.verification_id
+                + (failure == "explicit_mismatched"),
+                success_mask=torch.full_like(
+                    pending.env_mask,
+                    failure in {"explicit_success", "explicit_mismatched"},
+                ),
+                failure_mask=torch.full_like(
+                    pending.env_mask, failure == "explicit_failure"
+                ),
+                invalidation_mask=torch.zeros_like(pending.env_mask),
+                retry_mask=torch.zeros_like(pending.env_mask),
+            )
+        result = runner.step(effect_verifier=verifier, effect_result=supplied)
+        if result.status != RunnerStatus.RUNNING or supplied is not None:
             break
         current[0] += max(result.wait_duration, DT)
-    assert result.status == (
-        RunnerStatus.COMPLETED if failure == "none" else RunnerStatus.FAILED
-    ), result.message
+    expected_status = (
+        RunnerStatus.COMPLETED
+        if failure in {"none", "explicit_success"}
+        else (
+            RunnerStatus.RUNNING
+            if failure == "explicit_unresolved"
+            else RunnerStatus.FAILED
+        )
+    )
+    assert result.status == expected_status, result.message
     assert provider.monitor.terminal_passed is (failure != "source")
-    if failure == "semantic":
+    state = session.task_state.get_articulation_joint_state("hinge", "joint")
+    if failure == "explicit_success":
+        torch.testing.assert_close(state.position, torch.ones(1, 1))
+    elif failure in {
+        "semantic",
+        "explicit_failure",
+        "explicit_unresolved",
+        "explicit_mismatched",
+    }:
+        assert state is None
+    if failure == "explicit_unresolved":
+        current[0] += max(result.wait_duration, DT)
+        waiting = runner.step()
+        assert waiting.status is RunnerStatus.RUNNING
         assert session.task_state.get_articulation_joint_state("hinge", "joint") is None
-    if failure != "none":
+        # A later correlated approval can finish the same pending boundary.
+        current[0] += max(waiting.wait_duration, DT)
+        pending = session.pending_effect
+        result = runner.step(
+            effect_result=replace(
+                supplied,
+                verification_id=pending.verification_id,
+                success_mask=pending.env_mask,
+            )
+        )
+        assert result.status is RunnerStatus.COMPLETED, result.message
+        assert (
+            session.task_state.get_articulation_joint_state("hinge", "joint")
+            is not None
+        )
+    if expected_status is RunnerStatus.FAILED:
         assert sink.cancel.called and sink.hold.called
 
 

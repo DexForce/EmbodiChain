@@ -33,6 +33,8 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     InstantiatedSkillMotion,
     NominalMotionSource,
+    MonitoredNominalMotionSource,
+    EffectVerificationRequest,
     PrototypeMotionProvider,
     ResolvedActionRequest,
     PlanningContext,
@@ -447,4 +449,27 @@ class TracingTaskProgramNominalSources:
                 owner._motions[index] = replace(motion)
                 return motion
 
-        return _TraceSource()
+        if not isinstance(source, MonitoredNominalMotionSource):
+            return _TraceSource()
+
+        class _MonitoredTraceSource(_TraceSource):
+            # Python 3.12+ runtime protocols use static attribute lookup, which
+            # cannot discover protocol members forwarded by __getattr__.
+            def observe_execution(
+                self,
+                context: PlanningContext,
+                sample_index: int | None,
+                *,
+                terminal: bool,
+            ) -> None:
+                source.observe_execution(context, sample_index, terminal=terminal)
+
+            def owns_effect(self, request: EffectVerificationRequest) -> bool:
+                return source.owns_effect(request)
+
+            def verify_effect(
+                self, context: PlanningContext, request: object
+            ) -> object:
+                return source.verify_effect(context, request)
+
+        return _MonitoredTraceSource()
