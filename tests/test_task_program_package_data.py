@@ -477,3 +477,78 @@ print(json.dumps(decoded_deployments, sort_keys=True))
     assert json.loads(completed.stdout.splitlines()[-1]) == {
         path: list(identifiers) for path, identifiers in expected_deployments.items()
     }
+
+
+def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
+    """Import the installed task package and register the drawer environment."""
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
+        shutil.copyfile(_REPOSITORY_ROOT / name, source / name)
+    for name in ("embodichain", "extensions", "examples"):
+        shutil.copytree(
+            _REPOSITORY_ROOT / name,
+            source / name,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"),
+        )
+
+    wheel_dir = tmp_path / "wheels"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-build-isolation",
+            "--no-deps",
+            "--no-index",
+            "--wheel-dir",
+            str(wheel_dir),
+            ".",
+        ],
+        cwd=source,
+        check=True,
+    )
+    (wheel,) = wheel_dir.glob("embodichain-*.whl")
+    installed = tmp_path / "installed"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-index",
+            "--target",
+            str(installed),
+            str(wheel),
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            """
+from pathlib import Path
+import sys
+
+installed = Path(sys.argv[1])
+sys.path.insert(0, str(installed))
+import embodichain_tasks
+from embodichain.lab.gym.utils.registration import get_env_spec
+from embodichain_tasks.manipulation.drawer_storage import DrawerStorageEnv
+from gymnasium import registry
+
+assert Path(embodichain_tasks.__file__).is_relative_to(installed)
+env_id = "TaskProgramDrawerStorage-UR5-v1"
+assert env_id in registry
+assert get_env_spec(env_id).cls is DrawerStorageEnv
+""",
+            str(installed),
+        ],
+        cwd=tmp_path,
+        check=True,
+    )

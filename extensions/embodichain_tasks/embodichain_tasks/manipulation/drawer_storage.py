@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 from itertools import product
-from pathlib import Path
 
 import torch
 
@@ -27,13 +26,12 @@ from embodichain.lab.task_program.integrations.composition import (
     load_configured_task_program_deployment,
 )
 from embodichain.utils.utility import load_config
+from embodichain_tasks.configs import get_config_path
 
 __all__ = ["DrawerStorageEnv"]
 
 
-_CONFIG = (
-    Path(__file__).resolve().parents[2] / "configs/tasks/manipulation/drawer_storage"
-)
+_CONFIG = get_config_path("tasks/manipulation/drawer_storage")
 _DECLARATION = load_config(_CONFIG / "task.ur5.yaml")
 _PROFILE = load_config((_CONFIG / _DECLARATION["embodiment"]["component"]).resolve())[
     "skill_profile"
