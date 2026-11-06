@@ -83,6 +83,10 @@ generates no controller action. Live grounding occurs only after
 `TaskProgramEnvironmentAdapter` matches the compiled scene/profile/catalog
 snapshot to the exact integration registration.
 
+Catalog fingerprints omit exact inactive defaults only for named migration
+extensions. Existing schema fields, nondefault choices and realized skill
+capabilities remain part of the registration identity.
+
 Expansion is optional and episode-scoped, not part of compilation.
 `EmbodiedEnv.create_demo_segments()` passes a separate Expansion Profile and
 candidate ordinal into a fresh bridge. After a matching Semantic Call is

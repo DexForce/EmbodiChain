@@ -1527,6 +1527,16 @@ def test_native_service_extension_preserves_public_default_values_and_capabiliti
             Path(__file__).parent / "data/native_public_defaults_base42bd.json"
         ).read_text()
     )["values"]
+    extensions = json.loads(
+        (
+            Path(__file__).parent / "data/migration_default_fingerprint_fields.json"
+        ).read_text()
+    )["fields"]
+    omitted = {}
+    for extension in extensions:
+        omitted.setdefault(extension["class"], {})[extension["field"]] = extension[
+            "default"
+        ]
     actual = {}
     for name in frozen:
         if name.endswith(".descriptor"):
@@ -1534,7 +1544,99 @@ def test_native_service_extension_preserves_public_default_values_and_capabiliti
         else:
             value = getattr(atomic_actions, name)()
         actual[name] = _canonical_value(value)
+        # 42bd records raw defaults after A7/A8 added these fields; it did not
+        # introduce a new fingerprint schema. Preserve those values and every
+        # capability assertion while checking the explicit omission boundary.
+        for field_name, default in omitted.get(name, {}).items():
+            if field_name not in actual[name]["fields"]:
+                assert getattr(value, field_name) == default
+                actual[name]["fields"][field_name] = _canonical_value(
+                    getattr(value, field_name)
+                )
     assert actual == frozen
+
+
+def _load_e1_default_deployment():
+    """Use the public loader on unchanged frozen E1 program/profile/policy data."""
+    import yaml
+    from embodichain.lab.task_program.integrations import (
+        load_configured_task_program_deployment,
+    )
+
+    path = Path(__file__).parent / "data/e1_default_deployment_fingerprint.json"
+    fixture = json.loads(path.read_text())
+    files = fixture["files"]
+    read = lambda name: yaml.safe_load(files[name])
+    deployment = load_configured_task_program_deployment(
+        task_program={
+            "program": {"inline": read("task_program/program.yaml")},
+            "integration": {"inline": read("task_program/integration.yaml")},
+            "execution_policy": {"inline": read("components/execution_policy.yaml")},
+        },
+        skill_profile=read("components/embodiment.yaml")["skill_profile"],
+        base_dir=path.parent,
+    )
+    return fixture, deployment
+
+
+def test_e1_public_deployment_restores_default_fingerprint_without_runtime() -> None:
+    frozen, deployment = _load_e1_default_deployment()
+    assert (
+        deployment.integration.integration_fingerprint
+        == frozen["expected_integration_fingerprint"]
+    )
+    assert (
+        deployment.integration.registration.fingerprint
+        == frozen["expected_registration_fingerprint"]
+    )
+    deployment.integration.registration.assert_unchanged()
+
+
+_MIGRATION_DEFAULT_EXTENSIONS = json.loads(
+    (
+        Path(__file__).parent / "data/migration_default_fingerprint_fields.json"
+    ).read_text()
+)["fields"]
+
+
+@pytest.mark.parametrize(
+    "extension",
+    _MIGRATION_DEFAULT_EXTENSIONS,
+    ids=lambda row: row["class"] + "." + row["field"],
+)
+def test_nondefault_migration_options_remain_sealed_in_public_deployments(extension):
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    _, deployment = _load_e1_default_deployment()
+    registration = deployment.integration.registration
+    presets = {
+        preset.preset_id: preset
+        for preset in registration.robot_profile_binding.presets
+    }
+    cls = extension["class"]
+    if cls.endswith("PlanningRecovery"):
+        preset = presets["sampled_pick" if cls.startswith("Pick") else "sampled_place"]
+        value = preset._recovery_policy.planning_recovery
+    else:
+        skill = {
+            "HandOverOptions": "hand_over",
+            "PickUpOptions": "pick",
+            "PlaceOptions": "place",
+        }[cls]
+        value = presets["trajectory_verified"]._action_option_templates[skill]
+    assert type(value).__name__ == cls
+    field_name = extension["field"]
+    assert getattr(value, field_name) == extension["default"]
+    active = {
+        "existing_hold_hand_source": "grasp_command",
+        "receive_region": "supported_end",
+        "source_retreat_mode": "root_separation",
+    }.get(field_name, not extension["default"])
+    # Inject drift into the sealed owned value, rather than a public snapshot.
+    object.__setattr__(value, field_name, active)
+    assert _canonical_value(value)["fields"][field_name] == active
+    with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+        registration.assert_unchanged()
 
 
 def _bound_control_post_case():

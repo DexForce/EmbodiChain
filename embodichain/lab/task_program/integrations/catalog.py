@@ -282,6 +282,57 @@ def _canonical_value(value: object) -> object:
             and value.opening_place_invocation_id is None
         ):
             metadata.pop("opening_place_invocation_id", None)
+        from embodichain.lab.sim.atomic_actions.primitives.pick_up import (
+            PickUpOptions,
+            PickPlanningRecovery,
+        )
+        from embodichain.lab.sim.atomic_actions.primitives.place import (
+            PlaceOptions,
+            PlacePlanningRecovery,
+        )
+        from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
+            HandOverOptions,
+        )
+
+        # Preserve pre-extension defaults for these opt-ins only. Nondefault
+        # values and fields from the existing action schemas remain complete.
+        if type(value) is PickUpOptions:
+            for name in (
+                "constrained_grasp",
+                "linear_segments",
+                "measured_preshape",
+                "native_scene_trial",
+                "qualify_fixed_grasp",
+            ):
+                if getattr(value, name) is False:
+                    metadata.pop(name)
+            if value.qualify_downstream_targets is True:
+                metadata.pop("qualify_downstream_targets")
+        if type(value) is PlaceOptions:
+            for name in ("drawer_placement", "measured_inside", "preserve_vertical"):
+                if getattr(value, name) is False:
+                    metadata.pop(name)
+        if type(value) is HandOverOptions:
+            for name in (
+                "adaptive_receive",
+                "linear_segments",
+                "require_receiver_scene",
+            ):
+                if getattr(value, name) is False:
+                    metadata.pop(name)
+            for name, default in {
+                "existing_hold_hand_source": "observed",
+                "receive_region": "mesh_extent",
+                "source_retreat_mode": "approach",
+            }.items():
+                if getattr(value, name) == default:
+                    metadata.pop(name)
+        if type(value) is PickPlanningRecovery:
+            for name in ("constrained_roll", "place_continuation"):
+                if getattr(value, name) is False:
+                    metadata.pop(name)
+        if type(value) is PlacePlanningRecovery and value.inside_world_yaw is False:
+            metadata.pop("inside_world_yaw")
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "
