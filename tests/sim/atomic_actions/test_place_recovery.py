@@ -170,6 +170,39 @@ def test_place_recovery_requires_scene_inputs_before_any_ik_or_motion(
     assert not calls and not ik
 
 
+def test_place_velocity_failure_retains_pre_velocity_kinematic_evidence(
+    tmp_path, monkeypatch
+):
+    engine, invocation, context, calls, ik, _ = inputs(tmp_path, "nominal", monkeypatch)
+    generator = engine.motion_generator
+    callback = generator._generate_once
+    del generator._generate_once
+    generator._generate_ik_interpolation = callback
+    urdf = Path(generator.robot.cfg.fpath)
+    urdf.write_text(urdf.read_text().replace('velocity="1"', 'velocity="0.01"'))
+    invocation = replace(
+        invocation,
+        motion_policy=replace(invocation.motion_policy, mask_generation_overspeed=True),
+    )
+    torch.manual_seed(17)
+    np.random.seed(17)
+    random.seed(17)
+
+    plan = engine.plan(invocation, context)
+
+    assert plan.plan_success.tolist() == [False]
+    # Source records normalized generation success before the speed mask.
+    # This fixture's IK succeeds even when every path exceeds the speed cap.
+    assert plan.diagnostics.metadata["place_waypoint_probe"]["kinematic_valid"] is True
+    assert plan.diagnostics.metadata["place_recovery_cost"] == {
+        "complete_plans": 10,
+        "waypoint_batches": 2,
+        "clearance_routes": 2,
+        "scope": "one_complete_action_planning_attempt",
+    }
+    assert len(calls) == 16 and len(ik) == 1
+
+
 def test_place_scene_owns_arrays_and_uses_explicit_floor_identity(
     tmp_path, monkeypatch
 ):

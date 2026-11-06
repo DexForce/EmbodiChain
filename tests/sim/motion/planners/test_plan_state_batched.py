@@ -75,6 +75,35 @@ class TestPlanResultBatched:
         with pytest.raises(ValueError, match="explicit dt"):
             PlanResult(success=True, positions=positions)
 
+    def test_pre_velocity_success_is_optional_owned_row_evidence(self):
+        before = torch.tensor([True, True, False])
+        result = PlanResult(
+            success=torch.tensor([True, False, False]),
+            positions=torch.zeros(3, 2, 1),
+            dt=torch.tensor([[0.0, 0.1]]).expand(3, -1),
+            generation_success_before_velocity=before,
+        )
+        before.zero_()
+        assert result.generation_success_before_velocity.tolist() == [True, True, False]
+        assert PlanResult().generation_success_before_velocity is None
+
+    @pytest.mark.parametrize("invalid", ["dtype", "row_shape", "device"])
+    def test_pre_velocity_success_matches_result_rows(self, invalid):
+        before = (
+            torch.ones(1, dtype=torch.float32)
+            if invalid == "dtype"
+            else torch.ones(2 if invalid == "row_shape" else 1, dtype=torch.bool)
+        )
+        if invalid == "device":
+            before = before.to("meta")
+        with pytest.raises(ValueError, match="generation_success_before_velocity"):
+            PlanResult(
+                success=True,
+                positions=torch.zeros(1, 2, 1),
+                dt=torch.tensor([[0.0, 0.1]]),
+                generation_success_before_velocity=before,
+            )
+
 
 class TestValidateBatchConsistency:
     def test_rejects_inconsistent_B(self):

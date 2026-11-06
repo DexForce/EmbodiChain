@@ -1274,6 +1274,13 @@ def test_generation_velocity_mask_retains_normalized_proposal(
         interpolation_mode == "fixed_grid" and not enabled
     )
     assert limits.call_count == int(enabled or interpolation_mode == "fixed_grid")
+    if enabled:
+        before_velocity = torch.tensor([True, True, True, False])
+        assert torch.equal(result.generation_success_before_velocity, before_velocity)
+        raw.success.zero_()
+        assert torch.equal(result.generation_success_before_velocity, before_velocity)
+    else:
+        assert getattr(result, "generation_success_before_velocity", None) is None
 
 
 def test_generation_velocity_mask_checks_resampled_backend_result(
