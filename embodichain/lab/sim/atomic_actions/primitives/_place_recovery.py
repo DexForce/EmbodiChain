@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, TYPE_CHECKING
 import torch
 from embodichain.compute.trajectory.limits import joint_velocity_validity
 from embodichain.lab.sim.motion.limits import authored_joint_velocity_limits
@@ -34,6 +34,14 @@ from ._pick_path import _pose_path_valid
 from ._place_scene import inspect_place_plan
 
 __all__: list[str] = []
+
+if TYPE_CHECKING:
+    from .place import PlaceOptions
+
+
+def _matches_waypoint_recovery_scope(options: PlaceOptions, variant: str) -> bool:
+    """Share the existing declarative waypoint rule with static preflight."""
+    return options.qualify_required_waypoints == (variant in {"waypoint", "lateral"})
 
 
 @dataclass
@@ -58,7 +66,7 @@ def prepare_recovery_inputs(
         or options.preserve_current_object_orientation == goal_seeded
         or options.max_approach_retract_z is not None
         or not options.linear_segments
-        or options.qualify_required_waypoints != (variant in {"waypoint", "lateral"})
+        or not _matches_waypoint_recovery_scope(options, variant)
         or (
             goal_seeded
             and (

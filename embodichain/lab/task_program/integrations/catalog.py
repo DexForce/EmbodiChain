@@ -1181,6 +1181,21 @@ class TaskProgramIntegrationCatalog:
                     path=call.source_path,
                     preset_id=selected_presets.get(occurrence),
                 )
+                if linked.descriptor.target_descriptor.skill_id == "place":
+                    preset = self.robot_profile.presets[linked.preset_id]
+                    recovery = preset.recovery_policy.planning_recovery
+                    if type(recovery) is PlacePlanningRecovery:
+                        from embodichain.lab.sim.atomic_actions.primitives._place_recovery import (
+                            _matches_waypoint_recovery_scope,
+                        )
+
+                        options = preset.action_option_template(call.call.semantic_id)
+                        if not _matches_waypoint_recovery_scope(
+                            options, recovery.variant
+                        ):
+                            raise ValueError(
+                                "Place waypoint qualification and bounded recovery variant must agree."
+                            )
                 if linked.descriptor.target_descriptor.skill_id == "hand_over":
                     occurrence = f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
                     preset = self.robot_profile.presets[
