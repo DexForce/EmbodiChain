@@ -99,6 +99,7 @@ embodichain.lab.task_program.semantics
       ResourceClaim
       SkillPolicyPreset
       EffectAssurance
+      ReleaseGateEvidence
       ProfileValidationError
       UnsupportedSkillError
       AmbiguousSkillBindingError
@@ -208,6 +209,20 @@ Robot resources and profiles
 
 .. autoclass:: EffectAssurance
    :members:
+
+.. autoclass:: ReleaseGateEvidence
+   :members:
+
+A named ``SkillPolicyPreset`` may explicitly select
+``release_gate_evidence=ReleaseGateEvidence.BINARY_ONLY``. Only existing
+detached phase gates omit pose-separation clauses; other physical clauses,
+attached guards, terminal verification and monitor thresholds remain intact.
+The default ``TERMINAL_CLAUSES`` preserves ordinary shared behavior.
+Configured presets accept ``release_gate_evidence: binary_only``; projected
+assurance cannot select it. Program-bound invocation policies can choose
+different presets for repeated calls. The nondefault declaration is sealed
+in the integration fingerprint; an inactive default preserves its existing
+fingerprint.
 
 Profile errors
 --------------

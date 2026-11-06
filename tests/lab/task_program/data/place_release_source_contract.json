@@ -1,0 +1,56 @@
+{
+  "schema_version": "source.place_release_contract/v1",
+  "source_revision": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "occurrence": "gen_sim_demo/gen_sim_demo:segment:$.program.items[4]:0",
+  "provenance": [
+    {
+      "seed": 0,
+      "report_sha256": "b4d5c4b5e3e082e1987e16a91a3660e0b9128a0eae42427cbb92b8874de96c9d",
+      "length": 1007
+    },
+    {
+      "seed": 1,
+      "report_sha256": "bf7a504f0cc1d4685256a7863f8d69d6f01760bce8d39063c2f30996c8e10753",
+      "length": 1000
+    }
+  ],
+  "boundaries": {
+    "in_flight_guard": [
+      {
+        "clause_id": "source.pose",
+        "type": "PoseRelationClause",
+        "expectation": "matched",
+        "expected": null
+      },
+      {
+        "clause_id": "source.constraint",
+        "type": "BinaryEffectClause",
+        "expectation": null,
+        "expected": true
+      }
+    ],
+    "phase_effect_gate": [
+      {
+        "clause_id": "source.constraint",
+        "type": "BinaryEffectClause",
+        "expectation": null,
+        "expected": false
+      }
+    ],
+    "terminal": [
+      {
+        "clause_id": "source.pose",
+        "type": "PoseRelationClause",
+        "expectation": "separated",
+        "expected": null
+      },
+      {
+        "clause_id": "source.constraint",
+        "type": "BinaryEffectClause",
+        "expectation": null,
+        "expected": false
+      }
+    ]
+  },
+  "scope": "Frozen successful Source phase/terminal/attached clause signatures; no trajectory or threshold substitution."
+}

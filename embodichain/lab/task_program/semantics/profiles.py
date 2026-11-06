@@ -97,6 +97,19 @@ class EffectAssurance(str, Enum):
     PROJECTED = "projected"
 
 
+class ReleaseGateEvidence(str, Enum):
+    """Physical evidence used by an existing detached phase gate.
+
+    TERMINAL_CLAUSES preserves the shared projection of all terminal
+    clauses. BINARY_ONLY omits pose-separation clauses before retracting;
+    the terminal effect and attached guards still retain their full evidence.
+    This choice creates no gate and changes no monitor thresholds.
+    """
+
+    TERMINAL_CLAUSES = "terminal_clauses"
+    BINARY_ONLY = "binary_only"
+
+
 _SOLVER_BACKED_CAPABILITIES = frozenset(
     {
         BATCH_INVERSE_KINEMATICS_CAPABILITY,
@@ -964,6 +977,8 @@ class SkillPolicyPreset:
     _workflow_recovery_policy: WorkflowRecoveryPolicy
     _runner_cfg: ExecutionRunnerCfg
     _effect_monitors: Mapping[str, EffectMonitorRef]
+    release_gate_evidence: ReleaseGateEvidence
+    """Evidence projection for existing detached phase gates only."""
     _action_option_templates: Mapping[str, ActionOptions]
 
     def __init__(
@@ -973,6 +988,7 @@ class SkillPolicyPreset:
         action_option_templates: Mapping[str, ActionOptions],
         effect_assurance: EffectAssurance,
         effect_monitors: Mapping[str, EffectMonitorRef] = _EMPTY_EFFECT_MONITORS,
+        release_gate_evidence: ReleaseGateEvidence = ReleaseGateEvidence.TERMINAL_CLAUSES,
         motion_policy: MotionPolicy | None = None,
         tracking_policy: TrackingPolicy | None = None,
         recovery_policy: RecoveryPolicy | None = None,
@@ -989,6 +1005,15 @@ class SkillPolicyPreset:
             )
         if not isinstance(effect_assurance, EffectAssurance):
             raise TypeError("effect_assurance must be an EffectAssurance.")
+        if type(release_gate_evidence) is not ReleaseGateEvidence:
+            raise TypeError("release_gate_evidence must be a ReleaseGateEvidence.")
+        if (
+            release_gate_evidence is ReleaseGateEvidence.BINARY_ONLY
+            and effect_assurance is not EffectAssurance.VERIFIED
+        ):
+            raise ValueError(
+                "Binary release-gate evidence requires verified assurance."
+            )
         selected_motion = MotionPolicy() if motion_policy is None else motion_policy
         selected_tracking = (
             TrackingPolicy.joint_position()
@@ -1048,6 +1073,7 @@ class SkillPolicyPreset:
         object.__setattr__(self, "preset_id", preset_id)
         object.__setattr__(self, "required_planner", required_planner)
         object.__setattr__(self, "effect_assurance", effect_assurance)
+        object.__setattr__(self, "release_gate_evidence", release_gate_evidence)
         object.__setattr__(self, "_motion_policy", deepcopy(selected_motion))
         object.__setattr__(self, "_tracking_policy", deepcopy(selected_tracking))
         object.__setattr__(self, "_recovery_policy", deepcopy(selected_recovery))
@@ -1147,6 +1173,7 @@ class SkillPolicyPreset:
             workflow_recovery_policy=self.workflow_recovery_policy,
             runner_cfg=self.runner_cfg,
             effect_monitors=self.effect_monitors,
+            release_gate_evidence=self.release_gate_evidence,
             required_planner=self.required_planner,
             action_option_templates=self.action_option_templates,
         )
@@ -2433,6 +2460,7 @@ __all__ = [
     "EffectAssurance",
     "EndpointResolution",
     "ProfileValidationError",
+    "ReleaseGateEvidence",
     "ResourceEndpoint",
     "ResourceEndpointAdapter",
     "ResolvedRobotResource",
