@@ -66,6 +66,16 @@ observation manager owns their semantic schema.
 Env dispatches capture/reset boundaries;
 no Lab module imports TaskSpec or Task Engine.
 
+The pure evidence owner includes finite-member condition/placement groups,
+HandOver, coordinated holding/transport and explicit raw control v2. Import
+these through their `task_spec.<family>_evidence` modules; the core package
+exports remain unchanged. `evidence_report.evaluate_physical_evidence_report`
+dispatches the supported binding versions without importing Lab or Task Engine.
+`sampled_support_window`, `directional_observation_axes` and
+`observation_requests.held_observation_request` supply pure observation operands,
+not acquisition. Task Engine's binding projection and runtime collection consume
+this complete module set as a separate higher layer.
+
 Current goals cannot borrow recorded milestone success. The legacy instantaneous
 final-support scope requires its exact measured release and actual final runtime
 boundary, but not an unexecuted later wait/park policy. Failed post-policy execution
