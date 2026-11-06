@@ -477,7 +477,7 @@ def _ordinary_integration(
             max_steps=240,
             check_interval_steps=2,
             required_stable_checks=3,
-            measurement="pose_delta",
+            measurement="reported_velocity",
         ),
         "contained_rigid_object": dict(
             linear_velocity_threshold=0.03,

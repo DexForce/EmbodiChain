@@ -1630,3 +1630,63 @@ def test_source_hand_owner_input_is_rechecked_after_static_preflight(
             implementation_revisions={"embodichain": "test"},
         )
     assert not output.exists()
+
+
+def test_generated_settle_modes_keep_source_observation_inputs(tmp_path):
+    import torch
+    from gym.envs.task_program.test_simulation_policies import (
+        _compiled_segment,
+        _port,
+    )
+    from embodichain.lab.task_program.integrations.simulation.policies import (
+        SimulationSettleMonitorCfg,
+    )
+
+    _, physical, paths = _pour_bundle(tmp_path, 2, proxy_tolerance=0.02)
+    loaded = load_configured_bundle(
+        paths.root,
+        external_input_digests={
+            **physical.input_files,
+            **resolve_source_hand_services(physical.embodiment)[2],
+        },
+        implementation_revisions={"embodichain": "test-source"},
+    )
+    presets = loaded.deployment.integration.registration.settle_presets
+    # B0's explicit _POSE_DELTA_SETTLE_PRESETS contains only the last two.
+    # The ordinary rigid-object path observes reported backend velocities.
+    expected_modes = {
+        "rigid_object": "reported_velocity",
+        "contained_rigid_object": "pose_delta",
+        "transported_rigid_object": "pose_delta",
+    }
+    for name, expected in expected_modes.items():
+        cfg = presets[name]
+        assert type(cfg) is SimulationSettleMonitorCfg
+        assert cfg.measurement == expected
+        port, entity, _ = _port(torch.zeros(2, 3), preset=cfg, step_dt=0.02)
+        segment = _compiled_segment()
+        policy = segment.post_policies[0]
+        commands = 0
+        for command in port.actions(
+            policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+        ):
+            assert command.shape == (2, 2)
+            commands += 1
+            # Pose and reported velocity disagree, so selecting the wrong
+            # acquisition path changes the physical monitor's actual result.
+            entity._pose[:, 0, 3] += 0.1
+        result = port.post_policy_metadata(policy, segment=segment)
+        assert result["measurement_source"] == expected
+        assert result["thresholds"] == {
+            "linear_velocity": 0.03,
+            "angular_velocity": 1.0 if name == "contained_rigid_object" else 0.2,
+            "min_steps": 10,
+            "max_steps": 240,
+            "check_interval_steps": 2,
+            "required_stable_checks": 3,
+        }
+        assert result["status"] == (
+            "settled" if expected == "reported_velocity" else "timed_out"
+        )
+        assert commands == (14 if expected == "reported_velocity" else 240)
+        assert entity.pose_reads == (0 if expected == "reported_velocity" else 241)
