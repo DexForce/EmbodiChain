@@ -41,6 +41,9 @@ from typing import Literal, Protocol, TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
+from embodichain.lab.sim.atomic_actions.grip_evidence import GripEvidenceObservationPort
+
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
@@ -152,6 +155,35 @@ class _OwnedEffectEvidenceProvider(EffectEvidenceProvider):
     ) -> Mapping[str, EffectEvidenceBatch]:
         self._owner.require_open()
         return self._provider.collect(queries, context)
+
+
+class _OwnedGripEvidenceProvider(_OwnedEffectEvidenceProvider):
+    """Forward only an explicitly declared physical observation capability."""
+
+    def __init__(
+        self,
+        provider: EffectEvidenceProvider,
+        owner: _RuntimeOwner,
+        scope_guard: Callable[[], None],
+    ) -> None:
+        if not isinstance(provider, GripEvidenceObservationPort):
+            raise TypeError("Grip observation forwarding requires its explicit port.")
+        super().__init__(provider, owner)
+        self._grip_port = provider
+        self._scope_guard = scope_guard
+
+    def capture_grip_observation(
+        self, request: PhysicalEvidenceRequest, *, object_id: str, control_part: str
+    ) -> tuple[PhysicalEvidenceBatch, dict[str, object]]:
+        self._owner.require_open()
+        self._scope_guard()
+        try:
+            return self._grip_port.capture_grip_observation(
+                request, object_id=object_id, control_part=control_part
+            )
+        finally:
+            self._owner.require_open()
+            self._scope_guard()
 
 
 _PLANNER_CFG_TYPES: Mapping[str, type[BasePlannerCfg]] = {
@@ -1222,8 +1254,20 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         providers.append(
             SceneArticulationEvidenceProvider(scene_provider=scene_provider)
         )
+
+        def require_grip_scope() -> None:
+            observation_provider.validate_runtime_scope()
+            if self._simulation.get_robot(self._robot.uid) is not self._robot:
+                raise ValueError("Native grip runtime robot ownership changed.")
+
         return tuple(
-            _OwnedEffectEvidenceProvider(provider, self._owner_token)
+            (
+                _OwnedGripEvidenceProvider(
+                    provider, self._owner_token, require_grip_scope
+                )
+                if isinstance(provider, GripEvidenceObservationPort)
+                else _OwnedEffectEvidenceProvider(provider, self._owner_token)
+            )
             for provider in providers
         )
 

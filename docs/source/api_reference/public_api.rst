@@ -1986,6 +1986,12 @@ bindings and control-part/pad-link declarations. NativeGripEvidenceFactory uses
 the public control-part provider injection API and preserves its provider ID and
 revision. Each provider owns its observer and bounded raw-query trace.
 
+``capture_grip_observation`` performs one requested bilateral observation and
+returns an owned batch plus the exact query snapshot. The standard simulation
+factory forwards this capability through its lifetime and explicit runtime-scope
+guards; native sensor and engine ownership are checked around acquisition.
+It does not invoke effect collection or refresh a second contact sample.
+
 Physical interpretation revision 1 preserves the opposed positive-impulse
 criterion and absent-positive-contact observations. Revision 2 requires explicit
 opening calibration and opt-in; its one-sided open-hand release observation is
@@ -2052,11 +2058,20 @@ a historical pose or falls back to a live pose/previous frame.
 The result owns physical metadata and availability only; TaskSpec and Task Engine
 are not dependencies of this Lab collector.
 
+``SimulationStateObservationCollector.capture_current_grip`` requires the explicit
+``ObservationManager`` dependency and its current completed row boundaries. It
+selects the runtime's declared ``GripEvidenceObservationPort``, retaining raw
+validity, acquisition errors, actor identities and query revision. Environment,
+episode, robot, object, provider and clock ownership are checked around the read.
+Its timestamp describes the collection query clock; it does not claim that native
+impulses were refreshed at that time or establish task acceptance.
+
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
 
 .. autosummary::
 
    SimulationSupportObservationCollector
+   SimulationStateObservationCollector
 
 .. autoclass:: SimulationSupportObservationCollector
    :members:
@@ -4560,6 +4575,15 @@ are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrat
 
    GripContactObserver
    DriverOpeningBinding
+   GripEvidenceObservationPort
+
+``GripEvidenceObservationPort`` exposes one owned bilateral acquisition and its
+exact raw query without exposing the underlying provider or observer. Forwarders
+preserve their host and runtime lifetime checks. ``snapshot_latest_query`` rejects
+unrecorded or superseded query ordinals instead of substituting an older trace.
+
+.. autoclass:: GripEvidenceObservationPort
+   :members:
 
 ``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
 creating a per-environment reader. It performs no qpos read during binding;
@@ -4636,3 +4660,164 @@ substituted, and recorded joint claims require the original executed policy.
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_condition_evidence_binding
 
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_pour_evidence_binding
+
+
+embodichain.gen_sim.task_spec.coordinated_evidence
+--------------------------------------------------
+
+This normative entry point evaluates normalized held-object facts using an explicit manipulation binding. Raw actor, query, receipt and phase validation belongs to the Lab adapter.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.coordinated_evidence
+
+.. autosummary::
+
+   evaluate_coordinated_hold_evidence
+
+.. autofunction:: evaluate_coordinated_hold_evidence
+
+
+embodichain.gen_sim.task_spec.handover_evidence
+-----------------------------------------------
+
+This normative entry point evaluates normalized held-object facts using an explicit manipulation binding. Raw actor, query, receipt and phase validation belongs to the Lab adapter.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.handover_evidence
+
+.. autosummary::
+
+   evaluate_handover_evidence
+
+.. autofunction:: evaluate_handover_evidence
+
+
+embodichain.gen_sim.task_spec.manipulation_evidence
+---------------------------------------------------
+
+Explicit task acceptance compares normalized measurements with sealed bounds. Missing acquisition remains unavailable; valid measured negatives fail. Runtime monitor output never defines task thresholds.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.manipulation_evidence
+
+.. autosummary::
+
+   HoldAcceptanceCriteria
+   ManipulationEvidenceBinding
+   evaluate_manipulation_evidence
+
+.. autoclass:: HoldAcceptanceCriteria
+   :members:
+
+.. autoclass:: ManipulationEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_manipulation_evidence
+
+
+embodichain.lab.evidence
+------------------------
+
+Owned physical values retain row identity, validity, missing reasons and observation revisions. JSON snapshots are independent and encode nonfinite observations as null without discarding validity.
+
+.. currentmodule:: embodichain.lab.evidence
+
+.. autosummary::
+
+   PhysicalObservationStamp
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+   PhysicalEvidenceRequest
+
+.. autoclass:: PhysicalObservationStamp
+   :members:
+
+.. autoclass:: PhysicalEvidenceBatch
+   :members:
+
+.. autoclass:: PhysicalEvidenceFrame
+   :members:
+
+.. autoclass:: PhysicalEvidenceRequest
+   :members:
+
+
+embodichain.lab.task_program.integrations.evidence
+--------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   normalize_handover_evidence
+   CoordinatedHoldEvidenceBinding
+   normalize_coordinated_hold_evidence
+   held_observation_request
+   resolve_hold_observation_condition
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_handover_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_hold_evidence
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: resolve_hold_observation_condition
+
+
+embodichain.lab.task_program.integrations.evidence.coordinated_evidence
+-----------------------------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.coordinated_evidence
+
+.. autosummary::
+
+   CoordinatedHoldEvidenceBinding
+   normalize_coordinated_hold_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_hold_evidence
+
+
+embodichain.lab.task_program.integrations.evidence.handover_evidence
+--------------------------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.handover_evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   normalize_handover_evidence
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_handover_evidence
+
+
+embodichain.lab.task_program.integrations.evidence.observation_requests
+-----------------------------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.observation_requests
+
+.. autosummary::
+
+   held_observation_request
+   resolve_hold_observation_condition
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: resolve_hold_observation_condition
