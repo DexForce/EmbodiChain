@@ -112,6 +112,11 @@ and drawer handlers belong to `articulation_continuation`,
 `primitives/_articulation_recovery` and `primitives/_drawer_planning`. New service ports are optional, typed, same-robot and
 borrowed; construction captures no native state or commands.
 
+Additional Twist candidate timings retain counters and inclusive wall costs
+without adding a cooperative deadline check; the original IK and complete-plan
+boundaries continue to own stops. `measure_search` keeps its checking default;
+only explicitly additive measurements select `budget_checkpoint=False`.
+
 HandOver keeps the existing default/paired planning route. Explicit
 `HandOverPlanningRecovery` enables bounded receiver and exchange alternatives,
 consuming same-observation native hand queries from `HandOverSceneProvider`.

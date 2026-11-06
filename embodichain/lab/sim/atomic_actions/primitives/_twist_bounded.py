@@ -349,7 +349,7 @@ def plan_bounded_twist(
         ranked, first_failed = [], None
         for index, roll, shift in candidates:
             selected = _candidate_request(base_request, roll, shift, axis)
-            with measure_search("twist_candidate"):
+            with measure_search("twist_candidate", budget_checkpoint=False):
                 plan = action._plan_nominal(selected, context)
             plan = _metadata(
                 plan, gen_sim_twist_roll=roll, gen_sim_twist_roll_candidate=index

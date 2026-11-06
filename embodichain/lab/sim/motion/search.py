@@ -206,11 +206,14 @@ def record_search(
 
 
 @contextmanager
-def measure_search(operation: str) -> Iterator[None]:
+def measure_search(operation: str, *, budget_checkpoint: bool = True) -> Iterator[None]:
     """Measure inclusive CPU wall time, including unsuccessful attempts.
 
     Args:
         operation: Caller-defined measurement name.
+        budget_checkpoint: Check the deadline before and after this operation.
+            False retains counter and wall measurements without introducing a
+            new cooperative stop boundary.
 
     Yields:
         Control to the measured operation. Nested timings overlap and must not
@@ -220,7 +223,8 @@ def measure_search(operation: str) -> Iterator[None]:
     if cost is None:
         yield
         return
-    cost.check_budget(operation)
+    if budget_checkpoint:
+        cost.check_budget(operation)
     cost.counters[operation] += 1
     start = perf_counter()
     try:
@@ -229,4 +233,5 @@ def measure_search(operation: str) -> Iterator[None]:
         cost.inclusive_wall_seconds[operation] = (
             cost.inclusive_wall_seconds.get(operation, 0.0) + perf_counter() - start
         )
-    cost.check_budget(operation)
+    if budget_checkpoint:
+        cost.check_budget(operation)

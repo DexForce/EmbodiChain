@@ -61,3 +61,20 @@ def test_search_deadline_stops_only_at_cooperative_boundaries(monkeypatch):
     with pytest.raises(ValueError, match="finite and positive"):
         with search.search_cost_scope(wall_seconds=0):
             pass
+
+
+def test_additional_timing_retains_cost_without_adding_a_deadline_boundary(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(search, "perf_counter", lambda: clock[0])
+    with pytest.raises(search.PlanningBudgetExceeded) as failure:
+        with search.search_cost_scope(wall_seconds=1.0) as cost:
+            with search.measure_search(
+                "additional_measurement", budget_checkpoint=False
+            ):
+                clock[0] = 1.25
+            # Existing solver work remains the cooperative stop boundary.
+            search.record_search("ik_solve")
+    assert failure.value.operation == "ik_solve"
+    assert cost.counters == {"additional_measurement": 1}
+    assert cost.inclusive_wall_seconds == {"additional_measurement": 1.25}
+    assert search.current_search_cost() is None
