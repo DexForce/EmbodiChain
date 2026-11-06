@@ -400,6 +400,11 @@ the host's runner override. Re-grounding preserves the original occurrence and
 selection. Derived workflow-recovery calls keep independent IDs and ordinary
 preset selection.
 
+Catalog preflight checks each selected Place preset's waypoint qualification
+against its bounded recovery variant, using the same scope rule as Atomic
+planning. Contradictory combinations reject before runtime construction;
+unselected preset templates retain their ordinary behavior.
+
 Bindings targeting parallel branches are explicitly rejected. Unbound parallel
 calls remain supported. The compiled-program fingerprint uses the same format as
 nominal motion sources; it includes the instruction and integration selection.

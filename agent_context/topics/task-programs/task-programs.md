@@ -87,6 +87,11 @@ Catalog fingerprints omit exact inactive defaults only for named migration
 extensions. Existing schema fields, nondefault choices and realized skill
 capabilities remain part of the registration identity.
 
+Catalog preflight checks the effective Place option/recovery combination after
+occurrence preset selection. The same waypoint-scope rule is used by Atomic
+planning; a contradictory selected declaration rejects without live resources.
+Unused preset templates do not change ordinary calls.
+
 Expansion is optional and episode-scoped, not part of compilation.
 `EmbodiedEnv.create_demo_segments()` passes a separate Expansion Profile and
 candidate ordinal into a fresh bridge. After a matching Semantic Call is
