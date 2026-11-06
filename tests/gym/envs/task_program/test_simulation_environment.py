@@ -2480,12 +2480,15 @@ def test_returned_effect_providers_and_live_scene_reject_reads_after_close(
 
 
 @pytest.mark.parametrize("accessor", ["observe", "current_qpos", "hold_qpos", "scene"])
+@pytest.mark.parametrize("env_ids", [None, (2, 0)])
 def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_access(
-    monkeypatch, accessor
+    monkeypatch, accessor, env_ids
 ):
     factory, robot = _factory(hold_qpos_source="drive_target")
-    registry = factory.create_scene_registry()
     engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    registry = factory.create_scene_registry()
     epoch = [0]
 
     def guard():
@@ -2498,7 +2501,9 @@ def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_acces
         clock=EnvironmentStepClock(_STEP_DT),
         runtime_scope_guard=guard,
     )
-    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    state = TaskState.empty(
+        _BATCH_SIZE if env_ids is None else len(env_ids), robot.device
+    )
     context = observation.observe(state)
     # A separate factory and provider retain their own valid scope.
     other_factory, other_robot = _factory()
@@ -2520,7 +2525,10 @@ def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_acces
             observation.scene_provider.snapshot(timestamp=0.0, env_ids=context.env_ids)
         else:
             getattr(observation, accessor)(context.env_ids)
-    torch.testing.assert_close(other.observe(state).robot.qpos, other_robot.qpos)
+    torch.testing.assert_close(
+        other.observe(TaskState.empty(_BATCH_SIZE, robot.device)).robot.qpos,
+        other_robot.qpos,
+    )
     factory.close_runtime_resources()
     other_factory.close_runtime_resources()
 

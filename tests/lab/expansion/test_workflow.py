@@ -23,7 +23,7 @@ import json
 from pathlib import Path
 import pytest
 import torch
-from test_journal import recipe
+from .test_journal import recipe
 from embodichain.lab.expansion.configured import load_expansion_job
 from embodichain.lab.expansion.workflow import run_expansion_job
 from embodichain.lab.expansion.engine import PreparedEpisodeWorkItem

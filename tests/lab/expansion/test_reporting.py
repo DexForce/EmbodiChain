@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 from dataclasses import replace
-from test_persistence import episode
+from .test_persistence import episode
 from embodichain.lab.expansion.persistence import ArtifactEpisodeSink
 from embodichain.lab.expansion.reporting import build_expansion_report
 
