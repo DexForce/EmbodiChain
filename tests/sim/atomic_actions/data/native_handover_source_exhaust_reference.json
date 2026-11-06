@@ -1,0 +1,14 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "scope": "Actual source sampled Motion facade and native revision-eight end-grasp Pick; controlled proposal/FK/IK ports and real FCL geometry queries, not native physics qualification.",
+  "success": [
+    false
+  ],
+  "positions_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "dt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "segments": [],
+  "rng": "988e1542c74011a4d08ccc481caa9261edd2190bdf63728d488117a26898f2fb",
+  "calls_sha256": "f7507846577d663d4de04383361c267fd378e6165b4962610b8ef230de4ca2a1",
+  "ik_sha256": "d58c93bedb156e9f770d7e5d42be5bdb32c0124d8c5ebd3ed463426b75f3d7d5",
+  "metadata_sha256": "3ba751c8884621600320cfd2df88da1cb1cd92c69dce4c4a4318c8c1d0f4759d"
+}

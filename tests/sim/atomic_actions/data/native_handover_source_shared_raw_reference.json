@@ -1,0 +1,14 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "scope": "Source CheckedMotionGenerator explicit SHARED contract with controlled native end proposals/solver ports; no physical qualification.",
+  "success": [
+    false
+  ],
+  "positions_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "dt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "segments": [],
+  "rng": "988e1542c74011a4d08ccc481caa9261edd2190bdf63728d488117a26898f2fb",
+  "metadata_sha256": "07dd0d3a0b79a683e50df421fbec2c2eb4c31fb208730209771c8ce0b1ae23b9",
+  "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "ik_sha256": "f4b90de19b50014e8be79a963cdad1cd6fa39ac66adc9fc1a5737ac9459aa8b8"
+}

@@ -1,6 +1,5 @@
 Geometry arrays and tensor kernels
 ==================================
-
 ``embodichain.compute.geometry`` provides reusable Torch operations on dense
 float32/float64 tensors. Inputs share dtype and device; outputs stay on that
 CPU or CUDA device. The kernels do not accept entity UIDs, asset paths, mesh
@@ -384,6 +383,10 @@ without repairing or reducing input precision. ``distal_staging_variants``
 uses explicit TCP/root geometry to produce the ordered outward translations;
 rejected geometry or bounds remain unavailable proposals. Robot kinematics,
 collision queries and execution policy are outside these numeric operations.
+
+The FK and sampled-path residual helpers preserve their distinct source
+precision and rounding margins. They compare numeric transforms only; solver
+limits and observed Robot state are supplied by the Motion owner.
 
 .. automodule:: embodichain.compute.geometry.pose_checks
    :members:

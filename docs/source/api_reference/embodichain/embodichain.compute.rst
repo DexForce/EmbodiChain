@@ -234,3 +234,36 @@ measurements leave task acceptance and support thresholds to callers.
 .. autofunction:: planar_placement_metrics
 
 .. autofunction:: validate_planar_pose
+
+Ordered IK seed and pose residual arithmetic
+--------------------------------------------
+
+These functions consume numeric joint candidates and transforms, without Robot,
+simulation or task state. Seed selection keeps the original stable separation
+and ordering. The two pose checks retain their distinct source residual laws and
+rounding margins; neither changes the environment support of its caller or
+provides a physical-effect certificate.
+
+.. automodule:: embodichain.compute.kinematics.seed_selection
+   :members:
+
+.. currentmodule:: embodichain.compute.geometry.pose_checks
+
+.. autosummary::
+   :nosignatures:
+
+   fk_pose_error_mask
+   sampled_pose_path_matches
+
+
+Articulation event measurements
+-------------------------------
+
+Pure scalar rules consume caller-supplied joint/contact values and explicit
+press or revolute target parameters. They preserve unavailable observations,
+contact-backed travel, startup stability and distinct coarse-turn versus calibrated
+setting criteria. Acquisition, robot/sensor ownership and task acceptance remain
+outside Compute.
+
+.. automodule:: embodichain.compute.articulation
+   :members:

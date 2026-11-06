@@ -89,6 +89,14 @@ changing filtering, force assumptions, topology handling or actor metadata.
 Geometry-only contacts and multiple backend-emitted rows per actor pair are
 valid; sensor adaptation does not synthesize a common contact manifold.
 
+`command_sampling.capture_robot_commands` separately owns one explicit B=1
+actual-state/native-drive-target snapshot, using an unchanged host source stamp
+around the original four reads. `verify_robot_commands` rejects changed identity
+or arrays without replacing the captured values. The shared
+`evidence.RobotCommandObservation` retains dtype/device and complete joint order.
+These opt-in facts grant no command authority and determine no attachment or
+task success; the host owns the stamp/lifetime reader and execution permission.
+
 The contact scatter kernel remains sensor-owned because its columns, IDs and
 quota are integration contracts. Generic image tiling belongs to
 `embodichain/compute/image/_warp/tiling.py`; compatibility exports under

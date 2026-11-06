@@ -1,0 +1,312 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "source_guard_sha256": "c70e760b318fe8ab48d0fbf5aa8489694462d280ac8b38ebfc131469fac085ac",
+  "source_geometry_sha256": "32e9e82c7397b7d91c3cb9bb2a7088bed765090402adec886c85b394a84d0bb0",
+  "scope": "Analytic native-shaped ports with real source-qualified USD/URDF fixtures. Original source freshness method is bypassed for numerical isolation; new freshness/identity guards are separately tested. No native SDK runtime allocation, simulation, provider calls or task qualification. Error text is generalized; semantic dependency remapping remains Atomic-owned.",
+  "cases": [
+    {
+      "case": "ordinary",
+      "table": {
+        "supported": true,
+        "accepted": true,
+        "minimum_clearance_after_skin_m": 0.7370000095367432,
+        "checked_frames": 110,
+        "moving_links": [
+          "wrist",
+          "clamp_root",
+          "pad_a",
+          "pad_b"
+        ]
+      },
+      "root_dependency": {
+        "qualified": true,
+        "source_sha256": "<qualified-input-digest>",
+        "padding_m": 0.003,
+        "extra_sweeps": [
+          {
+            "path": "/Control/knob/pointer",
+            "projection_refinements": 0,
+            "separated": true
+          }
+        ],
+        "scope": "source-input command-frame proxy; not native cooking or continuous collision certification"
+      },
+      "table_fk_trace": [
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "d301a0953e85c80de26dfc058de86d728abd8f6fb92a02d588ed6e1a651aa82a"
+        },
+        {
+          "rows": 46,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "92dbe1e43422c72d5ed5763cd04395de6118e133ddd1951e080c3d09c3239baa"
+        }
+      ],
+      "root_fk_trace": [
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "d301a0953e85c80de26dfc058de86d728abd8f6fb92a02d588ed6e1a651aa82a"
+        },
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "80a997f4822207c55adfcb1acccffca198987e76ef8e52f0b638fba747c000a2"
+        },
+        {
+          "rows": 2,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "a319a27253c10003b6458738a21085b4785a5a096ac0f41ddb6ec8628b1cd4de"
+        }
+      ],
+      "exact_numeric_and_order": true
+    },
+    {
+      "case": "table_skin_overlap",
+      "table": {
+        "supported": true,
+        "accepted": false,
+        "minimum_clearance_after_skin_m": -0.003,
+        "checked_frames": 110,
+        "moving_links": [
+          "wrist",
+          "clamp_root",
+          "pad_a",
+          "pad_b"
+        ]
+      },
+      "root_dependency": {
+        "qualified": true,
+        "source_sha256": "<qualified-input-digest>",
+        "padding_m": 0.003,
+        "extra_sweeps": [
+          {
+            "path": "/Control/knob/pointer",
+            "projection_refinements": 0,
+            "separated": true
+          }
+        ],
+        "scope": "source-input command-frame proxy; not native cooking or continuous collision certification"
+      },
+      "table_fk_trace": [
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "d301a0953e85c80de26dfc058de86d728abd8f6fb92a02d588ed6e1a651aa82a"
+        },
+        {
+          "rows": 46,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "92dbe1e43422c72d5ed5763cd04395de6118e133ddd1951e080c3d09c3239baa"
+        }
+      ],
+      "root_fk_trace": [
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "d301a0953e85c80de26dfc058de86d728abd8f6fb92a02d588ed6e1a651aa82a"
+        },
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "80a997f4822207c55adfcb1acccffca198987e76ef8e52f0b638fba747c000a2"
+        },
+        {
+          "rows": 2,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "a319a27253c10003b6458738a21085b4785a5a096ac0f41ddb6ec8628b1cd4de"
+        }
+      ],
+      "exact_numeric_and_order": true
+    },
+    {
+      "case": "convex_refinement",
+      "table": {
+        "supported": true,
+        "accepted": true,
+        "minimum_clearance_after_skin_m": 0.7370000095367432,
+        "checked_frames": 110,
+        "moving_links": [
+          "wrist",
+          "clamp_root",
+          "pad_a",
+          "pad_b"
+        ]
+      },
+      "root_dependency": {
+        "qualified": true,
+        "source_sha256": "<qualified-input-digest>",
+        "padding_m": 0.003,
+        "extra_sweeps": [
+          {
+            "path": "/Control/knob/pointer",
+            "projection_refinements": 130,
+            "separated": true
+          }
+        ],
+        "scope": "source-input command-frame proxy; not native cooking or continuous collision certification"
+      },
+      "table_fk_trace": [
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "ef115a0e0c15cdc41958ca46b5b14b456115f4baec5e3ca68599d2a8f435e3b8"
+        },
+        {
+          "rows": 46,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "0345bffb28f80f4d0ded1a2af09a337b18ab3a80c68205bc8321a6ad4d409500"
+        }
+      ],
+      "root_fk_trace": [
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "ef115a0e0c15cdc41958ca46b5b14b456115f4baec5e3ca68599d2a8f435e3b8"
+        },
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "ef115a0e0c15cdc41958ca46b5b14b456115f4baec5e3ca68599d2a8f435e3b8"
+        },
+        {
+          "rows": 2,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "9d908ecfb6b256def8b49a7c504e6c889c4b0e41fe6ce3e01863dd7b61a20aa0"
+        }
+      ],
+      "exact_numeric_and_order": true
+    },
+    {
+      "case": "rotor_sweep_blocked",
+      "table": {
+        "supported": true,
+        "accepted": true,
+        "minimum_clearance_after_skin_m": 0.7370000095367432,
+        "checked_frames": 110,
+        "moving_links": [
+          "wrist",
+          "clamp_root",
+          "pad_a",
+          "pad_b"
+        ]
+      },
+      "root_dependency": {
+        "qualified": false,
+        "reason": "An extra rotor sweep remains unproven against a planned collider.",
+        "source_sha256": null
+      },
+      "table_fk_trace": [
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "ef115a0e0c15cdc41958ca46b5b14b456115f4baec5e3ca68599d2a8f435e3b8"
+        },
+        {
+          "rows": 46,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "0345bffb28f80f4d0ded1a2af09a337b18ab3a80c68205bc8321a6ad4d409500"
+        }
+      ],
+      "root_fk_trace": [
+        {
+          "rows": 64,
+          "names": [
+            "wrist",
+            "clamp_root",
+            "pad_a",
+            "pad_b"
+          ],
+          "qpos_sha256": "ef115a0e0c15cdc41958ca46b5b14b456115f4baec5e3ca68599d2a8f435e3b8"
+        }
+      ],
+      "exact_numeric_and_order": true
+    }
+  ]
+}

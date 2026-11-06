@@ -66,6 +66,37 @@ callbacks never become global engine configuration. Unsupported segment recovery
 rejects before provider preparation, and external nominal motion is not replaced
 by native sampling retries. No new Source skill implementation is registered.
 
+
+
+
+Pick and Place keep their shared default path. Explicit typed options select
+source geometry and native screens; `PickPlanningRecovery` and
+`PlacePlanningRecovery` own bounded searches. Their descriptors advertise the
+actual recovery type and segment handler. `ActionPlanningServices` borrows
+same-robot Motion/collision services and typed Pick/Place fact providers from
+`planning_probes`, `measured_rigid` and `place_continuation`; no semantic graph,
+compiler, skill-registry replacement or simulator stepping belongs here.
+Required missing providers fail before planning. Complete release previews stay
+on the same engine and observation and authorize no physical effects. The
+single-environment source paths reject other batches. AxisAlign rejects inherited
+Pick-only options it does not implement; drawer-specific Place is unavailable
+until its separate action owner is installed.
+
+Held transport and Pour retain their default paths. Explicit held-alignment and
+staging recovery consume declared geometry and owned command observations from
+Lab; retained-command provenance never certifies physical attachment. Ordered-pad
+and retained Pour goals own their original arc construction. Idle uses the normal
+MoveJoints entry, with declared relative joints and optional Motion-owned link
+clearance, and rejects nonempty resources under free-motion qualification.
+
+Released-hand cleanup and Park use exact suffix authority and the existing
+complete-plan/preview pipeline. `_released_park.py` is the unique owner of generic
+empty-hand Park qualification and bounded vias; articulation integrations reuse
+it rather than duplicating the algorithm. Articulation authorization, withdrawal
+and drawer handlers belong to their separate owner; drawer transport explicitly
+rejects until installed. New service ports are optional, typed, same-robot and
+borrowed; construction captures no native state or commands.
+
 `ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
 owned validated attempt before dispatch. Installation rejection latches the
 session: later ticks/revisions cannot resume commands. `ExecutionRunner` keeps
@@ -289,3 +320,14 @@ python docs/scripts/check_api_docs.py
 For public API changes also run the docs checker tests and Sphinx dummy build.
 For simulator adapters add an environment-level test that exercises normal
 `env.step()` consumption and safe cancellation.
+
+
+Bounded Twist uses `twist_planning` for exact same-observation query sessions and
+`primitives/twist_recovery.py` for immutable planning outcomes and measured
+recovery state. The B1/env0 float32 source route retains candidate ordering,
+fixed-grid sequential IK, time samples and budgets. Planning never commits a
+cursor; the host separately commits outcomes, adopts installed plans and submits
+measured feedback. `articulation_evidence`, `control_validation` and
+`twist_feedback` interpret explicit joint/contact facts through pure
+`compute.articulation` rules. None substitutes geometric clearance for physical
+contact or makes a missing measurement successful.

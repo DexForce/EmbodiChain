@@ -1,0 +1,17 @@
+{
+  "success": [
+    false
+  ],
+  "positions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "dt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "segments": [],
+  "metadata": {},
+  "failure": {
+    "code": "planning_failed",
+    "retryable": true
+  },
+  "calls": [],
+  "ik": [],
+  "inspections": [],
+  "rng": "2ec21778d7ec931a32a99bae8b2f255bd23a3f1f9a0fee4c3790af628910b976"
+}

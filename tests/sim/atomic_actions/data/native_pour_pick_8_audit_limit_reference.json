@@ -1,0 +1,18 @@
+{
+  "revision": 8,
+  "mode": "audit_limit",
+  "success": [
+    false
+  ],
+  "positions_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "dt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "segments": [],
+  "rng": [
+    "20e60f7455931a200e908d5af0abc2062c2f283c3084ffbdec2ca1fab89013b2",
+    0.36669556939777637,
+    0.6052398804018957
+  ],
+  "metadata_sha256": "c102e94cb20bf864b8d4ccede851cbb7b485e5c3f49b3a661d6a468ffec6c20d",
+  "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "ik_sha256": "0e483e01f54c238b49e986f99ac6c484e7fdebafce2e46d78487e0242d859684"
+}

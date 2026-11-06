@@ -28,7 +28,11 @@ from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_us
 from .articulation_inputs import _fixed_base
 from .control_semantics import resolve_twist_semantics
 
-__all__ = ["RevoluteControlBinding", "inspect_revolute_control"]
+__all__ = [
+    "RevoluteControlBinding",
+    "inspect_revolute_control",
+    "revolute_setting_attributes",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,3 +266,40 @@ def inspect_revolute_control(
     )
     semantics.assert_current(source)
     return binding
+
+
+def revolute_setting_attributes(config: dict[str, Any]) -> dict[str, Any]:
+    """Describe qualified authored setting labels for a fixed-base control.
+
+    Missing annotations yield no advertised settings; invalid authored roles
+    remain errors. Geometry and source qualification use the existing readers.
+    This function chooses no Semantic Calls or execution/recovery budgets.
+
+    Args:
+        config: Explicit fixed-base source configuration accepted by the existing
+            control and authored-semantics readers.
+
+    Returns:
+        Owned authored settings, joint and source/calibration identities, or an
+        empty mapping when the source advertises no fixed-base control settings.
+    """
+    from .control_semantics import resolve_twist_semantics, MissingTwistSemanticsError
+
+    if not _fixed_base(config):
+        return {}
+    try:
+        semantics = resolve_twist_semantics(config["fpath"])
+    except MissingTwistSemanticsError:
+        return {}
+    bindings = {
+        key: inspect_revolute_control(config, key) for key, _ in semantics.settings
+    }
+    values = {key: binding.target_qpos for key, binding in bindings.items()}
+    joint = next(iter(bindings.values())).joint
+    return {
+        "joint_settings": {joint: list(values.values())},
+        "twist_setting_labels": {str(key): value for key, value in values.items()},
+        "twist_source_sha256": semantics.source_sha256,
+        "twist_semantics_sha256": semantics.semantics_sha256,
+        "twist_control_joint": joint,
+    }

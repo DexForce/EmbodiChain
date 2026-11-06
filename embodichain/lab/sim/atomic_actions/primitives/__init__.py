@@ -43,8 +43,8 @@ from .move_held_object import (
 )
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
-from .pick_up import GraspGoal, PickUp, PickUpOptions
-from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
+from .pick_up import GraspGoal, PickPlanningRecovery, PickUp, PickUpOptions
+from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions, PlacePlanningRecovery
 from .press import Press, PressGoal, PressOptions
 from .push_object import (
     PushObject,
@@ -59,7 +59,7 @@ from .slide import (
     SlideJointTarget,
     SlideOptions,
 )
-from .twist import Twist, TwistGoal, TwistOptions
+from .twist import Twist, TwistGoal, TwistJointTarget, TwistOptions
 
 BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveEndEffector,
@@ -80,7 +80,15 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
 )
 """Built-in action implementations instantiated once per action engine."""
 
+from .move_held_object import MoveHeldObjectPlanningRecovery
+from .move_joints import JointOffsetTarget
+from .pour import RetainedPourGoal, JawPourGoal
+
 __all__ = [
+    "MoveHeldObjectPlanningRecovery",
+    "JointOffsetTarget",
+    "RetainedPourGoal",
+    "JawPourGoal",
     "AssembleGoal",
     "AxisAlign",
     "AxisAlignGoal",
@@ -110,9 +118,11 @@ __all__ = [
     "OpenDoorOptions",
     "PickUp",
     "PickUpOptions",
+    "PickPlanningRecovery",
     "Place",
     "PlaceGoal",
     "PlaceOptions",
+    "PlacePlanningRecovery",
     "Pour",
     "PourGoal",
     "PourOptions",
@@ -130,5 +140,6 @@ __all__ = [
     "SlideOptions",
     "Twist",
     "TwistGoal",
+    "TwistJointTarget",
     "TwistOptions",
 ]

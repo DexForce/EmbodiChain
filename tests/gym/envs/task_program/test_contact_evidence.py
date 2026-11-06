@@ -1014,7 +1014,7 @@ def test_joint_contact_observer_reuses_substep_sample_and_owns_window_records():
     qpos[0] = 0.13
     observer.after_sample(0.004, token)
     records = observer.snapshot()
-    assert len(records) == 2
+    assert len(records) == observer.record_count == 2
     assert len(observer.snapshot(1)) == 1
     assert observer.snapshot(2) == ()
     with pytest.raises(ValueError, match="window prefix"):
