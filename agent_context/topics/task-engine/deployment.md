@@ -235,6 +235,8 @@ Drawer acquisitions instead defer their entire downstream target tuple to the
 explicit drawer service. Direct drawer transport uses the motion_gen owner and
 cannot inherit generic Cartesian/lift/alignment modes; inside Place and closing
 Slide receive exact payload/physical-part bindings, including every close payload.
+The exact native transport occurrence retains the source acceleration budget of
+`0.5`; ordinary sampled fixed-grid policies keep `acceleration_limit=None`.
 
 Native Pick permissions retain the original global revision and explicit
 source-node override forms. Their generated closing bindings use exact compiled

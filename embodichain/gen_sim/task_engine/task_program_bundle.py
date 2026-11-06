@@ -1398,6 +1398,7 @@ def prepare_generated_task_program_bundle(
                     current["motion"].update(
                         strategy="motion_gen",
                         interpolation_mode="adaptive",
+                        acceleration_limit=0.5,
                         ik_seed_mode="batched",
                         segment_sample_count_retries=[],
                         segment_continuous_ik_recovery=False,

@@ -415,6 +415,249 @@ def _pour_bundle(
     return graph, physical, paths
 
 
+def _drawer_bundle(tmp_path, monkeypatch):
+    from embodichain.gen_sim.task_engine import drawer_declarations
+
+    values, physical = _frozen(tmp_path)
+    asset = tmp_path / "cabinet.usda"
+    asset.write_bytes(
+        (
+            Path(__file__).parents[2]
+            / "sim/scene/fixtures/source_declaration_drawer.usda"
+        ).read_bytes()
+    )
+    articulation = dict(
+        uid="drawer",
+        fpath=str(asset),
+        init_pos=[1.0, 0.0, 1.0],
+        init_rot=[0.0, 0.0, 0.0],
+        body_scale=[1.0, 1.0, 1.0],
+        root_props=dict(fixed_base=True),
+    )
+    scene = replace(
+        physical.scene,
+        articulations=(articulation,),
+        planner_objects=(
+            *physical.scene.planner_objects,
+            dict(
+                **articulation,
+                runtime_uid="drawer",
+                source_uid="drawer",
+                role="articulation",
+            ),
+        ),
+    )
+    simulation = {**physical.scene_simulation, "articulation": [articulation]}
+    inputs = {
+        str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in collect_declared_asset_files(
+            (simulation, physical.embodiment), base_dir=tmp_path
+        )
+    }
+    plain = asdict(scene)
+    plain["source_config_path"] = str(scene.source_config_path)
+    plain["scene_dir"] = str(scene.scene_dir)
+    physical = replace(
+        physical,
+        scene=scene,
+        scene_simulation=simulation,
+        input_files=inputs,
+        physical_digest=canonical_hash(
+            dict(
+                scene=plain,
+                scene_simulation=simulation,
+                embodiment=physical.embodiment,
+                execution_policy=physical.execution_policy,
+                deployment=physical.deployment,
+                robot_profile="dual_franka",
+                input_files=inputs,
+            )
+        ),
+    )
+    # The existing articulation fixture owns a handle. Supply its independent
+    # interior geometry port; declaration, occurrence linking and policies run
+    # through the real public producer and configured loader below.
+    monkeypatch.setattr(
+        drawer_declarations,
+        "read_drawer_region",
+        lambda *args: (np.array([-0.2, -0.2, 0.0]), np.array([0.2, 0.2, 0.2])),
+    )
+    source = next(
+        row["graph"]
+        for row in json.loads(
+            (Path(__file__).parent / "data/action_profiles_b0.json").read_text()
+        )["cases"]
+        if row["source_case"] == "e6-dual_franka-originalenv-v2"
+    )
+    graph = deepcopy(source)
+    for node in graph["nodes"]:
+        node["call"].get("arguments", {}).pop("part", None)
+    incoming = deepcopy(values["semantic_task_graph.json"])
+    for node in incoming["nodes"]:
+        node["id"] = node["id"].replace("step_01", "step_02")
+        node["task_instance_id"] = "step_02"
+        node["depends_on"] = [
+            key.replace("step_01", "step_02") for key in node["depends_on"]
+        ] or [graph["nodes"][-1]["id"]]
+        if node["call"].get("call_id") == "simulation.place_relative":
+            node["call"] = dict(
+                kind="place",
+                object="cylinder",
+                inside="inside__drawer__cylinder",
+                resources={"primary": "left"},
+            )
+    group = incoming["task_groups"][0]
+    group.update(
+        id="step_02",
+        depends_on=[graph["task_groups"][-1]["id"]],
+        node_ids=[node["id"] for node in incoming["nodes"]],
+        success=dict(
+            kind="semantic_task_term", step_id="step_02", type="semantic_goal"
+        ),
+    )
+    graph["nodes"].extend(incoming["nodes"])
+    graph["task_groups"].append(group)
+    graph["success"]["source"]["terms"].append(
+        dict(step_id="step_02", type="semantic_goal")
+    )
+    _, paths = generate_task_program_bundle(
+        graph,
+        physical,
+        tmp_path / "drawer",
+        robot_profile="dual_franka",
+        implementation_revisions={"embodichain": "test-source"},
+    )
+    return physical, paths
+
+
+def test_generated_drawer_native_transport_keeps_source_acceleration_cap(
+    tmp_path, monkeypatch
+):
+    from contextlib import contextmanager
+    from types import SimpleNamespace as NS
+    import torch
+    from sim.atomic_actions._drawer_fixture import drawer_transport_fixture
+    from embodichain.lab.sim.atomic_actions import AtomicActionEngine, MoveHeldObject
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.motion.planners.utils import PlanResult
+
+    physical, paths = _drawer_bundle(tmp_path, monkeypatch)
+    loaded = load_configured_bundle(
+        paths.root,
+        external_input_digests={
+            **physical.input_files,
+            **resolve_source_hand_services(physical.embodiment)[2],
+        },
+        implementation_revisions={"embodichain": "test-source"},
+    )
+    registration = loaded.deployment.integration.registration
+    binding = next(
+        item
+        for item in registration.planning_services.drawer_bindings
+        if item.operation == "transport"
+    )
+    selected = next(
+        item
+        for item in registration.invocation_policy_bindings
+        if item.invocation_id == binding.invocation_id
+    )
+    preset = next(
+        item
+        for item in registration.robot_profile_binding.presets
+        if item.preset_id == selected.preset_id
+    )
+    fixture_dir = tmp_path / "native_port"
+    fixture_dir.mkdir()
+    base, generator, context, invocation, *_ = drawer_transport_fixture(fixture_dir)
+    caps = []
+
+    class Planner:
+        cfg = NS(planner_type="curobo")
+        collision_world_info = None
+        supports_heterogeneous_waypoints = True
+
+        def supports_move_type(self, move):
+            return True
+
+        def with_motion_context(self, options, *, start_qpos, control_part):
+            options.start_qpos, options.control_part = start_qpos, control_part
+            return options
+
+        def plan(self, target_states, options):
+            caps.append(options.max_acceleration)
+            start = options.start_qpos
+            stop = target_states[-1].xpos[:, :3, 3]
+            # The controlled planner supplies a smooth path so acceleration
+            # qualification remains real without initializing any SDK solver.
+            t = torch.linspace(0, 1, 200)
+            weight = 10 * t**3 - 15 * t**4 + 6 * t**5
+            points = torch.lerp(start[:, None], stop[:, None], weight[None, :, None])
+            dt = points.new_full(points.shape[:2], 0.04)
+            dt[:, 0] = 0
+            return PlanResult(success=torch.tensor([True]), positions=points, dt=dt)
+
+    native = object.__new__(MotionGenerator)
+    native.robot, native.device, native.planner = (
+        generator.robot,
+        generator.device,
+        Planner(),
+    )
+
+    class Queries:
+        robot = generator.robot
+
+        def planning_device(self):
+            return torch.device("cpu")
+
+        def plan(self, **kwargs):
+            raise AssertionError("Drawer must open its payload query")
+
+        @contextmanager
+        def open(self, **kwargs):
+            yield native
+
+    engine = AtomicActionEngine(
+        generator,
+        load_builtins=False,
+        control_profiles=base.planning_services.control_profiles,
+        drawer_planning_provider=base.planning_services.drawer_planning_provider,
+        joint_prefix_planner=Queries(),
+    )
+    engine.register(MoveHeldObject())
+    request = engine.make_invocation(
+        "move_held_object",
+        invocation.goal,
+        control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
+        invocation_id=selected.invocation_id,
+        skill_options=preset.action_option_template("gen_sim.drawer_transport"),
+        motion_policy=preset.motion_policy,
+        recovery_policy=preset.recovery_policy,
+    )
+    plan = engine.plan(request, context)
+    # Source89d's MotionPolicy default .5 survives DrawerMotionGenerator's
+    # native copy; only its ordinary IK branch cleared that legacy default.
+    assert caps == [0.5]
+    assert plan.plan_success.all()
+    ordinary = next(
+        item
+        for item in registration.robot_profile_binding.presets
+        if item.motion_policy.interpolation_mode == "fixed_grid"
+    )
+    options = ordinary.motion_policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 3), control_part="arm", interpolation_dt=0.04
+    )
+    assert options.acceleration_limit is None
+    assert (
+        native.resolve_plan_options(
+            None,
+            sample_count=options.sample_count,
+            acceleration_limit=options.acceleration_limit,
+        ).max_acceleration
+        is None
+    )
+    physical.assert_unchanged()
+
+
 @pytest.mark.parametrize("runtime_profile", ["default", "auto"])
 @pytest.mark.parametrize("revision", [None, 1, 2])
 def test_pour_generation_preserves_static_and_opt_in_projection_modes(
