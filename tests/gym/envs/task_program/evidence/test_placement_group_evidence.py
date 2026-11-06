@@ -26,14 +26,14 @@ from embodichain.gen_sim.task_spec import canonical_hash, EvaluationStatus
 from embodichain.gen_sim.task_spec.evidence import SupportedPlacementEvidenceBinding
 from embodichain.gen_sim.task_spec.placement_group_evidence import (
     PlacementEvidenceGroupBinding,
-    evaluate_placement_group_evidence,
 )
-from embodichain.gen_sim.task_spec.evidence_report import (
-    evaluate_physical_evidence_report,
-)
+from ._evaluation import evaluate_physical_evidence_report
 
 REFERENCE = json.loads(
-    (Path(__file__).parent / "data/e1_count_inside_source_reference.json").read_text()
+    (
+        Path(__file__).parents[4]
+        / "gen_sim/task_spec/data/e1_count_inside_source_reference.json"
+    ).read_text()
 )
 
 
@@ -270,3 +270,6 @@ def test_group_and_nested_placement_binding_drift_are_rejected():
     group.members[0].planar_geometry["exact_silhouette"] = False
     with pytest.raises(ValueError, match="binding_hash"):
         PlacementEvidenceGroupBinding.from_dict(group)
+
+
+from ._evaluation import evaluate_placement_group_evidence

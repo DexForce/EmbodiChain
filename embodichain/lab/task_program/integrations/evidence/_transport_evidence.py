@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .canonicalization import canonical_hash
+from embodichain._json_contract import canonical_hash
 from ._held_evidence import flags, one, receipt
 
 __all__: list[str] = []

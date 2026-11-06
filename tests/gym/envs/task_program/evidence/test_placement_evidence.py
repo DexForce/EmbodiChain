@@ -33,7 +33,6 @@ from embodichain.gen_sim.task_spec import (
 )
 from embodichain.gen_sim.task_spec.evidence import (
     SupportedPlacementEvidenceBinding,
-    evaluate_supported_placement_evidence,
 )
 
 
@@ -498,8 +497,8 @@ def test_raw_lab_snapshot_leaves_release_and_acceptance_composition_to_taskspec(
 def test_report_requires_recorded_milestones_and_keeps_final_failure_independent():
     from dataclasses import replace
     from embodichain.gen_sim.task_spec import MilestoneSpec, TemporalCondition
-    from embodichain.gen_sim.task_spec.evidence import (
-        evaluate_placement_evidence_report,
+    from ._evaluation import (
+        evaluate_physical_evidence_report as evaluate_placement_evidence_report,
     )
 
     spec, original, final, program = _legacy_evidence()
@@ -681,8 +680,8 @@ def test_old_binding_version_requires_explicit_reconstruction():
 def test_report_cannot_mix_new_runtime_and_historical_input_contracts():
     from dataclasses import replace
     from embodichain.gen_sim.task_spec import MilestoneSpec
-    from embodichain.gen_sim.task_spec.evidence import (
-        evaluate_placement_evidence_report,
+    from ._evaluation import (
+        evaluate_physical_evidence_report as evaluate_placement_evidence_report,
     )
 
     spec, original, _, program = _legacy_evidence()
@@ -900,7 +899,9 @@ def _strong_evidence(*, region=False, historical=False):
         )
         raw.update(landing_region=landing, support_gap_m=[0.0])
     if historical:
-        from embodichain.gen_sim.task_spec._support_contract import release_window
+        from embodichain.lab.task_program.integrations.evidence._release_evidence import (
+            release_window,
+        )
 
         metrics = dict(
             scope="native_supported_placement",
@@ -1252,7 +1253,8 @@ def test_coordinated_terminal_placement_preserves_source_load_path(mode, expecte
 
     source = json.loads(
         (
-            Path(__file__).parent / "data/transport_placement_source_reference.json"
+            Path(__file__).parents[4]
+            / "gen_sim/task_spec/data/transport_placement_source_reference.json"
         ).read_text()
     )
     case = next(value for value in source["cases"] if value["mode"] == mode)
@@ -1513,7 +1515,7 @@ def _planar_evidence(case_index=0, row=0, *, raw=False, relation="on"):
 
     source = json.loads(
         (
-            Path(__file__).parents[2] / "sim/scene/fixtures/planar_placement_b0.json"
+            Path(__file__).parents[4] / "sim/scene/fixtures/planar_placement_b0.json"
         ).read_text()
     )["cases"][case_index]
     spec, binding, evidence, program = _legacy_evidence()
@@ -1675,11 +1677,14 @@ def test_triangle_projection_does_not_invent_3d_cavity_containment():
 def _directional_evidence_case(index=0, *, raw=False):
     import json
     from embodichain.gen_sim.task_spec import MilestoneSpec
-    from embodichain.gen_sim.task_spec.evidence import directional_observation_axes
+    from embodichain.lab.task_program.integrations.evidence.observation_requests import (
+        directional_observation_axes,
+    )
 
     source = json.loads(
         (
-            Path(__file__).parent / "data/side_placement_source_reference.json"
+            Path(__file__).parents[4]
+            / "gen_sim/task_spec/data/side_placement_source_reference.json"
         ).read_text()
     )["cases"][index]
     predicate = Predicate(
@@ -1814,7 +1819,9 @@ def _directional_evidence_case(index=0, *, raw=False):
             },
             observation_kind=binding.observation_kind,
             boundary_frames=[100],
-            axes=[list(pair) for pair in directional_observation_axes(binding)],
+            axes=[
+                list(pair) for pair in directional_observation_axes(binding.to_dict())
+            ],
             policy_segment_name="place" if source["recorded"] else None,
             policy_source_path=["program", "items", 0] if source["recorded"] else None,
             native_directional=native,
@@ -2096,3 +2103,6 @@ def test_final_physical_scope_does_not_require_an_unexecuted_future_post_policy(
         spec, binding, evidence, program=program
     )[0]
     assert outcome.status is EvaluationStatus.SATISFIED, outcome.reason
+
+
+from ._evaluation import evaluate_supported_placement_evidence
