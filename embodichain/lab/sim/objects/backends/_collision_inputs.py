@@ -24,6 +24,8 @@ from typing import Any
 import numpy as np
 import trimesh
 
+from embodichain.lab.sim.spawn.source_geometry import read_usd_source
+
 __all__: list[str] = []
 
 
@@ -167,30 +169,15 @@ def _descriptor_collision_meshes(
     return result
 
 
-def _stage(path: str | Path) -> Any:
-    from pxr import Usd, UsdGeom
-
-    if Path(path).suffix.lower() not in {".usd", ".usda", ".usdc"}:
-        raise ValueError("Collision inputs require a self-contained USD articulation.")
-    stage = Usd.Stage.Open(str(path))
-    if stage is None or UsdGeom.GetStageMetersPerUnit(stage) != 1.0:
-        raise ValueError("Collision inputs require metre-authored USD geometry.")
-    if any(
-        not layer.anonymous and layer != stage.GetRootLayer()
-        for layer in stage.GetUsedLayers()
-    ):
-        raise ValueError("Collision inputs require a self-contained USD layer.")
-    return stage
-
-
 def _usd_collision_meshes(
     config: dict[str, Any],
 ) -> dict[tuple[str, str], trimesh.Trimesh]:
     """Read enabled collision meshes in their native owning link frames."""
     from pxr import UsdGeom, UsdPhysics
 
-    stage = _stage(config["fpath"])
-    cache = UsdGeom.XformCache()
+    source = read_usd_source(config["fpath"])
+    source.require_geometry()
+    stage = source.stage
     scale = np.asarray(config.get("body_scale", [1, 1, 1]), dtype=float)
     if scale.shape != (3,) or not np.isfinite(scale).all() or (scale <= 0).any():
         raise ValueError("Collision-input geometry requires a finite positive scale.")
@@ -202,44 +189,15 @@ def _usd_collision_meshes(
             continue
         if not UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get():
             continue
-        owner = prim
-        while owner and not owner.HasAPI(UsdPhysics.RigidBodyAPI):
-            owner = owner.GetParent()
-        if not owner:
-            raise ValueError("Collision-input mesh has no rigid-body owner.")
-        mesh = UsdGeom.Mesh(prim)
-        vertices = np.asarray(mesh.GetPointsAttr().Get(), dtype=float)
-        counts = np.asarray(mesh.GetFaceVertexCountsAttr().Get(), dtype=int)
-        indices = np.asarray(mesh.GetFaceVertexIndicesAttr().Get(), dtype=int)
-        if (
-            vertices.ndim != 2
-            or vertices.shape[1] != 3
-            or not len(vertices)
-            or not np.isfinite(vertices).all()
-            or not len(indices)
-            or (counts < 3).any()
-            or counts.sum() != len(indices)
-            or indices.min() < 0
-            or indices.max() >= len(vertices)
-        ):
-            raise ValueError("Collision-input mesh has invalid topology.")
-        pose = np.asarray(cache.GetLocalToWorldTransform(owner)).T
-        if not np.allclose(pose[:3, :3].T @ pose[:3, :3], np.eye(3), atol=1e-6):
-            raise ValueError(
-                "Collision-input link frames must be unscaled rigid transforms."
-            )
-        local = np.linalg.inv(pose) @ np.asarray(cache.GetLocalToWorldTransform(prim)).T
-        vertices = (vertices @ local[:3, :3].T + local[:3, 3]) * scale
-        faces, offset = [], 0
-        for count in counts:
-            polygon = indices[offset : offset + count]
-            faces.extend(
-                (polygon[0], polygon[i], polygon[i + 1]) for i in range(1, count - 1)
-            )
-            offset += count
+        owner_path = source.rigid_owner(str(prim.GetPath()))
+        owner = stage.GetPrimAtPath(owner_path)
+        vertices, faces = source.link_mesh_arrays(
+            str(prim.GetPath()), str(owner.GetPath()), scale=float(scale[0])
+        )
         result[(owner.GetName(), str(prim.GetPath()))] = trimesh.Trimesh(
             vertices=vertices, faces=faces, process=True
         )
     if not result:
         raise ValueError("Articulation has no enabled collision input geometry.")
+    source.assert_current()
     return result

@@ -1507,7 +1507,7 @@ def test_registered_acquisition_phase_contract_uses_existing_gate_and_guard(
     "updates",
     [
         {"acquire_before_segment": "lift"},
-        {"retain_during_segments": ("lift",)},
+        {"relation": HeldObjectRelation.DETACHED, "retain_during_segments": ("lift",)},
         {
             "acquire_before_segment": "lift",
             "retain_during_segments": ("approach", "lift"),

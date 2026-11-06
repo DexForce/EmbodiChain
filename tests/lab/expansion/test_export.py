@@ -23,7 +23,7 @@ from pathlib import Path
 import json
 import numpy as np
 import torch
-from test_persistence import episode
+from .test_persistence import episode
 from embodichain.lab.expansion.persistence import ArtifactEpisodeSink
 from embodichain.data_pipeline.recording.media import MediaSpool, _digest
 from embodichain.lab.expansion import export as module

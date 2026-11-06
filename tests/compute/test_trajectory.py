@@ -314,3 +314,46 @@ def test_interpolate_with_nums_preserves_zero_sample_segment_endpoints() -> None
     keyframes = torch.tensor([[[0.0], [2.0], [4.0]]])
     result = interpolate_with_nums(keyframes, [0, 2], device="cpu")
     assert torch.equal(result, torch.tensor([[[0.0], [2.0], [3.0], [4.0]]]))
+
+
+def test_velocity_grid_keeps_ordered_endpoints_and_rejects_short_duration():
+    from embodichain.compute.trajectory.interpolation import interpolate_velocity_grid
+
+    keys = torch.tensor([[[0.0, 0.0], [0.5, 0.1], [0.5, 0.5]]])
+    limits = torch.tensor([[1.0, 2.0]])
+    values, intervals = interpolate_velocity_grid(keys, 11, limits, 0.1)
+    # Required edge intervals are 5 and 2; three spare intervals split 2 then 1.
+    assert intervals.tolist() == [7, 3]
+    assert torch.equal(values[:, [0, 7, 10]], keys)
+    assert bool((values.diff(dim=1).abs() <= limits[:, None] * 0.1 + 1e-7).all())
+    with pytest.raises(ValueError, match="cannot fit"):
+        interpolate_velocity_grid(keys, 7, limits, 0.1)
+
+
+def test_joint_velocity_diagnostics_keep_worst_row_operands_without_accepting_it():
+    from embodichain.compute.trajectory.limits import (
+        joint_velocity_diagnostics,
+        joint_velocity_validity,
+    )
+
+    positions = torch.tensor(
+        [[[0.0, 0.0], [0.3, 0.2], [0.5, 0.4]], [[0.0, 0.0], [0.0, 1.0], [0.0, 2.0]]]
+    )
+    intervals = torch.tensor([[0.0, 0.1, 0.2], [0.0, 0.0, 1.0]])
+    limits = torch.ones((2, 2))
+    first, second = joint_velocity_diagnostics(positions, intervals, limits)
+    assert (first["env_id"], first["frame"], first["control_joint_index"]) == (0, 1, 0)
+    assert first["previous_qpos"] == 0.0
+    assert first["next_qpos"] == pytest.approx(0.3)
+    assert first["dt"] == pytest.approx(0.1)
+    assert first["speed_ratio"] == pytest.approx(3.0)
+    assert (second["env_id"], second["frame"], second["control_joint_index"]) == (
+        1,
+        1,
+        1,
+    )
+    assert second["dt"] == 0.0 and second["speed_ratio"] is None
+    assert joint_velocity_validity(positions, intervals, limits).tolist() == [
+        False,
+        False,
+    ]

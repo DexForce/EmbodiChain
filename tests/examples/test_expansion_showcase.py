@@ -381,3 +381,51 @@ def test_preview_joint_types_are_explicit_and_survive_asset_removal(tmp_path):
     ]
     unknown = {"model": "other", "metadata": {"joint_names": ["unknown"]}}
     assert preview_joint_types(tmp_path, {"id": "missing"}, unknown) == [None]
+
+
+def test_preview_reuse_verifies_all_generated_artifacts(tmp_path):
+    from examples.expansion.engine.showcase._replay import (
+        preview_artifacts,
+        preview_cache_valid,
+    )
+
+    index = tmp_path / "replay/case.json"
+    signature = tmp_path / "replay/case.signature.json"
+    outputs = {
+        "model_path": "replay/model.js",
+        "replay": "replay/episode.js",
+        "media": {
+            "rgb": "media/rgb.mp4",
+            "depth": "media/depth.mp4",
+            "thumbnail": "media/thumb.jpg",
+        },
+    }
+    names = (
+        outputs["model_path"],
+        outputs["replay"],
+        *outputs["media"].values(),
+        "media/source/camera.mp4",
+    )
+    for name in names:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"verified output")
+    dump(index, [outputs])
+    source = {"parents": {"a": "hash"}}
+    dump(signature, {"source": source, "artifacts": preview_artifacts(tmp_path, index)})
+    assert preview_cache_valid(tmp_path, index, signature, source)
+    assert not preview_cache_valid(tmp_path, index, signature, {"parents": {}})
+    for name in names:
+        path = tmp_path / name
+        before = path.read_bytes()
+        path.unlink()
+        assert not preview_cache_valid(tmp_path, index, signature, source)
+        path.write_bytes(b"changed")
+        assert not preview_cache_valid(tmp_path, index, signature, source)
+        path.write_bytes(before)
+        assert preview_cache_valid(tmp_path, index, signature, source)
+    dump(index, [])
+    assert not preview_cache_valid(tmp_path, index, signature, source)
+    for invalid in (None, [], "invalid", {}):
+        dump(signature, invalid)
+        assert not preview_cache_valid(tmp_path, index, signature, source)

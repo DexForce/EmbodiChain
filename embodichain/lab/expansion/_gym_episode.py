@@ -212,13 +212,39 @@ class GymEpisodeAssembler:
                     )
                 )
             if row in services:
-                request = services[row].qualify_episode(
-                    qpos=positions,
-                    objects={
-                        uid: torch.stack(values)
-                        for uid, values in numeric["objects"].items()
-                    },
+                from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
+                    Real2SimAcceptanceRejected,
                 )
+
+                try:
+                    request = services[row].qualify_episode(
+                        qpos=positions,
+                        objects={
+                            uid: torch.stack(values)
+                            for uid, values in numeric["objects"].items()
+                        },
+                    )
+                except Real2SimAcceptanceRejected as rejection:
+                    rejected = ValidationResult(
+                        tuple(checks) + rejection.validation.checks
+                    )
+                    record.update(
+                        status="rejected",
+                        reason="source_acceptance_failed",
+                        measured_accepted=False,
+                        validation=[
+                            dict(
+                                check_id=c.check_id,
+                                status=c.status,
+                                detail=c.detail,
+                                metrics=dict(c.metrics),
+                            )
+                            for c in rejected.checks
+                        ],
+                    )
+                    _atomic_json(directory / "attempt.json", record)
+                    episodes[row] = None
+                    continue
                 # Source qualification keeps its legacy labels, while the host
                 # owns executed action/state/schema and recipe identities.
                 owned = set(metadata) - {"recipe"}

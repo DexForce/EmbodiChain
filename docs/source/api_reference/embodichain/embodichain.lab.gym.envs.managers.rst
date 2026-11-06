@@ -59,6 +59,7 @@ functors), :class:`ActionManager` (``process_action(action)`` then
       JointPositionToLimitsAction
       JointVelocityAction
       ParallelGripperAction
+      RelativeEefDlsAction
       RelativeEefPoseAction
       RelativeJointPositionAction
       LeRobotRecorder
@@ -194,6 +195,34 @@ The action descriptor records its method, damping, bound, and success semantics.
 ``joint_delta``, ``joint_step_limited``, and ``joint_limit_clipped_mask`` expose
 the applied increment and both forms of limiting; resets clear selected rows.
 
+``RelativeEefDlsAction`` keeps an unbounded xyz/rotation-vector request as one
+fixed arena-frame target for the control interval. It recomputes the damped
+Jacobian solve from measured joints before each physics substep and clips only
+joint-position limits. It shares solver-order mapping and arena/TCP Jacobian
+adaptation with the single-step relative controller. Its ``eef_pose.relative_substep_dls@1`` contract selects
+this behavior separately from the bounded, single-step relative-pose contract.
+``ActionManager.get_substep_callback(num_substeps)`` owns the remaining-step
+count, action refresh and inactive-row holds for one control interval.
+``EmbodiedEnv`` connects that callback after sensor sampling through the batched
+simulation update, preserving intermediate recording and visualization frames.
+
+Configure the same arm and binary gripper terms for expert and policy execution.
+Set ``env.expert_trajectory.use_action_manager: true`` to route position-only
+``ControllerAction`` commands through ``ActionManager.process_joint_targets``.
+The DLS term retains the expert's exact FK target while recording the
+corresponding relative request, and keeps the existing expert storage schema.
+Completed demo rows retain measured joint holds after conversion and refresh.
+The default controller-ready route stays direct. Every configured term must
+support joint-target processing.
+For binary grippers, ``open_on_zero=False`` makes zero a closing request;
+the default retains nonnegative opening requests. The descriptor records this
+boundary together with the gripper mode.
+
+.. autoclass:: RelativeEefDlsAction
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
 .. autoclass:: RelativeEefPoseAction
     :members:
     :inherited-members:
@@ -240,8 +269,70 @@ Action Descriptors
 .. autoclass:: ActionTrace
     :members:
 
+Observation Manager
+-------------------
+
+.. automodule:: embodichain.lab.gym.envs.managers.observation_manager
+    :members:
+    :no-index:
+
+The manager owns the raw field schema, source aliases and acquisition context.
+``capture`` returns the raw boundary and its actual policy view. The existing
+host rollout writer fills raw fields and temporal metadata directly;
+``bind_rollout_storage`` grants the manager read access to those tensors.
+``read_history`` returns owned indexed snapshots and ``snapshot_history`` serves
+the export adapter. ``read_history_window`` copies explicit inclusive start/end
+slots per selected environment, preserving their order and individual lengths.
+It returns the same raw fields with validity, acquisition errors, revisions,
+timestamps and timestamp validity; aliases use the existing schema. Values and
+masks are independently owned on the requested device. Invalid samples remain
+invalid, and unrecorded slots or changed episodes/closed owners reject the read.
+This bounded slice performs no physical acquisition and avoids repeated
+single-slot calls. ``read_history_step_counts`` returns qualified completed
+state-slot boundaries only, without copying field values; zero denotes recorded
+initialization. Both APIs check episode and owner lifetime before and after reads.
+There is no history instance, allocation engine or separate
+bind/seed/append API. Evidence adapters bind roles through ``schema``; numeric
+buffer operations perform no entity/quantity lookup.
+
+Expert policy state slots retain T+1 observations; existing rollout consumers
+keep their T-transition view. External learner windows preserve their own device
+and horizon. ``utils.trajectory_state.export_observation_history`` combines the
+single observation schema with a numeric snapshot for compatible output,
+without copying another complete state history.
+
 Observation Functions
 ---------------------
+
+``ObservationCfg.consumers`` defaults to ``("policy",)``. Add functors may
+select ``recording`` without expanding the policy space. Evidence adapters
+read qualified raw history; there is no separate evidence output route.
+Recording terms require an ``ObservationSample`` with an explicit descriptor
+and row validity; arbitrary policy tensors cannot become physical evidence by
+renaming them. Modify functors remain policy-only.
+
+For example, a single original arena pose can serve policy and recording:
+
+.. code-block:: python
+
+   ObservationCfg(
+       func=observations.get_entity_state,
+       mode="add",
+       name="scene/cube/pose",
+       params={"entity_cfg": SceneEntityCfg(uid="cube"), "quantity": "pose"},
+       consumers=("policy", "recording"),
+       extra={"shape": (7,)},
+   )
+
+The descriptor derives the resolved UID, shape, dtype, coordinate frame,
+representation and joint identities from the source. Pose values use arena
+coordinates and ``(x, y, z, qx, qy, qz, qw)``. Missing entities have a false validity
+mask and acquisition reasons; a policy zero-fill is never qualified evidence.
+Original channels are retained before in-place policy transforms. Existing
+Tensor-returning policy functors keep their signature and execution order.
+The manager resolves configured and required replay sources once, including
+callable strings and defaults, and reuses matching declarations. The descriptor
+cache contains immutable schema values, never live simulation handles.
 
 .. automodule:: embodichain.lab.gym.envs.managers.observations
     :members:

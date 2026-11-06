@@ -578,3 +578,30 @@ class TestIncrementalDistanceToTarget:
         assert result.shape == (4,)
         # Distance decreased from 0.5 to 0.25, so should be positive
         assert torch.any(result > 0)
+
+
+def test_stateful_reward_manager_reset_clears_only_selected_rows() -> None:
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.managers import RewardCfg, RewardManager
+    from embodichain.lab.gym.envs.managers.manager_base import Functor
+
+    class Counter(Functor):
+        def __init__(self, cfg, env):
+            super().__init__(cfg, env)
+            self.value = torch.zeros(env.num_envs)
+
+        def __call__(self, env, obs, action, info):
+            self.value += 1
+            return self.value.clone()
+
+        def reset(self, env_ids=None):
+            self.value[slice(None) if env_ids is None else env_ids] = 0
+
+    env = SimpleNamespace(num_envs=2, device=torch.device("cpu"))
+    manager = RewardManager(
+        {"counter": RewardCfg(func=Counter, weight=1.0, mode="add", params={})}, env
+    )
+    manager.compute({}, torch.zeros(2, 1), {})
+    manager.reset([0])
+    value, _ = manager.compute({}, torch.zeros(2, 1), {})
+    torch.testing.assert_close(value, torch.tensor([1.0, 2.0]))

@@ -617,11 +617,13 @@ def test_nominal_sources_are_bound_to_compiled_program_identity() -> None:
     )
     config = _program()
     compiled = adapter.compile(config)
-    assert adapter.create_bridge(compiled)._validator_port is validator
+    ordinary = adapter.create_bridge(compiled)
+    assert ordinary._validator_port is validator.sessions[0]
     bindings = BoundTaskProgramNominalSources(compiled, {0: Source()})
     bridge = adapter.create_bridge(compiled, nominal_source_factory=bindings)
     assert isinstance(bridge, TaskProgramDemoBridge)
-    assert bridge._validator_port is validator.sessions[0]
+    assert bridge._validator_port is validator.sessions[1]
+    assert ordinary._validator_port is not bridge._validator_port
     config.instruction = "A different instruction for the same program."
     changed = adapter.compile(config)
     with pytest.raises(ValueError, match="do not match"):
@@ -1126,6 +1128,19 @@ def test_factory_protocol_is_required() -> None:
     """Loose objects cannot enter the production assembly boundary."""
     with pytest.raises(TypeError, match="TaskProgramEnvironmentFactory"):
         TaskProgramEnvironmentAdapter(object(), step_dt=_STEP_DT)
+
+
+def test_adapter_close_releases_only_owned_resources_and_rejects_new_assembly():
+    factory = _FakeEnvironmentFactory()
+    closed = []
+    factory.close_runtime_resources = lambda: closed.append(True)
+    adapter = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
+    adapter.close()
+    adapter.close()
+    assert closed == [True]
+    with pytest.raises(RuntimeError, match="closed"):
+        adapter.assemble_runtime(_program().integration)
+    assert factory.calls == Counter()
 
 
 class _InvocationPolicyFactory(_FakeEnvironmentFactory):

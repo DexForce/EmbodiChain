@@ -49,6 +49,7 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
         "handover_pose_providers",
         "registered_semantic_lowerers",
         "control_part_evidence",
+        "settle_presets",
     }
 )
 _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
@@ -261,6 +262,19 @@ def _merge_runtime_services(
             task["nominal_motion_sources"],
             path="integration.runtime_services.nominal_motion_sources",
         )
+    if "settle_presets" in skill_profile or "settle_presets" in task:
+        profile_presets = _owned_mapping(
+            skill_profile.get("settle_presets", {}),
+            path="skill_profile.runtime_services.settle_presets",
+        )
+        task_presets = _owned_mapping(
+            task.get("settle_presets", {}),
+            path="integration.runtime_services.settle_presets",
+        )
+        duplicate = set(profile_presets) & set(task_presets)
+        if duplicate:
+            raise ValueError(f"Duplicate settle-preset ownership: {sorted(duplicate)}.")
+        result["settle_presets"] = {**profile_presets, **task_presets}
     return result
 
 

@@ -75,6 +75,7 @@ from embodichain.utils.utility import load_config
 
 __all__ = [
     "Real2SimTabletopCollectionCfg",
+    "Real2SimAcceptanceRejected",
     "Real2SimTabletopEpisodeEvidence",
     "Real2SimTabletopSource",
     "Real2SimTabletopBindings",
@@ -481,6 +482,21 @@ def _placement_heading_check(
         )
     )
     return angle <= tolerance_deg + 1e-9, {"placement_yaw_error_deg": angle}
+
+
+class Real2SimAcceptanceRejected(ValueError):
+    """Expected measured rejection; structural and runtime errors retain their type.
+
+    Args:
+        validation: Complete measured checks that failed source acceptance.
+    """
+
+    def __init__(self, validation: ValidationResult) -> None:
+        self.validation = validation
+        super().__init__(
+            "Real2Sim measured acceptance failed: "
+            + str([(c.check_id, c.status, c.detail) for c in validation.checks])
+        )
 
 
 class Real2SimTabletopEpisodeEvidence:
@@ -946,15 +962,7 @@ def qualify_real2sim_tabletop_episode(
         )
     )
     if not validation.accepted:
-        raise ValueError(
-            "Real2Sim measured acceptance failed: "
-            + str(
-                [
-                    (item.check_id, item.status, item.detail)
-                    for item in validation.checks
-                ]
-            )
-        )
+        raise Real2SimAcceptanceRejected(validation)
     variant = state["variant"]
     payload = {
         "program": tracer.program_fingerprint,

@@ -134,6 +134,19 @@ class RoleSpec:
         object.__setattr__(self, "attributes", attributes)
 
     @property
+    def is_single_member(self) -> bool:
+        """Whether the original cardinality selects exactly one member.
+
+        Returns:
+            True for ``one`` or explicit finite ``count=1``; an ``all``
+            selector and larger finite counts require complete separate proof.
+            This query does not add a field to serialization or semantic identity.
+        """
+        return self.quantifier == "one" or (
+            self.quantifier == "count" and self.count == 1
+        )
+
+    @property
     def role(self) -> str:
         """Compatibility alias used by scene binding adapters."""
         return self.name

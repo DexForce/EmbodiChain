@@ -336,9 +336,7 @@ def source_clock(root: Path, episode, selected: np.ndarray) -> dict:
             raise ValueError("Source video differs from the pinned recording")
         target = root / "media/source" / source.name
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists() and _digest(target) != entry["sha256"]:
-            raise ValueError("copied source video differs from its pin")
-        if not target.exists():
+        if not target.exists() or _digest(target) != entry["sha256"]:
             shutil.copyfile(source, target)
         videos.append(
             {
@@ -355,6 +353,43 @@ def source_clock(root: Path, episode, selected: np.ndarray) -> dict:
         "source_id": evidence["source_id"],
         "mapping": "execution → prototype → source acquisition → video encoding",
     }
+
+
+def preview_artifacts(root: Path, index_path: Path) -> dict[str, str]:
+    """Attest the index and each generated file required by its playback entries."""
+    from embodichain.data_pipeline.recording.media import _digest
+    from embodichain.lab.expansion.artifacts import resolve_artifact_path
+
+    records = json.loads(index_path.read_text())
+    paths = {index_path.relative_to(root).as_posix()}
+    for record in records:
+        paths.update((record["model_path"], record["replay"]))
+        paths.update(
+            value
+            for key, value in record.get("media", {}).items()
+            if key in {"rgb", "depth", "thumbnail"} and value
+        )
+    paths.update(
+        p.relative_to(root).as_posix() for p in (root / "media/source").glob("*.mp4")
+    )
+    return {name: _digest(resolve_artifact_path(root, name)) for name in sorted(paths)}
+
+
+def preview_cache_valid(
+    root: Path, index_path: Path, signature_path: Path, source: dict
+) -> bool:
+    """Reuse only when source pins and all generated playback files still match."""
+    try:
+        saved = json.loads(signature_path.read_text())
+        if (
+            not isinstance(saved, dict)
+            or saved.get("source") != source
+            or not saved.get("artifacts")
+        ):
+            return False
+        return saved["artifacts"] == preview_artifacts(root, index_path)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def export_replays(root: Path, job: Path) -> dict:
@@ -389,10 +424,8 @@ def export_replays(root: Path, job: Path) -> dict:
         "replay_version": 2,
     }
     signature_path = root / "replay" / (case["id"] + ".signature.json")
-    if (
-        signature_path.exists()
-        and json.loads(signature_path.read_text()) == signature
-        and (root / "replay" / (case["id"] + ".json")).exists()
+    if preview_cache_valid(
+        root, root / "replay" / (case["id"] + ".json"), signature_path, signature
     ):
         return {
             "ok": True,
@@ -530,7 +563,15 @@ def export_replays(root: Path, job: Path) -> dict:
                     }
                 )
         dump(root / "replay" / (case["id"] + ".json"), outputs)
-        dump(signature_path, signature)
+        dump(
+            signature_path,
+            {
+                "source": signature,
+                "artifacts": preview_artifacts(
+                    root, root / "replay" / (case["id"] + ".json")
+                ),
+            },
+        )
         return {
             "ok": True,
             "case": case["id"],

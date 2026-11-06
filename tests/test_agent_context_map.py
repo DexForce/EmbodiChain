@@ -71,6 +71,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "atomic-actions",
         "task-programs",
         "task-spec",
+        "task-engine",
         "gen-sim",
         "data-assets",
         "asset-generalization",

@@ -31,6 +31,7 @@ __all__: list[str] = []
 def physics_probe(backend: str) -> dict:
     import torch
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.visualization import VisualizationCfg
     from embodichain.lab.sim.cfg import RigidObjectCfg, physics_cfg_for_backend
     from embodichain.lab.sim.shapes import CubeCfg
     from embodichain.lab.sim.scene import (
@@ -50,6 +51,7 @@ def physics_probe(backend: str) -> dict:
         device="cpu",
         num_envs=8,
         physics_cfg=physics_cfg_for_backend(backend),
+        visualization=VisualizationCfg(backend="none"),
     )
     cfg.render_cfg.renderer = "no-render"
     sim = SimulationManager(cfg)

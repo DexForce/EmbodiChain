@@ -62,6 +62,14 @@ and per-row availability belong to the [contact boundary](../sensor-system/conta
 Raw traces are observations, while report serialization and TaskSpec verdicts
 remain frontend responsibilities.
 
+Fresh grip capture uses `SimulationStateObservationCollector` with the explicit
+`ObservationManager` owner. Its cheap `read_history_step_counts` query qualifies
+the current row boundaries without copying the full history. The runtime's
+`GripEvidenceObservationPort` performs one acquisition and owns that exact query;
+the standard factory preserves sensor, robot and runtime-scope checks around it.
+Collectors check episode, object, provider and clock identity before and after
+the read. Query time is not a claim of a native impulse refresh or task success.
+
 Stateful segment validators capture their incoming evidence through the optional
 `begin_segment` port immediately before runtime planning starts. Lift checks use
 that segment's measured baseline, including for lazy and repeated segments;
@@ -69,7 +77,9 @@ they do not observe at compile time or reset physical state. Results remain
 row-local and exclude rows that were ineligible when the segment started.
 
 `HandOver` starting from free resources covers pickup, transfer, delivery and
-final release. Its intermediate acquisition gates require attachment, while
+final release. The receiver enters from its side; after source release, the
+source withdraws before delivery, and the open receiver retracts before settling.
+These motions retain explicit phase boundaries. Its acquisition gates require attachment, while
 the terminal effect requires both participants detached. With an already
 verified source hold and an explicit policy preset selecting
 `HandOverOptions.release_at_target=False`, it transfers to the destination and
@@ -83,6 +93,43 @@ determine the expected raw value.
 `DemoSegment` values so the ordinary Gym executor retains stepping, recording,
 reward, reset, and persistence. Final success is published only after every
 segment lifecycle completes normally.
+
+Named geometric/held/support stability conditions execute through the standard
+`SimulationSegmentPolicyPort`; they do not install another constraints registry.
+The initial sample does not count toward duration. Ordinary drift resets the
+object/reference anchors, while a held-state failure stays latched for the row.
+Joint stability uses the actual joint coordinate and full-window range, holding
+the original observed robot position. Its receipt does not claim contact safety.
+The pure ``compute.trajectory.PositionRangeMonitor`` owns candidate-window
+statistics; the port owns observation and hold scheduling. An execution clock
+adds the final raw sample and a bounded ``joint_window`` record with actual
+steps/times, per-sample validity/errors and policy/segment/native identity.
+The pre-sample range anchor is retained separately as numerical initialization.
+Incomplete retention is explicit and cannot prove full coverage. Unclocked
+default execution retains its legacy receipt without fabricated timestamps.
+Execution termination and per-row condition status remain separate. The default
+invalid-row mode aborts the batch; explicit isolation lets other rows continue.
+Cancelled/interrupted waits keep partial diagnostics and no success result.
+Native support and qualified planar-region inputs remain distinct measurements;
+missing acquisition cannot become geometric success. Pure task/report matching
+stays outside Lab and can consume owned condition data without a runtime.
+Mesh-envelope math belongs to Compute; qualified contact-height adaptation
+belongs to sensors. Empty attachment selections perform no Robot query, and
+multi-arm attachment checks reuse one inverse without changing FK or sampling.
+
+The simulation factory owns support observer reuse and installs the same native
+sensor instances in the public environment suite. A support-enabled factory
+rejects overlapping unfinished bridges before replacing the clock. The adapter
+checks ownership before live assembly and binds the actual returned bridge.
+`execution_finished` distinguishes safely ended iteration from successful
+`program_completed`: outstanding lazy segments and unacknowledged actions keep
+ownership until consumed/validated or explicitly aborted. Non-support factories
+retain existing assembly. Returned effect providers, live scene snapshots and
+drive-target holds share the factory lifetime guard. Closing an
+environment keeps the demo executor's existing abort handshake, discards/finalizes
+recorders, closes runtime hooks, then destroys simulation. Close never guesses an
+action acknowledgement or steps physics; incomplete manual execution remains
+incomplete, and closed adapters/factories reject further assembly/acquisition.
 
 Sequential segments reuse one static workflow analysis per uninterrupted
 sequential stretch; parallel barriers stop this reuse across branches. Each
@@ -155,7 +202,12 @@ its call ID, revision, and target Atomic Skill descriptor. Use this extension
 to expose shared Atomic Skills; do not place task-local motion generators in a
 lowerer.
 Registered held effects use compiler-owned expectations, monitor grounding,
-acquisition/release gates and retention guards. A registered release may retain
+acquisition/release gates and retention guards. An attached retention-only
+contract consumes an exact verified input hold for every eligible row, requires
+a verified monitor, and guards the declared segments without a new acquisition
+gate. Routed held-object transport uses this contract and its named Atomic goal
+requests terminal retained-attachment verification.
+A registered release may retain
 its incoming verified hold through declared approach phases and require measured
 detachment before retracting. Relative Place declares the same checks as ordinary
 Place. Runtime validates every guard phase against each successful final plan,
@@ -175,6 +227,32 @@ executable lowerers. The current frontend permits the constrained node/call
 subset enforced by its decoder; Task Program itself supports the complete
 language.
 
+`TaskProgramPlanLifecycleFactory` is the provider-free selection protocol for
+an explicit grounded occurrence. Its composite permits at most one lifecycle
+owner and rejects duplicate factory registration. Runtime hosts bind this port
+explicitly; source-specific lowerers and services remain with their owning
+integration layers. Semantic preflight checks planning recovery against the
+actual target SkillDescriptor before grounding or physical acquisition.
+
+## Explicit runtime observation scope
+
+`TaskProgramEnvironmentAdapter.assemble_runtime()` and `create_bridge()` accept
+an optional `runtime_scope_guard`. The standard factory forwards this host-owned
+validator to `SimulationPlanningObservationProvider` and its shared scene cache.
+`validate_runtime_scope()` checks both the factory lifetime and that explicit
+scope without reading robot state, sensors or simulation samples. Hosts bind
+actual session/episode/owner epochs; a factory-open check alone cannot establish
+that an earlier bridge is still current.
+
+One internal validator combines factory lifetime and the optional host scope.
+Planning observations and the shared scene cache run that check before and after
+cached or live reads. Closing the factory during acquisition rejects the result
+even without a host callback; a replaced scope cannot publish a context or
+snapshot. The default `None` performs no host callback and leaves legacy custom
+factory calls unchanged; callers requesting a scope must use a factory
+implementing the optional keyword. These checks do not acquire evidence,
+create control services or select atomic skills.
+
 ## Evidence ownership across integrations
 
 Task Engine selects declared evidence requirements and named policies from skill,
@@ -189,15 +267,73 @@ adapts semantic clauses to shared physical requests. Sensor acquisition/history
 lives in `lab.sim.sensors`; physical grip interpretation lives in
 `lab.sim.atomic_actions.grip_evidence`, including `DriverOpeningBinding.bind`
 for calibrated hand-opening observations. Factories bind those declarations
-before creating sensor resources; sensors do not own release predicates or
-experiment labels. Contact arithmetic lives in
-`compute.geometry.grip_contacts`. `lab.sim.evidence` is the common frame/batch/request
-owner. Existing Atomic public imports refer to the same types. No raw acquisition
-module imports Task Program or Task Engine. Invocation and episode associations
-are maintained by the execution host rather than fields on shared raw frames.
+before creating sensor resources; release predicates and experiment labels
+remain outside raw acquisition. Contact arithmetic lives in
+`compute.geometry.grip_contacts` and `compute.geometry.contact_support`.
+`lab.sim.evidence` is the common frame/batch/request owner. Existing Atomic public
+imports refer to the same types. No raw acquisition module imports Task Program
+or Task Engine. Invocation and episode associations are maintained by the
+execution host rather than fields on shared raw frames.
 
 Changes after the contact-evidence extraction must import the sensor modules
 rather than the removed integration-local contact_evidence/contact_timeline paths.
 Factories may create or reuse matching sensor declarations; lifecycle, scope,
 capacity, unavailable data and selective resets remain sensor contracts. Do not
 turn missing acquisition into a measured negative or a successful effect.
+
+For declared support conditions, incomplete acquisition resets only the affected
+row's stable streak and keeps yielding holds until a qualified window or timeout.
+`measurements.support_acquisition` retains the physical channel's validity,
+errors and timestamp/row/revision identity separately from source support metadata.
+The result records missing-observation counts and the last reasons. A row that
+never reestablishes a successful window after missing evidence reports
+`support_result_available=false`; consumers must not interpret that false result
+as a measured task failure. Source-global errors still invalidate every witness.
+
+`SimulationSegmentPolicyPort.observation_clock` exposes only the requesting
+session's current observation binding; an unbound port returns None and a
+superseded session rejects new reads. Same-clock binding is idempotent and the
+generation belongs to the existing owner lifetime, not a global active-run
+registry. Default execution, cancellation and cleanup retain their own protocols.
+The environment adapter requests a fresh policy/validator session for every
+bridge, including ordinary execution without nominal sources. Creating a later
+bridge cannot replace the clock stored by an earlier session. Position-only
+post-policy holds pass through the configured Gym action encoder, preserving the
+captured positions and supplying zero velocity targets in position-velocity mode.
+
+`SimulationSupportObservationCollector` binds before the first action to an
+explicit environment and the bridge's actual policy session. Current capture
+uses that session's clock ownership and the native rest-envelope COM tolerance;
+recorded snapshots retain the policy's original override. Recorded reads combine
+the original policy metadata with exact described raw pose fields from an
+explicitly injected `ObservationManager`. The collector binds semantic fields
+from its schema; optional numeric history validates buffer lifetime, actual
+episode owner and temporal identities. The collector retains bridge/policy
+checks. Without observation history, current capture remains available and
+historical capture rejects. Raw history and T+1 timing belong to
+[environment recording](../env-framework/env-framework.md#expert-trajectory-contract).
+It never combines current contacts with old poses or accesses Env's private buffers.
+`SimulationSupportObservationCollector` receives the host's actual
+`ObservationManager` for historical reads. Full-footprint geometry is recomputed
+through the existing policy session's `measure_support_geometry` using exact
+recorded poses and original support metadata. It does not resample contacts or
+read current poses. Invalid raw history remains unavailable before reprojection;
+TaskSpec independently checks that recomputed geometry matches the bound proof.
+
+`simulation.observations.SimulationStateObservationCollector` binds the exact
+pre-execution bridge, sealed registration and initialized episode. Current pose
+and joint queries validate the selected native owner before and after acquisition
+and validate the observation clock.
+Historical pose reads require an explicitly supplied ObservationManager and
+reuse its semantic schema/raw store, including unavailable rows and original
+boundary/revision/timestamp metadata. A missing original timestamp leaves only
+its affected row unavailable; the read timestamp cannot substitute for it.
+It does not evaluate TaskSpec conditions,
+resample past state or alter execution targets.
+
+`SimulationStateObservationCollector.capture_recorded_pour_geometry` reads one
+owned snapshot from the explicitly supplied ObservationManager, then selects
+exact inclusive source slots and receiver slots at the first maximum tilt.
+Raw validity/errors, episode and written-boundary identity remain authoritative.
+Geometry functions live in Compute and choose no Pour thresholds or release
+verdicts. The collector does not read live poses or acquire new sensor samples.

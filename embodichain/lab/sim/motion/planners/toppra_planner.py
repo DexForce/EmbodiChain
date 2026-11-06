@@ -300,6 +300,7 @@ class ToppraPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.JOINT_MOVE})
+    uses_sparse_joint_waypoints = True
     preserve_plan_samples = True
     """Keep the solved native time grid through MotionGenerator normalization.
 

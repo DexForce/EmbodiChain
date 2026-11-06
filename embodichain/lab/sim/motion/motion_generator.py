@@ -112,8 +112,9 @@ class MotionGenOptions:
     start_qpos: torch.Tensor | None = None
     """Observed controlled-joint start, shape ``(B, DOF)``.
 
-    Required for ``ik_interp``. Backend pre-interpolation reads the current
-    robot state when omitted; native backend requests use backend defaults.
+    Required for ``ik_interp``. With ``is_interpolate=True``, joint-only
+    backends read the current robot state when omitted, including sparse
+    waypoint planning. Other backend requests use backend defaults.
     """
 
     control_part: str | None = None
@@ -144,8 +145,9 @@ class MotionGenOptions:
     is_linear: bool = False
     """Request Cartesian pre-interpolation for joint-only backends.
 
-    With ``ik_interp``, requires explicit ``preserve_cartesian_samples``;
-    sparse endpoint IK followed by joint interpolation is not a Cartesian line.
+    With fixed-grid sequential ``ik_interp``, unsampled keyframes are sampled
+    before IK. ``preserve_cartesian_samples=True`` instead supplies an already
+    sampled path. Other interpolation modes require that explicit sampled path.
     """
 
     preserve_cartesian_samples: bool = False
@@ -189,8 +191,49 @@ class MotionGenOptions:
     )
     """Use the current batched solver, or seed each pose from its predecessor."""
 
+    segment_sample_count_retries: tuple[int, ...] = field(default=(), kw_only=True)
+    """Ordered denser alternatives within one sampled Cartesian segment request.
+
+    These counts are independent of complete-action retries. The first count
+    also bounds eligibility of the original request, preserving the source
+    coarse-grid boundary. ``generate`` consumes them for explicit linear
+    keyframes under fixed-grid sequential IK.
+    """
+
+    segment_continuous_ik_recovery: bool = field(default=False, kw_only=True)
+    """Try unchanged-target/time continuous IK after segment samples fail.
+
+    Dense attempts advance the existing random stream. The continuous resolver
+    retains its own Torch-only fork; no outer action counter is reused.
+    """
+
     def __post_init__(self) -> None:
         """Validate backend-neutral motion generation options."""
+        segment_retries = self.segment_sample_count_retries
+        if (
+            type(segment_retries) is not tuple
+            or any(type(value) is not int or value < 2 for value in segment_retries)
+            or any(a >= b for a, b in zip(segment_retries, segment_retries[1:]))
+        ):
+            raise ValueError(
+                "segment_sample_count_retries must be a strictly increasing tuple of integer counts >=2."
+            )
+        if type(self.segment_continuous_ik_recovery) is not bool:
+            raise TypeError("segment_continuous_ik_recovery must be a boolean.")
+        if (segment_retries or self.segment_continuous_ik_recovery) and (
+            self.strategy != "ik_interp"
+            or self.interpolation_mode != "fixed_grid"
+            or self.ik_seed_mode != "sequential"
+        ):
+            raise ValueError(
+                "Cartesian segment recovery requires fixed-grid sequential ik_interp."
+            )
+        if (segment_retries or self.segment_continuous_ik_recovery) and (
+            not self.is_linear or self.preserve_cartesian_samples
+        ):
+            raise ValueError(
+                "Cartesian segment recovery requires unsampled linear keyframes."
+            )
         if self.interpolation_mode not in {"adaptive", "fixed_grid"}:
             raise ValueError("interpolation_mode must be adaptive or fixed_grid.")
         if self.ik_seed_mode not in {"batched", "sequential"}:
@@ -228,10 +271,14 @@ class MotionGenOptions:
             self.strategy == "ik_interp"
             and self.is_linear
             and not self.preserve_cartesian_samples
+            and (
+                self.interpolation_mode != "fixed_grid"
+                or self.ik_seed_mode != "sequential"
+            )
         ):
             raise ValueError(
                 "is_linear with ik_interp requires preserve_cartesian_samples=True "
-                "and explicit Cartesian path samples."
+                "or fixed-grid sequential keyframe sampling."
             )
         valid_strategies = {"motion_gen", "ik_interp"}
         if self.strategy not in valid_strategies:
@@ -676,11 +723,13 @@ class MotionGenerator:
         cls = self._support_planner_dict[planner_type][0](cfg=planner_cfg)
         return cls
 
-    @_planning_call("planning")
+    @_planning_call("check")
     def generate(
         self,
         target_states: list[PlanState],
         options: MotionGenOptions | None = None,
+        *,
+        defer_recovery: bool = False,
     ) -> PlanResult:
         r"""Generate one normalized, environment-batched motion plan.
 
@@ -696,21 +745,53 @@ class MotionGenerator:
 
         Args:
             target_states: Batched planner waypoints.
-            options: Motion-generation strategy and runtime options.
+            options: Motion-generation strategy and runtime options. Explicit
+                linear fixed-grid sequential IK samples the supplied keyframes
+                before generation and consumes segment recovery here.
+            defer_recovery: Generate only the nominal linear path, allowing the
+                caller to inspect its failure before spending recovery attempts.
+                Valid only for unsampled linear keyframes.
 
         Returns:
             Normalized result with a per-environment success mask and joint
             positions. Failed rows hold ``start_qpos`` when it is supplied.
+            Explicit linear keyframe requests attach their local attempt receipt
+            to ``PlanResult.recovery``; ordinary requests leave it ``None``.
 
         Raises:
             ValueError: If targets or options violate the motion contract.
         """
         if not target_states:
             raise ValueError("target_states must contain at least one waypoint.")
-        options = MotionGenOptions() if options is None else deepcopy(options)
+        options = MotionGenOptions() if options is None else options
         # Options are mutable config objects; revalidate at the call boundary.
         options.__post_init__()
+        if type(defer_recovery) is not bool:
+            raise TypeError("defer_recovery must be a boolean.")
+        linear_keyframes = (
+            options.strategy == "ik_interp"
+            and options.is_linear
+            and not options.preserve_cartesian_samples
+        )
+        if linear_keyframes:
+            from ._cartesian import _generate_cartesian_motion
 
+            return _generate_cartesian_motion(
+                self, target_states, deepcopy(options), defer_recovery=defer_recovery
+            )
+        if defer_recovery:
+            raise ValueError("defer_recovery requires unsampled linear keyframes.")
+        return self._generate_once(target_states, options=options)
+
+    @_planning_call("planning")
+    def _generate_once(
+        self,
+        target_states: list[PlanState],
+        options: MotionGenOptions,
+    ) -> PlanResult:
+        """Generate and normalize one attempt; charge its host budget once."""
+        options = deepcopy(options)
+        options.__post_init__()
         move_types = {state.move_type for state in target_states}
         heterogeneous = len(move_types) > 1
         if heterogeneous and not self.supports_heterogeneous_waypoints:
@@ -843,13 +924,20 @@ class MotionGenerator:
             len(move_types) == 1
             and move_type is MoveType.JOINT_MOVE
             and owns_sparse_waypoints
+            and not options.is_linear
         )
-        should_preinterpolate = (
+        needs_joint_preparation = (
             len(move_types) == 1
             and options.is_interpolate
-            and not uses_sparse_joint_waypoints
             and not self.planner.supports_move_type(MoveType.EEF_MOVE)
             and self.planner.supports_move_type(MoveType.JOINT_MOVE)
+        )
+        # Sparse timing bypasses densification, but still needs the observed
+        # start when interpolation was requested without an explicit start.
+        if needs_joint_preparation and options.start_qpos is None:
+            options.start_qpos = self._selected_qpos(options.control_part)
+        should_preinterpolate = (
+            needs_joint_preparation and not uses_sparse_joint_waypoints
         )
 
         preparation_success = None
@@ -873,8 +961,6 @@ class MotionGenerator:
                     f"Unsupported move type for pre-interpolation: {move_type}"
                 )
 
-            if options.start_qpos is None:
-                options.start_qpos = self._selected_qpos(options.control_part)
             if options.start_qpos is not None:
                 start = options.start_qpos
                 if start.dim() == 1:
@@ -1830,6 +1916,7 @@ class MotionGenerator:
             waypoint_indices=waypoint_indices,
             policy_waypoint_indices=result.policy_waypoint_indices,
             rejected_candidate=result.rejected_candidate,
+            recovery=result.recovery,
         )
 
     def _runtime_device(self) -> torch.device:
@@ -2175,7 +2262,7 @@ class MotionGenerator:
             if sparse_cartesian:
                 # A sparse joint planner owns timing between the requested
                 # goals. Densifying a free Cartesian move would turn every IK
-                # sample into a mandatory rest point for trapezoidal timing.
+                # sample into a mandatory rest point for stopped timing.
                 total_interpolated_poses = xpos_list.to(self._runtime_device())
             else:
                 # Allocations are per environment; share their segment maxima

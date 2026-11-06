@@ -447,6 +447,8 @@ class RegisteredHeldObjectEffect:
     """One registered held relation with optional acquisition or release phases.
 
     Acquisition phases use the existing verified gate and planned-effect guard.
+    Attached retention-only phases guard an existing verified input hold without
+    declaring a new acquisition gate.
     Empty phase declarations preserve terminal-only extension behavior.
 
     Args:
@@ -499,9 +501,17 @@ class RegisteredHeldObjectEffect:
             raise ValueError(
                 "A held relation cannot declare both acquisition and release gates."
             )
-        if bool(segments) != (acquiring or releasing):
+        if (acquiring or releasing) and not segments:
             raise ValueError(
                 "Registered phase checks require both a gate and retention phases."
+            )
+        if (
+            segments
+            and not (acquiring or releasing)
+            and self.relation is not HeldObjectRelation.ATTACHED
+        ):
+            raise ValueError(
+                "Retention without a gate requires an attached input hold."
             )
         if acquiring:
             if self.relation is not HeldObjectRelation.ATTACHED:
@@ -1569,6 +1579,21 @@ class SemanticCallCompiler:
                 (*path, call_index, "effect_gates"),
                 "Registered acquisition phases require a verified effect monitor.",
             )
+        if (
+            lowering.registered_effect is not None
+            and any(
+                item.relation is HeldObjectRelation.ATTACHED
+                and item.retain_during_segments
+                and item.acquire_before_segment is None
+                for item in lowering.registered_effect.held_objects
+            )
+            and (effect_spec is None or analyzed.effect_monitor_ref is None)
+        ):
+            raise _diagnostic(
+                "registered_retention_requires_verified_effect",
+                (*path, call_index, "effect_guards"),
+                "Registered retained transport requires a verified effect monitor.",
+            )
         effect_monitor: EffectMonitor | None = None
         if effect_spec is not None and analyzed.effect_monitor_ref is not None:
             try:
@@ -2201,15 +2226,21 @@ class SemanticCallCompiler:
         *,
         path: tuple[PathPart, ...],
     ) -> None:
-        """Require verified input holds declared by a registered release."""
+        """Require exact eligible input holds for registered release or retention."""
         contract = lowering.registered_effect
         if contract is None:
             return
         for item in contract.held_objects:
-            if (
-                item.relation is not HeldObjectRelation.DETACHED
-                or item.allow_missing_detached_baseline
-            ):
+            release = (
+                item.relation is HeldObjectRelation.DETACHED
+                and not item.allow_missing_detached_baseline
+            )
+            retain = (
+                item.relation is HeldObjectRelation.ATTACHED
+                and bool(item.retain_during_segments)
+                and item.acquire_before_segment is None
+            )
+            if not (release or retain):
                 continue
             self._require_held_object(
                 analyzed,

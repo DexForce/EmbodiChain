@@ -44,8 +44,10 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Component resolution and policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
-| Physical acquisition and history | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py` |
+| Physical acquisition, history and support observations | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py`, `support_observation.py` |
 | Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
+| Offline held-object protocol normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
+| Shared SDK-independent physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
 | Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
@@ -53,7 +55,15 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | MLLM untrusted-JSON frontend | `embodichain/agents/mllm/task_program.py` |
 
 The core `language`, `semantics`, `compiler`, and `runtime` packages must not
-import Gym. Provider-specific dependencies are confined to `integrations`.
+import Gym. Provider-specific dependencies are confined to `integrations`. Public package
+exports resolve lazily while retaining their existing names and objects, so an
+offline evidence adapter can import without initializing a simulator.
+
+The held-object adapter validates receipt, actor, query and time identities and
+cross-checks world-position/orientation measurements against the original policy.
+It imports neither TaskSpec nor Task Engine and makes no normative task judgment.
+Declared task bounds belong to the separately supplied normative criteria. Invalid
+capture boundaries return unavailable evidence instead of failing report assembly.
 Gym retains only lifecycle coupling; it does not own schemas, compilers,
 catalogs, lowerers, or simulation assembly.
 

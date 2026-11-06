@@ -40,6 +40,10 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 import embodichain.lab.gym.envs.task_program.bridge as bridge_module
 from embodichain.lab.gym.envs.types import ControllerAction
+from embodichain.lab.gym.envs.expert_trajectory import (
+    ExpertActionSpec,
+    encode_expert_action,
+)
 from embodichain.lab.sim.atomic_actions.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
@@ -900,13 +904,26 @@ def _bridge(
     parallel_safety_validator: object | None = None,
     runner_cfg: ExecutionRunnerCfg | None = None,
     isolate_policy_sessions: bool = False,
+    joint_command_mode: str = "position",
 ) -> tuple[TaskProgramDemoBridge, _FakeRuntime, EnvironmentStepClock]:
     clock = EnvironmentStepClock(STEP_DT)
     encoder = RuntimeCommandFrameEncoder(
-        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF)),
+        joint_command_mode=joint_command_mode,
     )
     sink = BufferedGymCommandSink(encoder, clock)
-    runtime = _FakeRuntime(sink, clock, _joint_frame(duration=duration))
+    runtime = _FakeRuntime(
+        sink,
+        clock,
+        _joint_frame(
+            duration=duration,
+            velocities=(
+                torch.ones(BATCH_SIZE, 2)
+                if joint_command_mode == "position_velocity"
+                else None
+            ),
+        ),
+    )
     bridge = TaskProgramDemoBridge(
         _FakeProgram(_FakeSegment() if segment is None else segment),
         runtime,
@@ -960,6 +977,9 @@ def test_execution_trace_records_only_consumed_actions_and_rejects_unknown_frame
     bridge = TaskProgramDemoBridge.__new__(TaskProgramDemoBridge)
     bridge._clock = EnvironmentStepClock(0.1)
     bridge._execution_trace = []
+    bridge._row_rejection = None
+    bridge._row_hold = None
+    bridge._pending_rejected_ids = ()
     lifecycle = bridge_module._SegmentLifecycle()
     action = ControllerAction(
         torch.zeros(1, 1),
@@ -1562,6 +1582,7 @@ def test_bridge_publishes_completion_only_after_normal_program_exhaustion() -> N
     with pytest.raises(StopIteration):
         next(segments)
     assert bridge.program_completed is True
+    assert bridge.execution_finished
     completion = bridge.completion_mask
     completion[0] = False
     assert bridge.completion_mask.tolist() == [True, True]
@@ -1575,17 +1596,21 @@ def test_closing_without_abort_handshake_fails_loudly_and_does_not_ack() -> None
     with pytest.raises(TaskProgramBridgeError, match="abort_actions"):
         actions.close()
 
+    assert not bridge.execution_finished
     assert clock.step_index == 0
     assert runtime.cancel_count == 1
 
 
 def test_abort_handshake_discards_unconsumed_command_and_yields_safe_hold() -> None:
     bridge, runtime, clock = _bridge(duration=2 * STEP_DT)
-    segment = next(bridge.iter_segments())
+    segments = bridge.iter_segments()
+    segment = next(segments)
     actions = iter(segment.actions)
 
     command = next(actions)
     assert command.metadata["bridge_action_kind"] == "runtime_command"
+    segments.close()
+    assert not bridge.execution_finished
     assert segment.abort_actions is not None
     emergency = iter(segment.abort_actions("operator stop", last_action_consumed=False))
     hold = next(emergency)
@@ -1609,6 +1634,7 @@ def test_abort_handshake_discards_unconsumed_command_and_yields_safe_hold() -> N
             )
         )
     actions.close()
+    assert bridge.execution_finished
 
 
 def test_abort_handshake_acknowledges_consumed_command_exactly_once() -> None:
@@ -2045,7 +2071,8 @@ def test_row_independent_partial_failure_does_not_abort_healthy_peer() -> None:
     assert runtime.sink.pending_count == 0
 
 
-def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+def test_post_policy_and_validator_ports_stay_at_demo_boundary(mode) -> None:
     post_policy = object()
     validator = object()
     segment = _FakeSegment(
@@ -2059,6 +2086,7 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
         segment=segment,
         post_policy_port=post_port,
         validator_port=validator_port,
+        joint_command_mode=mode,
     )
     demo_segment = next(bridge.iter_segments())
     actions = iter(demo_segment.actions)
@@ -2068,6 +2096,24 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
     post_action = next(actions)
     assert clock.step_index == 1
     assert post_action.metadata["bridge_action_kind"] == "program_post_policy"
+    if mode == "position_velocity":
+        assert runtime_action.value["qvel"].any()
+        assert torch.equal(post_action.value["qpos"], post_port.action)
+        assert not post_action.value["qvel"].any()
+    else:
+        assert torch.equal(post_action.value, post_port.action)
+    encoded = encode_expert_action(
+        post_action.value,
+        spec=ExpertActionSpec(
+            joint_command_mode=mode,
+            joint_names=tuple(f"joint_{i}" for i in range(ROBOT_DOF)),
+        ),
+        active_joint_ids=tuple(range(ROBOT_DOF)),
+    )
+    assert encoded.shape == (
+        BATCH_SIZE,
+        ROBOT_DOF * (2 if mode == "position_velocity" else 1),
+    )
     with pytest.raises(StopIteration):
         next(actions)
 
@@ -2077,6 +2123,61 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
     assert post_port.active_masks[0].tolist() == [True, True]
     assert demo_segment.validator().tolist() == [True, False]
     assert validator_port.seen == [validator]
+
+
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+@pytest.mark.parametrize("reject_tick", [0, 2])
+def test_row_rejection_holds_commands_without_disrupting_policy_clock(
+    mode, reject_tick
+) -> None:
+    class ExactClockPolicy(_PostPolicyPort):
+        def actions(self, policy, *, segment, active_mask):
+            self.active_masks.append(active_mask.clone())
+            start = clock.step_index
+            for tick in range(3):
+                assert clock.step_index == start + tick
+                yield self.action * (tick + 1)
+                assert clock.step_index == start + tick + 1
+
+    port = ExactClockPolicy(torch.ones(BATCH_SIZE, ROBOT_DOF))
+    bridge, _, clock = _bridge(
+        duration=STEP_DT,
+        segment=_FakeSegment(post_policies=(object(),)),
+        post_policy_port=port,
+        joint_command_mode=mode,
+    )
+    segment = next(bridge.iter_segments())
+    policy_commands = []
+    stopped = False
+    holds = 0
+    for action in segment.actions:
+        positions = action.value if mode == "position" else action.value["qpos"]
+        if stopped:
+            torch.testing.assert_close(positions[0], torch.full((ROBOT_DOF,), 9.0))
+            if mode == "position_velocity":
+                assert not action.value["qvel"][0].any()
+        if action.metadata.get("rejected_env_ids"):
+            assert action.metadata["rejected_env_ids"] == [7]
+            holds += 1
+        if action.metadata["bridge_action_kind"] == "program_post_policy":
+            policy_commands.append(positions[1].clone())
+            if len(policy_commands) == reject_tick + 1:
+                hold = action.value.clone()
+                if mode == "position":
+                    hold[0] = 9.0
+                else:
+                    hold["qpos"][0] = 9.0
+                    hold["qvel"][0] = 0.0
+                bridge.request_row_rejection(
+                    (7,), ControllerAction(hold), reason="measured failure"
+                )
+                stopped = True
+    assert holds == 1
+    torch.testing.assert_close(
+        torch.stack(policy_commands),
+        torch.arange(1.0, 4.0)[:, None].expand(3, ROBOT_DOF),
+    )
+    assert segment.validator().tolist() == [False, True]
 
 
 def test_post_policy_receives_only_rows_surviving_partial_runtime_failure() -> None:

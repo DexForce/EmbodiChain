@@ -3521,6 +3521,41 @@
           "label": "TaskSpec protocol API"
         }
       ]
+    },
+    {
+      "id": "task-engine",
+      "label": "Task Engine",
+      "kind": "module",
+      "topic_ids": [
+        "task-engine"
+      ],
+      "summary": "Interprets task intentions and validates candidates, TaskSpec projections and semantic graph coverage.",
+      "details": "Task Engine converts explicit instruction intent into candidate declarations and independent TaskSpec requirements. Canonical graph and role/lineage coverage describe intended Semantic Calls; execution, physical evidence and acceptance remain with their owning systems.",
+      "boundaries": [
+        "This semantic front end does not implement Atomic Skills, motion planning or physics observation. Declaration coverage is not a physical-success certificate."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_engine/agent.py",
+          "symbol": "TaskAgent",
+          "start_line": 69,
+          "end_line": 69,
+          "excerpt": "class TaskAgent:"
+        },
+        {
+          "path": "embodichain/gen_sim/task_engine/task_spec.py",
+          "symbol": "task_spec_from_candidate",
+          "start_line": 186,
+          "end_line": 186,
+          "excerpt": "    template = TaskSpec("
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.gen_sim.task_engine",
+          "label": "Task Engine semantic contracts"
+        }
+      ]
     }
   ],
   "edges": [
@@ -3741,9 +3776,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
-          "start_line": 811,
-          "end_line": 816,
-          "excerpt": "        return TaskProgramDemoBridge(\n            program,\n            assembly.runtime,\n            assembly.command_sink,\n            assembly.clock,\n            post_policy_port=self._post_policy_port,"
+          "start_line": 1019,
+          "end_line": 1024,
+          "excerpt": "        bridge = TaskProgramDemoBridge(\n            program,\n            assembly.runtime,\n            assembly.command_sink,\n            assembly.clock,\n            post_policy_port=self._post_policy_port,"
         }
       ]
     },
@@ -3845,9 +3880,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
-          "start_line": 811,
-          "end_line": 813,
-          "excerpt": "        return TaskProgramDemoBridge(\n            program,\n            assembly.runtime,"
+          "start_line": 1019,
+          "end_line": 1021,
+          "excerpt": "        bridge = TaskProgramDemoBridge(\n            program,\n            assembly.runtime,"
         }
       ]
     },
@@ -5924,6 +5959,24 @@
           "excerpt": "    return SupervisedTrainer("
         }
       ]
+    },
+    {
+      "id": "task-engine-constructs-task-spec",
+      "source": "task-engine",
+      "target": "task-spec",
+      "relation": "constructs",
+      "description": "Projects validated task candidates into normative TaskSpec declarations.",
+      "provenance": "source-reviewed",
+      "scope": "TaskSpec construction from semantic intent; independent identity validation and evidence evaluation stay with TaskSpec.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_engine/task_spec.py",
+          "symbol": "task_spec_from_candidate",
+          "start_line": 186,
+          "end_line": 186,
+          "excerpt": "    template = TaskSpec("
+        }
+      ]
     }
   ],
   "views": [
@@ -6022,7 +6075,8 @@
         "supervised-learning",
         "nerd-showcase",
         "robot-world-model",
-        "task-spec"
+        "task-spec",
+        "task-engine"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -6111,7 +6165,8 @@
         "motion-benchmarks-constructs-simulation",
         "nerd-recipe-constructs-sl-learner",
         "nerd-showcase-calls-sl-workflow",
-        "rwm-recipe-constructs-sl-trainer"
+        "rwm-recipe-constructs-sl-trainer",
+        "task-engine-constructs-task-spec"
       ],
       "groups": [
         {
@@ -6219,7 +6274,8 @@
             "simready",
             "asset-parsers",
             "gen-sim-sessions",
-            "task-spec"
+            "task-spec",
+            "task-engine"
           ]
         },
         {
@@ -6728,7 +6784,8 @@
         "scene-services",
         "compute",
         "scene-expansion",
-        "task-spec"
+        "task-spec",
+        "task-engine"
       ],
       "edge_ids": [
         "simulation-constructs-robot",
@@ -6751,7 +6808,8 @@
         "scene-services-calls-compute-layout",
         "scene-services-declares-manager-entities",
         "scene-services-references-manager",
-        "scene-recipes-import-expansion-contracts"
+        "scene-recipes-import-expansion-contracts",
+        "task-engine-constructs-task-spec"
       ],
       "groups": [
         {
@@ -6824,7 +6882,8 @@
           "id": "task-specification",
           "label": "Normative task specification",
           "node_ids": [
-            "task-spec"
+            "task-spec",
+            "task-engine"
           ]
         }
       ]

@@ -44,7 +44,11 @@ The sensor retains backend-emitted rows rather than reducing an actor pair to
 one contact. Force-reporting paths apply the query's positive-impulse filtering;
 geometry-only paths may provide valid rows with zero impulse. Solver settings
 can change manifold density. Fixed sensor capacity may truncate rows; increasing
-capacity does not normalize manifold semantics across backends.
+capacity does not normalize manifold semantics across backends. Consumers that
+interpret missing contacts as a physical miss must first check the device-local
+`dropped_contacts_mask`: scatter overflow is row-local, while unattributed native
+query overflow conservatively invalidates every row. Standalone updates report
+the latest query; history-enabled sensors retain the current interval's losses.
 
 PhysX Direct GPU cannot identify static counterparts from its raw contact
 buffer and uses actor ID `-1` for those rows. To observe arbitrary static

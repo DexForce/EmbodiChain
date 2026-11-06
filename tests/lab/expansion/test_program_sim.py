@@ -148,14 +148,28 @@ def _probe(source: str = "task_program") -> None:
             for row in (0, 1)
         ]
         frames = [0, 0]
+        rejected_hold = None
 
         def observe(ids, action, obs):
+            nonlocal rejected_hold
             command = (
                 action.value
                 if isinstance(action.value, torch.Tensor)
                 else action.value["qpos"]
             )
             assert command.shape[0] == 2
+            if source.startswith("task_program_vector_abort"):
+                if rejected_hold is not None:
+                    torch.testing.assert_close(
+                        command[0], rejected_hold, rtol=0, atol=0
+                    )
+                elif (
+                    action.metadata.get("row_actions", {})
+                    .get("0", {})
+                    .get("bridge_action_kind")
+                    == "runtime_row_rejection_hold"
+                ):
+                    rejected_hold = command[0].clone()
             for row in ids:
                 frames[row] += 1
                 positions[row].append(env.robot.get_qpos()[row].cpu().clone())
@@ -166,10 +180,24 @@ def _probe(source: str = "task_program") -> None:
                     .clone()
                 )
 
-        if source == "task_program_newton":
+        if source == "task_program_newton" or source.startswith(
+            "task_program_vector_abort"
+        ):
             # The native Task Program host executes the canonical vector runtime.
             result = collect_vector_program(
-                env, program, (0, 1), max_steps=2500, observe_step=observe
+                env,
+                program,
+                (0, 1),
+                max_steps=2500,
+                observe_step=observe,
+                reject_row=(
+                    (
+                        lambda row: (row == 0 or source.endswith("_all"))
+                        and frames[row] >= 10
+                    )
+                    if source.startswith("task_program_vector_abort")
+                    else None
+                ),
             )
         else:
             result = collect_program_batch(
@@ -184,10 +212,20 @@ def _probe(source: str = "task_program") -> None:
                 ),
             )
         assert result.accepted == (
-            (False, True) if source == "task_program_abort" else (True, True)
+            (False, False)
+            if source.endswith("_all")
+            else (
+                (False, True)
+                if source in {"task_program_abort", "task_program_vector_abort"}
+                else (True, True)
+            )
         ), result
-        if source == "task_program_abort":
+        if source in {"task_program_abort", "task_program_vector_abort"}:
             assert frames[0] == 11 and frames[1] > frames[0]
+        if source == "task_program_vector_abort_all":
+            assert frames == [11, 11]
+        if source.startswith("task_program_vector_abort"):
+            assert rejected_hold is not None
         assert tuple(frames) == result.lengths
         if rows is not None:
             for row, service in rows.items():
@@ -279,6 +317,8 @@ def _probe(source: str = "task_program") -> None:
     [
         "task_program",
         "task_program_abort",
+        "task_program_vector_abort",
+        "task_program_vector_abort_all",
         pytest.param("task_program_newton", marks=pytest.mark.gpu),
         "real2sim",
     ],

@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_ur5_embodiment
-suite_version: atomic_ur5_embodiment_v4
+suite_version: atomic_ur5_embodiment_v5
 profile: smoke
 
 embodiment:
@@ -71,6 +71,9 @@ tracks:
             pose_batch_size: 2
             object_translation_jitter_m: [0.02, 0.02, 0.0]
     config:
+      gripper:
+        # Open/grasp commands remain owned by the embodiment component.
+        finger_links: [gripper_finger1_link_1, gripper_finger2_link_1]
       physics:
         clock: compiled
         steps_per_waypoint: 4
