@@ -180,6 +180,9 @@ They do not register skills or modify their private fields.
 native_pick_declarations.py and continuation_declarations.py bind native inputs,
 lookahead and released-hand selections to explicit compiled occurrences.
 pour_declarations.py uses shared source target geometry and model calibration.
+Its Source held-transport declarations explicitly select terminal attachment,
+including measured Pour staging; this preserves terminal pose and constraint
+checks without adding in-flight retention sampling.
 
 experiment_declarations.py keeps opt-in contact, handover and reacquisition
 permissions explicit. experiment_policy.py selects acceptance/reporting modes
