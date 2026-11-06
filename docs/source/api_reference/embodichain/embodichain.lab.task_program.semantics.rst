@@ -12,7 +12,7 @@ embodichain.lab.task_program.semantics
       ResourceEndpointAdapter, EndpointResolution, ControlPartEndpoint,
       ControlPartEndpointAdapter, ResourceBinding, ResolvedResourceEndpoint,
       ResolvedRobotResource, ResolvedSkillBinding, ResourceClaim, SkillPolicyPreset,
-      EffectAssurance, ProfileValidationError, UnsupportedSkillError,
+      EffectAssurance, ReleaseGateEvidence, ProfileValidationError, UnsupportedSkillError,
       AmbiguousSkillBindingError, SemanticEffectSpec, EffectMonitorRef, EffectMonitor,
       EffectEvidenceCollector, SceneRegistry, RegistrySceneProvider,
       SceneEntityRegistration, SceneEntityMetadata, SceneEntityStateProvider,
