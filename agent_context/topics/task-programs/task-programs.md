@@ -101,7 +101,13 @@ capabilities remain part of the registration identity.
 Catalog preflight checks the effective Place option/recovery combination after
 occurrence preset selection. The same waypoint-scope rule is used by Atomic
 planning; a contradictory selected declaration rejects without live resources.
-Unused preset templates do not change ordinary calls.
+Unused preset templates do not change ordinary calls. A selected
+SkillPolicyPreset also owns any explicit release-gate evidence projection.
+The shared default follows the terminal clauses; the opt-in non-pose projection
+affects only existing detached phase gates before retracting. Attached guards,
+terminal verification, monitor thresholds and gate creation remain unchanged.
+InvocationPolicyBinding selects that preset per occurrence; consumers must not
+patch grounded clauses or monitor state.
 
 Expansion is optional and episode-scoped, not part of compilation.
 `EmbodiedEnv.create_demo_segments()` passes a separate Expansion Profile and

@@ -129,6 +129,7 @@ from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
 from embodichain.lab.task_program.semantics import (
     EffectAssurance,
     EffectMonitorRef,
+    ReleaseGateEvidence,
     RegisteredSemanticCall,
     SceneCollisionRole,
     SceneCollisionWorldMode,
@@ -2455,7 +2456,7 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
                 "effect_monitors",
             }
         ),
-        optional=frozenset({"required_planner"}),
+        optional=frozenset({"required_planner", "release_gate_evidence"}),
     )
     action_options_value = config["action_options"]
     if not isinstance(action_options_value, Mapping):
@@ -2525,6 +2526,13 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
         effect_monitors=_decode_effect_monitors(
             config["effect_monitors"],
             path=f"{path}.effect_monitors",
+        ),
+        release_gate_evidence=_enum(
+            config.get(
+                "release_gate_evidence", ReleaseGateEvidence.TERMINAL_CLAUSES.value
+            ),
+            ReleaseGateEvidence,
+            path=f"{path}.release_gate_evidence",
         ),
         required_planner=required_planner,
     )

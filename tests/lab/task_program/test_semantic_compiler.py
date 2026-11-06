@@ -1057,9 +1057,17 @@ def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding(
     assert repeated.effect_gates[0].effect_monitor is not gate.effect_monitor
 
 
-def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
+@pytest.mark.parametrize("source_release_gate", [False, True])
+def test_place_effect_spec_binds_source_and_verified_detach_baseline(
+    source_release_gate: bool,
+) -> None:
     registry, _ = _scene_registry()
-    compiler, _ = _compiler(registry)
+    preset = None
+    if source_release_gate:
+        from embodichain.lab.task_program.semantics import ReleaseGateEvidence
+
+        preset = _preset("safe", release_gate_evidence=ReleaseGateEvidence.BINARY_ONLY)
+    compiler, _ = _compiler(registry, profile=_profile(preset=preset))
     pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
     pick = compiler.ground(pick_workflow, 0, _context(registry))
     semantics = pick.invocation.goal.semantics
@@ -1130,13 +1138,38 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
     assert isinstance(gate_relation, HeldObjectStateExpectation)
     assert gate_relation.expectation_id == "source"
     assert gate_relation.relation is HeldObjectRelation.DETACHED
-    assert len(gate.effect_spec.clauses) == 2
-    gate_pose, gate_constraint = gate.effect_spec.clauses
-    assert isinstance(gate_pose, PoseRelationClause)
-    assert gate_pose.expectation is PoseRelationExpectation.SEPARATED
-    torch.testing.assert_close(gate_pose.baseline_object_to_endpoint, object_to_eef)
-    assert isinstance(gate_constraint, BinaryEffectClause)
-    assert gate_constraint.expected is False
+    if source_release_gate:
+        import json
+        from pathlib import Path
+
+        oracle = json.loads(
+            (
+                Path(__file__).parent / "data/place_release_source_contract.json"
+            ).read_text()
+        )
+        for kind, effect_spec in (
+            ("phase_effect_gate", gate.effect_spec),
+            ("terminal", spec),
+            ("in_flight_guard", guard.effect_spec),
+        ):
+            signature = [
+                {
+                    "clause_id": clause["clause_id"],
+                    "type": clause["type"].rsplit(".", 1)[-1],
+                    "expectation": clause.get("expectation"),
+                    "expected": clause.get("expected"),
+                }
+                for clause in effect_spec.to_metadata()["clauses"]
+            ]
+            assert signature == oracle["boundaries"][kind]
+    else:
+        assert len(gate.effect_spec.clauses) == 2
+        gate_pose, gate_constraint = gate.effect_spec.clauses
+        assert isinstance(gate_pose, PoseRelationClause)
+        assert gate_pose.expectation is PoseRelationExpectation.SEPARATED
+        torch.testing.assert_close(gate_pose.baseline_object_to_endpoint, object_to_eef)
+        assert isinstance(gate_constraint, BinaryEffectClause)
+        assert gate_constraint.expected is False
     assert grounded.invocation.phase_effect_gates == (gate.requirement,)
 
 
@@ -2449,3 +2482,48 @@ def test_pick_downstream_deferral_is_typed_and_does_not_change_shared_default():
     ).invocation.skill_options
     assert options.qualify_downstream_targets is False
     assert options.downstream_object_target_poses == ()
+
+
+def test_occurrence_release_gate_selection_keeps_terminal_and_other_occurrences():
+    from embodichain.lab.task_program.semantics import ReleaseGateEvidence
+
+    registry, _ = _scene_registry()
+    base = _profile()
+    profile = replace(
+        base,
+        presets={
+            **base.presets,
+            "source_release": _preset(
+                "source_release", release_gate_evidence=ReleaseGateEvidence.BINARY_ONLY
+            ),
+        },
+    )
+    compiler, _ = _compiler(registry, profile=profile)
+    pick = compiler.ground(
+        compiler.analyze((Pick(object=SceneObjectRef("cube")),)), 0, _context(registry)
+    )
+    context = _held_context(
+        registry, pick.invocation.goal.semantics, torch.eye(4).repeat(2, 1, 1)
+    )
+    call = Place(
+        object=SceneObjectRef("cube"),
+        at=SemanticPose((0.5, -0.2, 0.4), (0.0, 0.0, 0.0, 1.0)),
+    )
+    for occurrence, selected, gate_clause_count in (
+        ("repeat_a", "safe", 2),
+        ("repeat_b", "source_release", 1),
+        ("repeat_a", "safe", 2),
+    ):
+        workflow = compiler.analyze((call,), preset_ids=(selected,))
+        for revision in (0, 1):
+            identity = f"program/{occurrence}:0"
+            grounded = compiler.ground(
+                workflow, 0, context, invocation_id=identity, revision=revision
+            )
+            assert grounded.invocation.invocation_id == identity
+            assert grounded.invocation.revision == revision
+            assert (
+                len(grounded.effect_gates[0].effect_spec.clauses) == gate_clause_count
+            )
+            assert len(grounded.effect_spec.clauses) == 2
+            assert len(grounded.effect_guards[0].effect_spec.clauses) == 2
