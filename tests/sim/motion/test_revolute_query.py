@@ -208,21 +208,38 @@ def test_non_singleton_or_foreign_robot_fails_before_geometry_capture(
         _factory(data)
 
 
-def test_revolute_query_has_no_action_semantic_or_generation_dependency():
-    from embodichain.lab.sim.motion import revolute_query
+@pytest.mark.parametrize(
+    "module_name, forbidden",
+    [
+        (
+            "embodichain.lab.sim.motion.revolute_query",
+            ("atomic_actions", "task_program", "gen_sim"),
+        ),
+        (
+            "embodichain.lab.sim.motion.collision_query",
+            ("atomic_actions", "task_program", "gen_sim", "revolute"),
+        ),
+        (
+            "embodichain.lab.sim.scene.robot_collision",
+            ("atomic_actions", "task_program", "gen_sim", "motion", "revolute"),
+        ),
+        (
+            "embodichain.toolkits.graspkit.pg_grasp.contact_metrics",
+            ("embodichain.lab", "gen_sim"),
+        ),
+    ],
+)
+def test_query_owners_do_not_import_higher_layer_contracts(module_name, forbidden):
+    from importlib import import_module
 
-    tree = ast.parse(Path(revolute_query.__file__).read_text())
+    tree = ast.parse(Path(import_module(module_name).__file__).read_text())
     imports = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             imports.append(node.module or "")
         elif isinstance(node, ast.Import):
             imports.extend(alias.name for alias in node.names)
-    assert not any(
-        part in module
-        for module in imports
-        for part in ("atomic_actions", "task_program", "gen_sim")
-    )
+    assert not any(part in module for module in imports for part in forbidden)
 
 
 @pytest.mark.parametrize(
@@ -294,3 +311,81 @@ def test_static_table_missing_body_data_is_deferred_to_actual_path_query(tmp_pat
     with pytest.raises(ValueError, match="native owner was replaced"):
         _query(factory, data)
     factory.close()
+
+
+@pytest.mark.parametrize(
+    "root_height, accepted, clearance", [(0.8, True, 0.737), (0.05, False, -0.003)]
+)
+def test_shared_support_path_needs_neither_hand_nor_articulated_target(
+    tmp_path, root_height, accepted, clearance
+):
+    from embodichain.lab.sim.motion.collision_query import RobotPathQuery
+    from embodichain.lab.sim.scene.robot_collision import (
+        RobotCollisionInputs,
+        SupportCollisionInputs,
+    )
+
+    data = revolute_query_inputs(tmp_path, root_height=root_height)
+    del data.simulation.get_articulation
+    del data.robot.cfg.control_parts["clamp"]
+    geometry = RobotCollisionInputs(
+        data.simulation, data.robot, motion_part="manipulator"
+    )
+    support = SupportCollisionInputs(data.simulation, data.table.uid)
+    try:
+        with RobotPathQuery(
+            geometry,
+            scope=NativeQueryScope("generic-support", 0.0, 0),
+            robot_root_pose=data.root[0],
+        ) as query:
+            report = query.inspect_support_path(support, data.positions, data.frames)
+        assert report.supported and report.accepted is accepted
+        # Separated: 0.8 - 0.01 m link - 0.05 m support - 0.003 m skins.
+        # Overlapping boxes have zero separation before subtracting the skins.
+        assert report.minimum_clearance_after_skin_m == pytest.approx(
+            clearance, abs=1e-6
+        )
+        with pytest.raises(RuntimeError, match="closed"):
+            query.inspect_support_path(support, data.positions, data.frames)
+        # Query close borrows rather than consumes the reusable captures.
+        geometry.assert_current()
+        support.assert_current()
+    finally:
+        geometry.close()
+        support.close()
+    assert data.simulation.get_robot(data.robot.uid) is data.robot
+
+
+@pytest.mark.parametrize("change", ["source", "support_owner"])
+def test_shared_support_path_rejects_invalid_inputs_before_fk(tmp_path, change):
+    from copy import copy
+    from embodichain.lab.sim.motion.collision_query import RobotPathQuery
+    from embodichain.lab.sim.scene.robot_collision import (
+        RobotCollisionInputs,
+        SupportCollisionInputs,
+    )
+
+    data = revolute_query_inputs(tmp_path)
+    geometry = RobotCollisionInputs(
+        data.simulation, data.robot, motion_part="manipulator"
+    )
+    support = SupportCollisionInputs(data.simulation, data.table.uid)
+    query = RobotPathQuery(
+        geometry,
+        scope=NativeQueryScope("changed-source", 0.0, 0),
+        robot_root_pose=data.root[0],
+    )
+    try:
+        if change == "source":
+            source = Path(data.robot.cfg.fpath)
+            source.write_text(source.read_text() + "\n")
+        else:
+            support.close()
+            support = SupportCollisionInputs(copy(data.simulation), data.table.uid)
+        report = query.inspect_support_path(support, data.positions, data.frames)
+        assert not report.supported and not report.accepted and report.reason
+        assert data.trace == []
+    finally:
+        query.close()
+        geometry.close()
+        support.close()

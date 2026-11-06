@@ -31,6 +31,25 @@ from embodichain.toolkits.graspkit.pg_grasp.contact_fit import (
 )
 
 
+def test_pad_proximity_metrics_measure_explicit_points_without_robot_state():
+    from embodichain.toolkits.graspkit.pg_grasp.contact_metrics import (
+        pad_proximity_metrics,
+    )
+
+    # One of three pad vertices is within 3 mm of the parent. The second pad's
+    # nearest target point is 1 m away, defining the maximum per-pad distance.
+    pads = [
+        torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.004, 0.0]]),
+        torch.tensor([[1.0, 0.0, 0.0]]),
+    ]
+    target = parent = torch.zeros(1, 3)
+    fraction, distance = pad_proximity_metrics(
+        pads, target, parent, parent_distance_m=0.003
+    )
+    assert fraction == pytest.approx(1 / 3)
+    assert distance == pytest.approx(1.0)
+
+
 def _geometry() -> SampledHandGeometry:
     gaps = torch.tensor([0.12, 0.08, 0.04, 0.01])
     pads = []

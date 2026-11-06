@@ -201,7 +201,7 @@ topics:
     trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
-  keywords: [RevolutePathQueryFactory, RevolutePathReport, RevoluteDependencyReport, BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
+  keywords: [RobotPathQuery, SupportPathReport, RevolutePathQueryFactory, RevolutePathReport, RevoluteDependencyReport, BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
     interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate, MotionRecoveryTrace,
     expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
@@ -219,6 +219,7 @@ topics:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
   - embodichain/lab/sim/motion/revolute_query.py
+  - embodichain/lab/sim/motion/collision_query.py
   - embodichain/lab/sim/motion/ik.py
   - embodichain/lab/sim/motion/_cartesian.py
   - embodichain/lab/sim/motion/limits.py
@@ -258,7 +259,7 @@ topics:
   title: Scene Services
   aliases: [sim.scene, scene services, procedural scene, 场景服务, 程序化场景, 场景布局, 场景快照]
   keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
-    RigidMeshSnapshot, capture_rigid_mesh,
+    RigidMeshSnapshot, capture_rigid_mesh, RobotCollisionInputs, SupportCollisionInputs,
     NativeHandGeometry, capture_native_hand_geometry, capture_native_rigid_obstacles, native hand capture,
     source_fixed_frame_pose, source_arm_base_position, load_urdf_collision_inputs,
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,

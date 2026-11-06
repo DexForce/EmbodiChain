@@ -24,6 +24,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
 | Shared authored source reads and link-local collider inputs | `embodichain/lab/sim/spawn/source_geometry.py`; Scene retains its `LinkMesh` import |
 | Explicit robot mounting frames and URDF collision inputs | `source_robot_geometry.py`, `utility/urdf_collision.py` |
+| Borrowed robot source geometry and native support bounds | `robot_collision.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
 | CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
 | Robot-aware object proposals and full-pose IK/FK checks | `embodichain/lab/sim/scene/workspace.py` |
@@ -83,6 +84,15 @@ Spawn `LinkMesh` type, preserving source order and scaling origins/vertices once
 It rejects unresolved URIs and visual-only links. Vertex-envelope mode remains
 explicit and supplies no triangle-surface certificate. These generic readers
 construct no Robot, simulator or IK solver and select no concrete robot preset.
+
+`robot_collision.RobotCollisionInputs` retains the complete explicit solver-root
+collision subtree, original source bytes, joint layout and native Robot owner.
+`SupportCollisionInputs` retains an exact native support owner and reads the live
+collider-union AABB/contact skin. Both require Default/B1 and reject identity
+drift instead of recapturing a replacement baseline. Scene chooses no trajectory,
+hand or revolute policy. Motion's [path query](../motion-planning/motion-planning.md)
+validates these captures before collecting native facts and invoking FK; closing
+a query never closes its borrowed captures or destroys physical entities.
 
 `NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
 recreate it after replacing either object or changing its model/scale. Queries

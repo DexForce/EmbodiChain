@@ -112,3 +112,9 @@ cooking, continuous collisions, contact or task success.
 
 .. autoclass:: RevoluteDependencyReport
    :members:
+
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.motion.collision_query

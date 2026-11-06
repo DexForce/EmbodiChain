@@ -62,19 +62,28 @@ capped intervals under the query precision policy. A threshold inside an interva
 remains unavailable, never a fabricated contact or free path. CPU comparisons
 remain separate from GPU and physical-task qualification.
 
-`RevolutePathQueryFactory` prepares original URDF collision inputs for one exact
-Default/B1 robot, articulation and support. It borrows native owners and accepts
-an explicit complete motion-root subtree; it never creates a simulator, task,
-skill or planning context. Fresh `NativeQueryScope` queries bind supplied root,
-parent/child and measured-joint observations. Source/model/frame/owner drift
-rejects without recapturing a replacement baseline. Closing releases query
-resources, never borrowed Robot/native objects.
+`collision_query.RobotPathQuery` consumes Scene's `RobotCollisionInputs` and
+`SupportCollisionInputs` for Default/B1 discrete source-envelope checks. It needs
+no hand or articulated target. It reuses Robot FK in the original frame order
+and checks moving-link AABBs against the native support union AABB after contact
+skins. This conservative screen checks only the selected command frames and
+support; it neither invokes cuRobo/Newton nor certifies exact or continuous
+collision freedom. A query borrows captures; closing it leaves them reusable.
+
+`RevolutePathQueryFactory` composes these shared services with explicit hand and
+revolute-source qualification. Fresh `NativeQueryScope` queries bind supplied
+root, parent/child and joint observations. Source/model/frame/owner drift rejects
+without recapturing a replacement baseline. GraspKit's `pg_grasp.contact_metrics`
+owns ordered point sampling and pad proximity measurements with explicit caps
+and thresholds; Lab supplies FK and frame conversion. Candidate ranking remains
+with the caller. No service creates a simulator, skill or planning context.
 
 `RevolutePathReport` keeps unsupported acquisition distinct from an accepted or
 rejected supported screen. `RevoluteDependencyReport` describes the preserved
 source-input command-frame proxy and conservative sweep qualification, not
-native cooking, continuous collision or physical effects. The original FK batch,
-sampling order and collision domains remain with this Motion query. Scene's
+native cooking, continuous collision or physical effects. Specialized revolute
+checks retain invariant contact frames and conservative extra-rotor sweeps;
+semantic dependency remapping remains with Atomic. Scene's
 `revolute_setting_attributes` only exposes authored fixed-base setting identities;
 it chooses no Semantic Call or recovery policy.
 
