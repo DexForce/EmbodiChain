@@ -381,8 +381,12 @@ Bundle assembly
    prepare_task_program_bundle
    publish_task_program_bundle
 
-.. automodule:: embodichain.gen_sim.task_engine.bundle_assembly
-   :members: TaskProgramBundlePaths, prepare_task_program_bundle, publish_task_program_bundle
+.. autoclass:: TaskProgramBundlePaths
+   :members:
+
+.. autofunction:: prepare_task_program_bundle
+
+.. autofunction:: publish_task_program_bundle
 
 Bundle deployment
 ~~~~~~~~~~~~~~~~~
@@ -395,8 +399,12 @@ Bundle deployment
    prepare_configured_bundle
    load_configured_bundle
 
-.. automodule:: embodichain.gen_sim.task_engine.bundle_deployment
-   :members: LoadedTaskProgramBundle, prepare_configured_bundle, load_configured_bundle
+.. autoclass:: LoadedTaskProgramBundle
+   :members:
+
+.. autofunction:: prepare_configured_bundle
+
+.. autofunction:: load_configured_bundle
 
 Bundle identity
 ~~~~~~~~~~~~~~~
@@ -405,27 +413,29 @@ Bundle identity
 
 .. autosummary::
 
-   BUNDLE_IDENTITY_SCHEMA
-   SHARED_RUNTIME_CONTRACT
    BundleIdentity
    create_bundle_identity
    verify_bundle_files
 
-.. automodule:: embodichain.gen_sim.task_engine.bundle_identity
-   :members: BUNDLE_IDENTITY_SCHEMA, SHARED_RUNTIME_CONTRACT, BundleIdentity, create_bundle_identity, verify_bundle_files
+.. autodata:: BUNDLE_IDENTITY_SCHEMA
+
+.. autodata:: SHARED_RUNTIME_CONTRACT
+
+.. autoclass:: BundleIdentity
+   :members:
+
+.. autofunction:: create_bundle_identity
+
+.. autofunction:: verify_bundle_files
 
 Bundle inputs
 ~~~~~~~~~~~~~
 
 .. currentmodule:: embodichain.gen_sim.task_engine.bundle_inputs
 
-.. autosummary::
+.. autodata:: SOURCE_INPUT_PROVENANCE_FILE
 
-   SOURCE_INPUT_PROVENANCE_FILE
-   SOURCE_INPUT_PROVENANCE_SCHEMA
-
-.. automodule:: embodichain.gen_sim.task_engine.bundle_inputs
-   :members: SOURCE_INPUT_PROVENANCE_FILE, SOURCE_INPUT_PROVENANCE_SCHEMA
+.. autodata:: SOURCE_INPUT_PROVENANCE_SCHEMA
 
 Bundle io
 ~~~~~~~~~
@@ -439,8 +449,14 @@ Bundle io
    read_bundle_snapshot
    write_bundle_atomic
 
-.. automodule:: embodichain.gen_sim.task_engine.bundle_io
-   :members: BundleSnapshot, read_bundle_identity, read_bundle_snapshot, write_bundle_atomic
+.. autoclass:: BundleSnapshot
+   :members:
+
+.. autofunction:: read_bundle_identity
+
+.. autofunction:: read_bundle_snapshot
+
+.. autofunction:: write_bundle_atomic
 
 Bundle loading
 ~~~~~~~~~~~~~~
@@ -451,8 +467,7 @@ Bundle loading
 
    load_current_task_program_bundle
 
-.. automodule:: embodichain.gen_sim.task_engine.bundle_loading
-   :members: load_current_task_program_bundle
+.. autofunction:: load_current_task_program_bundle
 
 Cli
 ~~~
@@ -465,8 +480,11 @@ Cli
    main
    cli
 
-.. automodule:: embodichain.gen_sim.task_engine.cli
-   :members: build_parser, main, cli
+.. autofunction:: build_parser
+
+.. autofunction:: main
+
+.. autofunction:: cli
 
 Evidence
 ~~~~~~~~
@@ -482,8 +500,17 @@ Evidence
    project_coordinated_hold_evidence_binding
    project_coordinated_transport_evidence_binding
 
-.. automodule:: embodichain.gen_sim.task_engine.evidence
-   :members: project_control_evidence_binding, project_configured_placement_evidence_group_binding, project_condition_evidence_group_binding, project_handover_evidence_binding, project_coordinated_hold_evidence_binding, project_coordinated_transport_evidence_binding
+.. autofunction:: project_control_evidence_binding
+
+.. autofunction:: project_configured_placement_evidence_group_binding
+
+.. autofunction:: project_condition_evidence_group_binding
+
+.. autofunction:: project_handover_evidence_binding
+
+.. autofunction:: project_coordinated_hold_evidence_binding
+
+.. autofunction:: project_coordinated_transport_evidence_binding
 
 Execution
 ~~~~~~~~~
@@ -495,8 +522,10 @@ Execution
    TaskProgramBundleEpisode
    execute_task_program_bundle_episode
 
-.. automodule:: embodichain.gen_sim.task_engine.execution
-   :members: TaskProgramBundleEpisode, execute_task_program_bundle_episode
+.. autoclass:: TaskProgramBundleEpisode
+   :members:
+
+.. autofunction:: execute_task_program_bundle_episode
 
 Artifacts
 ~~~~~~~~~
@@ -505,18 +534,6 @@ Artifacts
 
 .. autosummary::
 
-   BINDING_REPORT_FILENAME
-   CONSERVATIVE_SCENE_GRAPH_FILENAME
-   EXECUTION_REPORT_FILENAME
-   FINAL_SCENE_INSPECTION_FILENAME
-   PREPARATION_FAILURE_FILENAME
-   ROLE_BINDINGS_FILENAME
-   SCENE_MANIFEST_FILENAME
-   STATIC_SCENE_MANIFEST_FILENAME
-   SUCCESS_SPEC_FILENAME
-   TASK_CANDIDATE_SET_FILENAME
-   TASK_DRAFT_FILENAME
-   SCENE_REQUEST_FILENAME
    ArtifactTransaction
    TaskEngineArtifactPaths
    task_engine_artifact_paths
@@ -524,8 +541,43 @@ Artifacts
    write_execution_report
    write_preparation_failure
 
-.. automodule:: embodichain.gen_sim.task_engine.orchestration.artifacts
-   :members: BINDING_REPORT_FILENAME, CONSERVATIVE_SCENE_GRAPH_FILENAME, EXECUTION_REPORT_FILENAME, FINAL_SCENE_INSPECTION_FILENAME, PREPARATION_FAILURE_FILENAME, ROLE_BINDINGS_FILENAME, SCENE_MANIFEST_FILENAME, STATIC_SCENE_MANIFEST_FILENAME, SUCCESS_SPEC_FILENAME, TASK_CANDIDATE_SET_FILENAME, TASK_DRAFT_FILENAME, SCENE_REQUEST_FILENAME, ArtifactTransaction, TaskEngineArtifactPaths, task_engine_artifact_paths, write_task_engine_artifacts, write_execution_report, write_preparation_failure
+.. autodata:: BINDING_REPORT_FILENAME
+
+.. autodata:: CONSERVATIVE_SCENE_GRAPH_FILENAME
+
+.. autodata:: EXECUTION_REPORT_FILENAME
+
+.. autodata:: FINAL_SCENE_INSPECTION_FILENAME
+
+.. autodata:: PREPARATION_FAILURE_FILENAME
+
+.. autodata:: ROLE_BINDINGS_FILENAME
+
+.. autodata:: SCENE_MANIFEST_FILENAME
+
+.. autodata:: STATIC_SCENE_MANIFEST_FILENAME
+
+.. autodata:: SUCCESS_SPEC_FILENAME
+
+.. autodata:: TASK_CANDIDATE_SET_FILENAME
+
+.. autodata:: TASK_DRAFT_FILENAME
+
+.. autodata:: SCENE_REQUEST_FILENAME
+
+.. autoclass:: ArtifactTransaction
+   :members:
+
+.. autoclass:: TaskEngineArtifactPaths
+   :members:
+
+.. autofunction:: task_engine_artifact_paths
+
+.. autofunction:: write_task_engine_artifacts
+
+.. autofunction:: write_execution_report
+
+.. autofunction:: write_preparation_failure
 
 Coordinator
 ~~~~~~~~~~~
@@ -537,8 +589,11 @@ Coordinator
    PreparationResult
    TaskEngineCoordinator
 
-.. automodule:: embodichain.gen_sim.task_engine.orchestration.coordinator
-   :members: PreparationResult, TaskEngineCoordinator
+.. autoclass:: PreparationResult
+   :members:
+
+.. autoclass:: TaskEngineCoordinator
+   :members:
 
 Run directory
 ~~~~~~~~~~~~~
@@ -550,8 +605,10 @@ Run directory
    RunDirectory
    reserve_run_directory
 
-.. automodule:: embodichain.gen_sim.task_engine.run_directory
-   :members: RunDirectory, reserve_run_directory
+.. autoclass:: RunDirectory
+   :members:
+
+.. autofunction:: reserve_run_directory
 
 Runtime bindings
 ~~~~~~~~~~~~~~~~
@@ -562,8 +619,8 @@ Runtime bindings
 
    BundleEvidenceProjector
 
-.. automodule:: embodichain.gen_sim.task_engine.runtime_bindings
-   :members: BundleEvidenceProjector
+.. autoclass:: BundleEvidenceProjector
+   :members:
 
 Runtime evidence
 ~~~~~~~~~~~~~~~~
@@ -575,8 +632,11 @@ Runtime evidence
    TaskEngineEvidenceReport
    TaskEngineEvidenceSession
 
-.. automodule:: embodichain.gen_sim.task_engine.runtime_evidence
-   :members: TaskEngineEvidenceReport, TaskEngineEvidenceSession
+.. autoclass:: TaskEngineEvidenceReport
+   :members:
+
+.. autoclass:: TaskEngineEvidenceSession
+   :members:
 
 Task program bundle
 ~~~~~~~~~~~~~~~~~~~
@@ -590,8 +650,14 @@ Task program bundle
    prepare_generated_task_program_bundle
    task_program_implementation_revisions
 
-.. automodule:: embodichain.gen_sim.task_engine.task_program_bundle
-   :members: TaskProgramBundlePaths, generate_task_program_bundle, prepare_generated_task_program_bundle, task_program_implementation_revisions
+.. autoclass:: TaskProgramBundlePaths
+   :members:
+
+.. autofunction:: generate_task_program_bundle
+
+.. autofunction:: prepare_generated_task_program_bundle
+
+.. autofunction:: task_program_implementation_revisions
 
 Workflow
 ~~~~~~~~
@@ -600,11 +666,19 @@ Workflow
 
 .. autosummary::
 
-   TASK_ENGINE_RUN_MANIFEST_SCHEMA
-   ActionExecutor
    SubprocessActionExecutor
    TaskEngineRunResult
    TaskEngineWorkflow
 
-.. automodule:: embodichain.gen_sim.task_engine.workflow
-   :members: TASK_ENGINE_RUN_MANIFEST_SCHEMA, ActionExecutor, SubprocessActionExecutor, TaskEngineRunResult, TaskEngineWorkflow
+.. autodata:: TASK_ENGINE_RUN_MANIFEST_SCHEMA
+
+.. autodata:: ActionExecutor
+
+.. autoclass:: SubprocessActionExecutor
+   :members:
+
+.. autoclass:: TaskEngineRunResult
+   :members:
+
+.. autoclass:: TaskEngineWorkflow
+   :members:
