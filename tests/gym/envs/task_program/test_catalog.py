@@ -1099,6 +1099,25 @@ def test_fingerprint_is_stable_for_equivalent_declarations() -> None:
     assert len(left.fingerprint) == 64
 
 
+@pytest.mark.parametrize("physics", [None, "", "garbage", True, 42])
+def test_registration_rejects_invalid_physics_without_optional_services(physics):
+    registration = _registration()
+    assert registration.planning_services is None
+    assert registration.recorded_contacts_cfg is None
+    with pytest.raises(ValueError, match="physics backend"):
+        registration.validate_physics(physics)
+
+
+@pytest.mark.parametrize("physics", ["default", "newton"])
+def test_registration_backend_preflight_preserves_plain_default_identity(physics):
+    registration = _registration()
+    before = registration.fingerprint_payload()
+    fingerprint = registration.fingerprint
+    registration.validate_physics(physics)
+    assert registration.fingerprint_payload() == before
+    assert registration.fingerprint == fingerprint
+
+
 def test_fingerprint_payload_is_detached_and_matches_full_registration() -> None:
     registration = _registration()
     payload = registration.fingerprint_payload()
