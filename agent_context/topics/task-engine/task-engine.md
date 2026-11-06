@@ -172,3 +172,16 @@ experiment_declarations.py keeps opt-in contact, handover and reacquisition
 permissions explicit. experiment_policy.py selects acceptance/reporting modes
 without changing strict TaskSpec verdicts. Configuration defaults, runtime
 composition, physical evidence and final bundle identity retain their own owners.
+
+## Configuration, requests and replayable state
+
+config.py owns the workflow, semantic planning and execution configuration plus
+defaults.yaml. Explicit direct configuration and packaged workflow defaults keep
+their distinct documented values. workflow_contracts.py validates existing-scene
+requests and source/output separation. state_machine.py owns immutable stage
+transitions and exact event replay; it starts no environment or model call.
+
+orchestration/workflow_artifacts.py owns safe run JSON and history persistence.
+It rejects writes below sealed bundle markers, including symbolic-link paths,
+and preserves interrupted histories. Workflow scheduling and bundle/runtime
+integration consume these contracts in their own layer.
