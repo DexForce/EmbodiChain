@@ -213,6 +213,13 @@ class PickUpOptions(ActionOptions):
     grasps and ``fixed_object_to_eef`` bypass this sampled-grasp selection.
     """
 
+    approach_along_grasp_axis: bool = False
+    """Use the realized calibrated TCP +Z for native pre-grasp translation.
+
+    Requires ``fixed_object_to_eef``. The approach then follows the object's
+    observed rotation instead of a shared world vector.
+    """
+
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
@@ -261,6 +268,10 @@ class PickUpOptions(ActionOptions):
         ):
             raise ValueError("obj_upright_direction must be a finite (3,) tensor.")
         _validate_single_se3(self.grasp_frame_to_eef, "grasp_frame_to_eef")
+        if type(self.approach_along_grasp_axis) is not bool:
+            raise TypeError("approach_along_grasp_axis must be boolean.")
+        if self.approach_along_grasp_axis and self.fixed_object_to_eef is None:
+            raise ValueError("Grasp-axis approach requires fixed_object_to_eef.")
         if self.fixed_object_to_eef is not None:
             _validate_single_se3(self.fixed_object_to_eef, "fixed_object_to_eef")
         object.__setattr__(self, "approach_direction", self.approach_direction.clone())
@@ -354,6 +365,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         hand_grasp_qpos: torch.Tensor,
         interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
+        if options.approach_along_grasp_axis:
+            approach_direction = grasp_xpos[:, :3, 2]
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
         )

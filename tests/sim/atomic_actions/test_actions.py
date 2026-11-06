@@ -3385,7 +3385,10 @@ def test_pick_explicit_batched_object_pose_is_scene_independent() -> None:
     )
 
 
-def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
+@pytest.mark.parametrize("follow_axis", [False, True])
+def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments(
+    follow_axis: bool,
+) -> None:
     """A calibrated object-relative grasp is used directly and owned safely."""
     generator = _motion_generator()
     semantics = ObjectSemantics(
@@ -3399,6 +3402,10 @@ def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
     grasp_generator.get_valid_grasp_poses = Mock()
     object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     object_pose[:, 0, 3] = torch.tensor([0.03, 0.07])
+    if follow_axis:
+        object_pose[1, :3, :3] = axis_angle_to_rotation_matrix(
+            torch.tensor([0.3, 0.0, 0.0])
+        )
     fixed_object_to_eef = torch.tensor(
         (
             (0.0, 1.0, 0.0, 0.04),
@@ -3409,6 +3416,7 @@ def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
     )
     options = PickUpOptions(
         fixed_object_to_eef=fixed_object_to_eef,
+        approach_along_grasp_axis=follow_axis,
         rotate_upright=math.pi / 2.0,
         grasp_frame_to_eef=torch.tensor(
             (
@@ -3422,6 +3430,7 @@ def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
     owned_transform = options.fixed_object_to_eef.clone()
     fixed_object_to_eef.zero_()
     context = _context(scene=_target_scene(object_pose, timestamp=0.0, version=0))
+    generator.generate = Mock(wraps=generator.generate)
 
     plan = _plan_action(
         action,
@@ -3440,11 +3449,22 @@ def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
     held = projected.get_held_object("arm")
     assert held is not None
     expected_grasp = torch.matmul(object_pose, owned_transform)
+    torch.testing.assert_close(
+        generator.generate.call_args.args[0][0].xpos[:, :3, 3],
+        expected_grasp[:, :3, 3]
+        - options.pre_grasp_distance
+        * (expected_grasp[:, :3, 2] if follow_axis else torch.tensor([0.0, 0.0, -1.0])),
+    )
     torch.testing.assert_close(held.grasp_xpos, expected_grasp)
     torch.testing.assert_close(
         held.object_to_eef,
         owned_transform.expand(NUM_ENVS, -1, -1),
     )
+
+
+def test_pick_grasp_axis_approach_requires_calibration() -> None:
+    with pytest.raises(ValueError, match="fixed_object_to_eef"):
+        PickUpOptions(approach_along_grasp_axis=True)
 
 
 @pytest.mark.parametrize("translated", [False, True])
@@ -6696,6 +6716,8 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         "left_arm",
         "left_arm",
         "right_arm",
+        "left_arm",
+        "right_arm",
         "right_arm",
     ]
     assert [segment.name for segment in plan.segments] == [
@@ -6707,8 +6729,10 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         "receive_close",
         "receive_hold",
         "handover_release",
+        "source_retreat",
         "place",
         "receive_release",
+        "receive_retreat",
     ]
 
     pickup_call, receive_call = action._resolve_grasp.call_args_list
@@ -6723,19 +6747,19 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     )
     receive_grasp_rotation = planned_targets[3][:, 1, :3, :3]
     assert torch.allclose(
-        planned_targets[4][:, :, :3, :3],
+        planned_targets[5][:, :, :3, :3],
         receive_grasp_rotation[:, None].expand(-1, 2, -1, -1),
     )
     assert torch.allclose(
-        planned_targets[4][:, 0, :3, 3],
+        planned_targets[5][:, 0, :3, 3],
         torch.tensor([[0.4, -0.2, 0.7], [0.4, -0.2, 0.7]]),
     )
     assert torch.allclose(
-        planned_targets[4][:, 1, :3, 3],
+        planned_targets[5][:, 1, :3, 3],
         torch.tensor([[0.4, -0.2, 0.65], [0.4, -0.2, 0.65]]),
     )
     assert torch.allclose(
-        planned_targets[4][:, 0, 2, 3],
+        planned_targets[5][:, 0, 2, 3],
         planned_targets[3][:, 1, 2, 3],
     )
 
@@ -6768,6 +6792,14 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     )
     assert torch.all(positions[:, handover_release_end, DUAL_ARM_DOF + 2 :] == 1)
     assert torch.all(positions[:, receive_release_end, DUAL_ARM_DOF:] == 0)
+    # The open source hand stays withdrawn throughout delivery and release.
+    withdrawn = positions[:, plan.segment("source_retreat").stop - 1, :ARM_DOF]
+    torch.testing.assert_close(
+        positions[:, plan.segment("place").start :, :ARM_DOF],
+        withdrawn[:, None].expand(
+            -1, positions.shape[1] - plan.segment("place").start, -1
+        ),
+    )
     assert dict(plan.expected_effects.held_object_updates) == {
         "left_arm": None,
         "right_arm": None,
@@ -6825,7 +6857,9 @@ def test_handover_preserves_extended_pickup_phase_boundaries(
         "pickup_reach",
         "pickup_transport",
         "receive_approach",
+        "source_retreat",
         "place",
+        "receive_retreat",
     )
     extra_samples = {"pickup_approach": 2, "pickup_reach": 3}
     planned_paths: dict[str, torch.Tensor] = {}
@@ -7270,7 +7304,7 @@ def test_handover_center_grasp_rejects_lower_cost_outer_candidates(
     assert sample.metadata["valid_candidate_counts"] == [1, 1]
 
 
-def test_handover_horizontal_mode_uses_downward_opposite_end_grasps() -> None:
+def test_handover_horizontal_mode_receives_from_side_at_opposite_end() -> None:
     generator = _dual_motion_generator()
     action = _bind_action(generator, HandOver())
     semantics, _ = _handover_semantics(torch.tensor([1.0, 0.0, 0.0]))
@@ -7319,7 +7353,10 @@ def test_handover_horizontal_mode_uses_downward_opposite_end_grasps() -> None:
     assert torch.equal(pickup_call.args[2], downward.expand(NUM_ENVS, -1))
     assert torch.equal(pickup_call.kwargs["obj_longest_axis"], expected_axis)
     assert pickup_call.kwargs["is_positive_part"].tolist() == [True, True]
-    assert torch.equal(receive_call.args[2], downward.expand(NUM_ENVS, -1))
+    torch.testing.assert_close(
+        receive_call.args[2],
+        torch.tensor([0.0, math.sqrt(3) / 2, -0.5]).expand(NUM_ENVS, -1),
+    )
     assert torch.equal(receive_call.kwargs["obj_longest_axis"], expected_axis)
     assert receive_call.kwargs["is_positive_part"].tolist() == [False, False]
 
