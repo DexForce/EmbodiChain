@@ -257,6 +257,21 @@ def record(
     )
     if not torch.allclose(reported, position, atol=1e-4, rtol=0):
         raise ValueError("E5 world-target observation differs from its hold boundary.")
+    if cfg.local_axis is not None:
+        local = object_pose.new_tensor(cfg.local_axis)
+        world = object_pose.new_tensor(cfg.world_axis or (0.0, 0.0, 1.0))
+        alignment = ((object_pose[:, :3, :3] @ local) * world).sum(-1)
+        measured_alignment = torch.as_tensor(
+            policy["result"]["measurements"]["alignment"], dtype=alignment.dtype
+        )
+        if (
+            measured_alignment.shape != alignment.shape
+            or not torch.isfinite(measured_alignment).all()
+            or not torch.allclose(measured_alignment, alignment, atol=1e-4, rtol=0)
+        ):
+            raise ValueError(
+                "Coordinated orientation observation differs from its hold boundary."
+            )
     return {
         "group_id": operation["operation_id"],
         "uid": uid,
