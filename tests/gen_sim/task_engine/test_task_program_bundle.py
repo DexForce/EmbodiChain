@@ -205,6 +205,7 @@ def test_original_generation_api_publishes_from_frozen_declarations_without_sim(
     )
     assert oracle["cartesian_calls"]["e1-franka-originalenv-v2"] == []
     assert place["qualify_required_waypoints"] is True
+    assert later[0]["recovery"]["planning_recovery"]["variant"] == "waypoint"
     (continuation,) = registration.planning_services.place_continuation_bindings
     assert (
         continuation.source_invocation_id
@@ -461,7 +462,9 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
     physical.assert_unchanged()
 
 
-def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(tmp_path):
+def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(
+    tmp_path, monkeypatch
+):
     _, physical = _frozen(tmp_path, slender=True)
     cases = json.loads(
         (Path(__file__).parent / "data/action_profiles_b0.json").read_text()
@@ -525,6 +528,64 @@ def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(tmp_pa
         name.endswith("call_04.stable") and value.get("support_sensor")
         for name, value in services["settle_presets"].items()
     )
+
+    # Exercise the generated, publicly loaded future Place through the real
+    # complete alignment planner. A flag-only assertion missed the incompatible
+    # waypoint recovery declaration, which rejected this preview before IK.
+    from embodichain.lab.sim.motion import mesh_collision
+    from sim.atomic_actions._alignment_continuation_fixture import (
+        continuation_fixture,
+    )
+
+    loaded = load_configured_bundle(
+        paths.root,
+        external_input_digests={
+            **physical.input_files,
+            **resolve_source_hand_services(physical.embodiment)[2],
+        },
+        implementation_revisions={"embodichain": "test-source"},
+    )
+    place_node = next(
+        node
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == "simulation.place_relative"
+    )
+    preset = next(
+        item
+        for item in loaded.deployment.integration.registration.robot_profile_binding.presets
+        if item.preset_id == "gen_sim." + place_node["id"] + ".execution"
+    )
+    fixture_dir = tmp_path / "future_place"
+    fixture_dir.mkdir()
+    engine, invocation, context, session, check, *unused = continuation_fixture(
+        fixture_dir, "success", enabled=True
+    )
+    monkeypatch.setattr(mesh_collision, "_make_checker", lambda *args, **kwargs: check)
+    original_resolve = session.resolve_place
+    original_plan = session.plan
+    previews = []
+
+    def resolve_place(current):
+        return replace(
+            original_resolve(current),
+            skill_options=preset.action_option_template("simulation.place_relative"),
+            motion_policy=preset.motion_policy,
+            recovery_policy=preset.recovery_policy,
+        )
+
+    def plan_place(request, current):
+        result = original_plan(request, current)
+        previews.append(result)
+        return result
+
+    session.resolve_place = resolve_place
+    session.plan = plan_place
+    result = engine.plan(invocation, context)
+    assert result.plan_success.all(), dict(result.diagnostics.metadata)
+    assert previews and all(plan.plan_success.all() for plan in previews)
+    assert preset.recovery_policy.planning_recovery is None
+    assert preset.motion_policy.segment_sample_count_retries == (260, 320)
+    assert preset.motion_policy.segment_continuous_ik_recovery is False
     physical.assert_unchanged()
 
 
