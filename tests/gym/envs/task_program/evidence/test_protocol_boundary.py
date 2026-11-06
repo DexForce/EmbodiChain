@@ -18,9 +18,12 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
+
+import pytest
 import torch
 
 
@@ -43,13 +46,20 @@ for name in evidence.__all__:
     assert result.returncode == 0, result.stderr
 
 
-def test_shared_evidence_json_preserves_row_validity_and_owns_values():
+@pytest.mark.parametrize(
+    ("unavailable_value", "encoded_value"),
+    [(2.0, 2.0), (float("nan"), None), (float("inf"), None), (-float("inf"), None)],
+)
+def test_shared_evidence_json_preserves_row_validity_and_owns_values(
+    unavailable_value: float, encoded_value: float | None
+) -> None:
     from embodichain.lab.evidence import PhysicalEvidenceBatch, PhysicalEvidenceFrame
+    from embodichain._json_contract import canonical_hash
 
     ids = torch.tensor([4, 1], dtype=torch.long)
     batch = PhysicalEvidenceBatch(
         evidence_id="pose",
-        values=torch.tensor([[1.0], [2.0]]),
+        values=torch.tensor([[1.0], [unavailable_value]]),
         valid=torch.tensor([True, False]),
         acquisition_errors=(None, "missing"),
         timestamp=1.5,
@@ -63,7 +73,16 @@ def test_shared_evidence_json_preserves_row_validity_and_owns_values():
     assert values["env_ids"] == [4, 1]
     assert values["batches"]["pose"]["valid"] == [True, False]
     assert values["batches"]["pose"]["acquisition_errors"] == [None, "missing"]
+    assert values["batches"]["pose"]["values"] == [[1.0], [encoded_value]]
+    assert canonical_hash(values) == canonical_hash(
+        json.loads(json.dumps(values, allow_nan=False))
+    )
     values["batches"]["pose"]["values"][0][0] = 99.0
     values["env_ids"].reverse()
-    assert frame.to_dict()["batches"]["pose"]["values"] == [[1.0], [2.0]]
+    assert frame.to_dict()["batches"]["pose"]["values"] == [[1.0], [encoded_value]]
     assert frame.to_dict()["env_ids"] == [4, 1]
+    torch.testing.assert_close(
+        frame.batches["pose"].values,
+        torch.tensor([[1.0], [unavailable_value]]),
+        equal_nan=True,
+    )
