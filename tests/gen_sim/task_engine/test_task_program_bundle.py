@@ -462,9 +462,7 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
     physical.assert_unchanged()
 
 
-def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(
-    tmp_path, monkeypatch
-):
+def _alignment_bundle(tmp_path):
     _, physical = _frozen(tmp_path, slender=True)
     cases = json.loads(
         (Path(__file__).parent / "data/action_profiles_b0.json").read_text()
@@ -485,6 +483,11 @@ def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(
         implementation_revisions={"embodichain": "test-source"},
         verify_pick_phases=True,
     )
+    return graph, physical, paths
+
+
+def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(tmp_path):
+    graph, physical, paths = _alignment_bundle(tmp_path)
     declaration = yaml.safe_load(
         (paths.root / "task_program/integration.yaml").read_text()
     )
@@ -528,7 +531,12 @@ def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(
         name.endswith("call_04.stable") and value.get("support_sensor")
         for name, value in services["settle_presets"].items()
     )
+    physical.assert_unchanged()
 
+
+def test_generated_cartesian_place_keeps_nominal_alignment_continuation(
+    tmp_path, monkeypatch
+):
     # Exercise the generated, publicly loaded future Place through the real
     # complete alignment planner. A flag-only assertion missed the incompatible
     # waypoint recovery declaration, which rejected this preview before IK.
@@ -537,6 +545,7 @@ def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(
         continuation_fixture,
     )
 
+    graph, physical, paths = _alignment_bundle(tmp_path)
     loaded = load_configured_bundle(
         paths.root,
         external_input_digests={
@@ -557,7 +566,7 @@ def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(
     )
     fixture_dir = tmp_path / "future_place"
     fixture_dir.mkdir()
-    engine, invocation, context, session, check, *unused = continuation_fixture(
+    engine, invocation, context, session, check, *_ = continuation_fixture(
         fixture_dir, "success", enabled=True
     )
     monkeypatch.setattr(mesh_collision, "_make_checker", lambda *args, **kwargs: check)
