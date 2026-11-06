@@ -1218,11 +1218,15 @@ def prepare_generated_task_program_bundle(
                 segment_sample_count_retries=[260, 320],
                 segment_continuous_ik_recovery=True,
             )
-            current["recovery"] = dict(
-                planning_recovery=dict(
-                    kind="place_bounded", revision=1, variant="waypoint"
-                ),
-            )
+            # Source Cartesian Place bypasses both the required-waypoint probe
+            # and its bounded waypoint recovery, retaining ordinary nominal
+            # planning and the independent segment motion retries below.
+            if node.get("task_instance_id", node["id"]) not in cartesian_groups:
+                current["recovery"] = dict(
+                    planning_recovery=dict(
+                        kind="place_bounded", revision=1, variant="waypoint"
+                    ),
+                )
             args = call.get("arguments", {})
             support = args.get("reference")
             if "inside" in call:
