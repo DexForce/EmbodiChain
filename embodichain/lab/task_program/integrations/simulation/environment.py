@@ -1505,6 +1505,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 preserve_plan_samples=True,
                 interpolation_dt=self._step_dt,
                 cuda_device=declared.cuda_device,
+                graph_planner_algorithm=declared.graph_planner_algorithm,
+                enable_timeopt=declared.enable_timeopt,
+                fit_graph_seed_to_bspline=declared.fit_graph_seed_to_bspline,
             )
             queries = ObservedCuroboQueryFactory(self._robot, cfg, shapes)
             world = SimulationCollisionObservationProvider(

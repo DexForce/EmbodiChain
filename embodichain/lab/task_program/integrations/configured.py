@@ -4570,7 +4570,15 @@ def _decode_runtime_services(
                 planning["observed_curobo"],
                 path=f"{path}.planning_services.observed_curobo",
                 required=frozenset(),
-                optional=frozenset({"cuda_device", "max_voxel_count"}),
+                optional=frozenset(
+                    {
+                        "cuda_device",
+                        "max_voxel_count",
+                        "graph_planner_algorithm",
+                        "enable_timeopt",
+                        "fit_graph_seed_to_bspline",
+                    }
+                ),
             )
             planning["observed_curobo"] = ObservedCuroboServicesCfg(**cfg).snapshot()
         planning = SimulationPlanningServicesCfg(**planning).snapshot()

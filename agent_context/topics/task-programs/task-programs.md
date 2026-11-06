@@ -98,6 +98,12 @@ Catalog fingerprints omit exact inactive defaults only for named migration
 extensions. Existing schema fields, nondefault choices and realized skill
 capabilities remain part of the registration identity.
 
+`ObservedCuroboServicesCfg` declares graph selection, TimeOpt and graph-seed
+fitting for observed queries. The environment factory forwards these choices to
+`Motion.CuroboPlannerCfg`; it does not select a policy from a task name. Omitted
+choices preserve the shared RRT/TimeOpt/fitting defaults and existing fingerprints.
+Explicit nondefaults are sealed as effective runtime declarations.
+
 Pour staging and inset-region transport accept the existing explicit
 `TransportEffectContract` selection through `effect_contract`. Their default
 guards the transport phase; `terminal_attachment` retains the complete terminal

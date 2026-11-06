@@ -428,6 +428,13 @@ class CuroboPlannerCfg(BasePlannerCfg):
     oriented batch rows requiring distinct gravity vectors must disable TimeOpt.
     """
 
+    fit_graph_seed_to_bspline: bool = field(default=True, kw_only=True)
+    """Fit graph seeds to B-splines before trajectory optimization.
+
+    ``False`` explicitly retains the SDK's direct waypoint-as-knot handoff.
+    The ordinary cuRobo 0.9 default remains ``True``.
+    """
+
     max_attempts: int = 5
     """Default per-plan cuRobo attempt count."""
 
@@ -512,6 +519,11 @@ class CuroboPlannerCfg(BasePlannerCfg):
     runs at least one coordinated warmup because otherwise the first real plan
     would perform an uncoordinated lazy capture.
     """
+
+    def __post_init__(self) -> None:
+        """Validate the optional graph-seed handoff declaration."""
+        if type(self.fit_graph_seed_to_bspline) is not bool:
+            raise ValueError("fit_graph_seed_to_bspline must be bool.")
 
 
 @configclass
@@ -1610,6 +1622,7 @@ class CuroboPlanner(BasePlanner):
                 use_cuda_graph=use_cuda_graph,
                 graph_planner_algorithm=algorithm,
                 enable_timeopt=self.cfg.enable_timeopt,
+                fit_graph_seed_to_bspline=self.cfg.fit_graph_seed_to_bspline,
                 interpolation_dt=float(self.cfg.interpolation_dt),
             )
             if backend.gravity is not None:

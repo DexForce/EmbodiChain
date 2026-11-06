@@ -6848,6 +6848,53 @@ def _drawer_configured_payload():
     return payload, program, compiled
 
 
+@pytest.mark.parametrize("explicit_defaults", [False, True])
+def test_observed_curobo_backend_policy_keeps_default_identity_and_seals_opt_in(
+    explicit_defaults,
+):
+    payload, program, compiled = _drawer_configured_payload()
+    observed = payload["runtime_services"]["planning_services"]["observed_curobo"]
+    if explicit_defaults:
+        observed.update(
+            graph_planner_algorithm="rrt",
+            enable_timeopt=True,
+            fit_graph_seed_to_bspline=True,
+        )
+    original = _decode_configured_task_program_integration(payload).registration
+    assert original.catalog.preflight(program) == compiled
+    # Frozen from the previous public declaration, before these optional
+    # defaults were introduced; neither omitted nor explicit defaults re-sign it.
+    assert original.fingerprint == (
+        "9e4c69acfa524f47f87896bf6315adcd274e05df10a4738610f1e4b48151fb48"
+    )
+    observed.update(
+        graph_planner_algorithm="prm",
+        enable_timeopt=False,
+        fit_graph_seed_to_bspline=False,
+    )
+    selected = _decode_configured_task_program_integration(payload).registration
+    assert selected.catalog.preflight(program) == compiled
+    cfg = selected.planning_services.observed_curobo
+    assert cfg.graph_planner_algorithm == "prm"
+    assert cfg.enable_timeopt is False and cfg.fit_graph_seed_to_bspline is False
+    assert selected.fingerprint != original.fingerprint
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("graph_planner_algorithm", "unknown"),
+        ("enable_timeopt", 1),
+        ("fit_graph_seed_to_bspline", "false"),
+    ],
+)
+def test_observed_curobo_rejects_invalid_backend_policy_before_runtime(field, value):
+    payload, _, _ = _drawer_configured_payload()
+    payload["runtime_services"]["planning_services"]["observed_curobo"][field] = value
+    with pytest.raises(ValueError, match=field):
+        _decode_configured_task_program_integration(payload)
+
+
 def test_configured_drawer_routes_require_exact_options_identity_and_native_scope():
     from embodichain.lab.task_program.integrations.catalog import _canonical_value
     from embodichain.lab.sim.atomic_actions import (

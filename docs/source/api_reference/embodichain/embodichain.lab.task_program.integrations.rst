@@ -808,6 +808,15 @@ their separate evidence and TaskSpec owners.
 .. autoclass:: embodichain.lab.task_program.integrations.simulation.planning_services.ObservedCuroboServicesCfg
    :members: snapshot
 
+Observed collision queries carry explicit ``graph_planner_algorithm``,
+``enable_timeopt`` and ``fit_graph_seed_to_bspline`` declarations into the shared
+Motion planner configuration. Omitted values retain cuRobo 0.9's shared RRT,
+TimeOpt and graph-seed fitting behavior. An explicit observed-query declaration can request PRM and
+disable the two optional stages without changing global defaults. Nondefault
+choices participate in registration identity; existing default declarations
+retain their fingerprints. These options do not promise equality with an older
+SDK's internal optimizer or graph configuration.
+
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.collision_observation
 
 .. autosummary::

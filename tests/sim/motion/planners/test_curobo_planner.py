@@ -653,15 +653,16 @@ def test_curobo_planner_class_is_lazy_import_safe():
         "batch_size",
         "algorithm",
         "enable_timeopt",
+        "fit_graph_seed",
         "use_graph",
         "effective_algorithm",
         "expected_lanes",
     ),
     [
-        (1, "rrt", True, True, "rrt", 8),
-        (2, "prm", False, False, "prm", None),
-        (17, "rrt", False, True, "rrt", 256),
-        (1, "rrt", True, False, "rrt", 8),
+        (1, "rrt", True, True, True, "rrt", 8),
+        (2, "prm", False, False, False, "prm", None),
+        (17, "rrt", False, False, True, "rrt", 256),
+        (1, "rrt", True, True, False, "rrt", 8),
     ],
 )
 def test_backend_forwards_fast_settings_and_disables_self_collision(
@@ -669,6 +670,7 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
     batch_size,
     algorithm,
     enable_timeopt,
+    fit_graph_seed,
     use_graph,
     effective_algorithm,
     expected_lanes,
@@ -709,6 +711,7 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
         robot_uid="robot",
         graph_planner_algorithm=algorithm,
         enable_timeopt=enable_timeopt,
+        fit_graph_seed_to_bspline=fit_graph_seed,
         interpolation_dt=0.01,
     )
     planner._curobo_device = torch.device("cuda:0")
@@ -755,6 +758,7 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
     assert create_kwargs["use_cuda_graph"] is use_graph
     assert runtime.cuda_graphs is True
     assert create_kwargs["enable_timeopt"] is enable_timeopt
+    assert create_kwargs["fit_graph_seed_to_bspline"] is fit_graph_seed
     assert create_kwargs["interpolation_dt"] == 0.01
     cost_manager.disable_self_collision.assert_called_once()
     if enable_timeopt:
