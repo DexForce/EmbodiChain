@@ -98,12 +98,23 @@ class ObservedCuroboServicesCfg:
     Attributes:
         cuda_device: Explicit planning device, or the backend default.
         max_voxel_count: Existing scene voxel capacity.
+        graph_planner_algorithm: Explicit cuRobo route initializer.
+        enable_timeopt: Enable the backend's traversal-time optimizer.
+        fit_graph_seed_to_bspline: Fit graph seeds before trajectory optimization.
     """
 
     cuda_device: str | None = None
     max_voxel_count: int = 4_000_000
+    graph_planner_algorithm: Literal["rrt", "prm"] = "rrt"
+    enable_timeopt: bool = True
+    fit_graph_seed_to_bspline: bool = True
 
     def __post_init__(self) -> None:
+        if self.graph_planner_algorithm not in ("rrt", "prm"):
+            raise ValueError("graph_planner_algorithm must be 'rrt' or 'prm'.")
+        for name in ("enable_timeopt", "fit_graph_seed_to_bspline"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"{name} must be bool.")
         if type(self.max_voxel_count) is not int or self.max_voxel_count < 1:
             raise ValueError("max_voxel_count must be a positive integer.")
         if self.cuda_device is not None and (
@@ -408,6 +419,15 @@ def _effective_planning_service_fields(
 ) -> dict[str, object]:
     """Serialize effective choices while preserving pre-extension empty defaults."""
     payload = (value.snapshot() if validate else value).to_dict()
+    observed = payload.get("observed_curobo")
+    if observed is not None:
+        for name, default in (
+            ("graph_planner_algorithm", "rrt"),
+            ("enable_timeopt", True),
+            ("fit_graph_seed_to_bspline", True),
+        ):
+            if observed[name] == default:
+                observed.pop(name)
     for name in (
         "native_handover_scene",
         "capture_coordinated_cargo",

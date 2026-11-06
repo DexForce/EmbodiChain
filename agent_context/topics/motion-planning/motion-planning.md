@@ -85,6 +85,12 @@ Torch settings on exit; `candidate_ik_threads` uses that capacity only for
 eligible CPU PytorchSolver pose products. Hosts serialize those process-wide
 changes and retain lifecycle ownership.
 
+`CuroboPlannerCfg` owns graph-planner selection, TimeOpt and
+`fit_graph_seed_to_bspline`. The latter defaults to the SDK 0.9 fitting stage;
+explicit false selects the SDK's direct waypoint-as-knot graph handoff. Task
+Program observed-query declarations forward these settings through their public
+configuration. No service or task changes the shared defaults implicitly.
+
 `RevolutePathQueryFactory` prepares original URDF collision inputs for one exact
 Default/B1 robot, articulation and support. It borrows native owners and accepts
 an explicit complete motion-root subtree; it never creates a simulator, task,

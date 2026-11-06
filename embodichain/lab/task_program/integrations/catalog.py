@@ -129,7 +129,10 @@ from .simulation.policies import (
     SimulationSettleMonitorCfg,
     default_simulation_settle_presets,
 )
-from .simulation.planning_services import SimulationPlanningServicesCfg
+from .simulation.planning_services import (
+    SimulationPlanningServicesCfg,
+    ObservedCuroboServicesCfg,
+)
 from .simulation.idle_clearance import IdleClearanceFactory
 from .simulation.planning_services import _effective_planning_service_fields
 from .simulation.held_planning import (
@@ -277,6 +280,21 @@ def _canonical_value(value: object) -> object:
             metadata.pop("effect_contract")
 
         from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
+
+        from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+            CuroboPlannerCfg,
+        )
+
+        if type(value) is ObservedCuroboServicesCfg:
+            for name, default in (
+                ("graph_planner_algorithm", "rrt"),
+                ("enable_timeopt", True),
+                ("fit_graph_seed_to_bspline", True),
+            ):
+                if getattr(value, name) == default:
+                    metadata.pop(name)
+        if type(value) is CuroboPlannerCfg and value.fit_graph_seed_to_bspline is True:
+            metadata.pop("fit_graph_seed_to_bspline")
 
         if (
             type(value) is SkillDescriptor

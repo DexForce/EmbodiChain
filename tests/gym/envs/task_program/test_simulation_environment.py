@@ -3898,3 +3898,93 @@ def test_factory_closed_during_read_cannot_publish_without_optional_scope_guard(
         monkeypatch.setattr(robot, "get_qpos", get_qpos)
         with pytest.raises(RuntimeError, match="closed"):
             observation.hold_qpos(torch.arange(_BATCH_SIZE, device=robot.device))
+
+
+@pytest.mark.parametrize("pinned_policy", [False, True], ids=["defaults", "pinned"])
+def test_observed_curobo_factory_forwards_declared_backend_policy(
+    monkeypatch, pinned_policy
+):
+    import sys
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.sim.motion.planners.curobo import observed
+    from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+        CuroboPlanner,
+        CuroboPlannerCfg,
+    )
+    from embodichain.lab.task_program.integrations.simulation.planning_services import (
+        CollisionSceneRosterCfg,
+        ObservedCuroboServicesCfg,
+        SimulationPlanningServicesCfg,
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Declared observed policy assembly constructed a native runtime.")
+
+    for cls in (SimulationManager, Robot, MotionGenerator, CuroboPlanner):
+        monkeypatch.setattr(cls, "__init__", forbidden)
+    monkeypatch.setattr(CuroboPlanner, "_get_backend", forbidden)
+    monkeypatch.setattr(sys.modules[__name__], "_BATCH_SIZE", 1)
+    robot = _Robot()
+    robot.num_instances = 1
+    simulation = _Simulation(robot)
+    simulation.num_envs = 1
+    simulation.instance_id = "observed-policy-test"
+    captured = []
+
+    class ObservedQueries:
+        def __init__(self, selected_robot, cfg, shapes):
+            assert selected_robot is robot
+            assert type(cfg) is CuroboPlannerCfg
+            self.robot = selected_robot
+            captured.append(cfg)
+
+    monkeypatch.setattr(observed, "ObservedCuroboQueryFactory", ObservedQueries)
+    declaration = ObservedCuroboServicesCfg(
+        **(
+            {
+                "graph_planner_algorithm": "prm",
+                "enable_timeopt": False,
+                "fit_graph_seed_to_bspline": False,
+            }
+            if pinned_policy
+            else {}
+        )
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+        planning_services=SimulationPlanningServicesCfg(
+            observed_curobo=declaration,
+            collision_roster=CollisionSceneRosterCfg(),
+            capture_root_pose=True,
+            capture_native_revision=True,
+        ),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    try:
+        assert captured == []
+        engine = factory.create_atomic_action_engine(
+            factory.create_robot_skill_profile()
+        )
+        assert type(engine) is AtomicActionEngine
+        assert engine.planning_services.joint_prefix_planner.robot is robot
+        (cfg,) = captured
+        assert cfg.graph_planner_algorithm == ("prm" if pinned_policy else "rrt")
+        assert cfg.enable_timeopt is (not pinned_policy)
+        assert cfg.fit_graph_seed_to_bspline is (not pinned_policy)
+        assert cfg.robot_uid == robot.uid
+        assert cfg.sim_instance_id == simulation.instance_id
+        assert cfg.world.max_voxel_count == 4_000_000
+        assert cfg.use_cuda_graph is False
+        assert cfg.warmup_iterations == 0
+        assert cfg.preserve_plan_samples is True
+        assert cfg.interpolation_dt == _STEP_DT
+    finally:
+        factory.close_runtime_resources()
