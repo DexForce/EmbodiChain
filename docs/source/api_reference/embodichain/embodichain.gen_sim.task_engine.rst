@@ -359,3 +359,252 @@ contracts for callers composing an adapter; their canonical descriptions follow.
 
 .. automodule:: embodichain.gen_sim.task_engine.scene_backend
    :members:
+
+
+Bundle publication and runtime orchestration
+--------------------------------------------
+
+The following owners connect pure declarations, immutable bundle identity and
+atomic publication to the standard Task Program deployment. Runtime assembly
+uses public Lab factories; program completion, action effects and strict TaskSpec
+acceptance remain independent in stored evidence and run reports. Historical
+outputs retain their existing identities.
+
+Bundle assembly
+~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.bundle_assembly
+
+.. autosummary::
+
+   TaskProgramBundlePaths
+   prepare_task_program_bundle
+   publish_task_program_bundle
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_assembly
+   :members: TaskProgramBundlePaths, prepare_task_program_bundle, publish_task_program_bundle
+
+Bundle deployment
+~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.bundle_deployment
+
+.. autosummary::
+
+   LoadedTaskProgramBundle
+   prepare_configured_bundle
+   load_configured_bundle
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_deployment
+   :members: LoadedTaskProgramBundle, prepare_configured_bundle, load_configured_bundle
+
+Bundle identity
+~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.bundle_identity
+
+.. autosummary::
+
+   BUNDLE_IDENTITY_SCHEMA
+   SHARED_RUNTIME_CONTRACT
+   BundleIdentity
+   create_bundle_identity
+   verify_bundle_files
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_identity
+   :members: BUNDLE_IDENTITY_SCHEMA, SHARED_RUNTIME_CONTRACT, BundleIdentity, create_bundle_identity, verify_bundle_files
+
+Bundle inputs
+~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.bundle_inputs
+
+.. autosummary::
+
+   SOURCE_INPUT_PROVENANCE_FILE
+   SOURCE_INPUT_PROVENANCE_SCHEMA
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_inputs
+   :members: SOURCE_INPUT_PROVENANCE_FILE, SOURCE_INPUT_PROVENANCE_SCHEMA
+
+Bundle io
+~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.bundle_io
+
+.. autosummary::
+
+   BundleSnapshot
+   read_bundle_identity
+   read_bundle_snapshot
+   write_bundle_atomic
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_io
+   :members: BundleSnapshot, read_bundle_identity, read_bundle_snapshot, write_bundle_atomic
+
+Bundle loading
+~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.bundle_loading
+
+.. autosummary::
+
+   load_current_task_program_bundle
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_loading
+   :members: load_current_task_program_bundle
+
+Cli
+~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.cli
+
+.. autosummary::
+
+   build_parser
+   main
+   cli
+
+.. automodule:: embodichain.gen_sim.task_engine.cli
+   :members: build_parser, main, cli
+
+Evidence
+~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.evidence
+
+.. autosummary::
+
+   project_control_evidence_binding
+   project_configured_placement_evidence_group_binding
+   project_condition_evidence_group_binding
+   project_handover_evidence_binding
+   project_coordinated_hold_evidence_binding
+   project_coordinated_transport_evidence_binding
+
+.. automodule:: embodichain.gen_sim.task_engine.evidence
+   :members: project_control_evidence_binding, project_configured_placement_evidence_group_binding, project_condition_evidence_group_binding, project_handover_evidence_binding, project_coordinated_hold_evidence_binding, project_coordinated_transport_evidence_binding
+
+Execution
+~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.execution
+
+.. autosummary::
+
+   TaskProgramBundleEpisode
+   execute_task_program_bundle_episode
+
+.. automodule:: embodichain.gen_sim.task_engine.execution
+   :members: TaskProgramBundleEpisode, execute_task_program_bundle_episode
+
+Artifacts
+~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.artifacts
+
+.. autosummary::
+
+   BINDING_REPORT_FILENAME
+   CONSERVATIVE_SCENE_GRAPH_FILENAME
+   EXECUTION_REPORT_FILENAME
+   FINAL_SCENE_INSPECTION_FILENAME
+   PREPARATION_FAILURE_FILENAME
+   ROLE_BINDINGS_FILENAME
+   SCENE_MANIFEST_FILENAME
+   STATIC_SCENE_MANIFEST_FILENAME
+   SUCCESS_SPEC_FILENAME
+   TASK_CANDIDATE_SET_FILENAME
+   TASK_DRAFT_FILENAME
+   SCENE_REQUEST_FILENAME
+   ArtifactTransaction
+   TaskEngineArtifactPaths
+   task_engine_artifact_paths
+   write_task_engine_artifacts
+   write_execution_report
+   write_preparation_failure
+
+.. automodule:: embodichain.gen_sim.task_engine.orchestration.artifacts
+   :members: BINDING_REPORT_FILENAME, CONSERVATIVE_SCENE_GRAPH_FILENAME, EXECUTION_REPORT_FILENAME, FINAL_SCENE_INSPECTION_FILENAME, PREPARATION_FAILURE_FILENAME, ROLE_BINDINGS_FILENAME, SCENE_MANIFEST_FILENAME, STATIC_SCENE_MANIFEST_FILENAME, SUCCESS_SPEC_FILENAME, TASK_CANDIDATE_SET_FILENAME, TASK_DRAFT_FILENAME, SCENE_REQUEST_FILENAME, ArtifactTransaction, TaskEngineArtifactPaths, task_engine_artifact_paths, write_task_engine_artifacts, write_execution_report, write_preparation_failure
+
+Coordinator
+~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.coordinator
+
+.. autosummary::
+
+   PreparationResult
+   TaskEngineCoordinator
+
+.. automodule:: embodichain.gen_sim.task_engine.orchestration.coordinator
+   :members: PreparationResult, TaskEngineCoordinator
+
+Run directory
+~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.run_directory
+
+.. autosummary::
+
+   RunDirectory
+   reserve_run_directory
+
+.. automodule:: embodichain.gen_sim.task_engine.run_directory
+   :members: RunDirectory, reserve_run_directory
+
+Runtime bindings
+~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.runtime_bindings
+
+.. autosummary::
+
+   BundleEvidenceProjector
+
+.. automodule:: embodichain.gen_sim.task_engine.runtime_bindings
+   :members: BundleEvidenceProjector
+
+Runtime evidence
+~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.runtime_evidence
+
+.. autosummary::
+
+   TaskEngineEvidenceReport
+   TaskEngineEvidenceSession
+
+.. automodule:: embodichain.gen_sim.task_engine.runtime_evidence
+   :members: TaskEngineEvidenceReport, TaskEngineEvidenceSession
+
+Task program bundle
+~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.task_program_bundle
+
+.. autosummary::
+
+   TaskProgramBundlePaths
+   generate_task_program_bundle
+   prepare_generated_task_program_bundle
+   task_program_implementation_revisions
+
+.. automodule:: embodichain.gen_sim.task_engine.task_program_bundle
+   :members: TaskProgramBundlePaths, generate_task_program_bundle, prepare_generated_task_program_bundle, task_program_implementation_revisions
+
+Workflow
+~~~~~~~~
+
+.. currentmodule:: embodichain.gen_sim.task_engine.workflow
+
+.. autosummary::
+
+   TASK_ENGINE_RUN_MANIFEST_SCHEMA
+   ActionExecutor
+   SubprocessActionExecutor
+   TaskEngineRunResult
+   TaskEngineWorkflow
+
+.. automodule:: embodichain.gen_sim.task_engine.workflow
+   :members: TASK_ENGINE_RUN_MANIFEST_SCHEMA, ActionExecutor, SubprocessActionExecutor, TaskEngineRunResult, TaskEngineWorkflow

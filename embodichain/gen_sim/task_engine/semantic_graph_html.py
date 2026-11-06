@@ -23,6 +23,7 @@ import base64
 import json
 from pathlib import Path
 import re
+import sys
 from typing import Any
 
 from embodichain.gen_sim.task_spec import TaskSpec, validate_task_spec
@@ -245,3 +246,119 @@ def write_semantic_task_graph_html(
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(content, encoding="utf-8")
     return destination
+
+
+def _finalize_run_html(
+    output_dir: Path,
+    *,
+    bundle: Path | None,
+    summary: Mapping[str, Any],
+    html_path: str | Path | None = None,
+    translate: bool = False,
+    model: str | None = None,
+) -> Path | None:
+    """Publish display-only timing and refresh only this run's selected viewer."""
+    if not output_dir.is_dir():
+        return
+    try:
+        (output_dir / "run_summary.json").write_text(
+            json.dumps(
+                {"schema_version": "task_engine_run_summary/v1", **summary},
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        if html_path is None:
+            selection_path = output_dir / "final/selection.json"
+            if selection_path.is_file():
+                selection = json.loads(selection_path.read_text(encoding="utf-8"))
+                if not isinstance(selection, dict):
+                    raise ValueError("Malformed run selection for HTML presentation.")
+                scene, action = selection.get("scene_attempt"), selection.get(
+                    "action_attempt"
+                )
+                if (
+                    type(scene) is not int
+                    or scene < 1
+                    or (action is not None and (type(action) is not int or action < 1))
+                ):
+                    raise ValueError("Invalid run selection for HTML presentation.")
+                if (
+                    type(scene) is int
+                    and type(action) is int
+                    and min(scene, action) > 0
+                ):
+                    scene_root = output_dir / "attempts" / f"scene_{scene:04d}"
+                    html_path = (
+                        scene_root
+                        / "action_attempts"
+                        / f"action_{action:04d}"
+                        / "semantic_graph.html"
+                    )
+                    bundle = bundle or scene_root / "bundle"
+            if html_path is None and bundle is not None:
+                html_path = output_dir / "semantic_graph.html"
+            if html_path is None:
+                reports = sorted(
+                    output_dir.glob(
+                        "attempts/scene_*/action_attempts/action_*/execution_report.json"
+                    )
+                )
+                if reports:
+                    html_path = reports[-1].parent / "semantic_graph.html"
+                    bundle = reports[-1].parent.parent.parent / "bundle"
+        if bundle is None or html_path is None:
+            return None
+        destination = Path(html_path).resolve()
+        if not destination.is_relative_to(output_dir.resolve()):
+            return
+        if not all(
+            (bundle / name).is_file()
+            for name in (
+                "semantic_task_graph.json",
+                "task_spec.json",
+                "semantic_graph_validation.json",
+            )
+        ):
+            return
+        from ._presentation_contracts import verify_display_companions
+
+        graph = json.loads(
+            (bundle / "semantic_task_graph.json").read_text(encoding="utf-8")
+        )
+        contract = verify_display_companions(bundle, graph)
+        report_path = destination.parent / "execution_report.json"
+        report = (
+            json.loads(report_path.read_text(encoding="utf-8"))
+            if report_path.is_file()
+            else None
+        )
+        if translate:
+            from ._graph_localization import _FILENAME, _ensure_localizations
+
+            _ensure_localizations(
+                destination.parent / _FILENAME,
+                graph,
+                _graph_presentation(graph, bundle_root=bundle),
+                model=model,
+            )
+        write_semantic_task_graph_html(
+            graph,
+            destination,
+            report,
+            task_spec=json.loads(
+                (bundle / "task_spec.json").read_text(encoding="utf-8")
+            ),
+            validation=contract,
+            bundle_root=bundle,
+            run_summary=summary,
+        )
+        return destination
+    except (OSError, TypeError, ValueError) as exc:
+        print(
+            f"[Task Engine] Semantic graph presentation unavailable: {exc}",
+            file=sys.stderr,
+        )

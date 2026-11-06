@@ -1,8 +1,10 @@
-# Task Engine semantic contracts
+# Task Engine
 
-`embodichain.gen_sim.task_engine` owns instruction understanding, candidate
-contracts, TaskSpec generation, canonical Semantic Call graphs and declaration
-coverage. Importing its front end does not initialize Lab or a simulator.
+`embodichain.gen_sim.task_engine` owns instruction understanding, semantic planning,
+role/target binding, declarative policy selection, bundle publication and runtime
+orchestration. TaskSpec owns normative identity and acceptance. Shared Lab,
+Motion, Scene and GraspKit owners implement skills, algorithms and observation.
+Importing the instruction/candidate front end initializes neither Lab nor Sim.
 
 | Request | Owner under `gen_sim/task_engine/` |
 |---|---|
@@ -12,6 +14,11 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Candidate-to-normative-spec conversion | `task_spec.py` |
 | Semantic graph schema, ordering and canonical call validation | `semantic_graph.py` |
 | Pure program projection and explicit segment acceptance bindings | `program_declarations.py` |
+| Pure bundle declarations, preflight and atomic publication | `task_program_bundle.py`, `bundle_assembly.py`, `bundle_deployment.py`, `bundle_identity.py`, `bundle_io.py` |
+| Installed current-bundle loading and source revision/input inventory | `bundle_loading.py`, `bundle_inputs.py` |
+| Execution and occurrence-bound evidence projection | `execution.py`, `runtime_bindings.py`, `runtime_evidence.py` |
+| Workflow, child lifecycle and fresh run allocation | `workflow.py`, `run_directory.py`, `orchestration/execution_resources.py` |
+| Unified public CLI and worker | `cli.py`, `_bundle_runner.py`; dispatch in `embodichain/cli/main.py` |
 
 | Source upright/carrier/handover/return graph declarations | `source_graph_declarations.py`; geometry comes from public Scene/Compute |
 | Declared alignment/Pick aliases and held-resource transitions | `alignment_declarations.py`; nominal envelopes use the public hand protocol |
@@ -35,8 +42,12 @@ is not evidence that the program ran or its physical objective succeeded.
 
 Graph validation uses the public Task Program language decoder. Shared Atomic,
 Motion, Scene and GraspKit owners remain independent of this front end; it
-contains no skill, planner, engine or sensor implementation. Execution assembly,
-physical adaptation and runtime workflow configuration are separate layers.
+contains no skill, planner, engine or sensor implementation. Runtime assembly
+consumes the public configured Task Program deployment and observation services.
+Task Engine does not replace skill registrations, patch skill private state or
+operate on planner SDK buffers. Shared owners import neither this package nor
+TaskSpec. See [deployment and evidence](deployment.md) for bundle/version,
+input identity, runtime and qualification contracts.
 
 Fixed candidate/graph inputs can be checked without invoking a model. Run
 `tests/gen_sim/task_engine/` for candidate/spec, coverage and import/ownership
@@ -155,8 +166,8 @@ semantic first-use/held-resource relationships while Scene supplies target
 geometry and Compute constructs poses. Constrained aliases require explicit
 geometry; ordinary E2 retains its existing downward-entry declaration. Closed
 option/lowerer fragments remain declarations for later configured preflight,
-not a runtime factory or a skill registration patch. This surface does not
-connect bundle/CLI publication or claim physical success.
+not a runtime factory or a skill registration patch. Bundle/CLI integration consumes these declarations separately; the declarations
+alone do not claim physical success.
 
 ## Policy and continuation declarations
 

@@ -411,3 +411,89 @@ def test_final_inspection_keeps_missing_geometry_unknown_and_inputs_detached(
     children = [row for row in graph["nodes"] if row["uid"] != "table"]
     assert children and all(row["parent_relation"] == "unknown" for row in children)
     assert all(row["orientation"] == "unknown" for row in children)
+
+
+@pytest.mark.parametrize(
+    ("failed", "minority_bound", "generation_error"),
+    [
+        ((), True, False),
+        (("majority",), True, False),
+        (("majority", "minority"), True, False),
+        (("majority",), False, False),
+        ((), True, True),
+    ],
+)
+def test_coordinator_tries_only_bound_candidates_before_bundle_generation(
+    scene_export, tmp_path, monkeypatch, failed, minority_bound, generation_error
+):
+    from embodichain.gen_sim.task_engine.orchestration import coordinator
+
+    candidates = _candidate_set(
+        [
+            _candidate("majority", "red can", votes=2),
+            _candidate("minority", "blue can"),
+        ]
+    )
+    calls, bundles = [], []
+
+    def ground(**kwargs):
+        response = _grounder(**kwargs)
+        if not minority_bound and response["bindings"][0]["uids"] == ["blue_can"]:
+            response["bindings"][0].update(status="ambiguous", uids=[])
+        return response
+
+    def plan(candidate, bindings, objects, **kwargs):
+        candidate_id = candidate["candidate_id"]
+        calls.append(candidate_id)
+        assert bindings["candidate_id"] == candidate_id
+        if candidate_id in failed:
+            raise ValueError("TaskSpec witness is not covered")
+        return SimpleNamespace(
+            graph={"nodes": [], "integration_fingerprint": "test"},
+            candidate=candidate,
+            task_spec=kwargs["task_spec"],
+            role_bindings=bindings,
+            lineage={},
+        )
+
+    def generate(graph, scene, output, **kwargs):
+        bundles.append(kwargs["task_candidate"]["candidate_id"])
+        if generation_error:
+            raise ValueError("bundle generation failed")
+        return graph, None
+
+    monkeypatch.setattr(coordinator, "prepare_generated_task_program_bundle", generate)
+    monkeypatch.setattr(coordinator, "_stage_prepared_snapshot", lambda *args: None)
+    monkeypatch.setattr(coordinator, "semantic_task_graph_hash", lambda graph: "test")
+    monkeypatch.setattr(coordinator, "_published_paths", lambda paths, output: paths)
+    result = coordinator.TaskEngineCoordinator(
+        scene_adapter=SceneAdapter(grounding_caller=ground),
+        semantic_planner=SimpleNamespace(plan_spec=plan),
+    ).prepare(
+        "upright_can",
+        _UPRIGHT_CAN_INSTRUCTION,
+        scene_export,
+        tmp_path / "prepared",
+        candidate_set=candidates,
+    )
+    expected = "minority" if failed == ("majority",) else "majority"
+    assert calls == (
+        ["majority", "minority"] if failed and minority_bound else ["majority"]
+    )
+    assert len(result.planning_attempts) == len(calls)
+    if len(failed) == 2 or not minority_bound or generation_error:
+        assert result.status == "planning_failed"
+        assert bundles == (["majority"] if generation_error else [])
+        failure = json.loads(
+            (result.output_dir / "preparation_failure.json").read_text()
+        )
+        assert len(failure["attempts"]) == len(calls)
+        assert all(a["status"] == "failed" for a in result.planning_attempts)
+    else:
+        assert result.bound
+        assert bundles == [expected]
+        assert result.selected_candidate_id == expected
+        report = json.loads((result.output_dir / "binding_report.json").read_text())
+        assert report["selected_candidate_id"] == expected
+        assert result.adaptation.role_bindings["candidate_id"] == expected
+        assert result.planning_attempts[-1]["status"] == "preflight_succeeded"

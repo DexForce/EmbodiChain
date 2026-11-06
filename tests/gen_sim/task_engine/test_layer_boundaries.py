@@ -44,8 +44,8 @@ def test_task_interpretation_imports_without_runtime_or_simulator(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-def test_shared_runtime_does_not_import_task_engine():
-    forbidden = "embodichain.gen_sim.task_engine"
+def test_shared_runtime_does_not_import_task_engine_or_normative_task_spec():
+    forbidden = ("embodichain.gen_sim.task_engine", "embodichain.gen_sim.task_spec")
     violations = []
     for folder in ("compute", "lab/sim", "lab/task_program", "toolkits/graspkit"):
         for path in (_REPOSITORY / "embodichain" / folder).rglob("*.py"):
@@ -75,8 +75,9 @@ def test_shared_runtime_does_not_import_task_engine():
                     ):
                         names = [node.args[0].value]
                 if any(
-                    name == forbidden or name.startswith(forbidden + ".")
+                    name == owner or name.startswith(owner + ".")
                     for name in names
+                    for owner in forbidden
                 ):
                     violations.append((str(path.relative_to(_REPOSITORY)), node.lineno))
     assert violations == []

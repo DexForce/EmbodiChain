@@ -515,7 +515,9 @@ topics:
   aliases: [Task Engine, task engine, 任务引擎, 任务理解, 动作语义图, 语义图可视化]
   keywords: [TaskAgent, TaskDraft, TaskCandidateSet, InstructionIntent, TaskSpecGenerator,
     SemanticTaskGraph, validate_semantic_task_graph, validate_graph_coverage,
-    render_semantic_task_graph_html, write_semantic_task_graph_html]
+    render_semantic_task_graph_html, write_semantic_task_graph_html,
+    generate_task_program_bundle, load_current_task_program_bundle,
+    TaskEngineEvidenceSession, TaskEngineWorkflow, task-engine, bundle identity]
   paths: [topics/task-engine/task-engine.md]
   source_of_truth:
   - embodichain/gen_sim/task_engine/__init__.py
@@ -530,6 +532,17 @@ topics:
   - embodichain/gen_sim/task_engine/reporting.py
   - embodichain/gen_sim/task_engine/bundle_spec.py
   - embodichain/gen_sim/task_engine/orchestration/contracts.py
+  - embodichain/gen_sim/task_engine/bundle_assembly.py
+  - embodichain/gen_sim/task_engine/bundle_deployment.py
+  - embodichain/gen_sim/task_engine/bundle_identity.py
+  - embodichain/gen_sim/task_engine/bundle_io.py
+  - embodichain/gen_sim/task_engine/bundle_loading.py
+  - embodichain/gen_sim/task_engine/task_program_bundle.py
+  - embodichain/gen_sim/task_engine/execution.py
+  - embodichain/gen_sim/task_engine/runtime_bindings.py
+  - embodichain/gen_sim/task_engine/runtime_evidence.py
+  - embodichain/gen_sim/task_engine/workflow.py
+  - embodichain/gen_sim/task_engine/cli.py
   watch_paths: [embodichain/gen_sim/task_engine/, tests/gen_sim/task_engine/, web/task-engine/, web/graph-ui/]
   related_topics: [task-spec, task-programs, gen-sim]
   status: active
