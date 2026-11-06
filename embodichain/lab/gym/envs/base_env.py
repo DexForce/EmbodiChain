@@ -18,13 +18,12 @@ from __future__ import annotations
 
 import zlib
 
-import math
 import inspect
 import random
 from contextlib import contextmanager
 from copy import deepcopy
 from collections.abc import Iterator, Mapping
-from numbers import Integral, Real
+from numbers import Real
 
 import torch
 import numpy as np
@@ -358,62 +357,15 @@ class BaseEnv(gym.Env):
 
     def _configure_timing(self) -> None:
         """Validate and expose the environment's simulation-derived timing."""
-        physics_dt = self.sim_cfg.physics_dt
-        try:
-            physics_dt_value = float(physics_dt)
-        except (TypeError, ValueError):
-            physics_dt_value = math.nan
-        if (
-            isinstance(physics_dt, bool)
-            or not math.isfinite(physics_dt_value)
-            or physics_dt_value <= 0.0
-        ):
-            raise ValueError(
-                f"physics_dt must be a finite positive number, got {physics_dt!r}."
-            )
+        from embodichain.lab.gym.utils.control_timing import resolve_control_timing
 
-        target_frequency = self.cfg.target_control_frequency
-        if target_frequency is not None:
-            try:
-                target_frequency_value = float(target_frequency)
-            except (TypeError, ValueError):
-                target_frequency_value = math.nan
-            if (
-                isinstance(target_frequency, bool)
-                or not math.isfinite(target_frequency_value)
-                or target_frequency_value <= 0.0
-            ):
-                raise ValueError(
-                    "target_control_frequency must be a finite positive number, "
-                    f"got {target_frequency!r}."
-                )
-
-            ideal_steps = 1.0 / (physics_dt_value * target_frequency_value)
-            resolved_steps = max(1, round(ideal_steps))
-            if not math.isclose(
-                ideal_steps, float(resolved_steps), rel_tol=0.0, abs_tol=1e-9
-            ):
-                achievable_frequency = 1.0 / (physics_dt_value * resolved_steps)
-                raise ValueError(
-                    f"target_control_frequency={target_frequency!r} cannot be "
-                    f"represented exactly with physics_dt={physics_dt!r}. The nearest "
-                    f"integer sim_steps_per_control is {resolved_steps}, which gives "
-                    f"{achievable_frequency:g} Hz. Set sim_steps_per_control explicitly "
-                    "or choose an exactly representable target frequency."
-                )
-            self.cfg.sim_steps_per_control = resolved_steps
-
-        sim_steps = self.cfg.sim_steps_per_control
-        if isinstance(sim_steps, bool) or not isinstance(sim_steps, Integral):
-            raise ValueError(
-                "sim_steps_per_control must be a positive integer, "
-                f"got {sim_steps!r}."
-            )
-        if sim_steps <= 0:
-            raise ValueError(
-                "sim_steps_per_control must be a positive integer, "
-                f"got {sim_steps!r}."
-            )
+        timing = resolve_control_timing(
+            self.sim_cfg.physics_dt,
+            self.cfg.sim_steps_per_control,
+            target_control_frequency=self.cfg.target_control_frequency,
+        )
+        if self.cfg.target_control_frequency is not None:
+            self.cfg.sim_steps_per_control = timing.sim_steps_per_control
 
         # Backwards-compatible aliases. Unlike the previous integer division,
         # these values preserve the exact rate implied by the simulation.

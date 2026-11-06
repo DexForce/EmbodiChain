@@ -2147,6 +2147,16 @@ embodichain.lab.gym.utils
    capture_trajectory_state
    restore_trajectory_state
 
+embodichain.lab.gym.utils.control_timing
+----------------------------------------
+
+Resolve the existing integer physics/control grid before environment creation.
+BaseEnv uses the same resolver during setup, retaining validation order,
+frequency priority and exact representability checks.
+
+.. automodule:: embodichain.lab.gym.utils.control_timing
+   :members:
+
 embodichain.lab.gym.utils.gym_utils
 -----------------------------------
 
