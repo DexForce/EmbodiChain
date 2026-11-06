@@ -185,6 +185,9 @@ def test_original_generation_api_publishes_from_frozen_declarations_without_sim(
         (output / "components/execution_policy.yaml").read_text()
     )["presets"]
     first, *later = policies.values()
+    assert all(
+        preset["release_gate_evidence"] == "binary_only" for preset in policies.values()
+    )
     assert first["motion"]["require_final_velocity"] is True
     assert first["motion"]["final_velocity_rejection"] == "mask_only"
     assert first["recovery"]["retry_all_failed_plans"] is False
@@ -442,6 +445,10 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
     policy = yaml.safe_load(
         (paths.root / "components/execution_policy.yaml").read_text()
     )
+    assert all(
+        preset["release_gate_evidence"] == "binary_only"
+        for preset in policy["presets"].values()
+    )
     first_name = "gen_sim." + graph["nodes"][0]["id"] + ".execution"
     pick_options = declaration["profile"]["preset_options"][first_name][
         "action_options"
@@ -485,6 +492,111 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
             # routes bypassed the source batched-tensor-only lift prelude.
             assert options.get("lift_clearance") is None
             assert options["report_retained_attachment"] is True
+    physical.assert_unchanged()
+
+
+def test_generated_place_preset_keeps_phase_and_terminal_effects_separate(tmp_path):
+    from lab.task_program.test_semantic_compiler import (
+        _engine,
+        _context,
+        _held_context,
+        _profile,
+        _scene_registry,
+    )
+    from embodichain.lab.task_program.semantics import (
+        BinaryEffectClause,
+        Pick,
+        Place,
+        PoseRelationClause,
+        PoseRelationExpectation,
+        SceneObjectRef,
+        SemanticPose,
+        SceneManifest,
+        SemanticIntegrationManifest,
+    )
+    from embodichain.lab.task_program.compiler.lowering import SemanticCallCompiler
+    import torch
+
+    graph, physical, paths = _pour_bundle(tmp_path, 2, proxy_tolerance=0.02)
+    loaded = load_configured_bundle(
+        paths.root,
+        external_input_digests={
+            **physical.input_files,
+            **resolve_source_hand_services(physical.embodiment)[2],
+        },
+        implementation_revisions={"embodichain": "test-source"},
+    )
+    registration = loaded.deployment.integration.registration
+    node = next(node for node in graph["nodes"] if node["call"]["kind"] == "place")
+    selected = next(
+        preset
+        for preset in registration.robot_profile_binding.presets
+        if preset.preset_id == "gen_sim." + node["id"] + ".execution"
+    )
+    # Reuse the production compiler's observed-scene test ports. The generated
+    # public preset remains the option/monitor owner; no solver or Sim is run.
+    registry, _ = _scene_registry()
+    profile = replace(
+        _profile(),
+        presets={selected.preset_id: selected},
+        default_preset=selected.preset_id,
+    )
+    engine = _engine(profile)
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=registration.call_catalog,
+    )
+    compiler = SemanticCallCompiler(manifest.bind(registry, engine))
+    acquired = compiler.ground(
+        compiler.analyze((Pick(object=SceneObjectRef("cube")),)),
+        0,
+        _context(registry),
+    )
+    held = _held_context(
+        registry,
+        acquired.invocation.goal.semantics,
+        torch.eye(4).repeat(2, 1, 1),
+    )
+    grounded = compiler.ground(
+        compiler.analyze(
+            (
+                Place(
+                    object=SceneObjectRef("cube"),
+                    at=SemanticPose((0.5, -0.2, 0.4), (0, 0, 0, 1)),
+                ),
+            )
+        ),
+        0,
+        held,
+    )
+    (gate,) = grounded.effect_gates
+    assert gate.gate_id == "source_released" and gate.segment_name == "retract"
+    assert len(gate.effect_spec.clauses) == 1
+    (constraint,) = gate.effect_spec.clauses
+    assert type(constraint) is BinaryEffectClause and constraint.expected is False
+    terminal_pose, terminal_constraint = grounded.effect_spec.clauses
+    assert type(terminal_pose) is PoseRelationClause
+    assert terminal_pose.expectation is PoseRelationExpectation.SEPARATED
+    assert torch.equal(
+        terminal_pose.baseline_object_to_endpoint, torch.eye(4).repeat(2, 1, 1)
+    )
+    assert type(terminal_constraint) is BinaryEffectClause
+    assert terminal_constraint.expected is False
+    (guard,) = grounded.effect_guards
+    held_pose, held_constraint = guard.effect_spec.clauses
+    assert type(held_pose) is PoseRelationClause
+    assert held_pose.expectation is PoseRelationExpectation.MATCHED
+    assert (
+        type(held_constraint) is BinaryEffectClause and held_constraint.expected is True
+    )
+    acquired_pose, acquired_constraint = acquired.effect_gates[0].effect_spec.clauses
+    assert type(acquired_pose) is PoseRelationClause
+    assert acquired_pose.expectation is PoseRelationExpectation.MATCHED
+    assert (
+        type(acquired_constraint) is BinaryEffectClause
+        and acquired_constraint.expected is True
+    )
     physical.assert_unchanged()
 
 

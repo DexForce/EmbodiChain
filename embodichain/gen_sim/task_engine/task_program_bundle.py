@@ -1154,6 +1154,8 @@ def prepare_generated_task_program_bundle(
         current = dict(
             motion=dict(sample_count=max(minimum, int(motion.get("sample_count") or 0)))
         )
+        if policy.get("effect_assurance") == "verified":
+            current["release_gate_evidence"] = "binary_only"
         if runtime_profile == "contact_experiment" and call["kind"] == "pick":
             current["motion"]["sample_count"] += 12
         if node["id"] in post_handover_nodes and experiment:
