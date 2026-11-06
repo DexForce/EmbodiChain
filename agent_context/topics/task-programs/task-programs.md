@@ -102,7 +102,10 @@ ports without the optional session factory retain their existing ownership.
 Declared Press/Twist controls assemble real per-bridge operations before runtime-bound
 lowerers. The factory uses the public initialized EpisodeContext, the ordinary
 sensor suite and one acknowledged bridge clock. Catalog preflight validates exact
-sequential targets, occurrence budgets and physical post-policy phases. Twist and
+sequential targets, occurrence budgets and physical post-policy phases. Source
+prismatic calls also bind their authored endpoints, typed recovery and exact
+fixed-grid segment policies during this static preflight, before live assembly.
+Twist and
 prismatic registries connect the existing Atomic lifecycle port; bridge cleanup
 closes owned hooks/cursors without issuing or acknowledging commands. Source control
 bridges keep their explicit B1 scope and reject external nominal plans and expansion.

@@ -7558,6 +7558,65 @@ def _prismatic_service_payload():
     return payload
 
 
+@pytest.mark.parametrize("defect", [None, "retries", "recovery", "state"])
+def test_prismatic_source_contract_is_rejected_during_static_preflight(
+    defect: str | None,
+) -> None:
+    from embodichain.lab.task_program import decode_task_program
+
+    payload = _prismatic_service_payload()
+    slide = next(
+        preset
+        for preset in payload["robot_profile"]["presets"]
+        if preset["preset_id"] == "slide"
+    )
+    if defect == "retries":
+        slide["motion"]["segment_sample_count_retries"] = []
+    elif defect == "recovery":
+        slide["recovery"]["planning_recovery"] = None
+    registration = _decode_configured_task_program_integration(payload).registration
+    program = decode_task_program(
+        {
+            "program_id": "source_preflight",
+            "targets": {},
+            "integration": {
+                "scene_registry": registration.scene_binding.registry_id,
+                "robot_profile": registration.robot_profile_binding.profile_id,
+                "runtime_preset": "slide",
+            },
+            "program": {
+                "kind": "segment",
+                "name": "slide",
+                "steps": {
+                    "kind": "invoke",
+                    "call": {
+                        "kind": "registered",
+                        "call_id": "gen_sim.articulation_slide",
+                        "arguments": {
+                            "object": "cabinet_source",
+                            "state": "ajar" if defect == "state" else "open",
+                        },
+                    },
+                },
+            },
+        }
+    )
+    if defect is None:
+        fingerprint = registration.fingerprint
+        compiled = registration.catalog.preflight(program)
+        assert compiled.program_id == program.program_id
+        registration.assert_unchanged()
+        assert registration.fingerprint == fingerprint
+    else:
+        expected = {
+            "retries": "exact fixed-grid segment recovery contract",
+            "recovery": "explicit typed planning recovery",
+            "state": "target state must be open or closed",
+        }
+        with pytest.raises(ValueError, match=expected[defect]):
+            registration.catalog.preflight(program)
+
+
 @pytest.mark.parametrize(
     "field", [None, "require_qualified_approach", "measured_preshape"]
 )
