@@ -24,6 +24,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
+| Frozen placement declaration → normative evidence binding | `task_engine/evidence.py` → [TaskSpec evidence boundary](../task-spec/task-spec.md#physical-evidence-boundary) |
 
 Generate: validate input → VLM understanding → geometry/articulation generation
 → placement refinement → export. Segmentation, geometry and articulation
@@ -175,3 +176,15 @@ environment files.
 
 Select provider-backed or simulator conversion tests only when that runtime
 boundary changes; source/unit checks do not establish remote service quality.
+
+Placement declaration projection for new bundles uses
+`project_configured_placement_evidence_binding` with the public configured owner's
+resolved condition and compiled occurrence descriptors. The final builder must
+not load or emit `constraints.json`. The original `project_placement_evidence_binding`
+only validates the frozen B0 constraints payload for source-comparison fixtures;
+it delegates the semantic projection and is not a second runtime policy owner.
+
+Task Engine's `project_condition_evidence_binding` projects frozen role/lineage,
+explicit compiled occurrences and already-resolved physical criteria into the
+TaskSpec state-evidence contract. It reads no physical state and chooses no
+acceptance thresholds; the Lab observation owner supplies facts.

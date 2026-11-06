@@ -1,5 +1,17 @@
 # Motion Planning
 
+`MotionGenerator.generate()` owns sampled Cartesian segment recovery through its
+private `_cartesian.py` helper. Explicit linear keyframes use fixed-grid sequential
+IK; `preserve_cartesian_samples=True` retains the separate pre-sampled contract.
+Segment alternatives are opt-in and B1-only. Their local counts and continuity
+receipt live in `PlanResult.recovery`, separate from complete-action retries.
+Dense attempts advance the original RNG stream; continuous IK uses the original
+grid and its existing Torch fork. Exhaustion retains the first failed result and
+candidate evidence. `defer_recovery=True` lets a caller inspect the nominal result.
+Each actual generation attempt charges the existing host budget once; the public
+entry checks cancellation before FK and adds no planning charge of its own.
+Atomic skills own which segment enables recovery; Task Engine declares policy.
+
 ## Find the owner
 
 | Change or question | Start here |
@@ -80,6 +92,14 @@ Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
 owned original positions, intervals and rejected-row identities for retries and
 audit; checking the zero-speed hold is not evidence that the candidate passed.
 
+`compute.trajectory.interpolation.interpolate_velocity_grid` allocates fixed
+B=1 joint-edge intervals from explicit speed caps. It preserves ordered mandatory
+endpoints and requested sample count, rejecting insufficient duration instead of
+retiming. The `limits.joint_velocity_diagnostics` companion reports the worst
+frame/joint operands with nonfinite values represented as None; it does not
+replace or weaken the existing validity mask. Ordinary interpolation remains
+unchanged unless callers explicitly choose the fixed-count helper.
+
 The bounded `resolve_continuous_ik_path()` adapter preserves a single path's
 time grid and restores the caller's random stream. Its numerical seed search
 accepts only B=1 and performs no simulation or state mutation.
@@ -88,6 +108,12 @@ checks compare each candidate to the actual preceding posture. Search ledgers
 share an outer caller-owned deadline across nested previews and isolate separate
 contexts. They do not replace `_budget.py`'s existing automatic planning hooks,
 preempt native work, or certify physical task success.
+
+Atomic policy propagation keeps whole-request sample alternatives separate from
+MotionGenerator's segment alternatives. Required final speed
+qualification checks emitted full-robot samples after transforms/recovery; it
+never treats zero-speed rejected holds as original candidate evidence. The
+ordinary automatic planning/cancellation hooks remain on AtomicAction.plan.
 
 Normalization must preserve the meaning of timing, derivatives, failure rows
 and backend diagnostics together. Read the
@@ -186,7 +212,14 @@ hands provide their own geometry. Sampling/collision stays in the canonical
 contact frame, and public poses map once to the declared runtime TCP. Do not
 add a second hand-specific conversion. GraspKit owns collision-qualified end-region
 selection through `pg_grasp.regions`; callers select a policy without supplying
-a Task Engine implementation. The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
+a Task Engine implementation. Explicit `pg_grasp.constraints` and `opening`
+views filter complete object geometry after ordinary ranking and preserve source
+order and infinite-cost failure padding. `preshape` consumes captured numeric
+hand sweeps; `proposals` defers final-TCP qualification without bypassing required
+ground filtering. These APIs import without a Robot, simulation or target
+decomposition backend; `pg_grasp` resolves concrete implementations lazily. Nominal dimensions
+in `hand_envelope` remain separate from physical collision geometry.
+The original mesh-region path remains the default. `pg_grasp.contact_fit` owns
 sampled closing geometry and contact fitting with explicit thresholds; robot/FK
 sampling and physical contact evidence remain Lab responsibilities.
 `pg_grasp.native_contact` owns discrete convex closing/opening and rigid-clearance

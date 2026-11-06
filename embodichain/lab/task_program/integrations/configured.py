@@ -1567,6 +1567,11 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "plan_opts",
                 "interpolation_mode",
                 "ik_seed_mode",
+                "sample_count_retries",
+                "segment_sample_count_retries",
+                "segment_continuous_ik_recovery",
+                "require_final_velocity",
+                "final_velocity_rejection",
             }
         ),
     )
@@ -1583,6 +1588,38 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
             path=f"{path}.velocity_targets",
         ),
         "sample_count": sample_count,
+        "final_velocity_rejection": _identifier(
+            config.get("final_velocity_rejection", "hold"),
+            path=f"{path}.final_velocity_rejection",
+        ),
+        "require_final_velocity": _boolean(
+            config.get("require_final_velocity", False),
+            path=f"{path}.require_final_velocity",
+        ),
+        "sample_count_retries": tuple(
+            _integer(item, path=f"{path}.sample_count_retries[{index}]", minimum=2)
+            for index, item in enumerate(
+                _sequence(
+                    config.get("sample_count_retries", ()),
+                    path=f"{path}.sample_count_retries",
+                )
+            )
+        ),
+        "segment_sample_count_retries": tuple(
+            _integer(
+                item, path=f"{path}.segment_sample_count_retries[{index}]", minimum=2
+            )
+            for index, item in enumerate(
+                _sequence(
+                    config.get("segment_sample_count_retries", ()),
+                    path=f"{path}.segment_sample_count_retries",
+                )
+            )
+        ),
+        "segment_continuous_ik_recovery": _boolean(
+            config.get("segment_continuous_ik_recovery", False),
+            path=f"{path}.segment_continuous_ik_recovery",
+        ),
         "interpolation_mode": _identifier(
             config.get("interpolation_mode", "adaptive"),
             path=f"{path}.interpolation_mode",
@@ -1750,6 +1787,8 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 "goal_translation_threshold",
                 "goal_rotation_threshold",
                 "action_timeout",
+                "planning_budget",
+                "retry_all_failed_plans",
             }
         ),
     )
@@ -1765,6 +1804,10 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
             minimum=0,
         ),
     }
+    if "retry_all_failed_plans" in config:
+        kwargs["retry_all_failed_plans"] = _boolean(
+            config["retry_all_failed_plans"], path=f"{path}.retry_all_failed_plans"
+        )
     for field_name in (
         "goal_translation_threshold",
         "goal_rotation_threshold",
@@ -1777,6 +1820,29 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 minimum=0.0,
                 strict_minimum=True,
             )
+    if config.get("planning_budget") is not None:
+        from embodichain.lab.sim.atomic_actions.policies import PlanningBudget
+
+        budget_path = f"{path}.planning_budget"
+        budget = _mapping(
+            config["planning_budget"],
+            path=budget_path,
+            required=frozenset(),
+            optional=frozenset({"wall_seconds"}),
+        )
+        wall_seconds = budget.get("wall_seconds")
+        kwargs["planning_budget"] = PlanningBudget(
+            wall_seconds=(
+                None
+                if wall_seconds is None
+                else _real(
+                    wall_seconds,
+                    path=f"{budget_path}.wall_seconds",
+                    minimum=0.0,
+                    strict_minimum=True,
+                )
+            )
+        )
     return RecoveryPolicy(**kwargs)
 
 

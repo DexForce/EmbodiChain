@@ -26,6 +26,7 @@ from types import MappingProxyType
 import torch
 
 __all__ = [
+    "PhysicalObservationStamp",
     "PhysicalEvidenceBatch",
     "PhysicalEvidenceFrame",
     "PhysicalEvidenceRequest",
@@ -63,6 +64,38 @@ def _validate_timestamp(value: float, *, name: str) -> float:
     if not math.isfinite(normalized) or normalized < 0.0:
         raise ValueError(f"{name} must be finite and non-negative.")
     return normalized
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicalObservationStamp:
+    """Identify one native-world observation independently of semantic versions.
+
+    Args:
+        source_id: Unique host-owned source/lifetime identity.
+        source_kind: Native revision contract, such as ``default.contacts``.
+        revision: Actual revision read from that native source.
+        simulation_time: Native manager-relative time, including warmup steps.
+    """
+
+    source_id: str
+    source_kind: str
+    revision: int
+    simulation_time: float
+
+    def __post_init__(self) -> None:
+        for name in ("source_id", "source_kind"):
+            value = getattr(self, name)
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(f"{name} must be a canonical nonempty identity.")
+        if type(self.revision) is not int or self.revision < 0:
+            raise ValueError(
+                "Native observation revision must be a nonnegative integer."
+            )
+        object.__setattr__(
+            self,
+            "simulation_time",
+            _validate_timestamp(self.simulation_time, name="simulation_time"),
+        )
 
 
 @dataclass(frozen=True, slots=True, eq=False)

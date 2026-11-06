@@ -46,6 +46,9 @@ from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
 from embodichain.utils import configclass
 from embodichain.utils import logger, set_seed
 from .episode_context import EpisodeContext
+from embodichain.lab.gym.envs.managers.observation_types import (
+    ObservationFrame,
+)
 
 __all__ = ["BaseEnv", "EnvCfg"]
 
@@ -765,12 +768,14 @@ class BaseEnv(gym.Env):
                     torch.tensor(selection[0], dtype=torch.long, device=self.device),
                 )
                 self._proprio_joint_index_cache = cached
+            proprioception = self.robot.get_proprioception()
+            manager = getattr(self, "observation_manager", None)
+            if manager is not None and manager.is_capturing:
+                from .managers.observations import _capture_proprioception
+
+                _capture_proprioception(self, proprioception)
             obs = TensorDict(
-                dict(
-                    robot=self.robot.get_proprioception().apply(
-                        lambda x: x[:, cached[1]]
-                    )
-                ),
+                dict(robot=proprioception.apply(lambda x: x[:, cached[1]])),
                 batch_size=[self.num_envs],
                 device=self.device,
             )
@@ -784,6 +789,28 @@ class BaseEnv(gym.Env):
             obs = self._extend_obs(obs=obs, **kwargs)
 
         return obs
+
+    def _capture_observation(self, **kwargs: Any) -> ObservationFrame:
+        """Capture one explicit control boundary without advancing history."""
+        manager = getattr(self, "observation_manager", None)
+        enabled = manager is not None and (
+            manager.has_history or manager.has_raw_channels
+        )
+        episodes = self.episode_context.episode_ids
+        if not enabled:
+            return ObservationFrame(self.get_obs(**kwargs), {}, episodes, -1)
+        timestamp = getattr(self.sim, "simulation_time", None)
+        timestamp = float(timestamp) if isinstance(timestamp, (int, float)) else None
+        return manager.capture(
+            lambda: self.get_obs(**kwargs),
+            episode_context=self.episode_context,
+            timestamp=timestamp,
+        )
+
+    def _record_initial_observation(
+        self, frame: ObservationFrame, env_ids: torch.Tensor
+    ) -> None:
+        """Dispatch a final post-reset boundary to optional recording consumers."""
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         """
@@ -1034,9 +1061,11 @@ class BaseEnv(gym.Env):
                 )
                 with self.sim.render_frame(force_visualization=True):
                     with self._profiler.section("get_obs"):
-                        obs = self.get_obs(**options)
+                        observation_frame = self._capture_observation(**options)
+                        obs = observation_frame.policy
                 self._after_episode_reset(obs, reset_ids)
                 context._finish_initialization(reset_ids)
+                self._record_initial_observation(observation_frame, reset_ids)
                 with self._profiler.section("get_info"):
                     info = self.get_info(**options)
                 info["episode_context"] = context.snapshot()
@@ -1098,17 +1127,41 @@ class BaseEnv(gym.Env):
         return effective_seed
 
     def step(
-        self, action: EnvAction, **kwargs
+        self,
+        action: EnvAction,
+        *,
+        recording_active_mask: torch.Tensor | None = None,
+        **kwargs,
     ) -> Tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Step the environment with the given action.
 
         Args:
             action: The action applied to the robot agent.
+            recording_active_mask: Optional row selection for raw episode
+                recording, independent of demonstration/rollout activity. The
+                default uses the host's demonstration mask. This allows an
+                explicit diagnostic settling tail without extending accepted
+                rollout or segment boundaries.
 
         Returns:
             A tuple contraining the observation, reward, terminated, truncated, and info dictionary.
         """
 
+        if recording_active_mask is not None:
+            if (
+                not isinstance(recording_active_mask, torch.Tensor)
+                or recording_active_mask.shape != (self.num_envs,)
+                or recording_active_mask.dtype != torch.bool
+            ):
+                raise ValueError(
+                    "recording_active_mask requires one bool per environment row."
+                )
+            if (
+                getattr(getattr(self, "observation_manager", None), "history", None)
+                is None
+            ):
+                raise RuntimeError("recording_active_mask requires episode recording.")
+            recording_active_mask = recording_active_mask.to(self.device).clone()
         with self._profiler.section("step", is_root=True):
             with self._profiler.section("preprocess_action"):
                 action = self._preprocess_action(action=action)
@@ -1123,7 +1176,8 @@ class BaseEnv(gym.Env):
 
             with self.sim.render_frame():
                 with self._profiler.section("get_obs"):
-                    obs = self.get_obs(**kwargs)
+                    observation_frame = self._capture_observation(**kwargs)
+                    obs = observation_frame.policy
             with self._profiler.section("get_info"):
                 info = self.get_info(**kwargs)
             with self._profiler.section("reward"):
@@ -1144,6 +1198,8 @@ class BaseEnv(gym.Env):
 
             with self._profiler.section("hook_after"):
                 self._hook_after_sim_step(
+                    observation_frame=observation_frame,
+                    recording_active_mask=recording_active_mask,
                     obs=obs,
                     action=action,
                     rewards=rewards,

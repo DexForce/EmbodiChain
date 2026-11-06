@@ -28,6 +28,7 @@ import torch
 from scipy.spatial.transform import Rotation
 
 __all__ = [
+    "source_pour_staging_frame",
     "PourFrameSet",
     "JawPourFrameSet",
     "PourGraspProjection",
@@ -36,6 +37,8 @@ __all__ = [
     "pour_frames",
     "jaw_tilt_axis",
     "jaw_pour_frames",
+    "measure_pour_tilt",
+    "measure_pour_receiver",
 ]
 
 
@@ -554,3 +557,118 @@ class PourGraspProjection:
             targets, device=object_to_eef.device, dtype=object_to_eef.dtype
         )
         return objects @ object_to_eef[None], valid
+
+
+def source_pour_staging_frame(
+    vertices: np.ndarray,
+    upright_axis: np.ndarray,
+    initial_rotation: np.ndarray,
+    reference_top: float,
+    finger_radius: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Preserve the source static bounding-sphere Pour staging construction.
+
+    Args:
+        vertices: Imported body-local source vertices in their original order.
+        upright_axis: Source longest-axis direction in that same local basis.
+        initial_rotation: Authored source world rotation.
+        reference_top: Receiver upper offset from its origin along world Z.
+        finger_radius: Explicit nominal hand reserve, not measured collision data.
+
+    Returns:
+        Receiver-relative translation pose, world orientation and local pivot.
+        The original 15 mm reserve and axis-alignment order remain unchanged.
+    """
+    vertices = np.asarray(vertices)
+    upright = np.asarray(upright_axis)
+    rotation = np.asarray(initial_rotation)
+    if vertices.ndim != 2 or vertices.shape[1] != 3 or not len(vertices):
+        raise ValueError("Pour staging requires nonempty (N,3) local vertices.")
+    if upright.shape != (3,) or rotation.shape != (3, 3):
+        raise ValueError("Pour staging requires an axis and a 3x3 rotation.")
+    if not all(np.isfinite(value).all() for value in (vertices, upright, rotation)):
+        raise ValueError("Pour staging geometry must be finite.")
+    if (
+        not math.isfinite(reference_top)
+        or not math.isfinite(finger_radius)
+        or finger_radius < 0
+    ):
+        raise ValueError(
+            "Pour staging offsets must be finite with nonnegative reserve."
+        )
+    pivot = (vertices.min(0) + vertices.max(0)) * 0.5
+    radius = float(np.linalg.norm(vertices - pivot, axis=1).max())
+    world_up = rotation @ upright
+    vertical = np.array([0.0, 0.0, 1.0])
+    cross = np.cross(world_up, vertical)
+    sine = np.linalg.norm(cross)
+    cosine = np.clip(world_up @ vertical, -1.0, 1.0)
+    if sine > 1e-8:
+        rotation = (
+            Rotation.from_rotvec(cross / sine * math.atan2(sine, cosine)).as_matrix()
+            @ rotation
+        )
+    elif cosine < 0:
+        transverse = rotation[:, int(np.argmin(np.abs(upright)))]
+        rotation = Rotation.from_rotvec(transverse * math.pi).as_matrix() @ rotation
+    offset = np.array([0.0, 0.0, reference_top + radius + finger_radius + 0.015])
+    relative = np.eye(4)
+    relative[:3, 3] = rotation.T @ offset - pivot
+    return relative, rotation, pivot
+
+
+def measure_pour_tilt(
+    vertices: torch.Tensor, poses: torch.Tensor
+) -> tuple[int, float, float, torch.Tensor]:
+    """Measure a recorded rigid tilt/restore window in the source numeric order.
+
+    Args:
+        vertices: Validated scaled CPU local vertices, shape ``(V, 3)``.
+        poses: Validated CPU pose window, shape ``(T, 4, 4)``, including its
+            original start and end states. Input precision is retained.
+
+    Returns:
+        First maximum-tilt row, maximum tilt in radians, final restore error in
+        radians and the gravity-top proxy's world point at that row. These are
+        geometric measurements without tilt thresholds or fluid conclusions.
+    """
+    up, pivot = gravity_top_frame(vertices.numpy(), poses[0, :3, :3].numpy())
+    up_world = poses[:, :3, :3] @ torch.as_tensor(up).to(poses)
+    tilts = torch.acos(up_world[:, 2].clamp(-1, 1))
+    peak = int(tilts.argmax())
+    anchor = poses[peak, :3, :3] @ torch.as_tensor(pivot).to(poses) + poses[peak, :3, 3]
+    return peak, float(tilts[peak]), float(tilts[-1]), anchor
+
+
+def measure_pour_receiver(
+    anchor: torch.Tensor,
+    vertices: torch.Tensor,
+    triangles: torch.Tensor,
+    pose: torch.Tensor,
+) -> tuple[float, float, bool]:
+    """Measure a source proxy against its observed receiver mesh projection.
+
+    Args:
+        anchor: Observed CPU world point, shape ``(3,)``.
+        vertices: Validated scaled CPU receiver vertices, shape ``(V, 3)``.
+        triangles: Original CPU triangle indices, shape ``(F, 3)``.
+        pose: Receiver's validated CPU world pose at the same selected slot.
+
+    Returns:
+        XY projection distance, height above the receiver's maximum world Z and
+        exact projected coverage. Original Torch precision is retained before
+        the source-compatible float64 triangle union. No semantic verdict is made.
+    """
+    from shapely.geometry import Point
+    from .projection import triangle_mesh_xy_projection
+
+    world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
+    projection = triangle_mesh_xy_projection(world.numpy(), triangles.numpy())
+    if projection.is_empty or not projection.is_valid:
+        raise ValueError("Pour receiver has no valid native mesh projection.")
+    point = Point(anchor[:2].tolist())
+    return (
+        float(projection.distance(point)),
+        float(anchor[2] - world[:, 2].max()),
+        bool(projection.covers(point)),
+    )

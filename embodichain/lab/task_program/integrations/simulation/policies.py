@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.sensors.base_sensor import BaseSensor
     from embodichain.lab.sim.sensors.support_observation import (
         SupportControlClock,
+        NativeSupportResult,
         SupportObservationRegistry,
     )
 
@@ -365,6 +366,32 @@ class SimulationSegmentPolicyPort:
             raise ValueError(
                 "Observation capture belongs to another runtime/session clock."
             )
+
+    def capture_support_observation(
+        self, preset_id: str, *, clock: SupportControlClock
+    ) -> NativeSupportResult:
+        """Capture current support from this exact declared runtime session.
+
+        Args:
+            preset_id: Existing named condition in the sealed settle table.
+            clock: The requesting bridge's canonical clock object.
+
+        Returns:
+            Owned native support with explicit validity/error masks, using the
+            native rest-envelope COM tolerance. A policy-specific tolerance is
+            confined to that policy's historical measurement. No task predicate
+            or historical support is reconstructed here.
+
+        Raises:
+            RuntimeError: Runtime resources are closed.
+            ValueError: The preset has no support declaration or this session
+                no longer owns the observer's runtime clock binding.
+            KeyError: The preset is not registered.
+        """
+        self._require_open()
+        if self._condition_runtime is None:
+            raise ValueError("No native support condition is registered.")
+        return self._condition_runtime.capture_current_support(preset_id, clock=clock)
 
     def close_runtime_resources(self) -> None:
         """Mark condition sessions closed without destroying borrowed resources."""
@@ -1567,6 +1594,36 @@ class SimulationSegmentPolicyPort:
         if require_finite and not bool(torch.isfinite(pose).all().item()):
             raise ValueError(f"Rigid object {entity_id!r} pose must be finite.")
         return pose.clone()
+
+    def measure_support_geometry(
+        self,
+        preset_id: str,
+        *,
+        native_support: Mapping[str, Any],
+        object_pose: Any,
+        reference_pose: Any,
+    ) -> Mapping[str, Any]:
+        """Measure a captured support snapshot using the existing region geometry.
+
+        Args:
+            preset_id: Registered full-footprint support condition.
+            native_support: Owned current or recorded native support measurements.
+            object_pose: Matching observed payload poses, including exact historical slots.
+            reference_pose: Corresponding observed support poses.
+
+        Returns:
+            Owned footprint and contact-height measurements. This method samples
+            no contacts/live poses and computes no task acceptance decision.
+        """
+        self._require_open()
+        if self._condition_runtime is None:
+            raise ValueError("No support region condition is registered.")
+        return self._condition_runtime.measure_support_geometry(
+            preset_id,
+            native_support=native_support,
+            object_pose=object_pose,
+            reference_pose=reference_pose,
+        )
 
 
 __all__ = ["SimulationSettleMonitorCfg"]

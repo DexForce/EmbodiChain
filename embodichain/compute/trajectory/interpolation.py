@@ -27,6 +27,7 @@ __all__ = [
     "interpolate_minimum_jerk",
     "interpolate_with_distance",
     "interpolate_with_nums",
+    "interpolate_velocity_grid",
 ]
 
 _MAX_MINIMUM_JERK_INTERVALS = 10_000
@@ -489,3 +490,52 @@ def interpolate_with_nums(
         seg = p0 + (p1 - p0) * alpha
         segments.append(seg[:, 1:, :])
     return torch.cat(segments, dim=1)
+
+
+def interpolate_velocity_grid(
+    keys: torch.Tensor, samples: int, limits: torch.Tensor, dt: float
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Allocate fixed B1 intervals by each edge's slowest controlled joint.
+
+    Args:
+        keys: Ordered required joint keyframes ``(1,N,D)``, N at least two.
+        samples: Fixed output sample count; the duration is never increased.
+        limits: Positive per-joint speed limits ``(1,D)``.
+        dt: Positive fixed sample interval.
+
+    Returns:
+        Exact-endpoint interpolation and edge interval counts. Spare intervals
+        are distributed evenly, with the remainder assigned in input order.
+
+    Raises:
+        ValueError: If inputs are invalid or the original grid cannot meet limits.
+    """
+    if (
+        type(samples) is not int
+        or samples < 2
+        or keys.ndim != 3
+        or keys.shape[0] != 1
+        or keys.shape[1] < 2
+        or limits.shape != (1, keys.shape[-1])
+        or not torch.isfinite(keys).all()
+        or not torch.isfinite(limits).all()
+        or (limits <= 0).any()
+        or not math.isfinite(dt)
+        or dt <= 0
+    ):
+        raise ValueError("Place phase requires finite single-row keys, limits and dt.")
+    intervals = (
+        torch.ceil(
+            ((keys[:, 1:] - keys[:, :-1]).abs() / (limits[:, None] * dt)).amax(-1)[0]
+        )
+        .to(torch.int64)
+        .clamp_min(1)
+    )
+    spare = samples - 1 - int(intervals.sum())
+    if spare < 0:
+        raise ValueError("Place phase cannot fit the original duration at its limits.")
+    intervals += spare // intervals.numel()
+    intervals[: spare % intervals.numel()] += 1
+    values = interpolate_with_nums(keys, intervals, device=keys.device)
+    values[:, intervals.cumsum(0)] = keys[:, 1:]
+    return values, intervals
