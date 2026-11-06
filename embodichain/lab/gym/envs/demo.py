@@ -815,6 +815,7 @@ def execute_demo_episode(
     should_stop: StopPredicate | None = None,
     progress: ProgressWrapper | None = None,
     segments: Iterable[DemoSegment] | None = None,
+    on_segment_completed: Callable[[DemoSegmentResult], None] | None = None,
     **plan_kwargs: Any,
 ) -> DemoEpisodeResult:
     """Plan and execute every segment in one environment episode.
@@ -838,12 +839,18 @@ def execute_demo_episode(
             instruction fallback, execution, and recording. An empty iterable
             produces an empty-plan failure. Otherwise planning methods are
             selected as usual.
+        on_segment_completed: Optional read-only boundary observer called after
+            ordinary recording and before requesting the next segment, including
+            failed/cancelled results constructed by the normal executor path.
+            Callback exceptions propagate; it must not step or reset the environment.
         **plan_kwargs: Arguments forwarded to the task's planning method.
 
     Returns:
         A :class:`DemoEpisodeResult` describing segment spans and terminal
         state.
     """
+    if on_segment_completed is not None and not callable(on_segment_completed):
+        raise TypeError("on_segment_completed must be callable or None.")
     if execution_cfg is None:
         execution_cfg = DemoExecutionCfg()
     elif not isinstance(execution_cfg, DemoExecutionCfg):
@@ -1257,6 +1264,8 @@ def execute_demo_episode(
             segment_results.append(segment_result)
             if end_segment is not None:
                 end_segment(result=segment_result)
+            if on_segment_completed is not None:
+                on_segment_completed(segment_result)
 
             if segment_reason is not None or not any(active):
                 break
