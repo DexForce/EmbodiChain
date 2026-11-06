@@ -26,11 +26,13 @@ from embodichain.gen_sim.task_spec import (
     MilestoneSpec,
     canonical_hash,
 )
-from embodichain.gen_sim.task_spec.coordinated_evidence import (
+from embodichain.lab.task_program.integrations.evidence.coordinated_evidence import (
     CoordinatedHoldEvidenceBinding,
-    evaluate_coordinated_hold_evidence,
 )
-from embodichain.gen_sim.task_spec._coordinated_evidence import record
+from ._evaluation import evaluate_coordinated_hold_evidence
+from embodichain.lab.task_program.integrations.evidence._coordinated_evidence import (
+    record,
+)
 
 _SOURCE = json.loads(
     (Path(__file__).parent / "data/coordinated_source_reference.json").read_text()
@@ -181,7 +183,11 @@ def test_source_dual_attachment_and_hold_outcomes(final, raw):
         metrics["tcp_poses"],
         metrics["fresh_grips"],
     )
-    assert canonical_hash(computed) == canonical_hash(original)
+    computed.pop("_normalized_facts")
+    assert canonical_hash(computed) == canonical_hash(
+        {key: value for key, value in original.items() if key != "accepted"}
+    )
+    assert outcome.observed == original["accepted"][0]
 
 
 @pytest.mark.parametrize(
@@ -240,9 +246,7 @@ def test_valid_loss_of_one_grip_is_negative():
 
 
 def test_coordinated_common_report_preserves_exact_declarations():
-    from embodichain.gen_sim.task_spec.evidence_report import (
-        evaluate_physical_evidence_report,
-    )
+    from ._evaluation import evaluate_physical_evidence_report
 
     spec, binding, evidence, program = _case(raw=True)
     normalized = CoordinatedHoldEvidenceBinding.from_dict(binding.to_dict())
@@ -253,12 +257,12 @@ def test_coordinated_common_report_preserves_exact_declarations():
 
 
 def test_coordinated_request_keeps_fresh_current_grips_for_recorded_boundary():
-    from embodichain.gen_sim.task_spec.observation_requests import (
+    from embodichain.lab.task_program.integrations.evidence.observation_requests import (
         held_observation_request,
     )
 
     spec, binding, evidence, program = _case(final=False, raw=False)
-    request = held_observation_request(spec, binding, evidence, program=program)
+    request = held_observation_request(binding, evidence, program=program)
     assert request["pose_observation_kind"] == "final"
     assert request["motion_parts"] == ["left_arm", "right_arm"]
     assert [item["control_part"] for item in request["grips"]] == [

@@ -23,7 +23,7 @@ from copy import deepcopy
 import math
 from typing import Any
 
-from .canonicalization import canonical_hash
+from embodichain._json_contract import canonical_hash
 from ._held_evidence import (
     delta,
     flags,
@@ -225,26 +225,20 @@ def record(
         "right",
     }:
         raise ValueError("E5 requires one native pose and grip observation per hand.")
-    accepted = torch.ones(count, dtype=torch.bool)
     translations, rotations, owned_tcp = {}, {}, {}
+    grip_values = {}
     for role in ("left", "right"):
         reference, part = slots[role]
         tcp = matrix(tcp_poses[part], count)
         translation, rotation = delta(pose_inv(object_pose) @ tcp, reference)
-        accepted &= (translation <= cfg.translation_drift) & (
-            rotation <= cfg.rotation_drift
-        )
-        accepted &= torch.tensor(
-            grip_flags(
-                uid=uid,
-                resource=resources[role],
-                sample=grips[role],
-                terminal=terminal,
-                frames=frames(segment, count),
-                dt=dt,
-                count=count,
-            ),
-            dtype=torch.bool,
+        grip_values[role] = grip_flags(
+            uid=uid,
+            resource=resources[role],
+            sample=grips[role],
+            terminal=terminal,
+            frames=frames(segment, count),
+            dt=dt,
+            count=count,
         )
         owned_tcp[part] = tcp.tolist()
         translations[role], rotations[role] = translation.tolist(), rotation.tolist()
@@ -258,7 +252,6 @@ def record(
     position = torch.linalg.vector_norm(
         object_pose[:, :3, 3] - object_pose.new_tensor(cfg.target_position), dim=-1
     )
-    accepted &= position <= cfg.position_tolerance
     reported = torch.as_tensor(
         policy["result"]["measurements"]["position_error"], dtype=position.dtype
     )
@@ -268,7 +261,24 @@ def record(
         "group_id": operation["operation_id"],
         "uid": uid,
         "part_id": None,
-        "accepted": accepted.tolist(),
+        "_normalized_facts": dict(
+            attachment_translation=[
+                [translations[role][row] for role in ("left", "right")]
+                for row in range(count)
+            ],
+            attachment_rotation=[
+                [rotations[role][row] for role in ("left", "right")]
+                for row in range(count)
+            ],
+            grips=[
+                [grip_values[role][row] for role in ("left", "right")]
+                for row in range(count)
+            ],
+            object_position=object_pose[:, :3, 3].tolist(),
+            object_rotation=object_pose[:, :3, :3].tolist(),
+            observed_seconds=[policy["result"]["elapsed_seconds"]] * count,
+            stable_seconds=list(policy["result"]["stable_seconds"]),
+        ),
         "measurements": {
             "scope": "native_coordinated_hold",
             "predicate": "held_by_both_grippers",

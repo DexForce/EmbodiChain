@@ -20,14 +20,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 import math
 from typing import Any
-from .canonicalization import canonical_hash
+from embodichain._json_contract import canonical_hash
 from ._held_evidence import number, flags
 
 __all__: list[str] = []
 
 
 def validate_sampled_identity(binding: Any) -> None:
-    from .evidence import _digest, _identifier
+    from ._values import _digest, _identifier
 
     identity = binding.sampled_contact_identity
     if not isinstance(identity, Mapping) or set(identity) != {
@@ -223,7 +223,7 @@ def prepare_sampled_support(
     if "boundary_frames" in snapshot and snapshot["boundary_frames"] != ends:
         raise ValueError("Sampled support report has another completed boundary.")
     end = ends[0]
-    from .evidence import sampled_support_window
+    from .observation_requests import _sampled_support_window as sampled_support_window
 
     starts, _ = sampled_support_window(binding, ends)
     start = starts[0]

@@ -28,13 +28,11 @@ import pytest
 from embodichain.gen_sim.task_spec import TaskSpec, canonical_hash, EvaluationStatus
 from embodichain.gen_sim.task_spec.pour_evidence import (
     PourEvidenceBinding,
-    evaluate_pour_evidence,
 )
 
 _SOURCE = json.loads(
     (
-        Path(__file__).resolve().parents[2]
-        / "gym/envs/task_program/data/pour_observation_source_reference.json"
+        Path(__file__).parents[1] / "data/pour_observation_source_reference.json"
     ).read_text()
 )
 
@@ -273,7 +271,7 @@ def test_pour_motion_proof_does_not_certify_a_fluid_predicate_or_resign_drift():
 
 
 def test_pour_binding_cold_import_and_decode_do_not_load_numeric_or_simulation_owners():
-    root = Path(__file__).resolve().parents[3]
+    root = Path(__file__).resolve().parents[5]
     data = _case()[1].to_dict()
     script = f"import sys;sys.path.insert(0,{str(root)!r});from embodichain.gen_sim.task_spec.pour_evidence import PourEvidenceBinding;PourEvidenceBinding.from_dict({data!r});assert not any(name=='torch' or name=='numpy' or name.startswith('embodichain.lab') for name in sys.modules)"
     result = subprocess.run(
@@ -284,9 +282,7 @@ def test_pour_binding_cold_import_and_decode_do_not_load_numeric_or_simulation_o
 
 @pytest.mark.parametrize("raw", [False, True])
 def test_pour_report_requires_independent_goal_and_milestone_proofs(raw):
-    from embodichain.gen_sim.task_spec.evidence_report import (
-        evaluate_physical_evidence_report,
-    )
+    from ._evaluation import evaluate_physical_evidence_report
 
     spec, goal, current, program = _case(raw=raw)
     _, milestone, past, _ = _case(raw=raw, past=True)
@@ -352,3 +348,6 @@ def test_raw_pour_retains_valid_rows_when_another_geometry_channel_is_unavailabl
         EvaluationStatus.SATISFIED,
         EvaluationStatus.UNAVAILABLE,
     ]
+
+
+from ._evaluation import evaluate_pour_evidence

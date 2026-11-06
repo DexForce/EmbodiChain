@@ -27,14 +27,15 @@ from embodichain.gen_sim.task_spec import (
     MilestoneSpec,
     canonical_hash,
 )
-from embodichain.gen_sim.task_spec.transport_evidence import (
+from embodichain.lab.task_program.integrations.evidence.transport_evidence import (
     CoordinatedTransportEvidenceBinding,
-    evaluate_coordinated_transport_evidence,
 )
+from ._evaluation import evaluate_coordinated_transport_evidence
 
 _SOURCE = json.loads(
     (
-        Path(__file__).parent / "data/transport_placement_source_reference.json"
+        Path(__file__).parents[4]
+        / "gen_sim/task_spec/data/transport_placement_source_reference.json"
     ).read_text()
 )
 
@@ -200,9 +201,7 @@ def _case(*, raw=False):
 def test_transport_event_retains_source_acquisition_after_release_without_final_hold(
     raw,
 ):
-    from embodichain.gen_sim.task_spec.evidence_report import (
-        evaluate_physical_evidence_report,
-    )
+    from ._evaluation import evaluate_physical_evidence_report
 
     spec, binding, evidence, program, _ = _case(raw=raw)
     outcome = evaluate_coordinated_transport_evidence(

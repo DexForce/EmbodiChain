@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import math
 from typing import Any
-from ._held_evidence import flags, number, matrix
+from ._evidence_values import flags, number, matrix
 
 __all__: list[str] = []
 _SUPPORT = 0.05
@@ -48,89 +48,6 @@ def validate_planar_geometry(binding: Any) -> None:
     _digest(value["program_fingerprint"], "program_fingerprint")
     if value["object_native_uid"] == value["reference_native_uid"]:
         raise ValueError("Planar native owners must be distinct.")
-
-
-def raw_planar_metrics(
-    binding: Any, snapshot: Mapping[str, Any], boundary: Mapping[str, Any]
-) -> dict[str, Any]:
-    from .canonicalization import canonical_hash
-
-    count = len(binding.env_ids)
-    if (
-        snapshot.get("schema_version") != "simulation.planar_observation/v1"
-        or snapshot.get("object_id") != binding.object_id
-        or snapshot.get("reference_id") != binding.reference_id
-        or snapshot.get("observation_kind") != binding.observation_kind
-        or snapshot.get("boundary_frames") != boundary["end_steps"]
-        or any(type(x) is not int for x in snapshot["boundary_frames"])
-    ):
-        raise ValueError(
-            "Planar geometry has another participant or observation boundary."
-        )
-    if any(
-        snapshot.get(key) != value or type(snapshot.get(key)) is not type(value)
-        for key, value in binding.planar_geometry.items()
-    ):
-        raise ValueError("Planar geometry has another native/program/mode identity.")
-    metrics = snapshot["native_planar"]
-    frame = snapshot["geometry_frame"]
-    number(frame["timestamp"])
-    if (
-        frame["env_ids"] != list(binding.env_ids)
-        or any(type(x) is not int for x in frame["env_ids"])
-        or type(frame["observation_revision"]) is not int
-        or frame["observation_revision"] < 0
-        or frame["clock_domain"] != "simulation_time"
-        or frame["revision_kind"] != "planar_geometry_acquisition"
-    ):
-        raise ValueError("Planar acquisition has another row/clock identity.")
-    columns = ["support_gap_m", "footprint_area_m2"] + (
-        ["outside_floor_area_m2"] if binding.planar_geometry["exact_silhouette"] else []
-    )
-    if snapshot["geometry_columns"] != columns:
-        raise ValueError("Planar acquisition columns differ from their declared mode.")
-    expected = {
-        "planar.geometry": [
-            [metrics[key][row] for key in columns] for row in range(count)
-        ],
-        "planar.full_footprint_inside": metrics["full_footprint_inside"],
-        "rigid.object_pose": metrics["object_pose"],
-        "rigid.reference_pose": metrics["reference_pose"],
-    }
-    if binding.planar_geometry["exact_silhouette"]:
-        expected.update(
-            {
-                "planar." + key: metrics[key]
-                for key in ("reference_has_raised_geometry", "reference_aabb_overlap")
-            }
-        )
-    for key, values in expected.items():
-        batch = frame["batches"][key]
-        if (
-            batch["evidence_id"] != key
-            or batch["env_ids"] != list(binding.env_ids)
-            or any(type(x) is not int for x in batch["env_ids"])
-            or type(batch["timestamp"]) not in (int, float)
-            or batch["timestamp"] != frame["timestamp"]
-            or type(batch["observation_revision"]) is not int
-            or batch["observation_revision"] != frame["observation_revision"]
-            or batch["acquisition_errors"] != [None] * count
-            or canonical_hash(batch["values"]) != canonical_hash(values)
-        ):
-            raise ValueError("Planar geometry channel is missing or inconsistent.")
-        flags(batch["valid"], count)
-        dtype = batch["value_dtype"]
-        if dtype not in (
-            {"torch.float32", "torch.float64"}
-            if key.startswith("rigid.")
-            else {"torch.float64"} if key == "planar.geometry" else {"torch.bool"}
-        ):
-            raise ValueError("Planar acquisition has another source dtype.")
-    return {
-        **metrics,
-        "support_tolerance_m": _SUPPORT,
-        "penetration_tolerance_m": _PENETRATION,
-    }
 
 
 def planar_flags(

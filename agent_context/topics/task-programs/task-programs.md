@@ -36,16 +36,24 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Parallel scheduling and safety boundary | `embodichain/lab/task_program/runtime/parallel.py`, `parallel_executor.py` |
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
 | Immutable catalog and extension declarations | `embodichain/lab/task_program/integrations/catalog.py`, `extensions.py` |
-| Program-bound occurrence policy selection | `embodichain/lab/task_program/integrations/invocation_policy.py` |
+| Program-bound call and post-policy preset selection | `embodichain/lab/task_program/integrations/invocation_policy.py` |
+| Bridge-owned runtime service identity | `embodichain/lab/task_program/integrations/runtime_services.py` |
+| Declared control operations, physical policy and grounding | `embodichain/lab/task_program/integrations/simulation/control_assembly.py`, `control_policy.py`, `control_lowering.py` |
 | Environment adapter and runtime assembly | `embodichain/lab/task_program/integrations/environment.py` |
 | Expansion source adapter, candidate transform and records | `embodichain/lab/task_program/integrations/expansion.py` |
 | Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
 | Public configured deployment composition | `embodichain/lab/task_program/integrations/composition.py` |
 | Component resolution and policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
+| Native planning declarations, providers and one-compiler continuations | `embodichain/lab/task_program/integrations/simulation/planning_services.py`, `pick_closing.py`, `measured_rigid.py`, `place_continuation.py`, `released_continuation.py` |
+| Route-bound retained alignment, released clearance and paired idle lowering | `embodichain/lab/task_program/integrations/simulation/held_alignment.py`, `release_clearance.py`, `idle_clearance.py` |
+| Declared geometry planning services and native receiver assembly | `embodichain/lab/task_program/integrations/simulation/planning_services.py`, `handover_scene.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
+| Pure source physical reset/cadence declarations | `embodichain/lab/task_program/integrations/simulation/source_deployment.py` |
 | Physical acquisition, history and support observations | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py`, `support_observation.py` |
 | Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
+| Offline receipt/query/actor normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
+| SDK-independent shared physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
 | Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
@@ -53,7 +61,16 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | MLLM untrusted-JSON frontend | `embodichain/agents/mllm/task_program.py` |
 
 The core `language`, `semantics`, `compiler`, and `runtime` packages must not
-import Gym. Provider-specific dependencies are confined to `integrations`.
+import Gym. Provider-specific dependencies are confined to `integrations`. Both public
+package roots resolve exports lazily, allowing offline evidence declarations to
+load without a simulator or a normative frontend.
+
+The offline evidence adapter validates raw execution, actor, query, clock and
+release protocols, then emits source-bound measurements through the existing
+physical frame/batch contract. It imports neither TaskSpec nor Task Engine and
+decides no task predicate. Held observation requests select exact parts and fresh
+query revisions here. Normative criteria are supplied separately by the consumer;
+mutable runtime receipts never define task acceptance thresholds.
 Gym retains only lifecycle coupling; it does not own schemas, compilers,
 catalogs, lowerers, or simulation assembly.
 
@@ -77,6 +94,15 @@ generates no controller action. Live grounding occurs only after
 `TaskProgramEnvironmentAdapter` matches the compiled scene/profile/catalog
 snapshot to the exact integration registration.
 
+Catalog fingerprints omit exact inactive defaults only for named migration
+extensions. Existing schema fields, nondefault choices and realized skill
+capabilities remain part of the registration identity.
+
+Catalog preflight checks the effective Place option/recovery combination after
+occurrence preset selection. The same waypoint-scope rule is used by Atomic
+planning; a contradictory selected declaration rejects without live resources.
+Unused preset templates do not change ordinary calls.
+
 Expansion is optional and episode-scoped, not part of compilation.
 `EmbodiedEnv.create_demo_segments()` passes a separate Expansion Profile and
 candidate ordinal into a fresh bridge. After a matching Semantic Call is
@@ -89,6 +115,17 @@ Source-bound bridges request independent session state from the simulation
 post-policy/validator port while retaining its registered scene bindings. This
 isolates lift baselines and policy results across episodes. Native bridges and
 ports without the optional session factory retain their existing ownership.
+
+Declared Press/Twist controls assemble real per-bridge operations before runtime-bound
+lowerers. The factory uses the public initialized EpisodeContext, the ordinary
+sensor suite and one acknowledged bridge clock. Catalog preflight validates exact
+sequential targets, occurrence budgets and physical post-policy phases. Source
+prismatic calls also bind their authored endpoints, typed recovery and exact
+fixed-grid segment policies during this static preflight, before live assembly.
+Twist and
+prismatic registries connect the existing Atomic lifecycle port; bridge cleanup
+closes owned hooks/cursors without issuing or acknowledging commands. Source control
+bridges keep their explicit B1 scope and reject external nominal plans and expansion.
 
 Simulation settling defaults to reported native velocities. An explicit
 `simulation.policies.SimulationSettleMonitorCfg(measurement="pose_delta")`

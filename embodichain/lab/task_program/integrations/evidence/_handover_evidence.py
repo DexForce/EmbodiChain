@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from types import SimpleNamespace
 import math
 from typing import Any
-from .canonicalization import canonical_hash
+from embodichain._json_contract import canonical_hash
 from ._held_evidence import (
     one as _one,
     flags as _flags,
@@ -32,7 +32,7 @@ from ._held_evidence import (
     slot as _slot,
     frames as _frames,
 )
-from .condition_evidence import _axis
+from ._values import _axis
 
 __all__: list[str] = []
 
@@ -94,7 +94,7 @@ def hold_condition(
         target_position=None,
         position_tolerance=0.04,
     )
-    from .evidence import _identifier
+    from ._values import _identifier
 
     _identifier(value.get("entity"), "hold entity")
     # Other stability modes are not silently interpreted as a held-axis proof.
@@ -427,19 +427,6 @@ def hold_records(
         raise ValueError("A later execution cannot certify an earlier final E4 hold.")
     relative = pose_inv(object_pose) @ tcp_pose
     translation, rotation = _delta(relative, reference)
-    params = terminal["monitor"]["resolved_params"]
-    distance = (
-        cfg.translation_drift
-        if cfg
-        else _number(params["attached_translation_threshold"])
-    )
-    angle = (
-        cfg.rotation_drift if cfg else _number(params["attached_rotation_threshold"])
-    )
-    if not bool(((translation <= distance) & (rotation <= angle)).all()):
-        raise ValueError(
-            "Native E4 receiver pose differs from its verified attachment."
-        )
     metrics.update(
         scope="native_handover_hold",
         predicate="held",
@@ -452,6 +439,18 @@ def hold_records(
         motion_part=motion_part,
     )
     result = {"held": {**record, "measurements": metrics}}
+    facts = dict(
+        attachment_translation=[[float(x)] for x in translation],
+        attachment_rotation=[[float(x)] for x in rotation],
+        object_position=object_pose[:, :3, 3].tolist(),
+        object_rotation=object_pose[:, :3, :3].tolist(),
+        observed_seconds=[elapsed] * count,
+        stable_seconds=(
+            list(policy["result"]["stable_seconds"]) if policy else [0.0] * count
+        ),
+        grips=[[True] for _ in range(count)],
+    )
+    result["held"]["_normalized_facts"] = facts
     if cfg is not None:
         reported = policy["result"]["measurements"]
         attachment = torch.as_tensor(
@@ -473,13 +472,13 @@ def hold_records(
                 measured.shape != alignment.shape
                 or not torch.isfinite(measured).all()
                 or not torch.allclose(measured, alignment, atol=1e-4, rtol=0)
-                or not (alignment >= cfg.minimum_alignment).all()
             ):
                 raise ValueError(
                     "E4 boundary orientation differs from its native hold."
                 )
             result["orientation"] = {
                 **record,
+                "_normalized_facts": facts,
                 "measurements": {
                     **metrics,
                     "predicate": "orientation",

@@ -1123,9 +1123,7 @@ invariants. The ordinary TaskSpec evaluator remains the certificate authority.
 
 .. autofunction:: evaluate_placement_evidence_report
 
-.. autofunction:: embodichain.gen_sim.task_spec.evidence.directional_observation_axes
 
-.. autofunction:: embodichain.gen_sim.task_spec.evidence.sampled_support_window
 
 embodichain.gen_sim.task_spec.evidence_report
 ---------------------------------------------
@@ -4248,62 +4246,25 @@ support for unrelated held/transport evidence.
 embodichain.gen_sim.task_spec.coordinated_evidence
 --------------------------------------------------
 
-The coordinated-hold binding verifies the original single-object
-``held_by_both_grippers`` contract. It rechecks both resource attachments,
-declared hold criteria, exact execution boundary and current target-filtered
-grips where the source requires them. Raw pose/grip acquisition remains distinct
-from historical receipt replay; missing channels are unavailable and valid
-measured negatives remain failed. It does not establish transported cargo,
-placement or fluid transfer.
+Normalized coordinated acceptance uses the sealed manipulation binding.
+Lab validates raw actor/query/execution protocols before this evaluator runs.
+No runtime monitor output defines normative criteria.
 
 .. currentmodule:: embodichain.gen_sim.task_spec.coordinated_evidence
-
-.. autosummary::
-
-   CoordinatedHoldEvidenceBinding
-   evaluate_coordinated_hold_evidence
-
-.. autoclass:: CoordinatedHoldEvidenceBinding
-   :members:
 
 .. autofunction:: evaluate_coordinated_hold_evidence
 
 embodichain.gen_sim.task_spec.handover_evidence
 -----------------------------------------------
 
-These data-only proofs seal source/destination resources, transfer/boundary
-occurrences, cadence, native identities and the unchanged TaskSpec/program.
-Transfer events, final receiver holding and recorded milestones retain their
-separate source criteria. Fresh raw receiver poses/grips require their exact
-acquisition rows, episodes, clocks and query ordinal; old traces cannot replace
-missing facts. ``one`` and finite ``count=1`` are supported while larger counts
-and an unobserved universe remain unavailable. No live lowerer or Lab factory
-is imported for qualification.
+Normalized handover acceptance uses the sealed manipulation binding.
+Lab validates raw actor/query/execution protocols before this evaluator runs.
+No runtime monitor output defines normative criteria.
 
 .. currentmodule:: embodichain.gen_sim.task_spec.handover_evidence
 
-.. autosummary::
-
-   HandOverEvidenceBinding
-   evaluate_handover_evidence
-
-.. autoclass:: HandOverEvidenceBinding
-   :members:
-
 .. autofunction:: evaluate_handover_evidence
 
-embodichain.gen_sim.task_spec.observation_requests
---------------------------------------------------
-
-Request projection validates the normative/program identity and original
-execution receipts before returning plain boundary, motion-part and fresh-grip
-query declarations. Event-only transfer requests no pose/grip capture. Recorded
-coordinated boundaries retain the source requirement for fresh current grip
-facts. This function performs no physical read and changes no success rule.
-
-.. currentmodule:: embodichain.gen_sim.task_spec.observation_requests
-
-.. autofunction:: held_observation_request
 
 embodichain.gen_sim.task_spec.placement_group_evidence
 ------------------------------------------------------
@@ -4321,19 +4282,227 @@ facts; Lab owns collection and the frontend owns semantic projection.
 .. autofunction:: evaluate_placement_group_evidence
 
 embodichain.gen_sim.task_spec.transport_evidence
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+------------------------------------------------
 
-This verifier qualifies an occurrence-bound recorded acquisition event. It keeps
-that event separate from a final held state, checks the declared completed
-execution prefix and native/episode/time identities, and retains unavailable
-results for missing evidence. It acquires no physical data and does not certify
-subsequent placement or liquid transfer. The source B=1/env0 boundary remains.
+Normalized transport acceptance uses the sealed manipulation binding.
+Lab validates raw actor/query/execution protocols before this evaluator runs.
+No runtime monitor output defines normative criteria.
 
 .. currentmodule:: embodichain.gen_sim.task_spec.transport_evidence
-
-.. autoclass:: CoordinatedTransportEvidenceBinding
-   :members:
 
 .. autofunction:: evaluate_coordinated_transport_evidence
 
 
+
+embodichain.compute.geometry.directional
+----------------------------------------
+
+Fixed world-axis relation operands are shared by geometric observation adapters.
+
+.. currentmodule:: embodichain.compute.geometry.directional
+
+.. autosummary::
+
+   DIRECTIONAL_RELATION_AXES
+
+.. autodata:: DIRECTIONAL_RELATION_AXES
+
+
+embodichain.gen_sim.task_spec.manipulation_evidence
+---------------------------------------------------
+
+Explicit task criteria are compared with normalized measurements, independently of execution-monitor thresholds. Missing evidence remains unavailable.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.manipulation_evidence
+
+.. autosummary::
+
+   HoldAcceptanceCriteria
+   ManipulationEvidenceBinding
+   evaluate_manipulation_evidence
+
+.. autoclass:: HoldAcceptanceCriteria
+   :members:
+
+.. autoclass:: ManipulationEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_manipulation_evidence
+
+
+embodichain.lab.evidence
+------------------------
+
+Owned physical values preserve explicit environment rows, validity, errors and observation revisions without importing a simulator.
+
+.. currentmodule:: embodichain.lab.evidence
+
+.. autosummary::
+
+   PhysicalObservationStamp
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+   PhysicalEvidenceRequest
+
+.. autoclass:: PhysicalObservationStamp
+   :members:
+
+
+.. autoclass:: PhysicalEvidenceBatch
+   :members:
+
+.. autoclass:: PhysicalEvidenceFrame
+   :members:
+
+.. autoclass:: PhysicalEvidenceRequest
+   :members:
+
+
+embodichain.lab.task_program.integrations.evidence
+--------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   normalize_handover_evidence
+   CoordinatedHoldEvidenceBinding
+   normalize_coordinated_hold_evidence
+   CoordinatedTransportEvidenceBinding
+   normalize_coordinated_transport_evidence
+   held_observation_request
+   resolve_hold_observation_condition
+   sampled_support_window
+   directional_observation_axes
+   normalize_placement_evidence
+   normalize_pour_release_evidence
+   validate_placement_declaration
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_handover_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_hold_evidence
+
+.. autoclass:: CoordinatedTransportEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_transport_evidence
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: resolve_hold_observation_condition
+
+.. autofunction:: sampled_support_window
+
+.. autofunction:: directional_observation_axes
+
+.. autofunction:: normalize_placement_evidence
+
+.. autofunction:: normalize_pour_release_evidence
+
+.. autofunction:: validate_placement_declaration
+
+
+embodichain.lab.task_program.integrations.evidence.coordinated_evidence
+-----------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.coordinated_evidence
+
+.. autosummary::
+
+   CoordinatedHoldEvidenceBinding
+   normalize_coordinated_hold_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_hold_evidence
+
+
+embodichain.lab.task_program.integrations.evidence.handover_evidence
+--------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.handover_evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   normalize_handover_evidence
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_handover_evidence
+
+
+embodichain.lab.task_program.integrations.evidence.observation_requests
+-----------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.observation_requests
+
+.. autosummary::
+
+   resolve_hold_observation_condition
+   held_observation_request
+   sampled_support_window
+   directional_observation_axes
+
+.. autofunction:: resolve_hold_observation_condition
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: sampled_support_window
+
+.. autofunction:: directional_observation_axes
+
+
+embodichain.lab.task_program.integrations.evidence.placement_evidence
+---------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.placement_evidence
+
+.. autosummary::
+
+   normalize_placement_evidence
+   normalize_pour_release_evidence
+   validate_placement_declaration
+
+.. autofunction:: normalize_placement_evidence
+
+.. autofunction:: normalize_pour_release_evidence
+
+.. autofunction:: validate_placement_declaration
+
+
+embodichain.lab.task_program.integrations.evidence.transport_evidence
+---------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.transport_evidence
+
+.. autosummary::
+
+   CoordinatedTransportEvidenceBinding
+   normalize_coordinated_transport_evidence
+
+.. autoclass:: CoordinatedTransportEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_transport_evidence
