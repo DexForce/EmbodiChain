@@ -308,3 +308,54 @@ execution, report evaluation and bundle publication remain separate consumers.
 
 .. automodule:: embodichain.gen_sim.task_engine.orchestration.workflow_artifacts
    :members:
+
+Semantic planning and existing-scene adaptation
+-----------------------------------------------
+
+Plan canonical Semantic Call recipes from explicit task candidates and role
+bindings, and adapt existing source scenes through declared manifests and
+conservative relationship graphs. Model calls remain behind caller interfaces;
+unknown geometry, support and orientation remain explicitly unknown rather than
+physical success. Shared Scene/Compute owns source measurements and numeric
+geometry; this frontend selects semantic roles and declarations.
+
+These APIs do not construct Atomic Skills, planners or simulators. Scene
+finalization may inspect exported files and publish owned audit data. Coordinator,
+bundle/CLI execution and runtime report aggregation are separate consumers.
+
+.. automodule:: embodichain.gen_sim.task_engine.semantic_planner
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.orchestration.scene_inventory
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.orchestration.grounding
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.orchestration.scene_source
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.orchestration.scene_adapter
+   :members:
+
+The scene package re-exports the same static manifest and conservative graph
+contracts for callers composing an adapter; their canonical descriptions follow.
+
+.. automodule:: embodichain.gen_sim.task_engine.scene
+   :members:
+   :no-index:
+
+.. automodule:: embodichain.gen_sim.task_engine.scene.contracts
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.scene.conservative_graph
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.scene.scene_engine_v1
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.scene.final_inspection
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.scene_backend
+   :members:

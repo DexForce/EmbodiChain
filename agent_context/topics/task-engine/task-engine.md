@@ -185,3 +185,19 @@ orchestration/workflow_artifacts.py owns safe run JSON and history persistence.
 It rejects writes below sealed bundle markers, including symbolic-link paths,
 and preserves interrupted histories. Workflow scheduling and bundle/runtime
 integration consume these contracts in their own layer.
+
+## Semantic planning and source scene adaptation
+
+semantic_planner.py and _semantic_recipes.py turn validated candidates and role
+bindings into canonical declarations, preserving complete task recipes and
+bounded control occurrence counts. They do not implement motion or atomic skills.
+orchestration/scene_inventory.py and grounding.py own declared scene matching and
+role/part grounding. scene_source.py fingerprints source inputs, while
+scene_adapter.py composes source selection and conservative scene evidence.
+
+The scene package owns static manifest validation, conservative relationship
+graphs, the existing Scene Engine adapter and final exported-source inspection.
+scene_backend.py consumes these descriptions and safe output/request contracts.
+Missing geometry remains unmeasured; no source graph or proposal establishes
+native physical success. Coordinator/runtime and bundle publication stay with
+their integration layer.

@@ -24,8 +24,6 @@ import json
 import re
 from typing import Any, Final, TypeAlias
 
-from embodichain.lab.task_program.language import decode_task_program
-
 from .contracts import canonical_hash
 
 __all__ = [
@@ -233,6 +231,8 @@ def semantic_task_graph_hash(value: Mapping[str, Any]) -> str:
 def _decode_calls(
     targets: Mapping[str, Any], calls: Sequence[Mapping[str, Any]]
 ) -> None:
+    from embodichain.lab.task_program.language import decode_task_program
+
     items = [{"kind": "invoke", "call": deepcopy(dict(call))} for call in calls]
     decode_task_program(
         {
