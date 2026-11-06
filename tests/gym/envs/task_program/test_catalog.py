@@ -688,6 +688,75 @@ def test_catalog_decodes_compiles_and_links_without_simulation() -> None:
     assert tuple(compiled.iter_segments())[0].calls[0].call.semantic_id == "pick"
 
 
+@pytest.mark.parametrize(
+    "qualified,recover,selection",
+    [
+        (False, False, "default"),
+        (True, True, "default"),
+        (False, True, "default"),
+        (False, True, "unused"),
+        (False, True, "occurrence"),
+    ],
+)
+def test_selected_place_recovery_and_waypoint_scope_agree_before_runtime(
+    qualified: bool, recover: bool, selection: str
+) -> None:
+    from embodichain.lab.sim.atomic_actions import (
+        PlaceOptions,
+        PlacePlanningRecovery,
+        RecoveryPolicy,
+    )
+
+    binding = create_cube_robot_profile_binding()
+    original = binding.declare().presets[_CUBE_RUNTIME_PRESET_ID]
+    preset = SkillPolicyPreset(
+        _CUBE_RUNTIME_PRESET_ID if selection == "default" else "waypoint_override",
+        action_option_templates={
+            **original.action_option_templates,
+            "place": PlaceOptions(
+                preserve_current_object_orientation=True,
+                linear_segments=True,
+                qualify_required_waypoints=qualified,
+            ),
+        },
+        effect_assurance=original.effect_assurance,
+        recovery_policy=RecoveryPolicy(
+            planning_recovery=PlacePlanningRecovery() if recover else None
+        ),
+    )
+    profile = replace(
+        binding, presets=(preset,) if selection == "default" else (original, preset)
+    ).declare()
+    catalog = replace(
+        _place_relation_catalog(install_grounder_key=True), robot_profile=profile
+    )
+    payload = _place_relation_payload()
+    program = decode_task_program(payload, validation_context=catalog)
+    if selection == "occurrence":
+        from embodichain.lab.task_program.integrations import (
+            InvocationPolicyBinding,
+            task_program_fingerprint,
+        )
+
+        compiled = TaskProgramCompiler(catalog.scene).compile(program)
+        segment = next(iter(compiled.iter_segments()))
+        catalog = replace(
+            catalog,
+            invocation_policy_bindings=(
+                InvocationPolicyBinding(
+                    program_fingerprint=task_program_fingerprint(compiled),
+                    invocation_id=f"{compiled.program_id}/{segment.segment_id}:0",
+                    preset_id=preset.preset_id,
+                ),
+            ),
+        )
+    if selection != "unused" and recover and not qualified:
+        with pytest.raises(ValueError, match="waypoint.*recovery"):
+            catalog.preflight(program)
+    else:
+        assert catalog.preflight(program).program_id == program.program_id
+
+
 def test_catalog_declares_builtin_endpoint_and_ordered_transport_contracts() -> None:
     """The standard provider-free catalog contains its exact built-in wiring."""
     catalog = _registration().catalog

@@ -4760,6 +4760,7 @@ def test_inside_landing_services_decode_preflight_and_preserve_default_identity(
         "revision": 1,
         "inside_world_yaw": True,
     }
+    preset["action_options"]["place"]["qualify_required_waypoints"] = True
     services = payload.setdefault("runtime_services", {})
     services["invocation_policy_bindings"] = [
         {
