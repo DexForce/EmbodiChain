@@ -4491,6 +4491,13 @@ device, float64 matrix channels and final native-agreement check. Original raw
 availability and temporal metadata remain authoritative; no new sensor sample
 or inferred task outcome is produced. Unavailable history fails explicitly.
 
+``capture_planar_placement`` and ``capture_directional_placement`` likewise use
+explicit current or exact historical boundaries. Their PhysicalEvidenceFrame
+channels preserve the original hull/triangle modes, signed world-axis gaps and
+native row identity. Historical links require the actual completed named policy
+observation. Missing raw poses or original times remain unavailable; geometry
+measurements cannot establish contact support or certify a task predicate.
+
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
 
 .. autoclass:: SimulationStateObservationCollector
