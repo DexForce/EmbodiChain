@@ -564,6 +564,7 @@ class CoordinatedPickment(
         semantics: ObjectSemantics,
         *,
         resume: bool,
+        retain: bool,
     ) -> torch.Tensor:
         """Reject conflicting participant occupancy and additional object holders."""
         keys = {resources.left_task_state_key, resources.right_task_state_key}
@@ -576,6 +577,16 @@ class CoordinatedPickment(
                     return torch.zeros_like(valid)
                 valid &= mask
             else:
+                # TaskState stores one object identity per resource across the
+                # batch. A new retained grasp cannot coexist with a different
+                # object kept by a rejected row on the same resource.
+                if (
+                    retain
+                    and held is not None
+                    and mask.any()
+                    and not _same_object_identity(held.semantics, semantics)
+                ):
+                    return torch.zeros_like(valid)
                 valid &= ~mask
         for key, held in context.task.held_objects.items():
             if key not in keys and _same_object_identity(held.semantics, semantics):
@@ -614,9 +625,10 @@ class CoordinatedPickment(
         ).to(right.object_to_eef)
         left_object = left_pose @ pose_inv(left.object_to_eef)
         right_object = right_pose @ pose_inv(right.object_to_eef)
+        comparison_dtype = torch.promote_types(left_object.dtype, right_object.dtype)
         eligible = eligible & torch.isclose(
-            left_object,
-            right_object,
+            left_object.to(dtype=comparison_dtype),
+            right_object.to(dtype=comparison_dtype),
             atol=1e-3,
             rtol=0,
         ).all(dim=(1, 2))
@@ -629,7 +641,11 @@ class CoordinatedPickment(
         safe_states = tuple(
             HeldObjectState(
                 held.semantics,
-                torch.where(eligible[:, None, None], held.object_to_eef, identity),
+                torch.where(
+                    eligible[:, None, None],
+                    held.object_to_eef,
+                    identity.to(held.object_to_eef),
+                ),
                 held.grasp_xpos,
             )
             for held in (left, right)
@@ -1661,6 +1677,7 @@ class CoordinatedPickment(
             resources,
             target.semantics,
             resume=target.resume_held,
+            retain=not options.release,
         )
         if not eligible.any():
             return self.failed_plan(

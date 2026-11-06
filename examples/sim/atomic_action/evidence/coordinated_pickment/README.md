@@ -48,3 +48,8 @@ reader was corrected to use `ContactActorInfo.link_name`. A subsequent
 PyTorch-IK grasp search was interrupted after several minutes without a plan;
 the final recordings use analytic UR IK. Failed attempts were not counted as
 successful continuation evidence.
+
+Contact acquisition now resolves actor paths from each configured hand's joint
+group, including mimic fingers and fixed pads. Native topology and actor lookup
+checks passed for UR5/PGI and UR10/Robotiq. The videos above remain the original
+UR5 recordings; this check does not qualify UR10 physical pickup or transport.

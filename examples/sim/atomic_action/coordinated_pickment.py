@@ -49,7 +49,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.sensors import ContactSensorCfg
+from embodichain.lab.sim.sensors import ContactSensor, ContactSensorCfg
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler, pose_inv
@@ -412,6 +412,42 @@ def log_execution_state(
     )
 
 
+def _hand_contact_paths(robot: Robot, sensor: ContactSensor) -> dict[str, set[str]]:
+    """Resolve configured hand links, including mimic fingers and fixed pads."""
+    sensor.update()
+    assert robot.control_parts is not None
+    parent_joints = {
+        link: {joint.name for joint in robot.get_parent_joint_chain(link)}
+        for link in robot.link_names
+    }
+    paths = {}
+    for side in ("left", "right"):
+        hand_joints = set(robot.control_parts[f"{side}_eef"])
+        # Some fixtures command only the leader; the opposing finger follows
+        # a URDF mimic joint and must also count as part of this hand.
+        while True:
+            followers = {
+                robot.joint_names[child]
+                for child, parent in zip(robot.mimic_ids, robot.mimic_parents)
+                if robot.joint_names[parent] in hand_joints
+            }
+            if followers <= hand_joints:
+                break
+            hand_joints |= followers
+        links = [link for link, chain in parent_joints.items() if chain & hand_joints]
+        if not links:
+            raise ValueError(f"No moving contact links for {side}_eef.")
+        paths[side] = {
+            info.path + "/" + info.link_name
+            for actor_id in sensor.get_actor_ids(robot.uid, links)
+            .cpu()
+            .flatten()
+            .tolist()
+            for info in (sensor.get_actor_info(actor_id),)
+        }
+    return paths
+
+
 def run_coordinated_pickment_demo(
     args: argparse.Namespace,
     sim: SimulationManager,
@@ -586,6 +622,8 @@ def run_coordinated_pickment_demo(
     else:
         observations: list[dict[str, object]] = []
         stage = "pickup"
+        assert contact_sensor is not None
+        hand_contact_paths = _hand_contact_paths(robot, contact_sensor)
 
         def contact_paths() -> list[str]:
             assert contact_sensor is not None
@@ -664,7 +702,7 @@ def run_coordinated_pickment_demo(
                 f"Acquisition bottom: initial={float(initial_bottom):.6f}, held={float(held_bottom):.6f}; recent contacts={acquisition_contacts}"
             )
             if not all(
-                any(f"{side}_gripper_finger" in path for path in acquisition_contacts)
+                hand_contact_paths[side].intersection(acquisition_contacts)
                 for side in ("left", "right")
             ):
                 raise RuntimeError(
@@ -738,6 +776,9 @@ def run_coordinated_pickment_demo(
                     for segment in resumed.action_plans[0].segments
                 ],
                 "acquisition_contact_actor_paths": acquisition_contacts,
+                "configured_hand_contact_paths": {
+                    side: sorted(paths) for side, paths in hand_contact_paths.items()
+                },
                 "held_input_source": "Measured object pose and robot FK after physical pickup; no attachment or object teleport during playback.",
                 "input_object_to_eef": {
                     key: held.object_to_eef.detach().cpu().tolist()

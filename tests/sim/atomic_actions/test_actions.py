@@ -7885,12 +7885,22 @@ def test_coordinated_pick_validates_explicit_resume_contract(
 
 
 @pytest.mark.parametrize("release", [False, True])
-def test_coordinated_pick_resumes_two_grasps_through_waypoints(release: bool) -> None:
+@pytest.mark.parametrize(
+    ("left_dtype", "right_dtype"),
+    [
+        (torch.float32, torch.float32),
+        (torch.float32, torch.float64),
+        (torch.float64, torch.float32),
+    ],
+)
+def test_coordinated_pick_resumes_two_grasps_through_waypoints(
+    release: bool, left_dtype: torch.dtype, right_dtype: torch.dtype
+) -> None:
     generator = _dual_motion_generator()
     action = _bind_action(generator, CoordinatedPickment())
     # These transforms are deliberately different: transport must retain both.
-    left_relation = torch.eye(4).repeat(NUM_ENVS, 1, 1)
-    right_relation = left_relation.clone()
+    left_relation = torch.eye(4, dtype=left_dtype).repeat(NUM_ENVS, 1, 1)
+    right_relation = left_relation.to(dtype=right_dtype).clone()
     left_relation[:, 0, 3] = -0.2
     right_relation[:, 0, 3] = 0.2
     initial = torch.eye(4).repeat(NUM_ENVS, 1, 1)
@@ -7901,17 +7911,19 @@ def test_coordinated_pick_resumes_two_grasps_through_waypoints(release: bool) ->
         device="cpu",
         held_objects={
             "left_arm": HeldObjectState(
-                semantics, left_relation, initial @ left_relation
+                semantics, left_relation, initial.to(left_relation) @ left_relation
             ),
             "right_arm": HeldObjectState(
-                semantics, right_relation, initial @ right_relation
+                semantics, right_relation, initial.to(right_relation) @ right_relation
             ),
         },
     )
-    generator.robot.compute_fk.side_effect = (
-        lambda *, qpos, name, to_matrix: initial
-        @ (left_relation if name == "left_arm" else right_relation)
-    )
+
+    def observed_fk(*, qpos, name, to_matrix):
+        relation = left_relation if name == "left_arm" else right_relation
+        return initial.to(relation) @ relation
+
+    generator.robot.compute_fk.side_effect = observed_fk
     action._resolve_dual_arm_grasp_poses = Mock(
         side_effect=AssertionError("must not resample held grasps")
     )
@@ -7946,11 +7958,13 @@ def test_coordinated_pick_resumes_two_grasps_through_waypoints(release: bool) ->
     for call, relation in zip(dense_calls, (left_relation, right_relation)):
         poses = call.kwargs["pose"]
         # The shared object follows each requested waypoint in order, for both hands.
-        torch.testing.assert_close(poses[:, 0], initial @ relation)
+        torch.testing.assert_close(poses[:, 0], initial @ relation.to(initial))
         torch.testing.assert_close(
-            poses[:, move.stop // 2 - 1], waypoints[:, 0] @ relation
+            poses[:, move.stop // 2 - 1], waypoints[:, 0] @ relation.to(waypoints)
         )
-        torch.testing.assert_close(poses[:, -1], waypoints[:, -1] @ relation)
+        torch.testing.assert_close(
+            poses[:, -1], waypoints[:, -1] @ relation.to(waypoints)
+        )
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
     for key, relation in (("left_arm", left_relation), ("right_arm", right_relation)):
         held = projected.get_held_object(key)
@@ -7962,7 +7976,10 @@ def test_coordinated_pick_resumes_two_grasps_through_waypoints(release: bool) ->
         else:
             assert held is not None
             torch.testing.assert_close(held.object_to_eef, relation)
-            torch.testing.assert_close(held.grasp_xpos, waypoints[:, -1] @ relation)
+            torch.testing.assert_close(
+                held.grasp_xpos,
+                (waypoints[:, -1] @ relation.to(waypoints)).to(held.grasp_xpos),
+            )
         torch.testing.assert_close(context.get_held_object(key).object_to_eef, relation)
 
 
@@ -8063,6 +8080,68 @@ def test_coordinated_pick_default_requires_free_participants() -> None:
         _dual_context(task),
     )
     assert not plan.plan_success.any()
+
+
+@pytest.mark.parametrize("occupied_key", ["left_arm", "right_arm"])
+@pytest.mark.parametrize("release", [False, True])
+@pytest.mark.parametrize("same_object", [False, True])
+def test_coordinated_pick_mixed_occupancy_returns_applicable_effects(
+    occupied_key: str, release: bool, same_object: bool
+) -> None:
+    action = _bind_action(_dual_motion_generator(), CoordinatedPickment())
+    _stub_dual_arm_grasp_poses(action)
+    semantics = replace(_semantics(entity_id="tray"), affordance=AntipodalAffordance())
+    retained = _held(
+        semantics if same_object else _semantics(entity_id="cup"),
+        env_mask=torch.tensor([False, True]),
+    )
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={occupied_key: retained},
+    )
+    context = _dual_context(task)
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id=action.skill_id,
+            goal=CoordinatedPickGoal(semantics, torch.eye(4), torch.eye(4)),
+            binding=_dual_binding(action, "left", "right"),
+            skill_options=CoordinatedPickmentOptions(
+                release=release,
+                hand_interp_steps=4,
+                hold_steps=0,
+                release_steps=4,
+                retreat_steps=4,
+            ),
+            motion_policy=MotionPolicy(sample_count=40),
+        ),
+        context,
+    )
+    # One identity per resource can represent a released pickup or the same
+    # object across rows, but cannot retain a tray beside a different held cup.
+    accepts_free_row = release or same_object
+    assert plan.plan_success.tolist() == [accepts_free_row, False]
+    projected = plan.expected_effects.apply(task, plan.plan_success)
+    kept = projected.get_held_object(occupied_key)
+    assert kept is not None
+    assert kept.semantics.entity_id == retained.semantics.entity_id
+    torch.testing.assert_close(kept.object_to_eef[1], retained.object_to_eef[1])
+    for key in ("left_arm", "right_arm"):
+        assert projected.held_object_mask(key).tolist() == [
+            accepts_free_row and not release,
+            key == occupied_key,
+        ]
+    failed = ~plan.plan_success
+    positions = _joint_trajectory(plan).positions
+    torch.testing.assert_close(
+        positions[failed],
+        context.robot.qpos[failed, None].expand(-1, positions.shape[1], -1),
+    )
+    assert all(not frame.active_mask[failed].any() for frame in plan.commands.frames)
+    torch.testing.assert_close(
+        task.held_object_mask(occupied_key), torch.tensor([False, True])
+    )
 
 
 def test_coordinated_pick_rejects_link_scoped_grasp_mesh() -> None:
