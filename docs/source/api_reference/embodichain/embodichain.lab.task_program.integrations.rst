@@ -711,9 +711,10 @@ an optional ``runtime_scope_guard`` for a host-owned session, episode or physica
 owner epoch. The standard factory forwards it to the planning observation port
 and shared scene cache. ``validate_runtime_scope()`` checks factory lifetime and
 this explicit authority without acquiring robot/sensor state or stepping physics.
-A scope change during acquisition rejects the result. Cached qpos also rejects
-closed factory resources; a live factory does not imply that a previous bridge
-still has authority.
+Factory lifetime and the optional host scope are checked before and after
+cached or live acquisition. Closing the factory during a read rejects the result
+even without a host callback. A live factory does not imply that a previous
+bridge still has authority.
 
 The default ``None`` keeps legacy custom factory calls unchanged: no new keyword
 is passed to them. Explicit scope requests require a factory supporting the
