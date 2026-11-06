@@ -325,7 +325,10 @@ def _canonical_value(value: object) -> object:
                 "receive_region": "mesh_extent",
                 "source_retreat_mode": "approach",
             }.items():
-                if getattr(value, name) == default:
+                if (
+                    type(getattr(value, name)) is str
+                    and getattr(value, name) == default
+                ):
                     metadata.pop(name)
         if type(value) is PickPlanningRecovery:
             for name in ("constrained_roll", "place_continuation"):
