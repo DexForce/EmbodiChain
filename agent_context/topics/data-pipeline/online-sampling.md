@@ -47,6 +47,9 @@
    This controls only the graceful-close wait; forced-shutdown join bounds remain
    separate. A forced shutdown marks durability unconfirmed and ends in FAILED. Concurrent stop
    cancels a starting engine.
+   The child also watches its logical creator's multiprocessing sentinel. Creator
+   death wakes idle/active close paths; the same shutdown timeout bounds remaining
+   cleanup before forced child exit. The OS parent may be the live forkserver.
 9. `OnlineDataset` is infinite. Item mode samples one row then removes the leading dimension
    so DataLoader can collate; batch mode re-samples a dynamic chunk per yield. Multi-worker
    readers sample shared memory independently.

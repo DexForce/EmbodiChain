@@ -201,6 +201,11 @@ raises the worker error instead of waiting indefinitely. A later worker failure
 is reported on the next `sample_batch()` call rather than silently serving a
 permanently stale buffer.
 
+The simulation child also watches its logical creator's process sentinel.
+Creator death wakes idle or active generation through the ordinary close path;
+if cleanup stalls, the child exits after `shutdown_timeout`. This uses the
+creator's identity even when the forkserver remains alive as the OS parent.
+
 ### Minimal setup
 
 ```python

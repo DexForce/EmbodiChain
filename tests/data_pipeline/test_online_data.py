@@ -31,6 +31,8 @@ from __future__ import annotations
 import multiprocessing as mp
 import json
 import os
+import time
+from pathlib import Path
 import sys
 import threading
 import unittest
@@ -852,6 +854,189 @@ def _start_lifecycle_worker(
     )
     engine._monitor_thread.start()
     return process
+
+
+def _creator_death_simulation_worker(args, directory: str, mode: str) -> None:
+    """Run the production worker against the external simulator boundary."""
+    import psutil
+
+    root = Path(directory)
+    os.environ.pop("EMBODICHAIN_SIM_EXIT_PROCESS", None)
+
+    class Environment:
+        def get_wrapper_attr(self, name):
+            return getattr(self, name)
+
+        def set_rollout_buffer(self, buffer):
+            pass
+
+        def reset(self, **kwargs):
+            return {}, {}
+
+        def close(self):
+            (root / "close_started").write_text(str(time.monotonic()))
+            if mode == "stalled_close":
+                while True:
+                    time.sleep(1)
+            (root / "closed").write_text("closed")
+
+    def make_environment(**kwargs):
+        (root / "child.json").write_text(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "created": psutil.Process().create_time(),
+                    "logical_parent": mp.parent_process().pid,
+                    "os_parent": os.getppid(),
+                }
+            )
+        )
+        return Environment()
+
+    def execute(env, *, should_stop, **kwargs):
+        if mode != "idle":
+            (root / "active").write_text("active")
+            while not should_stop():
+                time.sleep(0.01)
+            return SimpleNamespace(
+                completed=False, all_success=False, terminal_reason="interrupted"
+            )
+        return SimpleNamespace(completed=True, all_success=True)
+
+    config = SimpleNamespace(
+        num_envs=1,
+        sim_cfg=SimpleNamespace(
+            headless=True,
+            render_cfg=SimpleNamespace(renderer=None),
+            gpu_id=0,
+            device=None,
+        ),
+    )
+    sys.modules["gymnasium"] = SimpleNamespace(make=make_environment)
+    sys.modules["embodichain.lab.gym.utils.gym_utils"] = SimpleNamespace(
+        config_to_cfg=lambda *args, **kwargs: config, get_manager_modules=lambda: []
+    )
+    sys.modules["embodichain.lab.gym.utils.registration"] = SimpleNamespace(
+        discover_task_packages=lambda: [], execute_init_hooks=lambda: []
+    )
+    sys.modules["embodichain.lab.gym.envs.demo"] = SimpleNamespace(
+        execute_demo_episode=execute
+    )
+    engine_module._sim_worker_fn(*args)
+
+
+def _creator_with_simulation_worker(args, directory: str, mode: str) -> None:
+    root = Path(directory)
+    worker = mp.get_context("forkserver").Process(
+        target=_creator_death_simulation_worker,
+        args=(args, directory, mode),
+        daemon=False,
+    )
+    worker.start()
+    deadline = time.monotonic() + CONSUMER_RESULT_TIMEOUT
+    while not (args[4].is_set() if mode == "idle" else (root / "active").exists()):
+        if not worker.is_alive() or time.monotonic() >= deadline:
+            raise RuntimeError(
+                "Simulation child did not reach its expected producer state"
+            )
+        time.sleep(0.01)
+    (root / "creator_ready").write_text("ready")
+    while True:
+        time.sleep(1)
+
+
+@pytest.mark.parametrize("mode", ["idle", "active", "stalled_close"])
+def test_forkserver_producer_exits_when_logical_creator_dies(tmp_path, mode) -> None:
+    """Killing the creator closes idle/active envs and bounds a stalled close."""
+    import psutil
+
+    engine = _make_fake_engine(buffer_size=1, max_episode_steps=1)
+    engine.cfg.shutdown_timeout = 0.75
+    engine.cfg.gym_config["id"] = "CPU-OwnerDeath-v1"
+    engine._init_signal.clear()
+    engine._fill_signal.set()
+    args = (
+        engine.cfg,
+        engine.shared_buffer,
+        engine._lock_index,
+        engine._fill_signal,
+        engine._init_signal,
+        engine._close_signal,
+        engine._worker_error_buffer,
+        engine._worker_error_length,
+        engine._worker_failed_signal,
+        engine._state_value,
+    )
+    creator = mp.get_context("forkserver").Process(
+        target=_creator_with_simulation_worker,
+        args=(args, str(tmp_path), mode),
+        daemon=False,
+    )
+    child = None
+
+    def running(process):
+        try:
+            return (
+                process is not None
+                and process.is_running()
+                and process.status() != psutil.STATUS_ZOMBIE
+            )
+        except psutil.NoSuchProcess:
+            return False
+
+    creator.start()
+    try:
+        deadline = time.monotonic() + CONSUMER_RESULT_TIMEOUT
+        while not (tmp_path / "creator_ready").exists() and time.monotonic() < deadline:
+            assert (
+                creator.is_alive()
+            ), f"Creator exited before ready: {creator.exitcode}"
+            time.sleep(0.01)
+        assert (
+            tmp_path / "creator_ready"
+        ).exists(), "Producer did not reach expected state"
+        identity = json.loads((tmp_path / "child.json").read_text())
+        child = psutil.Process(identity["pid"])
+        assert child.create_time() == identity["created"]
+        assert identity["logical_parent"] == creator.pid
+        assert identity["os_parent"] != creator.pid
+        killed_at = time.monotonic()
+        creator.kill()
+        creator.join(PROCESS_CLEANUP_TIMEOUT)
+        assert not creator.is_alive()
+        deadline = (
+            time.monotonic() + engine.cfg.shutdown_timeout + PROCESS_CLEANUP_TIMEOUT
+        )
+        while running(child) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not running(child)
+        assert (
+            tmp_path / "close_started"
+        ).exists(), "Producer did not reach env.close()"
+        if mode == "stalled_close":
+            assert time.monotonic() - killed_at >= engine.cfg.shutdown_timeout * 0.8
+            assert not (tmp_path / "closed").exists()
+        else:
+            assert (tmp_path / "closed").exists()
+    finally:
+        if creator.is_alive():
+            creator.kill()
+        creator.join(PROCESS_CLEANUP_TIMEOUT)
+        creator.close()
+        if child is None and (tmp_path / "child.json").exists():
+            identity = json.loads((tmp_path / "child.json").read_text())
+            try:
+                candidate = psutil.Process(identity["pid"])
+                if candidate.create_time() == identity["created"]:
+                    child = candidate
+            except psutil.NoSuchProcess:
+                pass
+        if running(child):
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
+        engine.stop()
 
 
 def test_forkserver_monitor_preserves_normal_shutdown_status() -> None:

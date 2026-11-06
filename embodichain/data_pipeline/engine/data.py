@@ -228,6 +228,21 @@ def _monitor_worker_process(
     )
 
 
+def _monitor_creator_process(
+    parent_sentinel: int,
+    close_signal: MpEvent,
+    fill_signal: MpEvent,
+    shutdown_timeout: float,
+) -> None:
+    """Wake the producer on creator death and bound its remaining cleanup."""
+    wait_for_process_events([parent_sentinel])
+    deadline = threading.Timer(shutdown_timeout, os._exit, args=(1,))
+    deadline.daemon = True
+    deadline.start()
+    close_signal.set()
+    fill_signal.set()
+
+
 @configclass
 class OnlineDataEngineCfg:
     buffer_size: int = 16
@@ -341,6 +356,8 @@ class OnlineDataEngineCfg:
 
     Must be finite and positive. Forced termination still fails the engine's
     recorder-durability contract, regardless of this timeout.
+    If the creator dies, the worker wakes its close path and self-exits after
+    this bound if cleanup has not completed.
     """
 
 
@@ -1125,6 +1142,14 @@ def _sim_worker_fn(
         else {}
     )
     try:
+        parent = mp.parent_process()
+        if parent is not None:
+            # The forkserver is the OS parent; this sentinel tracks the creator.
+            threading.Thread(
+                target=_monitor_creator_process,
+                args=(parent.sentinel, close_signal, fill_signal, cfg.shutdown_timeout),
+                daemon=True,
+            ).start()
         worker_args = (
             cfg,
             shared_buffer,
