@@ -83,7 +83,11 @@ from .source_graph_declarations import (
     refine_source_manipulation_declarations,
     refine_source_return_declarations,
 )
-from .pour_declarations import resolve_pour_lowerer_declarations, supports_ordinary_pour
+from .pour_declarations import (
+    _pour_return_call_declarations,
+    resolve_pour_lowerer_declarations,
+    supports_ordinary_pour,
+)
 from .embodiment_declarations import (
     resolve_source_hand_services,
     declare_source_grip_evidence,
@@ -1134,6 +1138,7 @@ def prepare_generated_task_program_bundle(
             for node in selected["nodes"]
             if node["call"].get("call_id") == "simulation.pour"
         )
+    pour_returns = frozenset(_pour_return_call_declarations(selected))
     presets = {}
     place_bindings = []
     slide_preshape_bindings = []
@@ -1149,6 +1154,8 @@ def prepare_generated_task_program_bundle(
         current = dict(
             motion=dict(sample_count=max(minimum, int(motion.get("sample_count") or 0)))
         )
+        if policy.get("effect_assurance") == "verified":
+            current["release_gate_evidence"] = "binary_only"
         if runtime_profile == "contact_experiment" and call["kind"] == "pick":
             current["motion"]["sample_count"] += 12
         if node["id"] in post_handover_nodes and experiment:
@@ -1215,6 +1222,10 @@ def prepare_generated_task_program_bundle(
                 ),
                 monitor_scene_until_approach=True,
             )
+            if node["id"] in pour_returns:
+                # Source Pour-return policy revision 1 selected only this exact
+                # occurrence; ordinary Place and the shared default keep theirs.
+                options["lift_height"] = 0.12
             current["motion"].update(
                 segment_sample_count_retries=[260, 320],
                 segment_continuous_ik_recovery=True,

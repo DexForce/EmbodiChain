@@ -174,7 +174,9 @@ alone do not claim physical success.
 semantic_program.py projects validated graphs and owner-supplied bindings into
 the existing program format. action_profile_declarations.py and
 policy_declarations.py select declarations for typed action, motion and recovery
-options. They do not register skills or modify their private fields.
+options. Source verified occurrence presets explicitly select evidence for existing
+release gates; terminal and attached checks retain their full clauses.
+They do not register skills or modify their private fields.
 native_pick_declarations.py and continuation_declarations.py bind native inputs,
 lookahead and released-hand selections to explicit compiled occurrences.
 pour_declarations.py uses shared source target geometry and model calibration.
