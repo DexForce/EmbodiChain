@@ -1,0 +1,153 @@
+{
+  "main_revision": "0e7c8406f1267362564b473bb0453e3b7bc52b7d",
+  "checkpoint_revision": "42bd43e06a000de7d66a9566d63bde800d999790",
+  "checkpoint_is_main_ancestor": false,
+  "catalog_fingerprint_schema_version": 4,
+  "purpose": "Omit only exact inactive defaults added by A7/A8 migration. The 42bd raw values/capability snapshot remains unchanged; nondefault choices and all Main fields remain fingerprinted.",
+  "fields": [
+    {
+      "class": "HandOverOptions",
+      "field": "adaptive_receive",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/hand_over.py",
+      "introduced_by": "8904ac9f57fd7de3191680eb5040494e8ac3904b",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "HandOverOptions",
+      "field": "existing_hold_hand_source",
+      "default": "observed",
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/hand_over.py",
+      "introduced_by": "8904ac9f57fd7de3191680eb5040494e8ac3904b",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "HandOverOptions",
+      "field": "linear_segments",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/hand_over.py",
+      "introduced_by": "8904ac9f57fd7de3191680eb5040494e8ac3904b",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "HandOverOptions",
+      "field": "receive_region",
+      "default": "mesh_extent",
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/hand_over.py",
+      "introduced_by": "8904ac9f57fd7de3191680eb5040494e8ac3904b",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "HandOverOptions",
+      "field": "require_receiver_scene",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/hand_over.py",
+      "introduced_by": "8904ac9f57fd7de3191680eb5040494e8ac3904b",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "HandOverOptions",
+      "field": "source_retreat_mode",
+      "default": "approach",
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/hand_over.py",
+      "introduced_by": "8904ac9f57fd7de3191680eb5040494e8ac3904b",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PickUpOptions",
+      "field": "constrained_grasp",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/pick_up.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PickUpOptions",
+      "field": "linear_segments",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/pick_up.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PickUpOptions",
+      "field": "measured_preshape",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/pick_up.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PickUpOptions",
+      "field": "native_scene_trial",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/pick_up.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PickUpOptions",
+      "field": "qualify_downstream_targets",
+      "default": true,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/pick_up.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PickUpOptions",
+      "field": "qualify_fixed_grasp",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/pick_up.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PlaceOptions",
+      "field": "drawer_placement",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/place.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PlaceOptions",
+      "field": "measured_inside",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/place.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PlaceOptions",
+      "field": "preserve_vertical",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/place.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PickPlanningRecovery",
+      "field": "constrained_roll",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/pick_up.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PickPlanningRecovery",
+      "field": "place_continuation",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/pick_up.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    },
+    {
+      "class": "PlacePlanningRecovery",
+      "field": "inside_world_yaw",
+      "default": false,
+      "owner": "embodichain/lab/sim/atomic_actions/primitives/place.py",
+      "introduced_by": "f58e20f1cc3ed9d8150f9a1489c1b4922bf3d1d8",
+      "absent_from_main0e": true
+    }
+  ]
+}
