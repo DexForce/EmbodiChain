@@ -1639,6 +1639,33 @@ def test_nondefault_migration_options_remain_sealed_in_public_deployments(extens
         registration.assert_unchanged()
 
 
+@pytest.mark.parametrize(
+    "field_name", ["existing_hold_hand_source", "receive_region", "source_retreat_mode"]
+)
+def test_equal_string_enums_retain_their_existing_declaration_identity(field_name):
+    """Equal enum/string values cannot bypass the catalog's typed enum contract."""
+    from enum import Enum
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    _, deployment = _load_e1_default_deployment()
+    registration = deployment.integration.registration
+    preset = next(
+        value
+        for value in registration.robot_profile_binding.presets
+        if value.preset_id == "trajectory_verified"
+    )
+    options = preset._action_option_templates["hand_over"]
+    default = getattr(options, field_name)
+    equivalent = Enum("EquivalentDefault", {"VALUE": default}, type=str).VALUE
+    object.__setattr__(options, field_name, equivalent)
+    assert _canonical_value(options)["fields"][field_name] == {
+        "type": f"{type(equivalent).__module__}.{type(equivalent).__qualname__}",
+        "value": default,
+    }
+    with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+        registration.assert_unchanged()
+
+
 def _bound_control_post_case():
     from embodichain.lab.sim.scene.revolute_inputs import RevoluteControlBinding
     from embodichain.lab.task_program.integrations import (
