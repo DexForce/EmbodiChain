@@ -181,6 +181,10 @@ def test_original_generation_api_publishes_from_frozen_declarations_without_sim(
     assert not (output / "task_program/constraints.json").exists()
     registration = loaded.deployment.integration.registration
     assert len(registration.invocation_policy_bindings) == 3
+    observed = registration.planning_services.observed_curobo
+    assert observed.graph_planner_algorithm == "prm"
+    assert observed.enable_timeopt is False
+    assert observed.fit_graph_seed_to_bspline is False
     policies = yaml.safe_load(
         (output / "components/execution_policy.yaml").read_text()
     )["presets"]

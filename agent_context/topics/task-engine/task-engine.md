@@ -176,6 +176,9 @@ the existing program format. action_profile_declarations.py and
 policy_declarations.py select declarations for typed action, motion and recovery
 options. Source verified occurrence presets explicitly select evidence for existing
 release gates; terminal and attached checks retain their full clauses.
+Source observed cuRobo declarations explicitly choose PRM without TimeOpt or
+graph-seed fitting. These settings preserve the declared source handoff; SDK
+0.8-to-0.9 optimizer differences retain their separate compatibility baseline.
 They do not register skills or modify their private fields.
 native_pick_declarations.py and continuation_declarations.py bind native inputs,
 lookahead and released-hand selections to explicit compiled occurrences.

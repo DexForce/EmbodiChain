@@ -1566,7 +1566,12 @@ def prepare_generated_task_program_bundle(
         capture_root_pose=True,
         capture_native_revision=True,
         hold_qpos_source="drive_target",
-        observed_curobo=dict(max_voxel_count=4000000),
+        observed_curobo=dict(
+            max_voxel_count=4000000,
+            graph_planner_algorithm="prm",
+            enable_timeopt=False,
+            fit_graph_seed_to_bspline=False,
+        ),
         collision_roster=dict(
             rigid_objects=[
                 [item["uid"], item["uid"]]
