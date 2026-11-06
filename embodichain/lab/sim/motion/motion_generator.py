@@ -1922,7 +1922,9 @@ class MotionGenerator:
                 velocities[:, :-1] = velocities[:, :-1].masked_fill(stationary, 0.0)
                 velocities[:, 1:] = velocities[:, 1:].masked_fill(stationary, 0.0)
 
+        generation_success_before_velocity = None
         if options.mask_generation_overspeed and options.control_part is not None:
+            generation_success_before_velocity = success
             limits = authored_joint_velocity_limits(
                 self.robot, options.control_part
             ).to(positions)
@@ -1958,6 +1960,7 @@ class MotionGenerator:
             policy_waypoint_indices=result.policy_waypoint_indices,
             rejected_candidate=result.rejected_candidate,
             recovery=result.recovery,
+            generation_success_before_velocity=generation_success_before_velocity,
         )
 
     def _runtime_device(self) -> torch.device:

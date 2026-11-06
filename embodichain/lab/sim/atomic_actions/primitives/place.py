@@ -607,13 +607,19 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             planning_trace.used_continuity = (
                 segment_result is not None and segment_result.used_continuity
             )
-            planning_trace.kinematic_mask = (
-                torch.as_tensor(motion_result.success).detach().clone()
+            before_velocity = getattr(
+                motion_result, "generation_success_before_velocity", None
             )
-            if getattr(motion_result, "rejected_candidate", None) is not None:
-                planning_trace.kinematic_mask |= (
-                    motion_result.rejected_candidate.env_mask
+            if before_velocity is not None:
+                planning_trace.kinematic_mask = before_velocity.detach().clone()
+            else:
+                planning_trace.kinematic_mask = (
+                    torch.as_tensor(motion_result.success).detach().clone()
                 )
+                if getattr(motion_result, "rejected_candidate", None) is not None:
+                    planning_trace.kinematic_mask |= (
+                        motion_result.rejected_candidate.env_mask
+                    )
         assert isinstance(motion_result.success, torch.Tensor)
         assert motion_result.positions is not None
         assert motion_result.dt is not None

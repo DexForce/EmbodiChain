@@ -145,6 +145,10 @@ positions or timing. The explicit check replaces the earlier fixed-grid mask;
 ordinary fixed-grid defaults retain their existing hold/candidate behavior.
 This per-generation boundary is distinct from complete-action final-velocity
 qualification, planner retry selection and physical acceptance.
+Its optional `PlanResult.generation_success_before_velocity` owns the normalized
+pre-check mask so Place can retain its original kinematic diagnostic without
+changing a velocity failure into an IK failure. Default `None` leaves the old
+trace fallback unchanged; it never creates a rejected-candidate trajectory.
 
 `compute.trajectory.interpolation.interpolate_velocity_grid` allocates fixed
 B=1 joint-edge intervals from explicit speed caps. It preserves ordered mandatory

@@ -328,8 +328,33 @@ class PlanResult:
     recovery: MotionRecoveryTrace | None = field(default=None, kw_only=True)
     """Optional immutable segment recovery receipt, separate from the trajectory."""
 
+    generation_success_before_velocity: torch.Tensor | None = field(
+        default=None, kw_only=True
+    )
+    """Owned normalized success before an explicit generation velocity mask.
+
+    Shape ``(B,)`` with boolean dtype on the trajectory device. Only an enabled
+    controlled-part generation check supplies this snapshot. ``None`` means
+    unavailable; this is neither an independent IK nor physical-success proof.
+    """
+
     def __post_init__(self) -> None:
         """Validate trajectory timing and optional original policy traces."""
+        before_velocity = self.generation_success_before_velocity
+        if before_velocity is not None:
+            if (
+                not isinstance(before_velocity, torch.Tensor)
+                or before_velocity.dtype != torch.bool
+                or not isinstance(self.positions, torch.Tensor)
+                or self.positions.ndim != 3
+                or before_velocity.shape != self.positions.shape[:1]
+                or before_velocity.device != self.positions.device
+            ):
+                raise ValueError(
+                    "generation_success_before_velocity must be boolean (B,) "
+                    "on the trajectory device."
+                )
+            self.generation_success_before_velocity = before_velocity.detach().clone()
         if self.recovery is not None and not isinstance(
             self.recovery, MotionRecoveryTrace
         ):

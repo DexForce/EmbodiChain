@@ -42,6 +42,11 @@ rejected proposals remain available to the caller. It applies once per result
 and replaces the earlier fixed-grid speed mask when explicitly enabled. The
 default remains disabled. This is separate from complete-action final-speed
 qualification and does not enable retiming, recovery or acceleration validation.
+``PlanResult.generation_success_before_velocity`` retains the owned normalized
+success mask immediately before this explicit check. It is unavailable by
+default and is distinct from a rejected candidate or physical-success evidence.
+Place recovery uses that pre-check fact for its kinematic diagnostic while
+retaining the velocity rejection and its existing planning budget.
 
 Explicit linear keyframes and bounded recovery
 ----------------------------------------------
