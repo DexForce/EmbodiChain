@@ -4593,6 +4593,8 @@ contact, motion or task acceptance.
    :members:
 
 .. autofunction:: read_spatial_reference
+
+
 embodichain.gen_sim.task_spec.condition_group_evidence
 ------------------------------------------------------
 
