@@ -53,6 +53,8 @@ and expert commands.
 
 | Setting | Meaning |
 | --- | --- |
+| `gym_config`, `gym_config_path` | Loaded declaration or source JSON/YAML path; choose one. Relative components resolve from the source file. |
+| `episode_runner` | Optional `module:function` owning episode reset, execution and qualification; returns `DemoEpisodeResult`. |
 | `state_dim` | Stored robot proprioception width. |
 | `action_dim` | Optional stored action width; omitted values preserve the historical `state_dim` width. |
 | `action_semantics` | `"expert_controller_command"` by default, or explicit `"policy_request"`. |
@@ -85,9 +87,28 @@ proprioception/action widths, ordered contracts, contiguous term slices and
 controlled-joint order. It selects the environment's
 `rollout_action_semantics` accordingly. Explicit policy recording preserves raw
 requests through ActionManager processing, requires finite floating values
-within the action-space bounds, and works without a DatasetManager. A direct
-`ControllerAction` cannot be stored as a policy request. Expert-controller
+within the action-space bounds, and works without a DatasetManager. A
+position-only expert with `expert_trajectory.use_action_manager` records the
+actual converted manager request while executing its exact FK target. Unmanaged
+direct `ControllerAction` commands cannot be stored as policy requests. Expert-controller
 recording continues to use `ExpertActionSpec`.
+
+With `gym_config_path`, the engine loads the declaration once and passes the
+same mapping and absolute source path to buffer allocation and its forkserver
+worker. The child discovers task packages and executes `embodichain.init` hooks
+before resolving custom manager functions.
+`engine.resolved_gym_config` exposes an owned, component-expanded physical
+declaration. Flow control uses it to validate producer counts consistently for
+file and dictionary configurations.
+
+For a task-specific acceptance procedure, set `episode_runner="my_task:run_episode"`.
+The runner accepts the same arguments as `execute_demo_episode`, owns reset and
+may add bounded settling or physical acceptance checks. It returns a
+`DemoEpisodeResult` with those checks incorporated into completion/success.
+The engine attaches its buffer and validates its live schema before each attempt;
+it retains retry limits, publication and cleanup. It does not reset before a
+custom runner. Failed results are retried and never published. Without the
+option, the engine retains its reset plus standard SDK demo behavior.
 
 With manual refill, `request_refill()` returns a target generation and coalesces
 an outstanding request; `wait_for_generation()` waits for complete publication

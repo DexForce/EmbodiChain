@@ -1964,6 +1964,8 @@ def init_rollout_buffer_from_config(
     state_dim: int,
     device: Union[str, torch.device] = "cpu",
     action_dim: int | None = None,
+    *,
+    source_path: str | os.PathLike[str] | None = None,
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
@@ -1980,6 +1982,8 @@ def init_rollout_buffer_from_config(
         batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
         action_dim: Stored action width, defaulting to state_dim.
+        source_path: Owning Gym configuration file for relative component paths.
+            None preserves resolution from the current working directory.
 
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
@@ -1991,7 +1995,12 @@ def init_rollout_buffer_from_config(
     if action_dim is not None and (type(action_dim) is not int or action_dim < 1):
         raise ValueError("action_dim must be a positive integer or None")
 
-    config = _resolve_gym_components(config, base_dir=Path.cwd()).config
+    from embodichain.utils.config_paths import resolve_config_path
+
+    base_dir = (
+        resolve_config_path(source_path).resolve().parent if source_path else Path.cwd()
+    )
+    config = _resolve_gym_components(config, base_dir=base_dir).config
 
     # TODO: Currently we use this method to pre-allocate a rollout buffer with fixed size for simplicity.
     # Parse extra observations from observation functors in 'add' mode

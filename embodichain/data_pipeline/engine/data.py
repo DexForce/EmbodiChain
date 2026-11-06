@@ -24,9 +24,12 @@ import threading
 import time
 import multiprocessing as mp
 import uuid
+import importlib
+from copy import deepcopy
 
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Literal
 from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
@@ -244,7 +247,23 @@ class OnlineDataEngineCfg:
     # TODO: We may support multiple envs in the future.
     gym_config: dict = dict()
     """Gym environment configuration dictionary (already loaded, not a file path).
-    The contents depend on the specific environment being used. Default is None."""
+    The contents depend on the specific environment being used. Defaults to empty."""
+
+    gym_config_path: str | None = None
+    """Optional Gym JSON/YAML file, mutually exclusive with nonempty gym_config.
+
+    The owner loads the declaration once. Buffer allocation and the forkserver
+    worker receive that same declaration and its absolute source path, so
+    relative components resolve independently of the worker's working directory.
+    """
+
+    episode_runner: str | None = None
+    """Optional ``module:function`` with the execute_demo_episode call contract.
+
+    It owns episode reset, execution and qualification and returns a
+    DemoEpisodeResult. The engine retains bounded retries, publication and
+    cleanup. None preserves the engine's reset plus execute_demo_episode path.
+    """
 
     action_config: dict = dict()
     """Action configuration dictionary.  The contents depend on the specific environment and robot being used."""
@@ -345,6 +364,27 @@ def _validate_recording_config(cfg: OnlineDataEngineCfg) -> None:
         raise ValueError(
             "action_contracts are only valid for policy_request recording."
         )
+    if cfg.episode_runner is not None and (
+        not isinstance(cfg.episode_runner, str)
+        or cfg.episode_runner.count(":") != 1
+        or not all(part.strip() for part in cfg.episode_runner.split(":"))
+    ):
+        raise ValueError(
+            "episode_runner must be a nonempty 'module:function' import string."
+        )
+
+
+def _resolve_engine_gym_config(cfg: OnlineDataEngineCfg) -> tuple[dict, str | None]:
+    """Load a path-owned declaration without mutating the caller's config."""
+    if cfg.gym_config_path is None:
+        return cfg.gym_config, None
+    if cfg.gym_config:
+        raise ValueError("Specify gym_config or gym_config_path, not both.")
+    from embodichain.utils.config_paths import resolve_config_path
+    from embodichain.utils.utility import load_config
+
+    source = resolve_config_path(cfg.gym_config_path).resolve(strict=True)
+    return load_config(source), str(source)
 
 
 class _ProducerProgress:
@@ -756,6 +796,9 @@ def _run_sim_worker(
     run_id: int = 0,
     lifecycle_events: _LifecycleEvents | None = None,
     sampling_budget: _EpisodeSamplingBudget | None = None,
+    *,
+    gym_config: dict | None = None,
+    gym_config_source_path: str | None = None,
 ) -> None:
     """Simulation subprocess entry point.
 
@@ -785,19 +828,37 @@ def _run_sim_worker(
         config_to_cfg,
         get_manager_modules,
     )
-    from embodichain.lab.gym.utils.registration import discover_task_packages
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
     from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.utils.logger import log_info, log_warning
 
-    gym_config: dict = cfg.gym_config
+    if gym_config is None:
+        gym_config, gym_config_source_path = _resolve_engine_gym_config(cfg)
     action_config: dict = cfg.action_config
 
     # Forkserver workers start with a fresh Gym registry. Import official task
     # packages here so the configured environment is registered before make().
     discover_task_packages()
+    execute_init_hooks()
+
+    episode_runner = execute_demo_episode
+    if cfg.episode_runner is not None:
+        from embodichain.lab.gym.envs.demo import DemoEpisodeResult
+
+        module, function = cfg.episode_runner.split(":")
+        episode_runner = getattr(importlib.import_module(module), function)
+        if not callable(episode_runner):
+            raise TypeError("episode_runner must resolve to a callable.")
 
     # Build env config from the gym configuration dictionary.
-    env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
+    env_cfg = config_to_cfg(
+        gym_config,
+        manager_modules=get_manager_modules(),
+        source_path=gym_config_source_path,
+    )
     env_cfg.filter_dataset_saving = True
     env_cfg.init_rollout_buffer = False
     env_cfg.rollout_action_semantics = cfg.action_semantics
@@ -897,8 +958,9 @@ def _run_sim_worker(
                     # after a shorter replacement episode.
                     env.get_wrapper_attr("set_rollout_buffer")(tmp_buffer)
                     _validate_worker_dimensions(env, cfg)
-                    env.reset(options={"save_data": False})
-                    result = execute_demo_episode(
+                    if cfg.episode_runner is None:
+                        env.reset(options={"save_data": False})
+                    result = episode_runner(
                         env,
                         episode_index=rollout_idx,
                         attempt_id=attempt - 1,
@@ -910,6 +972,10 @@ def _run_sim_worker(
                             leave=False,
                         ),
                     )
+                    if cfg.episode_runner is not None and not isinstance(
+                        result, DemoEpisodeResult
+                    ):
+                        raise TypeError("episode_runner must return DemoEpisodeResult.")
                     if result.completed and result.all_success:
                         break
                     if progress is not None:
@@ -1042,6 +1108,8 @@ def _sim_worker_fn(
     run_id: int = 0,
     lifecycle_events: _LifecycleEvents | None = None,
     sampling_budget: _EpisodeSamplingBudget | None = None,
+    gym_config: dict | None = None,
+    gym_config_source_path: str | None = None,
 ) -> None:
     """Run the simulation worker and publish a stable exception envelope.
 
@@ -1051,6 +1119,11 @@ def _sim_worker_fn(
     :class:`OnlineDataWorkerError`.
     """
     error_reported = [False]
+    config_kwargs = (
+        {"gym_config": gym_config, "gym_config_source_path": gym_config_source_path}
+        if gym_config is not None
+        else {}
+    )
     try:
         worker_args = (
             cfg,
@@ -1073,17 +1146,25 @@ def _sim_worker_fn(
                 run_id,
                 lifecycle_events,
                 sampling_budget,
+                **config_kwargs,
             )
         elif lifecycle_events is not None:
             _run_sim_worker(
-                *worker_args, language_registry, progress, run_id, lifecycle_events
+                *worker_args,
+                language_registry,
+                progress,
+                run_id,
+                lifecycle_events,
+                **config_kwargs,
             )
         elif progress is not None:
-            _run_sim_worker(*worker_args, language_registry, progress, run_id)
+            _run_sim_worker(
+                *worker_args, language_registry, progress, run_id, **config_kwargs
+            )
         elif language_registry is None:
-            _run_sim_worker(*worker_args)
+            _run_sim_worker(*worker_args, **config_kwargs)
         else:
-            _run_sim_worker(*worker_args, language_registry)
+            _run_sim_worker(*worker_args, language_registry, **config_kwargs)
     except BaseException as error:
         if not error_reported[0]:
             _publish_worker_error(
@@ -1159,6 +1240,26 @@ class OnlineDataEngine:
         self._forced_shutdown_attempted = False
         self.cfg = cfg
         _validate_recording_config(cfg)
+        self._gym_config, self._gym_config_source_path = _resolve_engine_gym_config(cfg)
+        gym_dimensions = self._gym_config
+        if self._gym_config_source_path is not None or any(
+            name in self._gym_config for name in ("environment", "embodiment", "scene")
+        ):
+            from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+            gym_dimensions = resolve_gym_components(
+                self._gym_config,
+                base_dir=(
+                    Path(self._gym_config_source_path).parent
+                    if self._gym_config_source_path
+                    else Path.cwd()
+                ),
+            ).config
+        self._resolved_gym_config = gym_dimensions
+        self._gym_num_envs = gym_dimensions.get("num_envs", 1)
+        self._gym_max_episode_steps = gym_dimensions.get(
+            "max_episode_steps", cfg.max_episode_steps
+        )
         _validate_sampling_budget(cfg)
         if cfg.refill_policy not in {"sample_threshold", "manual"}:
             raise ValueError("refill_policy must be 'sample_threshold' or 'manual'")
@@ -1174,7 +1275,7 @@ class OnlineDataEngine:
                 "lifecycle_event_capacity must be zero or at least 2 * buffer_size"
             )
         if cfg.lifecycle_event_capacity:
-            parallel = cfg.gym_config.get("num_envs", 1)
+            parallel = self._gym_num_envs
             # A non-divisible final write window overlaps earlier rows. Its
             # otherwise invisible initial evictions must fit before start returns.
             initial_records = (
@@ -1213,7 +1314,7 @@ class OnlineDataEngine:
         self.buffer_size: int = self.shared_buffer.batch_size[0]
         self.device = self.shared_buffer.device
 
-        num_envs: int = cfg.gym_config.get("num_envs", 1)
+        num_envs: int = self._gym_num_envs
 
         if num_envs > self.buffer_size:
             log_error(
@@ -1322,6 +1423,11 @@ class OnlineDataEngine:
                         getattr(self, "run_id", 0),
                         getattr(self, "_lifecycle_events", None),
                         getattr(self, "_sampling_budget", None),
+                    )
+                    + (
+                        (self._gym_config, self._gym_config_source_path)
+                        if getattr(self, "_gym_config_source_path", None) is not None
+                        else ()
                     ),
                     # Some planners create their own process pool. A daemonic
                     # producer would make those nested workers illegal.
@@ -1559,10 +1665,8 @@ class OnlineDataEngine:
         """
         from embodichain.lab.gym.utils.gym_utils import init_rollout_buffer_from_config
 
-        gym_config: dict = self.cfg.gym_config
-        max_episode_steps: int = gym_config.get(
-            "max_episode_steps", self.cfg.max_episode_steps
-        )
+        gym_config: dict = self._gym_config
+        max_episode_steps: int = self._gym_max_episode_steps
 
         shared_td = init_rollout_buffer_from_config(
             gym_config,
@@ -1570,6 +1674,11 @@ class OnlineDataEngine:
             batch_size=self.cfg.buffer_size,
             max_episode_steps=max_episode_steps,
             state_dim=self.cfg.state_dim,
+            **(
+                {"source_path": self._gym_config_source_path}
+                if self._gym_config_source_path
+                else {}
+            ),
             **(
                 {"action_dim": self.cfg.action_dim}
                 if self.cfg.action_dim is not None
@@ -1603,6 +1712,19 @@ class OnlineDataEngine:
     # -----------------------------------------------------------------------
     # Status
     # -----------------------------------------------------------------------
+
+    @property
+    def resolved_gym_config(self) -> dict[str, object]:
+        """Return an owned physical declaration for producer metadata.
+
+        Environment, embodiment and scene components are expanded. Task Program
+        selectors remain declarations; runtime decoding still uses the original
+        source and its component metadata.
+
+        Returns:
+            Detached physical configuration, including declared producer count.
+        """
+        return deepcopy(getattr(self, "_resolved_gym_config", self.cfg.gym_config))
 
     @property
     def state(self) -> OnlineDataEngineState:
