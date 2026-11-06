@@ -2983,7 +2983,18 @@ def _decode_registered_lowerer(
                     else set()
                 )
             ),
+            optional=frozenset({"effect_contract"}),
         )
+        try:
+            effect_contract = TransportEffectContract(
+                config.get(
+                    "effect_contract", TransportEffectContract.GUARDED_ATTACHMENT.value
+                )
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"{path}.effect_contract is not a supported transport contract."
+            ) from error
         routes = []
         for index, raw in enumerate(_sequence(config["routes"], path=f"{path}.routes")):
             route_path = f"{path}.routes[{index}]"
@@ -3019,9 +3030,14 @@ def _decode_registered_lowerer(
         )
         if kind == "pour_region_transport":
             return PourRegionTransportFactory(
-                tuple(routes), stages, config["proxy_position_tolerance_m"]
+                tuple(routes),
+                stages,
+                config["proxy_position_tolerance_m"],
+                effect_contract=effect_contract,
             )
-        return PourTransportFactory(tuple(routes), stages)
+        return PourTransportFactory(
+            tuple(routes), stages, effect_contract=effect_contract
+        )
     if kind == "pick":
         config = _mapping(
             value,

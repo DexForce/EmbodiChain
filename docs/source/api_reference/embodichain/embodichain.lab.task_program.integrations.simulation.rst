@@ -35,3 +35,16 @@ connect them to the current robot and the Gym reset lifecycle:
 
    embodichain.lab.task_program.integrations.simulation.scene_expansion
    embodichain.lab.task_program.integrations.simulation.workspace
+
+Pour transport evidence
+-----------------------
+
+The ``effect_contract`` keyword on
+:class:`~embodichain.lab.task_program.integrations.simulation.pour_transport.PourTransportFactory`
+and :class:`~embodichain.lab.task_program.integrations.simulation.pour_transport.PourRegionTransportFactory`
+uses :class:`~embodichain.lab.task_program.integrations.simulation.effect_contracts.TransportEffectContract`.
+The default retains transport-phase observations. Explicit ``terminal_attachment``
+selects terminal attachment verification for staging and return routes, requiring
+``MoveHeldObjectOptions.report_retained_attachment=True`` and verified terminal
+monitoring in every selected occurrence preset. Geometry, targets and monitoring
+thresholds are unchanged; the selected contract participates in registration identity.

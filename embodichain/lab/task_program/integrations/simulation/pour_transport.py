@@ -17,7 +17,7 @@
 """Configured observed Pour staging through shared geometry and motion owners."""
 
 from __future__ import annotations
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import ClassVar, Mapping
 import math
@@ -60,6 +60,7 @@ from .transport import (
     HeldObjectTransportRoute,
 )
 from .targets import SceneEntityTarget, _identifier
+from .effect_contracts import TransportEffectContract
 
 __all__ = ["PourStageRoute", "PourTransportFactory", "PourRegionTransportFactory"]
 
@@ -109,8 +110,11 @@ class _PourTransportLowerer(_RoutedMoveHeldObjectLowerer):
         vertices: dict[str, np.ndarray],
         identifiers: dict[str, str],
         gravity: tuple[float, float, float],
+        *,
+        effect_contract: TransportEffectContract = TransportEffectContract.GUARDED_ATTACHMENT,
     ) -> None:
         super().__init__(routes)
+        self.effect_contract = effect_contract
         self._stages = {route.target_id: route for route in staging_routes}
         self._vertices, self._identifiers = vertices, identifiers
         self._gravity = gravity
@@ -217,9 +221,19 @@ class PourTransportFactory(RoutedMoveHeldObjectLowererFactory):
 
     revision: ClassVar[str] = "pour-transport-1"
     staging_routes: tuple[PourStageRoute, ...]
+    effect_contract: TransportEffectContract = field(
+        default=TransportEffectContract.GUARDED_ATTACHMENT, kw_only=True
+    )
+    """Choose phase retention or terminal attachment for staging and return routes.
+
+    Terminal attachment also requires the explicit Atomic action option
+    ``report_retained_attachment``. This selection changes no target geometry.
+    """
 
     def __post_init__(self) -> None:
         RoutedMoveHeldObjectLowererFactory.__post_init__(self)
+        if type(self.effect_contract) is not TransportEffectContract:
+            raise TypeError("effect_contract must be a TransportEffectContract.")
         if (
             type(self.staging_routes) is not tuple
             or not self.staging_routes
@@ -297,7 +311,12 @@ class PourTransportFactory(RoutedMoveHeldObjectLowererFactory):
             for identifier in identifiers
         }
         return _PourTransportLowerer(
-            self.routes, self.staging_routes, vertices, identifiers, gravity
+            self.routes,
+            self.staging_routes,
+            vertices,
+            identifiers,
+            gravity,
+            effect_contract=self.effect_contract,
         )
 
 
@@ -314,6 +333,7 @@ class _PourRegionTransportLowerer(_PourTransportLowerer):
             source._vertices,
             source._identifiers,
             source.gravity_world,
+            effect_contract=source.effect_contract,
         )
         self.region_geometry, self._robot = region_geometry, robot
 

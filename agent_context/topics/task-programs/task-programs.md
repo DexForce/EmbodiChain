@@ -98,6 +98,13 @@ Catalog fingerprints omit exact inactive defaults only for named migration
 extensions. Existing schema fields, nondefault choices and realized skill
 capabilities remain part of the registration identity.
 
+Pour staging and inset-region transport accept the existing explicit
+`TransportEffectContract` selection through `effect_contract`. Their default
+guards the transport phase; `terminal_attachment` retains the complete terminal
+proof without adding phase observations. Catalog preflight requires the selected
+occurrence preset to enable attachment reporting and verified terminal monitoring.
+The choice changes neither staging geometry nor the ordinary return target.
+
 Catalog preflight checks the effective Place option/recovery combination after
 occurrence preset selection. The same waypoint-scope rule is used by Atomic
 planning; a contradictory selected declaration rejects without live resources.

@@ -265,6 +265,17 @@ def _canonical_value(value: object) -> object:
         ):
             metadata.pop("release_gate_evidence")
 
+        from .simulation.effect_contracts import TransportEffectContract
+        from .simulation.pour_transport import (
+            PourTransportFactory,
+            PourRegionTransportFactory,
+        )
+
+        if type(value) in (PourTransportFactory, PourRegionTransportFactory) and (
+            value.effect_contract is TransportEffectContract.GUARDED_ATTACHMENT
+        ):
+            metadata.pop("effect_contract")
+
         from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
 
         if (
@@ -1252,11 +1263,28 @@ class TaskProgramIntegrationCatalog:
                     from .simulation.transport import (
                         TerminalAttachmentTransportLowererFactory,
                     )
+                    from .simulation.pour_transport import (
+                        PourTransportFactory,
+                        PourRegionTransportFactory,
+                    )
+                    from .simulation.effect_contracts import TransportEffectContract
 
-                    if (
+                    terminal_transport = (
                         declaration.factory_type
                         is TerminalAttachmentTransportLowererFactory
+                    )
+                    if declaration.factory_type in (
+                        PourTransportFactory,
+                        PourRegionTransportFactory,
                     ):
+                        terminal_transport = any(
+                            type(factory) is declaration.factory_type
+                            and factory.call_id == call.call.semantic_id
+                            and factory.effect_contract
+                            is TransportEffectContract.TERMINAL_ATTACHMENT
+                            for factory in self.pour_projection_factories
+                        )
+                    if terminal_transport:
                         preset = self.robot_profile.presets[linked.preset_id]
                         TerminalAttachmentTransportLowererFactory.validate_preset(
                             preset

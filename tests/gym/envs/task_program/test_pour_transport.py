@@ -51,7 +51,7 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 
 
-def fixture(region=False, cache_mode=None):
+def fixture(region=False, cache_mode=None, *, effect_contract=None):
     reads = []
     data = {}
     registrations = []
@@ -125,6 +125,8 @@ def fixture(region=False, cache_mode=None):
         ],
         **({"proxy_position_tolerance_m": 0.03} if region else {}),
     }
+    if effect_contract is not None:
+        cfg["effect_contract"] = effect_contract
     factory = _decode_registered_lowerer(cfg, path="lowerer")
     engine = NS(robot=robot)
     if cache_mode is not None:
@@ -186,8 +188,13 @@ def fixture(region=False, cache_mode=None):
 
 
 @pytest.mark.parametrize("region", [False, True])
-def test_pour_transport_captures_only_declared_geometry_and_uses_fresh_poses(region):
-    factory, lowerer, context, bound, reads, data = fixture(region)
+@pytest.mark.parametrize("terminal", [False, True])
+def test_pour_transport_captures_only_declared_geometry_and_uses_fresh_poses(
+    region, terminal
+):
+    factory, lowerer, context, bound, reads, data = fixture(
+        region, effect_contract="terminal_attachment" if terminal else None
+    )
     assert type(factory) is (
         PourRegionTransportFactory if region else PourTransportFactory
     )
@@ -200,9 +207,16 @@ def test_pour_transport_captures_only_declared_geometry_and_uses_fresh_poses(reg
     )
     initial = context.scene.entities["source"].pose.clone()
     result = lowerer.lower(
-        call, context=context, bound=bound, option_template=MoveHeldObjectOptions()
+        call,
+        context=context,
+        bound=bound,
+        option_template=MoveHeldObjectOptions(report_retained_attachment=terminal),
     )
     assert result.registered_effect.effect_kind is SemanticEffectKind.ATTACH
+    (attachment,) = result.registered_effect.held_objects
+    assert attachment.retain_during_segments == (() if terminal else ("transport",))
+    assert attachment.acquire_before_segment is None
+    assert attachment.release_before_segment is None
     assert result.goal.object_target_pose.entity_id == "receiver"
     pose = resolve_pose_goal(result.goal.object_target_pose, context, name="stage")
     torch.testing.assert_close(pose[:, :3, :3], initial[:, :3, :3])
@@ -217,8 +231,20 @@ def test_pour_transport_captures_only_declared_geometry_and_uses_fresh_poses(reg
     )
     home = replace(call, arguments={"object": "source", "target": "home"})
     returned = lowerer.lower(
-        home, context=context, bound=bound, option_template=MoveHeldObjectOptions()
+        home,
+        context=context,
+        bound=bound,
+        option_template=MoveHeldObjectOptions(report_retained_attachment=terminal),
     )
+    assert returned.registered_effect == result.registered_effect
+    if terminal:
+        with pytest.raises(ValueError, match="report_retained_attachment"):
+            lowerer.lower(
+                home,
+                context=context,
+                bound=bound,
+                option_template=MoveHeldObjectOptions(),
+            )
     torch.testing.assert_close(
         returned.goal.object_target_pose[:3, 3], torch.tensor([0.1, -0.2, 0.3])
     )
@@ -240,6 +266,83 @@ def test_pour_transport_captures_only_declared_geometry_and_uses_fresh_poses(reg
     assert reads == [("source", "vertices"), ("receiver", "vertices")] + (
         [("receiver", "faces")] if region else []
     )
+
+
+@pytest.mark.parametrize("region", [False, True])
+def test_pour_transport_default_identity_remains_stable(region):
+    import hashlib
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    factory, *_ = fixture(region)
+    payload = json.dumps(
+        _canonical_value(factory),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode()
+    # Frozen from the original public factories before the optional effect
+    # contract was introduced; an inactive extension cannot change deployment identity.
+    expected = (
+        "40643e272aad604e2afe0a67c49fbe64fcf09ac1b847696b9a8e9899c41d43ce"
+        if region
+        else "e8911c17f35209a489f500d5d57e8a2abe04601f7eea9e410629f5905c4f756e"
+    )
+    assert hashlib.sha256(payload).hexdigest() == expected
+
+
+@pytest.mark.parametrize("region", [False, True])
+def test_pour_transport_rejects_unknown_effect_contract_before_geometry(region):
+    with pytest.raises(ValueError, match="effect_contract"):
+        fixture(region, effect_contract="unknown")
+
+
+@pytest.mark.parametrize("region", [False, True])
+def test_terminal_pour_transport_requires_selected_verified_reporting_before_runtime(
+    region,
+):
+    from copy import deepcopy
+    from gym.envs.task_program.test_configured_integration import (
+        _pour_projection_payload,
+    )
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_configured_task_program_integration,
+    )
+
+    payload, program = _pour_projection_payload(region)
+    normal = _decode_configured_task_program_integration(payload).registration
+    normal.catalog.preflight(program)
+    payload["runtime_services"]["registered_semantic_lowerers"][0][
+        "effect_contract"
+    ] = "terminal_attachment"
+    with pytest.raises(ValueError, match="report_retained_attachment"):
+        _decode_configured_task_program_integration(
+            payload
+        ).registration.catalog.preflight(program)
+    for preset in payload["robot_profile"]["presets"]:
+        preset["action_options"]["simulation.move_held_object"][
+            "report_retained_attachment"
+        ] = True
+        preset["effect_assurance"] = "verified"
+        preset["effect_monitors"] = {
+            semantic_id: {"monitor_id": "builtin.composite_effect", "revision": "1"}
+            for semantic_id in (
+                "pick",
+                "place",
+                "simulation.move_held_object",
+                "simulation.pour",
+            )
+        }
+    selected = _decode_configured_task_program_integration(payload).registration
+    assert selected.catalog.preflight(program) == normal.catalog.preflight(program)
+    assert selected.fingerprint != normal.fingerprint
+    broken = deepcopy(payload)
+    broken["robot_profile"]["presets"][0]["effect_monitors"].pop(
+        "simulation.move_held_object"
+    )
+    with pytest.raises(ValueError, match="verified terminal monitoring"):
+        _decode_configured_task_program_integration(
+            broken
+        ).registration.catalog.preflight(program)
 
 
 def test_pour_transport_rejects_crosswired_stages_and_unavailable_region():
