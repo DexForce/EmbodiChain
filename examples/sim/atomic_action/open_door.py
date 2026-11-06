@@ -312,7 +312,7 @@ def run(args: argparse.Namespace) -> None:
         f"OpenDoor observed hinge: {report['initial_hinge_rad']} -> {report['final_hinge_rad']}; target={args.open_angle}, samples={len(measured_hinge)}"
     )
     if args.auto_play_video_path:
-        Path(args.auto_play_video_path).with_suffix(".json").write_text(
+        Path(args.auto_play_video_path).with_suffix(".hinge.json").write_text(
             json.dumps(report, indent=2) + "\n"
         )
     if wait_for_user:

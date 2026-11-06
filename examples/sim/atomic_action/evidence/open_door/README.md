@@ -32,7 +32,8 @@ python -m examples.sim.atomic_action.open_door --headless --auto_play --renderer
 `--headless` disables the interactive window, not native rendering. Both videos
 include the full trajectory and the existing 4.8 s final settling window.
 The new example flags expose fixture initialization and a larger sample budget,
-and its sidecar records the actual hinge angle after each command.
+and its `.hinge.json` sidecar records the actual hinge angle after each command.
+The configured launcher's `.json` replay record remains separate.
 
 Limitations observed during qualification: the 60° initial-open fixture did
 not resolve a feasible grasp. The 30° closing case with the original 300-sample
