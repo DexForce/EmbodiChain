@@ -2691,9 +2691,14 @@ class SimulationTaskProgramRegistration:
         """Preflight declared native observation capabilities without starting Sim.
 
         Args:
-            physics: Explicit environment-owned backend name.
+            physics: Explicit environment-owned backend name, ``default`` or
+                ``newton``.
         """
         self.assert_unchanged()
+        if type(physics) is not str or physics not in {"default", "newton"}:
+            raise ValueError(
+                "Declare an explicit supported physics backend: default or newton."
+            )
         if self.recorded_contacts_cfg is not None and physics != "default":
             raise ValueError("Recorded source contacts require Default physics.")
         if self.planning_services is not None:
