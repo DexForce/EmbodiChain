@@ -6902,10 +6902,11 @@ def test_observed_curobo_backend_policy_keeps_default_identity_and_seals_opt_in(
         )
     original = _decode_configured_task_program_integration(payload).registration
     assert original.catalog.preflight(program) == compiled
-    # Frozen from the previous public declaration, before these optional
-    # defaults were introduced; neither omitted nor explicit defaults re-sign it.
+    # Frozen from the current Main declarations, including
+    # PickUpOptions.approach_along_grasp_axis=False. Neither omitted nor explicit
+    # existing SDK defaults may change this identity.
     assert original.fingerprint == (
-        "9e4c69acfa524f47f87896bf6315adcd274e05df10a4738610f1e4b48151fb48"
+        "7e74075c53f78a88cf08fa6a8eb36e76775b95501e98781c3d9a0f92abdae3a6"
     )
     observed.update(
         graph_planner_algorithm="prm",
