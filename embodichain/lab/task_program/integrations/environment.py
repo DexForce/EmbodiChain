@@ -817,6 +817,11 @@ class TaskProgramEnvironmentAdapter:
             observation_provider,
             command_sink,
             evidence_collector,
+            task_state=(
+                self._factory.create_initial_task_state()
+                if callable(getattr(self._factory, "create_initial_task_state", None))
+                else None
+            ),
             clock=clock,
             runner_cfg=deepcopy(selected_runner_cfg),
             plan_transform_factory=plan_transform_factory,
@@ -910,6 +915,21 @@ class TaskProgramEnvironmentAdapter:
         )
         return TracingTaskProgramNominalSources(program, delegate)
 
+    def for_env_ids(self, env_ids: tuple[int, ...]) -> TaskProgramEnvironmentAdapter:
+        """Create a fresh registered adapter for selected physical rows.
+
+        Args:
+            env_ids: Explicit ordered world indices.
+        Returns:
+            Adapter with independent runtime state and preserved source bindings.
+        """
+        select = getattr(self._factory, "for_env_ids", None)
+        if not callable(select):
+            raise ValueError("environment factory does not support row selection")
+        adapter = select(env_ids).create_adapter()
+        adapter._set_configured_nominal_sources(self._configured_nominal_sources)
+        return adapter
+
     def create_bridge(
         self,
         program: CompiledTaskProgram,
@@ -919,6 +939,7 @@ class TaskProgramEnvironmentAdapter:
         recipe_indices: tuple[int, ...] | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        isolate_policy_sessions: bool = False,
         invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
         runtime_scope_guard: Callable[[], None] | None = None,
     ) -> TaskProgramDemoBridge:

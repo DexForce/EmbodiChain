@@ -1051,11 +1051,17 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "rotate_upright",
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
+                    *(("approach_along_grasp_axis",) if kind == "pick_up" else ()),
                     *(("target_axis",) if kind == "axis_align" else ()),
                 }
             ),
         )
         kwargs: dict[str, object] = {}
+        if "approach_along_grasp_axis" in config:
+            kwargs["approach_along_grasp_axis"] = _boolean(
+                config["approach_along_grasp_axis"],
+                path=f"{path}.approach_along_grasp_axis",
+            )
         if "hand_interp_steps" in config:
             kwargs["hand_interp_steps"] = _integer(
                 config["hand_interp_steps"],

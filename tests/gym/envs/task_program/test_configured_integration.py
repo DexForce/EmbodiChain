@@ -2625,7 +2625,7 @@ def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
 
 @pytest.mark.parametrize(
     ("variant", "arm_dof", "velocity"),
-    [("dual_ur5", 6, 0.5), ("tianji_marvin", 7, 0.5)],
+    [("dual_ur5", 6, 0.5), ("tianji_marvin", 7, 0.2)],
 )
 def test_configured_motion_budgets_reach_planner_options_and_metadata(
     variant: str, arm_dof: int, velocity: float

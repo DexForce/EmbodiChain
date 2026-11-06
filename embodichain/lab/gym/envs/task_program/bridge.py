@@ -1288,6 +1288,50 @@ class TaskProgramDemoBridge:
         self._last_segment_lifecycle: _SegmentLifecycle | None = None
         self._sequential_workflows: dict[int, tuple[SemanticWorkflow, int]] = {}
         self._execution_trace: list[dict[str, object]] | None = None
+        self._row_rejection: tuple[torch.Tensor, ControllerAction, str] | None = None
+        self._row_hold: tuple[torch.Tensor, ControllerAction] | None = None
+        self._pending_rejected_ids: tuple[int, ...] = ()
+
+    def request_row_rejection(
+        self, env_ids: tuple[int, ...], safe_hold: ControllerAction, *, reason: str
+    ) -> None:
+        """Queue row removal after the outstanding action is acknowledged.
+
+        The next ordinary command holds rejected rows without adding a hidden
+        clock tick for surviving rows or interrupting post-policy observations.
+        Subsequent commands retain that hold, including post-policy commands.
+
+        Args:
+            env_ids: Physical rows to remove permanently from this bridge.
+            safe_hold: Full controller hold supplied by the stepping environment.
+            reason: Measured failure reason retained by the collection owner.
+        """
+        if not env_ids or len(set(env_ids)) != len(env_ids) or not reason:
+            raise ValueError("row rejection requires unique physical IDs and a reason")
+        bound = self.env_ids
+        if any(type(row) is not int or row not in bound.tolist() for row in env_ids):
+            raise ValueError("rejected row is not bound to this bridge")
+        if self._row_rejection is not None:
+            raise RuntimeError("a row rejection is awaiting its safe hold")
+        self._row_rejection = (
+            torch.tensor([int(row) in env_ids for row in bound], device=bound.device),
+            safe_hold.snapshot(),
+            reason,
+        )
+
+    @property
+    def program_id(self) -> str:
+        """Return the compiled program identity without exposing its runtime."""
+        return self._program.program_id
+
+    @property
+    def env_ids(self) -> torch.Tensor:
+        """Return owned physical environment IDs bound to this runtime."""
+        provider = getattr(self._runtime, "observation_provider", None)
+        bound = getattr(provider, "env_ids", None)
+        if isinstance(bound, torch.Tensor):
+            return bound.clone()
+        return self._runtime.result.env_ids.clone()
 
     @property
     def clock(self) -> EnvironmentStepClock:
@@ -1628,6 +1672,15 @@ class TaskProgramDemoBridge:
         """Yield once and advance only after explicit consumption acknowledgement."""
         if lifecycle.pending_action is not None:
             raise RuntimeError("A prior demo action is still awaiting acknowledgement.")
+        if self._row_hold is not None:
+            mask, hold = self._row_hold
+            value = action.value.clone()
+            value[mask] = hold.value[mask]
+            metadata = dict(action.metadata)
+            if self._pending_rejected_ids:
+                metadata["rejected_env_ids"] = self._pending_rejected_ids
+                self._pending_rejected_ids = ()
+            action = ControllerAction(value, metadata=metadata)
         lifecycle.pending_action = action.snapshot()
         lifecycle.yielded_action_count += 1
         yield action
@@ -1635,6 +1688,29 @@ class TaskProgramDemoBridge:
             self._record_consumed_action(action)
             self._clock.advance_after_env_step()
             lifecycle.pending_action = None
+        if self._row_rejection is not None:
+            mask, hold, reason = self._row_rejection
+            self._row_rejection = None
+            runtime = lifecycle.runtime
+            if runtime.result.status is SemanticExecutionStatus.RUNNING:
+                deactivate = getattr(runtime, "deactivate_rows", None)
+                if not callable(deactivate):
+                    raise TaskProgramBridgeError(
+                        "runtime does not support row-local rejection"
+                    )
+                deactivate(mask, reason=reason)
+            if self._eligible_mask is None:
+                self._eligible_mask = ~mask
+            else:
+                self._eligible_mask &= ~mask
+            self._pending_rejected_ids += tuple(
+                int(row) for row in self.env_ids[mask].tolist()
+            )
+            if self._row_hold is not None:
+                previous_mask, previous_hold = self._row_hold
+                hold.value[previous_mask] = previous_hold.value[previous_mask]
+                mask |= previous_mask
+            self._row_hold = mask, hold
 
     def _segment_actions(
         self,
@@ -1796,8 +1872,19 @@ class TaskProgramDemoBridge:
             self._retain_eligible_rows(result.success_mask)
             if is_parallel:
                 self._runtime.adopt_verified_task_state(result.task_state)
-            if result.status is SemanticExecutionStatus.COMPLETED:
+            if result.success_mask.any():
                 yield from self._post_policy_actions(segment, result, lifecycle)
+            # A last policy observation can reject a row just as its iterator
+            # finishes. Surface its hold outside the policy's exact step clock.
+            while self._pending_rejected_ids:
+                assert self._row_hold is not None
+                yield from self._yield_and_advance(
+                    ControllerAction(
+                        self._row_hold[1].value,
+                        metadata={"bridge_action_kind": "runtime_row_rejection_hold"},
+                    ),
+                    lifecycle,
+                )
             lifecycle.complete = True
         finally:
             if not lifecycle.abort_started and lifecycle.pending_action is not None:
