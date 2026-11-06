@@ -183,7 +183,10 @@ Historical revision mapping belongs only to the frozen regression fixture.
 
 `PickUpOptions.approach_direction` accepts one world vector or one vector per
 planning row. PickUp and AxisAlign normalize each row independently and use the
-same direction for candidate eligibility and pre-grasp translation. A benchmark
+same direction for candidate eligibility and pre-grasp translation. Calibrated
+fixed grasps can explicitly select `approach_along_grasp_axis` so native
+pre-grasp translation follows each realized TCP +Z after object rotation.
+The default retains the world-vector contract. A benchmark
 that freezes per-row grasp realisations must forward their directions to the
 actual action; replacing them with one shared vector changes the request.
 

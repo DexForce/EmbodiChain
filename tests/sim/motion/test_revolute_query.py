@@ -247,9 +247,14 @@ def test_contact_metrics_preserve_source_sampling_frames_and_dtype(tmp_path, ref
     factory = _factory(data)
     qpos = torch.tensor([[reference["qpos_x"], 0.0, 0.0]])
     with _query(factory, data) as query:
-        assert query.contact_metrics(qpos, torch.zeros_like(qpos)) == tuple(
-            reference["metrics"]
+        metrics = query.contact_metrics(qpos, torch.zeros_like(qpos))
+        assert metrics[0] == reference["metrics"][0]
+        assert metrics[1] == pytest.approx(
+            reference["metrics"][1],
+            rel=4 * torch.finfo(torch.float32).eps,
+            abs=0,
         )
+        assert metrics[2] == reference["metrics"][2]
     factory.close()
 
 

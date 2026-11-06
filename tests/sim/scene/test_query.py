@@ -16,21 +16,24 @@
 
 from __future__ import annotations
 import pytest
+import torch
 from embodichain.lab.sim.scene.query import SceneView
 from ._runtime_ports import Sim
 
 
 @pytest.mark.parametrize("env_ids", [(1,), (0, 0), (), (False,)])
 def test_explicit_unsupported_selection_rejected(env_ids):
-    with pytest.raises(ValueError, match="B=1"):
+    with pytest.raises(ValueError, match="env_ids"):
         SceneView(Sim(), env_ids=env_ids)
 
 
-def test_batch_world_rejected_before_entity_reads():
-    sim = Sim()
-    sim.num_envs = 2
-    with pytest.raises(ValueError, match="B=1"):
-        SceneView(sim)
+def test_batch_view_selects_ordered_owned_pose_rows():
+    sim = Sim(4)
+    sim.rigid["cube"].value[:, 0] = torch.arange(4)
+    pose = SceneView(sim, env_ids=(3, 1)).pose("cube", to_matrix=False)
+    assert pose[:, 0].tolist() == [3, 1]
+    pose.zero_()
+    assert sim.rigid["cube"].value[:, 0].tolist() == [0, 1, 2, 3]
 
 
 def test_pose_is_owned_and_keeps_environment_dimension():

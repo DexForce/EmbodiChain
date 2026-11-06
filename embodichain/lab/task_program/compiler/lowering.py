@@ -1747,14 +1747,7 @@ class SemanticCallCompiler:
                 "PlanningContext robot_dof must match the compiler engine, "
                 f"got {context.robot.robot_dof} and {engine.robot.dof}."
             )
-        engine_qpos = engine.robot.get_qpos()
-        if context.batch_size != int(engine_qpos.shape[0]):
-            raise ValueError(
-                "PlanningContext batch size must match the compiler engine, "
-                f"got {context.batch_size} and {engine_qpos.shape[0]}."
-            )
-        if context.robot.qpos.device != engine.device:
-            raise ValueError("PlanningContext and compiler engine must share a device.")
+        engine._validate_context(context)
 
     def _effect_monitor_ref(
         self,
