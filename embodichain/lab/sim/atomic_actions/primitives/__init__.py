@@ -45,7 +45,13 @@ from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
-from .press import Press, PressGoal, PressOptions
+from .press import (
+    Press,
+    PressGoal,
+    PressOptions,
+    PressPlanningRecovery,
+    validate_press_extra_distance,
+)
 from .push_object import (
     PushObject,
     PushObjectGoal,
@@ -120,6 +126,8 @@ __all__ = [
     "Press",
     "PressGoal",
     "PressOptions",
+    "PressPlanningRecovery",
+    "validate_press_extra_distance",
     "PushObject",
     "PushObjectGoal",
     "PushObjectOptions",

@@ -152,6 +152,13 @@ def test_rigid_scene_prefix_uses_original_pair_rest_and_query_order(
 def test_opening_scope_and_owned_grounding_are_explicit(newton_available, tensor_poses):
     pose = torch.eye(4, dtype=torch.float64) if tensor_poses else np.eye(4)
     identity = {"place_id": "planned-place", "labels": ["owned"]}
+    from embodichain.lab.sim.atomic_actions import runtime, grasp_geometry
+
+    assert (
+        GraspOpeningTarget
+        is runtime.GraspOpeningTarget
+        is grasp_geometry.GraspOpeningTarget
+    )
     target = GraspOpeningTarget("support", pose, pose, _scope(), identity)
     pose[0, 3] = 9
     identity["labels"].append("external")

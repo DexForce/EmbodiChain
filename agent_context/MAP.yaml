@@ -261,7 +261,6 @@ topics:
   keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
     RigidMeshSnapshot, capture_rigid_mesh, RobotCollisionInputs, SupportCollisionInputs,
     NativeHandGeometry, capture_native_hand_geometry, capture_native_rigid_obstacles, native hand capture,
-    source_fixed_frame_pose, source_arm_base_position, load_urdf_collision_inputs,
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
     SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
@@ -276,8 +275,7 @@ topics:
   - embodichain/compute/geometry/pouring.py
   - embodichain/compute/geometry/projection.py
   - embodichain/lab/sim/objects/backends/_collision_inputs.py
-  - embodichain/lab/sim/utility/urdf_collision.py
-  watch_paths: [embodichain/lab/sim/scene/, embodichain/lab/sim/utility/urdf_collision.py, embodichain/compute/geometry/,
+  watch_paths: [embodichain/lab/sim/scene/, embodichain/compute/geometry/,
     tests/sim/scene/, tests/compute/geometry/]
   related_topics: [simulation-system, scene-expansion, gen-sim, task-programs]
   status: active
@@ -520,6 +518,12 @@ topics:
   - embodichain/gen_sim/task_spec/validation.py
   - embodichain/gen_sim/task_spec/registry.py
   - embodichain/gen_sim/task_spec/evidence.py
+  - embodichain/gen_sim/task_spec/evidence_report.py
+  - embodichain/gen_sim/task_spec/condition_evidence.py
+  - embodichain/gen_sim/task_spec/control_evidence.py
+  - embodichain/gen_sim/task_spec/pour_evidence.py
+  - embodichain/gen_sim/task_spec/manipulation_evidence.py
+  - embodichain/gen_sim/task_spec/evidence_report.py
   - embodichain/gen_sim/task_spec/canonicalization.py
   watch_paths: [embodichain/gen_sim/task_spec/, tests/gen_sim/task_spec/]
   related_topics: [gen-sim, task-programs, task-engine]

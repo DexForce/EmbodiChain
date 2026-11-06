@@ -23,7 +23,6 @@ semantic scene graph, generation model client or task lifecycle.
 | Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
 | Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
 | Shared authored source reads and link-local collider inputs | `embodichain/lab/sim/spawn/source_geometry.py`; Scene retains its `LinkMesh` import |
-| Explicit robot mounting frames and URDF collision inputs | `source_robot_geometry.py`, `utility/urdf_collision.py` |
 | Borrowed robot source geometry and native support bounds | `robot_collision.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
 | CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
@@ -77,16 +76,10 @@ in a content-addressed derived source; it never edits the original asset.
 `control_source` rejects source/sidecar drift, including newly present optional
 sidecars. Source mesh proofs do not certify native cooked shapes or paths.
 
-`source_robot_geometry.py` resolves declared fixed mounting chains and arm-base
-anchors from source configuration; explicit component transforms take precedence.
-`utility.urdf_collision` reads exact selected mesh/box colliders into the existing
-Spawn `LinkMesh` type, preserving source order and scaling origins/vertices once.
-It rejects unresolved URIs and visual-only links. Vertex-envelope mode remains
-explicit and supplies no triangle-surface certificate. These generic readers
-construct no Robot, simulator or IK solver and select no concrete robot preset.
-
 `robot_collision.RobotCollisionInputs` retains the complete explicit solver-root
 collision subtree, original source bytes, joint layout and native Robot owner.
+Its source adapter reuses GraspKit's existing `_urdf_geometry` decoder, adding
+strict scope/topology checks and scaled immutable Spawn `LinkMesh` components.
 `SupportCollisionInputs` retains an exact native support owner and reads the live
 collider-union AABB/contact skin. Both require Default/B1 and reject identity
 drift instead of recapturing a replacement baseline. Scene chooses no trajectory,

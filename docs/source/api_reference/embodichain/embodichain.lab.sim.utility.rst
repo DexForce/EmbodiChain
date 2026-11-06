@@ -131,17 +131,3 @@ Tensor Utilities
 
 .. automodule:: embodichain.lab.sim.utility.tensor
    :members:
-
-Authored URDF collision inputs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The reader returns the existing Spawn ``LinkMesh`` values for explicit local
-mesh/box colliders in selected link order. Collision scale and origin precede
-body scaling, applied once. Arrays are independently owned and read-only.
-``vertices_only`` is an explicit vertex envelope; it cannot establish surface or
-native-cooked geometry. Visuals, unresolved URIs, implicit link selection and
-shape substitution are unsupported. Reading constructs no Robot or simulator.
-
-.. currentmodule:: embodichain.lab.sim.utility.urdf_collision
-
-.. autofunction:: load_urdf_collision_inputs

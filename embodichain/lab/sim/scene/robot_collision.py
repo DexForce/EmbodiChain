@@ -37,7 +37,9 @@ import torch
 from embodichain.compute.geometry.pose_checks import as_rigid_matrix
 from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.spawn.source_geometry import LinkMesh
-from embodichain.lab.sim.utility.urdf_collision import load_urdf_collision_inputs
+from embodichain.toolkits.graspkit.pg_grasp._urdf_geometry import (
+    _load_collision_geometry,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -87,6 +89,118 @@ def _collision_subtree(document: ET.Element, root: str) -> tuple[str, ...]:
         for link in links
         if link.get("name") in selected and link.findall("collision")
     )
+
+
+def _collision_meshes(
+    document: ET.Element,
+    path: Path,
+    link_names: Sequence[str],
+    body_scale: Sequence[float],
+    *,
+    vertices_only: bool,
+) -> dict[str, tuple[LinkMesh, ...]]:
+    """Qualify ordered source components using the existing GraspKit decoder.
+
+    Scene adds its strict source scope, topology, body-scale and immutable
+    LinkMesh contract. Mesh/box decoding, mesh scaling and origins have one
+    implementation shared with surface sampling and fixed gripper geometry.
+    """
+    if isinstance(link_names, str):
+        raise ValueError("link_names must be a sequence of exact identifiers.")
+    names = tuple(link_names)
+    scale = np.asarray(body_scale, dtype=np.float64)
+    if (
+        not names
+        or any(
+            type(name) is not str or not name or name != name.strip() for name in names
+        )
+        or len(set(names)) != len(names)
+        or scale.shape != (3,)
+        or not np.isfinite(scale).all()
+        or (scale <= 0).any()
+    ):
+        raise ValueError(
+            "URDF collision inputs require exact links and positive XYZ scale."
+        )
+    if type(vertices_only) is not bool:
+        raise TypeError("vertices_only must be a bool.")
+    result = {}
+    for name in names:
+        matches = [
+            link for link in document.findall("link") if link.get("name") == name
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"URDF collision link {name!r} must be unambiguous.")
+        values = []
+        for index, collision in enumerate(matches[0].findall("collision")):
+            geometry = collision.find("geometry")
+            if geometry is None or len(geometry) != 1:
+                raise ValueError("Each URDF collider requires one explicit geometry.")
+            element = geometry[0]
+            if element.tag == "mesh":
+                source = element.get("filename", "")
+                if not source or "://" in source:
+                    raise ValueError(
+                        "URDF collision meshes require resolved local paths."
+                    )
+                mesh_scale = np.fromstring(element.get("scale", "1 1 1"), sep=" ")
+                if (mesh_scale <= 0).any():
+                    raise ValueError("URDF collision mesh scale must be positive.")
+                label, approximation = (
+                    str((path.parent / source).resolve()),
+                    "urdfMeshInput",
+                )
+            elif element.tag == "box":
+                size = np.fromstring(element.get("size", ""), sep=" ")
+                label, approximation = f"box:{' '.join(map(str, size))}", "urdfBoxInput"
+            else:
+                raise ValueError("URDF collision inputs support only meshes and boxes.")
+            vertices, faces, origin, _ = _load_collision_geometry(
+                collision, path.parent
+            )
+            vertices = np.asarray(vertices, dtype=np.float64)
+            faces = np.asarray(faces, dtype=np.int64)
+            if (
+                vertices.ndim != 2
+                or vertices.shape[1:] != (3,)
+                or not len(vertices)
+                or not np.isfinite(vertices).all()
+                or faces.ndim != 2
+                or faces.shape[1:] != (3,)
+                or not len(faces)
+                or faces.min() < 0
+                or faces.max() >= len(vertices)
+            ):
+                raise ValueError("URDF collision mesh has invalid source geometry.")
+            if vertices_only:
+                faces = np.empty((0, 3), dtype=np.int64)
+                approximation = approximation.removesuffix("Input") + "VertexEnvelope"
+            else:
+                triangle = vertices[faces]
+                area = np.linalg.norm(
+                    np.cross(
+                        triangle[:, 1] - triangle[:, 0], triangle[:, 2] - triangle[:, 0]
+                    ),
+                    axis=1,
+                )
+                if (area == 0).any():
+                    raise ValueError("URDF collision triangle surface is degenerate.")
+            vertices = (vertices @ origin[:3, :3].T + origin[:3, 3]) * scale
+            if not np.isfinite(vertices).all():
+                raise ValueError("URDF scale produced nonfinite collision vertices.")
+            values.append(
+                LinkMesh(
+                    f"{path}#{name}/collision[{index}]:{label}",
+                    name,
+                    vertices,
+                    faces,
+                    approximation,
+                )
+            )
+        if not values:
+            raise ValueError(f"URDF link {name!r} has no collision geometry.")
+        result[name] = tuple(values)
+    return result
 
 
 def _native_support(support: object) -> tuple[np.ndarray, float]:
@@ -197,12 +311,14 @@ class RobotCollisionInputs:
                 f"missing={sorted(set(required) - set(self._names))}, "
                 f"foreign={sorted(set(self._names) - set(required))}."
             )
-        self._meshes = load_urdf_collision_inputs(
+        self._meshes = _collision_meshes(
+            document,
             self._robot_path,
             self._names,
-            body_scale=self._robot_scale,
+            self._robot_scale,
             vertices_only=True,
         )
+        self._document = document
         self._motion_joint_ids = tuple(robot.get_joint_ids(motion_part))
         self._motion_joint_names = {
             robot.joint_names[index] for index in self._motion_joint_ids
@@ -296,10 +412,11 @@ class RobotCollisionInputs:
             raise ValueError(
                 "Additional collision inputs must belong to the captured subtree."
             )
-        return load_urdf_collision_inputs(
+        return _collision_meshes(
+            self._document,
             self._robot_path,
             names,
-            body_scale=self._robot_scale,
+            self._robot_scale,
             vertices_only=vertices_only,
         )
 
@@ -346,6 +463,7 @@ class RobotCollisionInputs:
         """Release owned source buffers without destroying the borrowed robot."""
         self._closed = True
         self._meshes = {}
+        self._document = None
         self._simulation = self._robot = self._native_robot = None
 
     def contact_offsets(self, names: tuple[str, ...]) -> dict[str, float]:

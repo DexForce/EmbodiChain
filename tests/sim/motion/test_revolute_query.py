@@ -397,3 +397,83 @@ def test_shared_support_path_rejects_invalid_inputs_before_fk(tmp_path, change):
         query.close()
         geometry.close()
         support.close()
+
+
+def test_robot_source_capture_preserves_scale_origin_and_component_order(tmp_path):
+    import xml.etree.ElementTree as ET
+    import trimesh
+
+    from embodichain.lab.sim.scene.robot_collision import RobotCollisionInputs
+
+    data = revolute_query_inputs(tmp_path)
+    path = Path(data.robot.cfg.fpath)
+    trimesh.Trimesh(
+        vertices=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        faces=[[0, 1, 2]],
+        process=False,
+    ).export(tmp_path / "ordered.ply")
+    document = ET.parse(path)
+    link = document.find("link[@name='wrist']")
+    collision = link.find("collision")
+    geometry = collision.find("geometry")
+    geometry.clear()
+    ET.SubElement(geometry, "mesh", filename="ordered.ply", scale="2 3 1")
+    ET.SubElement(collision, "origin", xyz="1 2 3", rpy=f"0 0 {np.pi / 2}")
+    second = ET.SubElement(ET.SubElement(link, "collision"), "geometry")
+    ET.SubElement(second, "box", size="0.2 0.4 0.6")
+    document.write(path)
+    data.robot.cfg.body_scale = (2.0, 1.0, 0.5)
+    names = tuple(reversed(data.names))
+    capture = RobotCollisionInputs(
+        data.simulation,
+        data.robot,
+        motion_part="manipulator",
+        collision_link_names=names,
+    )
+    try:
+        assert capture.link_names == names
+        mesh, box = capture.meshes["wrist"]
+        # Mesh scale -> 90-degree collision rotation/translation -> body scale.
+        np.testing.assert_allclose(
+            mesh.vertices,
+            [[2.0, 2.0, 1.5], [2.0, 4.0, 1.5], [-4.0, 2.0, 1.5]],
+            rtol=0,
+            atol=1e-14,
+        )
+        np.testing.assert_allclose(box.vertices.min(0), [-0.2, -0.2, -0.15])
+        np.testing.assert_allclose(box.vertices.max(0), [0.2, 0.2, 0.15])
+        assert mesh.faces.shape == box.faces.shape == (0, 3)
+        assert not mesh.vertices.flags.writeable
+        surface = capture.load_meshes(("wrist",))["wrist"][0]
+        np.testing.assert_array_equal(surface.vertices, mesh.vertices)
+        np.testing.assert_array_equal(surface.faces, [[0, 1, 2]])
+    finally:
+        capture.close()
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [
+        '<sphere radius="1"/>',
+        '<mesh filename="asset://shape.ply"/>',
+        '<mesh filename="shape.ply" scale="-1 1 1"/>',
+    ],
+)
+def test_robot_source_capture_rejects_unsupported_or_unresolved_geometry(
+    tmp_path, geometry
+):
+    import xml.etree.ElementTree as ET
+    import trimesh
+
+    from embodichain.lab.sim.scene.robot_collision import RobotCollisionInputs
+
+    data = revolute_query_inputs(tmp_path)
+    trimesh.creation.box().export(tmp_path / "shape.ply")
+    path = Path(data.robot.cfg.fpath)
+    document = ET.parse(path)
+    collision = document.find("link[@name='wrist']/collision")
+    collision.remove(collision.find("geometry"))
+    collision.append(ET.fromstring(f"<geometry>{geometry}</geometry>"))
+    document.write(path)
+    with pytest.raises(ValueError):
+        RobotCollisionInputs(data.simulation, data.robot, motion_part="manipulator")
