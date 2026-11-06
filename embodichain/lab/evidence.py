@@ -34,6 +34,17 @@ __all__ = [
 ]
 
 
+def _json_unavailable_values(value: object) -> object:
+    """Replace non-finite unavailable scalars in an owned JSON row."""
+    if isinstance(value, list):
+        for index, member in enumerate(value):
+            value[index] = _json_unavailable_values(member)
+        return value
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
 def _validate_env_ids(
     env_ids: torch.Tensor,
     *,
@@ -164,12 +175,20 @@ class PhysicalEvidenceBatch:
         Returns:
             A new dictionary retaining dtype, row order, unavailable reasons and
             the observation timestamp/revision. This method collects no facts.
+            Non-finite scalars in unavailable rows become JSON ``null``; the
+            original tensor and the row's validity and error remain unchanged.
         """
+        values = self.values.detach().cpu().tolist()
+        valid = self.valid.detach().cpu().tolist()
+        if self.values.is_floating_point():
+            for row, available in enumerate(valid):
+                if not available:
+                    values[row] = _json_unavailable_values(values[row])
         return dict(
             evidence_id=self.evidence_id,
-            values=self.values.detach().cpu().tolist(),
+            values=values,
             value_dtype=str(self.values.dtype),
-            valid=self.valid.detach().cpu().tolist(),
+            valid=valid,
             acquisition_errors=list(self.acquisition_errors),
             timestamp=self.timestamp,
             env_ids=self.env_ids.detach().cpu().tolist(),
