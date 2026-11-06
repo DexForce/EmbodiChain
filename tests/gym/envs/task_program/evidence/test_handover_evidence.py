@@ -129,6 +129,15 @@ def _case(index, name="held", *, raw=False):
             step_dt=0.04,
             object_pose=metrics["object_pose"],
             tcp_poses={part: metrics["receiver_tcp_pose"]},
+            recorded_acquisition=dict(
+                field_ids={"pose": "frozen.rigid.pose", "qpos": "frozen.robot.qpos"},
+                env_ids=[0],
+                episode_ids=[7],
+                frame_indices=list(boundary),
+                observation_revisions=[1],
+                timestamps=[12.0],
+                clock_domain="simulation_time",
+            ),
             pose_frame=frame,
         )
         if case["final"]:

@@ -76,7 +76,10 @@ program, episode and final/recorded scope. TaskSpec compares attachment drift,
 grips, target position, orientation and observed duration against those criteria;
 it never derives acceptance limits from a runtime monitor's resolved parameters.
 Valid measured negatives fail; missing or contradictory acquisition stays
-unavailable. Historical boundary overrides must match the verified record.
+unavailable. Historical boundary overrides must match the verified record. Raw held poses
+retain the canonical history row/episode/step identities and original native
+acquisition times; final observations match source time, while recorded reads
+may be collected later without equating native time to episode step count.
 Existing placement/state/control/Pour APIs keep their current contracts.
 
 Current goals cannot borrow recorded milestone success. The legacy instantaneous
