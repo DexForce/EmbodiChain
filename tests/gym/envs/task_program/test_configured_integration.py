@@ -7901,3 +7901,77 @@ def test_physical_component_snapshot_matches_files_without_component_reads(
         resolve_gym_components(
             duplicate, base_dir=path.parent, component_sources=original
         )
+
+
+def test_release_gate_evidence_is_closed_owned_and_default_fingerprint_stable():
+    from embodichain.lab.task_program.semantics import ReleaseGateEvidence
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    payload = _integration_payload("repeated_pick_place")
+    preset_data = payload["robot_profile"]["presets"][0]
+    preset_data["effect_assurance"] = "verified"
+    preset_data["effect_monitors"] = {
+        semantic_id: {"monitor_id": "builtin.composite_effect", "revision": "1"}
+        for semantic_id in preset_data["action_options"]
+    }
+    baseline = _decode_configured_task_program_integration(payload)
+    baseline_fingerprint = baseline.registration.fingerprint_payload()
+    preset_data["release_gate_evidence"] = "terminal_clauses"
+    explicit_default = _decode_configured_task_program_integration(payload)
+    assert explicit_default.registration.fingerprint_payload() == baseline_fingerprint
+
+    preset_data["release_gate_evidence"] = "binary_only"
+    selected = _decode_configured_task_program_integration(payload)
+    preset = selected.registration.robot_profile_binding.presets[0]
+    assert preset.release_gate_evidence is ReleaseGateEvidence.BINARY_ONLY
+    assert preset.snapshot().release_gate_evidence is ReleaseGateEvidence.BINARY_ONLY
+    assert selected.registration.fingerprint_payload() != baseline_fingerprint
+    assert _canonical_value(preset)["fields"]["release_gate_evidence"]["value"] == (
+        "binary_only"
+    )
+    assert (
+        "release_gate_evidence"
+        not in _canonical_value(baseline.registration.robot_profile_binding.presets[0])[
+            "fields"
+        ]
+    )
+    selected_fingerprint = selected.registration.fingerprint_payload()
+    preset_data["release_gate_evidence"] = "terminal_clauses"
+    assert selected.registration.fingerprint_payload() == selected_fingerprint
+
+    path = _config_path("repeated_pick_place")
+    physical = _physical_components(path, _gym_config("repeated_pick_place"))
+    program, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    policy = deepcopy(policy)
+    task = deepcopy(task)
+    policy["effect_assurance"] = "verified"
+    policy["release_gate_evidence"] = "binary_only"
+    policy["presets"] = {"full_release": {"release_gate_evidence": "terminal_clauses"}}
+    task["profile"]["effect_monitors"] = deepcopy(preset_data["effect_monitors"])
+    deployment = load_configured_task_program_deployment(
+        task_program={
+            "program": {"inline": load_config(program)},
+            "integration": {"inline": task},
+            "execution_policy": {"inline": policy},
+        },
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    decoded_presets = {
+        value.preset_id: value.release_gate_evidence
+        for value in deployment.integration.registration.robot_profile_binding.presets
+    }
+    assert decoded_presets[policy["preset_id"]] is ReleaseGateEvidence.BINARY_ONLY
+    assert decoded_presets["full_release"] is ReleaseGateEvidence.TERMINAL_CLAUSES
+
+    for invalid in (None, True, 3, "unknown"):
+        preset_data["release_gate_evidence"] = invalid
+        with pytest.raises((TypeError, ValueError), match="release_gate_evidence"):
+            _decode_configured_task_program_integration(payload)
+    preset_data["release_gate_evidence"] = "binary_only"
+    preset_data["effect_assurance"] = "projected"
+    preset_data["effect_monitors"] = {}
+    with pytest.raises(ValueError, match="requires verified assurance"):
+        _decode_configured_task_program_integration(payload)

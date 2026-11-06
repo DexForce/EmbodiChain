@@ -3235,6 +3235,7 @@ embodichain.lab.task_program.semantics.profiles
    EffectAssurance
    EndpointResolution
    ProfileValidationError
+   ReleaseGateEvidence
    ResourceEndpoint
    ResourceEndpointAdapter
    ResolvedRobotResource

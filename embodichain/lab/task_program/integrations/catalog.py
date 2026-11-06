@@ -59,6 +59,8 @@ from embodichain.lab.task_program.semantics import (
     EffectEvidenceProvider,
     Place,
     RobotSkillProfile,
+    ReleaseGateEvidence,
+    SkillPolicyPreset,
     RegisteredSemanticCall,
     ResourceEndpoint,
     ResourceEndpointAdapter,
@@ -256,6 +258,12 @@ def _canonical_value(value: object) -> object:
             )
         }
         from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+
+        if (
+            type(value) is SkillPolicyPreset
+            and value.release_gate_evidence is ReleaseGateEvidence.TERMINAL_CLAUSES
+        ):
+            metadata.pop("release_gate_evidence")
 
         from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
 
