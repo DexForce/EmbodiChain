@@ -67,6 +67,7 @@ from .robot_profiles import canonical_robot_profile
 from .prismatic_declarations import resolve_prismatic_program_declarations
 from .control_declarations import resolve_control_program_declarations
 from .continuation_declarations import (
+    _place_acquisition_purposes,
     resolve_source_continuation_declarations,
     source_pick_release_pairs,
     resolve_inside_yaw_declarations,
@@ -1426,6 +1427,24 @@ def prepare_generated_task_program_bundle(
         )
         for node_id, preset in presets.items()
     }
+    purposes = _place_acquisition_purposes(
+        selected, occurrences=occurrence_ids, options=effective_options
+    )
+    for node_id, occurrence in occurrence_ids.items():
+        acquisition = purposes.get(occurrence)
+        if acquisition is None or acquisition[1] not in {"pour", "ends"}:
+            continue
+        current = policy["presets"][presets[node_id]]
+        recovery = current.get("recovery", {})
+        rule = recovery.get("planning_recovery", {})
+        # Source excludes these held purposes from ordinary waypoint screening
+        # and recovery. Independent retained-end-grip/other declarations keep
+        # their own dispatch, as do all motion retries and budget fields.
+        if rule.get("kind") == "place_bounded" and rule.get("variant") == "waypoint":
+            effective_options[node_id]["qualify_required_waypoints"] = False
+            recovery.pop("planning_recovery")
+            if not recovery:
+                current.pop("recovery")
     continuations = resolve_source_continuation_declarations(
         selected,
         program_fingerprint=task_program_fingerprint(compiled),

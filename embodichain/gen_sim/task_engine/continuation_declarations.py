@@ -33,6 +33,55 @@ _PLACES = frozenset(
 )
 
 
+def _place_acquisition_purposes(
+    graph: Mapping[str, Any],
+    *,
+    occurrences: Mapping[str, str],
+    options: Mapping[str, Mapping[str, Any]],
+) -> dict[str, tuple[str, str | None]]:
+    """Associate releases with the current acquisition's declared grasp purpose.
+
+    Resource/entity IDs only link semantic occurrences. The purpose comes from
+    effective typed Pick options, never an object name or a recipe identifier.
+    Existing-hold HandOver retains those semantics on its receiving resource.
+    """
+    held: dict[str, tuple[str, str, str | None]] = {}
+    releases: dict[str, tuple[str, str | None]] = {}
+    for node in graph["nodes"]:
+        call = node["call"]
+        selected = options[node["id"]]
+        resources = call.get("resources", {})
+        subject = call.get("object", call.get("arguments", {}).get("object"))
+        occurrence = occurrences[node["id"]]
+        kind = selected.get("kind")
+        if not isinstance(subject, str):
+            continue
+        if kind in {"pick_up", "axis_align"} and "primary" in resources:
+            purpose = selected.get("adaptive_grasp")
+            # The shared typed handover-source mode owns the original ends
+            # acquisition semantics. AxisAlign has no adaptive Pick mode.
+            purpose = "ends" if purpose == "handover_source" else purpose
+            held[resources["primary"]] = (subject, occurrence, purpose)
+        elif kind == "hand_over":
+            source = resources.get("source")
+            receiver = resources.get("destination")
+            acquisition = held.get(source)
+            if (
+                acquisition is not None
+                and acquisition[0] == subject
+                and isinstance(receiver, str)
+                and not selected.get("release_at_target", True)
+            ):
+                held.pop(source)
+                held[receiver] = acquisition
+        elif kind == "place" and "primary" in resources:
+            acquisition = held.get(resources["primary"])
+            if acquisition is not None and acquisition[0] == subject:
+                held.pop(resources["primary"])
+                releases[occurrence] = acquisition[1:]
+    return releases
+
+
 def resolve_source_continuation_declarations(
     graph: Mapping[str, Any],
     *,

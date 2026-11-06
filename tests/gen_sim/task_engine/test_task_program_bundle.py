@@ -374,10 +374,8 @@ def test_frozen_additional_input_is_rechecked_before_publication(tmp_path, monke
     assert not output.exists()
 
 
-@pytest.mark.parametrize("runtime_profile", ["default", "auto"])
-@pytest.mark.parametrize("revision", [None, 1, 2])
-def test_pour_generation_preserves_static_and_opt_in_projection_modes(
-    tmp_path, revision, runtime_profile
+def _pour_bundle(
+    tmp_path, revision, runtime_profile="default", *, proxy_tolerance=0.03
 ):
     _, physical = _frozen(tmp_path)
     cases = json.loads(
@@ -404,8 +402,17 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
         task_candidate={"draft": {"steps": [{"task_type": "E3"}]}},
         pour_geometry_revision=revision,
         runtime_profile=runtime_profile,
-        pour_proxy_position_tolerance_m=0.03 if revision == 2 else None,
+        pour_proxy_position_tolerance_m=proxy_tolerance if revision == 2 else None,
     )
+    return graph, physical, paths
+
+
+@pytest.mark.parametrize("runtime_profile", ["default", "auto"])
+@pytest.mark.parametrize("revision", [None, 1, 2])
+def test_pour_generation_preserves_static_and_opt_in_projection_modes(
+    tmp_path, revision, runtime_profile
+):
+    graph, physical, paths = _pour_bundle(tmp_path, revision, runtime_profile)
     declaration = yaml.safe_load(
         (paths.root / "task_program/integration.yaml").read_text()
     )
@@ -446,6 +453,16 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
             if revision is not None and node["call"].get("call_id") == "simulation.pour"
             else {}
         )
+        if node["call"]["kind"] == "place":
+            assert (
+                declaration["profile"]["preset_options"][name]["action_options"][
+                    "place"
+                ]["qualify_required_waypoints"]
+                is False
+            )
+            assert "planning_recovery" not in policy["presets"][name].get(
+                "recovery", {}
+            )
     for node in graph["nodes"]:
         if node["call"].get("call_id") == "simulation.move_held_object":
             preset = "gen_sim." + node["id"] + ".execution"
@@ -459,6 +476,102 @@ def test_pour_generation_preserves_static_and_opt_in_projection_modes(
             # routes bypassed the source batched-tensor-only lift prelude.
             assert options.get("lift_clearance") is None
             assert options["report_retained_attachment"] is True
+    physical.assert_unchanged()
+
+
+def test_generated_pour_return_keeps_source_nominal_future_place(tmp_path, monkeypatch):
+    from sim.atomic_actions._alignment_continuation_fixture import (
+        continuation_fixture,
+    )
+    from embodichain.lab.sim.motion import mesh_collision
+    import torch
+
+    graph, physical, paths = _pour_bundle(tmp_path, 2, proxy_tolerance=0.02)
+    loaded = load_configured_bundle(
+        paths.root,
+        external_input_digests={
+            **physical.input_files,
+            **resolve_source_hand_services(physical.embodiment)[2],
+        },
+        implementation_revisions={"embodichain": "test-source"},
+    )
+    node = next(node for node in graph["nodes"] if node["call"]["kind"] == "place")
+    registration = loaded.deployment.integration.registration
+    preset_id = "gen_sim." + node["id"] + ".execution"
+    preset = next(
+        item
+        for item in registration.robot_profile_binding.presets
+        if item.preset_id == preset_id
+    )
+    binding = next(
+        item
+        for item in registration.invocation_policy_bindings
+        if item.preset_id == preset_id
+    )
+    fixture_dir = tmp_path / "future_return"
+    fixture_dir.mkdir()
+    engine, invocation, context, session, check, *_ = continuation_fixture(
+        fixture_dir, "success"
+    )
+    monkeypatch.setattr(mesh_collision, "_make_checker", lambda *args, **kwargs: check)
+    assert engine.planning_services.place_scene_provider is None
+    action_type = type(engine.actions["move_held_object"])
+    original_complete = action_type.plan_complete_request
+    previews = []
+
+    def complete_with_future_return(
+        action, request, current, *, build, external_nominal=False
+    ):
+        plan = original_complete(
+            action, request, current, build=build, external_nominal=external_nominal
+        )
+        assert plan.plan_success.all()
+        projected = replace(
+            current.project(
+                qpos=plan.joint_trajectory.positions[:, -1], task=current.task
+            ),
+            is_preview=True,
+        )
+        future = replace(
+            session.resolve_place(projected),
+            invocation_id=binding.invocation_id,
+            skill_options=preset.action_option_template("place"),
+            motion_policy=preset.motion_policy,
+            recovery_policy=preset.recovery_policy,
+        )
+        preview = build.plan_preview(future, projected)
+        assert torch.equal(
+            preview.joint_trajectory.positions[:, 0], projected.robot.qpos
+        )
+        assert torch.equal(
+            preview.joint_trajectory.dt[:, 1:],
+            preview.joint_trajectory.dt[:, 1:].new_full(
+                preview.joint_trajectory.dt[:, 1:].shape,
+                current.require_control_dt(),
+            ),
+        )
+        assert tuple(segment.name for segment in preview.segments) == (
+            "approach",
+            "release",
+            "retract",
+        )
+        previews.append(preview)
+        return plan
+
+    monkeypatch.setattr(
+        action_type, "plan_complete_request", complete_with_future_return
+    )
+    plan = engine.plan(invocation, context)
+    assert plan.plan_success.all()
+    assert len(previews) == 1 and previews[0].plan_success.all()
+    assert previews[0].invocation_id == binding.invocation_id
+    assert dict(previews[0].expected_effects.held_object_updates) == {
+        "source_arm": None
+    }
+    assert preset.action_option_template("place").qualify_required_waypoints is False
+    assert preset.recovery_policy.planning_recovery is None
+    assert preset.motion_policy.segment_sample_count_retries == (260, 320)
+    assert preset.motion_policy.segment_continuous_ik_recovery is True
     physical.assert_unchanged()
 
 

@@ -23,6 +23,7 @@ from copy import deepcopy
 import pytest
 
 from embodichain.gen_sim.task_engine.continuation_declarations import (
+    _place_acquisition_purposes,
     resolve_source_continuation_declarations,
     resolve_inside_yaw_declarations,
     resolve_measured_rigid_declarations,
@@ -77,6 +78,115 @@ def _pairs() -> tuple[dict, dict, dict, dict, dict, dict]:
         ]
     )
     return graph, occurrences, options, motions, recoveries, scene
+
+
+@pytest.mark.parametrize(
+    "purpose,expected",
+    [
+        ("pour", "pour"),
+        ("handover_source", "ends"),
+        ("ordinary", "ordinary"),
+        (None, None),
+    ],
+)
+def test_release_purpose_follows_acquisition_and_resource_not_object_name(
+    purpose: str | None, expected: str | None
+) -> None:
+    graph, _, _, _, _, _ = _pairs()
+    first, release, second, last = graph["nodes"]
+    first["call"]["resources"] = {"primary": "left"}
+    release["call"]["resources"] = {"primary": "right"}
+    second["call"]["resources"] = {"primary": "right"}
+    last["call"]["resources"] = {"primary": "right"}
+    other_pick = dict(
+        id="other_pick",
+        call=dict(kind="pick", object="unrelated", resources={"primary": "right"}),
+    )
+    other_place = dict(
+        id="other_place",
+        call=dict(kind="place", object="unrelated", resources={"primary": "right"}),
+    )
+    carried = [
+        dict(
+            id=name,
+            call=dict(
+                kind="registered",
+                call_id=call_id,
+                arguments={} if name == "park" else dict(object="payload"),
+                resources={"primary": "left"},
+            ),
+        )
+        for name, call_id in [
+            ("transport", "simulation.move_held_object"),
+            ("pour", "gen_sim.retained_pour"),
+            ("park", "simulation.park"),
+        ]
+    ]
+    transfer = dict(
+        id="transfer",
+        call=dict(
+            kind="hand_over",
+            object="payload",
+            resources={"source": "left", "destination": "right"},
+        ),
+    )
+    graph["nodes"] = [
+        first,
+        *carried,
+        other_pick,
+        other_place,
+        transfer,
+        release,
+        second,
+        last,
+    ]
+    occurrences = {row["id"]: f"program/{row['id']}:0" for row in graph["nodes"]}
+    options = {
+        first["id"]: dict(kind="pick_up", adaptive_grasp=purpose),
+        release["id"]: dict(kind="place"),
+        second["id"]: dict(kind="pick_up", adaptive_grasp="ordinary"),
+        last["id"]: dict(kind="place"),
+        "transport": dict(kind="move_held_object"),
+        "pour": dict(kind="pour"),
+        "park": dict(kind="move_joints"),
+        "other_pick": dict(kind="pick_up", adaptive_grasp="ordinary"),
+        "other_place": dict(kind="place"),
+        "transfer": dict(kind="hand_over", release_at_target=False),
+    }
+    before = deepcopy((graph, occurrences, options))
+    assert _place_acquisition_purposes(
+        graph, occurrences=occurrences, options=options
+    ) == {
+        occurrences["other_place"]: (occurrences["other_pick"], "ordinary"),
+        occurrences[release["id"]]: (occurrences[first["id"]], expected),
+        occurrences[last["id"]]: (occurrences[second["id"]], "ordinary"),
+    }
+    assert (graph, occurrences, options) == before
+
+
+def test_unsupported_releasing_handover_is_not_inferred_as_existing_hold_transfer() -> (
+    None
+):
+    graph, occurrences, _, _, _, _ = _pairs()
+    first, release = graph["nodes"][:2]
+    transfer = dict(
+        id="transfer",
+        call=dict(
+            kind="hand_over",
+            object="payload",
+            resources={"source": "arm", "destination": "receiver"},
+        ),
+    )
+    graph["nodes"] = [first, transfer, release]
+    occurrences["transfer"] = "program/transfer:0"
+    options = {
+        first["id"]: dict(kind="pick_up", adaptive_grasp="pour"),
+        "transfer": dict(kind="hand_over", release_at_target=True),
+        release["id"]: dict(kind="place"),
+    }
+    assert _place_acquisition_purposes(
+        graph, occurrences=occurrences, options=options
+    ) == {occurrences[release["id"]]: (occurrences[first["id"]], "pour")}
 
 
 def test_repeated_pick_continuations_keep_distinct_downstream_opening_occurrences() -> (
