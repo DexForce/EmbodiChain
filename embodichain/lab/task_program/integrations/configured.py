@@ -1981,6 +1981,7 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "segment_sample_count_retries",
                 "segment_continuous_ik_recovery",
                 "require_final_velocity",
+                "mask_generation_overspeed",
                 "final_velocity_rejection",
             }
         ),
@@ -2005,6 +2006,10 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         "require_final_velocity": _boolean(
             config.get("require_final_velocity", False),
             path=f"{path}.require_final_velocity",
+        ),
+        "mask_generation_overspeed": _boolean(
+            config.get("mask_generation_overspeed", False),
+            path=f"{path}.mask_generation_overspeed",
         ),
         "sample_count_retries": tuple(
             _integer(item, path=f"{path}.sample_count_retries[{index}]", minimum=2)

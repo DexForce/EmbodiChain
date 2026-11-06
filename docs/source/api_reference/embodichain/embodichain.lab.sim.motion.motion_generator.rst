@@ -32,6 +32,17 @@ Motion Generator
     :members:
     :exclude-members: __init__, copy, replace, to_dict, validate
 
+``mask_generation_overspeed=True`` opts into a check of each fully normalized
+generation result when ``control_part`` is supplied. It intersects ordered
+runtime speed caps with the authored URDF caps and masks only success, retaining
+positions, time intervals, derivatives and existing candidate metadata. The
+interval tolerance is ``1e-5`` joint units, including zero-duration intervals.
+The check follows resampling and existing failed-row normalization; newly
+rejected proposals remain available to the caller. It applies once per result
+and replaces the earlier fixed-grid speed mask when explicitly enabled. The
+default remains disabled. This is separate from complete-action final-speed
+qualification and does not enable retiming, recovery or acceleration validation.
+
 Explicit linear keyframes and bounded recovery
 ----------------------------------------------
 

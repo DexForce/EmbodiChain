@@ -303,6 +303,8 @@ def _canonical_value(value: object) -> object:
             metadata.pop("supports_segment_motion_recovery")
         if type(value) is MotionPolicy and value.final_velocity_rejection == "hold":
             metadata.pop("final_velocity_rejection")
+        if type(value) is MotionPolicy and value.mask_generation_overspeed is False:
+            metadata.pop("mask_generation_overspeed")
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
         if type(value) is SimulationPlanningServicesCfg:

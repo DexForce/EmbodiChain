@@ -3578,6 +3578,46 @@ def test_final_velocity_rejection_representation_is_explicit_and_default_identit
         )
 
 
+def test_generation_velocity_mask_is_typed_forwarded_and_default_identity_stable():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+    from embodichain.lab.task_program.runtime.results import _motion_policy_to_metadata
+    from embodichain.lab.sim.atomic_actions import MotionPolicy
+
+    default = _decode_motion_policy({"sample_count": 50}, path="motion")
+    disabled = _decode_motion_policy(
+        {"sample_count": 50, "mask_generation_overspeed": False}, path="motion"
+    )
+    assert _canonical_value(default) == _canonical_value(disabled)
+    assert "mask_generation_overspeed" not in _canonical_value(default)["fields"]
+    assert "mask_generation_overspeed" not in _motion_policy_to_metadata(default)
+    selected = _decode_motion_policy(
+        {
+            "strategy": "motion_gen",
+            "sample_count": 50,
+            "mask_generation_overspeed": True,
+        },
+        path="motion",
+    )
+    options = selected.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 3), control_part="arm", interpolation_dt=0.04
+    )
+    assert options.mask_generation_overspeed is True
+    assert _canonical_value(selected)["fields"]["mask_generation_overspeed"] is True
+    assert _motion_policy_to_metadata(selected)["mask_generation_overspeed"] is True
+    with pytest.raises((TypeError, ValueError), match="mask_generation_overspeed"):
+        _decode_motion_policy(
+            {"sample_count": 50, "mask_generation_overspeed": 1}, path="motion"
+        )
+    with pytest.raises(TypeError, match="mask_generation_overspeed"):
+        MotionPolicy(mask_generation_overspeed=1)
+    options.mask_generation_overspeed = 1
+    with pytest.raises(TypeError, match="mask_generation_overspeed"):
+        options.__post_init__()
+
+
 def test_planning_services_are_closed_owned_sealed_and_deferred(monkeypatch):
     from embodichain.lab.sim.motion import mesh_collision
     from embodichain.lab.task_program.integrations.catalog import (
