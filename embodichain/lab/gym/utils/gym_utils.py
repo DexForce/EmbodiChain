@@ -651,6 +651,7 @@ def config_to_cfg(
     *,
     source_path: str | os.PathLike[str] | None = None,
     task_program_path_override: str | os.PathLike[str] | None = None,
+    component_sources: Mapping[str, Mapping[str, object]] | None = None,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -683,6 +684,9 @@ def config_to_cfg(
         task_program_path_override: Optional explicit program path. This is
             selected instead of the Gym-config path and resolves from the
             process working directory.
+        component_sources: Optional verified physical component snapshot passed
+            to the public component resolver. Selected component files are not
+            reopened; external asset resolution keeps its existing owner rules.
 
     Returns:
         EmbodiedEnvCfg: A configuration object for initializing the environment.
@@ -766,7 +770,9 @@ def config_to_cfg(
     base_dir = (
         Path.cwd() if source_path is None else Path(source_path).expanduser().parent
     )
-    component_resolution = _resolve_gym_components(config, base_dir=base_dir)
+    component_resolution = _resolve_gym_components(
+        config, base_dir=base_dir, component_sources=component_sources
+    )
     config = component_resolution.config
     if "objective" in config:
         from embodichain.lab.gym.envs.objectives.config import load_objective_component
