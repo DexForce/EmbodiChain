@@ -1,0 +1,46 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "scope": "Actual complete B0 integration factory with fixed portable authored mesh declarations. No simulator, action execution or physical qualification.",
+  "source_function_sha256": "0f5c260d9826de8b13e1e35b2a467fa8ef87cba67f9114fc7b51f49622fbdbb5",
+  "cases": [
+    {
+      "name": "e1_tilted",
+      "world_axis_before_pick": [
+        -0.34202014332566877,
+        -0.8516507396391467,
+        0.39713126196710263
+      ],
+      "approach": [
+        0.20460586643013554,
+        0.5094809205837078,
+        -0.8358023875196525
+      ]
+    },
+    {
+      "name": "e1_after_align",
+      "world_axis_before_pick": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "approach": [
+        0.0,
+        0.0,
+        -1.0
+      ]
+    },
+    {
+      "name": "e1_downward",
+      "world_axis_before_pick": [
+        0.0,
+        -1.2246467991473532e-16,
+        -1.0
+      ],
+      "approach": [
+        0.0,
+        0.0,
+        -1.0
+      ]
+    }
+  ]
+}

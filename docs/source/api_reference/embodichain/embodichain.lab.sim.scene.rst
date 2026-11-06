@@ -454,6 +454,142 @@ robot installation search, independent validation and the configured entry point
 
    embodichain.lab.sim.scene.feasibility
 
+Authored collider inputs
+-----------------------
+
+``LinkMesh`` carries owned link-local source vertices and triangle indices.
+Its implementation belongs to ``spawn.source_geometry``; the Scene import
+remains available as the same class.
+It preserves authored order and dtype, and explicitly permits vertex-only
+inputs with an empty triangle array. Native cooked collision geometry and
+runtime poses remain separate observations; this value proves neither contact
+nor collision freedom.
+
+.. currentmodule:: embodichain.lab.sim.scene.source_geometry
+
+.. autoclass:: LinkMesh
+   :members:
+
+Static articulation and control inputs
+--------------------------------------
+
+These readers inspect self-contained USD sources without creating a simulator.
+``ArticulationGeometry`` measures collider vertices relative to the imported
+root body; ``fit_articulation_to_proxy`` explicitly returns a revised physical
+declaration. Prismatic discovery preserves stable part-identity order and
+requires explicit part selection when several mechanisms exist. Press inspection measures a
+selected joint, endpoint and collider; it does not evaluate a press event.
+
+Static readers share the Object/Spawn source reader. Config-based inspections
+accept an optional ``source=UsdSourceSnapshot``; path-based inspections also
+accept that snapshot directly. This reuses the selected source parse within an assembly while retaining
+source-byte and annotation checks at the reader boundaries. Mass lineage
+qualification keeps its own original/derived source checks::
+
+    from embodichain.lab.sim.spawn.source_geometry import read_usd_source
+    from embodichain.lab.sim.scene.revolute_inputs import inspect_revolute_control
+    from embodichain.lab.sim.scene.revolute_geometry import load_twist_geometry
+    from embodichain.lab.sim.scene.control_source import capture_revolute_source_seal
+
+    source = read_usd_source(config["fpath"])
+    binding = inspect_revolute_control(config, 90, source=source)
+    geometry = load_twist_geometry(source, binding)
+    seal = capture_revolute_source_seal(source, binding)
+
+Revolute inspection consumes authored joint, grip, pointer and printed-setting
+roles. The existing ``gen_sim.twist-control/v1`` annotation format is retained
+for frozen assets; no roles are inferred from names. The physical binding does
+not select execution chunk counts, recovery rules or acceptance tolerances.
+``TwistGeometry`` keeps each body's input mesh and cooking approximation separate,
+with scale applied once. Native cooked shapes require their own observation.
+
+``create_mass_source_copy`` performs the existing Default-only compensation:
+center of mass scales by the uniform body scale and diagonal inertia by its
+square, while mass and all other authored fields remain unchanged. It writes a
+content-addressed copy and lineage manifest, leaving the original read-only.
+Qualification reconstructs that exact operation and rejects altered artifacts.
+``RevoluteSourceSeal`` pins asset, calibration and optional mass-source bytes,
+including required sidecar absence. Freshness checks reject drift rather than
+re-signing it. The circular-prism proof requires two complete uniform rings and
+closed convex topology; it does not establish dynamic path clearance.
+
+.. currentmodule:: embodichain.lab.sim.scene.articulation_geometry
+
+.. autoclass:: ArticulationGeometry
+   :members:
+
+.. autofunction:: read_articulation_geometry
+
+.. autofunction:: fit_articulation_to_proxy
+
+.. currentmodule:: embodichain.lab.sim.scene.articulation_inputs
+
+.. autoclass:: PrismaticBinding
+   :members:
+
+.. autoclass:: ArticulationPartCandidate
+   :members:
+
+.. autofunction:: discover_prismatic_parts
+
+.. autofunction:: inspect_prismatic
+
+.. autofunction:: inspect_prismatic_part
+
+.. autofunction:: handle_mesh
+
+.. currentmodule:: embodichain.lab.sim.scene.control_semantics
+
+.. autoclass:: TwistSemantics
+   :members:
+
+.. autoexception:: MissingTwistSemanticsError
+
+.. autoexception:: InvalidTwistSemanticsError
+
+.. autofunction:: resolve_twist_semantics
+
+.. currentmodule:: embodichain.lab.sim.scene.revolute_inputs
+
+.. autoclass:: RevoluteControlBinding
+   :members:
+
+.. autofunction:: inspect_revolute_control
+
+.. currentmodule:: embodichain.lab.sim.scene.revolute_geometry
+
+.. autoclass:: TwistGeometry
+   :members:
+
+.. autofunction:: load_twist_geometry
+
+.. currentmodule:: embodichain.lab.sim.scene.press_inputs
+
+.. autoclass:: PressBinding
+   :members:
+
+.. autofunction:: inspect_press
+
+.. currentmodule:: embodichain.lab.sim.scene.control_mass_source
+
+.. autoclass:: MassSourceCopy
+   :members:
+
+.. autofunction:: adjacent_manifest_path
+
+.. autofunction:: qualify_mass_source_copy
+
+.. autofunction:: create_mass_source_copy
+
+.. currentmodule:: embodichain.lab.sim.scene.control_source
+
+.. autoclass:: RevoluteSourceSeal
+   :members:
+
+.. autofunction:: capture_revolute_source_seal
+
+.. autofunction:: qualify_revolute_grip_shell
+
 Native planar observations
 --------------------------
 
@@ -470,3 +606,26 @@ is not evidence of contact support, release, stability or task completion.
 
 .. autoclass:: NativePlanarPlacement
    :members:
+
+Exact batched rigid mesh inputs
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.rigid_mesh
+
+Capture scaled vertices and their original triangle indices without reading a
+pose, changing winding, processing a mesh or merging environment rows. The owned
+CPU data supports exact silhouette and staged Pour geometry. Input meshes are
+not cooked collision shapes or physical contact evidence; consumers retain the
+observation pose and native-object lifetime separately. The lightweight scene
+mesh-envelope path does not acquire triangles unless explicitly requested by
+this separate API.
+
+.. autosummary::
+
+   RigidMeshSnapshot
+   capture_rigid_mesh
+
+.. autoclass:: RigidMeshSnapshot
+   :members:
+
+.. autofunction:: capture_rigid_mesh

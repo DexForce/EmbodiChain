@@ -971,6 +971,10 @@ class ExecutionRunner:
         else:
             self._status = RunnerStatus.FAILED
             self._message = f"{reason} Safe stop acknowledgement failed."
+        cleanup = self._session.abort_plan_lifecycle(reason)
+        if cleanup:
+            self._status = RunnerStatus.FAILED
+            self._message = f"{self._message} {cleanup}"
         self._clear_effect_boundary()
         self._pending_revision = None
         self._next_step_at = self._clock_now()
@@ -1310,7 +1314,8 @@ class ExecutionRunner:
         records = list(dispatches or ())
         records.extend(self._safe_stop(context))
         self._status = RunnerStatus.FAILED
-        self._message = message
+        cleanup = self._session.abort_plan_lifecycle(message)
+        self._message = message if cleanup is None else f"{message} {cleanup}"
         self._clear_effect_boundary()
         self._pending_revision = None
         self._next_step_at = self._clock_now()

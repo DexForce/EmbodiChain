@@ -21,12 +21,12 @@ from __future__ import annotations
 from embodichain.lab.sim.motion._budget import _planning_call
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Mapping, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import cached_property
 import math
-from typing import Any, ClassVar, Generic, TYPE_CHECKING
+from typing import Any, ClassVar, Generic, TYPE_CHECKING, Protocol
 
 import torch
 
@@ -47,12 +47,18 @@ from .plans import (
     ActionPlan,
     EffectVerificationRequirement,
     PlannerDiagnostics,
+    PlanQualification,
     PlanningFailure,
     TimedTrajectory,
     TrajectorySegment,
     normalize_success_mask,
 )
-from .policies import DynamicCollisionMode
+from .policies import (
+    DynamicCollisionMode,
+    MotionPolicy,
+    PlanningRecovery,
+    RecoveryPolicy,
+)
 from .requirements import GRASP_CAPABILITY, SkillBindingContract
 from .runtime_commands import (
     EndpointCommand,
@@ -152,6 +158,13 @@ class SkillDescriptor:
     """Whether completion reports motion execution without physical-effect proof."""
     binding_contract: SkillBindingContract | None = None
     """Explicit generic resource contract used by Task Program lowering."""
+    planning_recovery_type: (
+        type[PlanningRecovery] | tuple[type[PlanningRecovery], ...] | None
+    ) = None
+    """Exact supported declaration type(s); None rejects nonempty declarations."""
+
+    supports_segment_motion_recovery: bool = field(default=False, init=False)
+    """Derived from the actual Atomic override; not a caller-supplied claim."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:
@@ -169,12 +182,128 @@ class SkillDescriptor:
             )
         if not isinstance(self.open_loop, bool):
             raise TypeError("SkillDescriptor.open_loop must be a bool.")
+        recovery_types = (
+            self.planning_recovery_type
+            if isinstance(self.planning_recovery_type, tuple)
+            else (
+                ()
+                if self.planning_recovery_type is None
+                else (self.planning_recovery_type,)
+            )
+        )
+        if self.planning_recovery_type is not None and (
+            not recovery_types
+            or len(set(recovery_types)) != len(recovery_types)
+            or any(
+                not isinstance(value, type) or not issubclass(value, PlanningRecovery)
+                for value in recovery_types
+            )
+        ):
+            raise TypeError(
+                "planning_recovery_type requires distinct PlanningRecovery types or None."
+            )
         if self.binding_contract is not None:
             if not isinstance(self.binding_contract, SkillBindingContract):
                 raise TypeError(
                     "SkillDescriptor.binding_contract must be a "
                     "SkillBindingContract or None."
                 )
+
+    def validate_motion_policy(self, policy: MotionPolicy) -> None:
+        """Reject unsupported segment recovery before grounding/provider work.
+
+        Args:
+            policy: Explicit motion policy selected for this exact skill.
+
+        Raises:
+            TypeError: The policy has an unsupported type.
+            ValueError: Segment recovery has no implementation for this skill.
+        """
+        if not isinstance(policy, MotionPolicy):
+            raise TypeError("policy must be a MotionPolicy.")
+        if (
+            policy.segment_sample_count_retries or policy.segment_continuous_ik_recovery
+        ) and not self.supports_segment_motion_recovery:
+            raise ValueError(
+                f"Skill {self.skill_id!r} does not support Cartesian segment recovery."
+            )
+
+    def validate_planning_recovery(self, policy: RecoveryPolicy) -> None:
+        """Reject incompatible declarations before grounding or planning.
+
+        Args:
+            policy: Selected immutable recovery policy.
+
+        Raises:
+            TypeError: The policy or concrete declaration type is unsupported.
+            ValueError: The declaration belongs to another skill.
+        """
+        if not isinstance(policy, RecoveryPolicy):
+            raise TypeError("policy must be a RecoveryPolicy.")
+        policy.validate_skill(self.skill_id)
+        declaration = policy.planning_recovery
+        if declaration is not None and type(declaration) not in (
+            self.planning_recovery_type
+            if isinstance(self.planning_recovery_type, tuple)
+            else (self.planning_recovery_type,)
+        ):
+            raise TypeError(
+                f"Skill {self.skill_id!r} does not support planning recovery {type(declaration).__name__}."
+            )
+
+
+class CompletePlanBuilder(Protocol):
+    """Engine-owned candidate construction and selected-plan finalization."""
+
+    def __call__(
+        self,
+        request: ResolvedActionRequest,
+        *,
+        planner: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
+        apply_transform: bool = True,
+        action_qualifier: (
+            Callable[
+                [ResolvedActionRequest, PlanningContext, ActionPlan],
+                PlanQualification | None,
+            ]
+            | None
+        ) = None,
+    ) -> ActionPlan:
+        """Build with sampling retries and final generic qualification.
+
+        ``planner`` retains request preparation and command authorization.
+        Explicit candidate search may defer the caller's transform until
+        :meth:`finalize_selected`; default calls preserve the original pipeline.
+        A declared mask-only velocity gate waits until the complete action hook
+        returns; it does not change masks seen by internal candidate searches.
+        ``action_qualifier`` replaces only this build's post-transform action
+        qualification. Structural checks and generic final velocity checks remain
+        mandatory; omitted callbacks use the action's normal qualifier.
+        """
+        ...
+
+    def plan_preview(
+        self, request: ResolvedActionRequest, context: PlanningContext
+    ) -> ActionPlan:
+        """Build an exact suffix under a private same-observation context.
+
+        The original caller transform stays local to this complete planning call.
+        The engine validates rows, observed robot, world/scene and request owner;
+        no command, state commit or second compiler is created by a preview.
+        """
+        ...
+
+    def finalize_selected(
+        self, request: ResolvedActionRequest, plan: ActionPlan
+    ) -> ActionPlan:
+        """Transform the selected candidate and qualify it without replanning.
+
+        Call once after selecting a candidate built with ``apply_transform=False``.
+        Structural, velocity and action final-plan qualification remain enforced.
+        """
+        ...
 
 
 class AtomicAction(Generic[GoalT, OptionsT], ABC):
@@ -193,6 +322,11 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
     OptionsType: ClassVar[type[ActionOptions]] = ActionOptions
     """Concrete per-invocation runtime options accepted by this skill."""
+
+    PlanningRecoveryType: ClassVar[
+        type[PlanningRecovery] | tuple[type[PlanningRecovery], ...] | None
+    ] = None
+    """Exact opt-in planning declarations supported by this skill."""
 
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
@@ -298,14 +432,22 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     @classmethod
     def descriptor(cls) -> SkillDescriptor:
         """Return stable metadata used by registries and Action Agent adapters."""
-        return SkillDescriptor(
+        descriptor = SkillDescriptor(
             skill_id=cls.skill_id,
             goal_type=cls.GoalType,
             options_type=cls.OptionsType,
             agent_visible=cls.agent_visible,
             open_loop=cls.open_loop,
             binding_contract=cls.__dict__.get("binding_contract"),
+            planning_recovery_type=cls.PlanningRecoveryType,
         )
+        object.__setattr__(
+            descriptor,
+            "supports_segment_motion_recovery",
+            cls._validate_segment_motion_recovery
+            is not AtomicAction._validate_segment_motion_recovery,
+        )
+        return descriptor
 
     def resolve_request(
         self,
@@ -329,6 +471,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Invocation skill_id {invocation.skill_id!r} does not match "
                 f"{self.skill_id!r}."
             )
+        descriptor = self.descriptor()
+        descriptor.validate_planning_recovery(invocation.recovery_policy)
+        descriptor.validate_motion_policy(invocation.motion_policy)
         if not isinstance(invocation.goal, self.GoalType):
             expected = (
                 " | ".join(item.__name__ for item in self.GoalType)
@@ -381,6 +526,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Request skill_id {request.skill_id!r} does not match "
                 f"{self.skill_id!r}."
             )
+        descriptor = self.descriptor()
+        descriptor.validate_planning_recovery(request.recovery_policy)
+        descriptor.validate_motion_policy(request.motion_policy)
         if not isinstance(request.goal, self.GoalType):
             raise TypeError(
                 f"Skill {self.skill_id!r} received incompatible goal "
@@ -400,12 +548,41 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         return request.goal
 
     @_planning_call("check")
+    def plan_complete_request(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        *,
+        build: CompletePlanBuilder,
+        external_nominal: bool = False,
+    ) -> ActionPlan:
+        """Delegate one complete request, optionally specialized by a typed skill.
+
+        Args:
+            request: Already-resolved immutable invocation and selected policies.
+            context: Actual planning observation; no execution is permitted.
+            build: Engine-owned builder retaining generic retry/transform/final
+                qualification boundaries. A skill may select only its declared
+                bounded alternatives; it cannot modify the builder or registry.
+            external_nominal: Whether the caller supplied an external nominal
+                motion source. Unsupported explicit recovery combinations reject.
+
+        Returns:
+            One complete action plan. The default delegates exactly once and
+            performs no reads, snapshots, retries or state changes.
+        """
+        return build(request)
+
+    @_planning_call("check")
     def plan(
         self,
         request: ResolvedActionRequest[GoalT, OptionsT],
         context: PlanningContext,
         *,
         nominal_source: NominalMotionSource | None = None,
+        planner: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
     ) -> ActionPlan:
         """Bind the current collision scene and invoke the skill planner.
 
@@ -417,9 +594,25 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             Scene-bound action plan with expected, uncommitted effects.
         """
         self.require_goal(request)
+        if planner is not None and (
+            not callable(planner) or nominal_source is not None
+        ):
+            raise ValueError(
+                "An action-owned candidate planner cannot replace external nominal motion."
+            )
+        segment_recovery = bool(
+            request.motion_policy.segment_sample_count_retries
+            or request.motion_policy.segment_continuous_ik_recovery
+        )
+        if segment_recovery:
+            if nominal_source is not None:
+                raise ValueError(
+                    "Segment motion recovery cannot alter external nominal motion."
+                )
+            self._validate_segment_motion_recovery(request, context)
         prepared = self._prepare_request(request, context)
         plan = (
-            self._plan(prepared, context)
+            (self._plan if planner is None else planner)(prepared, context)
             if nominal_source is None
             else self._plan_from_nominal(prepared, context, nominal_source)
         )
@@ -429,6 +622,27 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             plan,
             commands=self._authorize_command_targets(prepared, plan.commands),
         )
+
+    def _validate_segment_motion_recovery(self, request, context) -> None:
+        """Reject unsupported non-default segment policy before scene/provider work."""
+        raise ValueError(
+            f"Skill {self.skill_id!r} does not support Cartesian segment recovery."
+        )
+
+    def _qualify_final_plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        plan: ActionPlan,
+    ) -> PlanQualification | None:
+        """Inspect emitted samples after plan transforms without replanning.
+
+        The engine supplies an owned plan snapshot and accepts only a mask and
+        diagnostics. Implementations may reject rows, never return a replacement
+        plan, change the request/context, execute commands or commit effects.
+        The default has no additional qualification requirement.
+        """
+        return None
 
     def _plan_from_nominal(
         self,
@@ -1291,6 +1505,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
 __all__ = [
     "AtomicAction",
+    "CompletePlanBuilder",
     "ObjectSemantics",
     "SkillDescriptor",
     "resolve_runtime_device",

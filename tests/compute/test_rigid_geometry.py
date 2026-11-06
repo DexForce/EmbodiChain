@@ -20,11 +20,63 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 import torch
 
-from embodichain.compute.geometry import nearest_half_turn_pose, rotate_rigid_grasp
+from embodichain.compute.geometry import (
+    axis_contact_pose,
+    nearest_half_turn_pose,
+    rotate_rigid_grasp,
+)
+from embodichain.compute.geometry.pose_checks import as_rigid_matrix
 from embodichain.utils.math import pose_inv
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_staging_pose_validation_keeps_dtype_and_rejects_nonrigid_inputs(dtype):
+    pose = np.eye(4, dtype=dtype)
+    pose[0, 3] = 0.123456789
+    np.testing.assert_array_equal(as_rigid_matrix(pose[None]), pose)
+    assert as_rigid_matrix(torch.from_numpy(pose)).dtype == dtype
+    reflected = pose.copy()
+    reflected[0, 0] = -1
+    scaled = pose.copy()
+    scaled[0, 0] = 1.01
+    bad_row = pose.copy()
+    bad_row[3, 0] = 2e-6
+    nonfinite = pose.copy()
+    nonfinite[1, 3] = np.nan
+    for invalid in (
+        reflected,
+        scaled,
+        bad_row,
+        nonfinite,
+        pose[None].repeat(2, axis=0),
+    ):
+        with pytest.raises(ValueError, match="non_rigid"):
+            as_rigid_matrix(invalid)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_axis_contact_frames_preserve_tie_reference_roll_and_source_dtype(dtype):
+    target = torch.eye(4, dtype=dtype)[None]
+    target[:, :3, 3] = torch.tensor([1.0, 2.0, 3.0], dtype=dtype)
+    before = target.clone()
+    axis = torch.tensor([0.0, 0.0, 4.0], dtype=dtype)
+    pose = axis_contact_pose(target, axis, (0.1, 0.2, 0.3), math.pi / 2)
+    assert pose.dtype == torch.float32
+    torch.testing.assert_close(
+        pose[0, :3, :3],
+        torch.tensor([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]),
+        rtol=0,
+        atol=1e-7,
+    )
+    torch.testing.assert_close(pose[0, :3, 3], torch.tensor([1.1, 2.2, 3.3]))
+    torch.testing.assert_close(target, before, rtol=0, atol=0)
+    assert axis.tolist() == [0.0, 0.0, 4.0]
+    pose.zero_()
+    torch.testing.assert_close(target, before, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
@@ -86,3 +138,51 @@ def test_shared_angle_samples_broadcast_over_rigid_grasp_batch() -> None:
     assert rotated.shape == (3, 2, 4, 4)
     torch.testing.assert_close(rotated, carried)
     torch.testing.assert_close(rotated[:, 0], poses)
+
+
+def test_opposite_grasp_end_retains_center_threshold_and_receiver_tie():
+    from embodichain.compute.geometry.gripper import opposite_grasp_end
+
+    pose = torch.eye(4, dtype=torch.float64).repeat(4, 1, 1)
+    axis = pose.new_tensor([0.0, 0.0, 1.0]).expand(4, -1)
+    source = pose.clone()
+    source[:, 2, 3] = pose.new_tensor([0.1, -0.1, 0.0, 1e-5])
+    receiver = pose.clone()
+    receiver[:, 2, 3] = 0.2
+    assert opposite_grasp_end(axis, pose, source, receiver).tolist() == [
+        False,
+        True,
+        True,
+        True,
+    ]
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_support_mesh_envelope_preserves_world_axes_and_explicit_inset(dtype):
+    from embodichain.compute.geometry.rigid import support_mesh_envelope
+
+    corners = torch.tensor(
+        [[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)], dtype=dtype
+    ).repeat(2, 1, 1)
+    object_pose = torch.eye(4, dtype=dtype).repeat(2, 1, 1)
+    object_pose[:, 2, 3] = torch.tensor([5, 7], dtype=dtype)
+    reference_pose = torch.eye(4, dtype=dtype).repeat(2, 1, 1)
+    reference_pose[:, :3, :3] = torch.tensor(
+        [[0, -1, 0], [1, 0, 0], [0, 0, 1]], dtype=dtype
+    )
+    reference_pose[:, :3, 3] = torch.tensor([[10, 20, 1], [30, 40, 2]], dtype=dtype)
+    bottom, top, lower, upper = support_mesh_envelope(
+        corners,
+        corners * corners.new_tensor([2, 3, 1]),
+        object_pose,
+        reference_pose,
+        inset_xy=0.002,
+    )
+    torch.testing.assert_close(bottom, corners.new_tensor([4, 6]))
+    torch.testing.assert_close(top, corners.new_tensor([2, 3]))
+    torch.testing.assert_close(
+        lower, corners.new_tensor([[7.002, 18.002], [27.002, 38.002]])
+    )
+    torch.testing.assert_close(
+        upper, corners.new_tensor([[12.998, 21.998], [32.998, 41.998]])
+    )

@@ -21,12 +21,15 @@ import math
 import numpy as np
 import pytest
 import torch
+from scipy.spatial.transform import Rotation
 
 from embodichain.utils import math as math_utils
 from embodichain.utils.math import (
     convert_quat,
     default_orientation,
     inv_transform,
+    interpolate_poses,
+    interpolate_rotations,
     look_at_to_pose,
     matrix_from_quat,
     quat_apply,
@@ -351,6 +354,147 @@ def test_named_quaternion_boundary_helpers_preserve_numpy_backend() -> None:
 
     np.testing.assert_array_equal(quat_xyzw_to_wxyz(xyzw), wxyz)
     np.testing.assert_array_equal(quat_wxyz_to_xyzw(wxyz), xyzw)
+
+
+@pytest.mark.parametrize(
+    ("angle", "device"),
+    [
+        (0.0, "cpu"),
+        (1e-6, "cpu"),
+        (0.02, "cpu"),
+        (0.05, "cpu"),
+        (0.6, "cpu"),
+        (np.pi / 2 - 0.01, "cpu"),
+        (np.pi / 2 + 0.01, "cpu"),
+        (np.pi - 0.01, "cpu"),
+        pytest.param(0.02, "cuda:0", marks=pytest.mark.gpu),
+    ],
+)
+def test_rotation_interpolation_retains_small_motion_and_endpoints(
+    angle: float, device: str
+) -> None:
+    start = Rotation.from_euler("x", 0.3).as_matrix()
+    expected = (
+        Rotation.from_euler("z", np.linspace(0, angle, 5)[:, None]).as_matrix() @ start
+    )
+    start_tensor = torch.tensor(start, dtype=torch.float64, device=device)
+    end_tensor = torch.tensor(expected[-1], dtype=torch.float64, device=device)
+    original_start, original_end = start_tensor.clone(), end_tensor.clone()
+
+    result = interpolate_rotations(start_tensor, end_tensor, num_steps=4)
+
+    torch.testing.assert_close(
+        result, torch.tensor(expected, dtype=torch.float64, device=device)
+    )
+    torch.testing.assert_close(start_tensor, original_start, rtol=0, atol=0)
+    torch.testing.assert_close(end_tensor, original_end, rtol=0, atol=0)
+
+
+def test_pose_interpolation_keeps_small_rotation_aligned_with_translation() -> None:
+    start = torch.eye(4, dtype=torch.float64)
+    end = torch.eye(4, dtype=torch.float64)
+    end[:3, :3] = torch.from_numpy(Rotation.from_euler("z", 0.02).as_matrix())
+    end[:3, 3] = torch.tensor([1.0, 0.5, -0.25])
+
+    poses, interior_count = interpolate_poses(start, end, num_steps=3)
+
+    expected = torch.eye(4, dtype=torch.float64).repeat(5, 1, 1)
+    expected[:, :3, :3] = torch.from_numpy(
+        Rotation.from_euler("z", np.linspace(0, 0.02, 5)[:, None]).as_matrix()
+    )
+    expected[:, :3, 3] = (
+        torch.linspace(0, 1, 5, dtype=torch.float64)[:, None] * end[:3, 3]
+    )
+    assert interior_count == 3
+    torch.testing.assert_close(poses, expected)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize(
+    ("angle", "device"),
+    [
+        (0.02, "cpu"),
+        (np.pi / 2 - 0.01, "cpu"),
+        (np.pi / 2 + 0.01, "cpu"),
+        (np.pi - 0.01, "cpu"),
+        pytest.param(0.02, "cuda:0", marks=pytest.mark.gpu),
+        pytest.param(np.pi - 0.01, "cuda:0", marks=pytest.mark.gpu),
+    ],
+)
+def test_rotation_interpolation_preserves_low_precision(angle, device, dtype) -> None:
+    # A 90-degree X rotation is nonidentity and exactly representable in half types.
+    start_matrix = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])
+    start = torch.tensor(start_matrix, dtype=dtype, device=device)
+    end = torch.tensor(
+        Rotation.from_euler("z", angle).as_matrix() @ start_matrix,
+        dtype=dtype,
+        device=device,
+    )
+    actual = interpolate_rotations(start, end, 4)
+    expected = torch.tensor(
+        Rotation.from_euler("z", np.linspace(0, angle, 5)[:, None]).as_matrix()
+        @ start_matrix,
+        dtype=dtype,
+        device=device,
+    )
+    assert actual.dtype == dtype and actual.device == start.device
+    torch.testing.assert_close(actual, expected, atol=2e-3, rtol=2e-3)
+    torch.testing.assert_close(actual[0], start, atol=0, rtol=0)
+    torch.testing.assert_close(actual[-1], end, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize(
+    "angle,device",
+    [
+        (0.0, "cpu"),
+        (1e-6, "cpu"),
+        (0.02, "cpu"),
+        pytest.param(0.02, "cuda:0", marks=pytest.mark.gpu),
+    ],
+)
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_small_rotation_interpolation_has_finite_analytic_gradient(
+    angle, device, dtype
+) -> None:
+    theta = torch.tensor(angle, dtype=dtype, device=device, requires_grad=True)
+    c, s = theta.cos(), theta.sin()
+    zero, one = theta.new_zeros(()), theta.new_ones(())
+    end = torch.stack([c, -s, zero, s, c, zero, zero, zero, one]).reshape(3, 3)
+    output = interpolate_rotations(torch.eye(3, dtype=dtype, device=device), end, 4)
+    (gradient,) = torch.autograd.grad(output[1, 0, 1], theta)
+    expected_value = -torch.sin(theta.detach() / 4)
+    expected_gradient = -torch.cos(theta.detach() / 4) / 4
+    torch.testing.assert_close(output[1, 0, 1], expected_value)
+    torch.testing.assert_close(gradient, expected_gradient)
+
+
+def test_rotation_interpolation_requires_a_positive_interval_count() -> None:
+    with pytest.raises(ValueError, match="num_steps must be positive"):
+        interpolate_rotations(torch.eye(3), torch.eye(3), 0)
+
+
+@pytest.mark.parametrize(
+    ("interior_count", "device"),
+    [(0, "cpu"), (2, "cpu"), pytest.param(0, "cuda:0", marks=pytest.mark.gpu)],
+)
+def test_pose_interpolation_has_a_uniform_return_contract(
+    interior_count: int, device: str
+) -> None:
+    start = torch.eye(4, dtype=torch.float64, device=device)
+    start[:3, 3] = start.new_tensor([0.1, 0.2, 0.3])
+    end = torch.eye(4, dtype=torch.float64, device=device)
+    end[:3, :3] = end.new_tensor([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+    end[:3, 3] = end.new_tensor([1.0, 2.0, 3.0])
+    original_start, original_end = start.clone(), end.clone()
+
+    poses, count = interpolate_poses(start, end, num_steps=interior_count)
+
+    assert count == interior_count
+    assert poses.shape == (interior_count + 2, 4, 4)
+    torch.testing.assert_close(poses[0], start)
+    torch.testing.assert_close(poses[-1], end)
+    torch.testing.assert_close(start, original_start, rtol=0, atol=0)
+    torch.testing.assert_close(end, original_end, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize(

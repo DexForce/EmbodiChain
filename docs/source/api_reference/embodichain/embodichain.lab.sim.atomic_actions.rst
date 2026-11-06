@@ -479,6 +479,18 @@ verifier.
    PhaseEffectGateRequest
    PhaseEffectGateResult
 
+Named held-object transport
+---------------------------
+
+``HeldObjectPoseGoal.object_id`` optionally identifies the exact object already
+held by the bound resource. A named goal validates that identity before native
+or external nominal planning and declares the unchanged attachment as its
+terminal effect. The execution owner verifies this effect before committing it;
+planning does not establish physical attachment. Motion and timing use the same
+path as an unnamed goal. Omitting the field preserves the existing effectless
+``MoveHeldObject`` behavior. Task Program's routed transport uses named goals
+and additionally selects a verified input-hold guard for its transport segment.
+
 
 Scoped grasp preparation
 ------------------------
@@ -505,5 +517,31 @@ calibration fails before capture. Diagnostic metadata never selects policy.
 
 .. autoclass:: GraspOpeningTarget
    :members:
+   :no-index:
 
 .. automethod:: ActionPlanningServices.prepare_grasp_query
+
+Explicit source contact-policy composition
+------------------------------------------
+
+The shared ``GraspOpeningTarget`` definition lives in ``grasp_geometry``;
+``atomic_actions`` and ``runtime`` retain the same public class identity. Its
+poses and metadata stay owned and bound to one preparation scope.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.grasp_geometry
+   :members:
+
+``source_native_contact`` maps the explicitly selected preserved source revision
+to GraspKit's existing typed ``ClosingContactPolicy`` and the shared Newton collision
+pipeline. Closing, opening and rigid-clearance algorithms remain solely in
+GraspKit. Source builders consume the existing Default/B1 native capture API,
+retain the explicit hand sampling grid and original contact thresholds, and never step
+physics or infer a Task Program policy. Missing Newton fails explicitly; this is
+geometric qualification, not physical acquisition/release evidence.
+
+Close each query with its context manager or a ``finally`` block. It releases
+only owned query resources, never borrowed simulation entities. Ordinary
+``prepare_grasp_query`` keeps its existing Newton backend and defaults.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.source_native_contact
+   :members:
