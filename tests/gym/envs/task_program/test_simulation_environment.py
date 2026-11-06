@@ -3858,3 +3858,43 @@ def test_standard_factory_installs_measured_provider_without_native_capture(
     with pytest.raises(ValueError, match="original native observation"):
         session.validate_observation()
     session.close()
+
+
+@pytest.mark.parametrize("accessor", ["root_pose", "drive_target"])
+def test_factory_closed_during_read_cannot_publish_without_optional_scope_guard(
+    monkeypatch, accessor
+):
+    factory, robot = _factory(
+        capture_root_pose=accessor == "root_pose", hold_qpos_source="drive_target"
+    )
+    observation = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=factory.create_atomic_action_engine(
+            factory.create_robot_skill_profile()
+        ),
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    if accessor == "root_pose":
+
+        def get_local_pose(*, to_matrix):
+            assert to_matrix
+            factory.close_runtime_resources()
+            return torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
+
+        monkeypatch.setattr(robot, "get_local_pose", get_local_pose, raising=False)
+        with pytest.raises(RuntimeError, match="closed"):
+            observation.observe(state)
+    else:
+        observation.observe(state)
+        original = robot.get_qpos
+
+        def get_qpos(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if kwargs.get("target") is True:
+                factory.close_runtime_resources()
+            return result
+
+        monkeypatch.setattr(robot, "get_qpos", get_qpos)
+        with pytest.raises(RuntimeError, match="closed"):
+            observation.hold_qpos(torch.arange(_BATCH_SIZE, device=robot.device))

@@ -253,12 +253,14 @@ scope without reading robot state, sensors or simulation samples. Hosts bind
 actual session/episode/owner epochs; a factory-open check alone cannot establish
 that an earlier bridge is still current.
 
-Explicit scopes are checked before and after cached or live reads. A scope change
-during joint/root or scene acquisition cannot publish a context or snapshot.
-Cached qpos also rejects a closed factory. The default `None` performs no scope
-callback and leaves legacy custom factory calls unchanged; callers requesting a
-scope must use a factory implementing the optional keyword. These checks do not
-acquire evidence, create control services or select atomic skills.
+One internal validator combines factory lifetime and the optional host scope.
+Planning observations and the shared scene cache run that check before and after
+cached or live reads. Closing the factory during acquisition rejects the result
+even without a host callback; a replaced scope cannot publish a context or
+snapshot. The default `None` performs no host callback and leaves legacy custom
+factory calls unchanged; callers requesting a scope must use a factory
+implementing the optional keyword. These checks do not acquire evidence,
+create control services or select atomic skills.
 
 ## Evidence ownership across integrations
 
