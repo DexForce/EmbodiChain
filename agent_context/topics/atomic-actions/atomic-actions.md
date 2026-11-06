@@ -54,7 +54,12 @@ add no alternate built-in skill implementation or source-specific decoder.
 Press keeps its default open-loop path. Explicit `PressPlanningRecovery` permits
 at most two complete B1 plans, including nominal, and consumes the declared
 contact-roll alternative only after failure. Failed phases use Motion's existing
-continuous IK on the same targets and time grid. Final emitted full-robot velocity
+continuous IK on the same targets and time grid: `lab/sim/motion/ik.py` adapts the
+robot while `compute/kinematics/ik_path.py` owns bounded seed search. Press owns
+only the failed-phase trigger and contact-roll alternative. Robot's
+`compute_batch_ik(continuous=True)` selects solver candidate branches; it does
+not implement this recovery's velocity window, perturbation order or RNG scope
+and is not an interchangeable recovery backend. Final emitted full-robot velocity
 qualification remains rejection-only; no transformed plan triggers another search.
 The configured decoder accepts only the fixed `press_bounded` revision-one
 declaration. `validate_press_extra_distance` validates declaration-owned extra
