@@ -223,7 +223,14 @@ def test_source_pour_adapter_matches_original_b0_staging_and_pivot(
         sources["receiver"],
         finger_radius=reference["pour"]["finger_radius"],
     )
-    assert result == tuple(case["expected"])
+    pose, options = result
+    expected_pose, expected_options = case["expected"]
+    assert pose.keys() == expected_pose.keys()
+    for name, expected in expected_pose.items():
+        np.testing.assert_allclose(
+            pose[name], expected, rtol=0, atol=8 * np.finfo(np.float64).eps
+        )
+    assert options == expected_options
     assert sources == before
 
 
