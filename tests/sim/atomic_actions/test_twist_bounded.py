@@ -52,6 +52,7 @@ from embodichain.lab.sim.atomic_actions.primitives.twist_recovery import (
     TwistRecoveryScope,
 )
 from embodichain.lab.sim.atomic_actions.twist_planning import TwistPlanningSession
+from embodichain.lab.sim.motion import search
 from embodichain.toolkits.graspkit.pg_grasp.native_contact import NativeQueryScope
 from embodichain.lab.sim.motion.revolute_query import (
     RevolutePathReport,
@@ -313,6 +314,30 @@ def test_bounded_twist_uses_the_standard_engine_and_source_candidate_order(tmp_p
     cursor.commit_planning(outcome)
     cursor.adopt_plan(plan)
     assert cursor.snapshot().version == 1
+
+
+def test_twist_timing_does_not_preempt_an_existing_planning_checkpoint(
+    tmp_path, monkeypatch
+):
+    engine, invocation, context, provider, cursor = _setup(tmp_path)
+    clock = [0.0]
+    monkeypatch.setattr(search, "perf_counter", lambda: clock[0])
+    prepare = provider.prepare
+
+    def expire_after_preparation(request, current):
+        session = prepare(request, current)
+        clock[0] = 1.0
+        return session
+
+    provider.prepare = expire_after_preparation
+    with pytest.raises(search.PlanningBudgetExceeded) as failure:
+        with search.search_cost_scope(wall_seconds=1.0) as cost:
+            engine.plan(invocation, context)
+    assert failure.value.operation in {"ik_solve", "complete_plan_request"}
+    assert cost.counters["twist_candidate"] > 0
+    assert len(provider.queries) == 1 and provider.queries[0].closes == 1
+    assert cursor.snapshot().version == 0
+    assert search.current_search_cost() is None
 
 
 def test_table_rejection_keeps_first_logical_candidate_without_physical_success(

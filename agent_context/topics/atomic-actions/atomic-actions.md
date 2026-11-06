@@ -104,10 +104,18 @@ clearance, and rejects nonempty resources under free-motion qualification.
 Released-hand cleanup and Park use exact suffix authority and the existing
 complete-plan/preview pipeline. `_released_park.py` is the unique owner of generic
 empty-hand Park qualification and bounded vias; articulation integrations reuse
-it rather than duplicating the algorithm. Articulation authorization, withdrawal
+it rather than duplicating the algorithm. Each recursive complete Park candidate
+charges the existing parent search ledger and checks its cooperative deadline
+before rebuilding and after recursive qualification. The nominal request is
+charged once at the engine boundary. Articulation authorization, withdrawal
 and drawer handlers belong to `articulation_continuation`,
 `primitives/_articulation_recovery` and `primitives/_drawer_planning`. New service ports are optional, typed, same-robot and
 borrowed; construction captures no native state or commands.
+
+Additional Twist candidate timings retain counters and inclusive wall costs
+without adding a cooperative deadline check; the original IK and complete-plan
+boundaries continue to own stops. `measure_search` keeps its checking default;
+only explicitly additive measurements select `budget_checkpoint=False`.
 
 HandOver keeps the existing default/paired planning route. Explicit
 `HandOverPlanningRecovery` enables bounded receiver and exchange alternatives,
