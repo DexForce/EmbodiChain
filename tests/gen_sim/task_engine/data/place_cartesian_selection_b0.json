@@ -1,0 +1,73 @@
+{
+  "source_revision": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "input_fixture": "action_profiles_b0.json",
+  "input_fixture_sha256": "806e48e5a30e9a840d23123463924e3dea711845753ede77825f77ddb5f0f2f8",
+  "source_functions": {
+    "selector": {
+      "commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+      "path": "embodichain/gen_sim/task_engine/_task_program/invocation_policy.py",
+      "function": "cartesian_call_declarations",
+      "sha256": "429219c6fb48df22564e26ebc02e8dd660afd18d0e440aa2226c8fa9348de238"
+    },
+    "eligibility": {
+      "commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+      "path": "embodichain/gen_sim/task_engine/_task_program/place_recovery.py",
+      "function": "eligible",
+      "sha256": "1c84eb23bafee11c24eb696e6da56f7ed06fa44acc94fd3c8c56a69134698ed4"
+    }
+  },
+  "cartesian_calls": {
+    "e1-franka-originalenv-v2": [],
+    "e2-dual_franka-originalenv-v2": [
+      "step_01__call_01",
+      "step_01__call_02",
+      "step_01__call_03",
+      "step_01__call_04",
+      "step_01__call_05",
+      "step_01__call_06"
+    ],
+    "e3-dual_franka-originalenv-v2": [],
+    "e4-dual_franka-originalenv-v2": [
+      "step_01__call_01",
+      "step_01__call_02",
+      "step_01__call_03",
+      "step_01__call_04",
+      "step_01__call_05",
+      "step_01__call_06",
+      "step_02__call_01",
+      "step_02__call_02",
+      "step_02__call_03",
+      "step_02__call_04",
+      "step_02__call_05",
+      "step_02__call_06",
+      "step_03__call_01",
+      "step_03__call_02"
+    ],
+    "e5-franka-r7": [],
+    "e6-dual_franka-originalenv-v2": [
+      "step_01__call_01",
+      "step_01__call_02",
+      "step_01__call_03"
+    ],
+    "e8-dual_franka-originalenv-v2": [],
+    "e9-dual_franka-originalenv-v2": [],
+    "e1-dual_ur10-originalenv-v2": [],
+    "e4-dual_ur10-originalenv-v2": [
+      "step_01__call_01",
+      "step_01__call_02",
+      "step_01__call_03",
+      "step_01__call_04",
+      "step_01__call_05",
+      "step_01__call_06",
+      "step_02__call_01",
+      "step_02__call_02",
+      "step_02__call_03",
+      "step_02__call_04",
+      "step_02__call_05",
+      "step_02__call_06",
+      "step_03__call_01",
+      "step_03__call_02"
+    ]
+  },
+  "source_guard": "_CARTESIAN_APPROACH.get() causes eligible() to return False before any waypoint IK/FK probe."
+}

@@ -1209,7 +1209,9 @@ def prepare_generated_task_program_bundle(
         elif identity in {"place", "simulation.place_relative"}:
             options.update(
                 linear_segments=True,
-                qualify_required_waypoints=True,
+                qualify_required_waypoints=(
+                    node.get("task_instance_id", node["id"]) not in cartesian_groups
+                ),
                 monitor_scene_until_approach=True,
             )
             current["motion"].update(
