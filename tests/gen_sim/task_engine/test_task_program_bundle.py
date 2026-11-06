@@ -195,6 +195,16 @@ def test_original_generation_api_publishes_from_frozen_declarations_without_sim(
     )
 
     assert registration.planning_services.hold_qpos_source == "drive_target"
+    place = yaml.safe_load((paths.root / "task_program/integration.yaml").read_text())[
+        "profile"
+    ]["preset_options"]["gen_sim.step_01__call_02.execution"]["action_options"][
+        "simulation.place_relative"
+    ]
+    oracle = json.loads(
+        (Path(__file__).parent / "data/place_cartesian_selection_b0.json").read_text()
+    )
+    assert oracle["cartesian_calls"]["e1-franka-originalenv-v2"] == []
+    assert place["qualify_required_waypoints"] is True
     (continuation,) = registration.planning_services.place_continuation_bindings
     assert (
         continuation.source_invocation_id
@@ -496,6 +506,9 @@ def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(tmp_pa
         for item in bindings
     )
     selected = declaration["profile"]["preset_options"]
+    oracle = json.loads(
+        (Path(__file__).parent / "data/place_cartesian_selection_b0.json").read_text()
+    )["cartesian_calls"]["e2-dual_franka-originalenv-v2"]
     for node in graph["nodes"][:-1]:
         options = next(
             iter(
@@ -505,6 +518,9 @@ def test_alignment_recipe_selects_exact_staging_and_cartesian_occurrences(tmp_pa
             )
         )
         assert options["linear_segments"] is True
+        if options["kind"] == "place":
+            assert node["id"] in oracle
+            assert options["qualify_required_waypoints"] is False
     assert not any(
         name.endswith("call_04.stable") and value.get("support_sensor")
         for name, value in services["settle_presets"].items()
