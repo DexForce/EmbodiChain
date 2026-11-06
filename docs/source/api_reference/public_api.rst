@@ -3820,6 +3820,21 @@ embodichain_tasks.configs
 
    get_config_path
 
+embodichain_tasks.manipulation.drawer_storage
+---------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.drawer_storage
+
+Task Program drawer storage with measured cube containment, closed rail,
+released hand and finger clearance in addition to segment completion.
+
+.. autosummary::
+
+   DrawerStorageEnv
+
+.. autoclass:: DrawerStorageEnv
+   :members: is_task_success
+
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
 

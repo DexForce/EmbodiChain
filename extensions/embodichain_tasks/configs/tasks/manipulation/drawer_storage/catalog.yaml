@@ -1,0 +1,11 @@
+task_key: drawer_storage
+title: Drawer Storage
+summary: Open a drawer, store a cube and close it, with independent physical acceptance.
+tags:
+- manipulation
+- drawer
+- task_program
+default_deployment: ur5
+deployments:
+  ur5:
+    config: task.ur5.yaml

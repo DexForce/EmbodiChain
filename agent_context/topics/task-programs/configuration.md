@@ -79,6 +79,14 @@ factories, and registered-call lowerers. Adapter creation calls
 Reconstructing a registration with `dataclasses.replace` does not duplicate its
 scene-derived standard grounders; duplicate custom grounders remain errors.
 
+The configured articulation-link Slide lowerer can bind an explicit
+`joint_target: {joint_name: ..., axis_sign: -1|1}`. Its call then requires
+`handle` and an absolute joint `position`; direction and distance remain policy
+options. The factory checks the handle's prismatic ancestor and finite limits;
+multiple active ancestors require an explicit translation axis. Without this
+binding the existing handle-only call keeps its factory and fingerprint. The
+joint-target factory includes the authored target in its registration fingerprint.
+
 `runtime_services.settle_presets` is the closed serialized route to this same
 registration-owned table. Omission retains the existing dynamic presets; an
 explicit table owns its complete named selection. Components may contribute

@@ -188,9 +188,11 @@ deployment-bound program, and calls
 `register_env_function(EmbodiedEnv, config["id"], ...)`.
 
 The ID is selected by the config and may be any free valid Gym ID. Loading the
-same ID with the same integration and episode limit is idempotent. Reusing it
-for a different class, integration declaration, or limit fails closed; the
-loader does not use `override=True`. Registration is process-local, so callers
+same ID with the same integration and episode limit is idempotent. An explicitly
+registered `EmbodiedEnv` subclass may supply task-owned measured acceptance;
+the loader preserves it only when its adapter factory has the same integration
+fingerprint and episode limit. Incompatible classes, integrations and limits
+fail closed; the loader does not use `override=True`. Registration is process-local, so callers
 must load the Gym config before calling `gym.make(id)`. Such an ID is not
 present merely because task-package discovery ran.
 
@@ -200,8 +202,8 @@ leaves currently cover antipodal parallel-jaw grasp generation, configured
 hand-over poses, articulation-link Slide lowering, and joint-position
 constraint evidence. New executable provider families require a core
 allowlisted implementation and decoder entry; never serialize dotted imports
-or arbitrary callables into this config boundary. The official Task Program
-examples use this path and have no task environment subclass.
+or arbitrary callables into this config boundary. Configuration-only Task Program
+deployments use this path without a task environment subclass.
 
 ### Configuration-owned manipulation RL
 

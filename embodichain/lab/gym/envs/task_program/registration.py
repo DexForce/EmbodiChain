@@ -85,7 +85,7 @@ def _register_configured_task_program_integration(
             None,
         )
         if (
-            existing.cls is not EmbodiedEnv
+            not issubclass(existing.cls, EmbodiedEnv)
             or existing.max_episode_steps != selected_max_episode_steps
             or existing_fingerprint != integration.integration_fingerprint
         ):
