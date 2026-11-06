@@ -530,6 +530,8 @@ topics:
   - embodichain/gen_sim/task_spec/evidence.py
   - embodichain/gen_sim/task_spec/evidence_report.py
   - embodichain/gen_sim/task_spec/condition_evidence.py
+  - embodichain/gen_sim/task_spec/control_evidence.py
+  - embodichain/gen_sim/task_spec/pour_evidence.py
   - embodichain/gen_sim/task_spec/canonicalization.py
   watch_paths: [embodichain/gen_sim/task_spec/, tests/gen_sim/task_spec/]
   related_topics: [gen-sim, task-programs, task-engine]

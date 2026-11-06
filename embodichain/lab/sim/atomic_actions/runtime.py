@@ -21,7 +21,6 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 import time
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -65,41 +64,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class GraspOpeningTarget:
-    """Already-grounded support and object poses from the closing observation.
-
-    Args:
-        support_uid: Exact native rigid support UID selected by the caller.
-        reference_pose: Support-to-world pose, shape (4, 4), copied to CPU float64.
-        object_target_pose: Final placed-object-to-world pose, shape (4, 4), copied
-            to CPU float64. Tensor inputs are detached without changing the input.
-        scope: Must equal the closing query's fresh preparation scope.
-        identity: Optional neutral diagnostic IDs; never runtime or program objects.
-    """
-
-    support_uid: str
-    reference_pose: np.ndarray | torch.Tensor
-    object_target_pose: np.ndarray | torch.Tensor
-    scope: NativeQueryScope
-    identity: Mapping[str, object] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if (
-            type(self.support_uid) is not str
-            or not self.support_uid
-            or self.support_uid != self.support_uid.strip()
-        ):
-            raise ValueError("Opening requires an explicit native support UID.")
-        if not isinstance(self.scope, NativeQueryScope):
-            raise TypeError("Opening scope must be NativeQueryScope.")
-        for name in ("reference_pose", "object_target_pose"):
-            pose = _rigid_pose(getattr(self, name))
-            pose.setflags(write=False)
-            object.__setattr__(self, name, pose)
-        object.__setattr__(
-            self, "identity", MappingProxyType(_neutral_identity(self.identity))
-        )
+from .grasp_geometry import GraspOpeningTarget
 
 
 def _physical_identity(

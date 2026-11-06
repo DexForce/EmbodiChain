@@ -29,6 +29,7 @@ import torch
 from .affordance_sampling import AffordanceSamplingContext
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.evidence import PhysicalObservationStamp
     from .core import ObjectSemantics
 
 
@@ -953,7 +954,27 @@ class PlanningContext:
     affordance_sampling: AffordanceSamplingContext | None = None
     """Optional immutable Affordance sampling stream supplied by the host."""
 
+    observed_robot: RobotObservation | None = field(default=None, kw_only=True)
+    """Original host observation retained across projection, never its planned start."""
+
+    is_preview: bool = field(default=False, kw_only=True)
+    """Explicit look-ahead planning role, independent of measured/projected state."""
+
+    world_source_stamp: PhysicalObservationStamp | None = field(
+        default=None, kw_only=True
+    )
+    """Optional native-world source stamp; projected joint states keep this world scope."""
+
     def __post_init__(self) -> None:
+        if type(self.is_preview) is not bool:
+            raise TypeError("is_preview must be bool.")
+        if self.world_source_stamp is not None:
+            from embodichain.lab.sim.evidence import PhysicalObservationStamp
+
+            if type(self.world_source_stamp) is not PhysicalObservationStamp:
+                raise TypeError(
+                    "world_source_stamp must be PhysicalObservationStamp or None."
+                )
         if self.affordance_sampling is not None and not isinstance(
             self.affordance_sampling, AffordanceSamplingContext
         ):
@@ -962,6 +983,17 @@ class PlanningContext:
             )
         if not isinstance(self.robot, RobotObservation):
             raise TypeError("robot must be a RobotObservation.")
+        if self.observed_robot is not None:
+            if not isinstance(self.observed_robot, RobotObservation):
+                raise TypeError("observed_robot must be RobotObservation or None.")
+            if (
+                self.observed_robot.timestamp != self.robot.timestamp
+                or self.observed_robot.qpos.shape != self.robot.qpos.shape
+                or self.observed_robot.qpos.device != self.robot.qpos.device
+            ):
+                raise ValueError(
+                    "Original observation must match the planning timestamp, shape and device."
+                )
         if not isinstance(self.task, TaskState):
             raise TypeError("task must be a TaskState.")
         if not isinstance(self.scene, SceneSnapshot):
@@ -1096,6 +1128,11 @@ class PlanningContext:
             env_ids=self.env_ids,
             control_dt=self.control_dt,
             affordance_sampling=self.affordance_sampling,
+            world_source_stamp=self.world_source_stamp,
+            is_preview=self.is_preview,
+            observed_robot=(
+                self.observed_robot if self.observed_robot is not None else self.robot
+            ),
         )
 
 

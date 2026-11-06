@@ -224,6 +224,25 @@ explicitly; source-specific lowerers and services remain with their owning
 integration layers. Semantic preflight checks planning recovery against the
 actual target SkillDescriptor before grounding or physical acquisition.
 
+## Explicit runtime observation scope
+
+`TaskProgramEnvironmentAdapter.assemble_runtime()` and `create_bridge()` accept
+an optional `runtime_scope_guard`. The standard factory forwards this host-owned
+validator to `SimulationPlanningObservationProvider` and its shared scene cache.
+`validate_runtime_scope()` checks both the factory lifetime and that explicit
+scope without reading robot state, sensors or simulation samples. Hosts bind
+actual session/episode/owner epochs; a factory-open check alone cannot establish
+that an earlier bridge is still current.
+
+One internal validator combines factory lifetime and the optional host scope.
+Planning observations and the shared scene cache run that check before and after
+cached or live reads. Closing the factory during acquisition rejects the result
+even without a host callback; a replaced scope cannot publish a context or
+snapshot. The default `None` performs no host callback and leaves legacy custom
+factory calls unchanged; callers requesting a scope must use a factory
+implementing the optional keyword. These checks do not acquire evidence,
+create control services or select atomic skills.
+
 ## Evidence ownership across integrations
 
 Task Engine selects declared evidence requirements and named policies from skill,
@@ -298,3 +317,10 @@ Historical pose reads require an explicitly supplied ObservationManager and
 reuse its semantic schema/raw store, including unavailable rows and original
 boundary/revision/timestamp metadata. It does not evaluate TaskSpec conditions,
 resample past state or alter execution targets.
+
+`SimulationStateObservationCollector.capture_recorded_pour_geometry` reads one
+owned snapshot from the explicitly supplied ObservationManager, then selects
+exact inclusive source slots and receiver slots at the first maximum tilt.
+Raw validity/errors, episode and written-boundary identity remain authoritative.
+Geometry functions live in Compute and choose no Pour thresholds or release
+verdicts. The collector does not read live poses or acquire new sensor samples.
