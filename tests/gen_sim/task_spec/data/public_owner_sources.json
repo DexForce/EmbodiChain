@@ -1,0 +1,157 @@
+{
+  "base": "0e7c8406f1267362564b473bb0453e3b7bc52b7d",
+  "files": [
+    {
+      "path": "embodichain/gen_sim/task_spec/_control_evidence.py",
+      "source_head": "1e78115dc78aab288e46ce3b397693d27cdd2067",
+      "owner": "focused control fix/public1062",
+      "sha256": "25846b24a06b0d039be32190ff3fe557b1d0988bacdea23ed2d0e3666ee91ea6"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_coordinated_evidence.py",
+      "source_head": "d6ab410da63ed12cd6282e4a1799b9bdeb35c431",
+      "owner": "public1020",
+      "sha256": "c8009c00d4a97db1fc73a230620997327043aeb2a528bd69bd145ea0f557edd3"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_directional_evidence.py",
+      "source_head": "04dd4dc0f632c1362f6863eabe68f4d28cc09286",
+      "owner": "public1030",
+      "sha256": "0c9567e121bb8b773743f7a26879a44ddb4b035ca11e5abd5e92dc78a497b2fd"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_group_evidence.py",
+      "source_head": "9280705c4ac75ffba42d43552b04e3eb6bf9267a",
+      "owner": "public1019",
+      "sha256": "1ba098a81bc60a8a733248125f2a424afc8a04aedb66ed877b71d8403be152d9"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_handover_evidence.py",
+      "source_head": "d6ab410da63ed12cd6282e4a1799b9bdeb35c431",
+      "owner": "public1020",
+      "sha256": "22e2560705b06931bf7fa502363e803e5b02f79efa04396907112ddc23f1cc25"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_held_evidence.py",
+      "source_head": "d6ab410da63ed12cd6282e4a1799b9bdeb35c431",
+      "owner": "public1020",
+      "sha256": "62094c75949505360a1c8b687c24d7d23c5c3131e96414d97a549650696c1bdf"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_legacy_region_evidence.py",
+      "source_head": "04dd4dc0f632c1362f6863eabe68f4d28cc09286",
+      "owner": "public1030",
+      "sha256": "adb1e15b3f2a071e85ebdd8d2f9cbe6baefc2abc731189d8afcc6dd0ddf0d252"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_placement_linkage.py",
+      "source_head": "04dd4dc0f632c1362f6863eabe68f4d28cc09286",
+      "owner": "public1030",
+      "sha256": "84b836188f0ff7d50506cce1c17a65e9c23c257839d4b29d44f79f8b1c5166f1"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_planar_evidence.py",
+      "source_head": "04dd4dc0f632c1362f6863eabe68f4d28cc09286",
+      "owner": "public1030",
+      "sha256": "dbc49962d17571624b161197203368099012db2a3e5e3736c3fc5ef204fa3c31"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_raw_control_evidence.py",
+      "source_head": "1e78115dc78aab288e46ce3b397693d27cdd2067",
+      "owner": "focused control fix/public1062",
+      "sha256": "4366fc1bad02e87b21e29d8ace8f45af93fe70c565660c48f67dee69fdbba778"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_sampled_contact_evidence.py",
+      "source_head": "04dd4dc0f632c1362f6863eabe68f4d28cc09286",
+      "owner": "public1030",
+      "sha256": "50b03590c9794a773eaeb8b09386703c4523ad42a3940e693edd5321db3dacd9"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/_transport_evidence.py",
+      "source_head": "cb3b0600d094f61be71620643b7de34d8776b3a8",
+      "owner": "public1026",
+      "sha256": "4c29338f9aa3f77854907981cf6b577b5b5fdb368dccee78b157a7aab1a30975"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/condition_evidence.py",
+      "source_head": "9280705c4ac75ffba42d43552b04e3eb6bf9267a",
+      "owner": "public1019",
+      "sha256": "f399d257468855511a05c28b9f398f5969680278fe17f106893b566d734605b8"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/condition_group_evidence.py",
+      "source_head": "9280705c4ac75ffba42d43552b04e3eb6bf9267a",
+      "owner": "public1019",
+      "sha256": "44ed3b0de77820f3fe3894821d6dc2de24c3ddf55518bca0c783434cd1092cbd"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/control_evidence.py",
+      "source_head": "1e78115dc78aab288e46ce3b397693d27cdd2067",
+      "owner": "focused control fix/public1062",
+      "sha256": "2a972d55e2dc2aee51786d446e2ec9fae45740fa4348fb840bbaffdebe22608f"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/coordinated_evidence.py",
+      "source_head": "d6ab410da63ed12cd6282e4a1799b9bdeb35c431",
+      "owner": "public1020",
+      "sha256": "97ccff4eb8846e90a2874fcae0174cd25728b4007a1d4f70286cc5779a009b1f"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/evidence.py",
+      "source_head": "04dd4dc0f632c1362f6863eabe68f4d28cc09286",
+      "owner": "public1030",
+      "sha256": "18158fee20379509a78e5dc7bccc16b7291584e2d7bdb1e4d1b57ea9e3adf960"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/evidence_report.py",
+      "source_head": "04dd4dc0f632c1362f6863eabe68f4d28cc09286",
+      "owner": "public1030",
+      "sha256": "0d8faa59ec7296fbd8f31a216ba0e837b0b408e03fe44363cc205d4da2514dba"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/handover_evidence.py",
+      "source_head": "d6ab410da63ed12cd6282e4a1799b9bdeb35c431",
+      "owner": "public1020",
+      "sha256": "b2f92e78d21840435422323a718164052abedd0193399d4f2d1229f25c0d1f8e"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/observation_requests.py",
+      "source_head": "d6ab410da63ed12cd6282e4a1799b9bdeb35c431",
+      "owner": "public1020",
+      "sha256": "cfde1903c86924ca7fd868d3b80ded15348422bb540f3b25a389b90ee9061992"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/placement_group_evidence.py",
+      "source_head": "04dd4dc0f632c1362f6863eabe68f4d28cc09286",
+      "owner": "public1030",
+      "sha256": "6c4d31363e230f092ad327d1b01d39d24be57d4793b4bd48256c04cbe1a17135"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/pour_evidence.py",
+      "source_head": "95f26e1af7c753a92440eac2fcd93ce1bb76e512",
+      "owner": "focused Pour fix/main",
+      "sha256": "3072c82a37b195991e91c14c88f5ad36167e147b232e9fc6dead4125299f79c6"
+    },
+    {
+      "path": "embodichain/gen_sim/task_spec/transport_evidence.py",
+      "source_head": "cb3b0600d094f61be71620643b7de34d8776b3a8",
+      "owner": "public1026",
+      "sha256": "e408f1d045dd147b6cc56425be421a1940f10156eb86f2478c8d8c98a9999581"
+    },
+    {
+      "path": "embodichain/compute/articulation/__init__.py",
+      "source_head": "6dfde16a0852348a4641eb1e67fb681abcb71c9d",
+      "owner": "public1038 Compute event owner only",
+      "sha256": "6b0019149d7cd0891557f22957807e682268b97cce5fa92b365b2ea5fde4c24a"
+    },
+    {
+      "path": "embodichain/compute/articulation/_events.py",
+      "source_head": "6dfde16a0852348a4641eb1e67fb681abcb71c9d",
+      "owner": "public1038 Compute event owner only",
+      "sha256": "199948a0f53f8191a3e416a96bb6bec614cd541be8c19ec5f83fa58291cf1c11"
+    }
+  ],
+  "root_ancestor_or_Lab_files_included": false,
+  "scope": "Pure normative implementation projection from actual published owners/focused fixes, not a whole parent-tree merge"
+}

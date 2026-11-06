@@ -159,7 +159,7 @@ def test_coarse_turn_is_not_implicitly_upgraded_to_calibrated_setting():
 
 
 def test_control_import_and_binding_decode_are_standard_library_only():
-    root = Path(__file__).resolve().parents[3]
+    root = Path(sys.modules["embodichain"].__file__).resolve().parents[1]
     data = _case()[1].to_dict()
     script = f"import sys;sys.path.insert(0,{str(root)!r});from embodichain.gen_sim.task_spec.control_evidence import ControlEvidenceBinding;ControlEvidenceBinding.from_dict({data!r});assert not any(name=='torch' or name=='numpy' or name.startswith('embodichain.lab') for name in sys.modules)"
     result = subprocess.run(

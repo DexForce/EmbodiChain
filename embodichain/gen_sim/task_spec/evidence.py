@@ -38,6 +38,8 @@ __all__ = [
     "SupportedPlacementEvidenceBinding",
     "evaluate_supported_placement_evidence",
     "evaluate_placement_evidence_report",
+    "sampled_support_window",
+    "directional_observation_axes",
 ]
 
 _SCOPES = frozenset(
@@ -45,6 +47,10 @@ _SCOPES = frozenset(
         "native_contact_support",
         "native_stable_support",
         "native_supported_placement",
+        "measured_planar_landing_region",
+        "bound_rigid_world_axes",
+        "bound_link_world_axes",
+        "native_supported_landing_region",
     }
 )
 
@@ -118,6 +124,10 @@ class SupportedPlacementEvidenceBinding:
     env_ids: tuple[int, ...] = (0,)
     episode_ids: tuple[int, ...] | None = None
     binding_hash: str = ""
+    operation_evidence: Mapping[str, Any] | None = None
+    sampled_contact_identity: Mapping[str, Any] | None = None
+    planar_geometry: Mapping[str, Any] | None = None
+    directional_geometry: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         for name in ("task_spec_digest", "program_digest"):
@@ -155,9 +165,10 @@ class SupportedPlacementEvidenceBinding:
         if (
             self.evidence_scope == "native_stable_support"
             and self.evidence_format != "historical_record"
+            and self.sampled_contact_identity is None
         ):
             raise ValueError(
-                "Raw sampled-timeline collection is not implemented; it cannot use the COM-patch acquisition contract."
+                "Raw sampled-timeline collection requires its explicit acquisition identity; it cannot use the COM-patch acquisition contract."
             )
         ids = tuple(self.env_ids)
         if (
@@ -183,10 +194,21 @@ class SupportedPlacementEvidenceBinding:
         object.__setattr__(self, "condition", json_snapshot(dict(self.condition)))
         if self.condition and (
             self.condition.get("entity") != self.object_id
-            or self.condition.get("reference") != self.reference_id
+            or self.condition.get("reference")
+            != (
+                (
+                    self.directional_geometry.get("reference_link_id")
+                    or self.reference_id
+                )
+                if isinstance(self.directional_geometry, Mapping)
+                else self.reference_id
+            )
         ):
             raise ValueError("Condition endpoints differ from the normative binding.")
-        if self.evidence_scope != "native_contact_support":
+        if self.evidence_scope not in {
+            "native_contact_support",
+            "measured_planar_landing_region",
+        }:
             for name in ("duration", "translation_drift", "rotation_drift"):
                 value = self.condition.get(name)
                 if (
@@ -216,6 +238,10 @@ class SupportedPlacementEvidenceBinding:
             from ._strong_support import _condition_values
 
             _condition_values(self.condition)
+        elif self.evidence_scope == "native_supported_landing_region":
+            from ._legacy_region_evidence import validate_legacy_region
+
+            validate_legacy_region(self)
         elif revision is not None or self.condition.get("kind") == "supported_region":
             raise ValueError(
                 "Strong/full-footprint declarations require their explicit evidence scope; they cannot use a contact-only or version-2 verifier."
@@ -224,6 +250,58 @@ class SupportedPlacementEvidenceBinding:
             raise ValueError(
                 "The version-2 stable support contract has one native row."
             )
+        if self.evidence_scope in {"bound_rigid_world_axes", "bound_link_world_axes"}:
+            if self.directional_geometry is None:
+                raise ValueError(
+                    "Directional evidence requires its exact spatial route declaration."
+                )
+            object.__setattr__(
+                self, "directional_geometry", json_snapshot(self.directional_geometry)
+            )
+            from ._directional_evidence import validate_directional_geometry
+
+            validate_directional_geometry(self)
+        elif self.directional_geometry is not None:
+            raise ValueError(
+                "Directional geometry cannot change another evidence scope."
+            )
+        if self.evidence_scope == "measured_planar_landing_region":
+            if self.planar_geometry is None:
+                raise ValueError(
+                    "Planar evidence requires its explicit geometry declaration."
+                )
+            object.__setattr__(
+                self, "planar_geometry", json_snapshot(self.planar_geometry)
+            )
+            from ._planar_evidence import validate_planar_geometry
+
+            validate_planar_geometry(self)
+        elif self.planar_geometry is not None:
+            raise ValueError("Planar geometry cannot change another evidence scope.")
+        if self.sampled_contact_identity is not None:
+            if (
+                self.evidence_scope != "native_stable_support"
+                or self.evidence_format != "raw_snapshot"
+                or self.episode_ids is None
+            ):
+                raise ValueError(
+                    "Sampled acquisition identities require raw sampled support and explicit episodes."
+                )
+            object.__setattr__(
+                self,
+                "sampled_contact_identity",
+                json_snapshot(self.sampled_contact_identity),
+            )
+            from ._sampled_contact_evidence import validate_sampled_identity
+
+            validate_sampled_identity(self)
+        if self.operation_evidence is not None:
+            object.__setattr__(
+                self, "operation_evidence", json_snapshot(self.operation_evidence)
+            )
+            from ._placement_linkage import validate_linkage
+
+            validate_linkage(self)
         expected = canonical_hash(self._payload())
         if self.binding_hash and self.binding_hash != expected:
             raise ValueError(
@@ -232,12 +310,39 @@ class SupportedPlacementEvidenceBinding:
         object.__setattr__(self, "binding_hash", expected)
 
     def _payload(self) -> dict[str, Any]:
+        version = (
+            "v7"
+            if self.evidence_scope == "native_supported_landing_region"
+            else (
+                "v6"
+                if self.directional_geometry is not None
+                else (
+                    "v5"
+                    if self.planar_geometry is not None
+                    else (
+                        "v4"
+                        if self.sampled_contact_identity is not None
+                        else "v3" if self.operation_evidence is not None else "v2"
+                    )
+                )
+            )
+        )
         return {
-            "schema_version": "task_spec.placement_evidence_binding/v2",
+            "schema_version": "task_spec.placement_evidence_binding/" + version,
             **{
                 item.name: json_snapshot(getattr(self, item.name))
                 for item in fields(self)
                 if item.name != "binding_hash"
+                and (
+                    item.name
+                    not in {
+                        "operation_evidence",
+                        "sampled_contact_identity",
+                        "planar_geometry",
+                        "directional_geometry",
+                    }
+                    or getattr(self, item.name) is not None
+                )
             },
         }
 
@@ -264,11 +369,103 @@ class SupportedPlacementEvidenceBinding:
         raw = value.to_dict() if isinstance(value, cls) else json_snapshot(value)
         if not isinstance(raw, dict):
             raise TypeError("Placement evidence binding must be a mapping.")
-        if raw.pop("schema_version", None) != "task_spec.placement_evidence_binding/v2":
+        version = raw.pop("schema_version", None)
+        modes = {
+            "v2": None,
+            "v3": "operation_evidence",
+            "v4": "sampled_contact_identity",
+            "v5": "planar_geometry",
+            "v6": "directional_geometry",
+            "v7": None,
+        }
+        key = (
+            version.removeprefix("task_spec.placement_evidence_binding/")
+            if type(version) is str
+            else None
+        )
+        selected = modes.get(key)
+        allowed = {"operation_evidence"} if key in {"v3", "v4", "v5", "v6"} else set()
+        if selected is not None:
+            allowed.add(selected)
+        if (
+            version != "task_spec.placement_evidence_binding/" + str(key)
+            or key not in modes
+            or key == "v7"
+            and raw.get("evidence_scope") != "native_supported_landing_region"
+            or key != "v7"
+            and raw.get("evidence_scope") == "native_supported_landing_region"
+            or selected is not None
+            and raw.get(selected) is None
+            or any(
+                name in raw and name not in allowed
+                for name in (
+                    "operation_evidence",
+                    "sampled_contact_identity",
+                    "planar_geometry",
+                    "directional_geometry",
+                )
+            )
+        ):
             raise ValueError(
-                "Unsupported placement evidence binding schema; rebuild bindings from their normative and execution declarations."
+                "Unsupported placement binding schema or operation linkage; rebuild bindings from explicit declarations."
             )
         return cls(**raw)
+
+
+def sampled_support_window(
+    binding: SupportedPlacementEvidenceBinding | Mapping[str, Any],
+    boundary_frames: Sequence[int],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Select the original inclusive sampled-support window from its declaration.
+
+    Args:
+        binding: Exact raw sampled-support binding with source recording cadence.
+        boundary_frames: Actual completed native boundary slots supplied by the host.
+
+    Returns:
+        Inclusive start and end slots for the Lab recording API. Window length
+        retains the original ``ceil(duration / step_dt)`` rule.
+
+    Raises:
+        ValueError: The scope, row count or completed history is insufficient.
+    """
+    selected = SupportedPlacementEvidenceBinding.from_dict(binding)
+    ends = tuple(boundary_frames)
+    if (
+        selected.evidence_scope != "native_stable_support"
+        or selected.sampled_contact_identity is None
+        or len(ends) != 1
+        or any(type(value) is not int or value <= 0 for value in ends)
+    ):
+        raise ValueError(
+            "Sampled support requires its bound single-row completed boundary."
+        )
+    start = ends[0] - math.ceil(
+        selected.condition["duration"] / selected.sampled_contact_identity["step_dt"]
+    )
+    if start < 0:
+        raise ValueError("Sampled support window predates the initialized episode.")
+    return (start,), ends
+
+
+def directional_observation_axes(
+    binding: SupportedPlacementEvidenceBinding | Mapping[str, Any],
+) -> tuple[tuple[int, int], ...]:
+    """Return the exact numeric world-axis query selected by a side predicate.
+
+    Args:
+        binding: Sealed directional spatial-route declaration.
+
+    Returns:
+        Ordered (axis,sign) operands for Lab geometry acquisition. This helper
+        performs no physical read and does not infer capability from entity names.
+    """
+    selected = SupportedPlacementEvidenceBinding.from_dict(binding)
+    if selected.directional_geometry is None:
+        raise ValueError("Directional observation requires its explicit spatial route.")
+    from ._directional_evidence import AXES
+
+    return AXES[selected.directional_geometry["relation"]]
 
 
 def _bool_rows(value: Any, size: int) -> bool:
@@ -383,9 +580,29 @@ def evaluate_supported_placement_evidence(
     Numerical re-evaluation lazily loads the shared Torch/NumPy/Shapely compute
     implementation. Importing this API does not load those dependencies or Lab.
     """
-    from .expressions import EvaluationStatus, PredicateEvaluation
+    normalized, selected, predicate = _placement_selection(
+        spec, binding, program=program
+    )
+    try:
+        roles = {role.name: role for role in normalized.roles}
+        selector_error = (
+            None
+            if all(
+                roles[predicate.arguments[key]].is_single_member
+                for key in ("subject", "reference")
+            )
+            else "Complete selector-universe evidence was not provided."
+        )
+    except KeyError as error:
+        selector_error = str(error) or type(error).__name__
+    return _evaluate_placement_member(
+        selected, predicate, evidence, program=program, selector_error=selector_error
+    )
+
+
+def _placement_selection(spec, binding, *, program):
+    """Validate unchanged full normative/program identity and placement semantics."""
     from .spec import TaskSpec
-    from ._release_evidence import measured_release
 
     selected = SupportedPlacementEvidenceBinding.from_dict(binding)
     normalized = TaskSpec.from_dict(spec)
@@ -408,9 +625,24 @@ def evaluate_supported_placement_evidence(
     if len(predicates) != 1:
         raise ValueError("Placement binding must identify one declared predicate.")
     predicate = predicates[0]
-    if predicate.arguments.get("task_type") not in {None, "E1"}:
+    family = predicate.arguments.get("task_type")
+    if family not in {None, "E1"}:
+        if (
+            selected.operation_evidence is None
+            or selected.operation_evidence["family"] != family
+        ):
+            raise ValueError(
+                "Placement requires its exact handover/coordinated task-family evidence."
+            )
+    elif selected.operation_evidence is not None:
         raise ValueError(
-            "This placement slice does not verify handover, coordinated transport or other task-family evidence."
+            "Ordinary placement cannot borrow another operation family's proof."
+        )
+    if selected.evidence_scope == "native_supported_landing_region" and (
+        family != "E1" or "orientation_goal" in predicate.arguments
+    ):
+        raise ValueError(
+            "Legacy region evidence requires the original bare-table E1 predicate."
         )
     milestone_predicate = any(
         item.id == selected.predicate_id
@@ -426,15 +658,29 @@ def evaluate_supported_placement_evidence(
         raise ValueError(
             "Milestone evidence requires its explicit execution occurrence prefix."
         )
-    if (
-        predicate.name != "semantic_goal"
-        or predicate.arguments.get("relation")
-        not in (
+    from ._directional_evidence import AXES
+
+    permitted_relations = (
+        set(AXES)
+        if selected.directional_geometry is not None
+        else (
             {"on", "inside"}
-            if selected.evidence_scope == "native_supported_placement"
+            if selected.evidence_scope
+            in {"native_supported_placement", "measured_planar_landing_region"}
             else {"on"}
         )
+    )
+    if (
+        selected.directional_geometry is not None
+        and predicate.arguments.get("relation")
+        != selected.directional_geometry["relation"]
+    ):
+        raise ValueError("Directional predicate differs from its sealed spatial route.")
+    if (
+        predicate.name != "semantic_goal"
+        or predicate.arguments.get("relation") not in permitted_relations
         or predicate.arguments.get("relation") == "inside"
+        and selected.evidence_scope != "measured_planar_landing_region"
         and selected.condition.get("kind") != "supported_region"
         or predicate.operator != "eq"
         or predicate.expected is not True
@@ -442,7 +688,22 @@ def evaluate_supported_placement_evidence(
         raise ValueError(
             "This placement evidence contract requires an on-relation goal."
         )
-    roles = {role.name: role for role in normalized.roles}
+    return normalized, selected, predicate
+
+
+def _evaluate_placement_member(
+    selected: SupportedPlacementEvidenceBinding,
+    predicate: Any,
+    evidence: Mapping[str, Any],
+    *,
+    program: Mapping[str, Any],
+    selector_error: str | None = None,
+) -> tuple[PredicateEvaluation, ...]:
+    """Verify one physical member after its full selector is independently bound."""
+    from .expressions import EvaluationStatus, PredicateEvaluation
+    from ._release_evidence import measured_release
+
+    family = predicate.arguments.get("task_type")
     size = len(selected.env_ids)
     reason = None
     availability = [True] * size
@@ -451,11 +712,8 @@ def evaluate_supported_placement_evidence(
     execution_available = [True] * size
     reference = ()
     try:
-        if any(
-            roles[predicate.arguments[key]].quantifier != "one"
-            for key in ("subject", "reference")
-        ):
-            raise ValueError("Complete selector-universe evidence was not provided.")
+        if selector_error is not None:
+            raise ValueError(selector_error)
         snapshot = json_snapshot(evidence)
         if not isinstance(snapshot, dict):
             raise TypeError("Physical evidence must be a JSON mapping.")
@@ -489,7 +747,17 @@ def evaluate_supported_placement_evidence(
                 "Raw Lab observations require an explicit episode binding."
             )
         acquisition = snapshot.get("support_acquisition")
-        if acquisition is None and not historical_record:
+        if (
+            acquisition is None
+            and not historical_record
+            and selected.evidence_scope
+            not in {
+                "native_stable_support",
+                "measured_planar_landing_region",
+                "bound_rigid_world_axes",
+                "bound_link_world_axes",
+            }
+        ):
             raise ValueError("Raw support acquisition channel is missing.")
         if acquisition is not None:
             if selected.evidence_scope == "native_stable_support":
@@ -585,12 +853,12 @@ def evaluate_supported_placement_evidence(
         ):
             if (
                 index == 1
-                and selected.evidence_scope == "native_contact_support"
+                and selected.evidence_scope != "native_supported_placement"
                 and selected.observation_kind == "final"
             ):
-                # Instantaneous B0 final support never consumed a completed
-                # wait-policy receipt. The declaration still selects the owner
-                # condition, even when execution stopped before that occurrence.
+                # These source final-state/window contracts do not consume a
+                # completed post-policy receipt. Revision-one strong support
+                # retains its explicit successful policy requirement.
                 selected_segments.append(None)
                 continue
             segment = segments[name]
@@ -598,7 +866,75 @@ def evaluate_supported_placement_evidence(
                 raise ValueError("Evidence belongs to another execution occurrence.")
             selected_segments.append(segment)
         release_segment, support_boundary, boundary = selected_segments
-        if not historical_record:
+        if selected.observation_kind == "final" and (
+            snapshot["segments"][-1]["name"] != selected.boundary_segment_id
+            or "lengths" in snapshot
+            and snapshot["lengths"] != boundary["end_steps"]
+        ):
+            raise ValueError(
+                "Final placement requires its actual last runtime boundary."
+            )
+        if not historical_record and selected.evidence_scope == "native_stable_support":
+            from ._sampled_contact_evidence import prepare_sampled_support
+
+            metrics, timeline, poses = prepare_sampled_support(
+                selected, snapshot, boundary
+            )
+            snapshot["record"] = {
+                "uid": selected.object_id,
+                "part_id": None,
+                "measurements": metrics,
+            }
+            snapshot["contact_timeline"] = timeline
+            snapshot["boundary_poses"] = poses
+        elif (
+            not historical_record
+            and selected.evidence_scope == "measured_planar_landing_region"
+        ):
+            from ._planar_evidence import raw_planar_metrics
+
+            metrics = raw_planar_metrics(selected, snapshot, boundary)
+            metrics.update(
+                reference_uid=selected.reference_id,
+                relation=predicate.arguments["relation"],
+                boundary_frames=snapshot["boundary_frames"],
+            )
+            snapshot["record"] = {
+                "uid": selected.object_id,
+                "part_id": None,
+                "measurements": metrics,
+            }
+        elif not historical_record and selected.directional_geometry is not None:
+            from ._directional_evidence import raw_directional_metrics
+
+            metrics = raw_directional_metrics(selected, snapshot, boundary)
+            snapshot["record"] = {
+                "uid": selected.object_id,
+                "part_id": None,
+                "measurements": metrics,
+            }
+        elif (
+            not historical_record
+            and selected.evidence_scope == "native_supported_landing_region"
+        ):
+            snapshot["record"] = {
+                "uid": selected.object_id,
+                "part_id": None,
+                "measurements": dict(
+                    scope=selected.evidence_scope,
+                    placement_node_id=selected.release_segment_id,
+                    boundary_node_id=selected.boundary_segment_id,
+                    observation_kind=selected.observation_kind,
+                    native_support=snapshot["native_support"],
+                    landing_region=snapshot["landing_region"],
+                    support_gap_m=snapshot["support_gap_m"],
+                    contact_tolerance_m=0.01,
+                    reference_uid=selected.reference_id,
+                    relation="on",
+                    boundary_frames=boundary["end_steps"],
+                ),
+            }
+        elif not historical_record:
             native = json_snapshot(snapshot["native_support"])
             metrics = {
                 **native,
@@ -628,11 +964,16 @@ def evaluate_supported_placement_evidence(
                 "part_id": None,
                 "measurements": metrics,
             }
+        if not historical_record and selected.operation_evidence is not None:
+            snapshot["record"]["group_id"] = selected.operation_evidence["operation"][
+                "operation_id"
+            ]
         record = snapshot["record"]
         if acquisition is not None:
             native = (
                 record["measurements"]["native_support"]
-                if selected.evidence_scope == "native_supported_placement"
+                if selected.evidence_scope
+                in {"native_supported_placement", "native_supported_landing_region"}
                 else record["measurements"]
             )
             if selected.evidence_scope == "native_supported_placement" and acquisition[
@@ -655,19 +996,90 @@ def evaluate_supported_placement_evidence(
                 )
         if record.get("uid") != selected.object_id or record.get("part_id") is not None:
             raise ValueError("Placement record names another physical subject.")
-        released, release_available, receipt, release_call = measured_release(
-            release_segment["metadata"]["runtime"],
-            boundary["metadata"]["runtime"],
-            object_uid=selected.object_id,
-            resource=selected.resource_id,
-            invocation_id=selected.release_invocation_id,
-            num_envs=size,
-        )
+        if (
+            selected.operation_evidence is not None
+            and selected.operation_evidence["family"] == "E5"
+        ):
+            from ._placement_linkage import transport_release
+
+            released, release_available, receipt, release_call = transport_release(
+                selected, snapshot, program, boundary
+            )
+        else:
+            released, release_available, receipt, release_call = measured_release(
+                release_segment["metadata"]["runtime"],
+                boundary["metadata"]["runtime"],
+                object_uid=selected.object_id,
+                resource=selected.resource_id,
+                invocation_id=selected.release_invocation_id,
+                num_envs=size,
+            )
+        if not historical_record and selected.evidence_scope == "native_stable_support":
+            record["measurements"].update(
+                released=released, release_timestamp=receipt["timestamp"]
+            )
+        if selected.operation_evidence is not None:
+            from ._placement_linkage import qualify_linkage
+
+            qualify_linkage(selected, snapshot, program, receipt)
         for row in range(size):
             if not release_available[row]:
                 availability[row] = False
                 errors[row] = "Measured release acquisition is unavailable."
-        if selected.evidence_scope == "native_contact_support":
+        if selected.evidence_scope == "native_supported_landing_region":
+            from ._legacy_region_evidence import legacy_region_flags
+
+            flags = legacy_region_flags(
+                selected, snapshot, boundary, release_call, receipt, released, program
+            )
+        elif selected.directional_geometry is not None:
+            from ._directional_evidence import directional_flags
+
+            metrics = record["measurements"]
+            if historical_record and metrics.get("released") != released:
+                raise ValueError(
+                    "Directional evidence differs from its exact measured release."
+                )
+            flags = directional_flags(
+                selected, metrics, released, boundary, program, family=family
+            )
+        elif selected.evidence_scope == "measured_planar_landing_region":
+            from ._planar_evidence import planar_flags
+
+            metrics = record["measurements"]
+            if (
+                metrics.get("reference_uid") != selected.reference_id
+                or metrics.get("relation") != predicate.arguments["relation"]
+                or historical_record
+                and metrics.get("released") != released
+                or selected.observation_kind == "recorded"
+                and metrics.get("boundary_frames") != boundary["end_steps"]
+            ):
+                raise ValueError(
+                    "Planar evidence differs from its exact release or boundary."
+                )
+            flags, planar_available = planar_flags(
+                selected, metrics, released, predicate.arguments["relation"]
+            )
+            if (
+                historical_record
+                and record.get("available", [True] * size) != planar_available
+            ):
+                raise ValueError(
+                    "Planar containment availability differs from its native measurements."
+                )
+            availability = [
+                a and b for a, b in zip(availability, planar_available, strict=True)
+            ]
+            errors = [
+                (
+                    None
+                    if value
+                    else "Projected footprint cannot resolve this raised 3D containment."
+                )
+                for value in planar_available
+            ]
+        elif selected.evidence_scope == "native_contact_support":
             flags = _legacy_flags(
                 selected,
                 snapshot,
@@ -834,7 +1246,11 @@ def evaluate_supported_placement_evidence(
                 else (
                     "Explicit legacy support and measured release checked; no strong window qualification is implied."
                     if selected.evidence_scope == "native_contact_support"
-                    else "The selected sampled support window and measured release satisfy their declared evidence contract."
+                    else (
+                        "Explicit planar footprint/gap and measured release checked; native contact support is not inferred."
+                        if selected.evidence_scope == "measured_planar_landing_region"
+                        else "The selected sampled support window and measured release satisfy their declared evidence contract."
+                    )
                 )
             ),
             evidence_refs=reference,

@@ -158,6 +158,45 @@ def test_pour_motion_retains_frozen_source_outcomes_for_current_goals_and_milest
     assert "fluid transfer is not established" in outcome.reason
 
 
+@pytest.mark.parametrize("raw", [False, True])
+@pytest.mark.parametrize("past", [False, True])
+def test_explicit_single_count_preserves_pour_proof_without_rewriting_selectors(
+    raw, past
+):
+    spec, binding, evidence, program = _case(raw=raw, past=past)
+    original_spec, original_binding = spec.to_dict(), binding.to_dict()
+    counted = replace(
+        spec,
+        roles=tuple(replace(role, quantifier="count", count=1) for role in spec.roles),
+    )
+    declared = replace(
+        binding, task_spec_digest=canonical_hash(counted.to_dict()), binding_hash=""
+    )
+    expected = evaluate_pour_evidence(spec, binding, evidence, program=program)[0]
+    outcome = evaluate_pour_evidence(counted, declared, evidence, program=program)[0]
+    assert outcome.status is expected.status is EvaluationStatus.SATISFIED
+    assert outcome.observed is expected.observed is True
+    assert all(role.quantifier == "count" and role.count == 1 for role in counted.roles)
+    assert counted.semantic_hash != spec.semantic_hash
+    assert spec.to_dict() == original_spec and binding.to_dict() == original_binding
+
+
+@pytest.mark.parametrize("role_index", [0, 1])
+@pytest.mark.parametrize("quantifier,count", [("count", 2), ("all", 0)])
+def test_pour_single_member_proof_cannot_certify_a_larger_selector(
+    role_index, quantifier, count
+):
+    spec, binding, evidence, program = _case(raw=True)
+    roles = list(spec.roles)
+    roles[role_index] = replace(roles[role_index], quantifier=quantifier, count=count)
+    selected = replace(spec, roles=tuple(roles))
+    declared = replace(
+        binding, task_spec_digest=canonical_hash(selected.to_dict()), binding_hash=""
+    )
+    outcome = evaluate_pour_evidence(selected, declared, evidence, program=program)[0]
+    assert outcome.status is EvaluationStatus.UNAVAILABLE and outcome.observed is None
+
+
 @pytest.mark.parametrize(
     "damage",
     [

@@ -110,13 +110,23 @@ def qualified_control_record(
     for component in source_path:
         terminal_item = terminal_item[component]
     expected_preset = declaration["preset"]
-    if terminal_item.get("name") != terminal or terminal_item.get("post") != [
-        {
-            "kind": "wait_stable",
-            "entity": declared_binding["object_id"],
-            "preset": expected_preset,
-        }
-    ]:
+    policy_entity = terminal_item["post"][0]["entity"]
+    if (
+        terminal_item.get("name") != terminal
+        or policy_entity
+        not in (
+            declared_binding["object_id"],
+            declaration.get("policy_entity_id", declared_binding["object_id"]),
+        )
+        or terminal_item.get("post")
+        != [
+            {
+                "kind": "wait_stable",
+                "entity": policy_entity,
+                "preset": expected_preset,
+            }
+        ]
+    ):
         raise ValueError("Control terminal policy differs from its declared route.")
     receipts = [
         p
@@ -214,3 +224,10 @@ def qualified_control_record(
             "result": deepcopy(result),
         },
     }
+
+
+def one(values: Any) -> Any:
+    values = list(values)
+    if len(values) != 1:
+        raise ValueError("Held evidence requires one exact occurrence.")
+    return values[0]

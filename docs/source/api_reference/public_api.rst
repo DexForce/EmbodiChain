@@ -1139,11 +1139,23 @@ the same operation/source-asset/route digest, sampling window, cleanup, clearanc
 and declared coarse or calibrated criterion as the original source observer.
 There are no imports of live factories, sensors or Task Engine objects.
 
-Only explicitly selected ``historical_record`` inputs are currently qualified;
-raw input is rejected at binding construction until its complete operation-window
-acquisition contract is available. Missing or failed receipt qualification stays
-unavailable. A contact-backed Press event is not device activation, and the
-coarse Twist criterion is not silently upgraded to calibrated-setting success.
+Binding version 1 remains explicitly ``historical_record`` with unchanged
+serialization and hashes. Version 2 explicitly selects ``raw_snapshot`` and seals
+the complete actual control identity and compiled policy occurrences. Old records
+are never upgraded or re-signed automatically, and a raw contract cannot borrow a
+historical accepted claim. Raw binding decode is standard-library-only; numerical
+reevaluation lazily calls the published pure Compute articulation owner.
+
+The raw verifier rechecks exact B1 rows, episodes, native actor/topology identity,
+original revisions/timestamps, complete windows, hold grids and actual invocation
+selectors. Press retains released onset, contact-backed event, retreat, parent
+release and terminal clearance rules. Twist retains startup/table checks, contact
+path, stable held chunks, retained turn and non-target joint baselines. Missing
+channels, invalid finite data, incomplete shapes/windows and foreign boundaries
+remain unavailable; no Lab, Task Engine or native SDK is imported.
+
+A contact-backed Press event is not device activation, and the coarse Twist
+criterion is not silently upgraded to calibrated-setting success.
 The common physical report assembler accepts these bindings without filling
 missing final goals, past milestones or continuous trajectory requirements.
 
@@ -1174,23 +1186,25 @@ Raw snapshots require the complete ``support.com_patch`` acquisition channel,
 including values, validity/errors, timestamp, environment IDs, observation
 revision and clock domain. Values must agree with the native measurements.
 Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
-raw/historical input contracts. Raw sampled-timeline collection is not yet
-implemented and cannot be substituted with the COM-patch channel.
+raw/historical input contracts. Explicit version-4 raw sampled timelines seal
+the native/program acquisition universe and original substep lineage; a
+COM-patch sample cannot substitute for that timeline.
 
-Legacy ``native_contact_support`` and explicit
-``native_stable_reference_support/v2`` sampled windows retain their scopes.
-``native_supported_placement`` requires revision 1 and rechecks release-phase
-windows, actor/episode identity, original stable clocks and raw contact patches.
-Its declared ``supported_region`` variant checks complete planar footprints for
-``on`` and ``inside`` without claiming general volume containment. Stronger
-measurements never select a stronger scope implicitly. E4/E5 still require
-separate transfer/coordinated-transport proofs and reject in this slice.
+Rigid ``on`` relations retain their explicit legacy ``native_contact_support``
+or ``native_stable_reference_support/v2`` sampled-window contract. The separate
+``native_supported_placement`` scope requires revision 1 and rechecks the exact
+release phase, actor/episode provenance, original stable-clock trace and raw
+contact COM patch. Its explicitly declared ``supported_region`` variant also
+checks complete planar-footprint measurements for ``on`` or ``inside``; it does
+not claim general volume containment. A stronger payload never selects a scope
+implicitly. Operation-linked version-3 E4/E5 declarations require the independent
+transfer/coordinated-transport proof before the receiver/coordinated release.
+Version-5 planar and version-6 directional declarations preserve their explicit
+native geometry mode, owners, bounds and unavailable cases. Finite-count
+version-7 placement groups retain every declared member/occurrence.
 
-Recorded region geometry is recomputed from the ObservationManager's exact,
-available history slots and the original owned geometry/support snapshot.
-It cannot borrow the old footprint after a boundary pose changes, resample
-contacts or substitute a live pose. Import is standard-library-only; numerical
-proof re-evaluation lazily uses shared Torch/NumPy/Shapely algorithms.
+Imports and binding validation use only the standard library; numerical proof
+re-evaluation lazily loads the existing shared Torch/NumPy/Shapely algorithms.
 
 The verifier distinguishes unavailable acquisition from measured negatives and
 checks measured release receipts independently of plan/segment success. Raw Lab
@@ -1222,10 +1236,14 @@ invariants. The ordinary TaskSpec evaluator remains the certificate authority.
 
 .. autofunction:: evaluate_placement_evidence_report
 
+.. autofunction:: embodichain.gen_sim.task_spec.evidence.directional_observation_axes
+
+.. autofunction:: embodichain.gen_sim.task_spec.evidence.sampled_support_window
+
 embodichain.gen_sim.task_spec.evidence_report
 ---------------------------------------------
 
-Combine verified placement, orientation and joint evidence using the existing
+Combine verified placement, orientation, joint and historical control evidence using the existing
 TaskSpec evaluator. Bindings must share the native row, episode and input-format
 contract. Final observations cannot fill past milestones; sparse boundary
 observations cannot establish continuous invariants or complete temporal windows.
@@ -1237,7 +1255,6 @@ observations cannot establish continuous invariants or complete temporal windows
    evaluate_physical_evidence_report
 
 .. autofunction:: evaluate_physical_evidence_report
-
 
 embodichain.gen_sim.task_spec.expressions
 -----------------------------------------
@@ -4567,3 +4584,123 @@ contact, motion or task acceptance.
    :members:
 
 .. autofunction:: read_spatial_reference
+embodichain.gen_sim.task_spec.condition_group_evidence
+------------------------------------------------------
+
+Finite-count orientation and articulation-state proofs retain the unchanged
+full TaskSpec and program. The group requires a complete bijection between the
+declared count, execution groups and logical/native member channels; articulation
+members are identified by both entity and part/joint. No synthetic child spec,
+subset selection or unobserved ``all`` universe can stand in for that proof.
+
+Every required member retains its row, episode, occurrence and input-format
+identity. Missing members or historical failures remain unavailable; complete
+valid negative final measurements remain failed. E1 final upright/vertical facts
+are independent of placement, while its original recorded scope remains upright
+only. E6 normal multi-part milestone availability is unchanged. Single-member
+binding serialization, semantic identity and successful-case hashes remain stable.
+The common physical report accepts these condition-group bindings without adding
+support for unrelated held/transport evidence.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.condition_group_evidence
+
+.. autosummary::
+
+   ConditionEvidenceGroupBinding
+   evaluate_condition_group_evidence
+
+.. autoclass:: ConditionEvidenceGroupBinding
+   :members:
+
+.. autofunction:: evaluate_condition_group_evidence
+
+embodichain.gen_sim.task_spec.coordinated_evidence
+--------------------------------------------------
+
+The coordinated-hold binding verifies the original single-object
+``held_by_both_grippers`` contract. It rechecks both resource attachments,
+declared hold criteria, exact execution boundary and current target-filtered
+grips where the source requires them. Raw pose/grip acquisition remains distinct
+from historical receipt replay; missing channels are unavailable and valid
+measured negatives remain failed. It does not establish transported cargo,
+placement or fluid transfer.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.coordinated_evidence
+
+.. autosummary::
+
+   CoordinatedHoldEvidenceBinding
+   evaluate_coordinated_hold_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_coordinated_hold_evidence
+
+embodichain.gen_sim.task_spec.handover_evidence
+-----------------------------------------------
+
+These data-only proofs seal source/destination resources, transfer/boundary
+occurrences, cadence, native identities and the unchanged TaskSpec/program.
+Transfer events, final receiver holding and recorded milestones retain their
+separate source criteria. Fresh raw receiver poses/grips require their exact
+acquisition rows, episodes, clocks and query ordinal; old traces cannot replace
+missing facts. ``one`` and finite ``count=1`` are supported while larger counts
+and an unobserved universe remain unavailable. No live lowerer or Lab factory
+is imported for qualification.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.handover_evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   evaluate_handover_evidence
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_handover_evidence
+
+embodichain.gen_sim.task_spec.observation_requests
+--------------------------------------------------
+
+Request projection validates the normative/program identity and original
+execution receipts before returning plain boundary, motion-part and fresh-grip
+query declarations. Event-only transfer requests no pose/grip capture. Recorded
+coordinated boundaries retain the source requirement for fresh current grip
+facts. This function performs no physical read and changes no success rule.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.observation_requests
+
+.. autofunction:: held_observation_request
+
+embodichain.gen_sim.task_spec.placement_group_evidence
+------------------------------------------------------
+
+A complete finite-count declaration binds every member to its exact release,
+settle and boundary occurrence. All member outcomes contribute without filling
+missing evidence or collapsing native environment identity. This layer evaluates
+facts; Lab owns collection and the frontend owns semantic projection.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.placement_group_evidence
+
+.. autoclass:: PlacementEvidenceGroupBinding
+   :members:
+
+.. autofunction:: evaluate_placement_group_evidence
+
+embodichain.gen_sim.task_spec.transport_evidence
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This verifier qualifies an occurrence-bound recorded acquisition event. It keeps
+that event separate from a final held state, checks the declared completed
+execution prefix and native/episode/time identities, and retains unavailable
+results for missing evidence. It acquires no physical data and does not certify
+subsequent placement or liquid transfer. The source B=1/env0 boundary remains.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.transport_evidence
+
+.. autoclass:: CoordinatedTransportEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_coordinated_transport_evidence

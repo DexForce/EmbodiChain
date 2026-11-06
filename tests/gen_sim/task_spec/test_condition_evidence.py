@@ -210,7 +210,9 @@ def test_binding_instance_mutation_invalidates_original_identity():
 
 
 def test_state_binding_cold_import_and_normalization_do_not_load_simulation_or_numeric_backends():
-    root = Path(__file__).resolve().parents[3]
+    import embodichain
+
+    root = Path(embodichain.__file__).resolve().parent.parent
     data = _case()[1].to_dict()
     script = f"import sys;sys.path.insert(0,{str(root)!r});from embodichain.gen_sim.task_spec.condition_evidence import ConditionEvidenceBinding;ConditionEvidenceBinding.from_dict({data!r});assert not any(name=='torch' or name=='numpy' or name.startswith('embodichain.lab') for name in sys.modules)"
     result = subprocess.run(
