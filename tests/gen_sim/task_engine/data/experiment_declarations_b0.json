@@ -1,0 +1,267 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "embodiment": {
+    "simulation": {
+      "control_parts": {
+        "left_arm": [
+          "la0"
+        ],
+        "right_arm": [
+          "ra0"
+        ]
+      }
+    },
+    "skill_profile": {
+      "resources": [
+        {
+          "resource_id": "left",
+          "endpoints": [
+            {
+              "endpoint_id": "motion",
+              "control_part": "left_arm"
+            }
+          ]
+        },
+        {
+          "resource_id": "right",
+          "endpoints": [
+            {
+              "endpoint_id": "motion",
+              "control_part": "right_arm"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "source_case": "e1-franka-originalenv-v2",
+      "post_handover_places": [],
+      "native_revisions": {},
+      "idle_routes": [],
+      "adjusted_graph_sha256": "dd902425cfb1f056200c60c886282f751259d03fb88fbf755366964b5782a6e0"
+    },
+    {
+      "source_case": "e2-dual_franka-originalenv-v2",
+      "post_handover_places": [],
+      "native_revisions": {},
+      "idle_routes": [],
+      "adjusted_graph_sha256": "5e06c7bd9415d8c4f2db448d148891be77cd526844fe871dd99c885aee721d64"
+    },
+    {
+      "source_case": "e3-dual_franka-originalenv-v2",
+      "post_handover_places": [],
+      "native_revisions": {},
+      "idle_routes": [],
+      "adjusted_graph_sha256": "8e27700844238207509e07271f1e2356ecb28ada4e977a419342e20958abad3a"
+    },
+    {
+      "source_case": "e4-dual_franka-originalenv-v2",
+      "post_handover_places": [],
+      "native_revisions": {
+        "step_03__call_01": 8
+      },
+      "idle_routes": [],
+      "adjusted_graph_sha256": "09fa8852f37149c4eed5984eeef9bf6c15e69d41d2cd441cb29ac969a21d4123"
+    },
+    {
+      "source_case": "e5-franka-r7",
+      "post_handover_places": [],
+      "native_revisions": {},
+      "idle_routes": [],
+      "adjusted_graph_sha256": "81126df12c4e29de610c1a53ada001edb3fff3dfa10431126731d2c5c3aa018f"
+    },
+    {
+      "source_case": "e6-dual_franka-originalenv-v2",
+      "post_handover_places": [],
+      "native_revisions": {},
+      "idle_routes": [],
+      "adjusted_graph_sha256": "3e8f48f7619d9bc6fa225803b891f006dcb85592cae9b91d4590b166db0feb1a"
+    },
+    {
+      "source_case": "e8-dual_franka-originalenv-v2",
+      "post_handover_places": [],
+      "native_revisions": {},
+      "idle_routes": [],
+      "adjusted_graph_sha256": "2188f898df8f2d123c464ddd825bea06858eb0326e9171a1b736f4ebf97e2bf0"
+    },
+    {
+      "source_case": "e9-dual_franka-originalenv-v2",
+      "post_handover_places": [],
+      "native_revisions": {},
+      "idle_routes": [],
+      "adjusted_graph_sha256": "9befbe0523cadadee28ad61f9a36c8401c992b363f7b81b2de8720823d11c657"
+    },
+    {
+      "source_case": "e1-dual_ur10-originalenv-v2",
+      "post_handover_places": [],
+      "native_revisions": {},
+      "idle_routes": [],
+      "adjusted_graph_sha256": "8155cdf40ad65c5be2bef7356945bcafc1ebe098899a1583f031a6773bb4cfff"
+    },
+    {
+      "source_case": "e4-dual_ur10-originalenv-v2",
+      "post_handover_places": [],
+      "native_revisions": {
+        "step_03__call_01": 8
+      },
+      "idle_routes": [],
+      "adjusted_graph_sha256": "90276ed2a9afe88683e34d7e42039497e928034aa69a6c35ae80f59397f977ca"
+    },
+    {
+      "source_case": "same_object_reacquisition",
+      "graph": {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "demo",
+        "instruction": "Validated multi-stage task",
+        "planner_route": "offline",
+        "integration_fingerprint": "f842cf63c67f122ec66cfe9817df0f8755550ccb3219af4db37d37c66d556e99",
+        "targets": {},
+        "nodes": [
+          {
+            "id": "source_left",
+            "call": {
+              "kind": "pick",
+              "object": "cylinder",
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          {
+            "id": "park_left",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "left"
+              }
+            }
+          },
+          {
+            "id": "source_right",
+            "call": {
+              "kind": "pick",
+              "object": "cylinder",
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "park_right",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_01",
+            "call": {
+              "kind": "pick",
+              "object": "cylinder",
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_02",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "cylinder",
+                "reference": "pad",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_01__call_01"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "primary"
+          },
+          {
+            "id": "step_01__call_03",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "left"
+              }
+            },
+            "depends_on": [
+              "step_01__call_02"
+            ],
+            "task_instance_id": "step_01",
+            "task_type": "E1",
+            "role": "cleanup"
+          }
+        ],
+        "task_groups": [
+          {
+            "id": "step_01",
+            "task_type": "E1",
+            "node_ids": [
+              "step_01__call_01",
+              "step_01__call_02",
+              "step_01__call_03"
+            ],
+            "depends_on": [],
+            "success": {
+              "kind": "semantic_task_term",
+              "step_id": "step_01",
+              "type": "semantic_goal"
+            }
+          }
+        ],
+        "success": {
+          "kind": "all_task_groups",
+          "source": {
+            "schema_version": "action_engine_success_spec_v1",
+            "task_id": "demo",
+            "op": "all",
+            "terms": [
+              {
+                "step_id": "step_01",
+                "type": "semantic_goal"
+              }
+            ]
+          }
+        }
+      },
+      "post_handover_places": [],
+      "native_revisions": {},
+      "idle_routes": [
+        {
+          "route_id": "clear_step_01_right",
+          "clear_segment": "step_01__call_01__idle_clearance",
+          "restore_segment": "step_01__call_03__idle_restore",
+          "resource": "right",
+          "joint_name": "ra0",
+          "offset_rad": 0.6,
+          "search": true,
+          "protected_control_part": "left_arm"
+        }
+      ],
+      "adjusted_graph_sha256": "e52509aecd2c96302b77f153e1a8faa2eedff02345b50cc91bea551c3044dd51"
+    }
+  ],
+  "paused_combination_rows_excluded": true
+}

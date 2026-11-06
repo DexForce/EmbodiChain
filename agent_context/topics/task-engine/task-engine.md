@@ -157,3 +157,18 @@ geometry; ordinary E2 retains its existing downward-entry declaration. Closed
 option/lowerer fragments remain declarations for later configured preflight,
 not a runtime factory or a skill registration patch. This surface does not
 connect bundle/CLI publication or claim physical success.
+
+## Policy and continuation declarations
+
+semantic_program.py projects validated graphs and owner-supplied bindings into
+the existing program format. action_profile_declarations.py and
+policy_declarations.py select declarations for typed action, motion and recovery
+options. They do not register skills or modify their private fields.
+native_pick_declarations.py and continuation_declarations.py bind native inputs,
+lookahead and released-hand selections to explicit compiled occurrences.
+pour_declarations.py uses shared source target geometry and model calibration.
+
+experiment_declarations.py keeps opt-in contact, handover and reacquisition
+permissions explicit. experiment_policy.py selects acceptance/reporting modes
+without changing strict TaskSpec verdicts. Configuration defaults, runtime
+composition, physical evidence and final bundle identity retain their own owners.

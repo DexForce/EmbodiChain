@@ -247,3 +247,39 @@ reject. These APIs do not construct a skill, planner, simulator or runtime.
 .. autofunction:: resolve_alignment_lowerer_declarations
 
 .. autofunction:: resolve_handover_profile_declarations
+
+Action policy and continuation declarations
+-------------------------------------------
+
+Compose the unchanged semantic program, typed action options, named execution
+policies and occurrence-bound continuation declarations. Source selections keep
+their explicit profile and resource boundaries; shared defaults remain owned by
+Lab. Native Pick and retained/released continuation declarations use complete
+compiled occurrence identities rather than execution-cache indices or private
+skill mutations. Pour targets remain authored geometric proposals.
+
+Experiment permissions are explicit declarations. Execution completion, selected
+acceptance and strict TaskSpec certificates remain separate outcomes; this
+frontend neither collects evidence nor upgrades unavailable physical facts.
+Configuration defaults and bundle/CLI publication are separate integration owners.
+
+.. automodule:: embodichain.gen_sim.task_engine.semantic_program
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.policy_declarations
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.action_profile_declarations
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.native_pick_declarations
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.continuation_declarations
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.pour_declarations
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.experiment_declarations
+   :members:

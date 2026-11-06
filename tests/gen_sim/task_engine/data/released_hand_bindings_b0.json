@@ -1,0 +1,535 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "source_sha256": "f273ce133f5854ce21de5ce6541589da8490acef5fc994c2657c17c56a779de7",
+  "cases": [
+    {
+      "source_case": "e1-franka-originalenv-v2",
+      "expected": []
+    },
+    {
+      "source_case": "e2-dual_franka-originalenv-v2",
+      "expected": [
+        {
+          "program_fingerprint": "source-fingerprint",
+          "release_invocation_id": "source_program/step_01__call_04:0",
+          "clearance_invocation_id": "source_program/step_01__call_05:0",
+          "park_invocation_ids": [
+            "source_program/step_01__call_06:0"
+          ]
+        }
+      ]
+    },
+    {
+      "source_case": "e3-dual_franka-originalenv-v2",
+      "expected": []
+    },
+    {
+      "source_case": "e4-dual_franka-originalenv-v2",
+      "expected": [
+        {
+          "program_fingerprint": "source-fingerprint",
+          "release_invocation_id": "source_program/step_01__call_04:0",
+          "clearance_invocation_id": "source_program/step_01__call_05:0",
+          "park_invocation_ids": [
+            "source_program/step_01__call_06:0"
+          ]
+        },
+        {
+          "program_fingerprint": "source-fingerprint",
+          "release_invocation_id": "source_program/step_02__call_04:0",
+          "clearance_invocation_id": "source_program/step_02__call_05:0",
+          "park_invocation_ids": [
+            "source_program/step_02__call_06:0"
+          ]
+        }
+      ]
+    },
+    {
+      "source_case": "e5-franka-r7",
+      "expected": []
+    },
+    {
+      "source_case": "e6-dual_franka-originalenv-v2",
+      "expected": []
+    },
+    {
+      "source_case": "e8-dual_franka-originalenv-v2",
+      "expected": []
+    },
+    {
+      "source_case": "e9-dual_franka-originalenv-v2",
+      "expected": []
+    },
+    {
+      "source_case": "e1-dual_ur10-originalenv-v2",
+      "expected": []
+    },
+    {
+      "source_case": "e4-dual_ur10-originalenv-v2",
+      "expected": [
+        {
+          "program_fingerprint": "source-fingerprint",
+          "release_invocation_id": "source_program/step_01__call_04:0",
+          "clearance_invocation_id": "source_program/step_01__call_05:0",
+          "park_invocation_ids": [
+            "source_program/step_01__call_06:0"
+          ]
+        },
+        {
+          "program_fingerprint": "source-fingerprint",
+          "release_invocation_id": "source_program/step_02__call_04:0",
+          "clearance_invocation_id": "source_program/step_02__call_05:0",
+          "park_invocation_ids": [
+            "source_program/step_02__call_06:0"
+          ]
+        }
+      ]
+    },
+    {
+      "source_case": "two_parks",
+      "graph": {
+        "nodes": [
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "second_park",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "other_resource"
+              }
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "program_fingerprint": "source-fingerprint",
+          "release_invocation_id": "source_program/step_01__call_04:0",
+          "clearance_invocation_id": "source_program/step_01__call_05:0",
+          "park_invocation_ids": [
+            "source_program/step_01__call_06:0",
+            "source_program/second_park:0"
+          ]
+        }
+      ]
+    },
+    {
+      "source_case": "duplicate_park",
+      "graph": {
+        "nodes": [
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "second_park",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            }
+          }
+        ]
+      },
+      "error": "Released-hand clearance requires at most two distinct sequential parks including its explicit resource."
+    },
+    {
+      "source_case": "park_arguments",
+      "graph": {
+        "nodes": [
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {
+                "unexpected": true
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          }
+        ]
+      },
+      "error": "Released-hand clearance requires explicit pure parks."
+    },
+    {
+      "source_case": "wrong_park_resource",
+      "graph": {
+        "nodes": [
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "other_resource"
+              }
+            }
+          }
+        ]
+      },
+      "error": "Released-hand clearance requires at most two distinct sequential parks including its explicit resource."
+    },
+    {
+      "source_case": "missing_park",
+      "graph": {
+        "nodes": [
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          }
+        ]
+      },
+      "error": "Released-hand clearance requires at most two distinct sequential parks including its explicit resource."
+    },
+    {
+      "source_case": "wrong_release_object",
+      "graph": {
+        "nodes": [
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "other_object",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            }
+          }
+        ]
+      },
+      "error": "Released-hand clearance requires its preceding same-object release."
+    },
+    {
+      "source_case": "wrong_release_resource",
+      "graph": {
+        "nodes": [
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.place_relative",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "reference": "table",
+                "relation": "on"
+              },
+              "resources": {
+                "primary": "other_resource"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            }
+          }
+        ]
+      },
+      "error": "Released-hand clearance requires its preceding same-object release."
+    },
+    {
+      "source_case": "missing_release",
+      "graph": {
+        "nodes": [
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            }
+          }
+        ]
+      },
+      "error": "Released-hand clearance requires its preceding same-object release."
+    },
+    {
+      "source_case": "builtin_place",
+      "graph": {
+        "nodes": [
+          {
+            "id": "step_01__call_04",
+            "call": {
+              "kind": "place",
+              "object": "interact_purple_soda_can",
+              "on": "support",
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_05",
+            "call": {
+              "kind": "registered",
+              "call_id": "gen_sim.clear_released",
+              "arguments": {
+                "object": "interact_purple_soda_can",
+                "target": "step_01_upright_staging_target"
+              },
+              "resources": {
+                "primary": "right"
+              }
+            }
+          },
+          {
+            "id": "step_01__call_06",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {
+                "primary": "right"
+              }
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "program_fingerprint": "source-fingerprint",
+          "release_invocation_id": "source_program/step_01__call_04:0",
+          "clearance_invocation_id": "source_program/step_01__call_05:0",
+          "park_invocation_ids": [
+            "source_program/step_01__call_06:0"
+          ]
+        }
+      ]
+    }
+  ],
+  "paused_combination_rows_excluded": true
+}
