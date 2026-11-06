@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
 
 import torch
 
@@ -77,6 +79,12 @@ def parse_arguments() -> argparse.Namespace:
         features=("affordance_sampling", "visualize_axes"),
     )
     parser.add_argument("--press_distance", type=float, default=0.03)
+    parser.add_argument(
+        "--dwell_duration",
+        type=float,
+        default=0.0,
+        help="Seconds to hold the pressed pose before retracting (pose control).",
+    )
     parser.add_argument(
         "--press_position",
         type=float,
@@ -243,6 +251,7 @@ def run(args: argparse.Namespace) -> None:
                     hand_interp_steps=HAND_INTERP_STEPS,
                     approach_distance=0.12,
                     press_distance=args.press_distance,
+                    dwell_duration=getattr(args, "dwell_duration", 0.0),
                     press_position=(
                         None
                         if args.press_position is None
@@ -280,6 +289,27 @@ def run(args: argparse.Namespace) -> None:
     look_at = [camera_position, focus_position, [0, 0, 1]]
     if wait_for_user:
         input("Press Enter to replay the Press demo...")
+    observed: list[dict[str, object]] = []
+    plan = compiled.action_plans[0]
+
+    def observe_press(index: int, count: int) -> None:
+        eef_pose = robot.compute_fk(
+            robot.get_qpos(name="arm"), name="arm", to_matrix=True
+        )
+        observed.append(
+            {
+                "index": index,
+                "phase": plan.segment_at(index).name,
+                "eef_position_m": eef_pose[:, :3, 3].detach().cpu().tolist(),
+                "hand_qpos": robot.get_qpos(name="eef").detach().cpu().tolist(),
+                "target_joint_qpos": (
+                    target.get_qpos(target=False).detach().cpu().tolist()
+                    if isinstance(target, Articulation)
+                    else None
+                ),
+            }
+        )
+
     replay_trajectory(
         sim,
         robot,
@@ -293,6 +323,27 @@ def run(args: argparse.Namespace) -> None:
         hold_steps=POST_TRAJECTORY_STEPS,
         look_at=look_at,
         compiled=compiled,
+        on_trajectory_step=observe_press,
+    )
+    report = {
+        "requested_dwell_s": getattr(args, "dwell_duration", 0.0),
+        "control_dt": sim.sim_config.physics_dt,
+        "physics": args.physics,
+        "renderer": args.renderer,
+        "plan_success": compiled.plan_success.detach().cpu().tolist(),
+        "trajectory_duration_s": compiled.trajectory.duration.detach().cpu().tolist(),
+        "segments": [
+            {"name": segment.name, "start": segment.start, "stop": segment.stop}
+            for segment in plan.segments
+        ],
+        "observations": observed,
+    }
+    if args.auto_play_video_path:
+        Path(args.auto_play_video_path).with_suffix(".observations.json").write_text(
+            json.dumps(report, indent=2) + "\n"
+        )
+    logger.log_info(
+        f"Press observed {len(observed)} samples with requested dwell {report['requested_dwell_s']} s."
     )
     if wait_for_user:
         input("Press Enter to exit the simulation...")

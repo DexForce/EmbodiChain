@@ -99,6 +99,14 @@ class PressOptions(ActionOptions):
     press_position: tuple[float, float, float] | None = None
     """Optional local-frame position overriding the affordance press position."""
 
+    dwell_duration: float = 0.0
+    """Finite non-negative time in seconds to hold the final pressed pose.
+
+    Positive durations round up to whole observed control periods and add to
+    the motion sample budget. The grasp command remains active throughout.
+    This is a pose hold and does not regulate or guarantee contact force.
+    """
+
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
@@ -110,6 +118,12 @@ class PressOptions(ActionOptions):
             raise ValueError("press_distance must be finite.")
         if self.press_distance <= 0.0:
             raise ValueError("press_distance must be positive.")
+        if isinstance(self.dwell_duration, bool) or not isinstance(
+            self.dwell_duration, (int, float)
+        ):
+            raise TypeError("dwell_duration must be a real number.")
+        if not math.isfinite(self.dwell_duration) or self.dwell_duration < 0.0:
+            raise ValueError("dwell_duration must be finite and non-negative.")
         if self.press_position is not None:
             position = torch.as_tensor(self.press_position, dtype=torch.float32)
             if position.shape != (3,) or not torch.isfinite(position).all():
@@ -122,7 +136,7 @@ class PressOptions(ActionOptions):
 
 
 class Press(AtomicAction[PressGoal, PressOptions]):
-    """Open-loop motion primitive that approaches, presses, and retracts."""
+    """Approach, press, optionally dwell at the pressed pose, and retract."""
 
     skill_id: ClassVar[str] = "press"
     GoalType: ClassVar[type] = PressGoal
@@ -280,9 +294,29 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             & press_success
             & retract_success
         )
-        motion_phases = (approach_phase, contact_phase, press_phase, retract_phase)
+        motion_phases = {
+            "approach": approach_phase,
+            "contact": contact_phase,
+            "press": press_phase,
+        }
+        if options.dwell_duration > 0.0:
+            # nextafter avoids an extra period when an integer ratio is rounded
+            # one ULP upward. Any positive sub-period request still holds once.
+            dwell_steps = max(
+                1,
+                math.ceil(
+                    math.nextafter(options.dwell_duration / interpolation_dt, -math.inf)
+                ),
+            )
+            motion_phases["dwell"] = (
+                press_arm[:, -1:].expand(-1, dwell_steps, -1),
+                torch.full(
+                    (self.num_envs, dwell_steps), interpolation_dt, device=self.device
+                ),
+            )
+        motion_phases["retract"] = retract_phase
 
-        parts = (hand_close, *(phase[0] for phase in motion_phases))
+        parts = (hand_close, *(phase[0] for phase in motion_phases.values()))
         lengths = tuple(part.shape[1] for part in parts)
         full = torch.empty(
             (self.num_envs, sum(lengths), self.robot_dof),
@@ -300,7 +334,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         hand_dt = torch.full(hand_close.shape[:2], interpolation_dt, device=self.device)
         hand_dt[:, 0] = 0.0
         phase_intervals = [hand_dt]
-        for arm, dt in motion_phases:
+        for arm, dt in motion_phases.values():
             stop = offset + arm.shape[1]
             full[:, offset:stop, arm_joint_ids] = arm
             full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
@@ -379,10 +413,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             ),
             segment_lengths={
                 "close": lengths[0],
-                "approach": lengths[1],
-                "contact": lengths[2],
-                "press": lengths[3],
-                "retract": lengths[4],
+                **{name: phase[0].shape[1] for name, phase in motion_phases.items()},
             },
         )
 
