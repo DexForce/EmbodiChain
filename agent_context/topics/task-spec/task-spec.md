@@ -121,3 +121,9 @@ acknowledged hold grids and invocation selectors before replaying the source
 criterion. Missing or inconsistent proof remains unavailable. Binding decode
 stays standard-library-only; evaluation imports no Lab, Task Engine or native SDK.
 The verifier acquires no state and changes no physics or acceptance thresholds.
+
+Raw program policies may name either the sealed semantic parent or the explicitly
+sealed native child of that same control operation. Preset, occurrence, phase,
+window and actual acquisition identity still match exactly. Historical replay
+without a child declaration retains its original parent-only contract; unrelated
+entities cannot borrow the operation's observations.

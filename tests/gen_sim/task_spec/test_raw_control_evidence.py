@@ -51,10 +51,21 @@ ENCODED = gzip.decompress((DATA / "raw_control_public1057.json.gz").read_bytes()
 PROVENANCE = json.loads((DATA / "raw_control_public1057_provenance.json").read_text())
 assert hashlib.sha256(ENCODED).hexdigest() == PROVENANCE["sha256_uncompressed"]
 CASES = {x["case"]: x for x in json.loads(ENCODED)["cases"]}
+PARENT_ENCODED = gzip.decompress(
+    (DATA / "raw_control_parent_programs.json.gz").read_bytes()
+)
+PARENT_PROVENANCE = json.loads(
+    (DATA / "raw_control_parent_programs_provenance.json").read_text()
+)
+assert (
+    hashlib.sha256(PARENT_ENCODED).hexdigest()
+    == PARENT_PROVENANCE["sha256_uncompressed"]
+)
+PARENT_CASES = {x["case"]: x for x in json.loads(PARENT_ENCODED)["cases"]}
 
 
-def raw_case(name="press", *, past=False):
-    case = deepcopy(CASES[name])
+def raw_case(name="press", *, past=False, parent_program=False):
+    case = deepcopy((PARENT_CASES if parent_program else CASES)[name])
     predicate = Predicate(
         "pressed" if case["kind"] == "press" else "semantic_goal",
         predicate_id="control",
@@ -107,6 +118,46 @@ def test_public_raw_control_packets_preserve_full_proof_and_report_dispatch(name
         )
     else:
         assert report.certificate_ready
+
+
+@pytest.mark.parametrize("name", PARENT_CASES)
+@pytest.mark.parametrize("past", [False, True])
+def test_raw_control_parent_programs_retain_native_child_scope_and_reused_preset(
+    name, past
+):
+    spec, binding, evidence, program = raw_case(name, past=past, parent_program=True)
+    before = binding.to_dict()
+    assert binding.entity_id != binding.control_identity["entity_id"]
+    assert all(
+        item["post"][0]["entity"] == binding.entity_id
+        for item in program["program"]["items"]
+    )
+    items = program["program"]["items"]
+    assert items[-2]["post"][0]["preset"] == items[-1]["post"][0]["preset"]
+    facts = evidence["control_acquisition"]["policies"]
+    assert not facts[-2]["measurements"]["terminal"]
+    assert facts[-1]["measurements"]["terminal"]
+    result = evaluate_control_evidence(spec, binding, evidence, program=program)[0]
+    assert result.status is EvaluationStatus.SATISFIED, result.reason
+    assert result.observed is True
+    report = evaluate_physical_evidence_report(
+        spec, (binding,), {binding.predicate_id: evidence}, program=program, num_envs=1
+    )[0]
+    assert (
+        report.milestones[0].status is EvaluationStatus.SATISFIED
+        if past
+        else report.certificate_ready
+    )
+    assert binding.to_dict() == before
+
+
+@pytest.mark.parametrize("name", PARENT_CASES)
+def test_raw_control_parent_program_cannot_name_an_unrelated_entity(name):
+    spec, binding, evidence, program = raw_case(name, parent_program=True)
+    program["program"]["items"][-1]["post"][0]["entity"] = "unrelated_control"
+    declared = replace(binding, program_digest=canonical_hash(program), binding_hash="")
+    result = evaluate_control_evidence(spec, declared, evidence, program=program)[0]
+    assert result.status is EvaluationStatus.UNAVAILABLE and result.observed is None
 
 
 @pytest.mark.parametrize(

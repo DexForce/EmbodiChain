@@ -515,13 +515,20 @@ def verify_raw_control(
         item = program
         for component in selector["source_path"]:
             item = item[component]
-        if item["name"] != selector["segment_name"] or item["post"][
-            selector["policy_index"]
-        ] != {
-            "kind": "wait_stable",
-            "entity": identity["entity_id"],
-            "preset": selector["preset"],
-        }:
+        declared_policy = item["post"][selector["policy_index"]]
+        # A semantic operation may name its sealed parent while acquisition
+        # retains the explicitly bound native child. Neither identity is inferred.
+        if (
+            item["name"] != selector["segment_name"]
+            or declared_policy["entity"]
+            not in (binding.entity_id, identity["entity_id"])
+            or declared_policy
+            != {
+                "kind": "wait_stable",
+                "entity": declared_policy["entity"],
+                "preset": selector["preset"],
+            }
+        ):
             raise ValueError("Control policy has another declared entity or preset.")
         receipt = one(
             value
