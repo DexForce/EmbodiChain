@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Controlled six-coordinate pose solvers with real rigid FK and FCL geometry."""
+"""Controlled six-coordinate pose solvers with real rigid FK and native collision geometry."""
 
 from __future__ import annotations
 from dataclasses import replace

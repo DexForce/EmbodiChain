@@ -368,18 +368,26 @@ def test_current_loader_rejects_current_implementation_drift_during_preflight(
 
 
 @pytest.mark.parametrize(
-    "changed_version", ["0.9.0", None], ids=["upgraded", "missing"]
+    "distribution,starting_version,upgraded_version",
+    [
+        ("nvidia-curobo", "0.8.0", "0.9.0"),
+        ("newton", "1.6.0", "1.6.1"),
+        ("warp-lang", "1.17.0", "1.17.1"),
+    ],
+    ids=["curobo", "newton", "warp"],
 )
-def test_current_loader_seals_optional_curobo_distribution_version(
-    tmp_path, monkeypatch, changed_version
+@pytest.mark.parametrize("missing", [False, True], ids=["upgraded", "missing"])
+def test_current_loader_seals_planning_distribution_versions(
+    tmp_path, monkeypatch, distribution, starting_version, upgraded_version, missing
 ):
     from embodichain.gen_sim.task_engine import task_program_bundle
 
     actual_version = task_program_bundle.metadata.version
-    selected = {"version": "0.8.0"}
+    selected = {"version": starting_version}
+    changed_version = None if missing else upgraded_version
 
     def distribution_version(name):
-        if name == "nvidia-curobo":
+        if name == distribution:
             if selected["version"] is None:
                 raise task_program_bundle.metadata.PackageNotFoundError(name)
             return selected["version"]
@@ -395,12 +403,12 @@ def test_current_loader_seals_optional_curobo_distribution_version(
         loaded.configure_environment()
 
     revisions = task_program_implementation_revisions()
-    assert revisions["nvidia-curobo"] == (changed_version or "unavailable")
+    assert revisions[distribution] == (changed_version or "unavailable")
     envelope = original.identity.to_dict()
-    assert {k: v for k, v in revisions.items() if k != "nvidia-curobo"} == {
+    assert {k: v for k, v in revisions.items() if k != distribution} == {
         k: v
         for k, v in envelope["implementation_revisions"].items()
-        if k != "nvidia-curobo"
+        if k != distribution
     }
     regenerated = prepare_configured_bundle(
         original.files,

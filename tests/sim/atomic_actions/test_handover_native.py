@@ -223,3 +223,31 @@ def test_complete_cartesian_handover_matches_source_outer_scope(tmp_path, mode):
     )["record"]
     assert record == expected
     assert all(query.closed for query in queries)
+
+
+def test_native_receiver_bounds_support_proposals_without_bypassing_inspection(
+    tmp_path, monkeypatch
+):
+    engine, invocation, context, queries, _, _, _, _ = native_inputs(tmp_path, "clear")
+    inspected = []
+    original = NativeHandSceneQuery.inspect
+
+    def observe(query, poses):
+        inspected.append(len(poses))
+        bounds = query.obstacle_bounds
+        assert len(bounds) == len(query.obstacles)
+        for index, value in enumerate(bounds):
+            if value is not None:
+                before = query.obstacle_bounds
+                value[0][:] = -123.0
+                assert np.array_equal(query.obstacle_bounds[index][0], before[index][0])
+                break
+        return original(query, poses)
+
+    monkeypatch.setattr(NativeHandSceneQuery, "inspect", observe)
+    plan = engine.plan(invocation, context)
+    assert plan.plan_success.all()
+    assert queries and inspected and max(inspected) > 1
+    assert all(query.closed for query in queries)
+    with pytest.raises(RuntimeError, match="closed"):
+        queries[0].obstacle_bounds

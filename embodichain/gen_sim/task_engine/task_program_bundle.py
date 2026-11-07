@@ -160,6 +160,8 @@ def task_program_implementation_revisions() -> dict[str, str]:
     for name in (
         "dexsim",
         "nvidia-curobo",
+        "newton",
+        "warp-lang",
         "torch",
         "numpy",
         "scipy",

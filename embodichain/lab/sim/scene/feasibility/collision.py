@@ -14,16 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Independent Newton collision queries over declared physical convex shapes."""
+"""Independent Newton collision queries over declared physical shapes."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import version
 import math
 from numbers import Integral
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -31,11 +32,139 @@ from .._validation import _identifier, _rigid_pose
 from ._values import count, digest, finite, names
 from .contracts import FeasibilityCheck
 
-__all__ = ["CollisionBody", "NewtonCollisionChecker", "UnsupportedFeasibilityError"]
+if TYPE_CHECKING:
+    from scipy.spatial.transform import Rotation
+
+__all__ = [
+    "CollisionBody",
+    "NativeContactResult",
+    "NewtonCollisionChecker",
+    "UnsupportedFeasibilityError",
+]
+
+_DEFAULT_DETECTION_GAP_M = 0.03
+_DEFAULT_NUMERIC_TOLERANCE_M = 1e-6
+_DEFAULT_MAX_SHAPES = 256
+_MIXED_CLEARANCE_LIMITATION = (
+    "Newton mixed mesh/primitive clearance has no complete certificate; "
+    "native contact or canonical AABB separation is required."
+)
+_MESH_CLEARANCE_LIMITATION = (
+    "Newton mesh/mesh contacts do not certify complete clearance, including "
+    "containment; canonical AABB separation is required to certify clear."
+)
 
 
 class UnsupportedFeasibilityError(RuntimeError):
     """Required geometry, task adaptation or runtime capability is unavailable."""
+
+
+@dataclass(frozen=True, slots=True)
+class NativeContactResult:
+    """Owned native surface predicate and a separate capped clearance interval.
+
+    The native signed separation is authoritative only for exactly represented
+    query inputs. Conversion uncertainty spanning a threshold stays unavailable.
+    This result certifies neither a global distance nor physical acquisition.
+
+    Args:
+        lower: Nonnegative conservative clearance lower bound, in metres.
+        upper: Conservative upper bound, possibly unbounded.
+        signed_surface_separation_m: Native signed separation inside the contact
+            band, or None when no surface contact was reported.
+        representation_error_m: Geometry/pose conversion uncertainty.
+        detection_gap_m: Native query band, in metres.
+        native_contact_count: Number of reduced native contacts.
+        pair_ids: Physical shape IDs for a single pair, if applicable.
+        clearance_unavailable_reason: Why absence of a native contact cannot
+            certify separation; a canonical positive bound may still decide.
+    """
+
+    lower: float
+    upper: float
+    signed_surface_separation_m: float | None
+    representation_error_m: float
+    detection_gap_m: float
+    native_contact_count: int
+    pair_ids: tuple[str, str] | None = None
+    clearance_unavailable_reason: str | None = field(default=None, kw_only=True)
+    _pairs: tuple[NativeContactResult, ...] = field(default=(), repr=False)
+
+    def below(self, threshold: float) -> bool:
+        """Classify the original nonnegative threshold without adding a margin.
+
+        Args:
+            threshold: Requested contact or rest offset, in metres.
+
+        Returns:
+            Whether any active pair is at or below the original threshold.
+
+        Raises:
+            UnsupportedFeasibilityError: If available evidence cannot decide.
+            ValueError: If the threshold is negative or nonfinite.
+        """
+        if isinstance(threshold, bool) or not math.isfinite(threshold) or threshold < 0:
+            raise ValueError(
+                "Native contact thresholds must be finite and nonnegative."
+            )
+        if self._pairs:
+            unknown = False
+            for pair in self._pairs:
+                try:
+                    if pair.below(threshold):
+                        return True
+                except UnsupportedFeasibilityError:
+                    unknown = True
+            if not unknown:
+                return False
+        elif self.pair_ids is None:
+            return False
+        elif threshold < self.detection_gap_m:
+            if self.upper <= threshold:
+                return True
+            if self.lower > threshold:
+                return False
+            if (
+                self.representation_error_m == 0.0
+                and self.signed_surface_separation_m is not None
+            ):
+                if self.signed_surface_separation_m <= threshold:
+                    return True
+                if self.clearance_unavailable_reason is None:
+                    return False
+        raise UnsupportedFeasibilityError(
+            self.clearance_unavailable_reason
+            or "Native contact representation or contact band cannot decide the threshold."
+        )
+
+    def metadata(self) -> dict[str, object]:
+        """Return finite/null native facts, retaining an unbounded upper endpoint."""
+        return {
+            "backend": "newton.CollisionPipeline",
+            "predicate": "native_surface_separation<=threshold",
+            "distance_semantics": "capped_conversion_interval/v1",
+            "lower_bound_m": float(self.lower) if math.isfinite(self.lower) else None,
+            "upper_bound_m": float(self.upper) if math.isfinite(self.upper) else None,
+            "upper_unbounded": math.isinf(self.upper),
+            "signed_surface_separation_m": (
+                float(self.signed_surface_separation_m)
+                if self.signed_surface_separation_m is not None
+                and math.isfinite(self.signed_surface_separation_m)
+                else None
+            ),
+            "representation_error_m": float(self.representation_error_m),
+            "detection_gap_m": (
+                float(self.detection_gap_m)
+                if math.isfinite(self.detection_gap_m)
+                else None
+            ),
+            "native_contact_count": self.native_contact_count,
+            "pair_ids": None if self.pair_ids is None else list(self.pair_ids),
+            "clearance_unavailable_reason": self.clearance_unavailable_reason,
+            "pairs": [pair.metadata() for pair in self._pairs],
+            "continuous": False,
+            "physical_acquisition": False,
+        }
 
 
 def _query_float32(values: object, label: str) -> np.ndarray:
@@ -52,6 +181,112 @@ def _query_float32(values: object, label: str) -> np.ndarray:
             f"{label} cannot be represented by float32 query geometry"
         )
     return converted
+
+
+def _geometry_precision(kind: str, values: object) -> tuple[float, float]:
+    """Use one geometry conversion budget for native and broad-phase queries."""
+    original = np.asarray(values)
+    converted = _query_float32(
+        original,
+        (
+            "Convex vertices"
+            if kind in {"convex", "mesh"}
+            else "Physical shape dimensions"
+        ),
+    )
+    if kind in {"convex", "mesh"}:
+        radius = float(np.linalg.norm(original, axis=1).max())
+        error = float(np.linalg.norm(original - converted, axis=1).max())
+    else:
+        if np.any(converted <= 0):
+            raise UnsupportedFeasibilityError(
+                "Physical shape dimensions collapsed in query precision"
+            )
+        radius = float(np.linalg.norm(original))
+        error = float(np.abs(original - converted).sum())
+    return radius, error
+
+
+def _pack_query_poses(
+    matrices: np.ndarray,
+    geometry_radius: float,
+    geometry_error: float,
+    numeric_tolerance_m: float,
+) -> tuple[np.ndarray, float, np.ndarray, Rotation]:
+    """Share the existing relative-pose conversion and scale allowance exactly."""
+    from scipy.spatial.transform import Rotation
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        relative = matrices[:, :3, 3] - matrices[0, :3, 3]
+    rotations = Rotation.from_matrix(matrices[:, :3, :3])
+    packed = _query_float32(
+        np.column_stack((relative, rotations.as_quat())),
+        "Packed physical collision pose",
+    )
+    rotation_loss = (
+        float(
+            np.linalg.norm(
+                rotations.as_matrix() - matrices[:, :3, :3], axis=(1, 2)
+            ).max()
+        )
+        * geometry_radius
+    )
+    scale = float(np.abs(relative).max()) + geometry_radius
+    tolerance = (
+        numeric_tolerance_m
+        + 2 * (geometry_error + rotation_loss)
+        + 32 * np.finfo(np.float32).eps * scale
+    )
+    return packed, tolerance, relative, rotations
+
+
+def _validate_triangle_faces(vertices: object, faces: object) -> None:
+    """Reject invalid surfaces, including faces collapsed by native conversion."""
+    original = np.asarray(vertices, dtype=np.float64)
+    converted = _query_float32(original, "Triangle vertices").astype(np.float64)
+    indices = np.asarray(faces)
+    if (
+        indices.ndim != 2
+        or indices.shape[1] != 3
+        or not np.issubdtype(indices.dtype, np.integer)
+        or np.any(indices < 0)
+        or np.any(indices >= len(original))
+    ):
+        raise UnsupportedFeasibilityError(
+            "Triangle mesh needs valid explicit face indices."
+        )
+    for points in (original, converted):
+        triangles = points[indices]
+        areas = np.linalg.norm(
+            np.cross(
+                triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+            ),
+            axis=1,
+        )
+        if not np.isfinite(areas).all() or np.any(areas == 0):
+            raise UnsupportedFeasibilityError(
+                "Triangle mesh has degenerate or collapsed faces."
+            )
+
+
+def _aabb_corners(low: np.ndarray, high: np.ndarray) -> np.ndarray:
+    return np.asarray(
+        [
+            (x, y, z)
+            for x in (low[0], high[0])
+            for y in (low[1], high[1])
+            for z in (low[2], high[2])
+        ]
+    )
+
+
+def _aabb_lower_bound(
+    a: tuple[np.ndarray, np.ndarray],
+    b: tuple[np.ndarray, np.ndarray],
+    tolerance: float,
+) -> float:
+    gap = np.maximum(0.0, np.maximum(a[0] - b[1], b[0] - a[1]))
+    return float(max(0.0, float(np.linalg.norm(gap)) - tolerance))
 
 
 @dataclass(frozen=True)
@@ -138,11 +373,11 @@ class CollisionBody:
 
 
 class NewtonCollisionChecker:
-    """Check an isolated B=1 convex collision state without advancing physics.
+    """Check an isolated B=1 collision state without advancing physics.
 
     Args:
-        bodies: Physical shapes, including fixed scene geometry. Triangle mesh
-            and SDF inputs require an explicit adapter and return unsupported.
+        bodies: Physical shapes, including fixed scene geometry. Triangle meshes
+            require explicit opt-in and retain their authored triangle surfaces.
         ignored_pairs: Permanent structural exemptions, as physical IDs or
             frame aliases. Adjacency is never inferred from link names.
         clearance_m: Required separation for non-exempt pairs, in metres.
@@ -153,6 +388,9 @@ class NewtonCollisionChecker:
         use_cuda_graph: Capture repeated CUDA queries after a warm call.
         max_shapes: Explicit shape budget, at most 512; bounds pair storage.
         max_contacts: Upper contact-buffer budget; saturation is unsupported.
+        allow_triangle_meshes: Opt in to native mesh/mesh and mesh/convex surface
+            queries. Does not imply solid containment or convert meshes to hulls.
+        max_triangle_pairs: Bounded native mesh midphase storage.
 
     Returns from check contain a capped conservative clearance estimate, not
     a global minimum distance or a continuous collision certificate. Halfspaces
@@ -170,11 +408,13 @@ class NewtonCollisionChecker:
         ignored_pairs: Sequence[tuple[str, str]] = (),
         clearance_m: float = 0.0,
         device: str = "cpu",
-        detection_gap_m: float = 0.03,
-        numeric_tolerance_m: float = 1e-6,
+        detection_gap_m: float = _DEFAULT_DETECTION_GAP_M,
+        numeric_tolerance_m: float = _DEFAULT_NUMERIC_TOLERANCE_M,
         use_cuda_graph: bool = True,
-        max_shapes: int = 256,
+        max_shapes: int = _DEFAULT_MAX_SHAPES,
         max_contacts: int = 1048576,
+        allow_triangle_meshes: bool = False,
+        max_triangle_pairs: int = 1000000,
     ) -> None:
         self.bodies = tuple(bodies)
         count(max_shapes, "max_shapes")
@@ -189,7 +429,16 @@ class NewtonCollisionChecker:
             raise TypeError("collision bodies must be CollisionBody values")
         if len({b.collision_id for b in self.bodies}) != len(self.bodies):
             raise ValueError("collision bodies must have unique IDs")
-        if any(b.kind == "mesh" for b in self.bodies):
+        if type(allow_triangle_meshes) is not bool:
+            raise TypeError("allow_triangle_meshes must be boolean.")
+        if (
+            type(max_triangle_pairs) is not int
+            or not 1 <= max_triangle_pairs <= 1048576
+        ):
+            raise ValueError("max_triangle_pairs must be between 1 and 1048576.")
+        self.allow_triangle_meshes = allow_triangle_meshes
+        self.max_triangle_pairs = max_triangle_pairs
+        if not allow_triangle_meshes and any(b.kind == "mesh" for b in self.bodies):
             raise UnsupportedFeasibilityError(
                 "Triangle meshes require an explicit collision adapter; preserve native CONVEX shapes as convex"
             )
@@ -225,25 +474,21 @@ class NewtonCollisionChecker:
         )
         self._geometry_radius = 0.0
         self._geometry_error = 0.0
-        for body in self.bodies:
+        self._body_geometry_error = {}
+        self._body_geometry_radius = {}
+        for index, body in enumerate(self.bodies):
             if body.kind == "halfspace":
                 continue
-            if body.kind == "convex":
-                original = np.asarray(body.vertices)
-                converted = _query_float32(original, "Convex vertices")
-                radius = float(np.linalg.norm(original, axis=1).max())
-                error = float(np.linalg.norm(original - converted, axis=1).max())
-            else:
-                original = np.asarray(body.dimensions)
-                converted = _query_float32(original, "Physical shape dimensions")
-                if np.any(converted <= 0):
-                    raise UnsupportedFeasibilityError(
-                        "Physical shape dimensions collapsed in query precision"
-                    )
-                radius = float(np.linalg.norm(original))
-                error = float(np.abs(original - converted).sum())
+            radius, error = _geometry_precision(
+                body.kind,
+                body.vertices if body.kind in {"convex", "mesh"} else body.dimensions,
+            )
+            if body.kind == "mesh":
+                _validate_triangle_faces(body.vertices, body.triangles)
             self._geometry_radius = max(self._geometry_radius, radius)
             self._geometry_error = max(self._geometry_error, error)
+            self._body_geometry_error[index] = error
+            self._body_geometry_radius[index] = radius
         self._max_effective_tolerance = self.numeric_tolerance_m
         if (
             2 * self._geometry_error
@@ -271,6 +516,9 @@ class NewtonCollisionChecker:
         self.ignored_pairs = frozenset(self._expand_pairs(ignored_pairs))
         self.last_pair = None
         self.last_clearance_interval: tuple[float, float] | None = None
+        self._pair_separation = self._pair_contacts = None
+        self._last_contact_rows = ()
+        self._body_bounds = {}
         self._frame_uids = tuple(dict.fromkeys(b.frame_uid for b in self.bodies))
         self._native = tuple(
             i for i, body in enumerate(self.bodies) if body.kind != "halfspace"
@@ -286,12 +534,40 @@ class NewtonCollisionChecker:
             and frozenset((self.bodies[i].collision_id, self.bodies[j].collision_id))
             not in self.ignored_pairs
         )
+        self._mixed_pairs = frozenset(
+            (i, j)
+            for i, j in self._pairs
+            if i in self._native_lookup
+            and j in self._native_lookup
+            and ((self.bodies[i].kind == "mesh") != (self.bodies[j].kind == "mesh"))
+        )
+        self._mesh_pairs = frozenset(
+            (i, j)
+            for i, j in self._pairs
+            if self.bodies[i].kind == "mesh" and self.bodies[j].kind == "mesh"
+        )
         native_pairs = [
             (self._native_lookup[i], self._native_lookup[j])
             for i, j in self._pairs
             if i in self._native_lookup and j in self._native_lookup
         ]
         requested_capacity = max(64, 16 * len(native_pairs))
+        if any(body.kind == "mesh" for body in self.bodies):
+            # Bound surface-manifold storage by declared triangle work, without
+            # allocating the maximum contact budget for every small mesh pair.
+            triangle_work = sum(
+                (len(self.bodies[i].triangles) if self.bodies[i].kind == "mesh" else 1)
+                * (
+                    len(self.bodies[j].triangles)
+                    if self.bodies[j].kind == "mesh"
+                    else 1
+                )
+                for i, j in self._pairs
+                if i in self._native_lookup and j in self._native_lookup
+            )
+            requested_capacity = min(
+                max_contacts, max(64, 16 * min(max_triangle_pairs, triangle_work))
+            )
         if requested_capacity > 1048576:
             raise UnsupportedFeasibilityError("Physical collision pair budget exceeded")
         self._capacity = min(max_contacts, requested_capacity)
@@ -304,22 +580,30 @@ class NewtonCollisionChecker:
         self._meshes = []
         self._closed = False
         self._version = version("newton")
-        self.verification_id = digest(
-            (
-                "newton-convex-query/v1",
-                "relative-origin/scale-allowance/v1",
-                self._version,
-                self.bodies,
-                self.ignored_pairs,
-                self.clearance_m,
-                self.detection_gap_m,
-                self.numeric_tolerance_m,
-                max_shapes,
-                self._capacity,
-                device,
-                use_cuda_graph,
-            )
+        identity = (
+            "newton-convex-query/v1",
+            "relative-origin/scale-allowance/v1",
+            self._version,
+            self.bodies,
+            self.ignored_pairs,
+            self.clearance_m,
+            self.detection_gap_m,
+            self.numeric_tolerance_m,
+            max_shapes,
+            self._capacity,
+            device,
+            use_cuda_graph,
         )
+        if allow_triangle_meshes:
+            identity += (
+                (
+                    "native-triangle-surfaces/v1",
+                    max_triangle_pairs,
+                    "mixed-clearance-canonical-aabb/v1",
+                    "mesh-clearance-canonical-aabb/v1",
+                ),
+            )
+        self.verification_id = digest(identity)
         try:
             if native_pairs:
                 self._build_query(native_pairs)
@@ -330,7 +614,7 @@ class NewtonCollisionChecker:
     @property
     def metadata(self) -> dict[str, str | float | int | bool]:
         """Return owned backend, precision, distance-scope and query identity data."""
-        return {
+        metadata = {
             "backend": "newton.CollisionPipeline",
             "version": self._version,
             "device": self.device,
@@ -351,13 +635,25 @@ class NewtonCollisionChecker:
             "halfspace_check": "analytic_physical_support",
             "continuous": False,
         }
+        if self.allow_triangle_meshes:
+            metadata.update(
+                triangle_mesh_scope="native_triangle_surface",
+                mixed_mesh_primitive_pairs=len(self._mixed_pairs),
+                mixed_clearance_policy=_MIXED_CLEARANCE_LIMITATION,
+                mesh_clearance_policy=_MESH_CLEARANCE_LIMITATION,
+            )
+        return metadata
 
     def _build_query(self, pairs: list[tuple[int, int]]) -> None:
         import newton
         import warp as wp
-        from embodichain.compute.geometry._warp.contact_query import _contact_summary
+        from embodichain.compute.geometry._warp.contact_query import (
+            _check_contact_capacity,
+            _contact_summary,
+        )
 
         self._wp, self._kernel = wp, _contact_summary
+        self._capacity_kernel = _check_contact_capacity
         self.device = str(wp.get_device(self.device))
         builder = newton.ModelBuilder()
         cfg = newton.ModelBuilder.ShapeConfig(
@@ -397,7 +693,11 @@ class NewtonCollisionChecker:
                     maxhullvert=len(body.vertices),
                 )
                 self._meshes.append(mesh)
-                shape = builder.add_shape_convex_hull(mesh=mesh, **options)
+                shape = (
+                    builder.add_shape_mesh(mesh=mesh, **options)
+                    if body.kind == "mesh"
+                    else builder.add_shape_convex_hull(mesh=mesh, **options)
+                )
             if shape != owner:
                 raise UnsupportedFeasibilityError(
                     "Collision query requires one physical shape per owned body"
@@ -414,6 +714,14 @@ class NewtonCollisionChecker:
             include_static_kinematic_pairs=True,
             rigid_contact_max=self._capacity,
             soft_contact_max=0,
+            **(
+                {
+                    "reduce_contacts": False,
+                    "max_triangle_pairs": self.max_triangle_pairs,
+                }
+                if any(body.kind == "mesh" for body in self.bodies)
+                else {}
+            ),
         )
         if self._pipeline.narrow_phase.global_contact_reducer is not None:
             raise UnsupportedFeasibilityError(
@@ -488,10 +796,34 @@ class NewtonCollisionChecker:
             self._mask_cache.popitem(last=False)
         return value
 
-    def _run_query(self) -> None:
+    def _run_query(self, collect_pairs: bool = False) -> None:
         wp, phase, c = self._wp, self._pipeline.narrow_phase, self._contacts
         self._output.fill_(math.inf)
+        if collect_pairs:
+            self._pair_separation.fill_(math.inf)
+            self._pair_contacts.zero_()
         self._pipeline.collide(self._state, self._contacts)
+        if self.allow_triangle_meshes:
+            for count_name, storage_name in (
+                ("shape_pairs_mesh_count", "shape_pairs_mesh"),
+                ("triangle_pairs_count", "triangle_pairs"),
+                ("shape_pairs_mesh_plane_count", "shape_pairs_mesh_plane"),
+                ("shape_pairs_mesh_mesh_count", "shape_pairs_mesh_mesh"),
+                ("shape_pairs_sdf_sdf_count", "shape_pairs_sdf_sdf"),
+            ):
+                value, storage = getattr(phase, count_name), getattr(
+                    phase, storage_name
+                )
+                wp.launch(
+                    self._capacity_kernel,
+                    1,
+                    inputs=[
+                        value if value is not None else self._empty_count,
+                        storage.shape[0] if storage is not None else 0,
+                        self._output,
+                    ],
+                    device=self.device,
+                )
         counters = []
         for count_name, storage_name in (
             ("gjk_candidate_pairs_count", "gjk_candidate_pairs"),
@@ -528,6 +860,9 @@ class NewtonCollisionChecker:
                 len(self._explicit),
                 *counters,
                 self._output,
+                collect_pairs,
+                self._pair_separation if collect_pairs else self._output,
+                self._pair_contacts if collect_pairs else self._empty_count,
             ],
             device=self.device,
         )
@@ -541,7 +876,7 @@ class NewtonCollisionChecker:
             )
         normal = pp[:3, :3] @ np.asarray(plane.dimensions[:3])
         local_normal = sp[:3, :3].T @ normal
-        if shape.kind == "convex":
+        if shape.kind in {"convex", "mesh"}:
             support = float((np.asarray(shape.vertices) @ local_normal).min())
         elif shape.kind == "sphere":
             support = -shape.dimensions[0]
@@ -561,6 +896,44 @@ class NewtonCollisionChecker:
         )
         return center_separation + float(support)
 
+    def _pair_lower_bound(
+        self,
+        i: int,
+        j: int,
+        poses: list[np.ndarray],
+        relative: np.ndarray,
+        tolerance: float,
+    ) -> float:
+        bounds = []
+        for index in (i, j):
+            if index not in self._body_bounds:
+                body = self.bodies[index]
+                if body.kind in {"mesh", "convex"}:
+                    vertices = np.asarray(body.vertices)
+                    low, high = vertices.min(axis=0), vertices.max(axis=0)
+                else:
+                    if body.kind == "box":
+                        high = np.asarray(body.dimensions) / 2
+                    elif body.kind == "sphere":
+                        high = np.full(3, body.dimensions[0])
+                    else:
+                        radius, height = body.dimensions
+                        high = np.asarray(
+                            (
+                                radius,
+                                radius,
+                                height / 2 + (radius if body.kind == "capsule" else 0),
+                            )
+                        )
+                    low = -high
+                self._body_bounds[index] = _aabb_corners(low, high)
+            corners = (
+                self._body_bounds[index] @ poses[index][:3, :3].T
+                + relative[self._native_lookup[index]]
+            )
+            bounds.append((corners.min(axis=0), corners.max(axis=0)))
+        return _aabb_lower_bound(bounds[0], bounds[1], tolerance)
+
     def check(
         self,
         frame_poses: Mapping[str, object],
@@ -568,6 +941,121 @@ class NewtonCollisionChecker:
         allowed_contacts: Sequence[tuple[str, str]] = (),
         moving_objects: Sequence[str] = (),
         all_pairs: bool = False,
+    ) -> tuple[FeasibilityCheck, float]:
+        """Return the existing tolerance-aware discrete feasibility check.
+
+        Args:
+            frame_poses: Arena transforms for every physical body frame.
+            allowed_contacts: Current-stage explicit ID/frame pair exemptions.
+            moving_objects: Payload frames requiring environment checks.
+            all_pairs: Also inspect static layout pairs.
+
+        Returns:
+            Feasibility evidence and a nonnegative capped clearance estimate.
+            ``last_clearance_interval`` retains conversion uncertainty and an
+            unbounded upper endpoint when no contact was reported.
+        """
+        return self._evaluate(
+            frame_poses,
+            allowed_contacts=allowed_contacts,
+            moving_objects=moving_objects,
+            all_pairs=all_pairs,
+        )
+
+    def contact_query(
+        self,
+        frame_poses: Mapping[str, object],
+        *,
+        allowed_contacts: Sequence[tuple[str, str]] = (),
+        moving_objects: Sequence[str] = (),
+        all_pairs: bool = False,
+    ) -> NativeContactResult:
+        """Query native signed surfaces once, without a feasibility tolerance.
+
+        Args:
+            frame_poses: Arena transforms for every physical body frame.
+            allowed_contacts: Explicit ID/frame pair exemptions.
+            moving_objects: Payload frames requiring environment checks.
+            all_pairs: Also inspect static layout pairs.
+
+        Returns:
+            Detached native pair facts and separate conversion intervals. Its
+            ``below`` predicate raises when a threshold cannot be decided.
+            Triangle meshes certify surfaces, never solid containment.
+        """
+        self._evaluate(
+            frame_poses,
+            allowed_contacts=allowed_contacts,
+            moving_objects=moving_objects,
+            all_pairs=all_pairs,
+            _collect=True,
+        )
+        rows = self._last_contact_rows
+        signed = [
+            row.signed_surface_separation_m
+            for row in rows
+            if row.signed_surface_separation_m is not None
+        ]
+        return NativeContactResult(
+            min((row.lower for row in rows), default=math.inf),
+            min((row.upper for row in rows), default=math.inf),
+            min(signed) if signed else None,
+            max((row.representation_error_m for row in rows), default=0.0),
+            self.detection_gap_m,
+            sum(row.native_contact_count for row in rows),
+            _pairs=rows,
+            clearance_unavailable_reason=(
+                "; ".join(
+                    dict.fromkeys(
+                        row.clearance_unavailable_reason
+                        for row in rows
+                        if row.clearance_unavailable_reason
+                    )
+                )
+                or None
+            ),
+        )
+
+    def contact_pairs(
+        self,
+        frame_poses: Mapping[str, object],
+        *,
+        allowed_contacts: Sequence[tuple[str, str]] = (),
+        moving_objects: Sequence[str] = (),
+        all_pairs: bool = False,
+    ) -> tuple[tuple[str, str], ...]:
+        """Return all active native touching/penetrating pairs in body order.
+
+        Args:
+            frame_poses: Arena transforms for every physical body frame.
+            allowed_contacts: Explicit ID/frame pair exemptions.
+            moving_objects: Payload frames requiring environment checks.
+            all_pairs: Also inspect static layout pairs.
+
+        Returns:
+            All decided pairs at signed surface separation at most zero, or an
+            empty tuple for a decided clear frame. One native collide is used.
+
+        Raises:
+            UnsupportedFeasibilityError: Any active pair is undecidable, or a
+                native contact/midphase buffer overflows.
+        """
+        self.contact_query(
+            frame_poses,
+            allowed_contacts=allowed_contacts,
+            moving_objects=moving_objects,
+            all_pairs=all_pairs,
+        )
+        return tuple(row.pair_ids for row in self._last_contact_rows if row.below(0.0))
+
+    def _evaluate(
+        self,
+        frame_poses: Mapping[str, object],
+        *,
+        allowed_contacts: Sequence[tuple[str, str]] = (),
+        moving_objects: Sequence[str] = (),
+        all_pairs: bool = False,
+        _collect: bool = False,
     ) -> tuple[FeasibilityCheck, float]:
         """Check synchronized frames and return a capped clearance estimate.
 
@@ -590,6 +1078,8 @@ class NewtonCollisionChecker:
             raise RuntimeError("collision checker is closed")
         self.last_pair = None
         self.last_clearance_interval = None
+        self._last_contact_rows = ()
+        rows = []
         frames = {}
         for uid in self._frame_uids:
             if uid not in frame_poses:
@@ -609,6 +1099,11 @@ class NewtonCollisionChecker:
         mask, planes, has_native = self._mask(
             allowed_contacts, moving_objects, all_pairs
         )
+        mesh_safety = any(
+            mask[self._native_lookup[i] * len(self._native) + self._native_lookup[j]]
+            for i, j in self._mixed_pairs | self._mesh_pairs
+        )
+        collect_pairs = _collect or mesh_safety
         clearance = math.inf
         upper_clearance = math.inf
         for i, j in planes:
@@ -623,33 +1118,29 @@ class NewtonCollisionChecker:
                 )
             clearance = min(clearance, max(0.0, distance))
             upper_clearance = min(upper_clearance, max(0.0, distance))
+            if collect_pairs:
+                rows.append(
+                    NativeContactResult(
+                        max(0.0, distance),
+                        max(0.0, distance),
+                        distance,
+                        0.0,
+                        math.inf,
+                        0,
+                        (self.bodies[i].collision_id, self.bodies[j].collision_id),
+                    )
+                )
             if distance < self.clearance_m - 1e-8:
                 self.last_clearance_interval = (0.0, upper_clearance)
-                return self._failure(i, j), max(0.0, distance)
+                if not _collect:
+                    return self._failure(i, j), max(0.0, distance)
         if has_native:
-            from scipy.spatial.transform import Rotation
-
             matrices = np.asarray([poses[i] for i in self._native])
-            with np.errstate(over="ignore", invalid="ignore"):
-                relative = matrices[:, :3, 3] - matrices[0, :3, 3]
-            rotations = Rotation.from_matrix(matrices[:, :3, :3])
-            packed = _query_float32(
-                np.column_stack((relative, rotations.as_quat())),
-                "Packed physical collision pose",
-            )
-            rotation_loss = (
-                float(
-                    np.linalg.norm(
-                        rotations.as_matrix() - matrices[:, :3, :3], axis=(1, 2)
-                    ).max()
-                )
-                * self._geometry_radius
-            )
-            scale = float(np.abs(relative).max()) + self._geometry_radius
-            tolerance = (
-                self.numeric_tolerance_m
-                + 2 * (self._geometry_error + rotation_loss)
-                + 32 * np.finfo(np.float32).eps * scale
+            packed, tolerance, relative, rotations = _pack_query_poses(
+                matrices,
+                self._geometry_radius,
+                self._geometry_error,
+                self.numeric_tolerance_m,
             )
             if (
                 not math.isfinite(tolerance)
@@ -664,7 +1155,18 @@ class NewtonCollisionChecker:
             self._state.body_q.assign(packed)
             self._active.assign(mask)
             self._tolerance.assign(np.array([tolerance], dtype=np.float32))
-            if self._graph is None:
+            if collect_pairs:
+                if self._pair_separation is None:
+                    self._pair_separation = self._wp.empty(
+                        len(self._native) ** 2, dtype=float, device=self.device
+                    )
+                    self._pair_contacts = self._wp.zeros(
+                        len(self._native) ** 2,
+                        dtype=self._wp.int32,
+                        device=self.device,
+                    )
+                self._run_query(True)
+            elif self._graph is None:
                 self._run_query()
                 if self.device.startswith("cuda") and self._use_cuda_graph:
                     self._wp.synchronize_device(self.device)
@@ -692,10 +1194,74 @@ class NewtonCollisionChecker:
                 ),
             )
             upper_clearance = min(upper_clearance, max(0.0, separation + tolerance))
+            if collect_pairs:
+                separations = self._pair_separation.numpy().copy()
+                counts = self._pair_contacts.numpy().copy()
+                pose_errors = np.linalg.norm(relative - packed[:, :3], axis=1)
+                rotation_errors = np.linalg.norm(
+                    rotations.as_matrix() - matrices[:, :3, :3], axis=(1, 2)
+                ) + 8 * np.linalg.norm(rotations.as_quat() - packed[:, 3:], axis=1)
+                errors = [
+                    self._body_geometry_error[logical]
+                    + pose_errors[index]
+                    + rotation_errors[index] * self._body_geometry_radius[logical]
+                    for index, logical in enumerate(self._native)
+                ]
+                for i, j in self._pairs:
+                    if i not in self._native_lookup or j not in self._native_lookup:
+                        continue
+                    a, b = self._native_lookup[i], self._native_lookup[j]
+                    pair = a * len(self._native) + b
+                    if mask[pair] == 0:
+                        continue
+                    signed = float(separations[pair])
+                    if math.isnan(signed) or signed == -math.inf:
+                        raise UnsupportedFeasibilityError(
+                            "Invalid native pair evidence."
+                        )
+                    mixed = (i, j) in self._mixed_pairs
+                    mesh_pair = (i, j) in self._mesh_pairs
+                    needs_certificate = mixed or mesh_pair
+                    lower = (
+                        self._pair_lower_bound(i, j, poses, relative, tolerance)
+                        if needs_certificate
+                        else float(
+                            max(0.0, min(self.detection_gap_m, signed) - tolerance)
+                        )
+                    )
+                    upper = float(max(0.0, signed + tolerance))
+                    if lower > upper:
+                        raise UnsupportedFeasibilityError(
+                            "Native contact disagrees with the canonical separation bound."
+                        )
+                    if needs_certificate:
+                        clearance = min(clearance, lower)
+                    row = NativeContactResult(
+                        lower,
+                        upper,
+                        signed if math.isfinite(signed) else None,
+                        float(errors[a] + errors[b]),
+                        self.detection_gap_m,
+                        int(counts[pair]),
+                        (self.bodies[i].collision_id, self.bodies[j].collision_id),
+                        clearance_unavailable_reason=(
+                            _MIXED_CLEARANCE_LIMITATION
+                            if mixed
+                            else _MESH_CLEARANCE_LIMITATION if mesh_pair else None
+                        ),
+                    )
+                    rows.append(row)
+                    if needs_certificate and not _collect:
+                        row.below(self.clearance_m)
             if math.isfinite(summary[1]):
                 self.last_clearance_interval = (clearance, upper_clearance)
                 a, b = divmod(int(summary[1]), len(self._native))
-                return self._failure(self._native[a], self._native[b]), clearance
+                if not _collect:
+                    return self._failure(self._native[a], self._native[b]), clearance
+        body_order = {body.collision_id: i for i, body in enumerate(self.bodies)}
+        self._last_contact_rows = tuple(
+            sorted(rows, key=lambda row: tuple(body_order[uid] for uid in row.pair_ids))
+        )
         self.last_clearance_interval = (clearance, upper_clearance)
         return FeasibilityCheck(
             "collision",
@@ -716,6 +1282,9 @@ class NewtonCollisionChecker:
         self._graph = self._pipeline = self._contacts = self._state = self._model = None
         self._active = self._output = self._empty_count = None
         self._tolerance = None
+        self._pair_separation = self._pair_contacts = None
+        self._last_contact_rows = ()
+        self._body_bounds.clear()
         self._explicit = None
         self._meshes.clear()
         self._mask_cache.clear()

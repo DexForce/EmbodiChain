@@ -95,8 +95,10 @@ through the public config-only Gym owner; URDF assembly destinations are outputs
 Configured adapter asset providers supply model/side dependencies, and Data owns
 mesh metadata plus composed USD asset and layer references. Dependency-set changes,
 including a newly present source sidecar, reject before runtime assembly. It requires the installed
-package's implementation revisions, including the optional `nvidia-curobo`
-distribution version read without importing the SDK (`unavailable` when absent).
+package's implementation revisions, including the `nvidia-curobo`, `newton` and
+`warp-lang` distribution versions read through metadata without importing the
+SDKs (`unavailable` when absent). Per-query verification identities do not replace
+these bundle-level versions.
 It never adopts envelope values as the
 independent expected inputs. Explicit qualification-owned revision mappings remain
 available only through the configured loader; old runtime contracts reject before

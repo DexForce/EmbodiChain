@@ -297,6 +297,9 @@ def stable_closing_report(value):
                 "query_scope",
                 "object_pose_at_capture",
             }
+            # Native query identity is checked at the Motion boundary. The
+            # frozen record here compares candidate/search/command behavior.
+            and not (key == "backend" and item == "newton.CollisionPipeline")
         }
     if isinstance(value, (list, tuple)):
         return [stable_closing_report(item) for item in value]

@@ -1805,9 +1805,16 @@ source-excluding precontact scopes remain distinct in MotionCollisionReport.
 Snapshot scopes retain the exact robot/model input identity and reject drift.
 Nested robot_collision_query_scope restores the previous call-local scope.
 
-These queries require the explicit ``planning-geometry`` optional dependency.
-Missing FCL rejects before capture; existing Newton queries keep their backend.
-Input proxies and sampled checks establish neither CCD nor physical contact.
+These queries own isolated Newton collision models and retain original triangle
+topology through the native mesh route. Permanent pair exclusions are declared
+before model construction; each sampled pose makes one native query, with
+scene, other-arm and self rejection priority retained. Reports identify the
+actual collision backend. No live simulator state or filters are modified.
+
+Missing Newton rejects before capture. Unsupported geometry, exhausted native
+buffers and uncertain precision raise an unavailable result, never a free path.
+Snapshots close their native resources explicitly. Input proxies and sampled
+checks establish neither CCD nor physical contact, and there is no FCL fallback.
 
 .. currentmodule:: embodichain.lab.sim.motion.mesh_collision
 

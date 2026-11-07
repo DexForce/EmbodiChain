@@ -81,10 +81,8 @@ class ConvexMeshQuery(Protocol):
         """
         ...
 
-    def distance_interval(
-        self, other: ConvexMeshQuery, limit: float
-    ) -> _DistanceInterval:
-        """Return bounded clearance between two query groups.
+    def contact_query(self, other: ConvexMeshQuery, limit: float) -> _DistanceInterval:
+        """Return native surface predicates and bounded clearance facts.
 
         Args:
             other: Compatible group from the same collision backend.
@@ -538,7 +536,7 @@ class NativeClosingQuery(_QueryLifetime):
                     if part.contact_offset is None or self.target_contact_offset is None
                     else max(rest, part.contact_offset + self.target_contact_offset)
                 )
-                interval = manager.distance_interval(self.target, band)
+                interval = manager.contact_query(self.target, band)
                 distance = interval.lower
                 if interval.below(rest):
                     if part.pad:
@@ -905,9 +903,7 @@ class NativeOpeningQuery(_QueryLifetime):
                         )
                     rest = self.rest_offset + part.rest_offset
                     contact = self.contact_offset + part.contact_offset
-                    interval = manager.distance_interval(
-                        self.reference, max(rest, contact)
-                    )
+                    interval = manager.contact_query(self.reference, max(rest, contact))
                     distance = interval.lower
                     result["checked_queries"] += 1
                     previous = result["clearance_lower_bound_m"]
@@ -1096,7 +1092,7 @@ class NativeRigidRestScene(_QueryLifetime):
                     manager.set_transform(str(index), pose @ part.tcp_poses[step])
                 for uid, rest, target in self.targets:
                     pair_rest = part.rest_offset + rest
-                    interval = manager.distance_interval(target, pair_rest)
+                    interval = manager.contact_query(target, pair_rest)
                     distance = interval.lower
                     margin = distance - pair_rest
                     minimum = min(minimum, margin)

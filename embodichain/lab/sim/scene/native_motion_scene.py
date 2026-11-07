@@ -31,6 +31,7 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
     _rigid_pose,
 )
 from embodichain.lab.sim.objects.backends.collision import _native_meshes
+from ._newton_queries import _ConvexCollection
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -99,11 +100,13 @@ class NativeRestSceneBody:
 
 
 class NativeRestSceneQuery:
-    """Own an ordered same-revision rest-offset/FCL scene snapshot.
+    """Own an ordered same-revision rest-offset/Newton scene snapshot.
 
     This retains the original discrete query order and pair-rest acceptance.
     It does not test continuous motion, contact acquisition, task success or
-    otherwise widen the source's finite-mesh shape coverage.
+    otherwise widen the source's finite-mesh shape coverage. Captured meshes must
+    retain their triangle topology. Unsupported native routes or uncertain
+    threshold precision are unavailable, never silently approximated.
     """
 
     def __init__(
@@ -140,15 +143,14 @@ class NativeRestSceneQuery:
         self.assert_current()
         try:
             for body in bodies:
-                manager = trimesh.collision.CollisionManager()
-                for index, mesh in enumerate(body.part.meshes):
-                    manager.add_object(str(index), mesh, transform=body.pose)
-                points = np.vstack(
-                    [_transform(mesh.vertices, body.pose) for mesh in body.part.meshes]
-                )
-                self._obstacles.append(
-                    (body, manager, np.stack((points.min(0), points.max(0))))
-                )
+                manager = _ConvexCollection(geometry_kind="mesh")
+                try:
+                    for index, mesh in enumerate(body.part.meshes):
+                        manager.add_object(str(index), mesh, transform=body.pose)
+                except BaseException:
+                    manager.close()
+                    raise
+                self._obstacles.append((body, manager))
             self.assert_current()
         except BaseException:
             self.close()
@@ -191,71 +193,105 @@ class NativeRestSceneQuery:
         Returns:
             Original first violation and pair-rest threshold/query count, or
             discrete all-sample validity. A declared but unavailable shape/pose
-            raises rather than becoming clearance.
+            raises rather than becoming clearance. ``distance_m`` is a
+            conservative lower bound accompanied by a finite/null interval,
+            not an exact distance. Native conversion uncertainty is never
+            bypassed by a float64 broadphase test.
         """
         self.assert_current()
         managers = []
-        vertices = []
-        for part in parts:
+        try:
+            for part in parts:
+                if (
+                    not math.isfinite(part.rest_offset)
+                    or part.rest_offset < 0
+                    or not part.meshes
+                ):
+                    raise ValueError(
+                        "Native moving parts require finite rest offsets and enabled shapes."
+                    )
+                manager = _ConvexCollection(geometry_kind="mesh")
+                managers.append(manager)
+                for index, mesh in enumerate(part.meshes):
+                    manager.add_object(str(index), mesh)
             if (
-                not math.isfinite(part.rest_offset)
-                or part.rest_offset < 0
-                or not part.meshes
+                not len(parts)
+                or poses.shape != (len(poses), len(parts), 4, 4)
+                or not np.isfinite(poses).all()
             ):
                 raise ValueError(
-                    "Native moving parts require finite rest offsets and enabled shapes."
+                    "Native clearance requires complete finite part poses."
                 )
-            manager = trimesh.collision.CollisionManager()
-            for index, mesh in enumerate(part.meshes):
-                manager.add_object(str(index), mesh)
-            managers.append(manager)
-            vertices.append(np.vstack([mesh.vertices for mesh in part.meshes]))
-        if (
-            not len(parts)
-            or poses.shape != (len(poses), len(parts), 4, 4)
-            or not np.isfinite(poses).all()
-        ):
-            raise ValueError("Native clearance requires complete finite part poses.")
-        queries = 0
-        for frame in range(len(poses)):
-            for index, part in enumerate(parts):
-                pose = poses[frame, index]
-                cloud = _transform(vertices[index], pose)
-                low, high = cloud.min(0), cloud.max(0)
-                manager = managers[index]
-                for key in range(len(part.meshes)):
-                    manager.set_transform(str(key), pose)
-                for obstacle, other, bounds in self._obstacles:
-                    if obstacle.part.name == source_id and frame >= source_contact_from:
-                        continue
-                    threshold = part.rest_offset + obstacle.part.rest_offset
-                    gap = np.maximum(0, np.maximum(bounds[0] - high, low - bounds[1]))
-                    if np.linalg.norm(gap) > threshold + 0.002:
-                        continue
-                    distance = float(manager.min_distance_other(other))
-                    queries += 1
-                    if not math.isfinite(distance) or distance <= threshold:
-                        self.assert_current()
-                        return dict(
-                            valid=False,
-                            frame=frame,
-                            link=part.name,
-                            obstacle=obstacle.part.name,
-                            distance_m=distance,
-                            required_clearance_m=threshold,
-                            queries=queries,
-                        )
-        self.assert_current()
-        return dict(
-            valid=True,
-            frames=len(poses),
-            queries=queries,
-            scope="discrete_native_pair_rest_not_continuous_contact_or_task_success",
-        )
+            queries = 0
+            culled = 0
+            for frame in range(len(poses)):
+                for index, part in enumerate(parts):
+                    pose = poses[frame, index]
+                    manager = managers[index]
+                    for key in range(len(part.meshes)):
+                        manager.set_transform(str(key), pose)
+                    for obstacle, other in self._obstacles:
+                        if (
+                            obstacle.part.name == source_id
+                            and frame >= source_contact_from
+                        ):
+                            continue
+                        threshold = part.rest_offset + obstacle.part.rest_offset
+                        lower_bound = manager.clearance_lower_bound(other)
+                        if lower_bound is not None and lower_bound > threshold:
+                            culled += 1
+                            continue
+                        interval = manager.contact_query(other, threshold)
+                        rejected = interval.below(threshold)
+                        distance = interval.lower
+                        queries += 1
+                        if rejected:
+                            self.assert_current()
+                            return dict(
+                                valid=False,
+                                frame=frame,
+                                link=part.name,
+                                obstacle=obstacle.part.name,
+                                distance_m=distance,
+                                reported_distance_semantics="conservative_clearance_lower_bound",
+                                broadphase_scope="canonical_native_conversion_lower_bound",
+                                broadphase_culled_pairs=culled,
+                                required_clearance_m=threshold,
+                                distance_interval_m=[
+                                    interval.lower,
+                                    (
+                                        interval.upper
+                                        if math.isfinite(interval.upper)
+                                        else None
+                                    ),
+                                ],
+                                native_contact_result=interval.metadata(),
+                                **_ConvexCollection.metadata(),
+                                geometry_representation="captured_native_triangle_surfaces",
+                                queries=queries,
+                            )
+            self.assert_current()
+            return dict(
+                valid=True,
+                frames=len(poses),
+                queries=queries,
+                **_ConvexCollection.metadata(),
+                geometry_representation="captured_native_triangle_surfaces",
+                broadphase_scope="canonical_native_conversion_lower_bound",
+                broadphase_culled_pairs=culled,
+                scope="discrete_native_pair_rest_not_continuous_contact_or_task_success",
+            )
+        finally:
+            for manager in managers:
+                manager.close()
 
     def close(self) -> None:
-        """Release only owned FCL resources, never borrowed Robot/simulation objects."""
+        """Release only owned Newton resources, never borrowed Robot/simulation objects."""
+        if self._closed:
+            return
         self._closed = True
+        for _, manager in self._obstacles:
+            manager.close()
         self._obstacles.clear()
         self._bodies = ()
 
@@ -283,7 +319,7 @@ def capture_native_rest_scene(
         validate_observation: Same-source guard called before/after native reads.
 
     Returns:
-        Owned rest-offset/FCL query preserving original rigid/link capture order.
+        Owned rest-offset/Newton query preserving original rigid/link capture order.
     """
     validate_observation()
     if (

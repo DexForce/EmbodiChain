@@ -395,7 +395,7 @@ def capture(
     if not torch.equal(robot.get_qpos(), expected_qpos):
         raise ValueError("handover_scene_snapshot_robot_changed")
     # The query constructor rechecks the same native revision after all capture
-    # reads, before allocating any owned FCL managers.
+    # reads, before allocating any owned native collision queries.
     return NativeHandSceneQuery(
         scope=scope,
         robot_uid=robot.uid,

@@ -162,3 +162,90 @@ def test_goal_seeded_variant_rejects_preserved_orientation_before_ik(
     with pytest.raises(ValueError, match="Place waypoint recovery"):
         engine.plan(invocation, context)
     assert not ikcalls and not batchcalls
+
+
+def test_place_scene_near_threshold_retains_native_unavailable(monkeypatch):
+    """A raw tensorAABB cannot bypass the shared native capability decision."""
+    from itertools import product
+
+    points = torch.tensor(list(product((-0.125, 0.125), repeat=3)))[None]
+    angle = torch.tensor(0.1)
+    cosine, sine = torch.cos(angle), torch.sin(angle)
+    rotation = torch.stack(
+        (
+            torch.stack((cosine, -sine, torch.tensor(0.0))),
+            torch.stack((sine, cosine, torch.tensor(0.0))),
+            torch.tensor((0.0, 0.0, 1.0)),
+        )
+    )
+    fk = torch.eye(4).repeat(1, 2, 1, 1)
+    fk[:, :, :3, :3] = rotation
+    world = torch.einsum("btij,bvj->btvi", fk[:, :, :3, :3], points)
+    threshold = 0.002 + 1e-6
+    obstacle = torch.eye(4)[None]
+    obstacle[:, 0, 3] = world[0, 0, :, 0].max() + 0.125 + threshold + 2e-7
+    raw_gap = obstacle[0, 0, 3] - 0.125 - world[0, 0, :, 0].max()
+    assert threshold < float(raw_gap) < threshold + 1e-6
+    floor = torch.eye(4)[None]
+    floor[:, 2, 3] = -1.0
+    geometry = SceneMeshSnapshot({"object": points, "wall": points, "floor": points})
+    endpoint = SimpleNamespace(
+        task_state_key="arm",
+        require_target=lambda kind: SimpleNamespace(control_part="arm", joint_ids=(0,)),
+    )
+    held = SimpleNamespace(
+        semantics=SimpleNamespace(entity_id="object"), object_to_eef=torch.eye(4)[None]
+    )
+    context = SimpleNamespace(
+        last_qpos=torch.zeros(1, 1),
+        get_held_object=lambda key: held,
+        scene=SimpleNamespace(
+            entities={
+                "object": SimpleNamespace(pose=torch.eye(4)[None], confidence=1.0),
+                "wall": SimpleNamespace(pose=obstacle, confidence=1.0),
+                "floor": SimpleNamespace(pose=floor, confidence=1.0),
+            }
+        ),
+    )
+    robot = SimpleNamespace(
+        get_qpos_limits=lambda **kwargs: torch.tensor([[[-1.0, 1.0]]]),
+        compute_batch_fk=lambda **kwargs: fk,
+        get_solver=lambda *args: SimpleNamespace(
+            get_iteration_params=lambda: {"pos_eps": 1e-5, "rot_eps": 1e-5}
+        ),
+    )
+    plan = SimpleNamespace(
+        plan_success=torch.tensor([True]),
+        joint_trajectory=SimpleNamespace(
+            positions=torch.zeros(1, 2, 1), dt=torch.full((1, 2), 0.04)
+        ),
+        segments=(SimpleNamespace(name="approach", stop=2),),
+    )
+    monkeypatch.setattr(
+        _place_scene, "authored_joint_velocity_limits", lambda *args: torch.ones(1, 1)
+    )
+    monkeypatch.setattr(
+        _place_scene, "inspect_robot_motion", lambda *args: {"valid": True}
+    )
+    calls = []
+
+    def native_unavailable(*args, **kwargs):
+        calls.append((args[4].tolist(), kwargs))
+        raise RuntimeError("native precision interval unavailable")
+
+    monkeypatch.setattr(_place_scene, "convex_input_clearance", native_unavailable)
+    result = _place_scene.inspect_place_plan(
+        SimpleNamespace(robot=robot),
+        SimpleNamespace(binding=SimpleNamespace(endpoint=lambda *args: endpoint)),
+        context,
+        plan,
+        PlaceSceneInputs(
+            geometry=geometry, floor_entity_id="floor", support_owner_id="floor"
+        ),
+    )
+    assert calls == [([0, 1], {"clearance_m": 0.002, "numerical_allowance_m": 1e-6})]
+    assert result == {
+        "valid": False,
+        "reason": "scene_geometry_unavailable",
+        "unavailable": "native precision interval unavailable",
+    }

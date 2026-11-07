@@ -46,6 +46,33 @@ filters, and the query never advances the simulation clock. Shape/pair/contact
 storage is bounded; saturation and nonfinite results remain unverified.
 The host closes the owned query arrays/graphs after every attempt.
 
+The checker separately exposes `contact_query` native signed-surface facts and
+`contact_pairs` for all active strict-contact physical-ID pairs from one collide.
+The tolerance-aware `check` and capped interval retain their existing semantics.
+Exactly represented native touching can decide zero rest offset; conversion
+uncertainty spanning a threshold remains unavailable. Triangle meshes require
+explicit `allow_triangle_meshes=True`; this uses actual native triangle surfaces,
+never hull substitution or a containment certificate. The default physical
+extractor continues to reject unsupported geometry. Mesh midphase/contact
+overflow is unavailable, and returned native facts own their data.
+The mesh-group adapter's `clearance_lower_bound` reuses the same geometry/pose
+conversion preparation for conservative frozen-AABB culling without a model or
+collide. Only a decided bound strictly above the original threshold can skip a
+native query; near/unsafe inputs remain zero or unavailable. It never supplies
+contact evidence or replaces the native predicate.
+Mixed mesh/primitive absence of contacts is not a separation certificate: the
+native SDK can omit such contacts for intersecting inputs. `check`,
+`contact_query` and `contact_pairs` require native contact evidence or a canonical
+AABB separation proof; otherwise they retain unavailable clearance with an
+explicit reason. Convex-only defaults retain their original semantics.
+All mesh/mesh negative decisions require canonical AABB separation. Bounded
+native searches can omit deeply contained components even while reporting
+positive halo contacts for another component. Missing contacts or a positive
+reported minimum are not complete solid-clearance certificates. All three
+checker entries retain unavailable evidence without that proof. Native contact
+facts can still decide positively. Near separated pairs and empty concave gaps
+with overlapping AABBs can remain unavailable without changing their inputs.
+
 Query transforms are rebased before composing local offsets; precision budgets
 cover conversion, scale and nonfinite failures before no-contact acceptance.
 The owned tolerance array is refreshed before graph replay. Checker calls are

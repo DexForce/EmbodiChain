@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Registered idle intent reaches ordinary Atomic/Motion with frozen FCL outcomes."""
+"""Registered idle intent reaches ordinary Atomic/Motion with native collision qualification."""
 
 from __future__ import annotations
 
@@ -49,8 +49,8 @@ _REFERENCE = json.loads(
 
 
 @pytest.mark.skipif(
-    importlib.util.find_spec("fcl") is None,
-    reason="planning-geometry is required for actual FCL qualification",
+    importlib.util.find_spec("newton") is None,
+    reason="Newton is required for native collision qualification",
 )
 @pytest.mark.parametrize(
     "case",

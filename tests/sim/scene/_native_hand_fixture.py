@@ -177,6 +177,13 @@ def recording_manager(original):
 
         def distance_interval(self, other, limit):
             interval = self.inner.distance_interval(other.inner, limit)
+            return self._record(other, interval)
+
+        def contact_query(self, other, limit):
+            interval = self.inner.contact_query(other.inner, limit)
+            return self._record(other, interval)
+
+        def _record(self, other, interval):
             distance = interval.lower
             trace.append(
                 {

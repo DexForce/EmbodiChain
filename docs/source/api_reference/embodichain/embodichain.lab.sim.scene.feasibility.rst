@@ -65,6 +65,43 @@ permissions. Shape/pair/contact budgets are bounded, and overflow or nonfinite
 results cannot accept a candidate. Query arrays and graphs are released by the
 host after each attempt.
 
+``contact_query`` separates the native signed-surface predicate from the
+conservative distance interval. Exactly represented touching/penetrating native
+surfaces can be classified at the original zero rest offset; conversion
+uncertainty spanning a threshold remains unavailable. ``contact_pairs`` returns
+all active touching/penetrating physical-ID pairs from one pipeline call, or
+raises if any pair is undecidable. Returned facts are detached from subsequent
+query updates and provide finite/null metadata.
+
+The checker retains triangle-mesh rejection by default. Explicit
+``allow_triangle_meshes=True`` uses Newton's actual mesh/mesh and mesh/convex
+surface route with the supplied faces, without hull conversion or a solid
+containment certificate. Native midphase and contact buffers are bounded and
+checked for overflow.
+
+Mixed mesh/primitive queries have a further SDK limitation: absence of reported
+contacts does not certify separation. They require either an actual native
+contact deciding the original threshold or a canonical AABB separation lower
+bound. Otherwise all three checker entry points retain unavailable evidence.
+``NativeContactResult`` records the mixed-route clearance limitation explicitly;
+the convex-only default retains its original semantics.
+
+Mesh/mesh negative decisions likewise require canonical AABB separation. A
+closed component can be deeply contained inside another without being reported
+by the SDK's bounded queries, even while a different component yields positive
+halo contacts. Neither missing contacts nor a positive minimum over reported
+contacts certifies complete solid clearance. Native contact evidence may still
+decide the original threshold positively. Near separated pairs and genuinely
+empty concave gaps with overlapping AABBs can remain unavailable; inputs and
+thresholds are not changed to manufacture a negative certificate.
+
+The shared mesh-group adapter can cull a far pair using a frozen AABB separation
+lower bound after the same geometry/pose conversion allowance. It allocates no
+native model and does not collide. Only a lower bound strictly above the original
+threshold may skip the native predicate; a zero or unavailable bound cannot
+decide contact. Unsafe coordinates and unsupported shape/precision budgets do
+not become clear broad-phase results.
+
 CPU is the default query device. ``collision_device`` selects CPU/CUDA,
 independently of the environment-owned physical backend and proposal device;
 ``collision_use_cuda_graph`` controls CUDA replay. Reported clearance is a
@@ -169,6 +206,7 @@ Implementation modules
 .. autosummary::
 
    CollisionBody
+   NativeContactResult
    NewtonCollisionChecker
    UnsupportedFeasibilityError
 
