@@ -16,9 +16,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from datetime import datetime, timezone
 from typing import Literal, Protocol
+import json
 
 import numpy as np
 
@@ -39,6 +40,7 @@ __all__ = [
     "JointControlSpec",
     "JointControlState",
     "MeshGeometry",
+    "MeshMarkerOverlay",
     "PickCommand",
     "PointCloudOverlay",
     "SceneFrame",
@@ -53,7 +55,7 @@ __all__ = [
     "pose_to_position_wxyz",
 ]
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 Color = tuple[int, int, int]
 
 
@@ -638,6 +640,195 @@ class PointCloudOverlay:
 
 
 @dataclass(frozen=True)
+class _MeshMarkerGeometry:
+    """Validated, detached, immutable geometry shared by marker instances."""
+
+    vertices: np.ndarray
+    faces: np.ndarray
+    uv_coords: np.ndarray | None
+    texture: np.ndarray | None
+    texture_wrap: tuple[str, str] = ("repeat", "repeat")
+    normals: np.ndarray | None = None
+    material: object | None = None
+    material_uv_coords: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        vertices = _array(self.vertices, np.float32)
+        if self.normals is not None:
+            normals = _array(self.normals, np.float32)
+            if normals.shape != vertices.shape or not np.isfinite(normals).all():
+                raise ValueError("Mesh normals must be finite and match vertices.")
+            normals.setflags(write=False)
+            object.__setattr__(self, "normals", normals)
+        if self.material_uv_coords is not None:
+            material_uv = _array(self.material_uv_coords, np.float32)
+            if (
+                material_uv.shape != (len(vertices), 2)
+                or not np.isfinite(material_uv).all()
+            ):
+                raise ValueError("Material UV coordinates must be finite Vx2.")
+            material_uv.setflags(write=False)
+            object.__setattr__(self, "material_uv_coords", material_uv)
+        if self.material is not None:
+            material = (
+                json.loads(self.material)
+                if isinstance(self.material, str)
+                else self.material
+            )
+            if not isinstance(material, dict):
+                raise ValueError("Mesh material must contain descriptor parameters.")
+            object.__setattr__(
+                self, "material", json.dumps(material, sort_keys=True, allow_nan=False)
+            )
+        face_values = _array(self.faces, np.float64)
+        if vertices.ndim != 2 or vertices.shape[1] != 3:
+            raise ValueError(
+                f"vertices must have shape (V, 3), received {vertices.shape}."
+            )
+        if face_values.size == 0:
+            raise ValueError("Mesh marker geometry must contain at least one triangle.")
+        if face_values.ndim != 2 or face_values.shape[1] != 3:
+            raise ValueError(
+                f"faces must have shape (F, 3), received {face_values.shape}."
+            )
+        if not np.all(np.isfinite(vertices)):
+            raise ValueError("Mesh marker vertices must be finite.")
+        if (
+            not np.all(np.isfinite(face_values))
+            or np.any(face_values < 0.0)
+            or np.any(face_values > np.iinfo(np.uint32).max)
+            or np.any(face_values != np.floor(face_values))
+        ):
+            raise ValueError(
+                "Mesh marker faces must contain finite non-negative integers "
+                "representable as uint32."
+            )
+        faces = np.ascontiguousarray(face_values, dtype=np.uint32)
+        if faces.size and (vertices.shape[0] == 0 or np.max(faces) >= len(vertices)):
+            raise ValueError("Mesh marker faces contain out-of-bounds vertex indices.")
+        uv = None if self.uv_coords is None else _array(self.uv_coords, np.float32)
+        texture = None if self.texture is None else _array(self.texture, None)
+        if len(self.texture_wrap) != 2 or any(
+            value not in {"repeat", "clamp", "mirror"} for value in self.texture_wrap
+        ):
+            raise ValueError(
+                "texture_wrap must contain two repeat, clamp, or mirror modes."
+            )
+        object.__setattr__(self, "texture_wrap", tuple(self.texture_wrap))
+        if uv is not None and (
+            uv.shape != (len(vertices), 2) or not np.isfinite(uv).all()
+        ):
+            raise ValueError("uv_coords must be finite with shape (V, 2).")
+        if texture is not None:
+            if (
+                uv is None
+                or texture.dtype != np.uint8
+                or texture.ndim != 3
+                or texture.shape[2] not in (3, 4)
+                or min(texture.shape[:2]) == 0
+            ):
+                raise ValueError(
+                    "texture requires UVs and a nonempty uint8 RGB/RGBA image."
+                )
+        for name, value in (
+            ("vertices", vertices),
+            ("faces", faces),
+            ("uv_coords", uv),
+            ("texture", texture),
+        ):
+            if value is not None:
+                value.setflags(write=False)
+            object.__setattr__(self, name, value)
+
+
+@dataclass(frozen=True)
+class MeshMarkerOverlay:
+    """Triangle mesh marker with detached poses and shared immutable geometry.
+
+    Color RGB and texture RGB use sRGB; alpha is linear coverage.
+    """
+
+    overlay_id: str
+    vertices: np.ndarray
+    faces: np.ndarray
+    position: np.ndarray
+    wxyz: np.ndarray
+    scale: np.ndarray = field(default_factory=lambda: np.ones((3,), dtype=np.float32))
+    color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 1.0)
+    visible: bool = True
+    env_id: int | None = None
+    uv_coords: np.ndarray | None = None
+    texture: np.ndarray | None = None
+    texture_wrap: tuple[str, str] = ("repeat", "repeat")
+    unlit: bool = True
+    scene_lighting: bool = False
+    normals: np.ndarray | None = None
+    material: object | None = None
+    material_uv_coords: np.ndarray | None = None
+
+    _shared_geometry: InitVar[_MeshMarkerGeometry | None] = field(
+        default=None, kw_only=True
+    )
+
+    def __post_init__(self, _shared_geometry: _MeshMarkerGeometry | None) -> None:
+        if not isinstance(self.overlay_id, str) or not self.overlay_id:
+            raise ValueError("Mesh marker overlay_id must be a non-empty string.")
+        if not isinstance(self.unlit, bool):
+            raise ValueError("Mesh marker unlit must be a boolean.")
+        if not isinstance(self.scene_lighting, bool):
+            raise ValueError("Mesh marker scene_lighting must be a boolean.")
+        geometry = _shared_geometry or _MeshMarkerGeometry(
+            self.vertices,
+            self.faces,
+            self.uv_coords,
+            self.texture,
+            self.texture_wrap,
+            self.normals,
+            self.material,
+            self.material_uv_coords,
+        )
+        position, wxyz = _normalize_position_wxyz(self.position, self.wxyz)
+        scale = _array(self.scale, np.float32)
+        color = tuple(float(component) for component in self.color)
+        if not np.all(np.isfinite(position)) or not np.all(np.isfinite(wxyz)):
+            raise ValueError("Mesh marker pose arrays must be finite.")
+        if scale.shape != (3,):
+            raise ValueError(f"scale must have shape (3,), got {scale.shape}.")
+        if not np.all(np.isfinite(scale)) or np.any(scale <= 0.0):
+            raise ValueError("Mesh marker scale values must be finite and positive.")
+        if len(color) != 4 or not all(
+            np.isfinite(component) and 0.0 <= component <= 1.0 for component in color
+        ):
+            raise ValueError(
+                "Mesh marker color must be an RGBA tuple with values in [0, 1]."
+            )
+        if self.env_id is not None and (
+            isinstance(self.env_id, (bool, np.bool_))
+            or not isinstance(self.env_id, (int, np.integer))
+            or self.env_id < 0
+        ):
+            raise ValueError(
+                "Mesh marker env_id must be a non-negative integer or None."
+            )
+        object.__setattr__(self, "_geometry", geometry)
+        for name in (
+            "vertices",
+            "faces",
+            "uv_coords",
+            "texture",
+            "texture_wrap",
+            "normals",
+            "material",
+            "material_uv_coords",
+        ):
+            object.__setattr__(self, name, getattr(geometry, name))
+        object.__setattr__(self, "position", position)
+        object.__setattr__(self, "wxyz", wxyz)
+        object.__setattr__(self, "scale", scale)
+        object.__setattr__(self, "color", color)
+
+
+@dataclass(frozen=True)
 class SceneOverlays:
     """All optional overlays attached to a dynamic frame."""
 
@@ -645,6 +836,12 @@ class SceneOverlays:
     trajectories: tuple[TrajectoryOverlay, ...] = field(default_factory=tuple)
     targets: tuple[TargetOverlay, ...] = field(default_factory=tuple)
     point_clouds: tuple[PointCloudOverlay, ...] = field(default_factory=tuple)
+    meshes: tuple[MeshMarkerOverlay, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        mesh_ids = [mesh.overlay_id for mesh in self.meshes]
+        if len(mesh_ids) != len(set(mesh_ids)):
+            raise ValueError("SceneOverlays contains duplicate mesh overlay IDs.")
 
 
 @dataclass(frozen=True)
@@ -742,7 +939,7 @@ def estimate_camera_image_frame_bytes(frame: CameraImageFrame) -> int:
 
 
 def estimate_frame_bytes(frame: SceneFrame) -> int:
-    """Estimate NumPy payload bytes retained by a frame."""
+    """Estimate NumPy payload bytes, counting shared marker geometry once."""
     total = (
         frame.positions.nbytes
         + frame.wxyz.nbytes
@@ -755,6 +952,18 @@ def estimate_frame_bytes(frame: SceneFrame) -> int:
         total += overlay.points.nbytes
     for overlay in frame.overlays.point_clouds:
         total += overlay.points.nbytes + overlay.colors.nbytes
+    geometry_arrays = set()
+    for overlay in frame.overlays.meshes:
+        total += overlay.position.nbytes + overlay.wxyz.nbytes + overlay.scale.nbytes
+        for array in (
+            overlay.vertices,
+            overlay.faces,
+            overlay.uv_coords,
+            overlay.texture,
+        ):
+            if array is not None and id(array) not in geometry_arrays:
+                total += array.nbytes
+                geometry_arrays.add(id(array))
     for overlay in (*frame.overlays.frames, *frame.overlays.targets):
         total += overlay.position.nbytes + overlay.wxyz.nbytes
     for gizmo in frame.gizmos:

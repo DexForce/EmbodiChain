@@ -32,6 +32,7 @@ from embodichain.lab.visualization import (
     GizmoState,
     JointControlSpec,
     JointControlState,
+    MeshMarkerOverlay,
     MeshGeometry,
     SceneFrame,
     SceneManifest,
@@ -256,6 +257,13 @@ class _Scene:
         self.dynamic_mesh_handles.append(handle)
         return handle
 
+    def add_glb(self, name: str, glb_data: bytes, **kwargs: object) -> _Handle:
+        handle = _Handle(
+            name=name, glb_data=glb_data, removed=False, visible=True, **kwargs
+        )
+        self.dynamic_mesh_handles.append(handle)
+        return handle
+
     def add_camera_frustum(self, name: str, **kwargs: object) -> _Handle:
         handle = _Handle(name=name, removed=False, **kwargs)
         self.camera_handles.append(handle)
@@ -379,6 +387,189 @@ def test_viser_backend_renders_axis_marker_frame_overlay() -> None:
     np.testing.assert_allclose(handle.position, marker.position)
     np.testing.assert_allclose(handle.wxyz, marker.wxyz)
     assert handle.visible
+    backend.stop()
+
+
+def _mesh_marker(
+    *,
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 1.0),
+    env_id: int | None = 0,
+) -> MeshMarkerOverlay:
+    return MeshMarkerOverlay(
+        overlay_id="goal",
+        vertices=np.array(
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        ),
+        faces=np.array([[0, 1, 2]], dtype=np.uint32),
+        position=np.asarray(position, dtype=np.float32),
+        wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        scale=np.asarray(scale, dtype=np.float32),
+        color=color,
+        env_id=env_id,
+    )
+
+
+def _empty_frame_with_mesh(
+    overlay: MeshMarkerOverlay | None, sequence: int
+) -> SceneFrame:
+    return SceneFrame(
+        run_id="run",
+        scene_revision=1,
+        sequence=sequence,
+        sim_step=sequence,
+        sim_time=sequence * 0.01,
+        node_ids=(),
+        positions=np.empty((0, 3), dtype=np.float32),
+        wxyz=np.empty((0, 4), dtype=np.float32),
+        visible=np.empty((0,), dtype=np.bool_),
+        overlays=SceneOverlays(meshes=() if overlay is None else (overlay,)),
+    )
+
+
+def test_viser_backend_reuses_mesh_marker_handles_until_geometry_changes() -> None:
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    initial = _mesh_marker(color=(1.0, 0.0, 0.0, 0.4))
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    assert backend.publish_frame(_empty_frame_with_mesh(initial, 1))
+    handle = server.scene.dynamic_mesh_handles[-1]
+    np.testing.assert_allclose(handle.vertices, initial.vertices)
+    assert handle.color == (255, 0, 0)
+    assert handle.opacity == 0.4
+    assert handle.side == "double"
+    assert handle.cast_shadow is False
+    assert handle.receive_shadow is False
+
+    styled = _mesh_marker(position=(1.0, 2.0, 3.0), color=(0.0, 1.0, 0.0, 0.7))
+    assert backend.publish_frame(_empty_frame_with_mesh(styled, 2))
+    assert server.scene.dynamic_mesh_handles[-1] is handle
+    np.testing.assert_allclose(handle.position, [1.0, 2.0, 3.0])
+    assert handle.color == (0, 255, 0)
+    assert handle.opacity == 0.7
+
+    scaled = _mesh_marker(scale=(2.0, 3.0, 4.0))
+    assert backend.publish_frame(_empty_frame_with_mesh(scaled, 3))
+    replacement = server.scene.dynamic_mesh_handles[-1]
+    assert replacement is not handle
+    assert handle.removed
+    np.testing.assert_allclose(
+        replacement.vertices,
+        scaled.vertices * np.array([2.0, 3.0, 4.0], dtype=np.float32),
+    )
+
+    assert backend.publish_frame(_empty_frame_with_mesh(None, 4))
+    assert replacement.removed
+    backend.stop()
+
+
+def test_viser_textured_markers_export_unlit_glb_and_preserve_pose_updates() -> None:
+    import io
+    import json
+    import struct
+    import trimesh
+
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    texture = np.full((2, 2, 4), [255, 128, 0, 255], dtype=np.uint8)
+    marker = replace(
+        _mesh_marker(color=(0.5, 0.5, 0.5, 0.4)),
+        texture=texture,
+        uv_coords=np.array([[0, 0], [1, 0], [0, 1]]),
+        texture_wrap=("mirror", "clamp"),
+    )
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    backend.publish_frame(_empty_frame_with_mesh(marker, 1))
+    handle = server.scene.dynamic_mesh_handles[-1]
+    json_size = struct.unpack_from("<I", handle.glb_data, 12)[0]
+    tree = json.loads(handle.glb_data[20 : 20 + json_size])
+    material = tree["materials"][0]
+    assert "KHR_materials_unlit" in material["extensions"]
+    assert material["alphaMode"] == "BLEND"
+    assert tree["samplers"] == [{"wrapS": 33648, "wrapT": 33071}]
+    np.testing.assert_allclose(
+        material["pbrMetallicRoughness"]["baseColorFactor"],
+        [0.21404114] * 3 + [0.4],
+        atol=1 / 255,
+    )
+    loaded = trimesh.load_scene(io.BytesIO(handle.glb_data), file_type="glb")
+    geometry = next(iter(loaded.geometry.values()))
+    np.testing.assert_array_equal(
+        np.asarray(geometry.visual.material.baseColorTexture), texture
+    )
+    np.testing.assert_allclose(geometry.visual.uv, marker.uv_coords)
+    moved = replace(marker, position=np.array([1, 2, 3]))
+    backend.publish_frame(_empty_frame_with_mesh(moved, 2))
+    assert server.scene.dynamic_mesh_handles[-1] is handle
+    np.testing.assert_array_equal(handle.position, [1, 2, 3])
+    faded = replace(moved, color=(0.5, 0.5, 0.5, 0.1))
+    backend.publish_frame(_empty_frame_with_mesh(faded, 3))
+    assert handle.removed
+    replacement = server.scene.dynamic_mesh_handles[-1]
+    np.testing.assert_array_equal(replacement.position, [1, 2, 3])
+    backend.publish_frame(_empty_frame_with_mesh(replace(faded, unlit=False), 4))
+    assert replacement.removed
+    lit = server.scene.dynamic_mesh_handles[-1]
+    json_size = struct.unpack_from("<I", lit.glb_data, 12)[0]
+    lit_tree = json.loads(lit.glb_data[20 : 20 + json_size])
+    assert "KHR_materials_unlit" not in lit_tree.get("extensionsUsed", [])
+    assert "KHR_materials_unlit" not in lit_tree["materials"][0].get("extensions", {})
+    backend.publish_frame(_empty_frame_with_mesh(None, 5))
+    assert lit.removed
+    backend.stop()
+
+
+def test_viser_backend_mesh_marker_respects_environment_and_category_visibility() -> (
+    None
+):
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    geometry = MeshGeometry(
+        "env-geometry",
+        np.empty((0, 3), dtype=np.float32),
+        np.empty((0, 3), dtype=np.uint32),
+    )
+    node = SceneNode(
+        node_id="env:0/rigid:empty",
+        path="/envs/0/rigid_objects/empty",
+        parent_id="env:0",
+        env_id=0,
+        kind="rigid_object",
+        geometry_id=geometry.geometry_id,
+    )
+    frame = replace(
+        _empty_frame_with_mesh(_mesh_marker(), 1),
+        node_ids=(node.node_id,),
+        positions=np.zeros((1, 3), dtype=np.float32),
+        wxyz=np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
+        visible=np.ones((1,), dtype=np.bool_),
+    )
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (node,), (geometry,)))
+    assert backend.publish_frame(frame)
+    handle = server.scene.dynamic_mesh_handles[-1]
+    assert handle.visible
+
+    server.gui.checkboxes["Environment 0"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=False))
+    )
+    backend.poll()
+    assert not handle.visible
+    server.gui.checkboxes["Markers"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=False))
+    )
+    backend.poll()
+    server.gui.checkboxes["Environment 0"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=True))
+    )
+    backend.poll()
+    assert not handle.visible
     backend.stop()
 
 
@@ -1301,3 +1492,95 @@ def test_viser_backend_disambiguates_compact_joint_labels() -> None:
         "arm-0": "arm [0] (°)",
         "arm-1": "arm [1] (°)",
     }
+
+
+def test_marker_only_environment_gets_controls_and_keeps_hidden_state():
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    frame = _empty_frame_with_mesh(_mesh_marker(env_id=7), 1)
+    assert backend.publish_frame(frame)
+    handle = server.scene.dynamic_mesh_handles[-1]
+    assert "Environment 7" in server.gui.checkboxes
+    checkbox = server.gui.checkboxes["Environment 7"]
+    checkbox.callback(SimpleNamespace(target=SimpleNamespace(value=False)))
+    backend.poll()
+    assert not handle.visible
+    assert backend.publish_frame(replace(frame, sequence=2))
+    assert server.gui.checkboxes["Environment 7"] is checkbox
+    assert not handle.visible
+    backend.stop()
+
+
+def test_marker_environment_stays_hidden_after_last_scene_node_is_removed():
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    geometry = MeshGeometry(
+        "env-geometry",
+        np.empty((0, 3), dtype=np.float32),
+        np.empty((0, 3), dtype=np.uint32),
+    )
+    node = SceneNode(
+        node_id="env:0/rigid:empty",
+        path="/envs/0/rigid_objects/empty",
+        parent_id="env:0",
+        env_id=0,
+        kind="rigid_object",
+        geometry_id=geometry.geometry_id,
+    )
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (node,), (geometry,)))
+    frame = replace(
+        _empty_frame_with_mesh(_mesh_marker(), 1),
+        node_ids=(node.node_id,),
+        positions=np.zeros((1, 3), dtype=np.float32),
+        wxyz=np.array([[1, 0, 0, 0]], dtype=np.float32),
+        visible=np.ones(1, dtype=bool),
+    )
+    assert backend.publish_frame(frame)
+    handle = server.scene.dynamic_mesh_handles[-1]
+    server.gui.checkboxes["Environment 0"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=False))
+    )
+    backend.poll()
+    backend.publish_manifest(SceneManifest("run", 2, (), ()))
+    assert "Environment 0" in server.gui.checkboxes
+    assert backend.publish_frame(
+        replace(_empty_frame_with_mesh(_mesh_marker(), 2), scene_revision=2)
+    )
+    assert not handle.visible
+    assert server.gui.checkboxes["Environment 0"].value is False
+    backend.stop()
+
+
+def test_marker_only_many_environments_use_selection_and_world_markers_stay_visible():
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    count = backend._INDIVIDUAL_ENV_CONTROL_LIMIT + 1
+    markers = tuple(
+        replace(_mesh_marker(env_id=i), overlay_id=f"marker-{i}") for i in range(count)
+    )
+    world_marker = replace(_mesh_marker(env_id=None), overlay_id="world-marker")
+    frame = replace(
+        _empty_frame_with_mesh(None, 1),
+        overlays=SceneOverlays(meshes=(*markers, world_marker)),
+    )
+    assert backend.publish_frame(frame)
+    server.gui.checkboxes["Show all environments"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=False))
+    )
+    server.gui.dropdowns["Selected environment"].callback(
+        SimpleNamespace(target=SimpleNamespace(value="3"))
+    )
+    backend.poll()
+    handles = server.scene.dynamic_mesh_handles[-count - 1 :]
+    assert [h.visible for h in handles] == [i == 3 for i in range(count)] + [True]
+    assert backend.publish_frame(replace(frame, sequence=2))
+    assert [h.visible for h in handles] == [i == 3 for i in range(count)] + [True]
+    assert backend.publish_frame(_empty_frame_with_mesh(world_marker, 3))
+    assert not backend._env_visibility
+    assert server.scene.dynamic_mesh_handles[-1].visible
+    backend.stop()
