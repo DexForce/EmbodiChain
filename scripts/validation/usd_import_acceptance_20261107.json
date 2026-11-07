@@ -1,0 +1,1691 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-07",
+  "runtime": {
+    "dexsim": "0.6.0+c3e92584a3dc31479ad07cb1a3551965077109e6",
+    "python": "3.11",
+    "gpu": "NVIDIA GeForce RTX 5090"
+  },
+  "scope": "USD import, facade binding, finite simulation state, stepping and reset; selected native offscreen views. This is not SimReady profile certification or a material-fidelity comparison.",
+  "excluded": [
+    "3DGS assets and composites containing 3DGS",
+    "Derived inputs and three six-type composites without available original packages, deferred at user request"
+  ],
+  "primary_summary": {
+    "input_cases": 54,
+    "unique_entry_sha256": 54,
+    "passed": 43,
+    "compatibility_failures": 11,
+    "existing_entry_points": 10,
+    "existing_entry_points_passed": 10
+  },
+  "primary_cases": [
+    {
+      "id": "catalog-004_sugar_box_xmh-931cdab0",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-004_sugar_box_xmh-931cdab0",
+      "entry_sha256": "3d02b5b599a348f9b1928898c1620e0b852f8f5c2f3970ada6b54143bedfb6c9",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-006_mustard_bottle-19c63ac2",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-006_mustard_bottle-19c63ac2",
+      "entry_sha256": "26b7b4e781e3b5d9b6da86d0c27459fd05ee27960f15350214e3c5bbfeb55841",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "VisualObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-S18-17-55f1445e",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-S18-17-55f1445e",
+      "entry_sha256": "4f6d30329e32d9db657daf6bb4b6a928ef3c7680d3556a35f455cbe04b2293c3",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-bowl-7cc39faa",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-bowl-7cc39faa",
+      "entry_sha256": "2497510111f01b8b9c78842314e8ef72b0bb99571b564715b676e7c2d4022507",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-cartpole-01890707",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-cartpole-01890707",
+      "entry_sha256": "b7020b3fb990ec4967ec7241aeb98965becc63586056d8f2492d6e83923a604f",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-cartpole-cf0ebdc7",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-cartpole-cf0ebdc7",
+      "entry_sha256": "5340c9aad17d919f9e0f6d029081b215ed330a8835563fc2efbb906087775be2",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-cartpole-abebab1b",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-cartpole-abebab1b",
+      "entry_sha256": "3a2def48a5f72a052a4dce405f40cdf2212fcfd25add1b861809810241418832",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-crx3ia-4a934f88",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-crx3ia-4a934f88",
+      "entry_sha256": "5e1c0ac4d9587c443d0a8e9a9c73abfcde93fa50e67f79369e89205c756af159",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-hammer-85866117",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-hammer-85866117",
+      "entry_sha256": "16009997ab028c37b59c163a33b3e6801de401c3c8b7a5f75d0baf6be536d464",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-mug-b3477d58",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-mug-b3477d58",
+      "entry_sha256": "4377cb915f96fff1b6973556973dc4d9d5a557859f3d4e8c44700d52cc4dc54d",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-pallet-e9b04578",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-pallet-e9b04578",
+      "entry_sha256": "a8634b983da91f7b830258fc415485bcb276e4b1c910181dcaa5bdf4beca5313",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-volume_deformable_multi-f30a52fe",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-volume_deformable_multi-f30a52fe",
+      "entry_sha256": "7a2945afc7dead50e39f2f080fdf4927ee45b4a2c75055c9f4fddcf0e9f30406",
+      "status": "failed",
+      "backend": "newton",
+      "replicas": 1,
+      "descriptor_counts": {
+        "SoftBodyDesc": 2
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 2
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "failed"
+      },
+      "error": "NotImplementedError: USD deformable /World/DeformableBody_0: Newton cannot preserve PhysX settings ['dynamic_friction', 'elasticity_damping']; choose the default backend or explicitly replace those settings on the parsed descriptor.",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "catalog-volume_deformable_simple-52ec3881",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: catalog-volume_deformable_simple-52ec3881",
+      "entry_sha256": "7af4f5bdbe52381a780f48987d41d8c4f2c7b89c1e618ac192bea4d5221348dc",
+      "status": "failed",
+      "backend": "newton",
+      "replicas": 1,
+      "descriptor_counts": {
+        "SoftBodyDesc": 1
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "failed"
+      },
+      "error": "NotImplementedError: USD deformable /World/DeformableBody: Newton cannot preserve PhysX settings ['dynamic_friction', 'elasticity_damping']; choose the default backend or explicitly replace those settings on the parsed descriptor.",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-usd_soft_body_duck_v1",
+      "category": "soft",
+      "source_reference": "Schema v1 document asset: doc-usd_soft_body_duck_v1",
+      "entry_sha256": "d69c3e0b4ce3cab467086e69af4848edfb48ebf74f401ebf05f5c5f3b8dbc938",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "SoftBodyDesc": 1
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-usd_soft_body_isaac_duck_v1",
+      "category": "soft",
+      "source_reference": "Schema v1 document asset: doc-usd_soft_body_isaac_duck_v1",
+      "entry_sha256": "39c2ae2e858405e0ba4e687212ff595e6d46820a0779afe7d40be55db3aef8d2",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "SoftBodyDesc": 1
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-usd_soft_body_cow_v1",
+      "category": "soft",
+      "source_reference": "Schema v1 document asset: doc-usd_soft_body_cow_v1",
+      "entry_sha256": "e5c462b0bbf098edd96a0f6f0fd34b54296bfaa50011dad3d54971857b7e3a9d",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "SoftBodyDesc": 1
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-usd_cloth_curtain_v1",
+      "category": "cloth",
+      "source_reference": "Schema v1 document asset: doc-usd_cloth_curtain_v1",
+      "entry_sha256": "042f0379334fc162aa1bc1a1f6352c98a4cd32bf35911c44c91e6016e35dd12f",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "ClothDesc": 1
+      },
+      "facade_counts": {
+        "SurfaceDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-usd_cloth_shirt_v1",
+      "category": "cloth",
+      "source_reference": "Schema v1 document asset: doc-usd_cloth_shirt_v1",
+      "entry_sha256": "2cb245f382d3d256d11b1a068adae082025f736ff5022387cd2e3f794b7889ad",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "ClothDesc": 1
+      },
+      "facade_counts": {
+        "SurfaceDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-pipette_usd",
+      "category": "articulation",
+      "source_reference": "Schema v1 document asset: doc-pipette_usd",
+      "entry_sha256": "9486b8d29aefb6b635a9f654811488dc6c1361c1a845ec69f7bd696bc9107d29",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-GLB_Reference_Box",
+      "category": "rigid",
+      "source_reference": "Schema v1 document asset: doc-GLB_Reference_Box",
+      "entry_sha256": "c8b1070aaa25ce390fca197ca682b0a40795df5ba732c8c3b2c8fdc7d2822ab3",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-clean_lab",
+      "category": "scene_mesh",
+      "source_reference": "Schema v1 document asset: doc-clean_lab",
+      "entry_sha256": "906bf9c093941e3bca2b6db4dbcc5fa3e1eb3bcae8d3eb6231ea7848e299b207",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 2
+      },
+      "facade_counts": {
+        "VisualObject": 1,
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "render": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": true
+    },
+    {
+      "id": "doc-demo_studio",
+      "category": "scene_mesh",
+      "source_reference": "Schema v1 document asset: doc-demo_studio",
+      "entry_sha256": "6471aeaf3d64c8aaba2430162e0d209a9d576590b697c4a8f354b78a5857c547",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 2
+      },
+      "facade_counts": {
+        "VisualObject": 1,
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-industrial_workshop",
+      "category": "scene_mesh",
+      "source_reference": "Schema v1 document asset: doc-industrial_workshop",
+      "entry_sha256": "87dab3b3260c1ad28677f8d4c11877591477a217eb8a8f1ed68d128e59d937bd",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 2
+      },
+      "facade_counts": {
+        "VisualObject": 1,
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-wood_lab",
+      "category": "scene_mesh",
+      "source_reference": "Schema v1 document asset: doc-wood_lab",
+      "entry_sha256": "e14446ab360089170ba75ad6046d30008532444f18ee153547801502ac527fe7",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 2
+      },
+      "facade_counts": {
+        "VisualObject": 1,
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-robot_workbench_usd",
+      "category": "scene_mesh",
+      "source_reference": "Schema v1 document asset: doc-robot_workbench_usd",
+      "entry_sha256": "31be69f5e42e4e735131ec32b8fa743b9ff72be2df19f64a5dbfd41278408c25",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 24,
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 24,
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "render": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": true
+    },
+    {
+      "id": "doc-hf-food_beverage_beerBottle_a01",
+      "category": "single",
+      "source_reference": "https://huggingface.co/datasets/nvidia/simready-assets/resolve/653d91e182011f357cf1644013cc94ddf194d349/food_beverage_beerBottle_a01/simready_usd/sm_food_beverage_beerBottle_a01_01.usd",
+      "entry_sha256": "430e7a24b91c32b3c268013289fd49676e591d97d959c725a4438b9697f4dffd",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "render": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": true
+    },
+    {
+      "id": "doc-hf-food_produce_banana_a01",
+      "category": "single",
+      "source_reference": "https://huggingface.co/datasets/nvidia/simready-assets/resolve/653d91e182011f357cf1644013cc94ddf194d349/food_produce_banana_a01/simready_usd/sm_food_produce_banana_a01_01.usd",
+      "entry_sha256": "5f6e7f4f0c3841a62b442002d4b56009849e5faa69e3ec910dec89e7b9a82cad",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "render": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": true
+    },
+    {
+      "id": "doc-hf-cleaning_sponge_c01",
+      "category": "single",
+      "source_reference": "https://huggingface.co/datasets/nvidia/simready-assets/resolve/653d91e182011f357cf1644013cc94ddf194d349/cleaning_sponge_c01/simready_usd/sm_cleaning_sponge_c01_01.usd",
+      "entry_sha256": "df5595bc0a88790f2a351d6cf28e0f125a6cd5a24ab29a03b347b337855f6590",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "render": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": true
+    },
+    {
+      "id": "doc-hf-Robotiq_2F_140",
+      "category": "articulation",
+      "source_reference": "https://huggingface.co/datasets/Robotiq-Official/simready-assets/resolve/c7fa7615a353ebac03990208cbc2aa57426f4c48/Robotiq_2F_140/simready_usd/Robotiq_2F_140.usda",
+      "entry_sha256": "202d17a0ea8c842cbdcbe6cda2d3dced765f2bb7f963f589bc2da80af33519d6",
+      "status": "failed",
+      "descriptor_counts": {},
+      "facade_counts": {},
+      "stages": {
+        "parse": "failed"
+      },
+      "error": "ValueError: Articulation /Robotiq_2F_140/Robotiq_2F_140 has duplicate joint name 'FixedJoint' at /Robotiq_2F_140/Robotiq_2F_140/left_outer_finger/FixedJoint and /Robotiq_2F_140/Robotiq_2F_140/right_outer_finger/FixedJoint.",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-hf-g2_omnipicker",
+      "category": "articulation",
+      "source_reference": "https://huggingface.co/datasets/agibot-assets/simready-assets/resolve/b0628c2800bb1d64559489d6b2b8643b0d502fcc/g2_omnipicker/simready_usd/g2_omnipicker.usda",
+      "entry_sha256": "fe2da149412ca73dc740b5ca13c495c3c3b9e43e9d7e26b41dba8155e1b90480",
+      "status": "failed",
+      "descriptor_counts": {},
+      "facade_counts": {},
+      "stages": {
+        "parse": "failed"
+      },
+      "error": "ValueError: Mimic joint /g2_omnipicker/Physics/idx41_gripper_l_outer_joint1 has invalid axis 'angular'.",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-hf-g2_swiftpicker",
+      "category": "articulation",
+      "source_reference": "https://huggingface.co/datasets/agibot-assets/simready-assets/resolve/b0628c2800bb1d64559489d6b2b8643b0d502fcc/g2_swiftpicker/simready_usd/g2_swiftpicker.usda",
+      "entry_sha256": "4d3a9ef0554b19ede941e6c2e0b760c1644f86b9d1d5932e04caec8fb04d694f",
+      "status": "failed",
+      "descriptor_counts": {},
+      "facade_counts": {},
+      "stages": {
+        "parse": "failed"
+      },
+      "error": "ValueError: Mimic joint /g2_swiftpicker/Physics/idx32_gripper_l_outer_joint1 has invalid axis 'angular'.",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "doc-hf-franka_hand",
+      "category": "articulation",
+      "source_reference": "https://huggingface.co/datasets/frankarobotics/simready-assets/resolve/89b84c2e10b49f2ed5b056e08164ece2cfe0fb94/franka_hand/simready_usd/franka_hand.usda",
+      "entry_sha256": "d7654a0ef9a8c1dede4007b216ce8d48f531ca9cb593e43a0e753e3f1d3e779f",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-UnitreeH1_2Locomotion-usda",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: UnitreeH1_2Locomotion",
+      "entry_sha256": "b0b1c29be546bc30e6a67f4733b4244735daa351ccac689767d5a0d359c25491",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-UnitreeGo2Locomotion-usda",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: UnitreeGo2Locomotion",
+      "entry_sha256": "a2e8e15cd1d7a79a38e4b3897f3736fc95d3c2d91ca5fec7895404cc5052f4a5",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-RubiksCube-usdc",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: RubiksCube",
+      "entry_sha256": "94ed00151c9401ae1fbd1337a13e36e49c3cd2a3fa996e693355d657be34f6ee",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-UnitreeH1Usd-usda",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: UnitreeH1Usd",
+      "entry_sha256": "094e30cb012f63fe20d97613eab3825c77a49001fa2fe6158d9d63f2cd50227c",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-UnitreeH1Usd-usd",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: UnitreeH1Usd",
+      "entry_sha256": "65e7f372b0a60d1d794b37765970ca622796d3891fa9933364120b7573bdd935",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-DrawerUSD-usdc",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: DrawerUSD",
+      "entry_sha256": "695d4bee9b2f4cb47d81fc1d3f1122069b99dc450d23854ad645564d98c4ddae",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-SugarBox-usda",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: SugarBox",
+      "entry_sha256": "31d0acd23494d7f64d5c4f09250e0baed8155a34484a1f5c84520d5c9cc1a0a8",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-ANYmalCLocomotion-usda",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: ANYmalCLocomotion",
+      "entry_sha256": "afd0b2de8a3c57c04efeb39977e54ac89d2f4e3674215222f591c0ed4cf7403b",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-UnitreeG1Locomotion-usda",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: UnitreeG1Locomotion",
+      "entry_sha256": "f25703374def6a56310c8b26691fae55f9a9dddb4bc513bee3eb4c2ecdeeea8b",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "existing-UnitreeGo1Locomotion-usda",
+      "category": "embodichain-existing",
+      "source_reference": "EmbodiChain data registry: UnitreeGo1Locomotion",
+      "entry_sha256": "e02ea2e678e442c5b77b182b35cc421c5c2439778eb2f8aa37852ed34be65936",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-teddy_bear",
+      "category": "soft",
+      "source_reference": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.1/Isaac/IsaacLab/Objects/Teddy_Bear/teddy_bear.usd",
+      "entry_sha256": "f3bcbce2b70a4d43f42152bf68f6cb5883c70ee2310f2aec54cf380c728f2d2a",
+      "status": "failed",
+      "descriptor_counts": {},
+      "facade_counts": {},
+      "stages": {
+        "parse": "failed"
+      },
+      "error": "ValueError: /Bear/geometry/bear: duplicate tetrahedron",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-tube",
+      "category": "soft",
+      "source_reference": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.1/Isaac/Props/DeformableTube/tube.usd",
+      "entry_sha256": "c834b872fb7af0ee465dbf9c527432ea71ab2a0702a13af00680500480b859d5",
+      "status": "failed",
+      "descriptor_counts": {},
+      "facade_counts": {},
+      "stages": {
+        "parse": "failed"
+      },
+      "error": "ValueError: /Tube/mesh: non-manifold tetrahedral face",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-cloth",
+      "category": "cloth",
+      "source_reference": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/Healthcare/0.7.0/724f82e/Props/Lightwheel/Assets/DeformableCloth/cloth.usd",
+      "entry_sha256": "8801537d35de5008675efcfc7c3a17b7578b1c1edd69cc1ff7fa0715ad54d490",
+      "status": "failed",
+      "descriptor_counts": {},
+      "facade_counts": {},
+      "stages": {
+        "parse": "failed"
+      },
+      "error": "NotImplementedError: USD prim /Tablecloth/Cloth_fold07/Visuals/Cloth_fold06 uses unsupported schemas ['PhysxSurfaceDeformableBodyAPI']; deformable import is deferred.",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-surface_deformable_material",
+      "category": "cloth",
+      "source_reference": "https://raw.githubusercontent.com/NVIDIA-Omniverse/PhysX/b97365c6ddb32fda8469bc788ec18024862b0368/ovphysx/tests/data/surface_deformable_material.usda",
+      "entry_sha256": "1ee42ec83d95e97b7c27e9dbe143847767f25c77664ec7ae7e1b0156f90c25ae",
+      "status": "failed",
+      "backend": "newton",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ClothDesc": 1
+      },
+      "facade_counts": {
+        "SurfaceDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "failed"
+      },
+      "error": "NotImplementedError: USD deformable /World/DeformableBody: Newton cannot preserve PhysX settings ['dynamic_friction', 'elasticity_damping', 'bending_damping']; choose the default backend or explicitly replace those settings on the parsed descriptor.",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-deformables_mixed",
+      "category": "cloth",
+      "source_reference": "https://raw.githubusercontent.com/newton-physics/newton/1c0e1383f07835781ddff660ae86938f12c90b3f/newton/tests/assets/deformables_mixed.usda",
+      "entry_sha256": "dbef29649fd10713081d7541ede760772936d603e56f277f14819c3feaf3c1b8",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ClothDesc": 1,
+        "SoftBodyDesc": 2,
+        "CableDesc": 2
+      },
+      "facade_counts": {
+        "SurfaceDeformableObject": 1,
+        "VolumeDeformableObject": 2
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-deformables_envs_128",
+      "category": "soft",
+      "source_reference": "https://raw.githubusercontent.com/NVIDIA-Omniverse/PhysX/b97365c6ddb32fda8469bc788ec18024862b0368/ovphysx/tests/benchmarks/data/deformables_envs_128.usda",
+      "entry_sha256": "93af98e1f6f99856574cc7e0d5fc3fa123c9f627651d062830fdb62abeaba295",
+      "status": "failed",
+      "backend": "newton",
+      "replicas": 1,
+      "descriptor_counts": {
+        "SoftBodyDesc": 128,
+        "ClothDesc": 128
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 128,
+        "SurfaceDeformableObject": 128
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "failed"
+      },
+      "error": "NotImplementedError: USD deformable /World/envs/env_0/Volume: Newton cannot preserve PhysX settings ['dynamic_friction', 'elasticity_damping']; choose the default backend or explicitly replace those settings on the parsed descriptor.",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-default_environment",
+      "category": "scene_mesh",
+      "source_reference": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.2/Isaac/Environments/Grid/default_environment.usd",
+      "entry_sha256": "086584c39cb37fe460f20e6e1de64f3dcdd4115b28acbf60250bc8665d0d4147",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 2
+      },
+      "facade_counts": {
+        "RigidObject": 1,
+        "VisualObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "render": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": true
+    },
+    {
+      "id": "official-jetracer_track_solid",
+      "category": "scene_mesh",
+      "source_reference": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.2/Isaac/Environments/Jetracer/jetracer_track_solid.usd",
+      "entry_sha256": "f2e85c9a0e3e505c048ceb9ef4bc23142b8cfb4077f29813b7bb0c35f936904c",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 4
+      },
+      "facade_counts": {
+        "VisualObject": 4
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "render": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": true
+    },
+    {
+      "id": "official-Female_T_Shirt",
+      "category": "cloth",
+      "source_reference": "https://raw.githubusercontent.com/newton-physics/newton-assets/0deda9b1a68d1c202a6115a78ce0ff61ac861e00/style3d/garments/Female_T_Shirt.usd",
+      "entry_sha256": "301d2e85049be96b2e84a55a094a6da9d4a7c2ef31ad6fc0372bbf9d0673b82e",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "VisualObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-Women_Skirt",
+      "category": "cloth",
+      "source_reference": "https://raw.githubusercontent.com/newton-physics/newton-assets/0deda9b1a68d1c202a6115a78ce0ff61ac861e00/style3d/garments/Women_Skirt.usd",
+      "entry_sha256": "c3ba8dcf96e3f75f7d8f89a2227ce0a267f30f33e096749e078a1e5f371adeec",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "VisualObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-Women_Sweatshirt",
+      "category": "cloth",
+      "source_reference": "https://raw.githubusercontent.com/newton-physics/newton-assets/0deda9b1a68d1c202a6115a78ce0ff61ac861e00/style3d/garments/Women_Sweatshirt.usd",
+      "entry_sha256": "c0fbcbf8f5db0b58ce50830a41d76df9f04796c4edb545e18174f40b2ad32174",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 1,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "VisualObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "official-model",
+      "category": "single",
+      "source_reference": "https://raw.githubusercontent.com/newton-physics/newton-assets/0deda9b1a68d1c202a6115a78ce0ff61ac861e00/manipulation_objects/rubber_duck/model.usda",
+      "entry_sha256": "13a6c07c43926833e574bb695fac51c7f5727c5a1214cfb041e79bccffbff4c0",
+      "status": "failed",
+      "descriptor_counts": {},
+      "facade_counts": {},
+      "stages": {
+        "parse": "failed"
+      },
+      "error": "TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'",
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    }
+  ],
+  "typed_entry_points": [
+    {
+      "id": "typed-articulation",
+      "category": "document-catalog",
+      "source_reference": "Schema v1 document asset: typed-articulation",
+      "entry_sha256": "b7020b3fb990ec4967ec7241aeb98965becc63586056d8f2492d6e83923a604f",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 2,
+      "descriptor_counts": {
+        "ArticulationDesc": 1
+      },
+      "facade_counts": {
+        "Articulation": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "typed-volume",
+      "category": "soft",
+      "source_reference": "Schema v1 document asset: typed-volume",
+      "entry_sha256": "e5c462b0bbf098edd96a0f6f0fd34b54296bfaa50011dad3d54971857b7e3a9d",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "SoftBodyDesc": 1
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "typed-surface",
+      "category": "cloth",
+      "source_reference": "Schema v1 document asset: typed-surface",
+      "entry_sha256": "042f0379334fc162aa1bc1a1f6352c98a4cd32bf35911c44c91e6016e35dd12f",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "ClothDesc": 1
+      },
+      "facade_counts": {
+        "SurfaceDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "typed-rigid",
+      "category": "rigid",
+      "source_reference": "Schema v1 document asset: typed-rigid",
+      "entry_sha256": "c8b1070aaa25ce390fca197ca682b0a40795df5ba732c8c3b2c8fdc7d2822ab3",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 2,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "RigidObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false
+    },
+    {
+      "id": "typed-visual",
+      "category": "rigid",
+      "source_reference": "Schema v1 document asset: typed-visual",
+      "entry_sha256": "c8b1070aaa25ce390fca197ca682b0a40795df5ba732c8c3b2c8fdc7d2822ab3",
+      "status": "passed",
+      "backend": "default",
+      "replicas": 2,
+      "descriptor_counts": {
+        "MeshObjectDesc": 1
+      },
+      "facade_counts": {
+        "VisualObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "render": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": true
+    }
+  ],
+  "nonempty_particle_state_verification": [
+    {
+      "id": "doc-usd_soft_body_duck_v1",
+      "category": "soft",
+      "source_reference": "Schema v1 document asset: doc-usd_soft_body_duck_v1",
+      "entry_sha256": "d69c3e0b4ce3cab467086e69af4848edfb48ebf74f401ebf05f5c5f3b8dbc938",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "SoftBodyDesc": 1
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false,
+      "state_shapes": {
+        "Duck": [
+          2,
+          2734,
+          3
+        ]
+      }
+    },
+    {
+      "id": "doc-usd_soft_body_isaac_duck_v1",
+      "category": "soft",
+      "source_reference": "Schema v1 document asset: doc-usd_soft_body_isaac_duck_v1",
+      "entry_sha256": "39c2ae2e858405e0ba4e687212ff595e6d46820a0779afe7d40be55db3aef8d2",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "SoftBodyDesc": 1
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false,
+      "state_shapes": {
+        "Duck": [
+          2,
+          2734,
+          3
+        ]
+      }
+    },
+    {
+      "id": "doc-usd_soft_body_cow_v1",
+      "category": "soft",
+      "source_reference": "Schema v1 document asset: doc-usd_soft_body_cow_v1",
+      "entry_sha256": "e5c462b0bbf098edd96a0f6f0fd34b54296bfaa50011dad3d54971857b7e3a9d",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "SoftBodyDesc": 1
+      },
+      "facade_counts": {
+        "VolumeDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false,
+      "state_shapes": {
+        "Cow": [
+          2,
+          917,
+          3
+        ]
+      }
+    },
+    {
+      "id": "doc-usd_cloth_curtain_v1",
+      "category": "cloth",
+      "source_reference": "Schema v1 document asset: doc-usd_cloth_curtain_v1",
+      "entry_sha256": "042f0379334fc162aa1bc1a1f6352c98a4cd32bf35911c44c91e6016e35dd12f",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "ClothDesc": 1
+      },
+      "facade_counts": {
+        "SurfaceDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false,
+      "state_shapes": {
+        "Cloth": [
+          2,
+          2500,
+          3
+        ]
+      }
+    },
+    {
+      "id": "doc-usd_cloth_shirt_v1",
+      "category": "cloth",
+      "source_reference": "Schema v1 document asset: doc-usd_cloth_shirt_v1",
+      "entry_sha256": "2cb245f382d3d256d11b1a068adae082025f736ff5022387cd2e3f794b7889ad",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 2,
+      "descriptor_counts": {
+        "ClothDesc": 1
+      },
+      "facade_counts": {
+        "SurfaceDeformableObject": 1
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false,
+      "state_shapes": {
+        "Cloth": [
+          2,
+          6436,
+          3
+        ]
+      }
+    },
+    {
+      "id": "official-deformables_mixed",
+      "category": "cloth",
+      "source_reference": "https://raw.githubusercontent.com/newton-physics/newton/1c0e1383f07835781ddff660ae86938f12c90b3f/newton/tests/assets/deformables_mixed.usda",
+      "entry_sha256": "dbef29649fd10713081d7541ede760772936d603e56f277f14819c3feaf3c1b8",
+      "status": "passed",
+      "backend": "newton",
+      "replicas": 1,
+      "descriptor_counts": {
+        "ClothDesc": 1,
+        "SoftBodyDesc": 2,
+        "CableDesc": 2
+      },
+      "facade_counts": {
+        "SurfaceDeformableObject": 1,
+        "VolumeDeformableObject": 2
+      },
+      "stages": {
+        "parse": "passed",
+        "initialize": "passed",
+        "declare": "passed",
+        "prepare": "passed",
+        "step": "passed",
+        "reset": "passed"
+      },
+      "source_entry_unchanged": true,
+      "offscreen_image": false,
+      "state_shapes": {
+        "Cloth": [
+          1,
+          4,
+          3
+        ],
+        "SoftA": [
+          1,
+          4,
+          3
+        ],
+        "SoftB": [
+          1,
+          4,
+          3
+        ]
+      }
+    }
+  ],
+  "checks": {
+    "focused_behavioral_tests": {
+      "passed": 343
+    },
+    "gen_sim_usd_tests": {
+      "passed": 11
+    },
+    "agent_context_tests": {
+      "passed": 42
+    },
+    "api_checker_tests": {
+      "passed": 11
+    },
+    "broad_configuration_tests": {
+      "passed": 179,
+      "failed": 1,
+      "remaining_failure": "test_backend_property_groups_track_dexsim_spawn_descriptors: main schema does not expose all DexSim 0.6 collision fields; tracked by the shared 0.6 migration."
+    },
+    "api_documentation": {
+      "documented": 4335,
+      "exports": 4335
+    },
+    "sphinx_dummy": {
+      "status": "passed",
+      "project_warnings": 852
+    },
+    "formatting": "black==26.10.1",
+    "scalar_particle_flags": {
+      "passed": 2
+    }
+  },
+  "source_notes": [
+    "Original garment inputs without authored cloth physics remain visual assets; they are not counted as physical cloth acceptance.",
+    "The compatibility failures retain the current parser/backend errors without modifying source assets."
+  ],
+  "implementation_reference_commit": "a80e8861b5136b56e95bb7361af1622207b1cab9",
+  "validation_provenance": "Primary results were collected from the implementation worktree. The nonempty-particle rerun records commit and module hashes in the full evidence bundle."
+}

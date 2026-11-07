@@ -235,7 +235,7 @@ def test_particle_import_registers_existing_facade_and_preserves_authored_physic
         UsdImportCfg(
             name="test",
             source=UsdSourceCfg(file_path="scene.usda"),
-            asset_cfgs={"/World/Soft": {"uid": "renamed"}},
+            asset_cfgs={"/World/Soft": {"uid": "renamed", "particle_flags": 0}},
         )
     )
 
@@ -244,6 +244,8 @@ def test_particle_import_registers_existing_facade_and_preserves_authored_physic
     assert manager._deformable_objects["renamed"] is asset
     assert asset.cfg.source.source_prim_path == "/World/Soft"
     assert descriptor.physics.density == 321.0
+    assert descriptor.particle_flags == 0
+    assert isinstance(descriptor.particle_flags, int)
     np.testing.assert_array_equal(descriptor.positions, points)
 
 

@@ -48,6 +48,7 @@ from embodichain.lab.sim.spawn.descriptors import (
     _compile_visual_material,
     _articulation_root_values,
     _pose_from_cfg,
+    _particle_flags_from_cfg,
     _required_uid,
     _resolve_rigid_physics,
     _validate_articulation_rigid_physics,
@@ -146,7 +147,7 @@ def _configure_deformable_usd(cfg: DeformableObjectCfg, descriptor) -> None:
             raise ValueError("particle_radius must be finite and positive.")
         descriptor.particle_radius = cfg.particle_radius
     if cfg.particle_flags is not None:
-        descriptor.particle_flags = np.asarray(cfg.particle_flags, dtype=np.int32)
+        descriptor.particle_flags = _particle_flags_from_cfg(cfg.particle_flags)
 
 
 def _overlay_optional_properties(
