@@ -906,6 +906,10 @@ SDK's internal optimizer or graph configuration.
 .. autoclass:: MeasuredRigidInvocationBinding
    :members:
 
+``collision_backend`` explicitly selects ``"newton"`` or ``"fcl"`` for this
+occurrence's closing geometry. The default Newton choice preserves existing
+registration fingerprints; an explicit FCL choice participates in identity.
+
 .. autoclass:: SimulationMeasuredRigidProvider
    :members:
 
@@ -919,6 +923,11 @@ SDK's internal optimizer or graph configuration.
 
 .. autoclass:: PickClosingBinding
    :members:
+
+The keyword-only ``collision_backend`` also fixes the backend for dependent
+opening and rigid-rest screens. Closed configuration decoding rejects unknown
+choices, and unavailable backends never trigger a fallback. Omitted or explicit
+``"newton"`` retains the default fingerprint.
 
 .. autoclass:: SimulationPickClosingProvider
    :members:

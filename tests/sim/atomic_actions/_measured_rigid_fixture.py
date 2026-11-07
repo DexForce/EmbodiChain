@@ -88,6 +88,7 @@ class MeasuredSession:
             0.0,
             scope=NativeQueryScope("measured-" + str(len(self.queries)), 0.0, 0),
             revision=4,
+            collision_backend="fcl",
             target_contact_offset=0.002,
         )
         if self.mode == "closure_rejected" and self.queries:
