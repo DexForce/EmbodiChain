@@ -43,6 +43,7 @@ from embodichain.lab.task_program.integrations import SimulationTaskProgramRegis
 from embodichain.lab.task_program.integrations.simulation.bindings import (
     SimulationSceneBinding,
     SimulationRigidObjectBinding,
+    SimulationArticulationBinding,
 )
 from embodichain.lab.task_program.integrations.simulation.observations import (
     SimulationStateObservationCollector,
@@ -59,17 +60,31 @@ from test_simulation_environment import (
 )
 
 
-def _collector(*, history=True, invalid=False):
+def _collector(*, history=True, invalid=False, timestamp=True, articulated=False):
     robot, cube = _Robot(), _RigidObject()
     cube.uid = "cube_native"
     sim = _Simulation(robot, {cube.uid: cube})
     sim.simulation_time = 0.04
+    sim.articulations = {}
+    sim.get_articulation = sim.articulations.get
+    if articulated:
+        sim.articulations["drawer_native"] = SimpleNamespace(
+            uid="drawer_native",
+            joint_names=("slide",),
+            get_qpos=lambda: torch.tensor([[0.1], [0.2], [0.3]]),
+        )
     binding = SimulationSceneBinding(
         registry_id="scene",
         rigid_objects=(
             SimulationRigidObjectBinding(entity_id="object", simulation_uid=cube.uid),
         ),
     )
+    if articulated:
+        binding = SimulationSceneBinding(
+            registry_id="scene",
+            rigid_objects=binding.rigid_objects,
+            articulations=(SimulationArticulationBinding("drawer", "drawer_native"),),
+        )
     registration = SimulationTaskProgramRegistration(binding, _profile_binding())
     compiled = TaskProgramCompiler(binding.declare()).compile(
         decode_task_program(
@@ -148,7 +163,7 @@ def _collector(*, history=True, invalid=False):
                 {"pose": ObservationSample(descriptor, values, mask, errors)},
                 context.episode_ids,
                 slot,
-                timestamp=slot * 0.04,
+                timestamp=slot * 0.04 if timestamp or slot == 1 else None,
                 clock_domain="simulation_time",
                 episode_owner=context,
             )
@@ -209,3 +224,57 @@ def test_recorded_state_requires_explicit_canonical_history():
     collector, _, _, _ = _collector(history=False)
     with pytest.raises(RuntimeError, match="Observation history"):
         collector.capture_recorded_rigid_pose("object", [1, 1, 1])
+
+
+@pytest.mark.parametrize("kind", ["current_rigid", "current_joint", "recorded_rigid"])
+def test_state_capture_rejects_native_owner_replaced_during_read(monkeypatch, kind):
+    joint = kind == "current_joint"
+    collector, env, bridge, cube = _collector(articulated=joint)
+    bridge.clock.advance_after_env_step()
+    table = env.sim.articulations if joint else env.sim.rigid_objects
+    native = table["drawer_native"] if joint else cube
+
+    def replace_owner():
+        table[native.uid] = SimpleNamespace(uid=native.uid)
+
+    if kind == "recorded_rigid":
+        read = collector._observations.read_history
+
+        def read_history(*args, **kwargs):
+            snapshot = read(*args, **kwargs)
+            replace_owner()
+            return snapshot
+
+        monkeypatch.setattr(collector._observations, "read_history", read_history)
+        capture = lambda: collector.capture_recorded_rigid_pose("object", [1, 1, 1])
+    else:
+        read = native.get_qpos if joint else native.get_local_pose
+
+        def read_current(**kwargs):
+            values = read(**kwargs)
+            replace_owner()
+            return values
+
+        monkeypatch.setattr(
+            native, "get_qpos" if joint else "get_local_pose", read_current
+        )
+        capture = (
+            (lambda: collector.capture_current_joint_position("drawer", "slide"))
+            if joint
+            else (lambda: collector.capture_current_rigid_pose("object"))
+        )
+
+    with pytest.raises(ValueError, match="native object owner"):
+        capture()
+
+
+def test_recorded_state_without_source_timestamp_stays_unavailable_per_row():
+    collector, _, bridge, _ = _collector(timestamp=False)
+    bridge.clock.advance_after_env_step()
+    packet = collector.capture_recorded_rigid_pose("object", [1, 0, 1])
+    assert packet["recorded_acquisition"]["timestamps"] == [0.04, None, 0.04]
+    assert packet["state_acquisition"]["valid"] == [True, False, True]
+    assert packet["state_acquisition"]["values"][1] is None
+    assert packet["state_acquisition"]["acquisition_errors"][0] is None
+    assert "timestamp" in packet["state_acquisition"]["acquisition_errors"][1]
+    assert packet["state_acquisition"]["acquisition_errors"][2] is None

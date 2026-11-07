@@ -63,10 +63,16 @@ REFERENCE = json.loads(
 
 @pytest.mark.parametrize("case", REFERENCE["cases"])
 def test_quaternion_target_matches_independent_complete_b0_reference(case):
-    assert (
+    actual = np.asarray(
         upright_source_quaternion(case["euler"], case["axis"], world_yaw=case["yaw"])
-        == case["quaternion"]
     )
+    expected = np.asarray(case["quaternion"])
+    # q and -q encode the same pose; backend rounding can choose either near ties.
+    if actual @ expected < 0:
+        expected = -expected
+    tolerance = 4 * np.finfo(np.float32).eps
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=tolerance)
+    assert np.linalg.norm(actual) == pytest.approx(1, rel=0, abs=tolerance)
 
 
 @pytest.mark.parametrize(
