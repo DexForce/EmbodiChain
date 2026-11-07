@@ -18,11 +18,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
 import math
 
 import pytest
 
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
+from embodichain.lab.gym.utils.control_timing import resolve_control_timing
 from embodichain.lab.sim import SimulationManagerCfg
 
 pytestmark = pytest.mark.no_sim
@@ -72,39 +75,76 @@ def test_exact_target_frequency_resolves_integer_sim_steps() -> None:
     assert env.control_frequency == pytest.approx(20.0)
 
 
-def test_unrepresentable_target_frequency_is_rejected() -> None:
+@pytest.mark.parametrize(
+    "physics_dt,decimation,frequency,expected_steps,expected_dt",
+    [(0.006, 7, None, 7, 0.042), (0.01, 2, 20.0, 5, 0.05)],
+)
+def test_declaration_timing_uses_the_same_exact_control_grid(
+    physics_dt: float,
+    decimation: int,
+    frequency: float | None,
+    expected_steps: int,
+    expected_dt: float,
+) -> None:
+    """The public resolver exposes the unresampled grid without an environment."""
+    timing = resolve_control_timing(
+        physics_dt, decimation, target_control_frequency=frequency
+    )
+    assert timing.physics_dt == physics_dt
+    assert timing.sim_steps_per_control == expected_steps
+    assert timing.step_dt == expected_dt
+
+
+@pytest.fixture(params=("environment", "declaration"))
+def timing_resolver(request: pytest.FixtureRequest) -> Callable[..., object]:
+    """Reuse the established validation contract at both public entry points."""
+    if request.param == "environment":
+        return _configure_timing
+    return partial(resolve_control_timing, sim_steps_per_control=4)
+
+
+def test_unrepresentable_target_frequency_is_rejected(
+    timing_resolver: Callable[..., object],
+) -> None:
     """A requested rate cannot silently change physics dt or be approximated."""
     with pytest.raises(ValueError, match="cannot be represented exactly"):
-        _configure_timing(
+        timing_resolver(
             physics_dt=0.01,
             target_control_frequency=30.0,
         )
 
 
-@pytest.mark.parametrize("physics_dt", [0.0, -0.01, math.inf, math.nan])
-def test_invalid_physics_dt_is_rejected(physics_dt: float) -> None:
+@pytest.mark.parametrize("physics_dt", [0.0, -0.01, math.inf, math.nan, True])
+def test_invalid_physics_dt_is_rejected(
+    physics_dt: float,
+    timing_resolver: Callable[..., object],
+) -> None:
     """Physics timing must be finite and positive."""
     with pytest.raises(ValueError, match="physics_dt must be"):
-        _configure_timing(physics_dt=physics_dt)
+        timing_resolver(physics_dt=physics_dt)
 
 
 @pytest.mark.parametrize("sim_steps_per_control", [0, -1, 1.5, True])
 def test_invalid_sim_steps_per_control_is_rejected(
     sim_steps_per_control: int | float,
+    timing_resolver: Callable[..., object],
 ) -> None:
     """Simulation decimation must be a positive integer."""
     with pytest.raises(ValueError, match="sim_steps_per_control must be"):
-        _configure_timing(
+        timing_resolver(
             physics_dt=0.01,
             sim_steps_per_control=sim_steps_per_control,
         )
 
 
 @pytest.mark.parametrize("target_frequency", [0.0, -10.0, math.inf, math.nan, True])
-def test_invalid_target_frequency_is_rejected(target_frequency: float) -> None:
+def test_invalid_target_frequency_is_rejected(
+    target_frequency: float,
+    timing_resolver: Callable[..., object],
+) -> None:
     """Requested control timing must be finite and positive."""
     with pytest.raises(ValueError, match="target_control_frequency must be"):
-        _configure_timing(
+        timing_resolver(
             physics_dt=0.01,
             target_control_frequency=target_frequency,
         )
