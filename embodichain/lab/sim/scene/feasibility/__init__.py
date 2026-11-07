@@ -38,6 +38,7 @@ from .contracts import (
 from .budget import FeasibilityBudget, FeasibilityBudgetExhausted
 from .collision import (
     CollisionBody,
+    NativeContactResult,
     NewtonCollisionChecker,
     UnsupportedFeasibilityError,
 )
@@ -81,6 +82,7 @@ __all__ = [
     "FeasibilityBudget",
     "FeasibilityBudgetExhausted",
     "CollisionBody",
+    "NativeContactResult",
     "NewtonCollisionChecker",
     "UnsupportedFeasibilityError",
     "TaskPlanningBackend",

@@ -232,6 +232,7 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
+  - embodichain/lab/sim/motion/mesh_collision.py
   - embodichain/lab/sim/motion/ik.py
   - embodichain/lab/sim/motion/_cartesian.py
   - embodichain/lab/sim/motion/limits.py
@@ -258,6 +259,7 @@ topics:
   - embodichain/toolkits/graspkit/pg_grasp/
   watch_paths: [extensions/embodichain_benchmarks/motion_generation/, tests/benchmark/motion_generation/, tests/test_benchmark_package.py, embodichain/lab/sim/motion/motion_generator.py, embodichain/lab/sim/motion/execution.py,
     embodichain/compute/kinematics/_path_derivatives.py,
+    embodichain/lab/sim/motion/mesh_collision.py, tests/sim/motion/test_mesh_collision.py,
     tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
     embodichain/lab/sim/motion/ik.py, embodichain/lab/sim/motion/limits.py, embodichain/lab/sim/motion/search.py,

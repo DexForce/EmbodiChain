@@ -62,6 +62,14 @@ capped intervals under the query precision policy. A threshold inside an interva
 remains unavailable, never a fabricated contact or free path. CPU comparisons
 remain separate from GPU and physical-task qualification.
 
+`motion.mesh_collision` owns B1 Default complete native-part motion queries.
+It consumes public cooked descriptors and full named-joint FK, retains measured
+mimic states, and composes the world root once. `robot_collision_query_scope`
+owns robot-only query lifetimes; full-scene queries capture fresh rigid inputs.
+Unsupported MESH, disabled/incomplete geometry and uncertain contact results
+remain unavailable. Callers own sample selection and execution; the query never
+steps simulation or certifies continuous collision freedom or a physical effect.
+
 ## Timing and batch boundary
 
 Planning is environment-batched: waypoint qpos is `(B, dof)`, TCP transforms

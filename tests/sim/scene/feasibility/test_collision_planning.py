@@ -24,6 +24,7 @@ import pytest
 from embodichain.lab.sim.scene.feasibility import (
     CollisionBody,
     NewtonCollisionChecker,
+    NativeContactResult,
     FeasibilityBudget,
     SceneRobotFeasibilityCfg,
     TaskPhase,
@@ -32,6 +33,40 @@ from embodichain.lab.sim.scene.feasibility import (
     plan_task_mode,
     UnsupportedFeasibilityError,
 )
+
+
+@pytest.mark.parametrize(
+    ("offset", "touching"), [(0.125, True), (0.25, True), (0.5, False)]
+)
+def test_native_contact_predicate_uses_original_zero_without_feasibility_tolerance(
+    offset, touching
+):
+    """Exactly represented boxes distinguish penetration, touch and separation."""
+    pytest.importorskip("newton")
+    checker = NewtonCollisionChecker(
+        (
+            CollisionBody("a", "a", "box", (0.25, 0.25, 0.25), robot=True),
+            CollisionBody("b", "b", "box", (0.25, 0.25, 0.25)),
+        ),
+        use_cuda_graph=False,
+    )
+    poses = {"a": np.eye(4), "b": np.eye(4)}
+    poses["b"][0, 3] = offset
+    try:
+        result = checker.contact_query(poses)
+        assert result.below(0.0) is touching
+        assert checker.contact_pairs(poses) == ((("a", "b"),) if touching else ())
+        assert result.metadata()["physical_acquisition"] is False
+    finally:
+        checker.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        checker.contact_query(poses)
+
+
+def test_native_contact_conversion_uncertainty_is_not_relaxed_to_a_contact_margin():
+    result = NativeContactResult(0.0, 1e-6, 0.0, 1e-7, 0.03, 1, ("a", "b"))
+    with pytest.raises(UnsupportedFeasibilityError, match="cannot decide"):
+        result.below(0.0)
 
 
 def test_newton_self_interarm_payload_and_phase_contacts():

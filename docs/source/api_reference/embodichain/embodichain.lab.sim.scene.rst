@@ -29,6 +29,13 @@ through one ``world_to_frame`` transform. Its owned providers reuse
 ``CollisionShapeDesc`` and can be passed to ``CuroboWorldCfg.rigid_objects``.
 The link-box reader preserves separate connected components and applies scale once.
 
+``convex_input_clearance`` explicitly declares convex solids over numeric input
+vertices. It retains the selected discrete frame order and original clearance
+inputs; a canonical conversion bound may cull a frame only strictly above that
+threshold. Bound-only and native-query receipts remain distinct. This envelope
+query is not a cooked-MESH clearance, continuous-collision or physical-contact
+certificate, and must not replace an unavailable native shape query.
+
 .. currentmodule:: embodichain.lab.sim.scene
 
 .. autosummary::
@@ -40,6 +47,7 @@ The link-box reader preserves separate connected components and applies scale on
    CollisionObjectSnapshot
    read_articulation_link_boxes
    snapshot_collision_sources
+   convex_input_clearance
 
 .. autoclass:: SceneMeshComponent
    :members:
@@ -57,6 +65,14 @@ The link-box reader preserves separate connected components and applies scale on
 .. autofunction:: read_articulation_link_boxes
 
 .. autofunction:: snapshot_collision_sources
+
+.. autofunction:: convex_input_clearance
+
+.. currentmodule:: embodichain.lab.sim.scene.convex_clearance
+
+.. autosummary::
+
+   convex_input_clearance
 
 Robot-aware workspace proposals
 ------------------------------

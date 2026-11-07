@@ -35,11 +35,60 @@ validation, and dataset persistence belong to explicit host integrations.
    :nosignatures:
 
    motion_generator
+   mesh_collision
    execution
    solvers
    planners
    workspace
    expansion
+
+Discrete native motion queries
+------------------------------
+
+The B=1 Default query borrows the exact simulation-owned Robot and captures all
+ordered native collision parts. It preserves cooked box/convex shape semantics,
+local poses and scale. Full named-joint FK consumes measured mimic states; the
+observed robot root is composed once. URDF data supplies topology and explicit
+neighbour/mount exclusions, rather than replacement geometry or projected joint
+states. Actual triangle meshes, incomplete/disabled shapes and uncertain native
+predicates are unavailable.
+
+``SimulationFreeMotionQuery.inspect`` captures a fresh rigid world and checks
+every supplied full-robot sample. The scoped robot-only query validates its
+captured observation, solver and model identity and closes owned Newton resources
+on scope exit, including cancellation. Neither query steps physics, checks a
+continuous swept volume, or certifies acquisition or task success. Controlled
+providers leave backend and geometry-source fields unset; only an actual native
+provider supplies those identities.
+
+.. currentmodule:: embodichain.lab.sim.motion.mesh_collision
+
+.. autosummary::
+
+   MotionCollisionReport
+   FreeMotionQuery
+   SimulationFreeMotionQuery
+   RobotMeshCollisionSnapshot
+   robot_collision_query_scope
+   inspect_robot_collision
+
+.. autoclass:: MotionCollisionReport
+   :members:
+
+.. autoclass:: FreeMotionQuery
+   :members:
+
+.. autoclass:: SimulationFreeMotionQuery
+   :members:
+
+.. autoclass:: RobotMeshCollisionSnapshot
+   :members:
+
+.. autofunction:: robot_collision_query_scope
+
+.. autofunction:: inspect_robot_collision
+
+.. currentmodule:: embodichain.lab.sim.motion
 
 .. toctree::
    :maxdepth: 1
