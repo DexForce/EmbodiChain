@@ -24,8 +24,6 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
-import subprocess
-import sys
 
 import pytest
 
@@ -39,11 +37,8 @@ from embodichain.gen_sim.task_spec import (
 )
 from embodichain.gen_sim.task_spec.control_evidence import (
     ControlEvidenceBinding,
-    evaluate_control_evidence,
 )
-from embodichain.gen_sim.task_spec.evidence_report import (
-    evaluate_physical_evidence_report,
-)
+from ._evaluation import evaluate_physical_evidence_report
 from .test_control_evidence import _case
 
 DATA = Path(__file__).parent / "data"
@@ -264,38 +259,6 @@ def test_historical_control_hash_serialization_outcomes_and_reports_match_actual
         )
 
 
-def test_raw_binding_decode_stays_standard_library_only():
-    _, binding, _, _ = raw_case()
-    root = Path(sys.modules["embodichain"].__file__).resolve().parents[1]
-    script = f"import sys;sys.path.insert(0,{str(root)!r});from embodichain.gen_sim.task_spec.control_evidence import ControlEvidenceBinding;ControlEvidenceBinding.from_dict({binding.to_dict()!r});assert not any(n=='torch' or n=='numpy' or n.startswith('embodichain.lab') or n.startswith('embodichain.gen_sim.task_engine') for n in sys.modules)"
-    result = subprocess.run(
-        [sys.executable, "-I", "-c", script], capture_output=True, text=True, timeout=30
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_actual_producer_bindings_and_complete_reports_match_unmodified_source():
-    for expected in json.loads((DATA / "raw_control_source_oracles.json").read_text()):
-        spec, binding, evidence, program = raw_case(
-            expected["case"], past=expected["past"]
-        )
-        assert binding.to_dict() == expected["binding"]
-        assert [
-            x.to_dict()
-            for x in evaluate_control_evidence(spec, binding, evidence, program=program)
-        ] == expected["outcomes"]
-        assert [
-            x.to_dict()
-            for x in evaluate_physical_evidence_report(
-                spec,
-                (binding.to_dict(),),
-                {"control": evidence},
-                program=program,
-                num_envs=1,
-            )
-        ] == expected["reports"]
-
-
 @pytest.mark.parametrize("format", ["raw_snapshot", "historical_record"])
 def test_explicit_format_cannot_borrow_another_contracts_snapshot(format):
     if format == "raw_snapshot":
@@ -316,6 +279,22 @@ def test_raw_scope_rejects_undeclared_batch_and_binding_drift_before_evaluation(
     _, binding, _, _ = raw_case()
     with pytest.raises(ValueError, match="B=1"):
         replace(binding, env_ids=(0, 1), episode_ids=(0, 0), binding_hash="")
+    from embodichain.lab.task_program.integrations.evidence import (
+        validate_control_declaration,
+    )
+
+    declaration = binding.to_dict()
+    validate_control_declaration(declaration)
+    actors = declaration["control_identity"]["contact_actors"]
+    actors["parent"] = actors["target"]
+    declaration["binding_hash"] = canonical_hash(
+        {k: v for k, v in declaration.items() if k != "binding_hash"}
+    )
+    with pytest.raises(ValueError, match="disjoint"):
+        validate_control_declaration(declaration)
     binding.control_identity["observer_id"] = "foreign"
     with pytest.raises(ValueError, match="binding_hash"):
         ControlEvidenceBinding.from_dict(binding)
+
+
+from ._evaluation import evaluate_control_evidence

@@ -1898,5 +1898,10 @@ def project_control_evidence_binding(
         control_identity=control_identity,
         policy_occurrences=tuple(policy_occurrences),
     )
+    from embodichain.lab.task_program.integrations.evidence import (
+        validate_control_declaration,
+    )
+
+    validate_control_declaration(result.to_dict())
     evaluate_control_evidence(normalized, result, {}, program=program)
     return result

@@ -284,7 +284,9 @@ def _normalize(
         PlacementEvidenceGroupBinding,
     )
     from embodichain.gen_sim.task_spec.pour_evidence import PourEvidenceBinding
+    from embodichain.gen_sim.task_spec.control_evidence import ControlEvidenceBinding
     from embodichain.lab.task_program.integrations.evidence import (
+        normalize_control_evidence,
         normalize_placement_evidence,
         normalize_pour_release_evidence,
     )
@@ -319,6 +321,10 @@ def _normalize(
         return binding, data
     if isinstance(binding, PourEvidenceBinding):
         return binding, normalize_pour_release_evidence(
+            binding.to_dict(), packet, program=program
+        )
+    if isinstance(binding, ControlEvidenceBinding):
+        return binding, normalize_control_evidence(
             binding.to_dict(), packet, program=program
         )
     return binding, json_snapshot(packet)

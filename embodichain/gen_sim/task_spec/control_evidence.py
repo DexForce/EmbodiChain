@@ -34,10 +34,10 @@ __all__ = ["ControlEvidenceBinding", "evaluate_control_evidence"]
 class ControlEvidenceBinding:
     """Seal an exact control route and occurrence independently of live factories.
 
-    The original operation-window receipt is a different contract from a final
-    joint position. Historical replay must be selected explicitly. Raw control
-    binds original native contact/state/geometry channels to exact completed
-    policies. Adding a legacy record cannot silently select another verifier.
+    The original operation-window declaration differs from final joint state.
+    It retains its v1/v2 serialized identity for Lab's explicit historical/raw
+    normalization. Actor rosters and completed policy phases are interpreted by
+    that adapter; normative evaluation consumes only source-bound physical facts.
     """
 
     task_spec_digest: str
@@ -164,9 +164,12 @@ class ControlEvidenceBinding:
                 "policy_occurrences",
                 tuple(json_snapshot(item) for item in self.policy_occurrences),
             )
-            from ._raw_control_evidence import validate_control_acquisition
-
-            validate_control_acquisition(self)
+            # Runtime actor, contact-window and policy-phase validation belongs
+            # to Lab. TaskSpec seals the independent acquisition declaration.
+            if self.env_ids != (0,) or self.episode_ids is None:
+                raise ValueError(
+                    "Raw control declarations require an explicit B=1 episode."
+                )
 
         expected = canonical_hash(self._payload())
         if self.binding_hash and self.binding_hash != expected:
@@ -243,23 +246,23 @@ def evaluate_control_evidence(
     *,
     program: Mapping[str, Any],
 ) -> tuple[PredicateEvaluation, ...]:
-    """Qualify original control operation receipts without inferring activation.
+    """Compare normalized control facts without interpreting execution protocols.
 
     Args:
         spec: Frozen normative TaskSpec.
         binding: Explicit raw/historical format and exact source route/occurrence.
-        evidence: Original record or complete raw policy/window acquisition with runtime segments.
+        evidence: Source-bound normalized physical evidence from Lab.
         program: Complete serialized program matching the binding digest.
 
     Returns:
-        Per-environment predicate outcomes. The original control qualification
-        requires all active rows to complete; absent or rejected operation proof
-        remains unavailable. A Press contact event is not device activation, and
-        a coarse Twist is not silently promoted to calibrated-setting success.
+        Per-environment outcomes. Missing acquisition remains unavailable;
+        a valid negative fact fails the declared predicate. Lab retains the
+        original all-active operation-proof requirement. Press contact does not
+        establish device activation or upgrade a coarse Twist to strict setting.
     """
     from .spec import TaskSpec
     from .expressions import EvaluationStatus, PredicateEvaluation
-    from ._control_evidence import qualified_control_record
+    from ._control_evidence import control_value
 
     selected = ControlEvidenceBinding.from_dict(binding)
     normalized = TaskSpec.from_dict(spec)
@@ -293,81 +296,57 @@ def evaluate_control_evidence(
         raise ValueError(
             "Control proof differs from its declared predicate or boundary scope."
         )
-    reason = None
-    refs = ()
-    try:
-        role = next(
-            role
-            for role in normalized.roles
-            if role.name == predicate.arguments["subject"]
-        )
-        if not role.is_single_member:
-            raise ValueError("Complete selector-universe evidence was not provided.")
-        snapshot = json_snapshot(evidence)
-        refs = (selected.binding_hash, canonical_hash(snapshot))
-        if "unavailable" in snapshot:
-            raise ValueError(str(snapshot["unavailable"]))
-        raw = selected.evidence_format == "raw_snapshot"
-        if raw:
-            if "record" in snapshot or "control_acquisition" not in snapshot:
+    outcomes = []
+    for row in range(len(selected.env_ids)):
+        reason = None
+        refs = ()
+        observed = None
+        try:
+            role = next(
+                role
+                for role in normalized.roles
+                if role.name == predicate.arguments["subject"]
+            )
+            if not role.is_single_member:
                 raise ValueError(
-                    "Raw control cannot borrow historical claims or omit acquisition."
+                    "Complete selector-universe evidence was not provided."
                 )
-        elif "record" not in snapshot or any(
-            name in snapshot
-            for name in ("acquisition", "control_acquisition", "physical_evidence")
-        ):
-            raise ValueError(
-                "Historical control replay cannot consume a new raw acquisition overlay."
+            snapshot = json_snapshot(evidence)
+            refs = tuple(snapshot.get("evidence_refs", ()))
+            observed = control_value(selected, snapshot, row)
+        except (
+            KeyError,
+            ValueError,
+            TypeError,
+            AttributeError,
+            IndexError,
+            StopIteration,
+            RuntimeError,
+            OverflowError,
+        ) as error:
+            reason = str(error) or type(error).__name__
+        outcomes.append(
+            PredicateEvaluation(
+                predicate.id,
+                predicate.name,
+                (
+                    EvaluationStatus.UNAVAILABLE
+                    if reason
+                    else (
+                        EvaluationStatus.SATISFIED
+                        if observed
+                        else EvaluationStatus.FAILED
+                    )
+                ),
+                observed=None if reason else observed,
+                expected=True,
+                reason=reason
+                or (
+                    "The declared original operation criterion is supported by its own complete physical receipts."
+                    if observed
+                    else "The normalized physical control effect was not observed."
+                ),
+                evidence_refs=refs,
             )
-        if selected.episode_ids is not None and snapshot.get("episode_ids") != list(
-            selected.episode_ids
-        ):
-            raise ValueError("Control snapshots belong to another declared episode.")
-        if selected.episode_ids is not None and any(
-            type(x) is not int for x in snapshot.get("episode_ids", ())
-        ):
-            raise ValueError(
-                "Control episode IDs must retain integer native identities."
-            )
-        if raw:
-            from ._raw_control_evidence import verify_raw_control
-
-            verify_raw_control(selected, snapshot, program)
-        declaration = {"control_kind": selected.control_kind, **selected.operation}
-        if raw:
-            declaration["policy_entity_id"] = selected.control_identity["entity_id"]
-        expected_record = qualified_control_record(
-            declaration,
-            {"segments": snapshot["segments"]},
-            program,
-            len(selected.env_ids),
         )
-        if not raw and snapshot["record"] != expected_record:
-            raise ValueError(
-                "Historical control claims differ from their exact measured operation receipts."
-            )
-    except (
-        KeyError,
-        ValueError,
-        TypeError,
-        AttributeError,
-        IndexError,
-        StopIteration,
-        RuntimeError,
-        OverflowError,
-    ) as error:
-        reason = str(error) or type(error).__name__
-    return tuple(
-        PredicateEvaluation(
-            predicate.id,
-            predicate.name,
-            EvaluationStatus.UNAVAILABLE if reason else EvaluationStatus.SATISFIED,
-            observed=None if reason else True,
-            expected=True,
-            reason=reason
-            or "The declared original operation criterion is supported by its own complete physical receipts.",
-            evidence_refs=refs,
-        )
-        for _ in selected.env_ids
-    )
+    return tuple(outcomes)

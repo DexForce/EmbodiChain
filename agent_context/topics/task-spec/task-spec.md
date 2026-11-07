@@ -87,6 +87,21 @@ manipulation and the existing normative binding families without importing Lab
 or Task Engine. Raw integration tests and frozen protocol fixtures live with Lab;
 TaskSpec tests exercise task criteria, identity and normalized facts.
 
+HandOver and coordinated holding separate protocol validation from task acceptance.
+Lab's `task_program/integrations/evidence/` owns raw receipt/actor/query/clock
+validation and observation requests. Its offline normalizers emit source-bound
+physical frame/batch JSON without importing TaskSpec or Task Engine.
+`ManipulationEvidenceBinding` seals explicit `HoldAcceptanceCriteria`, predicate,
+program, episode and final/recorded scope. TaskSpec compares attachment drift,
+grips, target position, orientation and observed duration against those criteria;
+it never derives acceptance limits from a runtime monitor's resolved parameters.
+Valid measured negatives fail; missing or contradictory acquisition stays
+unavailable. Historical boundary overrides must match the verified record. Raw held poses
+retain the canonical history row/episode/step identities and original native
+acquisition times; final observations match source time, while recorded reads
+may be collected later without equating native time to episode step count.
+Existing placement/state/control/Pour APIs keep their current contracts.
+
 Current goals cannot borrow recorded milestone success. The legacy instantaneous
 final-support scope requires its exact measured release and actual final runtime
 boundary, but not an unexecuted later wait/park policy. Failed post-policy execution
@@ -127,11 +142,12 @@ source/receiver, episode, program, release and cadence identities. The original
 this does not qualify fluid transfer. Missing acquisition remains unavailable.
 Lab reads recorded values through the canonical ObservationManager schema/raw
 history, never live poses or a second trajectory buffer. Historical control
-receipts remain qualified by the separate `control_evidence.py` owner.
+receipts are normalized by the Lab control-evidence adapter before normative evaluation.
 
-Historical Press/Twist control proof lives in `control_evidence.py`. Bindings
-seal explicit predicate/joint/direction/resource and compiled occurrence identity.
-TaskSpec replays the original acceptance receipt and complete execution prefix;
-program success alone cannot certify a physical control effect. Missing acquisition
-remains unavailable, and an original measured rejection remains rejected. This
-verifier collects no state and changes no physics or acceptance thresholds.
+`control_evidence.py` seals the original v1/v2 source declarations and evaluates
+normalized control-effect observations. It checks source/measurement identities,
+row/episode association and channel validity without interpreting skill phases,
+contact windows or raw receipts. Valid negative facts fail; invalid acquisition
+remains unavailable. Raw and historical sources first pass through Lab's
+`normalize_control_evidence`; the declaration and program identities remain
+unchanged, while normalization has its own measurement identity.

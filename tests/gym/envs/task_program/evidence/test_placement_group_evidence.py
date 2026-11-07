@@ -35,6 +35,8 @@ REFERENCE = json.loads(
         / "gen_sim/task_spec/data/e1_count_inside_source_reference.json"
     ).read_text()
 )
+for _case in REFERENCE["cases"]:
+    _case.setdefault("runtime", deepcopy(REFERENCE["runtime"]))
 
 
 def _binding(*, recorded, raw):

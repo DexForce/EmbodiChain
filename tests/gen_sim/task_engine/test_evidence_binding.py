@@ -138,3 +138,34 @@ def test_public_projection_requires_explicit_criteria_without_a_hold_declaration
     paired = project(acceptance_criteria=acceptance.criteria)
     assert paired.acceptance.criteria == acceptance.criteria
     assert paired.acceptance.source_binding_hash == paired.runtime.binding_hash
+
+
+@pytest.mark.parametrize("kind", ["press", "twist"])
+@pytest.mark.parametrize("past", [False, True])
+def test_control_bridge_uses_lab_normalization(kind, past):
+    from gym.envs.task_program.evidence.test_control_evidence import (
+        _case as control_case,
+    )
+
+    spec, binding, evidence, program = control_case(kind, past=past)
+    before = deepcopy(evidence)
+    report = evaluate_task_engine_evidence(
+        spec,
+        [binding.to_dict()],
+        {binding.predicate_id: evidence},
+        program=program,
+        num_envs=1,
+    )[0].to_dict()
+    predicates = (
+        report["milestones"][0]["observed"]["predicates"] if past else report["goal"]
+    )
+    assert predicates[0]["status"] == "satisfied"
+    assert evidence == before
+    missing = evaluate_task_engine_evidence(
+        spec,
+        [binding.to_dict()],
+        {},
+        program=program,
+        num_envs=1,
+    )[0].to_dict()
+    assert missing["milestones" if past else "goal"][0]["status"] == "unavailable"

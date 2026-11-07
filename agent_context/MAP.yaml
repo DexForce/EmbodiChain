@@ -502,10 +502,12 @@ topics:
     SimulationPlanningServicesCfg, CollisionSceneRosterCfg, SimulationHandOverSceneProvider,
     HeldAlignmentLowererFactory, ClearReleasedLowererFactory, IdleClearanceFactory,
     PickClosingBinding, SimulationMeasuredRigidProvider, SimulationPlaceContinuationProvider,
-    SimulationReleasedHandContinuationProvider, PourProjectionBinding, compile_configured_task_program]
+    SimulationReleasedHandContinuationProvider, PourProjectionBinding, compile_configured_task_program,
+    normalize_control_evidence, validate_control_declaration]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/
+  - embodichain/lab/task_program/integrations/evidence/control_evidence.py
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
