@@ -179,8 +179,8 @@ and an optional boolean `(..., N)` validity mask, retaining independent leading
 batches. Padding is excluded; empty/all-padding batches return invalid evidence.
 
 Scene strategies still run on CPU and use Shapely, Trimesh and SciPy. Their
-Torch-kernel calls do not offload polygon search or SLSQP to CUDA. CUDA kernel
-support does not enable B>1 physics capture, edits or host stepping.
+Torch-kernel calls do not offload polygon search or SLSQP to CUDA. Scene state services support explicit B>1 selections independently of proposal
+kernels. Host stepping and task collection remain separate integration contracts.
 
 `compute.geometry._sampling` additionally supplies counter-addressed rectangular
 AABB rejection batches on CPU/CUDA. It returns numeric XY proposals and validity
@@ -208,17 +208,30 @@ covered by the selected mesh component, excluding openings during preparation.
   level; `preserve_holes` retains its mesh openings. Explicit polygon inputs retain holes and
   disconnected regions. Group translation and height alignment preserve
   relative poses; independent AABB separation uses a separate strategy.
-- `SceneView` wraps existing rigid objects, robots and articulations. The current
-  runtime rejects worlds other than B=1 and selections other than `(0,)` before
-  writes. Poses and physical snapshots still expose an environment dimension.
-  Rigid groups, deformables and explicit rigid constraints are unsupported.
+- `SceneView` wraps existing rigid objects, robots and articulations. Nonempty,
+  unique `env_ids` retain their declared order in reads and physical snapshots.
+  Restore preflights every selected row before writes and leaves other rows
+  untouched. Changes to world capacity invalidate the view. Rigid groups,
+  deformables and explicit rigid constraints remain unsupported.
 - Physical snapshots own numeric poses, velocities, joints, targets and efforts;
   restore checks original ownership, binding, backend and topology. It does not
   restore solver internals, task progress or a full backend checkpoint. Host
   integrations retain control-period and episode identity contracts.
+  `restore_render_state` is a separate physics-disabled publication path for
+  complete measured states, including solver excursions beyond command limits.
+  It temporarily admits those positions and restores the exact original limits;
+  it must never be used as a physical reset. Offline collection ownership is in
+  [Expansion Engine](../expansion-engine/expansion-engine.md).
   Restoration rejects saved joint positions or targets outside current limits
   by default. An explicit `qpos_tolerance` allows bounded measured-position
   clipping followed by caller-owned round-trip validation; targets remain strict.
+- `scene.physics` captures immutable selected-row mass, principal inertia and
+  friction baselines for ready dynamic rigid bodies on Default and Newton.
+  Mass scaling also scales inertia; absolute friction changes and restoration
+  verify actual backend readback. Repeated application derives from the original
+  baseline. All requested values are checked before mutation. Other parameters,
+  including damping, are outside this operation's capability contract. Native
+  or readback failures require the host to stop the batch.
 - Change sets preflight all UIDs and movable permissions, apply rigid poses,
   clear dynamics and publish render state without stepping. Native write errors
   propagate without guaranteed rollback. The host handles reported planner and
@@ -226,7 +239,11 @@ covered by the selected mesh component, excluding openings during preparation.
 - Required checks are `passed`, `failed` or `unverified`; empty or unverified
   reports cannot accept a candidate. Fixed-step settling is unverified stability.
   Opt-in convergence checks consecutive low-velocity measurements. Supplied
-  step callbacks advance the whole world; no per-selection isolation is implied.
+  step callbacks advance the whole world, so settling requires a full-world
+  selection and checks convergence across all rows. A shared `SceneChangeSet`
+  applies its declared poses to every selected row. `apply_changes_batch` takes
+  distinct change sets keyed by environment ID, preflights all rows first, then
+  groups native writes by entity without touching unselected rows.
 - `check_layout` reads actual poses after settling. Supplied measured arena XY
   AABBs update individual proxies and allow checking changed orientations.
   Missing poses, changed support, or changed orientation without a measured
