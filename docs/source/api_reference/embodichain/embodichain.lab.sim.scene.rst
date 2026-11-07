@@ -709,8 +709,15 @@ articulation links and planes in their captured order. Its discrete checks use
 native contact/rest offsets. ``native_motion_scene`` keeps the original ordered
 moving-part/rest-offset checks and full named-joint FK adaptation. Neither query
 establishes continuous collision freedom, measured grasp acquisition or task
-success. FCL is an explicit optional backend; install
-``embodichain[planning-geometry]`` to request these paths.
+success. Queries use the shared Newton collision pipeline over the captured
+triangle topology, without convexifying physical meshes. Unsupported native
+routes, exhausted contact buffers and precision intervals that cannot decide the
+unchanged contact or rest threshold remain unavailable. Native query resources
+are isolated from the live simulator and closed on normal and exceptional exits.
+Reported minimum-distance scalars are conservative lower bounds, accompanied by
+bounded intervals rather than exact mesh distance claims. A float64 AABB alone
+cannot bypass native conversion uncertainty near a threshold; these queries use
+the native pipeline for classification.
 
 .. currentmodule:: embodichain.lab.sim.scene.native_hand_scene
 
@@ -766,7 +773,11 @@ observed poses. It tests selected discrete frames in their supplied order,
 including repeats, and stops at the first rejection. Convex solids also reject
 complete containment. This is a conservative input-envelope query, separate from
 native cooked-shape and physical contact evidence. Margins and numerical
-allowance are explicit; missing FCL or unavailable geometry raises.
+allowance are explicit and remain unchanged. This API explicitly declares the
+convex envelope of each vertex cloud; its hull is the query object rather than a
+substitute for a native physical mesh. Newton supplies bounded clearance and
+native contact information; unsupported geometry or an ambiguous comparison
+raises instead of converting a distance interval into a guessed boolean.
 
 .. currentmodule:: embodichain.lab.sim.scene.convex_clearance
 

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Native motion rest queries preserve FCL order, offsets and observed ownership."""
+"""Native motion rest queries retain frame order, offsets and observed ownership."""
 
 from __future__ import annotations
 from pathlib import Path
@@ -41,7 +41,7 @@ REFERENCE = json.loads(
 
 
 @pytest.mark.parametrize("case", REFERENCE["cases"], ids=lambda c: c["name"])
-def test_native_rest_scene_paths_match_complete_original_fcl_query(case):
+def test_native_rest_scene_preserves_analytic_box_decisions_and_first_pair(case):
     parts = tuple(
         NativeRestCollisionPart(
             row["name"], (trimesh.creation.box(row["extents"]),), row["rest"]
@@ -62,13 +62,41 @@ def test_native_rest_scene_paths_match_complete_original_fcl_query(case):
         scope=NativeQueryScope("rest", 0.0, 0),
         validate_observation=lambda: None,
     ) as query:
+        if case["name"] == "later_frame":
+            # Before the later penetration, this input visits exactly the
+            # pair's5mm rest boundary. Native representation uncertainty must
+            # remain unavailable rather than forcing the historical FCL verdict.
+            from embodichain.lab.sim.scene.feasibility import (
+                UnsupportedFeasibilityError,
+            )
+
+            with pytest.raises(
+                UnsupportedFeasibilityError, match="decide the threshold"
+            ):
+                query.inspect(
+                    parts,
+                    np.asarray(case["poses"]),
+                    case["source_id"],
+                    source_contact_from=case["source_contact_from"],
+                )
+            return
         result = query.inspect(
             parts,
             np.asarray(case["poses"]),
             case["source_id"],
             source_contact_from=case["source_contact_from"],
         )
-    assert result == case["expected"]
+    # Original fixtures specify axis-aligned box geometry. Reuse only their
+    # input paths, not the old backend's scalar distances or query metadata.
+    assert result["valid"] is (case["name"] in {"clear", "contact_deferred"})
+    assert result["collision_backend"] == "newton.CollisionPipeline"
+    if not result["valid"]:
+        assert result["frame"] == (3 if case["name"] == "later_frame" else 0)
+        assert result["link"] == "pad"
+        assert result["obstacle"] == (
+            "target" if case["name"] == "contact_early" else "wall"
+        )
+        assert result["required_clearance_m"] == 0.005
     assert query.closed
 
 
@@ -235,3 +263,73 @@ def test_native_capture_rejects_unsupported_scope_before_native_reads(
                 scope=NativeQueryScope("unsupported", 0.0, 0),
                 validate_observation=lambda: None,
             )
+
+
+def test_native_rest_query_closes_all_owned_groups_when_precision_is_unavailable(
+    monkeypatch,
+):
+    from embodichain.lab.sim.scene.feasibility import UnsupportedFeasibilityError
+
+    class Groups:
+        owned = []
+
+        def __init__(self, *, geometry_kind):
+            assert geometry_kind == "mesh"
+            self.closed = False
+            self.owned.append(self)
+
+        def add_object(self, *args, **kwargs):
+            pass
+
+        def set_transform(self, *args):
+            pass
+
+        def contact_query(self, other, limit):
+            assert limit == 0.0
+            raise UnsupportedFeasibilityError("threshold precision unavailable")
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(module, "_ConvexCollection", Groups)
+    mesh = trimesh.creation.box((0.5, 0.5, 0.5))
+    part = NativeRestCollisionPart("moving", (mesh,), 0.0)
+    obstacle = NativeRestSceneBody(
+        NativeRestCollisionPart("obstacle", (mesh,), 0.0), np.eye(4)
+    )
+    with NativeRestSceneQuery(
+        (obstacle,),
+        scope=NativeQueryScope("precision", 0.0, 0),
+        validate_observation=lambda: None,
+    ) as query:
+        with pytest.raises(UnsupportedFeasibilityError, match="precision"):
+            query.inspect((part,), np.eye(4)[None, None], "not-excluded")
+        assert not Groups.owned[0].closed  # This query still owns its obstacle.
+        assert Groups.owned[1].closed  # The failed call released its moving group.
+    assert all(group.closed for group in Groups.owned)
+
+
+def test_native_rest_mesh_keeps_a_gap_between_disconnected_closed_surfaces():
+    # Convexifying this declared mesh would fill the gap and reject the moving
+    # cube. The actual two triangle components are0.75m away from that cube.
+    left = trimesh.creation.box((0.25, 0.25, 0.25))
+    right = left.copy()
+    left.apply_translation((-1.0, 0.0, 0.0))
+    right.apply_translation((1.0, 0.0, 0.0))
+    split = trimesh.util.concatenate((left, right))
+    assert not split.is_convex
+    part = NativeRestCollisionPart(
+        "moving", (trimesh.creation.box((0.25, 0.25, 0.25)),), 0.01
+    )
+    obstacle = NativeRestSceneBody(
+        NativeRestCollisionPart("split", (split,), 0.01), np.eye(4)
+    )
+    with NativeRestSceneQuery(
+        (obstacle,),
+        scope=NativeQueryScope("mesh-gap", 0.0, 0),
+        validate_observation=lambda: None,
+    ) as query:
+        result = query.inspect((part,), np.eye(4)[None, None], "not-excluded")
+    assert result["valid"] and result["queries"] == 1
+    assert result["geometry_representation"] == "captured_native_triangle_surfaces"
+    assert query.closed

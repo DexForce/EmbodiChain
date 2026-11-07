@@ -32,9 +32,8 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
     _QueryLifetime,
     _neutral_identity,
 )
-from ._collision_backends import _require_fcl
+from ._newton_queries import _ConvexCollection
 from embodichain.compute.geometry.pose_checks import as_rigid_matrix as _pose
-from embodichain.compute.geometry.mesh_bounds import input_mesh_bounds
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -115,19 +114,19 @@ class NativeSceneBody:
         object.__setattr__(self, "pose", pose)
 
 
-def _manager(body: NativeSceneBody) -> trimesh.collision.CollisionManager:
-    manager = trimesh.collision.CollisionManager()
-    for index, mesh in enumerate(body.meshes):
-        manager.add_object(str(index), mesh, transform=body.pose)
+def _manager(body: NativeSceneBody) -> _ConvexCollection:
+    manager = _ConvexCollection(geometry_kind="mesh")
+    try:
+        for index, mesh in enumerate(body.meshes):
+            manager.add_object(str(index), mesh, transform=body.pose)
+    except BaseException:
+        manager.close()
+        raise
     return manager
 
 
-def _bounds(body: NativeSceneBody, pose: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    return input_mesh_bounds(body.meshes, pose)
-
-
 class NativeHandSceneQuery(_QueryLifetime):
-    """Own FCL queries over one explicitly captured B1 hand/scene observation.
+    """Own Newton collision queries over one explicitly captured B1 hand/scene observation.
 
     Args:
         scope: Fresh query identity and common observation clock.
@@ -143,6 +142,11 @@ class NativeHandSceneQuery(_QueryLifetime):
 
     This is discrete geometry qualification, not physical effect evidence. The
     caller supplies planned link poses; this query owns neither IK nor commands.
+    Meshes retain their original triangle topology in Newton. Unsupported native
+    routes or precision spanning the original threshold raise as unavailable; no hull,
+    alternate backend or threshold adjustment is used. Reported mesh distances
+    are conservative lower bounds with interval metadata, not exact distances.
+    Float64 bounds do not bypass native precision classification.
     """
 
     def __init__(
@@ -202,14 +206,17 @@ class NativeHandSceneQuery(_QueryLifetime):
         self.native_revision = native_revision
         self._read_native_revision = read_native_revision
         self.assert_current()
-        _require_fcl()
-        self.hand_managers = tuple(_manager(part) for part in self.parts)
-        self.obstacle_managers = tuple(
-            _manager(part) if part.meshes else None for part in self.obstacles
-        )
-        self.obstacle_bounds = tuple(
-            _bounds(part, part.pose) if part.meshes else None for part in self.obstacles
-        )
+        self.hand_managers = ()
+        self.obstacle_managers = ()
+        try:
+            for part in self.parts:
+                self.hand_managers += (_manager(part),)
+            for part in self.obstacles:
+                self.obstacle_managers += (_manager(part) if part.meshes else None,)
+            self.assert_current()
+        except BaseException:
+            self.close()
+            raise
 
     @property
     def inventory(self) -> list[dict[str, Any]]:
@@ -275,11 +282,18 @@ class NativeHandSceneQuery(_QueryLifetime):
             "valid": True,
             "frames": len(arena_poses),
             "minimum_checked_distance_m": None,
-            "fcl_queries": 0,
+            "native_queries": 0,
+            **_ConvexCollection.metadata(),
+            "geometry_representation": "captured_native_triangle_surfaces",
+            "minimum_checked_distance_interval_m": None,
+            "reported_distance_semantics": "conservative_clearance_lower_bound",
+            "broadphase_scope": "native_pipeline_only_no_float64_shortcut",
             "plane_queries": 0,
             "minimum_plane_signed_distance_m": None,
         }
-        return self._inspect_hand_poses(arena_poses, report)
+        result = self._inspect_hand_poses(arena_poses, report)
+        self.assert_current()
+        return result
 
     def _inspect_hand_poses(
         self, arena_poses: np.ndarray, report: dict[str, Any]
@@ -293,12 +307,8 @@ class NativeHandSceneQuery(_QueryLifetime):
                 manager = self.hand_managers[part_index]
                 for shape in range(len(part.meshes)):
                     manager.set_transform(str(shape), pose)
-                lower, upper = _bounds(part, pose)
-                for obstacle, other, bounds in zip(
-                    self.obstacles,
-                    self.obstacle_managers,
-                    self.obstacle_bounds,
-                    strict=True,
+                for obstacle, other in zip(
+                    self.obstacles, self.obstacle_managers, strict=True
                 ):
                     threshold = part.contact_offset + obstacle.contact_offset
                     for plane in obstacle.planes:
@@ -334,23 +344,31 @@ class NativeHandSceneQuery(_QueryLifetime):
                             }
                     if other is None:
                         continue
-                    gap = np.maximum(
-                        np.maximum(bounds[0] - upper, lower - bounds[1]), 0
-                    )
-                    if np.linalg.norm(gap) > threshold:
-                        continue
-                    intersecting = bool(manager.in_collision_other(other))
-                    distance = (
-                        0.0
-                        if intersecting
-                        else float(manager.min_distance_other(other))
-                    )
-                    if not math.isfinite(distance) or distance < 0:
-                        raise ValueError("handover_native_mesh_distance_unavailable")
-                    report["fcl_queries"] += 1
+                    interval = manager.contact_query(other, threshold)
+                    rejected = interval.below(threshold)
+                    distance = interval.lower
+                    report["native_queries"] += 1
                     minimum = distance if minimum is None else min(minimum, distance)
                     report["minimum_checked_distance_m"] = minimum
-                    if distance <= threshold:
+                    previous_interval = report["minimum_checked_distance_interval_m"]
+                    report["minimum_checked_distance_interval_m"] = [
+                        (
+                            min(interval.lower, previous_interval[0])
+                            if previous_interval
+                            else interval.lower
+                        ),
+                        (
+                            (
+                                None
+                                if not math.isfinite(interval.upper)
+                                else interval.upper
+                            )
+                            if previous_interval is None or previous_interval[1] is None
+                            else min(interval.upper, previous_interval[1])
+                        ),
+                    ]
+                    report["last_native_contact_result"] = interval.metadata()
+                    if rejected:
                         return {
                             **report,
                             "valid": False,
@@ -363,16 +381,19 @@ class NativeHandSceneQuery(_QueryLifetime):
                             "native_pair_contact_offset_m": threshold,
                             "reason": "receiver_hand_non_target_contact_envelope",
                         }
+        self.assert_current()
         return report
 
     def close(self) -> None:
-        """Release query-local FCL managers and geometry references, once."""
+        """Release query-local native managers and geometry references, once."""
         if self.closed:
             return
         self._closed = True
+        for manager in (*self.hand_managers, *self.obstacle_managers):
+            if manager is not None:
+                manager.close()
         self.hand_managers = ()
         self.obstacle_managers = ()
-        self.obstacle_bounds = ()
         self.parts = ()
         self.obstacles = ()
         self._read_native_revision = None
@@ -411,7 +432,7 @@ def capture_native_hand_scene(
     All physical owner identities, observed joints/root and the actual revision
     are explicit inputs. The reader preserves source body/link order, collision
     offsets, retained articulation scales and analytic planes, and verifies named
-    hand FK before constructing FCL resources. It never substitutes later poses.
+    hand FK before constructing native query resources. It never substitutes later poses.
     """
     from ._native_hand_scene_capture import capture
 
