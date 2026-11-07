@@ -28,14 +28,11 @@ __all__ = [
     "AntipodalGraspAffordanceBinding",
     "BoundInvocationPolicies",
     "InvocationPolicyBinding",
-    "PostPolicyPresetBinding",
-    "BoundPostPolicyPresets",
     "task_program_fingerprint",
     "ContainerAffordanceBinding",
     "ControlPartCommandPreset",
     "ControlPartEvidenceProviderDeclaration",
     "ControlPartEvidenceProviderFactory",
-    "DeclaredAssetFileProvider",
     "ControlPartEndpointBinding",
     "ControlPartResourceBinding",
     "ConfiguredHandOverPoseProvider",
@@ -82,14 +79,57 @@ __all__ = [
     "default_simulation_settle_presets",
     "load_configured_task_program_deployment",
     "compile_configured_task_program",
+    "PostPolicyPresetBinding",
+    "BoundPostPolicyPresets",
+    "DeclaredAssetFileProvider",
 ]
 
 _EXPORTS = {
+    "AntipodalGraspAffordanceBinding": (
+        ".simulation",
+        "AntipodalGraspAffordanceBinding",
+    ),
+    "BoundInvocationPolicies": (".invocation_policy", "BoundInvocationPolicies"),
+    "InvocationPolicyBinding": (".invocation_policy", "InvocationPolicyBinding"),
+    "task_program_fingerprint": (".invocation_policy", "task_program_fingerprint"),
+    "ContainerAffordanceBinding": (".simulation", "ContainerAffordanceBinding"),
+    "ControlPartCommandPreset": (".simulation", "ControlPartCommandPreset"),
+    "ControlPartEvidenceProviderDeclaration": (
+        ".extensions",
+        "ControlPartEvidenceProviderDeclaration",
+    ),
+    "ControlPartEvidenceProviderFactory": (
+        ".extensions",
+        "ControlPartEvidenceProviderFactory",
+    ),
+    "ControlPartEndpointBinding": (".simulation", "ControlPartEndpointBinding"),
+    "ControlPartResourceBinding": (".simulation", "ControlPartResourceBinding"),
+    "ConfiguredHandOverPoseProvider": (
+        ".simulation.handover",
+        "ConfiguredHandOverPoseProvider",
+    ),
+    "ConfiguredTaskProgramDeployment": (
+        ".composition",
+        "ConfiguredTaskProgramDeployment",
+    ),
+    "ConfiguredTaskProgramIntegration": (
+        ".composition",
+        "ConfiguredTaskProgramIntegration",
+    ),
+    "CuroboParallelCommandSafetyValidator": (
+        ".simulation.parallel_safety",
+        "CuroboParallelCommandSafetyValidator",
+    ),
+    "CuroboParallelSafetyValidatorFactory": (
+        ".simulation.parallel_safety",
+        "CuroboParallelSafetyValidatorFactory",
+    ),
+    "EndpointAdapterDeclaration": (".extensions", "EndpointAdapterDeclaration"),
     "TaskProgramAdapterFactory": (".environment", "TaskProgramAdapterFactory"),
     "TaskProgramEnvironmentAdapter": (".environment", "TaskProgramEnvironmentAdapter"),
     "TaskProgramEnvironmentFactory": (".environment", "TaskProgramEnvironmentFactory"),
-    "TaskProgramRuntimeAssembly": (".environment", "TaskProgramRuntimeAssembly"),
-    "PlanningObservationPort": (".environment", "PlanningObservationPort"),
+    "TaskProgramIntegrationCatalog": (".catalog", "TaskProgramIntegrationCatalog"),
+    "TaskProgramSourceAdapter": (".expansion", "TaskProgramSourceAdapter"),
     "CombinedTaskProgramExpansionFactory": (
         ".expansion",
         "CombinedTaskProgramExpansionFactory",
@@ -105,75 +145,14 @@ _EXPORTS = {
         ".expansion",
         "TaskProgramSameGridExpansionRecord",
     ),
-    "TaskProgramSourceAdapter": (".expansion", "TaskProgramSourceAdapter"),
-    "AntipodalGraspAffordanceBinding": (
-        ".simulation",
-        "AntipodalGraspAffordanceBinding",
-    ),
-    "ContainerAffordanceBinding": (".simulation", "ContainerAffordanceBinding"),
-    "ControlPartCommandPreset": (".simulation", "ControlPartCommandPreset"),
-    "ControlPartEndpointBinding": (".simulation", "ControlPartEndpointBinding"),
-    "ControlPartResourceBinding": (".simulation", "ControlPartResourceBinding"),
-    "RigidizedArticulationAntipodalGraspBinding": (
-        ".simulation",
-        "RigidizedArticulationAntipodalGraspBinding",
-    ),
-    "SimulationArticulationBinding": (".simulation", "SimulationArticulationBinding"),
-    "SimulationArticulationLinkBinding": (
-        ".simulation",
-        "SimulationArticulationLinkBinding",
-    ),
-    "SimulationRigidizedArticulationObjectBinding": (
-        ".simulation",
-        "SimulationRigidizedArticulationObjectBinding",
-    ),
-    "SimulationRigidObjectBinding": (".simulation", "SimulationRigidObjectBinding"),
-    "SimulationRobotSkillProfileBinding": (
-        ".simulation",
-        "SimulationRobotSkillProfileBinding",
-    ),
-    "SimulationSceneBinding": (".simulation", "SimulationSceneBinding"),
-    "SupportSurfaceAffordanceBinding": (
-        ".simulation",
-        "SupportSurfaceAffordanceBinding",
-    ),
-    "TaskProgramIntegrationCatalog": (".catalog", "TaskProgramIntegrationCatalog"),
+    "TaskProgramRuntimeAssembly": (".environment", "TaskProgramRuntimeAssembly"),
     "IntegrationFingerprintMismatch": (".catalog", "IntegrationFingerprintMismatch"),
-    "SimulationTaskProgramRegistration": (
-        ".catalog",
-        "SimulationTaskProgramRegistration",
-    ),
-    "ConfiguredTaskProgramDeployment": (
-        ".composition",
-        "ConfiguredTaskProgramDeployment",
-    ),
-    "ConfiguredTaskProgramIntegration": (
-        ".composition",
-        "ConfiguredTaskProgramIntegration",
-    ),
-    "load_configured_task_program_deployment": (
-        ".composition",
-        "load_configured_task_program_deployment",
-    ),
-    "compile_configured_task_program": (
-        ".composition",
-        "compile_configured_task_program",
-    ),
-    "ControlPartEvidenceProviderDeclaration": (
-        ".extensions",
-        "ControlPartEvidenceProviderDeclaration",
-    ),
-    "ControlPartEvidenceProviderFactory": (
-        ".extensions",
-        "ControlPartEvidenceProviderFactory",
-    ),
-    "DeclaredAssetFileProvider": (".extensions", "DeclaredAssetFileProvider"),
-    "EndpointAdapterDeclaration": (".extensions", "EndpointAdapterDeclaration"),
     "ParallelCommandSafetyValidatorFactory": (
         ".extensions",
         "ParallelCommandSafetyValidatorFactory",
     ),
     "ParallelSafetyDeclaration": (".extensions", "ParallelSafetyDeclaration"),
+    "PlanningObservationPort": (".environment", "PlanningObservationPort"),
     "RegisteredSemanticLowererDeclaration": (
         ".extensions",
         "RegisteredSemanticLowererDeclaration",
@@ -186,9 +165,20 @@ _EXPORTS = {
         ".extensions",
         "RegisteredSemanticLowererSceneValidator",
     ),
+    "RigidizedArticulationAntipodalGraspBinding": (
+        ".simulation",
+        "RigidizedArticulationAntipodalGraspBinding",
+    ),
     "RuntimeTransportDeclaration": (".extensions", "RuntimeTransportDeclaration"),
-    "StandardExtensionDeclarations": (".extensions", "StandardExtensionDeclarations"),
-    "VersionedKey": (".extensions", "VersionedKey"),
+    "SimulationArticulationBinding": (".simulation", "SimulationArticulationBinding"),
+    "SimulationArticulationLinkBinding": (
+        ".simulation",
+        "SimulationArticulationLinkBinding",
+    ),
+    "SimulationRigidizedArticulationObjectBinding": (
+        ".simulation",
+        "SimulationRigidizedArticulationObjectBinding",
+    ),
     "SimulationTaskProgramAdapterFactory": (
         ".simulation.environment",
         "SimulationTaskProgramAdapterFactory",
@@ -197,35 +187,45 @@ _EXPORTS = {
         ".simulation.environment",
         "SimulationTaskProgramFactory",
     ),
-    "create_simulation_task_program_adapter": (
-        ".simulation.environment",
-        "create_simulation_task_program_adapter",
+    "SimulationTaskProgramRegistration": (
+        ".catalog",
+        "SimulationTaskProgramRegistration",
     ),
-    "ConfiguredHandOverPoseProvider": (
-        ".simulation.handover",
-        "ConfiguredHandOverPoseProvider",
+    "SimulationRigidObjectBinding": (".simulation", "SimulationRigidObjectBinding"),
+    "SimulationRobotSkillProfileBinding": (
+        ".simulation",
+        "SimulationRobotSkillProfileBinding",
     ),
-    "CuroboParallelCommandSafetyValidator": (
-        ".simulation.parallel_safety",
-        "CuroboParallelCommandSafetyValidator",
-    ),
-    "CuroboParallelSafetyValidatorFactory": (
-        ".simulation.parallel_safety",
-        "CuroboParallelSafetyValidatorFactory",
-    ),
+    "SimulationSceneBinding": (".simulation", "SimulationSceneBinding"),
     "SimulationSegmentPolicyPort": (
         ".simulation.policies",
         "SimulationSegmentPolicyPort",
+    ),
+    "StandardExtensionDeclarations": (".extensions", "StandardExtensionDeclarations"),
+    "SupportSurfaceAffordanceBinding": (
+        ".simulation",
+        "SupportSurfaceAffordanceBinding",
+    ),
+    "VersionedKey": (".extensions", "VersionedKey"),
+    "create_simulation_task_program_adapter": (
+        ".simulation.environment",
+        "create_simulation_task_program_adapter",
     ),
     "default_simulation_settle_presets": (
         ".simulation.policies",
         "default_simulation_settle_presets",
     ),
-    "BoundInvocationPolicies": (".invocation_policy", "BoundInvocationPolicies"),
-    "InvocationPolicyBinding": (".invocation_policy", "InvocationPolicyBinding"),
+    "load_configured_task_program_deployment": (
+        ".composition",
+        "load_configured_task_program_deployment",
+    ),
+    "compile_configured_task_program": (
+        ".composition",
+        "compile_configured_task_program",
+    ),
     "PostPolicyPresetBinding": (".invocation_policy", "PostPolicyPresetBinding"),
     "BoundPostPolicyPresets": (".invocation_policy", "BoundPostPolicyPresets"),
-    "task_program_fingerprint": (".invocation_policy", "task_program_fingerprint"),
+    "DeclaredAssetFileProvider": (".extensions", "DeclaredAssetFileProvider"),
 }
 
 

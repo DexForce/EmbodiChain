@@ -300,7 +300,7 @@ def normalize_coordinated_hold_evidence(
             tcp,
             grips,
         )
-        if raw and (
+        if (raw or "boundary_frames" in snapshot) and (
             snapshot.get("boundary_frames")
             != expected["measurements"]["boundary_frames"]
             or any((type(x) is not int for x in snapshot["boundary_frames"]))
