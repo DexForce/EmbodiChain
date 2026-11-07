@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import pytest
+import numpy as np
 import torch
 import trimesh
 from embodichain.lab.sim.scene.convex_clearance import convex_input_clearance
@@ -110,3 +111,64 @@ def test_native_convex_envelope_retains_repeated_selected_frames():
     assert result["valid"] and result["checked_frames"] == 3
     assert result["required_clearance_m"] == 0.002
     assert result["numerical_allowance_m"] == 1e-6
+
+
+@pytest.mark.parametrize("first_bound", [0.0, None, 0.002 + 1e-6])
+def test_bound_only_frame_does_not_retain_an_earlier_native_contact_receipt(
+    monkeypatch,
+    first_bound,
+):
+    from types import SimpleNamespace
+    from embodichain.lab.sim.scene import convex_clearance as module
+
+    class Groups:
+        owned = []
+
+        def __init__(self):
+            self.frame = -1
+            self.closed = False
+            self.owned.append(self)
+
+        @staticmethod
+        def metadata():
+            return {"collision_backend": "newton.CollisionPipeline"}
+
+        def add_object(self, *args, **kwargs):
+            pass
+
+        def set_transform(self, *args):
+            self.frame += 1
+
+        def clearance_lower_bound(self, other):
+            return first_bound if self.frame == 0 else np.float32(1.0)
+
+        def contact_query(self, other, limit):
+            assert limit == 0.002 + 1e-6
+            return SimpleNamespace(
+                lower=0.01,
+                upper=0.02,
+                below=lambda value: False,
+                metadata=lambda: {"native_contact_count": 1},
+            )
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(module, "_ConvexCollection", Groups)
+    points = torch.tensor(trimesh.creation.box((0.25, 0.25, 0.25)).vertices)[None]
+    result = convex_input_clearance(
+        points,
+        torch.eye(4).repeat(1, 2, 1, 1),
+        points,
+        torch.eye(4)[None],
+        torch.tensor([0, 1]),
+        clearance_m=0.002,
+        numerical_allowance_m=1e-6,
+    )
+    assert result["valid"] and result["checked_frames"] == 2
+    assert result["native_queries"] == result["bound_only_frames"] == 1
+    assert result["last_query_kind"] == "canonical_bound"
+    assert result["last_distance_interval_m"] == [1.0, None]
+    assert "native_contact_result" not in result
+    json.dumps(result, allow_nan=False)
+    assert all(group.closed for group in Groups.owned)

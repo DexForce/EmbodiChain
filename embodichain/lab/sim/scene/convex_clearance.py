@@ -50,7 +50,11 @@ def convex_input_clearance(
 
     Returns:
         Clearance receipt with first rejection, a minimum-distance lower bound and actual
-        checked-frame count. Convex solids reject full containment, unlike
+        checked-frame count. A bound-only frame is accepted only when the shared
+        canonical conversion lower bound strictly exceeds the original threshold.
+        Native-query and bound-only frame counts remain distinct; the last-frame
+        receipt never carries a prior frame's native contact result.
+        Convex solids reject full containment, unlike
         triangle-surface distance alone. This is an input-envelope query, not
         a native-cooked, continuous-collision or physical-contact certificate.
         Newton reports a bounded distance interval; a query whose precision
@@ -127,6 +131,8 @@ def convex_input_clearance(
         "minimum_distance_m": None,
         "reported_distance_semantics": "conservative_clearance_lower_bound",
         "checked_frames": 0,
+        "native_queries": 0,
+        "bound_only_frames": 0,
         **_ConvexCollection.metadata(),
         "geometry_representation": "declared_input_convex_envelope",
     }
@@ -138,9 +144,27 @@ def convex_input_clearance(
         obstacle.add_object("obstacle", obstacle_solid, transform=obstacle_pose)
         for frame in frames.tolist():
             moving.set_transform("moving", transform(poses[0, frame]))
+            lower_bound = moving.clearance_lower_bound(obstacle)
+            threshold = clearance_m + numerical_allowance_m
+            if lower_bound is not None and lower_bound > threshold:
+                lower_bound = float(lower_bound)
+                previous = result["minimum_distance_m"]
+                result["minimum_distance_m"] = (
+                    lower_bound if previous is None else min(previous, lower_bound)
+                )
+                result["checked_frames"] += 1
+                result["bound_only_frames"] += 1
+                result["last_query_kind"] = "canonical_bound"
+                result["last_distance_interval_m"] = [lower_bound, None]
+                # The receipt describes this frame, never an earlier native
+                # contact result relabelled as a bound-only frame.
+                result.pop("native_contact_result", None)
+                continue
             interval = moving.contact_query(
                 obstacle, clearance_m + numerical_allowance_m
             )
+            result["native_queries"] += 1
+            result["last_query_kind"] = "native_contact"
             rejected = interval.below(clearance_m + numerical_allowance_m)
             distance = interval.lower
             previous = result["minimum_distance_m"]
