@@ -129,6 +129,15 @@ def _case(index, name="held", *, raw=False):
             step_dt=0.04,
             object_pose=metrics["object_pose"],
             tcp_poses={part: metrics["receiver_tcp_pose"]},
+            recorded_acquisition=dict(
+                field_ids={"pose": "frozen.rigid.pose", "qpos": "frozen.robot.qpos"},
+                env_ids=[0],
+                episode_ids=[7],
+                frame_indices=list(boundary),
+                observation_revisions=[1],
+                timestamps=[12.0],
+                clock_domain="simulation_time",
+            ),
             pose_frame=frame,
         )
         if case["final"]:
@@ -296,3 +305,41 @@ def test_handover_retains_original_single_member_qualification(
         ].status.value
         == expected
     )
+
+
+@pytest.mark.parametrize(
+    "shift,receipt_error,expected",
+    [
+        (0.0, 0.0, "satisfied"),
+        (1.0, 0.0, "unavailable"),
+        (1.0, 1.0, "failed"),
+        (1.0, None, "unavailable"),
+    ],
+)
+def test_world_target_is_checked_when_object_and_receiver_translate_together(
+    shift, receipt_error, expected
+):
+    from dataclasses import replace
+
+    spec, binding, evidence, program = _case(3, raw=True)
+    operation = deepcopy(binding.operation)
+    operation["hold_condition"].update(
+        target_position=[0.0, 0.0, 0.0], local_axis=None, world_axis=None
+    )
+    binding = replace(binding, operation=operation, binding_hash="")
+    held = evidence["held_poses"]
+    for pose in [held["object_pose"], *held["tcp_poses"].values()]:
+        pose[0][0][3] += shift
+    for name, batch in held["pose_frame"]["batches"].items():
+        batch["values"] = (
+            held["object_pose"]
+            if name == "rigid.pose"
+            else held["tcp_poses"][name.split(":", 1)[1]]
+        )
+    measurements = evidence["segments"][0]["metadata"]["post_policies"][0]["result"][
+        "measurements"
+    ]
+    if receipt_error is not None:
+        measurements["position_error"] = [receipt_error]
+    outcome = evaluate_handover_evidence(spec, binding, evidence, program=program)[0]
+    assert outcome.status.value == expected, outcome.reason
