@@ -19,8 +19,8 @@
 from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from uuid import uuid4
 import torch
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
@@ -68,15 +68,8 @@ class MeasuredRigidInvocationBinding:
     invocation_id: str
     object_id: str
     container_id: str | None = None
-    collision_backend: Literal["newton", "fcl"] = field(default="newton", kw_only=True)
-    """Explicit closing backend for this measured rigid planning occurrence."""
 
     def __post_init__(self) -> None:
-        if type(self.collision_backend) is not str or self.collision_backend not in {
-            "newton",
-            "fcl",
-        }:
-            raise ValueError("collision_backend must be 'newton' or 'fcl'.")
         for name in ("invocation_id", "object_id", "container_id"):
             value = getattr(self, name)
             if value is None and name == "container_id":
@@ -93,7 +86,6 @@ class _MeasuredSession:
     def __init__(self, provider, request, context, binding):
         self._provider, self._request, self._context = provider, request, context
         self.subject_id, self.container_id = binding.object_id, binding.container_id
-        self._collision_backend = binding.collision_backend
         self.source_uid = provider._rigids[self.subject_id]
         self._stamp = context.world_source_stamp
         self._qpos = context.robot.qpos.detach().clone()
@@ -184,7 +176,6 @@ class _MeasuredSession:
                 str(uuid4()), context.robot.timestamp, context.scene.version
             ),
             revision=4,
-            collision_backend=self._collision_backend,
         )
         self._queries.append(query)
         self.validate_observation()
