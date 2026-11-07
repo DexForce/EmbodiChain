@@ -656,12 +656,13 @@ def test_curobo_planner_class_is_lazy_import_safe():
         "use_graph",
         "effective_algorithm",
         "expected_lanes",
+        "fit_graph_seed_to_bspline",
     ),
     [
-        (1, "rrt", True, True, "rrt", 8),
-        (2, "prm", False, False, "prm", None),
-        (17, "rrt", False, True, "rrt", 256),
-        (1, "rrt", True, False, "rrt", 8),
+        (1, "rrt", True, True, "rrt", 8, None),
+        (2, "prm", False, False, "prm", None, False),
+        (17, "rrt", False, True, "rrt", 256, True),
+        (1, "rrt", True, False, "rrt", 8, False),
     ],
 )
 def test_backend_forwards_fast_settings_and_disables_self_collision(
@@ -672,6 +673,7 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
     use_graph,
     effective_algorithm,
     expected_lanes,
+    fit_graph_seed_to_bspline,
 ):
     create_kwargs = {}
     cost_manager = SimpleNamespace(disable_self_collision=Mock())
@@ -710,6 +712,11 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
         graph_planner_algorithm=algorithm,
         enable_timeopt=enable_timeopt,
         interpolation_dt=0.01,
+        **(
+            {"fit_graph_seed_to_bspline": fit_graph_seed_to_bspline}
+            if fit_graph_seed_to_bspline is not None
+            else {}
+        ),
     )
     planner._curobo_device = torch.device("cuda:0")
     planner._timeopt_gravity = lambda backend: (0.0, 0.0, 0.0)
@@ -755,6 +762,9 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
     assert create_kwargs["use_cuda_graph"] is use_graph
     assert runtime.cuda_graphs is True
     assert create_kwargs["enable_timeopt"] is enable_timeopt
+    assert create_kwargs["fit_graph_seed_to_bspline"] is (
+        True if fit_graph_seed_to_bspline is None else fit_graph_seed_to_bspline
+    )
     assert create_kwargs["interpolation_dt"] == 0.01
     cost_manager.disable_self_collision.assert_called_once()
     if enable_timeopt:
@@ -2520,3 +2530,9 @@ def test_curobo_assembly_does_not_hide_a_real_start_mismatch() -> None:
         2,
     )
     assert torch.equal(result.positions, path)
+
+
+def test_graph_seed_fit_setting_retains_sdk_default_and_requires_bool():
+    assert CuroboPlannerCfg(robot_uid="robot").fit_graph_seed_to_bspline is True
+    with pytest.raises(ValueError, match="fit_graph_seed_to_bspline"):
+        CuroboPlannerCfg(robot_uid="robot", fit_graph_seed_to_bspline="false")

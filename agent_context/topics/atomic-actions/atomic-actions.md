@@ -218,6 +218,7 @@ skill or alternate registry is installed by these query builders.
 | Runner and transports | `runner.py`, `transports.py`, `tracking.py` |
 | Engine and built-in registration | `engine.py`, `primitives/`, `__init__.py` |
 | Simulation ports | `sim_adapter.py` |
+| Exact observed joint-prefix adapter | `curobo_queries.py`; [snapshot lifetime and frame contract](../motion-planning/collision-worlds.md#observed-query-snapshots) |
 | Task Program semantic declarations | `embodichain/lab/task_program/semantics/` |
 | Task Program lowering/execution | `embodichain/lab/task_program/compiler/`, `runtime/` |
 | Gym lifecycle bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |

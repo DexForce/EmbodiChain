@@ -428,6 +428,12 @@ class CuroboPlannerCfg(BasePlannerCfg):
     oriented batch rows requiring distinct gravity vectors must disable TimeOpt.
     """
 
+    fit_graph_seed_to_bspline: bool = field(default=True, kw_only=True)
+    """Fit graph seeds before optimization, retaining the cuRobo 0.9 default.
+
+    ``False`` explicitly selects the backend's direct waypoint-as-knot handoff.
+    """
+
     max_attempts: int = 5
     """Default per-plan cuRobo attempt count."""
 
@@ -512,6 +518,10 @@ class CuroboPlannerCfg(BasePlannerCfg):
     runs at least one coordinated warmup because otherwise the first real plan
     would perform an uncoordinated lazy capture.
     """
+
+    def __post_init__(self) -> None:
+        if type(self.fit_graph_seed_to_bspline) is not bool:
+            raise ValueError("fit_graph_seed_to_bspline must be bool.")
 
 
 @configclass
@@ -1452,6 +1462,15 @@ class CuroboPlanner(BasePlanner):
                 del self._backend_cache[key]
 
         profile = self._materialize_profile(control_part)
+        snapshot = getattr(self, "_query_snapshot", None)
+        if (
+            snapshot is not None
+            and snapshot.base_link_name is not None
+            and snapshot.base_link_name != profile.sim_base_link_name
+        ):
+            raise ValueError(
+                "Observed query base does not match the generated cuRobo URDF root."
+            )
         sim_joint_names = self._resolve_sim_joint_names(control_part)
         world_cfg = self.cfg.world
         scene_model = (
@@ -1601,6 +1620,7 @@ class CuroboPlanner(BasePlanner):
                 use_cuda_graph=use_cuda_graph,
                 graph_planner_algorithm=algorithm,
                 enable_timeopt=self.cfg.enable_timeopt,
+                fit_graph_seed_to_bspline=self.cfg.fit_graph_seed_to_bspline,
                 interpolation_dt=float(self.cfg.interpolation_dt),
             )
             if backend.gravity is not None:

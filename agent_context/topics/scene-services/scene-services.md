@@ -99,6 +99,11 @@ planner roles are metadata: `none` does not remove a selected physical input.
 Connected nonconvex inputs remain unavailable in this capture path. The separate
 `collision_sources.py` link-box adapter retains its conservative component AABB
 policy; it is not a native cooked-shape/contact oracle.
+Its public `SimulationCollisionShapeReader` reads an explicit B1 rigid roster
+without poses, preserves descriptor order/type and applies exclusions before
+geometry reads. It rejects replaced owners, empty shapes and unsupported
+articulation selections. Observed cuRobo composition supplies the timestamp/root
+and trusted native-revision boundary separately.
 `snapshot_collision_sources()` combines common shape descriptors and explicitly
 supplied same-observation poses through `world_to_frame`. Batched inputs require
 matching pose/transform batch axes and equal projected obstacle poses; otherwise

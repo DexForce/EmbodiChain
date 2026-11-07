@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -95,6 +95,7 @@ class CuroboQuerySnapshot:
             shape ``(B, 4, 4)``. Goals use the corresponding row.
         payload: Optional carried body from the same observation, B=1 only.
         env_ids: Canonical row order, defaulting to ``tuple(range(B))``.
+        base_link_name: Optional exact URDF root identity of the supplied transform.
 
     B>1 requires the complete robot environment batch in canonical order,
     identical passive locks and a shared frozen collision world in each row's
@@ -109,8 +110,15 @@ class CuroboQuerySnapshot:
     world_to_base: torch.Tensor
     payload: CuroboPayload | None = None
     env_ids: tuple[int, ...] | None = None
+    base_link_name: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
+        if self.base_link_name is not None and (
+            type(self.base_link_name) is not str
+            or not self.base_link_name
+            or self.base_link_name != self.base_link_name.strip()
+        ):
+            raise ValueError("base_link_name must be an exact nonempty identifier.")
         if (
             not isinstance(self.full_qpos, torch.Tensor)
             or self.full_qpos.ndim != 2

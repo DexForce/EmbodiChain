@@ -1720,6 +1720,36 @@ Native failures may leave partial changes, requiring the host to stop execution.
 
    capture_physics_properties
 
+embodichain.lab.sim.motion.planners.curobo.observed
+---------------------------------------------------
+
+The B1 observed-query factory composes explicit shape sources, an owned complete
+world observation and full named joint state through one world-to-root transform.
+The generated whole-robot URDF root is checked independently of the active arm.
+Live hosts supply a trusted native revision getter; it must match the supplied
+world stamp before shape acquisition and after immutable snapshot assembly.
+``None`` retains the numeric/immutable-reader path without native revision reads.
+The factory reads no live poses, changes no borrowed robot, and closes the
+standard backend on exit or failure. Geometry scope and native planning success
+remain separate from execution and measured task acceptance.
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.observed
+
+.. autosummary::
+
+   CollisionShapeReader
+   CuroboWorldObservation
+   ObservedCuroboQueryFactory
+
+.. autoclass:: CollisionShapeReader
+   :members:
+
+.. autoclass:: CuroboWorldObservation
+   :members:
+
+.. autoclass:: ObservedCuroboQueryFactory
+   :members:
+
 embodichain.lab.sim.motion.planners.curobo.payload
 --------------------------------------------------
 
@@ -2691,6 +2721,29 @@ finalization transforms once and cannot replace the logical recovery proposal.
 .. autoclass:: CompletePlanBuilder
    :members:
 
+
+embodichain.lab.sim.atomic_actions.curobo_queries
+-------------------------------------------------
+
+The Atomic prefix adapter retains the caller's exact joint endpoint, complete
+passive locks and command cadence. It uses the shared observed factory and the
+original Torch-only CPU/planning-device RNG boundary; Python and NumPy streams
+are not reset. It selects no recovery branch and introduces no retries, target
+perturbations or implicit planner tuning. The world provider owns actual native
+stamp acquisition and the caller owns subsequent path qualification.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.curobo_queries
+
+.. autosummary::
+
+   CuroboJointPrefixPlanner
+   CuroboWorldObservationProvider
+
+.. autoclass:: CuroboJointPrefixPlanner
+   :members:
+
+.. autoclass:: CuroboWorldObservationProvider
+   :members:
 
 embodichain.lab.sim.atomic_actions.effects
 ------------------------------------------

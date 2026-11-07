@@ -29,6 +29,12 @@ through one ``world_to_frame`` transform. Its owned providers reuse
 ``CollisionShapeDesc`` and can be passed to ``CuroboWorldCfg.rigid_objects``.
 The link-box reader preserves separate connected components and applies scale once.
 
+``SimulationCollisionShapeReader`` captures the explicitly selected B1 rigid
+roster in declared order, retaining actual shape types and rejecting owner drift
+or incomplete shapes. Exclusions apply before geometry reads; this reader never
+substitutes live poses or creates a planner. Its current rigid-only capability
+rejects nonempty articulation selections rather than dropping those owners.
+
 ``convex_input_clearance`` explicitly declares convex solids over numeric input
 vertices. It retains the selected discrete frame order and original clearance
 inputs; a canonical conversion bound may cull a frame only strictly above that
@@ -45,6 +51,7 @@ certificate, and must not replace an unavailable native shape query.
    capture_scene_meshes
    iter_scene_components
    CollisionObjectSnapshot
+   SimulationCollisionShapeReader
    read_articulation_link_boxes
    snapshot_collision_sources
    convex_input_clearance
@@ -57,6 +64,17 @@ certificate, and must not replace an unavailable native shape query.
 
 .. autoclass:: CollisionObjectSnapshot
    :members:
+
+.. autoclass:: SimulationCollisionShapeReader
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.scene.collision_sources
+
+.. autosummary::
+
+   SimulationCollisionShapeReader
+
+.. currentmodule:: embodichain.lab.sim.scene
 
 .. autofunction:: capture_scene_meshes
 

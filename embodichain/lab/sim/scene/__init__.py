@@ -71,6 +71,7 @@ __all__ = [
     "capture_scene_meshes",
     "iter_scene_components",
     "CollisionObjectSnapshot",
+    "SimulationCollisionShapeReader",
     "read_articulation_link_boxes",
     "snapshot_collision_sources",
 ]
@@ -120,6 +121,7 @@ _EXPORT_MODULES = {
     "capture_scene_meshes": "mesh_snapshot",
     "iter_scene_components": "mesh_snapshot",
     "CollisionObjectSnapshot": "collision_sources",
+    "SimulationCollisionShapeReader": "collision_sources",
     "read_articulation_link_boxes": "collision_sources",
     "snapshot_collision_sources": "collision_sources",
 }

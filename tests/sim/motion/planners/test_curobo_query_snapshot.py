@@ -580,3 +580,309 @@ def test_shared_world_snapshot_checks_every_projected_row():
     poses[1, 1, 3] = 0.2
     with pytest.raises(ValueError, match="worlds must be identical"):
         snapshot_collision_sources({"box": ()}, {"box": poses}, frames)
+
+
+def test_observed_factory_projects_complete_world_without_observing_live_poses(
+    monkeypatch,
+):
+    from contextlib import contextmanager
+    from embodichain.lab.sim.motion.planners.curobo import observed
+    from embodichain.lab.sim.scene.collision_sources import (
+        SimulationCollisionShapeReader,
+    )
+
+    calls = []
+    shape = CollisionShapeDesc(
+        "box",
+        RigidBodyShape.BOX,
+        torch.eye(4),
+        half_extents=torch.tensor([0.1, 0.2, 0.3]),
+    )
+
+    def body(uid):
+        return SimpleNamespace(
+            uid=uid,
+            num_instances=1,
+            get_collision_shapes=lambda: calls.append(uid) or [shape],
+            get_local_pose=lambda **kwargs: pytest.fail("reader queried live pose"),
+        )
+
+    bodies = {
+        uid: body(uid) for uid in ("native_payload", "native_floor", "native_obstacle")
+    }
+    simulation = SimpleNamespace(
+        get_rigid_object=bodies.get, get_articulation=lambda uid: None
+    )
+    reader = SimulationCollisionShapeReader(
+        simulation,
+        rigid_objects={
+            "payload": "native_payload",
+            "floor": "native_floor",
+            "obstacle": "native_obstacle",
+        },
+        articulation_links={},
+    )
+    robot = SimpleNamespace(
+        uid="trace_robot",
+        num_instances=1,
+        root_link_name="whole_root",
+        joint_names=["arm_joint", "passive"],
+        control_parts={"arm": ["arm_joint"]},
+    )
+    cfg = _cfg()
+    cfg.graph_planner_algorithm = "prm"
+    cfg.enable_timeopt = False
+    cfg.fit_graph_seed_to_bspline = False
+    factory = observed.ObservedCuroboQueryFactory(robot, cfg, reader)
+    root = torch.eye(4)[None]
+    root[0, 0, 3] = 2.0
+    poses = {key: torch.eye(4)[None] for key in reader.entity_ids}
+    poses["floor"][0, 1, 3] = 3.0
+    world = observed.CuroboWorldObservation(
+        timestamp=0.4, scene_version=7, native_revision=11, poses=poses
+    )
+    records = []
+
+    @contextmanager
+    def owned(cfg, *, query_snapshot):
+        records.append((cfg, query_snapshot))
+        try:
+            yield SimpleNamespace(robot=robot)
+        finally:
+            calls.append("closed")
+
+    monkeypatch.setattr(observed, "curobo_motion_generator", owned)
+    with factory.open(
+        control_part="arm",
+        full_qpos=torch.tensor([[0.1, 0.9]]),
+        root_pose=root,
+        root_link_name="whole_root",
+        observed_at=0.4,
+        world=world,
+        control_dt=0.04,
+    ):
+        cfg, snapshot = records[0]
+        assert list(cfg.world.rigid_objects) == ["payload", "floor", "obstacle"]
+        assert snapshot.base_link_name == "whole_root"
+        assert snapshot.full_qpos.tolist() == [[pytest.approx(0.1), pytest.approx(0.9)]]
+        torch.testing.assert_close(
+            cfg.world.rigid_objects["floor"].pose[0, :3, 3],
+            torch.tensor([-2.0, 3.0, 0.0]),
+        )
+        assert cfg.interpolation_dt == 0.04
+        assert cfg.world.max_voxel_count == 4_000_000
+        assert cfg.warmup_iterations == 0 and not cfg.use_cuda_graph
+        assert cfg.preserve_plan_samples
+        assert cfg.graph_planner_algorithm == "prm"
+        assert cfg.enable_timeopt is cfg.fit_graph_seed_to_bspline is False
+        shape.half_extents.fill_(9)
+        torch.testing.assert_close(
+            cfg.world.rigid_objects["floor"].shapes[0].half_extents,
+            torch.tensor([0.1, 0.2, 0.3]),
+        )
+    assert calls == ["native_payload", "native_floor", "native_obstacle", "closed"]
+    with pytest.raises(ValueError, match="same|exact observation"):
+        with factory.open(
+            control_part="arm",
+            full_qpos=torch.zeros(1, 2),
+            root_pose=root,
+            root_link_name="whole_root",
+            observed_at=0.5,
+            world=world,
+            control_dt=0.04,
+        ):
+            pass
+    assert calls == ["native_payload", "native_floor", "native_obstacle", "closed"]
+    with pytest.raises(ValueError, match="URDF root"):
+        with factory.open(
+            control_part="arm",
+            full_qpos=torch.zeros(1, 2),
+            root_pose=root,
+            root_link_name="arm_subchain",
+            observed_at=0.4,
+            world=world,
+            control_dt=0.04,
+        ):
+            pass
+    assert tuple(reader.capture(excluded_entity_ids=("payload",))) == (
+        "floor",
+        "obstacle",
+    )
+    assert calls[-2:] == ["native_floor", "native_obstacle"]
+    bodies["native_floor"] = body("replacement")
+    with pytest.raises(ValueError, match="ownership changed"):
+        reader.capture(excluded_entity_ids=("payload",))
+
+
+def test_observed_factory_rejects_missing_collision_only_pose(monkeypatch):
+    from embodichain.lab.sim.motion.planners.curobo import observed
+
+    robot = SimpleNamespace(
+        uid="trace_robot",
+        num_instances=1,
+        root_link_name="root",
+        joint_names=["arm_joint"],
+        control_parts={"arm": ["arm_joint"]},
+    )
+    reader = SimpleNamespace(capture=lambda **kwargs: {"hidden_link": ()})
+    factory = observed.ObservedCuroboQueryFactory(robot, _cfg(), reader)
+    monkeypatch.setattr(
+        observed,
+        "curobo_motion_generator",
+        lambda *args, **kwargs: pytest.fail(
+            "created backend before full pose qualification"
+        ),
+    )
+    with pytest.raises(ValueError, match="hidden_link"):
+        with factory.open(
+            control_part="arm",
+            full_qpos=torch.zeros(1, 1),
+            root_pose=torch.eye(4)[None],
+            root_link_name="root",
+            observed_at=0.0,
+            world=observed.CuroboWorldObservation(
+                timestamp=0.0, scene_version=0, native_revision=0, poses={}
+            ),
+            control_dt=0.04,
+        ):
+            pass
+
+
+def test_query_rejects_a_base_name_different_from_the_materialized_urdf(monkeypatch):
+    _cpu_constructor(monkeypatch)
+    planner = cp.CuroboPlanner(
+        _cfg(),
+        query_snapshot=replace(
+            _snapshot(payload=False), base_link_name="wrong_subchain"
+        ),
+    )
+    monkeypatch.setattr(planner, "_robot_yaml_cache_key", lambda *args: ())
+    monkeypatch.setattr(
+        planner, "_materialize_profile", lambda part: _backend().profile
+    )
+    monkeypatch.setattr(
+        planner,
+        "_auto_generate_world_scene",
+        lambda *args: pytest.fail("constructed world with a mismatched root"),
+    )
+    with pytest.raises(ValueError, match="URDF root"):
+        planner._get_backend("arm", 1)
+    planner.close()
+
+
+def test_query_snapshot_keeps_existing_positional_row_order_and_optional_root():
+    snapshot = CuroboQuerySnapshot(torch.zeros(1, 2), torch.eye(4)[None], None, (0,))
+    assert snapshot.env_ids == (0,) and snapshot.base_link_name is None
+    assert replace(snapshot, base_link_name="root").base_link_name == "root"
+    with pytest.raises(ValueError, match="base_link_name"):
+        replace(snapshot, base_link_name=" root")
+
+
+def test_observed_shape_reader_preserves_mesh_type_and_rejects_unavailable_roster():
+    from embodichain.lab.sim.scene.collision_sources import (
+        SimulationCollisionShapeReader,
+    )
+
+    shape = CollisionShapeDesc(
+        "actual_mesh",
+        RigidBodyShape.MESH,
+        torch.eye(4),
+        vertices=torch.tensor([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
+        triangles=torch.tensor([[0, 1, 2]]),
+    )
+    shapes, reads = [shape], []
+    body = SimpleNamespace(
+        num_instances=1,
+        get_collision_shapes=lambda: reads.append("shape") or shapes,
+        get_local_pose=lambda **kwargs: pytest.fail("geometry reader observed a pose"),
+    )
+    simulation = SimpleNamespace(get_rigid_object=lambda uid: body)
+    reader = SimulationCollisionShapeReader(
+        simulation, rigid_objects={"obstacle": "native"}, articulation_links={}
+    )
+    assert reader.capture(excluded_entity_ids=("obstacle",)) == {} and reads == []
+    result = reader.capture()
+    assert result["obstacle"][0].shape_type is RigidBodyShape.MESH
+    torch.testing.assert_close(result["obstacle"][0].vertices, shape.vertices)
+    assert reads == ["shape"]
+    shapes.clear()
+    with pytest.raises(ValueError, match="incomplete"):
+        reader.capture()
+    with pytest.raises(ValueError, match="articulation"):
+        SimulationCollisionShapeReader(
+            simulation,
+            rigid_objects={},
+            articulation_links={"link": ("articulation", "link")},
+        )
+
+
+@pytest.mark.parametrize("revisions", [None, [9, 9], [True], ["9"], [10], [9, 10]])
+def test_observed_factory_checks_native_revision_around_owned_capture(
+    monkeypatch, revisions
+):
+    from contextlib import contextmanager
+    from embodichain.lab.sim.motion.planners.curobo import observed
+
+    robot = SimpleNamespace(
+        uid="trace_robot",
+        num_instances=1,
+        root_link_name="root",
+        joint_names=["arm_joint"],
+        control_parts={"arm": ["arm_joint"]},
+    )
+    events = []
+    shape = CollisionShapeDesc(
+        "box", RigidBodyShape.BOX, torch.eye(4), half_extents=torch.ones(3)
+    )
+    reader = SimpleNamespace(
+        capture=lambda **kwargs: events.append("shapes") or {"object": (shape,)}
+    )
+    world = observed.CuroboWorldObservation(
+        timestamp=0.4,
+        scene_version=7,
+        native_revision=9,
+        poses={"object": torch.eye(4)[None]},
+    )
+    sequence = iter(revisions or ())
+
+    def revision():
+        value = next(sequence)
+        events.append(("revision", value))
+        return value
+
+    @contextmanager
+    def backend(cfg, *, query_snapshot):
+        events.append("open")
+        try:
+            yield SimpleNamespace(robot=robot)
+        finally:
+            events.append("close")
+
+    monkeypatch.setattr(observed, "curobo_motion_generator", backend)
+    kwargs = {} if revisions is None else {"native_revision_reader": revision}
+    factory = observed.ObservedCuroboQueryFactory(robot, _cfg(), reader, **kwargs)
+    assert events == []  # Configuration itself neither captures nor creates a backend.
+    opened = factory.open(
+        control_part="arm",
+        full_qpos=torch.zeros(1, 1),
+        root_pose=torch.eye(4)[None],
+        root_link_name="root",
+        observed_at=0.4,
+        world=world,
+        control_dt=0.04,
+    )
+    if revisions not in (None, [9, 9]):
+        with pytest.raises(ValueError, match="revision"):
+            with opened:
+                pytest.fail("Unqualified native observation created a backend")
+        assert "open" not in events and "close" not in events
+        assert ("shapes" in events) is (revisions == [9, 10])
+        return
+    with pytest.raises(RuntimeError, match="caller failed"):
+        with opened:
+            raise RuntimeError("caller failed")
+    assert events == (
+        ["shapes", "open", "close"]
+        if revisions is None
+        else [("revision", 9), "shapes", ("revision", 9), "open", "close"]
+    )
