@@ -147,63 +147,10 @@ def support_window_flags(
 def release_window(
     call: Mapping[str, Any], receipt: Mapping[str, Any], num_envs: int
 ) -> dict[str, Any]:
-    """Bind an already verified release receipt to its actual attempt and phase."""
-    attempts = call.get("plan_attempts", [])
-    if not attempts:
-        raise ValueError("Support release lacks an actual planning attempt.")
-    last = attempts[-1]
-    generation = call.get("active_plan_attempt_generation")
-    identity = {key: call[key] for key in ("invocation_id", "invocation_revision")}
-    index = last.get("invocation_index")
-    if (
-        type(generation) is not int
-        or generation < 0
-        or last.get("attempt_generation") != generation
-        or type(index) is not int
-        or index < 0
-        or any(last.get(key) != value for key, value in identity.items())
-        or not _time(last.get("planned_at"))
-    ):
-        raise ValueError("Support release has a foreign or superseded plan.")
-    planned = last["planned_at"]
-    events = [
-        event
-        for event in call.get("events", [])
-        if all(event.get(key) == value for key, value in identity.items())
-        and event.get("invocation_index") == index
-        and _time(event.get("timestamp"))
-        and event["timestamp"] >= planned
-    ]
-    entries = [
-        event
-        for event in events
-        if event.get("kind") == "trajectory_segment_entered"
-        and event.get("segment_name") == "release"
-    ]
-    completed = [event for event in events if event.get("kind") == "action_completed"]
-    if (
-        len(entries) != 1
-        or len(completed) != 1
-        or entries[0].get("env_mask") != [True] * num_envs
-        or completed[0].get("env_mask") != [True] * num_envs
-        or not _time(receipt.get("timestamp"))
-        or not entries[0]["timestamp"]
-        <= receipt["timestamp"]
-        <= completed[0]["timestamp"]
-        or any(
-            type(receipt.get(key)) is not int or receipt[key] < 0
-            for key in ("verification_id", "observation_revision")
-        )
-    ):
-        raise ValueError("Support release lacks its exact measured phase window.")
-    return {
-        **identity,
-        "attempt_generation": generation,
-        "invocation_index": index,
-        "planned_at": planned,
-        "release_started_at": entries[0]["timestamp"],
-        "timestamp": receipt["timestamp"],
-        "completed_at": completed[0]["timestamp"],
-        "verification_id": receipt["verification_id"],
-        "observation_revision": receipt["observation_revision"],
-    }
+    """Read the source-verified release interval without parsing skill phases."""
+    from .canonicalization import json_snapshot
+
+    window = call.get("normalized_release_window")
+    if not isinstance(window, Mapping):
+        raise ValueError("Support release lacks its normalized observation window.")
+    return json_snapshot(window)

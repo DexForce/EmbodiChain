@@ -168,6 +168,7 @@ topics:
   - embodichain/lab/sim/sensors/contact/timeline.py
   - embodichain/lab/sim/sensors/contact/observation.py
   - embodichain/lab/sim/sensors/support_observation.py
+  - embodichain/lab/evidence.py
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
@@ -473,10 +474,12 @@ topics:
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
     joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies,
     ContactEvidenceSampler, ContactTimeline, NativeGripEvidenceFactory, SimulationSupportObservationCollector,
-    ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
+    ConfiguredTaskProgramDeployment, load_configured_task_program_deployment,
+    normalize_control_evidence, validate_control_declaration]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/
+  - embodichain/lab/task_program/integrations/evidence/control_evidence.py
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
@@ -530,6 +533,7 @@ topics:
   - embodichain/gen_sim/task_spec/registry.py
   - embodichain/gen_sim/task_spec/evidence.py
   - embodichain/gen_sim/task_spec/evidence_report.py
+  - embodichain/gen_sim/task_spec/manipulation_evidence.py
   - embodichain/gen_sim/task_spec/condition_evidence.py
   - embodichain/gen_sim/task_spec/control_evidence.py
   - embodichain/gen_sim/task_spec/pour_evidence.py
