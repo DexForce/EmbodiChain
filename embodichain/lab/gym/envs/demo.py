@@ -1294,14 +1294,16 @@ def execute_demo_episode(
             if segment_reason is not None or not any(active):
                 break
 
-        final_acceptance = (
-            final_acceptance_fn() if final_acceptance_fn is not None else None
-        )
-        final_gate = (
-            None
-            if final_acceptance is None
-            else _as_bool_tuple(final_acceptance, num_envs)
-        )
+        final_gate = None
+        if final_acceptance_fn is not None:
+            normal_exhaustion = segment_count > 0 and fatal_reason is None
+            execution_eligible = tuple(
+                succeeded or (normal_exhaustion and is_active)
+                for succeeded, is_active in zip(success, active, strict=True)
+            )
+            final_acceptance = final_acceptance_fn(execution_eligible)
+            if final_acceptance is not None:
+                final_gate = _as_bool_tuple(final_acceptance, num_envs)
         if final_gate is not None:
             # A step outcome cannot bypass the deployment gate or bridge completion.
             for env_id, accepted in enumerate(final_gate):

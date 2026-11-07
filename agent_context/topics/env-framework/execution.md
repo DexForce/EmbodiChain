@@ -293,9 +293,11 @@ not orchestrate multiple experiments or qualify kinematic playback.
   [recording contract](env-framework.md#expert-trajectory-contract).
 - **Persistence**: `env.save_trajectory(path, env_ids=None)` retains legacy
   `states`, `actions` and `meta` (`lengths`), adding `terminal_states` and versioned
-  `raw_observations`. Auto-save participates in an explicitly committed reset;
-  `close()` discards uncommitted data and finalizes writes rather than implicitly
-  accepting an episode. Persistence failures propagate through the durability
+  `raw_observations`. A measured deployment final acceptance includes a separate
+  `final_acceptance_observations` capture tied to the episode row and seal revision.
+  The capture may occur after the last recorded control step. Auto-save
+  participates in an explicitly committed reset. `close()` discards uncommitted
+  data and finalizes writes. Persistence failures propagate through the durability
   barrier. Defaults and paths live in `EmbodiedEnvCfg`/`save_trajectory`.
 - **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
   `kinematic` disables physics and writes recorded states (obs only, exact
@@ -305,7 +307,13 @@ not orchestrate multiple experiments or qualify kinematic playback.
   decodes `ControllerAction`; the legacy `expert_controller` marker remains
   accepted. Objective-enabled dynamic replay requires one row and a full reset.
   `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay env must
-  use the same robot/objects/`actions` config as the recording env.
+  use the same robot/objects/`actions` config as the recording env. For a deployment
+  with `evaluation.final_acceptance`, `ReplayWrapper.final_acceptance` recomputes
+  each row's physical predicates from its sealed capture before stepping. It
+  combines them with the recorded execution eligibility and program completion.
+  The replay deployment must use the recorded final rule definitions.
+  Legacy trajectories remain playable and report `not_recorded` when they lack
+  the capture. `not_run` identifies a seal created before physical evaluation.
 - **Policy projection**: `rollout_buffer` retains actual policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than

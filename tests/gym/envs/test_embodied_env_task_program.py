@@ -415,3 +415,79 @@ def test_reset_seals_manually_completed_program_before_persistence_retry():
     env.reset(options={"reset_ids": [0]})
     assert recorded == [terminal]
     assert read_pose.call_count == 2
+
+
+def test_trajectory_replay_recomputes_the_sealed_capture_after_physics_changes(
+    tmp_path,
+):
+    from tensordict import TensorDict
+
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+    from embodichain.lab.gym.envs.wrapper import ReplayWrapper
+
+    env, position, read_pose = _final_acceptance_env()
+    env.cfg.sim_steps_per_control = 4
+    env.sim_cfg = SimpleNamespace(physics_dt=0.01)
+    env.robot = SimpleNamespace(uid="arm", dof=1)
+    env.active_joint_ids = [0]
+    env.max_episode_steps = 5
+    env.sim._articulations = {}
+    env.sim._rigid_objects = {"payload": None, "support": None}
+    env._trajectory_action_metadata = lambda: {"action_kind": "policy"}
+
+    def step(action):
+        env._demo_steps += 1
+        return (
+            {},
+            torch.zeros(2),
+            torch.zeros(2, dtype=torch.bool),
+            torch.zeros(2, dtype=torch.bool),
+            {},
+        )
+
+    env.step = step
+    result = execute_demo_episode(env)
+    assert result.success == (True, False)
+    sealed = [env.get_demo_episode_metadata(i)["final_acceptance"] for i in (1, 0)]
+
+    # Save after a later acquisition at the same simulation timestamp. The
+    # source capture still has the original revision and row-local poses.
+    position[:, 0] = torch.tensor([0.9, 0.1])
+    assert env.is_task_success().tolist() == [False, True]
+    env._traj_steps = torch.ones(2, dtype=torch.long)
+    env._traj_buffer = TensorDict(
+        {
+            "states": {"rigid_objects": {"payload": {"pose": position[:, None, :]}}},
+            "actions": torch.zeros(2, 1, 1),
+        },
+        batch_size=[2, 1],
+    )
+    path = env.save_trajectory(str(tmp_path / "episode.pt"), env_ids=[1, 0])
+    replay = ReplayWrapper(env, path, mode="kinematic")
+    for report, expected in zip(replay.final_acceptance, sealed, strict=True):
+        assert report == {
+            **expected,
+            "status": "recomputed",
+            "recorded_accepted": expected["accepted"],
+        }
+    assert read_pose.call_count == 2
+
+    payload = torch.load(path, weights_only=False)
+    first = payload["meta"]["demo_episodes"][0]["final_acceptance"]
+    first["accepted"] = True
+    first["physical_satisfied"] = True
+    first["conditions"]["near_support"]["distance"] = 0.0
+    report = ReplayWrapper(env, payload, mode="kinematic").final_acceptance[0]
+    assert report["recorded_accepted"] is True
+    assert report["accepted"] is False
+    assert report["conditions"]["near_support"]["distance"] == pytest.approx(0.9)
+
+    second = payload["meta"]["demo_episodes"][1]["final_acceptance"]
+    second["execution_eligible"] = False
+    report = ReplayWrapper(env, payload, mode="kinematic").final_acceptance[1]
+    assert report["physical_satisfied"] is True
+    assert report["accepted"] is False
+
+    first["observation_revision"] += 1
+    with pytest.raises(ValueError, match="observation does not match the episode seal"):
+        ReplayWrapper(env, payload, mode="kinematic")

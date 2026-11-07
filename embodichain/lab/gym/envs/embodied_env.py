@@ -101,8 +101,10 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
 from embodichain.lab.gym.envs.task_program._final_acceptance import (
+    _FINAL_OBSERVATIONS_KEY,
     _FinalMeasurement,
     _deployment_final_rules,
+    _export_final_observations,
     _final_acceptance_rows,
     _measure_final_conditions,
 )
@@ -520,8 +522,15 @@ class EmbodiedEnv(BaseEnv):
 
         registration = getattr(task_program_adapter_factory, "registration", None)
         self._final_acceptance_rules = _deployment_final_rules(registration)
+        self._sealed_final_observations: dict[int, ObservationFrame] = {}
         self._pending_final_acceptance: (
-            tuple[tuple[int, ...], torch.Tensor, _FinalMeasurement | None] | None
+            tuple[
+                tuple[int, ...],
+                tuple[bool, ...],
+                torch.Tensor,
+                _FinalMeasurement | None,
+            ]
+            | None
         ) = None
         self._evaluation_recording = (
             _evaluation_observation_cfgs(registration)
@@ -1471,6 +1480,7 @@ class EmbodiedEnv(BaseEnv):
             self._final_acceptance_rules,
             episode_ids,
             tuple(accepted.tolist()),
+            (True,) * self.num_envs,
             completion,
             measurement,
         )
@@ -1480,7 +1490,9 @@ class EmbodiedEnv(BaseEnv):
             snapshot = final_rows[env_id]
             passed = snapshot["accepted"] and not truncated
             snapshot["accepted"] = passed
+            snapshot["execution_eligible"] = not truncated
             success[env_id] = passed
+            self._sealed_final_observations[env_id] = measurement.frame
             reason = "success" if passed else "task_incomplete"
             if truncated:
                 reason = "truncated"
@@ -1642,8 +1654,10 @@ class EmbodiedEnv(BaseEnv):
         env_ids_to_process = self.episode_context._ids(env_ids)
         episode_metadata = getattr(self, "_demo_episode_metadata", None)
         if episode_metadata is not None:
+            final_observations = getattr(self, "_sealed_final_observations", {})
             for env_id in env_ids_to_process.cpu().tolist():
                 episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
+                final_observations.pop(env_id, None)
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -1795,6 +1809,7 @@ class EmbodiedEnv(BaseEnv):
         self._demo_continuity_id = 0
         self._demo_program_run_id = f"{episode_index}:{attempt_id}"
         self._pending_final_acceptance = None
+        self._sealed_final_observations = {}
         self._demo_active_segment_id = 0
         self._demo_active_segment_ids.zero_()
         self._demo_active_mask.fill_(True)
@@ -1890,12 +1905,13 @@ class EmbodiedEnv(BaseEnv):
             episode_ids = self.episode_context.episode_ids
             pending = getattr(self, "_pending_final_acceptance", None)
             completion, measurement = None, None
+            eligible = (False,) * self.num_envs
             if pending is not None:
                 if pending[0] != episode_ids:
                     raise RuntimeError("Final acceptance belongs to another episode.")
-                _, completion, measurement = pending
+                _, eligible, completion, measurement = pending
             final_rows = _final_acceptance_rows(
-                rules, episode_ids, result.success, completion, measurement
+                rules, episode_ids, result.success, eligible, completion, measurement
             )
             self._pending_final_acceptance = None
         bridge = getattr(self, "_active_task_program_bridge", None)
@@ -1915,6 +1931,8 @@ class EmbodiedEnv(BaseEnv):
                 ):
                     continue
                 metadata["final_acceptance"] = final_rows[env_id]
+                if measurement is not None:
+                    self._sealed_final_observations[env_id] = measurement.frame
             length = (
                 result.lengths[env_id]
                 if result.lengths
@@ -3524,13 +3542,16 @@ class EmbodiedEnv(BaseEnv):
         measured = _measure_final_conditions(self, self._final_acceptance_rules)
         return completion & measured.satisfied, completion, measured
 
-    def _finalize_demo_task_success(self) -> torch.Tensor | None:
+    def _finalize_demo_task_success(
+        self, execution_eligible: tuple[bool, ...]
+    ) -> torch.Tensor | None:
         """Take the final demo measurement for its terminal result and metadata."""
         if not getattr(self, "_final_acceptance_rules", ()):
             return None
         accepted, completion, measurement = self._evaluate_final_task_acceptance()
         self._pending_final_acceptance = (
             self.episode_context.episode_ids,
+            execution_eligible,
             completion.clone(),
             measurement,
         )
@@ -3649,6 +3670,8 @@ class EmbodiedEnv(BaseEnv):
         matching the frame alignment used by expert/LeRobot trajectories. New
         recordings also include ``terminal_states`` and described
         ``raw_observations`` with all T+1 state boundaries.
+        A sealed deployment evaluation also includes its exact raw capture in
+        ``final_acceptance_observations``.
 
         Args:
             path: Destination ``.pt`` file path.
@@ -3741,6 +3764,11 @@ class EmbodiedEnv(BaseEnv):
             ],
         }
         meta.update(self._trajectory_action_metadata())
+        final_observations = _export_final_observations(
+            getattr(self, "_final_acceptance_rules", ()),
+            getattr(self, "_sealed_final_observations", {}),
+            meta["demo_episodes"],
+        )
         meta["run_uuid"] = meta["demo_episodes"][0].get("run_uuid")
         meta["episode_uuids"] = [
             episode.get("episode_uuid") for episode in meta["demo_episodes"]
@@ -3781,6 +3809,8 @@ class EmbodiedEnv(BaseEnv):
                     meta["state_frame_layout"] = "pre_action_plus_terminal/v1"
                 if history is not None:
                     payload["raw_observations"] = history
+                if final_observations is not None:
+                    payload[_FINAL_OBSERVATIONS_KEY] = final_observations
                 torch.save(payload, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
