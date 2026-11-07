@@ -268,6 +268,15 @@ jobs:
           restore-keys: |
             docs-full-site-${{ github.repository }}-
 
+      - name: Install wget for published docs merge
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if ! command -v wget >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends wget
+          fi
+
       # Tag-scoped caches are invisible on main; merge live Pages so releases survive.
       - name: Merge versions from live GitHub Pages
         if: github.event_name == 'push'
