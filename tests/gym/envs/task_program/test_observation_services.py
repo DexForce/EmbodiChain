@@ -35,8 +35,8 @@ from embodichain.lab.task_program.integrations.simulation.recorded_contacts impo
 from embodichain.lab.task_program.integrations.simulation.observations import (
     SimulationStateObservationCollector,
 )
-from _observation_fixture import observation_host
-from test_cargo_observation import configure_meshes
+from ._observation_fixture import observation_host
+from .test_cargo_observation import configure_meshes
 
 
 def factory(host):

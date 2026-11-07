@@ -44,7 +44,7 @@ from embodichain.lab.task_program.integrations.simulation.bindings import (
 from embodichain.lab.task_program.integrations.simulation.policies import (
     SimulationSegmentPolicyPort,
 )
-from test_simulation_environment import (
+from .test_simulation_environment import (
     _Robot,
     _RigidObject,
     _profile_binding,

@@ -27,7 +27,7 @@ from embodichain.lab.task_program.integrations.simulation.recorded_contacts impo
     SimulationRecordedContactCfg,
     SimulationRecordedContactCollector,
 )
-from _observation_fixture import observation_host
+from ._observation_fixture import observation_host
 
 
 def contact_case():
