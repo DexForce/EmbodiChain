@@ -41,6 +41,9 @@ from typing import Literal, Protocol, TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
+from embodichain.lab.sim.atomic_actions.grip_evidence import GripEvidenceObservationPort
+
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
@@ -152,6 +155,35 @@ class _OwnedEffectEvidenceProvider(EffectEvidenceProvider):
     ) -> Mapping[str, EffectEvidenceBatch]:
         self._owner.require_open()
         return self._provider.collect(queries, context)
+
+
+class _OwnedGripEvidenceProvider(_OwnedEffectEvidenceProvider):
+    """Forward only an explicitly declared physical observation capability."""
+
+    def __init__(
+        self,
+        provider: EffectEvidenceProvider,
+        owner: _RuntimeOwner,
+        scope_guard: Callable[[], None],
+    ) -> None:
+        if not isinstance(provider, GripEvidenceObservationPort):
+            raise TypeError("Grip observation forwarding requires its explicit port.")
+        super().__init__(provider, owner)
+        self._grip_port = provider
+        self._scope_guard = scope_guard
+
+    def capture_grip_observation(
+        self, request: PhysicalEvidenceRequest, *, object_id: str, control_part: str
+    ) -> tuple[PhysicalEvidenceBatch, dict[str, object]]:
+        self._owner.require_open()
+        self._scope_guard()
+        try:
+            return self._grip_port.capture_grip_observation(
+                request, object_id=object_id, control_part=control_part
+            )
+        finally:
+            self._owner.require_open()
+            self._scope_guard()
 
 
 _PLANNER_CFG_TYPES: Mapping[str, type[BasePlannerCfg]] = {
@@ -526,14 +558,18 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         if (
             not isinstance(env_ids, torch.Tensor)
             or env_ids.dtype != torch.long
-            or env_ids.shape != (qpos.shape[0],)
+            or env_ids.dim() != 1
+            or env_ids.numel() == 0
+            or bool((env_ids < 0).any())
+            or bool((env_ids >= qpos.shape[0]).any())
         ):
-            raise ValueError("env_ids must be int64 with one ID per robot row.")
+            raise ValueError("env_ids must be nonempty int64 indices into robot rows.")
         if env_ids.device != qpos.device:
             raise ValueError("env_ids and robot qpos must share a device.")
         if torch.unique(env_ids).numel() != env_ids.numel():
             raise ValueError("env_ids must be unique.")
         self._robot = robot
+        self._world_batch_size = qpos.shape[0]
         self._scene_provider = scene_provider
         self._clock = clock
         self._env_ids = env_ids.clone()
@@ -619,7 +655,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             not isinstance(target_qpos, torch.Tensor)
             or not target_qpos.is_floating_point()
             or target_qpos.shape
-            != (self._env_ids.numel(), int(getattr(self._robot, "dof", 0)))
+            != (self._world_batch_size, int(getattr(self._robot, "dof", 0)))
             or target_qpos.device != self._env_ids.device
             or not bool(torch.isfinite(target_qpos).all().item())
         ):
@@ -627,7 +663,9 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
                 "robot.get_qpos(target=True) must return finite floating full-qpos "
                 "shape (num_envs, robot_dof) on the simulation device."
             )
-        index = torch.tensor(rows, dtype=torch.long, device=target_qpos.device)
+        index = self._env_ids.index_select(
+            0, torch.tensor(rows, dtype=torch.long, device=self._env_ids.device)
+        )
         result = target_qpos.index_select(0, index).clone()
         self.validate_runtime_scope()
         return result
@@ -638,7 +676,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         qpos = _full_robot_tensor(self._robot, "get_qpos", required=True)
         assert qpos is not None
         if (
-            qpos.shape[0] != self._env_ids.numel()
+            qpos.shape[0] != self._world_batch_size
             or qpos.device != self._env_ids.device
         ):
             raise ValueError("Robot batch shape or device changed after assembly.")
@@ -670,10 +708,16 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         context = PlanningContext(
             robot=RobotObservation(
                 timestamp=timestamp,
-                qpos=qpos,
-                qvel=qvel,
-                qeffort=qeffort,
-                root_pose=root_pose,
+                qpos=qpos.index_select(0, self._env_ids),
+                qvel=qvel.index_select(0, self._env_ids),
+                qeffort=(
+                    None if qeffort is None else qeffort.index_select(0, self._env_ids)
+                ),
+                root_pose=(
+                    None
+                    if root_pose is None
+                    else root_pose.index_select(0, self._env_ids)
+                ),
             ),
             task=task_state,
             scene=scene,
@@ -826,6 +870,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             dtype=torch.long,
             device=qpos.device,
         )
+        self._sensor_suite = sensor_suite
         self._support_registry = None
         self._runtime_bridge_ref: ReferenceType[TaskProgramDemoBridge] | None = None
         self._support_clock: EnvironmentStepClock | None = None
@@ -904,6 +949,63 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self._segment_policy_port.close_runtime_resources()
         if self._support_registry is not None:
             self._support_registry.close()
+
+    def for_env_ids(self, env_ids: tuple[int, ...]) -> SimulationTaskProgramFactory:
+        """Create independent runtime bindings for selected arenas in this world.
+
+        Args:
+            env_ids: Nonempty, unique physical indices in desired batch order.
+        Returns:
+            Fresh factory sharing native assets but owning policy and scene caches.
+        """
+        self._owner_token.require_open()
+        if self._support_registry is not None:
+            raise ValueError(
+                "selected-row factories require an explicit support-sensor adapter"
+            )
+        count = self._robot.get_qpos().shape[0]
+        if (
+            not env_ids
+            or any(type(i) is not int or not 0 <= i < count for i in env_ids)
+            or len(set(env_ids)) != len(env_ids)
+        ):
+            raise ValueError("env_ids must be unique valid simulation rows")
+        factory = type(self)(
+            self._simulation,
+            self._robot,
+            self._registration,
+            step_dt=self._step_dt,
+            joint_command_mode=self._joint_command_mode,
+            planner_cfg=self._planner_cfg,
+            motion_generator_factory=self._motion_generator_factory,
+            grasp_pose_generators=self._grasp_pose_generators,
+            hand_geometry_cfgs=self._hand_geometry_cfgs,
+            capture_root_pose=self._capture_root_pose,
+            hold_qpos_source=self._hold_qpos_source,
+            translation_threshold=self._translation_threshold,
+            rotation_threshold=self._rotation_threshold,
+            sensor_suite=self._sensor_suite,
+        )
+        factory._env_ids = torch.tensor(
+            env_ids, dtype=torch.long, device=self._env_ids.device
+        )
+        factory._segment_policy_port.close_runtime_resources()
+        factory._segment_policy_port = SimulationSegmentPolicyPort(
+            self._simulation,
+            self._robot,
+            self._scene_binding,
+            settle_presets=self._registration.settle_presets,
+            env_ids=factory._env_ids,
+            select_rows=True,
+            step_dt=self._step_dt,
+        )
+        return factory
+
+    def create_initial_task_state(self) -> TaskState:
+        """Return empty symbolic state aligned with this factory's arena selection."""
+        return TaskState.empty(
+            batch_size=len(self._env_ids), device=self._env_ids.device
+        )
 
     @classmethod
     def from_environment(
@@ -1041,10 +1143,21 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise ValueError(
                 "Motion generator must own the exact robot selected by the factory."
             )
+        from embodichain.lab.sim.profiler import Profiler
+
+        profiler = getattr(self._simulation, "profiler", None)
+        profiling = {"profiler": profiler} if isinstance(profiler, Profiler) else {}
         engine = AtomicActionEngine(
             motion_generator,
+            env_ids=(
+                tuple(self._env_ids.tolist())
+                if tuple(self._env_ids.tolist())
+                != tuple(range(self._robot.get_qpos().shape[0]))
+                else None
+            ),
             control_profiles=profile.action_control_profiles(),
             grasp_pose_generators=self._grasp_pose_generators,
+            **profiling,
             hand_geometry_cfgs=self._hand_geometry_cfgs,
         )
         self._registration.validate_engine(engine)
@@ -1073,13 +1186,13 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise ValueError("clock.step_dt must equal the factory Gym cadence.")
         provider = scene_registry.make_planning_scene_provider(
             engine.motion_generator,
-            batch_size=int(self._env_ids.numel()),
+            batch_size=int(self._robot.get_qpos().shape[0]),
             translation_threshold=self._translation_threshold,
             rotation_threshold=self._rotation_threshold,
         )
         shared = SharedTickSceneProvider(
             provider,
-            self._env_ids,
+            torch.arange(self._robot.get_qpos().shape[0], device=self._env_ids.device),
             require_open=self._owner_token.require_open,
             runtime_scope_guard=runtime_scope_guard,
         )
@@ -1141,8 +1254,20 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         providers.append(
             SceneArticulationEvidenceProvider(scene_provider=scene_provider)
         )
+
+        def require_grip_scope() -> None:
+            observation_provider.validate_runtime_scope()
+            if self._simulation.get_robot(self._robot.uid) is not self._robot:
+                raise ValueError("Native grip runtime robot ownership changed.")
+
         return tuple(
-            _OwnedEffectEvidenceProvider(provider, self._owner_token)
+            (
+                _OwnedGripEvidenceProvider(
+                    provider, self._owner_token, require_grip_scope
+                )
+                if isinstance(provider, GripEvidenceObservationPort)
+                else _OwnedEffectEvidenceProvider(provider, self._owner_token)
+            )
             for provider in providers
         )
 
@@ -1198,6 +1323,12 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         """Create and validate one exact motion generator."""
         if self._motion_generator_factory is not None:
             generator = self._motion_generator_factory()
+            if tuple(self._env_ids.tolist()) != tuple(
+                range(self._robot.get_qpos().shape[0])
+            ) and getattr(generator, "_env_ids", None) != tuple(self._env_ids.tolist()):
+                raise ValueError(
+                    "custom motion generator does not bind selected physical rows"
+                )
         else:
             planner_cfg = (
                 ToppraPlannerCfg(robot_uid=_robot_uid(self._robot))
@@ -1207,7 +1338,15 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             planner_cfg.sim_instance_id = self._simulation.instance_id
             if isinstance(planner_cfg, CuroboPlannerCfg):
                 self._bind_curobo_scene(planner_cfg)
-            generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
+            selection_kwargs = (
+                {"env_ids": tuple(self._env_ids.tolist())}
+                if tuple(self._env_ids.tolist())
+                != tuple(range(self._robot.get_qpos().shape[0]))
+                else {}
+            )
+            generator = MotionGenerator(
+                MotionGenCfg(planner_cfg=planner_cfg), **selection_kwargs
+            )
         if not isinstance(generator, MotionGenerator):
             raise TypeError(
                 "motion_generator_factory must return a MotionGenerator instance."
