@@ -1205,8 +1205,10 @@ class _InvocationPolicyFactory(_FakeEnvironmentFactory):
         )
 
 
+@pytest.mark.parametrize("configured_defaults", [False, True])
 def test_invocation_policy_preserves_repeat_identity_in_cached_analysis(
     monkeypatch,
+    configured_defaults: bool,
 ) -> None:
     from task_program_support import completed_runtime
     from embodichain.lab.task_program import RepeatCfg
@@ -1225,7 +1227,21 @@ def test_invocation_policy_preserves_repeat_identity_in_cached_analysis(
     binding = InvocationPolicyBinding(
         task_program_fingerprint(compiled), target_id, "careful"
     )
-    bridge = adapter.create_bridge(compiled, invocation_policy_bindings=(binding,))
+    if configured_defaults:
+        from types import SimpleNamespace
+
+        adapter = TaskProgramEnvironmentAdapter(
+            factory, step_dt=_STEP_DT, invocation_policy_bindings=(binding,)
+        )
+        host = SimpleNamespace(_checked_task_program_adapter=lambda: adapter)
+        bridge = EmbodiedEnv.create_task_program_bridge(host, compiled)
+        conflicting = InvocationPolicyBinding(
+            binding.program_fingerprint, binding.invocation_id, "projected"
+        )
+        with pytest.raises(ValueError, match="configured invocation"):
+            adapter.create_bridge(compiled, invocation_policy_bindings=(conflicting,))
+    else:
+        bridge = adapter.create_bridge(compiled, invocation_policy_bindings=(binding,))
     assert factory.observation_samples == 0
     completed = completed_runtime(torch.arange(_BATCH_SIZE))
     selected = []

@@ -29,8 +29,11 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
-from typing import cast
+from typing import TYPE_CHECKING, cast
 import torch
+
+if TYPE_CHECKING:
+    from .invocation_policy import InvocationPolicyBinding
 
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import (
@@ -859,8 +862,24 @@ class TaskProgramIntegrationCatalog:
                 f"{sorted(_VALIDATOR_KINDS)}."
             )
 
-    def preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
-        """Compile and statically link every expanded semantic call."""
+    def preflight(
+        self,
+        program: TaskProgramCfg,
+        *,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+    ) -> CompiledTaskProgram:
+        """Compile and statically link every expanded semantic call.
+
+        Args:
+            program: Provider-free program using this catalog's integration.
+            invocation_policy_bindings: Exact immutable selections for sequential
+                occurrences; omitted calls retain their normal policy resolution.
+
+        Returns:
+            Unmodified compiled program, after validating the selected presets.
+        """
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
         self.validate_integration(program.integration, path=("integration",))
         compiled = TaskProgramCompiler(self.scene).compile(program)
         manifest = SemanticIntegrationManifest(
@@ -869,6 +888,15 @@ class TaskProgramIntegrationCatalog:
             call_catalog=self.call_catalog,
             runtime_preset=program.integration.runtime_preset,
         )
+        selected_presets: dict[str, str] = {}
+        if invocation_policy_bindings:
+            from .invocation_policy import BoundInvocationPolicies
+
+            policies = BoundInvocationPolicies(compiled, invocation_policy_bindings)
+            policies.validate_manifest(compiled, manifest)
+            selected_presets = {
+                item.invocation_id: item.preset_id for item in policies.bindings
+            }
         for segment in compiled.iter_segments():
             for policy in segment.post_policies:
                 if (
@@ -887,7 +915,20 @@ class TaskProgramIntegrationCatalog:
                     "physical safety-validator factory.",
                 )
             for call in segment.calls:
-                linked = manifest.link_call(call.call, path=call.source_path)
+                linked = manifest.link_call(
+                    call.call,
+                    path=call.source_path,
+                    **(
+                        {
+                            "preset_id": selected_presets.get(
+                                f"{compiled.program_id}/{segment.segment_id}:"
+                                f"{call.segment_call_index}"
+                            )
+                        }
+                        if invocation_policy_bindings
+                        else {}
+                    ),
+                )
                 if type(linked.call) is Place and linked.call.at is None:
                     destination = linked.affordances.get("destination")
                     if destination is None:

@@ -166,6 +166,21 @@ Explicit `non_pose_clauses` is a verified-execution choice described at the
 tracking override. The typed default is omitted from catalog canonical data to
 preserve existing fingerprints; an active non-default choice is sealed.
 
+Execution policies may declare a nonempty `invocation_presets` list of complete
+named policies alongside the base preset. Each owns motion, tracking, recovery,
+workflow recovery, runner and effect assurance; it is not an inheritance or
+patch table. Action-option and effect-monitor templates still come only from
+`integration.profile`. Names must be distinct from the base and each other.
+The integration's optional `invocation_policy_bindings` uses the existing exact
+program-fingerprint/occurrence/preset contract. Configuration rejects stale or
+duplicate occurrences and incompatible selections during static preflight.
+`ConfiguredTaskProgramDeployment.invocation_policy_bindings` and its lazy factory
+own the same immutable selection. Active bindings enter the effective integration
+fingerprint; omitted fields retain the original payload and loading path.
+Program bytes and the compiled-program fingerprint do not change merely because
+a separately sealed occurrence selection is declared. See the
+[execution selection boundary](execution.md#execution-occurrence-identity).
+
 Configured `motion` policies accept optional finite, strictly positive
 `velocity_limit` and `acceleration_limit` values. Configured Pour action options
 accept a finite, non-negative `dwell_duration`; unknown timing keys still fail

@@ -135,6 +135,7 @@ if TYPE_CHECKING:
     from .simulation.planning_services import SimulationPlanningServicesCfg
     from .environment import TaskProgramEnvironmentAdapter
     from .simulation.grip_evidence import NativeGripEvidenceFactory
+    from .invocation_policy import InvocationPolicyBinding
 
 __all__: list[str] = []
 
@@ -3563,6 +3564,37 @@ def _decode_runtime_services(
     )
 
 
+def _decode_invocation_policy_bindings(
+    value: object, *, path: str
+) -> tuple[InvocationPolicyBinding, ...]:
+    """Decode the existing exact occurrence-binding contract without live state."""
+    from .invocation_policy import (
+        InvocationPolicyBinding,
+        _snapshot_invocation_policy_bindings,
+    )
+
+    values = _sequence(value, path=path)
+    if not values:
+        raise ValueError(f"{path} must be nonempty when declared.")
+    bindings = []
+    for index, item in enumerate(values):
+        item_path = f"{path}[{index}]"
+        declaration = _mapping(
+            item,
+            path=item_path,
+            required=frozenset({"program_fingerprint", "invocation_id", "preset_id"}),
+        )
+        bindings.append(
+            InvocationPolicyBinding(
+                **{
+                    key: _identifier(nested, path=f"{item_path}.{key}")
+                    for key, nested in declaration.items()
+                }
+            )
+        )
+    return _snapshot_invocation_policy_bindings(tuple(bindings))
+
+
 @dataclass(frozen=True, slots=True)
 class _ConfiguredTaskProgramAdapterFactory:
     """Expose one config identity while delegating live adapter construction."""
@@ -3570,6 +3602,7 @@ class _ConfiguredTaskProgramAdapterFactory:
     delegate: SimulationTaskProgramAdapterFactory
     integration_fingerprint: str
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = ()
 
     @property
     def registration(self) -> SimulationTaskProgramRegistration:
@@ -3604,7 +3637,15 @@ def _decode_configured_task_program_integration(
         value,
         path=path,
         required=frozenset({"scene", "robot_profile"}),
-        optional=frozenset({"runtime_services"}),
+        optional=frozenset({"runtime_services", "invocation_policy_bindings"}),
+    )
+    bindings = (
+        _decode_invocation_policy_bindings(
+            config["invocation_policy_bindings"],
+            path=f"{path}.invocation_policy_bindings",
+        )
+        if "invocation_policy_bindings" in config
+        else ()
     )
     scene_binding = _decode_scene(config["scene"])
     robot_profile_binding = _decode_robot_profile(config["robot_profile"])
@@ -3654,6 +3695,10 @@ def _decode_configured_task_program_integration(
         "grasp_pose_generators": grasp_fingerprint,
         "planner_config": deepcopy(planner_config),
     }
+    if bindings:
+        fingerprint_payload["invocation_policy_bindings"] = [
+            asdict(item) for item in bindings
+        ]
     if services.hand_geometries:
         fingerprint_payload["hand_geometries"] = tuple(
             {"target_id": target_id, "factory": asdict(factory)}
@@ -3682,11 +3727,13 @@ def _decode_configured_task_program_integration(
         grasp_pose_generator_factories=dict(services.grasp_pose_generators),
         hand_geometry_cfg_factories=dict(services.hand_geometries),
         planner_config=planner_config,
+        **({"invocation_policy_bindings": bindings} if bindings else {}),
     )
     adapter_factory = _ConfiguredTaskProgramAdapterFactory(
         delegate=delegate,
         integration_fingerprint=integration_fingerprint,
         nominal_motion_sources=services.nominal_motion_sources,
+        invocation_policy_bindings=bindings,
     )
     return _ConfiguredTaskProgramIntegration(
         registration=registration,

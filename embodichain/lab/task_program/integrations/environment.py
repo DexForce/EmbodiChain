@@ -334,6 +334,8 @@ class TaskProgramEnvironmentAdapter:
         post_policy_port: Optional environment post-policy executor.
         validator_port: Optional environment segment validator.
         parallel_safety_validator: Optional authoritative parallel safety gate.
+        invocation_policy_bindings: Immutable configured defaults for exact
+            program occurrences; conflicting per-bridge selections are rejected.
 
     A call to :meth:`compile` snapshots only scene identities.  A call to
     :meth:`assemble_runtime` creates a fresh live runtime, which makes reset and
@@ -361,6 +363,7 @@ class TaskProgramEnvironmentAdapter:
         post_policy_port: SegmentPostPolicyPort | None = None,
         validator_port: SegmentValidatorPort | None = None,
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
     ) -> None:
         if not isinstance(factory, TaskProgramEnvironmentFactory):
             raise TypeError("factory must implement TaskProgramEnvironmentFactory.")
@@ -507,6 +510,15 @@ class TaskProgramEnvironmentAdapter:
                 "ParallelCommandSafetyValidator or be None."
             )
 
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
+        if invocation_policy_bindings:
+            from .invocation_policy import _snapshot_invocation_policy_bindings
+
+            invocation_policy_bindings = _snapshot_invocation_policy_bindings(
+                invocation_policy_bindings
+            )
+        self._configured_invocation_policy_bindings = invocation_policy_bindings
         self._factory = factory
         self._closed = False
         self._configured_nominal_sources: tuple[object, ...] = ()
@@ -972,6 +984,16 @@ class TaskProgramEnvironmentAdapter:
             raise TypeError("program must be exactly CompiledTaskProgram.")
         if type(invocation_policy_bindings) is not tuple:
             raise TypeError("invocation_policy_bindings must be an exact tuple.")
+        if self._configured_invocation_policy_bindings:
+            if (
+                invocation_policy_bindings
+                and invocation_policy_bindings
+                != self._configured_invocation_policy_bindings
+            ):
+                raise ValueError(
+                    "Explicit bindings conflict with configured invocation policies."
+                )
+            invocation_policy_bindings = self._configured_invocation_policy_bindings
         policies = None
         if invocation_policy_bindings:
             from .invocation_policy import BoundInvocationPolicies

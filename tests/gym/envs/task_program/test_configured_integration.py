@@ -403,6 +403,124 @@ def _deployment_from_path(path: Path) -> ConfiguredTaskProgramDeployment:
     )
 
 
+def test_complete_occurrence_presets_are_owned_sealed_and_preflighted() -> None:
+    """Two explicit policies preserve the program and reject stale selections."""
+    from embodichain.lab.task_program.integrations import task_program_fingerprint
+
+    path = _config_path("rubiks_cube_pick_place")
+    physical = _physical_components(path, _gym_config("rubiks_cube_pick_place"))
+    refs = physical.config["task_program"]
+    program_path, integration, policy = _resolve_task_program_components(
+        refs, base_dir=path.parent
+    )
+    declaration = {
+        "program": {"inline": load_config(program_path)},
+        "integration": {"inline": deepcopy(integration)},
+        "execution_policy": {"inline": deepcopy(policy)},
+    }
+
+    def load(values):
+        return load_configured_task_program_deployment(
+            task_program=values,
+            skill_profile=physical.embodiment_skill_profile,
+            base_dir=path.parent,
+        )
+
+    baseline = load(declaration)
+    program = baseline.integration.registration.catalog.preflight(
+        baseline.load_program()
+    )
+    fingerprint = task_program_fingerprint(program)
+    segments = tuple(program.iter_segments())
+    authored = deepcopy(declaration)
+    named = []
+    for preset_id, count in (("first_policy", 61), ("second_policy", 81)):
+        value = {
+            key: deepcopy(policy[key])
+            for key in (
+                "motion",
+                "tracking",
+                "recovery",
+                "workflow_recovery",
+                "runner",
+                "effect_assurance",
+            )
+        }
+        value["preset_id"] = preset_id
+        value["motion"]["sample_count"] = count
+        named.append(value)
+    authored["execution_policy"]["inline"]["invocation_presets"] = named
+    bindings = [
+        {
+            "program_fingerprint": fingerprint,
+            "invocation_id": f"{program.program_id}/{segment.segment_id}:0",
+            "preset_id": name,
+        }
+        for segment, name in zip(segments[:2], ("first_policy", "second_policy"))
+    ]
+    authored["integration"]["inline"]["invocation_policy_bindings"] = bindings
+    selected = load(authored)
+    compiled = selected.integration.registration.catalog.preflight(
+        selected.load_program(),
+        invocation_policy_bindings=selected.invocation_policy_bindings,
+    )
+    assert task_program_fingerprint(compiled) == fingerprint
+    assert len(selected.invocation_policy_bindings) == 2
+    assert [binding.preset_id for binding in selected.invocation_policy_bindings] == [
+        "first_policy",
+        "second_policy",
+    ]
+    presets = {
+        value.preset_id: value
+        for value in selected.integration.registration.robot_profile_binding.presets
+    }
+    assert presets["first_policy"].motion_policy.sample_count == 61
+    assert presets["second_policy"].motion_policy.sample_count == 81
+    assert (
+        selected.integration.integration_fingerprint
+        != baseline.integration.integration_fingerprint
+    )
+    changed = deepcopy(authored)
+    changed["integration"]["inline"]["invocation_policy_bindings"][0][
+        "preset_id"
+    ] = "second_policy"
+    assert (
+        load(changed).integration.integration_fingerprint
+        != selected.integration.integration_fingerprint
+    )
+    bindings[0]["preset_id"] = "mutated_caller_copy"
+    named[0]["motion"]["sample_count"] = 999
+    assert selected.invocation_policy_bindings[0].preset_id == "first_policy"
+    assert presets["first_policy"].motion_policy.sample_count == 61
+    assert (
+        task_program_fingerprint(
+            selected.integration.registration.catalog.preflight(
+                selected.load_program(),
+                invocation_policy_bindings=selected.invocation_policy_bindings,
+            )
+        )
+        == fingerprint
+    )
+
+    # Each invalid authored form uses an untouched snapshot, before live assembly.
+    pristine = deepcopy(changed)
+    for invalid in ("preset", "duplicate", "fingerprint", "incomplete"):
+        candidate = deepcopy(pristine)
+        values = candidate["integration"]["inline"]["invocation_policy_bindings"]
+        if invalid == "preset":
+            values[0]["preset_id"] = "unknown_policy"
+        elif invalid == "duplicate":
+            values.append(deepcopy(values[0]))
+        elif invalid == "fingerprint":
+            values[0]["program_fingerprint"] = "0" * 64
+        else:
+            candidate["execution_policy"]["inline"]["invocation_presets"][0].pop(
+                "runner"
+            )
+        with pytest.raises((ValueError, KeyError)):
+            load(candidate)
+
+
 def _tableware_config_path(task_name: str) -> Path:
     """Return one config-defined tableware task's Gym config path."""
     return _TABLEWARE_CONFIG_DIRECTORY / task_name / "task.cobotmagic.yaml"

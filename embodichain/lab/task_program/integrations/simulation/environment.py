@@ -108,6 +108,7 @@ from .policies import SimulationSegmentPolicyPort
 from .stability import SimulationStabilityConditionCfg
 
 if TYPE_CHECKING:
+    from ..invocation_policy import InvocationPolicyBinding
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
@@ -1485,8 +1486,14 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             )
         return validator
 
-    def create_adapter(self) -> TaskProgramEnvironmentAdapter:
+    def create_adapter(
+        self,
+        *,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+    ) -> TaskProgramEnvironmentAdapter:
         """Create the exact Gym adapter with shared simulation policy ports."""
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
         self._owner_token.require_open()
         try:
             return TaskProgramEnvironmentAdapter(
@@ -1494,6 +1501,11 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 step_dt=self._step_dt,
                 joint_command_mode=self._joint_command_mode,
                 registration=self._registration,
+                **(
+                    {"invocation_policy_bindings": invocation_policy_bindings}
+                    if invocation_policy_bindings
+                    else {}
+                ),
             )
         except Exception:
             self.close_runtime_resources()
@@ -1603,6 +1615,8 @@ class SimulationTaskProgramAdapterFactory:
             calibration settings. No geometry is captured by these factories.
         planner_config: Optional execution-policy planner declaration. The live
             factory supplies the selected robot and simulation instance values.
+        invocation_policy_bindings: Immutable configured occurrence selections
+            passed to each freshly constructed adapter.
     """
 
     _registration: SimulationTaskProgramRegistration
@@ -1612,6 +1626,7 @@ class SimulationTaskProgramAdapterFactory:
     ]
     _planner_config: Mapping[str, object] | None
     _hand_geometry_cfg_factories: Mapping[str, Callable[[], RobotHandGeometryCfg]]
+    _invocation_policy_bindings: tuple[InvocationPolicyBinding, ...]
 
     def __init__(
         self,
@@ -1624,6 +1639,7 @@ class SimulationTaskProgramAdapterFactory:
             Mapping[str, Callable[[], RobotHandGeometryCfg]] | None
         ) = None,
         planner_config: Mapping[str, object] | None = None,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
     ) -> None:
         if type(registration) is not SimulationTaskProgramRegistration:
             raise TypeError(
@@ -1636,6 +1652,17 @@ class SimulationTaskProgramAdapterFactory:
             raise TypeError("grasp_pose_generator_factories must be a mapping or None.")
         if planner_config is not None and not isinstance(planner_config, Mapping):
             raise TypeError("planner_config must be a mapping or None.")
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
+        if invocation_policy_bindings:
+            from ..invocation_policy import _snapshot_invocation_policy_bindings
+
+            invocation_policy_bindings = _snapshot_invocation_policy_bindings(
+                invocation_policy_bindings
+            )
+        object.__setattr__(
+            self, "_invocation_policy_bindings", invocation_policy_bindings
+        )
         factories: dict[str, Callable[[], GraspPoseGenerator]] = {}
         for target_id, factory in (grasp_pose_generator_factories or {}).items():
             if (
@@ -1732,6 +1759,8 @@ class SimulationTaskProgramAdapterFactory:
             kwargs["hand_geometry_cfgs"] = geometry_cfgs
         if self._planner_config is not None:
             kwargs["planner_config"] = self._planner_config
+        if self._invocation_policy_bindings:
+            kwargs["invocation_policy_bindings"] = self._invocation_policy_bindings
         return create_simulation_task_program_adapter(environment, **kwargs)
 
 
@@ -1746,6 +1775,7 @@ def create_simulation_task_program_adapter(
     hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
     translation_threshold: float = 1.0e-4,
     rotation_threshold: float = 1.0e-3,
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
 ) -> TaskProgramEnvironmentAdapter:
     """Create a complete production adapter from one standard Gym environment.
 
@@ -1766,10 +1796,19 @@ def create_simulation_task_program_adapter(
         hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint target ID.
         translation_threshold: Scene translation revision threshold.
         rotation_threshold: Scene rotation revision threshold.
+        invocation_policy_bindings: Immutable configured occurrence selections.
 
     Returns:
         Complete production Task Program environment adapter.
     """
+    if type(invocation_policy_bindings) is not tuple:
+        raise TypeError("invocation_policy_bindings must be an exact tuple.")
+    if invocation_policy_bindings:
+        from ..invocation_policy import _snapshot_invocation_policy_bindings
+
+        invocation_policy_bindings = _snapshot_invocation_policy_bindings(
+            invocation_policy_bindings
+        )
     factory = SimulationTaskProgramFactory.from_environment(
         environment,
         registration=registration,
@@ -1781,7 +1820,13 @@ def create_simulation_task_program_adapter(
         translation_threshold=translation_threshold,
         rotation_threshold=rotation_threshold,
     )
-    return factory.create_adapter()
+    return factory.create_adapter(
+        **(
+            {"invocation_policy_bindings": invocation_policy_bindings}
+            if invocation_policy_bindings
+            else {}
+        )
+    )
 
 
 __all__: list[str] = []

@@ -81,6 +81,24 @@ class InvocationPolicyBinding:
         _identifier(self.preset_id, "preset_id")
 
 
+def _snapshot_invocation_policy_bindings(
+    values: tuple[InvocationPolicyBinding, ...],
+) -> tuple[InvocationPolicyBinding, ...]:
+    """Own one exact immutable declaration tuple before program validation."""
+    if type(values) is not tuple or not all(
+        type(item) is InvocationPolicyBinding for item in values
+    ):
+        raise TypeError("invocation_policy_bindings must be an exact typed tuple.")
+    if len({item.invocation_id for item in values}) != len(values):
+        raise ValueError("Duplicate invocation policy binding.")
+    return tuple(
+        InvocationPolicyBinding(
+            item.program_fingerprint, item.invocation_id, item.preset_id
+        )
+        for item in values
+    )
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class BoundInvocationPolicies:
     """Own validated occurrence selections without retaining mutable runtime state.
