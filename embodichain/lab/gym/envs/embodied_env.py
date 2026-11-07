@@ -282,7 +282,9 @@ class EmbodiedEnvCfg(EnvCfg):
     """Meaning of episode rollout actions, independently of the expert schema.
 
     ``policy_request`` stores the flat ActionManager input and requires an
-    ActionManager. It also enables raw-policy recording without a DatasetManager.
+    ActionManager. Managed position-only experts record the converted manager
+    request while retaining their exact FK execution target. It also enables
+    raw-policy recording without a DatasetManager.
     The default preserves active-joint expert-controller recording.
     """
 
@@ -2555,6 +2557,8 @@ class EmbodiedEnv(BaseEnv):
             if getattr(self, "_step_uses_action_manager", False):
                 self.action_manager.apply_action()
                 self._last_action_trace = self.action_manager.action_trace()
+                if getattr(self, "_record_raw_actions", False):
+                    return self.action_manager.action
                 return action.value
             return EmbodiedEnv._apply_controller_action(self, action.value)
         action_manager = getattr(self, "action_manager", None)
@@ -2744,7 +2748,11 @@ class EmbodiedEnv(BaseEnv):
             getattr(self, "_trajectory_action_kind", None) == "policy"
         )
         policy_recording = bool(getattr(self, "_record_raw_actions", False))
-        if is_controller_action and (policy_recording or policy_trajectory):
+        if (
+            is_controller_action
+            and not managed_expert
+            and (policy_recording or policy_trajectory)
+        ):
             incompatible = []
             if policy_recording:
                 incompatible.append("policy action recording")
@@ -2760,6 +2768,7 @@ class EmbodiedEnv(BaseEnv):
         record_controller_targets = (
             self._traj_buffer is not None
             and not policy_trajectory
+            and not (managed_expert and policy_recording)
             and getattr(self, "expert_action_spec", None) is not None
             and (
                 is_controller_action
@@ -2777,16 +2786,6 @@ class EmbodiedEnv(BaseEnv):
         if self.action_manager is not None and (
             not is_controller_action or managed_expert
         ):
-            if policy_recording:
-                explicit_policy = getattr(self, "_explicit_policy_rollout", False)
-                if explicit_policy:
-                    self._validate_policy_rollout_action(action)
-                if self.dataset_manager is not None:
-                    self.dataset_manager.validate_policy_action(action)
-                elif not explicit_policy:
-                    raise RuntimeError(
-                        "Policy action recording requires an initialized DatasetManager."
-                    )
             if managed_expert:
                 action = self._prepare_controller_action(action)
                 if getattr(self, "_demo_no_auto_reset", False):
@@ -2795,7 +2794,18 @@ class EmbodiedEnv(BaseEnv):
                 full_targets = self.robot.get_qpos().clone()
                 full_targets[:, self.active_joint_ids] = self._active_qpos_command(qpos)
                 self.action_manager.process_joint_targets(full_targets)
-            else:
+            if policy_recording:
+                policy_action = self.action_manager.action if managed_expert else action
+                explicit_policy = getattr(self, "_explicit_policy_rollout", False)
+                if explicit_policy:
+                    self._validate_policy_rollout_action(policy_action)
+                if self.dataset_manager is not None:
+                    self.dataset_manager.validate_policy_action(policy_action)
+                elif not explicit_policy:
+                    raise RuntimeError(
+                        "Policy action recording requires an initialized DatasetManager."
+                    )
+            if not managed_expert:
                 self.action_manager.process_action(action)
             if getattr(self, "_demo_no_auto_reset", False):
                 self.action_manager.mask_inactive(self._demo_active_mask)
@@ -2850,7 +2860,7 @@ class EmbodiedEnv(BaseEnv):
             )
         # Do not retain malformed actions: validation, masking and trajectory
         # encoding above are the ownership boundary for raw-action history.
-        if not is_controller_action:
+        if not is_controller_action or managed_expert:
             self._record_raw_action(raw_action)
         if is_controller_action:
             return ControllerAction(value=action, metadata=controller_metadata)
