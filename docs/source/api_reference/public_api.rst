@@ -21,6 +21,17 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.cli.expansion
+-------------------------
+
+Offline job preflight, run, resume and verified inspection commands.
+
+.. currentmodule:: embodichain.cli.expansion
+
+.. autosummary::
+
+   main
+
 embodichain.compute.geometry.shading
 ------------------------------------
 
@@ -314,6 +325,34 @@ embodichain.data_pipeline.depth_video
    DEPTH_METER_UNIT
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
+
+embodichain.data_pipeline.recording.media
+-----------------------------------------
+
+Byte-bounded owned frame chunks with checksums, timestamps and final manifests.
+
+.. currentmodule:: embodichain.data_pipeline.recording.media
+
+.. autosummary::
+
+   MediaSpool
+   verify_media_manifest
+
+
+.. autosummary::
+
+   MediaFrameReader
+
+embodichain.data_pipeline.recording.schema
+------------------------------------------
+
+Simulation-independent camera dimensions used to reconstruct recording features from frozen evidence.
+
+.. currentmodule:: embodichain.data_pipeline.recording.schema
+
+.. autosummary::
+
+   RecordedCamera
 
 embodichain.gen_sim.asset_engine.cli.start
 -----------------------------------------------
@@ -1233,6 +1272,349 @@ spellings are aliases of the TaskSpec functions.
    validate_task_spec
    validate_task_template
 
+embodichain.lab.expansion
+------------------------
+
+.. currentmodule:: embodichain.lab.expansion
+
+Compatible-cohort orchestration for explicitly supplied host and writer ports.
+The engine reuses the canonical session for admission, budgets and receipts.
+``ExpansionEngine.from_job(ExpansionRunCfg(...))`` selects the native Gym host,
+Task Program with native or pinned prototype motion, bounded media, render-only variants,
+and durable episode-boundary recovery. See the offline expansion example.
+
+.. autosummary::
+
+   ExpansionEngine
+   ExpansionJobCfg
+   ExpansionAssignment
+   ExpansionHost
+   EpisodeSink
+   ExpansionSession
+
+.. autosummary::
+
+   ExpansionRunCfg
+   load_expansion_job
+   preflight_expansion_job
+   run_expansion_job
+   inspect_expansion_job
+   ArtifactEpisodeSink
+   EpisodeCandidate
+   ExpertSource
+   ExpansionOperator
+   ExpansionContext
+   OperatorCapability
+   PinnedExpertSource
+   UniformRangeOperator
+   JointSceneSource
+
+.. autosummary::
+
+   ExpansionEpisode
+
+
+.. autosummary::
+
+   resume_expansion_export
+   ExpansionRecipe
+   RecipeOperation
+   BatchCompatibility
+   PreparedEpisodeWorkItem
+   ExpansionWorkItem
+   ExpansionRecipeSource
+   PreparingExpansionHost
+   GymExpansionHost
+   ExpansionJournal
+   RecipeAttempt
+   ArtifactReference
+   EpisodeArtifactManifest
+   load_expansion_episode
+   resolve_expansion_job
+   build_expansion_report
+
+
+.. autosummary::
+
+   ExpansionSessionCfg
+   ExpansionCoverage
+   EpisodeCoverage
+
+embodichain.lab.expansion.artifacts
+-----------------------------------
+
+Typed content-addressed numeric, media and source references. Paths remain contained within the artifact directory so bundles can move independently of their producing job.
+
+.. currentmodule:: embodichain.lab.expansion.artifacts
+
+.. autosummary::
+
+   ArtifactReference
+   EpisodeArtifactManifest
+   resolve_artifact_path
+
+embodichain.lab.expansion.configured
+------------------------------------
+
+Closed file configuration resolves existing deployments without changing backend ownership.
+
+.. currentmodule:: embodichain.lab.expansion.configured
+
+.. autosummary::
+
+   ExpansionRunCfg
+   load_expansion_job
+   preflight_expansion_job
+
+
+.. autosummary::
+
+   resolve_expansion_job
+
+embodichain.lab.expansion.contracts
+-----------------------------------
+
+Immutable source, candidate, numerical episode and commit identities shared with motion expansion. Old motion import paths remain compatible.
+
+.. currentmodule:: embodichain.lab.expansion.contracts
+
+.. autosummary::
+
+   EpisodeCandidate
+   SceneCase
+   MotionSnapshot
+   TrajectoryPhase
+   TrajectoryTemplate
+   CandidateIdentity
+   ProposalRequest
+   CandidateSpec
+   CandidateTrajectoryBatch
+   ValidationCheck
+   ValidationResult
+   ExpertEpisode
+   CommitReceipt
+
+.. autosummary::
+
+   ExpansionEpisode
+
+embodichain.lab.expansion.coverage
+----------------------------------
+
+Coverage reservations belong to the session lifecycle. The default policy counts confirmed episode identities; trajectory geometry and manipulability require the explicit motion-owned policy.
+
+.. currentmodule:: embodichain.lab.expansion.coverage
+
+.. autosummary::
+
+   ExpansionCoverage
+   EpisodeCoverage
+
+embodichain.lab.expansion.engine
+-------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.engine
+
+Candidates must be proposed in the supplied session before enqueueing.
+``preflight`` groups their existing compatibility keys without changing state.
+``run`` reserves payload capacity before invoking the host once per cohort.
+The host reports actual starts independently for each row and returns measured
+T+1 observations with T submitted commands. Rejected rows do not commit.
+
+Accepted payloads are staged before writes begin. When a submission is ambiguous,
+obtain its final receipt from the writer and pass it to ``resolve_receipt``;
+``flush`` then submits the remaining staged rows without another physical rollout.
+These methods reconcile supplied in-process ports. Configured jobs instead use
+``resume`` to verify disk receipts, repair frozen writes and restart interrupted
+attempts at episode boundaries. Native failures invalidate the active host.
+
+.. autosummary::
+
+   ExpansionJobCfg
+   ExpansionAssignment
+   ExpansionHost
+   EpisodeSink
+   ExpansionEngine
+
+
+.. autosummary::
+
+   PreparedEpisodeWorkItem
+   ExpansionWorkItem
+   ExpansionRecipeSource
+   PreparingExpansionHost
+
+embodichain.lab.expansion.export
+--------------------------------
+
+Stream confirmed numeric episodes and observation children through the existing LeRobot recorder. A finalized export attests the exact physical and visual episode set. Portable bundles retain relative media, calibration and source references; frame reads do not materialize an entire image trajectory.
+
+.. currentmodule:: embodichain.lab.expansion.export
+
+.. autosummary::
+
+   export_expansion_lerobot
+
+embodichain.lab.expansion.host
+------------------------------
+
+The native Gym adapter owns World preparation, parameter readback and Task Program execution. Admission, receipt handling and retries remain in the common engine.
+
+.. currentmodule:: embodichain.lab.expansion.host
+
+.. autosummary::
+
+   GymExpansionHost
+
+embodichain.lab.expansion.journal
+---------------------------------
+
+Persist logical recipe identity separately from physical attempt and invocation identity. Resource revisions may change batch capacity without changing sampled conditions.
+
+.. currentmodule:: embodichain.lab.expansion.journal
+
+.. autosummary::
+
+   RecipeAttempt
+   ExpansionJournal
+
+embodichain.lab.expansion.persistence
+-------------------------------------
+
+Stage immutable numeric evidence and archived source attachments before publishing a confirmed commit receipt. Recovery retries the same artifact without replaying physics.
+
+.. currentmodule:: embodichain.lab.expansion.persistence
+
+.. autosummary::
+
+   ArtifactEpisodeSink
+
+
+.. autosummary::
+
+   load_expansion_episode
+
+embodichain.lab.expansion.program
+---------------------------------
+
+Drive either one vector Task Program or independently bound source runtimes through one World loop. Finished and unused rows contribute no padding samples.
+
+.. currentmodule:: embodichain.lab.expansion.program
+
+.. autosummary::
+
+   ProgramBatchResult
+   collect_program_batch
+   collect_vector_program
+
+
+.. autosummary::
+
+   TaskProgramBatchExecutor
+
+embodichain.lab.expansion.recipes
+---------------------------------
+
+Source-pinned, versioned random streams depend on logical candidate identity rather than arena assignment. Operators declare resource scope and return immutable changes.
+
+.. currentmodule:: embodichain.lab.expansion.recipes
+
+.. autosummary::
+
+   ExpansionContext
+   ExpertSource
+   PinnedExpertSource
+   OperatorCapability
+   ExpansionOperator
+   UniformRangeOperator
+
+
+.. autosummary::
+
+   BatchCompatibility
+   RecipeOperation
+   ExpansionRecipe
+
+embodichain.lab.expansion.reporting
+-----------------------------------
+
+Report trajectory geometry, actual physical conditions, visual descendants and source ancestry separately. Coverage is diagnostic and does not silently alter admission.
+
+.. currentmodule:: embodichain.lab.expansion.reporting
+
+.. autosummary::
+
+   build_expansion_report
+
+embodichain.lab.expansion.scene
+-------------------------------
+
+Reuse complete scene/workspace joint candidates without splitting their conditional geometry. Every applied proposal requires new measured execution evidence.
+
+.. currentmodule:: embodichain.lab.expansion.scene
+
+.. autosummary::
+
+   JointSceneSource
+   apply_joint_scene_candidates
+
+embodichain.lab.expansion.session
+---------------------------------
+
+Canonical source-independent candidate, budget, evidence and receipt state machine. Legacy motion imports re-export this exact class, and domain configuration adapters preserve their original coverage behavior.
+
+.. currentmodule:: embodichain.lab.expansion.session
+
+.. autosummary::
+
+   ExpansionSession
+   SessionConfigAdapter
+
+embodichain.lab.expansion.session_cfg
+-------------------------------------
+
+Source-independent session limits. These settings are separate from deployment-owned simulation configuration and from domain-specific trajectory augmentation settings.
+
+.. currentmodule:: embodichain.lab.expansion.session_cfg
+
+.. autosummary::
+
+   ExpansionSessionCfg
+   ExpansionExecutionCfg
+   ExpansionValidationCfg
+   ExpansionCollectionCfg
+   ExpansionPersistenceCfg
+
+embodichain.lab.expansion.visual
+--------------------------------
+
+Apply one native visual profile per compatible World cohort. Render complete recorded scene states with physics disabled and preserve physical parent lineage.
+
+.. currentmodule:: embodichain.lab.expansion.visual
+
+.. autosummary::
+
+   load_visual_profiles
+   render_observation_variants
+   inspect_observation_variants
+
+embodichain.lab.expansion.workflow
+----------------------------------
+
+Assemble the common engine, native host, durable journal and independently recoverable render/export stages. Frozen export recovery needs neither source configuration nor a simulator.
+
+.. currentmodule:: embodichain.lab.expansion.workflow
+
+.. autosummary::
+
+   run_expansion_job
+   inspect_expansion_job
+
+
+.. autosummary::
+
+   resume_expansion_export
+
 embodichain.lab.gym.envs.base_env
 ---------------------------------
 
@@ -1270,6 +1652,63 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.motion.expansion.session_coverage
+-----------------------------------------------------
+
+Adapt legacy phase-aligned geometry, timing and measured manipulability to the canonical session coverage protocol. Existing trajectory configurations select this adapter automatically.
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.session_coverage
+
+.. autosummary::
+
+   TrajectorySessionCoverage
+
+embodichain.lab.sim.scene.operations
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.operations
+
+``apply_changes_batch`` accepts an environment-indexed change set for each row
+of a scene view. It preflights every row before any mutation, then batches writes
+by entity. Neighboring rows remain untouched; no operation steps physics.
+
+.. autosummary::
+
+   apply_changes_batch
+
+.. currentmodule:: embodichain.lab.sim.scene
+
+.. autosummary::
+
+   apply_changes_batch
+
+.. autosummary::
+
+   restore_render_state
+
+embodichain.lab.sim.scene.physics
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.physics
+
+Capture and restore measured mass, principal inertia and friction for explicitly
+selected dynamic rigid bodies on Default or Newton. Applying a mass scale also
+scales inertia from the original baseline, so repeated application does not
+accumulate. Every parameter is preflighted before writes; actual backend readback
+must match the request. These operations do not step physics or verify task success.
+Native failures may leave partial changes, requiring the host to stop execution.
+
+.. autosummary::
+
+   RigidPhysicsState
+   capture_rigid_physics
+   apply_rigid_physics
+   restore_rigid_physics
+
+.. autosummary::
+
+   capture_physics_properties
 
 embodichain.lab.sim.motion.planners.curobo.payload
 --------------------------------------------------
@@ -1547,6 +1986,12 @@ bindings and control-part/pad-link declarations. NativeGripEvidenceFactory uses
 the public control-part provider injection API and preserves its provider ID and
 revision. Each provider owns its observer and bounded raw-query trace.
 
+``capture_grip_observation`` performs one requested bilateral observation and
+returns an owned batch plus the exact query snapshot. The standard simulation
+factory forwards this capability through its lifetime and explicit runtime-scope
+guards; native sensor and engine ownership are checked around acquisition.
+It does not invoke effect collection or refresh a second contact sample.
+
 Physical interpretation revision 1 preserves the opposed positive-impulse
 criterion and absent-positive-contact observations. Revision 2 requires explicit
 opening calibration and opt-in; its one-sided open-hand release observation is
@@ -1613,11 +2058,20 @@ a historical pose or falls back to a live pose/previous frame.
 The result owns physical metadata and availability only; TaskSpec and Task Engine
 are not dependencies of this Lab collector.
 
+``SimulationStateObservationCollector.capture_current_grip`` requires the explicit
+``ObservationManager`` dependency and its current completed row boundaries. It
+selects the runtime's declared ``GripEvidenceObservationPort``, retaining raw
+validity, acquisition errors, actor identities and query revision. Environment,
+episode, robot, object, provider and clock ownership are checked around the read.
+Its timestamp describes the collection query clock; it does not claim that native
+impulses were refreshed at that time or establish task acceptance.
+
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
 
 .. autosummary::
 
    SimulationSupportObservationCollector
+   SimulationStateObservationCollector
 
 .. autoclass:: SimulationSupportObservationCollector
    :members:
@@ -4136,6 +4590,15 @@ are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrat
 
    GripContactObserver
    DriverOpeningBinding
+   GripEvidenceObservationPort
+
+``GripEvidenceObservationPort`` exposes one owned bilateral acquisition and its
+exact raw query without exposing the underlying provider or observer. Forwarders
+preserve their host and runtime lifetime checks. ``snapshot_latest_query`` rejects
+unrecorded or superseded query ordinals instead of substituting an older trace.
+
+.. autoclass:: GripEvidenceObservationPort
+   :members:
 
 ``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
 creating a per-environment reader. It performs no qpos read during binding;
@@ -4201,6 +4664,8 @@ State observation acquisition
 collects current poses or explicit joint positions without interpreting task
 acceptance. Recorded poses read the canonical ObservationManager's raw history;
 invalid finite values remain unavailable and original temporal metadata is kept.
+Missing source timestamps remain unavailable per environment. Owner replacement
+during capture raises before a packet can be published.
 Current reads work without history. Native owners, episodes and clocks cannot be
 substituted, and recorded joint claims require the original executed policy.
 
@@ -4212,3 +4677,164 @@ substituted, and recorded joint claims require the original executed policy.
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_condition_evidence_binding
 
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_pour_evidence_binding
+
+
+embodichain.gen_sim.task_spec.coordinated_evidence
+--------------------------------------------------
+
+This normative entry point evaluates normalized held-object facts using an explicit manipulation binding. Raw actor, query, receipt and phase validation belongs to the Lab adapter.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.coordinated_evidence
+
+.. autosummary::
+
+   evaluate_coordinated_hold_evidence
+
+.. autofunction:: evaluate_coordinated_hold_evidence
+
+
+embodichain.gen_sim.task_spec.handover_evidence
+-----------------------------------------------
+
+This normative entry point evaluates normalized held-object facts using an explicit manipulation binding. Raw actor, query, receipt and phase validation belongs to the Lab adapter.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.handover_evidence
+
+.. autosummary::
+
+   evaluate_handover_evidence
+
+.. autofunction:: evaluate_handover_evidence
+
+
+embodichain.gen_sim.task_spec.manipulation_evidence
+---------------------------------------------------
+
+Explicit task acceptance compares normalized measurements with sealed bounds. Missing acquisition remains unavailable; valid measured negatives fail. Runtime monitor output never defines task thresholds.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.manipulation_evidence
+
+.. autosummary::
+
+   HoldAcceptanceCriteria
+   ManipulationEvidenceBinding
+   evaluate_manipulation_evidence
+
+.. autoclass:: HoldAcceptanceCriteria
+   :members:
+
+.. autoclass:: ManipulationEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_manipulation_evidence
+
+
+embodichain.lab.evidence
+------------------------
+
+Owned physical values retain row identity, validity, missing reasons and observation revisions. JSON snapshots are independent and encode nonfinite observations as null without discarding validity.
+
+.. currentmodule:: embodichain.lab.evidence
+
+.. autosummary::
+
+   PhysicalObservationStamp
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+   PhysicalEvidenceRequest
+
+.. autoclass:: PhysicalObservationStamp
+   :members:
+
+.. autoclass:: PhysicalEvidenceBatch
+   :members:
+
+.. autoclass:: PhysicalEvidenceFrame
+   :members:
+
+.. autoclass:: PhysicalEvidenceRequest
+   :members:
+
+
+embodichain.lab.task_program.integrations.evidence
+--------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   normalize_handover_evidence
+   CoordinatedHoldEvidenceBinding
+   normalize_coordinated_hold_evidence
+   held_observation_request
+   resolve_hold_observation_condition
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_handover_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_hold_evidence
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: resolve_hold_observation_condition
+
+
+embodichain.lab.task_program.integrations.evidence.coordinated_evidence
+-----------------------------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.coordinated_evidence
+
+.. autosummary::
+
+   CoordinatedHoldEvidenceBinding
+   normalize_coordinated_hold_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_hold_evidence
+
+
+embodichain.lab.task_program.integrations.evidence.handover_evidence
+--------------------------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.handover_evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   normalize_handover_evidence
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_handover_evidence
+
+
+embodichain.lab.task_program.integrations.evidence.observation_requests
+-----------------------------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.observation_requests
+
+.. autosummary::
+
+   held_observation_request
+   resolve_hold_observation_condition
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: resolve_hold_observation_condition

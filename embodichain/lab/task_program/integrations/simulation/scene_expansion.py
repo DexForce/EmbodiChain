@@ -225,53 +225,10 @@ class SimulationSceneExpansionHost:
         self._view.check_topology()
 
     def _measure_physical_properties(self) -> dict[str, torch.Tensor]:
-        """Own the live physical parameters that must stay fixed across resets."""
-        properties = {}
-        for kind, uid, entity in self._entities():
-            # Static bodies deliberately have no RigidBodyData. Their material
-            # parameters remain measurable, but dynamic mass properties do not.
-            values = (
-                {}
-                if kind == "rigid_object" and entity.body_type == "static"
-                else {
-                    name: getattr(entity.body_data, name)
-                    for name in ("mass", "inertia", "com_pose")
-                }
-            )
-            if kind == "rigid_object":
-                values.update(
-                    friction=entity.get_friction(env_ids=[0]),
-                    damping=entity.get_damping(env_ids=[0]),
-                )
-            else:
-                values.update(
-                    {
-                        name: getattr(entity.body_data, name)
-                        for name in (
-                            "joint_stiffness",
-                            "joint_damping",
-                            "joint_friction",
-                            "joint_armature",
-                            "qpos_limits",
-                            "qvel_limits",
-                        )
-                    }
-                )
-            for name, value in values.items():
-                if (
-                    not isinstance(value, torch.Tensor)
-                    or not value.is_floating_point()
-                    or value.ndim == 0
-                    or value.shape[0] != 1
-                    or bool(torch.isnan(value).any())
-                    or (
-                        not name.endswith("limits")
-                        and not bool(torch.isfinite(value).all())
-                    )
-                ):
-                    raise ValueError(f"Cannot measure physical parameter {uid}.{name}")
-                properties[f"{uid}.{name}"] = value.detach().clone()
-        return properties
+        """Own the live physical parameter baseline for this scene selection."""
+        from embodichain.lab.sim.scene.physics import capture_physics_properties
+
+        return capture_physics_properties(self._view)
 
     def _check_physical_properties(self) -> None:
         actual = self._measure_physical_properties()

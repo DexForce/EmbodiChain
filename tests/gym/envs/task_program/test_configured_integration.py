@@ -1307,6 +1307,20 @@ def test_axis_align_and_relative_place_configs_use_closed_decoders() -> None:
     torch.testing.assert_close(axis_options.target_axis, torch.tensor((0.0, 0.0, 1.0)))
 
 
+def test_initial_lift_is_pickup_only() -> None:
+    options = _decode_action_options(
+        {"kind": "pick_up", "initial_lift_height": 0.20}, path="options"
+    )
+    assert options.initial_lift_height == pytest.approx(0.20)
+
+    with pytest.raises(ValueError, match="initial_lift_height"):
+        _decode_action_options(
+            {"kind": "axis_align", "initial_lift_height": 0.20}, path="options"
+        )
+    with pytest.raises(ValueError, match="initial_lift_height"):
+        AxisAlignOptions(initial_lift_height=0.20)
+
+
 def test_coordinated_transport_config_decodes_closed_routes_and_options() -> None:
     """Configured transport data round-trips through the strict allowlist."""
     identity = [
@@ -2603,7 +2617,7 @@ def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
 
 @pytest.mark.parametrize(
     ("variant", "arm_dof", "velocity"),
-    [("dual_ur5", 6, 0.5), ("tianji_marvin", 7, 0.5)],
+    [("dual_ur5", 6, 0.5), ("tianji_marvin", 7, 0.2)],
 )
 def test_configured_motion_budgets_reach_planner_options_and_metadata(
     variant: str, arm_dof: int, velocity: float
