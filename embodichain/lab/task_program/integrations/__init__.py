@@ -14,85 +14,15 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Explicit provider, environment, and simulation Task Program integrations."""
+"""Explicit provider, environment, and simulation Task Program integrations.
+
+Public owners load on access; data-only evidence imports create no runtime.
+"""
 
 from __future__ import annotations
 
-from .environment import (
-    TaskProgramAdapterFactory,
-    TaskProgramEnvironmentAdapter,
-    TaskProgramEnvironmentFactory,
-    TaskProgramRuntimeAssembly,
-    PlanningObservationPort,
-)
-from .expansion import (
-    CombinedTaskProgramExpansionFactory,
-    TaskProgramExpansionRecord,
-    TaskProgramMappedRetimeFactory,
-    TaskProgramMappedRetimeRecord,
-    TaskProgramSameGridExpansionFactory,
-    TaskProgramSameGridExpansionRecord,
-    TaskProgramSourceAdapter,
-)
-from .simulation import (
-    AntipodalGraspAffordanceBinding,
-    ContainerAffordanceBinding,
-    ControlPartCommandPreset,
-    ControlPartEndpointBinding,
-    ControlPartResourceBinding,
-    RigidizedArticulationAntipodalGraspBinding,
-    SimulationArticulationBinding,
-    SimulationArticulationLinkBinding,
-    SimulationRigidizedArticulationObjectBinding,
-    SimulationRigidObjectBinding,
-    SimulationRobotSkillProfileBinding,
-    SimulationSceneBinding,
-    SupportSurfaceAffordanceBinding,
-)
-from .catalog import (
-    TaskProgramIntegrationCatalog,
-    IntegrationFingerprintMismatch,
-    SimulationTaskProgramRegistration,
-)
-from .composition import (
-    ConfiguredTaskProgramDeployment,
-    ConfiguredTaskProgramIntegration,
-    load_configured_task_program_deployment,
-    compile_configured_task_program,
-)
-from .extensions import (
-    ControlPartEvidenceProviderDeclaration,
-    ControlPartEvidenceProviderFactory,
-    EndpointAdapterDeclaration,
-    ParallelCommandSafetyValidatorFactory,
-    ParallelSafetyDeclaration,
-    RegisteredSemanticLowererDeclaration,
-    RegisteredSemanticLowererFactory,
-    RegisteredSemanticLowererSceneValidator,
-    RuntimeTransportDeclaration,
-    StandardExtensionDeclarations,
-    VersionedKey,
-)
-from .simulation.environment import (
-    SimulationTaskProgramAdapterFactory,
-    SimulationTaskProgramFactory,
-    create_simulation_task_program_adapter,
-)
-from .simulation.handover import ConfiguredHandOverPoseProvider
-from .simulation.parallel_safety import (
-    CuroboParallelCommandSafetyValidator,
-    CuroboParallelSafetyValidatorFactory,
-)
-from .simulation.policies import (
-    SimulationSegmentPolicyPort,
-    default_simulation_settle_presets,
-)
-
-from .invocation_policy import (
-    BoundInvocationPolicies,
-    InvocationPolicyBinding,
-    task_program_fingerprint,
-)
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "AntipodalGraspAffordanceBinding",
@@ -150,3 +80,158 @@ __all__ = [
     "load_configured_task_program_deployment",
     "compile_configured_task_program",
 ]
+
+_EXPORTS = {
+    "AntipodalGraspAffordanceBinding": (
+        ".simulation",
+        "AntipodalGraspAffordanceBinding",
+    ),
+    "BoundInvocationPolicies": (".invocation_policy", "BoundInvocationPolicies"),
+    "InvocationPolicyBinding": (".invocation_policy", "InvocationPolicyBinding"),
+    "task_program_fingerprint": (".invocation_policy", "task_program_fingerprint"),
+    "ContainerAffordanceBinding": (".simulation", "ContainerAffordanceBinding"),
+    "ControlPartCommandPreset": (".simulation", "ControlPartCommandPreset"),
+    "ControlPartEvidenceProviderDeclaration": (
+        ".extensions",
+        "ControlPartEvidenceProviderDeclaration",
+    ),
+    "ControlPartEvidenceProviderFactory": (
+        ".extensions",
+        "ControlPartEvidenceProviderFactory",
+    ),
+    "ControlPartEndpointBinding": (".simulation", "ControlPartEndpointBinding"),
+    "ControlPartResourceBinding": (".simulation", "ControlPartResourceBinding"),
+    "ConfiguredHandOverPoseProvider": (
+        ".simulation.handover",
+        "ConfiguredHandOverPoseProvider",
+    ),
+    "ConfiguredTaskProgramDeployment": (
+        ".composition",
+        "ConfiguredTaskProgramDeployment",
+    ),
+    "ConfiguredTaskProgramIntegration": (
+        ".composition",
+        "ConfiguredTaskProgramIntegration",
+    ),
+    "CuroboParallelCommandSafetyValidator": (
+        ".simulation.parallel_safety",
+        "CuroboParallelCommandSafetyValidator",
+    ),
+    "CuroboParallelSafetyValidatorFactory": (
+        ".simulation.parallel_safety",
+        "CuroboParallelSafetyValidatorFactory",
+    ),
+    "EndpointAdapterDeclaration": (".extensions", "EndpointAdapterDeclaration"),
+    "TaskProgramAdapterFactory": (".environment", "TaskProgramAdapterFactory"),
+    "TaskProgramEnvironmentAdapter": (".environment", "TaskProgramEnvironmentAdapter"),
+    "TaskProgramEnvironmentFactory": (".environment", "TaskProgramEnvironmentFactory"),
+    "TaskProgramIntegrationCatalog": (".catalog", "TaskProgramIntegrationCatalog"),
+    "TaskProgramSourceAdapter": (".expansion", "TaskProgramSourceAdapter"),
+    "CombinedTaskProgramExpansionFactory": (
+        ".expansion",
+        "CombinedTaskProgramExpansionFactory",
+    ),
+    "TaskProgramExpansionRecord": (".expansion", "TaskProgramExpansionRecord"),
+    "TaskProgramMappedRetimeFactory": (".expansion", "TaskProgramMappedRetimeFactory"),
+    "TaskProgramMappedRetimeRecord": (".expansion", "TaskProgramMappedRetimeRecord"),
+    "TaskProgramSameGridExpansionFactory": (
+        ".expansion",
+        "TaskProgramSameGridExpansionFactory",
+    ),
+    "TaskProgramSameGridExpansionRecord": (
+        ".expansion",
+        "TaskProgramSameGridExpansionRecord",
+    ),
+    "TaskProgramRuntimeAssembly": (".environment", "TaskProgramRuntimeAssembly"),
+    "IntegrationFingerprintMismatch": (".catalog", "IntegrationFingerprintMismatch"),
+    "ParallelCommandSafetyValidatorFactory": (
+        ".extensions",
+        "ParallelCommandSafetyValidatorFactory",
+    ),
+    "ParallelSafetyDeclaration": (".extensions", "ParallelSafetyDeclaration"),
+    "PlanningObservationPort": (".environment", "PlanningObservationPort"),
+    "RegisteredSemanticLowererDeclaration": (
+        ".extensions",
+        "RegisteredSemanticLowererDeclaration",
+    ),
+    "RegisteredSemanticLowererFactory": (
+        ".extensions",
+        "RegisteredSemanticLowererFactory",
+    ),
+    "RegisteredSemanticLowererSceneValidator": (
+        ".extensions",
+        "RegisteredSemanticLowererSceneValidator",
+    ),
+    "RigidizedArticulationAntipodalGraspBinding": (
+        ".simulation",
+        "RigidizedArticulationAntipodalGraspBinding",
+    ),
+    "RuntimeTransportDeclaration": (".extensions", "RuntimeTransportDeclaration"),
+    "SimulationArticulationBinding": (".simulation", "SimulationArticulationBinding"),
+    "SimulationArticulationLinkBinding": (
+        ".simulation",
+        "SimulationArticulationLinkBinding",
+    ),
+    "SimulationRigidizedArticulationObjectBinding": (
+        ".simulation",
+        "SimulationRigidizedArticulationObjectBinding",
+    ),
+    "SimulationTaskProgramAdapterFactory": (
+        ".simulation.environment",
+        "SimulationTaskProgramAdapterFactory",
+    ),
+    "SimulationTaskProgramFactory": (
+        ".simulation.environment",
+        "SimulationTaskProgramFactory",
+    ),
+    "SimulationTaskProgramRegistration": (
+        ".catalog",
+        "SimulationTaskProgramRegistration",
+    ),
+    "SimulationRigidObjectBinding": (".simulation", "SimulationRigidObjectBinding"),
+    "SimulationRobotSkillProfileBinding": (
+        ".simulation",
+        "SimulationRobotSkillProfileBinding",
+    ),
+    "SimulationSceneBinding": (".simulation", "SimulationSceneBinding"),
+    "SimulationSegmentPolicyPort": (
+        ".simulation.policies",
+        "SimulationSegmentPolicyPort",
+    ),
+    "StandardExtensionDeclarations": (".extensions", "StandardExtensionDeclarations"),
+    "SupportSurfaceAffordanceBinding": (
+        ".simulation",
+        "SupportSurfaceAffordanceBinding",
+    ),
+    "VersionedKey": (".extensions", "VersionedKey"),
+    "create_simulation_task_program_adapter": (
+        ".simulation.environment",
+        "create_simulation_task_program_adapter",
+    ),
+    "default_simulation_settle_presets": (
+        ".simulation.policies",
+        "default_simulation_settle_presets",
+    ),
+    "load_configured_task_program_deployment": (
+        ".composition",
+        "load_configured_task_program_deployment",
+    ),
+    "compile_configured_task_program": (
+        ".composition",
+        "compile_configured_task_program",
+    ),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve the existing public object only when its capability is requested."""
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = _EXPORTS[name]
+    value = getattr(import_module(module_name, __name__), attribute)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

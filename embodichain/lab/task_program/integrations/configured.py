@@ -1122,6 +1122,9 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "preserve_current_object_orientation",
                 "direction",
                 "approach_distance",
+                "press_distance",
+                "press_position",
+                "contact_roll_alternatives",
                 "translation_distance",
                 "press_distance",
                 "press_position",
@@ -1178,6 +1181,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "fixed_object_to_eef",
                     *(
                         (
+                            "approach_along_grasp_axis",
                             "adaptive_grasp",
                             "full_opening_clearance",
                             "native_closing_revision",
@@ -1197,6 +1201,11 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             ),
         )
         kwargs: dict[str, object] = {}
+        if "approach_along_grasp_axis" in config:
+            kwargs["approach_along_grasp_axis"] = _boolean(
+                config["approach_along_grasp_axis"],
+                path=f"{path}.approach_along_grasp_axis",
+            )
         if "hand_interp_steps" in config:
             kwargs["hand_interp_steps"] = _integer(
                 config["hand_interp_steps"],
@@ -2192,6 +2201,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 "planning_recovery",
                 "planning_budget",
                 "retry_all_failed_plans",
+                "planning_recovery",
             }
         ),
     )

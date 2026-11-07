@@ -151,3 +151,32 @@ def test_semantic_release_target_includes_solver_error_in_yaw_acceptance() -> No
     accepted, metrics = _placement_heading_check(observed, semantic, 3.0)
     assert not accepted
     assert metrics["placement_yaw_error_deg"] == pytest.approx(4.8)
+
+
+def test_explicit_tabletop_evidence_owns_states_and_rejects_incomplete_clock():
+    import torch
+    from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
+        Real2SimTabletopEpisodeEvidence,
+    )
+
+    qpos = torch.zeros(3, 2)
+    poses = torch.zeros(3, 7)
+    poses[:, 6] = 1
+    target = torch.eye(4)
+    values = dict(
+        qpos=qpos,
+        object_pose=poses,
+        target_pose=target,
+        joint_names=("a", "b"),
+        step_dt=1 / 30,
+        execution_trace=({}, {}),
+        compute_batch_fk=lambda **kw: torch.eye(4)[None, None],
+    )
+    evidence = Real2SimTabletopEpisodeEvidence(**values)
+    qpos.fill_(1)
+    poses[:, 0] = 2
+    target[0, 3] = 3
+    assert evidence.qpos.sum() == 0 and evidence.object_pose[:, 0].sum() == 0
+    assert evidence.target_pose[0, 3] == 0
+    with pytest.raises(ValueError, match="T acknowledged"):
+        Real2SimTabletopEpisodeEvidence(**{**values, "execution_trace": ({},)})
