@@ -102,6 +102,8 @@ sensor:
     - 0.0
     - 0.0
     - 1.0
+finger_links:
+  eef: [fr3_leftfinger, fr3_rightfinger]
 skill_profile:
   contract_id: single_arm_parallel_gripper
   profile_id: franka_panda

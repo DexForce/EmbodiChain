@@ -1307,6 +1307,20 @@ def test_axis_align_and_relative_place_configs_use_closed_decoders() -> None:
     torch.testing.assert_close(axis_options.target_axis, torch.tensor((0.0, 0.0, 1.0)))
 
 
+def test_initial_lift_is_pickup_only() -> None:
+    options = _decode_action_options(
+        {"kind": "pick_up", "initial_lift_height": 0.20}, path="options"
+    )
+    assert options.initial_lift_height == pytest.approx(0.20)
+
+    with pytest.raises(ValueError, match="initial_lift_height"):
+        _decode_action_options(
+            {"kind": "axis_align", "initial_lift_height": 0.20}, path="options"
+        )
+    with pytest.raises(ValueError, match="initial_lift_height"):
+        AxisAlignOptions(initial_lift_height=0.20)
+
+
 def test_coordinated_transport_config_decodes_closed_routes_and_options() -> None:
     """Configured transport data round-trips through the strict allowlist."""
     identity = [
@@ -2401,6 +2415,34 @@ def test_invalid_config_does_not_leave_an_integration_registration(
 
     assert _TEST_ENV_ID not in REGISTERED_ENVS
     assert _TEST_ENV_ID not in gym_registry
+
+
+def test_integration_registration_preserves_explicit_environment_discovered_on_load(
+    registered_test_ids: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.lab.gym.utils import registration
+
+    registered_test_ids.append(_TEST_ENV_ID)
+    integration = _decode_configured_task_program_integration(
+        _integration_payload("repeated_pick_place")
+    )
+
+    class ExplicitEnv(EmbodiedEnv):
+        pass
+
+    def discover():
+        registration.register_env_function(
+            ExplicitEnv,
+            _TEST_ENV_ID,
+            max_episode_steps=321,
+            task_program_adapter_factory=integration.adapter_factory,
+        )
+
+    monkeypatch.setattr(registration, "discover_task_packages", discover)
+    spec = _register_configured_task_program_integration(
+        _TEST_ENV_ID, integration, max_episode_steps=321
+    )
+    assert spec.cls is ExplicitEnv
 
 
 def test_integration_registration_rejects_reusing_an_id_for_changed_config(

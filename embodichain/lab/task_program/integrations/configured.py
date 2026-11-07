@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from ._configured_services import (
     _AntipodalGraspPoseGeneratorFactory,
+    _ArticulationLinkJointTargetSlideLowererFactory,
     _ArticulationLinkSlideLowererFactory,
     _AxisAlignLowererFactory,
     _CoordinatedTransportLowererFactory,
@@ -978,6 +979,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "pick_object_part",
                 "lift_height",
                 "pre_grasp_distance",
+                "initial_lift_height",
                 "grasp_commit_fraction",
                 "approach_direction",
                 "left_to_right_arm_direction",
@@ -1000,6 +1002,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "preshape_fraction",
                 "approach_along_grasp_axis",
                 "release_retreat_distance",
+                "push_approach_offset",
                 "rotate_angle",
                 "dwell_duration",
                 "mouth_height",
@@ -1039,7 +1042,11 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "rotate_upright",
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
-                    *(("approach_along_grasp_axis",) if kind == "pick_up" else ()),
+                    *(
+                        ("approach_along_grasp_axis", "initial_lift_height")
+                        if kind == "pick_up"
+                        else ()
+                    ),
                     *(("target_axis",) if kind == "axis_align" else ()),
                 }
             ),
@@ -1067,7 +1074,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 config["pick_object_part"],
                 path=f"{path}.pick_object_part",
             )
-        for field_name in ("lift_height", "pre_grasp_distance"):
+        for field_name in ("lift_height", "pre_grasp_distance", "initial_lift_height"):
             if field_name in config:
                 kwargs[field_name] = _real(
                     config[field_name],
@@ -1512,6 +1519,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "preshape_fraction",
                     "approach_along_grasp_axis",
                     "release_retreat_distance",
+                    "push_approach_offset",
                 }
             ),
         )
@@ -1547,6 +1555,12 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             kwargs["approach_along_grasp_axis"] = _boolean(
                 config["approach_along_grasp_axis"],
                 path=f"{path}.approach_along_grasp_axis",
+            )
+        if "push_approach_offset" in config:
+            kwargs["push_approach_offset"] = _finite_tuple(
+                config["push_approach_offset"],
+                path=f"{path}.push_approach_offset",
+                expected_length=3,
             )
         return SlideOptions(**kwargs)
     if kind == "hand_over":
@@ -2449,6 +2463,7 @@ def _decode_registered_lowerer(
                 "articulation_simulation_uid",
                 "link_entity_id",
                 "translation_axis",
+                "joint_target",
                 "target_pose_mode",
                 "target_id",
                 "reference_entity_id",
@@ -2486,7 +2501,9 @@ def _decode_registered_lowerer(
                     "link_entity_id",
                 }
             ),
-            optional=frozenset({"target_pose_mode", "translation_axis"}),
+            optional=frozenset(
+                {"target_pose_mode", "translation_axis", "joint_target"}
+            ),
         )
         target_pose_mode = _identifier(
             config.get("target_pose_mode", "live"),
@@ -2496,7 +2513,25 @@ def _decode_registered_lowerer(
             raise ValueError(
                 f"{path}.target_pose_mode must be one of ['live', 'snapshot']."
             )
-        return _ArticulationLinkSlideLowererFactory(
+        joint_target = None
+        if "joint_target" in config:
+            target = _mapping(
+                config["joint_target"],
+                path=f"{path}.joint_target",
+                required=frozenset({"joint_name", "axis_sign"}),
+            )
+            joint_target = (
+                _identifier(
+                    target["joint_name"], path=f"{path}.joint_target.joint_name"
+                ),
+                _integer(
+                    target["axis_sign"],
+                    path=f"{path}.joint_target.axis_sign",
+                    minimum=-1,
+                    maximum=1,
+                ),
+            )
+        factory_kwargs = dict(
             articulation_id=_identifier(
                 config["articulation_id"],
                 path=f"{path}.articulation_id",
@@ -2520,6 +2555,11 @@ def _decode_registered_lowerer(
             ),
             target_pose_mode=target_pose_mode,
         )
+        if joint_target is not None:
+            return _ArticulationLinkJointTargetSlideLowererFactory(
+                **factory_kwargs, joint_target=joint_target
+            )
+        return _ArticulationLinkSlideLowererFactory(**factory_kwargs)
     if kind == "move_held_object" and "routes" in value:
         config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
         routes = []

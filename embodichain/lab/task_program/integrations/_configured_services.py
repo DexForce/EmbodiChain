@@ -68,6 +68,7 @@ from embodichain.lab.sim.atomic_actions import (
     Slide,
     SlideAffordance,
     SlideGoal,
+    SlideJointTarget,
     SlideOptions,
     sample_initial_articulation_geometry,
 )
@@ -420,6 +421,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
         link_entity_id: str,
         *,
         target_pose_mode: str = "live",
+        joint_target: tuple[str, str, int] | None = None,
     ) -> None:
         if not isinstance(semantics, ObjectSemantics):
             raise TypeError("semantics must be ObjectSemantics.")
@@ -431,6 +433,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
             field_name="link_entity_id",
         )
         self._target_pose_mode = _slide_target_pose_mode(target_pose_mode)
+        self._joint_target = joint_target
 
     def lower(
         self,
@@ -448,10 +451,15 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
             )
         arguments = dict(call.arguments)
         configured_arguments = {"handle": self._link_entity_id}
-        if arguments != configured_arguments:
+        if self._joint_target is not None:
+            configured_arguments["position"] = arguments.get("position")
+        if arguments != configured_arguments or (
+            self._joint_target is not None and "position" not in arguments
+        ):
             raise ValueError(
-                f"{self.call_id} arguments must name only the configured handle; "
-                "motion options belong to the selected policy preset."
+                f"{self.call_id} arguments must name the configured handle"
+                + (" and position; " if self._joint_target is not None else "; ")
+                + "motion options belong to the selected policy preset."
             )
         target_pose: torch.Tensor | SceneEntityPose
         if self._target_pose_mode == "live":
@@ -473,6 +481,16 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
             goal=SlideGoal(
                 semantics=self._semantics,
                 target_pose=target_pose,
+                joint_target=(
+                    SlideJointTarget(
+                        self._joint_target[0],
+                        self._joint_target[1],
+                        arguments["position"],
+                        axis_sign=self._joint_target[2],
+                    )
+                    if self._joint_target is not None
+                    else None
+                ),
             )
         )
 
@@ -493,6 +511,10 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
 
     target_pose_mode: str = "live"
 
+    @property
+    def _configured_joint_target(self) -> tuple[str, int] | None:
+        return None
+
     def __post_init__(self) -> None:
         for field_name in (
             "articulation_id",
@@ -503,6 +525,16 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
         if self.translation_axis is not None:
             object.__setattr__(self, "translation_axis", _axis(self.translation_axis))
         _slide_target_pose_mode(self.target_pose_mode)
+        joint_target = self._configured_joint_target
+        if joint_target is not None:
+            if type(joint_target) is not tuple or len(joint_target) != 2:
+                raise TypeError("joint_target must contain a joint name and axis sign.")
+            SlideJointTarget(
+                self.articulation_id,
+                joint_target[0],
+                0.0,
+                axis_sign=joint_target[1],
+            )
 
     def create(
         self,
@@ -561,6 +593,29 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
                 body_scale=articulation.cfg.body_scale,
             ).to_object_geometry()
         affordance_kwargs: dict[str, object] = {}
+        joint_target = self._configured_joint_target
+        if joint_target is not None:
+            chain = articulation.get_parent_joint_chain(native_link_name)
+            joint = next(
+                (item for item in chain if item.name == joint_target[0]),
+                None,
+            )
+            if joint is None or joint.joint_type != "prismatic":
+                raise ValueError("Slide joint_target must name a prismatic ancestor.")
+            if (
+                self.translation_axis is None
+                and sum(item.joint_type != "fixed" for item in chain) != 1
+            ):
+                raise ValueError(
+                    "Slide joint_target requires an unambiguous axis or an explicit translation_axis."
+                )
+            if joint.joint_limits is None or not all(
+                math.isfinite(value) for value in joint.joint_limits
+            ):
+                raise ValueError("Slide joint_target requires finite joint limits.")
+            affordance_kwargs.update(
+                joint_name=joint.name, joint_limits=joint.joint_limits
+            )
         if self.translation_axis is not None:
             affordance_kwargs["translation_axis"] = torch.tensor(
                 self.translation_axis,
@@ -589,7 +644,26 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
             semantics,
             self.link_entity_id,
             target_pose_mode=self.target_pose_mode,
+            joint_target=(
+                (self.articulation_id, *joint_target)
+                if joint_target is not None
+                else None
+            ),
         )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _ArticulationLinkJointTargetSlideLowererFactory(
+    _ArticulationLinkSlideLowererFactory
+):
+    """Register the explicit joint target without changing handle-only fingerprints."""
+
+    revision: ClassVar[str] = "5"
+    joint_target: tuple[str, int]
+
+    @property
+    def _configured_joint_target(self) -> tuple[str, int]:
+        return self.joint_target
 
 
 class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):

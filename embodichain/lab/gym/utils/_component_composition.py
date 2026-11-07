@@ -272,8 +272,13 @@ def _resolve_embodiment_component(
     value: object,
     *,
     base_dir: Path,
-) -> tuple[dict[str, object], list[object], dict[str, object] | None]:
-    """Resolve robot, sensors, and an optional Task Program skill profile."""
+) -> tuple[
+    dict[str, object],
+    list[object],
+    dict[str, object] | None,
+    dict[str, tuple[str, ...]] | None,
+]:
+    """Resolve robot, sensors, and optional embodiment metadata."""
     declaration = _mapping(
         value,
         path="embodiment",
@@ -289,7 +294,7 @@ def _resolve_embodiment_component(
         _load_yaml_component(component_path, field_name="embodiment component"),
         path="embodiment component",
         required=frozenset({"embodiment_id", "simulation", "sensor"}),
-        optional=frozenset({"skill_profile"}),
+        optional=frozenset({"skill_profile", "finger_links"}),
     )
     _identifier(component["embodiment_id"], path="embodiment component.embodiment_id")
     simulation = _owned_mapping(
@@ -315,7 +320,22 @@ def _resolve_embodiment_component(
             component["skill_profile"],
             path="embodiment component.skill_profile",
         )
-    return simulation, sensors, skill_profile
+    finger_links = None
+    if "finger_links" in component:
+        finger_links = {}
+        for part, names in _owned_mapping(
+            component["finger_links"], path="embodiment component.finger_links"
+        ).items():
+            part = _identifier(part, path="embodiment component.finger_links keys")
+            path = f"embodiment component.finger_links.{part}"
+            links = tuple(
+                _identifier(link, path=f"{path}[{index}]")
+                for index, link in enumerate(_owned_sequence(names, path=path))
+            )
+            if not links or len(set(links)) != len(links):
+                raise ValueError(f"{path} must name one or more distinct links.")
+            finger_links[part] = links
+    return simulation, sensors, skill_profile, finger_links
 
 
 def _resolve_scene_component(
@@ -445,6 +465,7 @@ def _resolve_gym_components(
 
     embodiment_selected = "embodiment" in resolved
     embodiment_skill_profile = None
+    embodiment_finger_links = None
     if embodiment_selected:
         duplicate_fields = sorted(
             field for field in ("robot", "sensor") if field in resolved
@@ -454,9 +475,11 @@ def _resolve_gym_components(
                 "embodiment.component owns robot and sensor configuration; "
                 f"remove top-level fields {duplicate_fields}."
             )
-        robot, sensors, embodiment_skill_profile = _resolve_embodiment_component(
-            resolved.pop("embodiment"),
-            base_dir=selected_base_dir,
+        robot, sensors, embodiment_skill_profile, embodiment_finger_links = (
+            _resolve_embodiment_component(
+                resolved.pop("embodiment"),
+                base_dir=selected_base_dir,
+            )
         )
         resolved["robot"] = robot
         resolved["sensor"] = sensors
@@ -492,4 +515,5 @@ def _resolve_gym_components(
         or scene_config is not None,
         embodiment_skill_profile=embodiment_skill_profile,
         scene_config=scene_config,
+        embodiment_finger_links=embodiment_finger_links,
     )

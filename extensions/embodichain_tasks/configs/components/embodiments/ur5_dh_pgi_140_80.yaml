@@ -53,6 +53,8 @@ sensor:
       target: [-0.50, 0.10, 0.20]
       up: [0.0, 0.0, 1.0]
 
+finger_links:
+  eef: [gripper_finger1_link_1, gripper_finger2_link_1]
 skill_profile:
   contract_id: single_arm_parallel_gripper
   profile_id: ur5_dh_pgi_140_80

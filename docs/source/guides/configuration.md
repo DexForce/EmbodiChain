@@ -393,6 +393,20 @@ own a `skill_profile` when Task Program needs semantic resources. The
 task-local `integration.yaml` owns its nested `scene_binding`, including each
 canonical `entity_id` to physical `simulation_uid` mapping.
 
+A configured Task Program deployment can also select
+`acceptance: {component: task_program/acceptance.yaml}`. The common environment
+checks the current rigid-object corners against bounds in an articulation link
+frame, the measured articulation joint against an inclusive interval, and the
+hand against the selected embodiment command preset's `open` positions. Each
+finger link declared in the embodiment's `finger_links` mapping must clear
+the object. Task-specific names and tolerances belong in the acceptance
+component.
+
+`EmbodiedEnv.is_task_success()` combines those freshly measured conditions
+with the bridge completion mask on every call. The check also applies when an
+episode uses a replacement program. Registration and construction require the
+same decoded acceptance and embodiment bindings for that ID.
+
 The optional `expansion.config` reference keeps task-facing augmentation
 settings in a separate file. That file may define `runtime`, `policy`,
 `overrides`, and `collection`; `collection.target_episodes` is the final
