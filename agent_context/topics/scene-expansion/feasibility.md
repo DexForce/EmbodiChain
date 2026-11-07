@@ -64,7 +64,13 @@ Mixed mesh/primitive absence of contacts is not a separation certificate: the
 native SDK can omit such contacts for intersecting inputs. `check`,
 `contact_query` and `contact_pairs` require native contact evidence or a canonical
 AABB separation proof; otherwise they retain unavailable clearance with an
-explicit reason. This does not change convex-only defaults or mesh/mesh queries.
+explicit reason. Convex-only defaults retain their original semantics.
+For mesh/mesh zero-contact pairs, the SDK's bounded signed queries also cannot
+certify solid clearance or exclude deep containment. A canonical AABB
+separation proof is required; otherwise all three checker entries retain
+unavailable evidence. Native positive contact facts remain usable. Concave
+empty gaps with overlapping AABBs can therefore remain unavailable rather than
+become an implicit solid-clear certificate.
 
 Query transforms are rebased before composing local offsets; precision budgets
 cover conversion, scale and nonfinite failures before no-contact acceptance.
