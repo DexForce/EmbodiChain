@@ -32,10 +32,6 @@ logger = logging.getLogger()
 THIS_DIR = Path(__file__).resolve().parent
 CORE_PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
 EXTENSIONS_DIR = THIS_DIR / "extensions"
-TASKS_PROJECT_DIR = EXTENSIONS_DIR / "embodichain_tasks"
-TASKS_PACKAGE_PATTERNS = ["embodichain_tasks", "embodichain_tasks.*"]
-ROBOTS_PACKAGE_PATTERNS = ["embodichain_robots", "embodichain_robots.*"]
-BENCHMARKS_PACKAGE_PATTERNS = ["embodichain_benchmarks", "embodichain_benchmarks.*"]
 EXAMPLES_DIR = THIS_DIR / "examples"
 
 # Defer importing torch until it's actually needed (when building extensions).
@@ -85,27 +81,41 @@ class CleanCommand(Command):
                     logger.info(f"removed '{rm_path}'")
 
 
+def _extension_package_dirs() -> dict[str, Path]:
+    """Discover bundled extension roots in flat or nested layouts."""
+    packages = {}
+    for project in sorted(EXTENSIONS_DIR.glob("embodichain_*")):
+        if not project.is_dir():
+            continue
+        name = project.name
+        if not name.isidentifier():
+            raise ValueError(f"Invalid extension package name: {name}")
+        nested = project / name
+        flat_package = (project / "__init__.py").is_file()
+        nested_package = (nested / "__init__.py").is_file()
+        if flat_package == nested_package:
+            raise ValueError(f"Expected exactly one package layout for {project}")
+        packages[name] = project if flat_package else nested
+    return packages
+
+
 def get_packages() -> list[str]:
     """Return core and bundled extension packages shipped in the main wheel."""
     core_packages = find_namespace_packages(
         where=str(THIS_DIR), include=CORE_PACKAGE_PATTERNS
     )
-    task_packages = find_namespace_packages(
-        where=str(TASKS_PROJECT_DIR), include=TASKS_PACKAGE_PATTERNS
-    )
-    robot_packages = find_namespace_packages(
-        where=str(EXTENSIONS_DIR), include=ROBOTS_PACKAGE_PATTERNS
-    )
-    benchmark_packages = find_namespace_packages(
-        where=str(EXTENSIONS_DIR), include=BENCHMARKS_PACKAGE_PATTERNS
-    )
+    extension_packages = []
+    for name, package_dir in _extension_package_dirs().items():
+        extension_packages.extend(
+            find_namespace_packages(
+                where=str(package_dir.parent), include=[name, f"{name}.*"]
+            )
+        )
     return sorted(
         set(
             [
                 *core_packages,
-                *task_packages,
-                *robot_packages,
-                *benchmark_packages,
+                *extension_packages,
                 "embodichain_tasks.configs",
             ]
         )
@@ -115,10 +125,11 @@ def get_packages() -> list[str]:
 def get_package_dir() -> dict[str, str]:
     """Map bundled extension sources to their stable Python package names."""
     return {
-        "embodichain_tasks": "extensions/embodichain_tasks/embodichain_tasks",
+        **{
+            name: path.relative_to(THIS_DIR).as_posix()
+            for name, path in _extension_package_dirs().items()
+        },
         "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
-        "embodichain_robots": "extensions/embodichain_robots",
-        "embodichain_benchmarks": "extensions/embodichain_benchmarks",
     }
 
 
@@ -177,9 +188,41 @@ def main():
         package_dir=get_package_dir(),
         package_data={
             "embodichain": ["VERSION"],
+            "embodichain_models.dynamics.nerd": ["THIRD_PARTY_LICENSES"],
+            "embodichain_models.dynamics.rigidformer": [
+                "THIRD_PARTY_LICENSES",
+                "REFERENCE_SOURCES.json",
+                "configs/*.yaml",
+            ],
             "embodichain.data": ["default_materials.json"],
+            "embodichain.compute.kinematics._warp": [
+                "ssik_LICENSE.txt",
+                "data/*.npz",
+                "data/*.json",
+            ],
+            "embodichain_robots": [
+                "README.md",
+                "**/README.md",
+                "_ssik_artifacts/*.py",
+                "_ssik_artifacts/*.json",
+                "_ssik_artifacts/LICENSE.txt",
+            ],
+            "embodichain_robots.unitree.go1": ["profile.json"],
+            "embodichain_robots.unitree.go2": ["profile.json"],
+            "embodichain_robots.unitree.g1": ["profile.json"],
+            "embodichain_robots.unitree.h1_2": ["profile.json"],
+            "embodichain_robots.anybotics.anymal_c": ["profile.json"],
+            "embodichain_robots.pollen_robotics.microduck": ["profile.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
-            "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
+            "embodichain.gen_sim.asset_engine.configs": ["*.json"],
+            "embodichain.gen_sim.task_engine": [
+                "defaults.yaml",
+                "_semantic_graph_viewer.html",
+                "_graph_react.css",
+                "_graph_react.js",
+                "_graph_react.LICENSE.txt",
+                "_graph_assets/*",
+            ],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",

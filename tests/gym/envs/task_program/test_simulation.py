@@ -328,6 +328,7 @@ def _scene_binding() -> SimulationSceneBinding:
                     1.0,
                 ),
                 minimum_confidence=0.8,
+                release_clearance=0.12,
                 is_default=True,
             ),
         ),
@@ -642,6 +643,7 @@ def test_scene_binding_builds_existing_registry_contracts() -> None:
     container = registry.lookup(container_ref).affordance
     assert type(container) is ContainerAffordance
     assert container.minimum_confidence == pytest.approx(0.8)
+    assert container.release_clearance == pytest.approx(0.12)
     assert torch.allclose(
         snapshot.entities[container_ref.entity_id].pose[:, 0, 3],
         torch.tensor((0.4, 0.5)),
@@ -779,6 +781,18 @@ def test_placement_rejects_unknown_target_frame(binding_type: type) -> None:
             native_name="target",
             object_target_frame="unknown",
         )
+
+
+@pytest.mark.parametrize("frame", ["parent", "world_axes"])
+def test_container_preserves_legacy_positional_parameters(frame: str) -> None:
+    pose = tuple(torch.eye(4).reshape(-1).tolist())
+    binding = ContainerAffordanceBinding(
+        "inside", "bin", "native", (), pose, 0.0, True, frame, release_clearance=0.12
+    )
+    assert binding.is_default is True
+    assert binding.object_target_frame == frame
+    assert binding.release_clearance == pytest.approx(0.12)
+    assert replace(binding, release_clearance=0.0).release_clearance == 0.0
 
 
 def test_scene_binding_fails_closed_on_missing_native_entity() -> None:

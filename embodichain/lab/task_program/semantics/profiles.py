@@ -1548,9 +1548,9 @@ class RobotSkillProfile:
             ),
         )
         self._validate_resource_graph(resources)
-        self.action_control_profiles()
+        self.skill_control_profiles()
 
-    def action_control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
+    def skill_control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
         """Lower endpoint command profiles for the current action core.
 
         Returns:
@@ -1885,7 +1885,7 @@ class BoundRobotSkillProfile:
         """Require current-core endpoint commands to be installed on the engine."""
         engine_profiles = self._engine.control_profiles
         try:
-            expected_control_profiles = self._profile.action_control_profiles()
+            expected_control_profiles = self._profile.skill_control_profiles()
         except (TypeError, ValueError) as exc:
             raise ProfileValidationError(
                 f"Could not lower profile commands to action control parts: {exc}"

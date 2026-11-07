@@ -38,7 +38,10 @@ Preserve these coupled result rules in `motion_generator.py`:
   waypoints; only an explicit `is_linear` request adds Cartesian path samples.
   This avoids treating interpolated samples as mandatory rest points.
   `preserve_plan_samples` keeps its native grid and derivatives through
-  normalization. TrapezoidalPlanner declares both.
+  normalization. TrapezoidalPlanner and TOPPRA declare both. Explicit
+  Cartesian-line requests retain their dense IK nodes, including joint targets
+  converted through FK. Explicit native sampling options remain authoritative over
+  a generic facade count.
 - Failed rows hold the supplied start pose unless the backend declares
   `preserve_failed_plan_positions`; NeuralPlanner uses that capability to keep
   partial rollout evidence while reporting failure.
@@ -98,12 +101,31 @@ lives in `_toppra_common.py`. `_toppra.py` is an offline NumPy oracle and must
 not be imported by the runtime planner or Warp adapter.
 Robot-backed planning retains shared speed-cap and control-part resolution,
 including gradients of uncapped requested limits.
-The runtime and reference preserve uniform not-a-knot cubic geometry, the existing waypoint
+Ordinary planner calls and the reference preserve uniform not-a-knot cubic geometry, the existing waypoint
 deduplication tolerance and final knot, and signed velocity/acceleration bounds
-containing rest. Planner outputs retain float32 and quantity sampling retains
+containing rest. Public planner and joint-path retiming outputs retain float64
+sampling precision: narrowing joint positions before differentiating dense
+samples can amplify quantization into dynamic-limit violations. Input cleanup
+retains its original precision semantics. Consumers that narrow or resample
+outputs must validate their resulting trajectories. Quantity sampling retains
 the existing integer coercion, independently of backend or input precision.
 Interval bounds are conservative; timing need not match the former external
 TOPPRA package. Tiny real moves must retain positive duration.
+A hand hold inserted into a moving path needs a solved rest boundary, not only
+native time sampling. `ToppraPlanOptions.stop_at_waypoints` is an opt-in TIME
+mode owned numerically by `_toppra_stopped.py`: solve adjacent waypoint pairs at
+rest, conservatively extend each segment to exact control intervals, and merge
+valid row prefixes. Shared goals retain zero velocity; failed rows remain zero
+and stationary/tail rows retain endpoint holds. This changes intermediate path
+geometry and timing; default spline/quantity behavior remains unchanged.
+The benchmark adapter enables this mode only when the Atomic host supplies
+`atomic_plan_options(control_dt=...)`. Primitive sample counts remain lower
+bounds, and compiled control-grid checks still decide timing validity. NMG keeps
+its complete request and original rollout budget.
+Native timing does not certify an action after it inserts an intermediate hold:
+splitting a moving path at its closest target-pose sample introduces a rest
+boundary the original solve may not provide. Compiled dynamics remain a separate
+validity check, including for retimed neural rollouts.
 
 Warp constructs splines, bounds, controllable sets and samples on the input
 device. It honors the current Torch stream and reads a scalar to size output.
@@ -178,6 +200,36 @@ the graph. Validate complete observation-layout metadata/fingerprint before
 rollout; model dimensions and waypoint capacity belong to the export contract.
 Inspect the `policy-deploy` package extra for runtime dependencies.
 
+With `batch_control_parts=True`, `MotionGenerator.generate_multi_part()` can
+route independent named-arm requests to `NeuralPlanner.plan_multi_part()`.
+The shared actor receives arm-major `A * B` rows, while each named-arm FK call
+retains its original `B` scene rows. Valid goal counts, step budgets, completion
+and failure masks remain independent. Results split back into ordinary per-arm
+plans; another arm's terminal padding is removed before retiming. Fixed-batch
+exports must fit the packed batch. `PlanResult.policy_batching` records actual
+scene/arm/actor batch sizes and shared forward calls, not a speed estimate.
+CUDA arithmetic is owned by ONNX Runtime's provider options, independently of
+Torch's TF32 flags. `onnx_cuda_use_tf32=None` preserves historical provider
+defaults; an explicit Boolean fixes that option. The expanded Franka benchmark
+disables TF32 consistently across its NMG configurations to limit batch-size
+dependent numerical differences. Check actual selected provider options when
+validating CUDA parity; CPU equality alone does not establish it.
+The CUDA execution provider's `device_id` follows the planner's runtime device
+ordinal within `CUDA_VISIBLE_DEVICES`. Quality workers on separate devices must
+retain this binding; setting Torch's current device alone does not bind ORT.
+
+Callers must establish independence before grouping requests. HandOver can batch
+ready transport/receiver plans while retaining serial execution stages;
+CoordinatedPlacement groups its simultaneous approaches. Dependencies and
+execution order remain task-owned. Other backends and historical neural configs
+use sequential facade fallback for the same ready group. Both independent
+requests are evaluated before the task's failure gate, including when the first
+placing arm fails; dependent phases and command execution remain blocked.
+Grouping a request does not imply a packed backend. Atomic benchmark
+`packed_motion_groups` diagnostics
+record groups actually planned, so an enabled flag alone does not prove batching
+ran when a prior stage failed.
+
 `NeuralPlannerCfg.dt` is bookkeeping, not solved timing: the rollout integrates
 a joint delta per step, so a saturated step implies `action_scale / dt` rad/s
 and overshoots a typical arm's velocity limit several times over. Setting
@@ -186,15 +238,27 @@ the shared entry point below; it resamples the path, so positions and poses
 change with the timing, and it cannot reduce the path's own jerk. Default
 remains `None`, which preserves the nominal-timing behavior.
 
+`PlanResult.policy_rollout_positions` and `policy_rollout_lengths` retain the
+original policy states and per-row valid prefixes before retiming. Sample zero
+is the initial state; padded terminal holds do not represent further controls.
+The facade preserves these diagnostics even if output samples change or the
+output plan fails. External completion-step evaluation must match constraints
+on those original states, independently of planner success and retimed output.
+
 Runtime/training frame differences must be expressed through explicit policy
-frame and TCP transforms. Target/FK quaternions follow the shared
+frame and TCP transforms. A shared single-arm policy can serve both arms of a
+fixed-base assembly through `policy_frame_from_world_by_control_part`; every
+requested arm must have an entry. The selected transform applies to targets,
+rollout FK, and retimed arrival checks. Atomic task orchestration coordinates
+the arms; reusing the policy does not create a jointly trained dual-arm policy.
+Target/FK quaternions follow the shared
 [simulation convention](../simulation-system/simulation-system.md); do not
 convert a value twice. Failed waypoint convergence retains native rollout
 samples through the capability described above. Validate export metadata and
 batched behavior in `test_neural_planner.py` and `test_neural_batched.py` under
 `tests/sim/motion/planners/`.
 
-### cuRobo import isolation
+### cuRobo backend and import isolation
 
 `curobo_planner.py::_require_curobo()` lazily imports the optional backend and
 restores the caller's Torch matmul precision and CUDA/cuDNN TF32 flags on success
@@ -203,18 +267,97 @@ other planners/solvers. Native derivatives are mapped into simulator joint order
 only missing velocity segments are derived. Scene conversion and batch-world
 semantics are owned by [collision worlds](collision-worlds.md).
 
+`CuroboPlanOptions.waypoint_modalities` preserves each target's joint, position,
+orientation, or full-pose meaning in mixed sequences. Partial poses change
+native terminal costs and convergence criteria without adding path constraints;
+reset full-pose criteria after a partial segment. Position-only conversion
+requires coincident native tool and runtime TCP origins. Do not complete missing
+pose components using hidden benchmark witnesses. Per-control-part backends and
+root transforms support dual-arm Atomic calls; benchmark preparation and joint
+budgets must cover both bound motion parts.
+
+The benchmark TOPPRA adapter's opt-in masked route uses
+`compute/kinematics/_masked_ik.py` with caller-owned batched FK. It solves active
+components from the preceding joint state, preserves failed rows as failures,
+then times the joint path. Joint targets supply their requested joint values;
+Cartesian reference joint solutions never seed the solve. Historical homogeneous
+Joint/FullPose routes retain their existing behavior. Validate component masking,
+mixed order and real Franka adapter calls in
+`tests/benchmark/motion_generation/test_constraint_sequences.py`.
+
+The supported backend is cuRobo V2-Fast (0.9+). `CuroboPlannerCfg` selects
+RRT or PRM initialization and enables/disables fixed-path TimeOpt; direct seeds
+are attempted first. Pass the interpolation timestep into the native factory
+before constructing solvers so TimeOpt and interpolation share the same settings.
+Cached solvers retain these construction-time settings.
+RRT lane capacity is rounded to a power of two covering batch × trajectory seeds,
+so small backends avoid unused tree buffers and larger batches are not limited
+to the native factory's default lane count.
+
+cuRobo 0.9's RRT and lazy solver helpers can ignore per-solver graph flags.
+Scope the effective native runtime graph switch during construction, warmup and
+planning, serialize changes, and restore the caller's value on exit. This also
+applies to capture-timeout fallback. While capture ownership is held, warm the
+actual batch × seed lane shapes, the B-spline graph-seed fitter and complete fallback
+seed merging. Graph-enabled planning also holds capture ownership so an unseen
+data-dependent executor cannot overlap a Newton capture.
+
+TimeOpt loads dynamics with simulator gravity transformed into the same cuRobo
+base frame used for goals. Differing per-row gravity cannot share one native
+solver and requires `enable_timeopt=False`; gravity/frame changes invalidate the
+cached backend. TimeOpt uses source-model inertial data and effort limits; world
+collision geometry alone does not model carried payload dynamics. Preserve native timing
+and derivatives through result normalization and control-grid playback.
+
 ## Retiming and playback
+
+`compute.trajectory.retime_joint_paths()` is the simulation-independent public
+operator with explicit velocity/acceleration inputs. It returns plain tensors
+`(q, qd, qdd, dt, success, lengths)`; duration is `dt.sum(-1)`. Quantity sampling
+has fixed width, while time sampling pads to the maximum valid row length.
+Failures have zero valid length; stationary successes retain two samples.
+This API and `DifferentiableRetimingLayer` retain not-a-knot geometry, including
+the repeated final knot. They share the Warp solver with the planner helper
+below, which explicitly selects PCHIP instead. Both boundaries validate path
+lengths before integer narrowing.
 
 `toppra_planner.py::retime_joint_paths()` is the shared entry point for
 re-parameterizing an already-planned joint path under velocity and acceleration
-limits, used by planners that emit geometry without executable timing. It is
-the planner's own time parameterization. All CPU/CUDA rows run on Warp,
-including single-row calls, so batch size does not change waypoint cleanup
-precision or the helper's float32/float64 output dtype. It resamples
-along the fitted spline, so recompute derived poses from its output rather
-than reusing the input samples. Optional per-row path lengths exclude
-rectangular tail holds from spline fitting; without them, an explicit repeated
-final waypoint retains the historical final-knot geometry.
+limits, used by planners that emit geometry without executable timing. It keeps
+its mapping/enum signature and native-width float64 `PlanResult`, without
+allocating padded learning outputs. It shares
+TOPPRA's interval solver but uses coordinatewise PCHIP: the continuous curve
+stays inside each adjacent pair's position box. C1 joins preserve velocity;
+acceleration can jump, with both sides bounded on segment-aligned cells. Jerk
+and collision freedom are not certified. All distinct input nodes remain in
+order in output, so rollout waypoint arrivals survive retiming. Consecutive
+exact repeats collapse; without timestamps they cannot specify dwell duration.
+TIME samples are uniform within each geometric segment and never exceed the
+requested spacing. QUANTITY keeps its requested count for moving rows and
+fails rows with too many distinct nodes. Ordinary `ToppraPlanner` geometry and
+sampling remain unchanged.
+
+Explicit `arrival_indices` in TIME mode retain distinct semantic visits, even
+at identical configurations, and solve each phase rest-to-rest. This can lengthen
+motion; it is separate from preserving geometric knots. NeuralPlanner opts in
+with `preserve_waypoint_arrivals`. `PlanResult.waypoint_indices` and
+`policy_waypoint_indices` carry output and native visits; missing visits use -1
+and padding never establishes an arrival. Atomic control-grid conversion and
+event splits consume these identities instead of recovering visits by proximity.
+Position-only composite paths encode each declared stop without a stationary
+neighbor as a one-control-period hold, including terminal stops that can become
+interior junctions. This extends those paths by one tick per added hold and
+preserves zero velocity targets when the final composite is differentiated.
+Direct full-robot conversion retains phase velocities without adding these holds.
+Revalidate float32 compiled dynamics after holds and concatenation.
+
+Call-scoped trajectory capture in `compute/trajectory/_trace.py` clones device
+tensors only when enabled. Benchmark hosts own case identities and file export;
+capture is quality diagnostics and must be disabled for performance replay.
+All CPU/CUDA rows run on Warp, including single-row calls. Retiming outputs use
+float64; poses must be recomputed from returned positions. Optional per-row
+path lengths exclude rectangular tail holds. Failed rows remain zero-filled;
+shorter successful rows hold their endpoint with zero derivatives and zero dt.
 
 `compute/trajectory/timing.py` owns time-domain differentiation/resampling and
 `retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time
@@ -225,6 +368,10 @@ Control-grid retiming requires zero first-arrival intervals. It rounds each
 row's duration up to the destination clock, samples uniform source-path phase,
 and recomputes qvel with zero first/last-valid and padded-hold velocities.
 Source `PlanResult.dt` remains planner timing.
+Atomic `trajectory_ops.to_full_robot_trajectory()` converts sampled positions
+and velocities to the destination `base_qpos` dtype/device only after this
+control-grid resampling. Native planner tensors remain unchanged; compiled
+dynamics are evaluated on the resulting command samples.
 
 `compute/trajectory/interpolation.py::interpolate_minimum_jerk()` expands joint
 keyframes onto a fixed control interval while preserving every keyframe. The

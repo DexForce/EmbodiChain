@@ -21,19 +21,34 @@ from __future__ import annotations
 from itertools import product
 
 _CONFIG_CLASSES = {
-    "ARX5": "embodichain_robots.arx5:ARX5Cfg",
-    "AlohaMini": "embodichain_robots.aloha_mini:AlohaMiniCfg",
-    "TianjiMarvin": "embodichain_robots.tianji_marvin:TianjiMarvinCfg",
-    "DexforceW1": "embodichain_robots.dexforce_w1.cfg:DexforceW1Cfg",
-    "CobotMagic": "embodichain_robots.cobotmagic:CobotMagicCfg",
-    "FrankaPanda": "embodichain_robots.franka_panda:FrankaPandaCfg",
-    "FrankaPandaPgi": "embodichain_robots.franka_panda:FrankaPandaPgiCfg",
-    "FlexivRizon4S": "embodichain_robots.flexiv_rizon4s:FlexivRizon4SCfg",
-    "URRobot": "embodichain_robots.ur_robot:URRobotCfg",
-    "SO101Follower": "embodichain_robots.so101:SO101FollowerCfg",
+    "UnitreeGo1": "embodichain_robots.unitree.go1:UnitreeGo1Cfg",
+    "UnitreeGo2": "embodichain_robots.unitree.go2:UnitreeGo2Cfg",
+    "UnitreeG1": "embodichain_robots.unitree.g1:UnitreeG1Cfg",
+    "UnitreeH1_2": "embodichain_robots.unitree.h1_2:UnitreeH12Cfg",
+    "ANYmalC": "embodichain_robots.anybotics.anymal_c:ANYmalCCfg",
+    "MicroDuck": "embodichain_robots.pollen_robotics.microduck:MicroDuckCfg",
+    "ARX5": "embodichain_robots.arx.arx5:ARX5Cfg",
+    "AlohaMini": "embodichain_robots.alohamini.aloha_mini:AlohaMiniCfg",
+    "TianjiMarvin": "embodichain_robots.tianji.marvin:TianjiMarvinCfg",
+    "DexforceW1": "embodichain_robots.dexforce.w1:DexforceW1Cfg",
+    "CobotMagic": "embodichain_robots.agilex.cobotmagic:CobotMagicCfg",
+    "Franka": "embodichain_robots.franka.cfg:FrankaCfg",
+    "FrankaPanda": "embodichain_robots.franka.panda:FrankaPandaCfg",
+    "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s:FlexivRizon4SCfg",
+    "URRobot": "embodichain_robots.universal_robots.ur_robot:URRobotCfg",
+    "SO101Follower": "embodichain_robots.the_robot_studio.so101:SO101FollowerCfg",
+    "BrainCoRevo1": "embodichain_robots.brainco.revo1:BrainCoRevo1Cfg",
+    "SharpaWave": "embodichain_robots.sharpa.wave:SharpaWaveCfg",
+    "WujiHand": "embodichain_robots.wuji.hand:WujiHandCfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "UnitreeGo1": {"dof": 12, "control_parts": {"locomotion": 12}},
+    "UnitreeGo2": {"dof": 12, "control_parts": {"locomotion": 12}},
+    "UnitreeG1": {"dof": 29, "control_parts": {"locomotion": 29}},
+    "UnitreeH1_2": {"dof": 27, "control_parts": {"locomotion": 27}},
+    "ANYmalC": {"dof": 12, "control_parts": {"locomotion": 12}},
+    "MicroDuck": {"dof": 14, "control_parts": {"locomotion": 14}},
     "ARX5": {"dof": 8, "control_parts": {"arm": 6, "eef": 2}},
     "AlohaMini": {
         "dof": 15,
@@ -76,17 +91,14 @@ _DEFAULT_CONTROL_INFO = {
             "right_eef": 2,
         },
     },
-    "FrankaPanda": {
-        "dof": 8,
-        "control_parts": {"arm": 7, "eef": 2},
-    },
-    "FrankaPandaPgi": {
-        "dof": 8,
-        "control_parts": {"arm": 7, "eef": 1},
-    },
+    "Franka": {"dof": 7, "control_parts": {"arm": 7}},
+    "FrankaPanda": {"dof": 7, "control_parts": {"arm": 7}},
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
     "SO101Follower": {"dof": 6, "control_parts": {"arm": 5, "eef": 1}},
     "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
+    "BrainCoRevo1": {"dof": 6, "control_parts": {"eef": 6}},
+    "SharpaWave": {"dof": 22, "control_parts": {"eef": 22}},
+    "WujiHand": {"dof": 20, "control_parts": {"eef": 20}},
 }
 
 _MIMIC_JOINTS = {
@@ -104,8 +116,8 @@ _MIMIC_JOINTS = {
         "left_joint8": "left_joint7",
         "right_joint8": "right_joint7",
     },
-    "FrankaPanda": {"fr3_finger_joint2": "fr3_finger_joint1"},
-    "FrankaPandaPgi": {"gripper_finger2_joint_1": "gripper_finger1_joint_1"},
+    "Franka": {},
+    "FrankaPanda": {},
     "URRobot": {},
 }
 _CONTROL_PART_MIMICS = {
@@ -114,16 +126,40 @@ _CONTROL_PART_MIMICS = {
         "right_eef": ("RIGHT_HAND_FINGER_2",),
     },
     "CobotMagic": {"left_eef": ("left_joint8",), "right_eef": ("right_joint8",)},
-    "FrankaPanda": {"eef": ("fr3_finger_joint2",)},
+    "Franka": {},
+    "FrankaPanda": {},
+}
+
+_CLASSIFICATION = {
+    "UnitreeGo1": ("unitree", "quadruped", 0),
+    "UnitreeGo2": ("unitree", "quadruped", 0),
+    "UnitreeG1": ("unitree", "bipedal_humanoid", 2),
+    "UnitreeH1_2": ("unitree", "bipedal_humanoid", 2),
+    "ANYmalC": ("anybotics", "quadruped", 0),
+    "MicroDuck": ("pollen_robotics", "biped", 0),
+    "ARX5": ("arx", "fixed_manipulator", 1),
+    "AlohaMini": (None, "wheeled_manipulator", 2),
+    "TianjiMarvin": ("tianji", "fixed_manipulator", 2),
+    "DexforceW1": ("dexforce", "wheeled_humanoid", 2),
+    "CobotMagic": ("agilex", "fixed_manipulator", 2),
+    "Franka": ("franka", "fixed_manipulator", 1),
+    "FrankaPanda": ("franka", "fixed_manipulator", 1),
+    "FlexivRizon4S": ("flexiv", "fixed_manipulator", 1),
+    "URRobot": ("universal_robots", "fixed_manipulator", 1),
+    "SO101Follower": ("the_robot_studio", "fixed_manipulator", 1),
+    "BrainCoRevo1": ("BrainCo", "dexterous_hand", 0),
+    "SharpaWave": ("sharpa", "dexterous_hand", 0),
+    "WujiHand": ("wuji", "dexterous_hand", 0),
 }
 
 ROBOT_CONFIGS = {
     name: {
         "class_path": class_path,
+        **dict(zip(("vendor", "morphology", "arm_count"), _CLASSIFICATION[name])),
         **_DEFAULT_CONTROL_INFO.get(name, {}),
         "mimic_joints": _MIMIC_JOINTS.get(name, {}),
         "control_part_mimics": _CONTROL_PART_MIMICS.get(name, {}),
-        "supports_dual_arm": name in ("FrankaPanda", "URRobot"),
+        "supports_dual_arm": name in ("Franka", "FrankaPanda", "URRobot"),
     }
     for name, class_path in _CONFIG_CLASSES.items()
 }
@@ -210,9 +246,73 @@ _UR_VARIANTS = {
     for variant in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e")
 }
 ROBOT_CONFIGS["URRobot"].update(variants=_UR_VARIANTS, default_variant="ur10")
+
+# Native side-specific metadata remains cheap to enumerate without loading cfg.
+_REVO1_VARIANTS = {
+    side: {
+        **_DEFAULT_CONTROL_INFO["BrainCoRevo1"],
+        "defaults": {"side": side},
+        "control_part_mimics": {},
+        "supports_dual_arm": False,
+        "mimic_joints": {
+            f"{side.upper()}_{finger}_PIP": f"{side.upper()}_HAND_{finger}"
+            for finger in ("INDEX", "MIDDLE", "RING", "PINKY")
+        },
+    }
+    for side in ("left", "right")
+}
+ROBOT_CONFIGS["BrainCoRevo1"].update(
+    defaults={"side": "right"},
+    mimic_joints=_REVO1_VARIANTS["right"]["mimic_joints"],
+    variants=_REVO1_VARIANTS,
+    default_variant="right",
+)
 for _variant, _profile in _UR_VARIANTS.items():
     ROBOT_CONFIGS[_variant] = {
         "class_path": _CONFIG_CLASSES["URRobot"],
         **_profile,
+        **dict(zip(("vendor", "morphology", "arm_count"), _CLASSIFICATION["URRobot"])),
         "variant_of": "URRobot",
     }
+
+
+ROBOT_CONFIGS["Franka"].update(
+    variants={
+        model: {
+            **_DEFAULT_CONTROL_INFO["Franka"],
+            "defaults": {"arm_model": model},
+            "supports_dual_arm": model == "fr3",
+        }
+        for model in ("fr3", "panda")
+    },
+    default_variant="fr3",
+)
+ROBOT_CONFIGS["FrankaPanda"]["variant_of"] = "Franka"
+
+
+ROBOT_CONFIGS["SharpaWave"].update(
+    defaults={"side": "right"},
+    default_variant="right",
+    variants={
+        side: {
+            **_DEFAULT_CONTROL_INFO["SharpaWave"],
+            "defaults": {"side": side},
+            "supports_dual_arm": False,
+        }
+        for side in ("left", "right")
+    },
+)
+
+
+ROBOT_CONFIGS["WujiHand"].update(
+    defaults={"side": "right"},
+    default_variant="right",
+    variants={
+        side: {
+            **_DEFAULT_CONTROL_INFO["WujiHand"],
+            "defaults": {"side": side},
+            "supports_dual_arm": False,
+        }
+        for side in ("left", "right")
+    },
+)

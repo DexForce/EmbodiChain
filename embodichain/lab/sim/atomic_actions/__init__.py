@@ -36,6 +36,7 @@ __all__ = [
     "ActionOptions",
     "ActionPlan",
     "ActionPlanningServices",
+    "GraspOpeningTarget",
     "Affordance",
     "AffordancePoseCandidates",
     "AffordanceSample",
@@ -53,8 +54,12 @@ __all__ = [
     "AxisAlignGoal",
     "AxisAlignOptions",
     "AtomicAction",
+    "CompletePlanBuilder",
     "AtomicActionEngine",
     "PlanTransform",
+    "NominalMotionSource",
+    "InstantiatedSkillMotion",
+    "PrototypeMotionProvider",
     "BUILTIN_ACTION_TYPES",
     "BATCH_INVERSE_KINEMATICS_CAPABILITY",
     "CARTESIAN_POSE_CAPABILITY",
@@ -100,6 +105,7 @@ __all__ = [
     "ExecutionEvent",
     "ExecutionEventKind",
     "ExecutionPlanAttempt",
+    "ExecutionPlanLifecycle",
     "ExecutionRunner",
     "ExecutionRunnerCfg",
     "ExecutionSession",
@@ -138,6 +144,7 @@ __all__ = [
     "JointPositionTrackingMetric",
     "JointPositionTrackingState",
     "MotionPolicy",
+    "PlanningBudget",
     "MonotonicExecutionClock",
     "MoveEndEffector",
     "MoveEndEffectorOptions",
@@ -163,8 +170,11 @@ __all__ = [
     "Pour",
     "PourGoal",
     "PourOptions",
+    "PourTarget",
     "PlannerDiagnostics",
+    "PlanQualification",
     "PlanningFailure",
+    "PlanningRecoveryOutcome",
     "PlanningContext",
     "PoseGoalValue",
     "PoseTrackingMetric",
@@ -173,6 +183,8 @@ __all__ = [
     "PressAffordance",
     "PressGoal",
     "PressOptions",
+    "PressPlanningRecovery",
+    "validate_press_extra_distance",
     "PushObject",
     "PushObjectGoal",
     "PushObjectOptions",
@@ -186,6 +198,7 @@ __all__ = [
     "TwistGoal",
     "TwistOptions",
     "RecoveryPolicy",
+    "PlanningRecovery",
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
     "ResolvedActionRequest",
@@ -276,6 +289,9 @@ for _module in _modules:
     for _old_name, _new_name in _RENAMES.items():
         if hasattr(_module, _new_name):
             setattr(_module, _old_name, getattr(_module, _new_name))
+            _exports = getattr(_module, "__all__", ())
+            if _new_name in _exports and _old_name not in _exports:
+                _module.__all__ = [*_exports, _old_name]
     if _module is not _canonical:
         _sys.modules[_module.__name__.replace("atomic_skills", "atomic_actions", 1)] = (
             _module

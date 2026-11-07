@@ -8,7 +8,7 @@ embodichain.lab.sim.atomic_skills.primitives
 Overview
 --------
 
-Concrete implementations of the built-in atomic-skill primitives. Each
+Concrete implementations of the built-in atomic-action primitives. Each
 primitive is an :class:`~embodichain.lab.sim.atomic_skills.AtomicSkill` that
 accepts a :class:`~embodichain.lab.sim.atomic_skills.ResolvedSkillRequest` and a
 :class:`~embodichain.lab.sim.atomic_skills.PlanningContext`. Planning returns a

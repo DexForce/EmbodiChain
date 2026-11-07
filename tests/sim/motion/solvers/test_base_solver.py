@@ -45,6 +45,21 @@ UR5_DH_PARAMETERS = {
 }
 
 
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_nearest_weight_numpy_dtypes_update_tensor_in_place(dtype) -> None:
+    solver = object.__new__(OPWSolver)
+    solver.dof = 6
+    solver.ik_nearest_weight = torch.ones(6)
+    original = solver.ik_nearest_weight
+    assert solver.set_ik_nearest_weight(
+        np.array([2.5, 0.25], dtype=dtype), np.array([4, 1], dtype=np.int32)
+    )
+    torch.testing.assert_close(
+        solver.get_ik_nearest_weight(), torch.tensor([1.0, 0.25, 1.0, 1.0, 2.5, 1.0])
+    )
+    assert solver.ik_nearest_weight is original
+
+
 @pytest.mark.parametrize(
     "cfg_type",
     [
@@ -274,3 +289,25 @@ def test_runtime_fk_compile_fallback_preserves_values_gradients_and_real_errors(
     solver.get_fk(torch.zeros(3, 3))
     assert compiled_calls == [2]
     assert eager_calls == [2, 3]
+
+
+def test_supplied_pk_chain_has_immediately_callable_fk(tmp_path) -> None:
+    from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
+
+    path = tmp_path / "slide.urdf"
+    path.write_text(
+        '<robot name="slide"><link name="base"/><link name="tool"/>'
+        '<joint name="slide" type="prismatic"><parent link="base"/><child link="tool"/>'
+        '<axis xyz="1 0 0"/><limit lower="-0.5" upper="0.5" effort="1" velocity="1"/></joint></robot>'
+    )
+    chain = create_pk_serial_chain(
+        urdf_path=str(path), root_link_name="base", end_link_name="tool", device="cpu"
+    )
+    solver = DifferentialSolverCfg(
+        urdf_path=str(path),
+        root_link_name="base",
+        end_link_name="tool",
+        joint_names=["slide"],
+    ).init_solver(pk_serial_chain=chain)
+    pose = solver.get_fk(torch.tensor([[0.2]]))
+    torch.testing.assert_close(pose[0, :3, 3], torch.tensor([0.2, 0.0, 0.0]))

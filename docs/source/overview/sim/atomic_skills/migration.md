@@ -46,6 +46,7 @@ Python keyword arguments and attributes on the canonical contracts use:
 | `action_waypoint_offset` | `skill_waypoint_offset` |
 | `action_index` | `skill_index` |
 | `action_binding` | `skill_binding` |
+| `action_control_profiles` | `skill_control_profiles` |
 | `max_action_retries` | `max_skill_retries` |
 | `action_timeout` | `skill_timeout` |
 | `action_retry_counts` | `skill_retry_counts` |

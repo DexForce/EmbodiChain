@@ -24,8 +24,9 @@ import pathlib
 import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence, Iterable
-from typing import TYPE_CHECKING, Literal
+from typing import Any, TYPE_CHECKING, Literal
 
+import numpy as np
 import torch
 
 from embodichain.data import get_data_path
@@ -56,6 +57,8 @@ from embodichain.lab.sim.cfg import (
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
+    JointDrivePropertiesCfg,
+    URDFCfg,
     physics_cfg_for_backend,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
@@ -65,15 +68,18 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlannerCfg,
     TrapezoidalPlannerCfg,
 )
-from embodichain_robots import FrankaPandaPgiCfg, URRobotCfg
+from embodichain_robots import URRobotCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
     GraspAnnotationCfg,
     ParallelJawGraspCollisionCfg,
+    FixedGripperCollisionGeometry,
 )
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
-from embodichain.utils import logger
+from embodichain.utils import configclass, logger
+from embodichain.lab.sim.motion.solvers import FEPSolverCfg
+from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from .tcp_presets import (
     ToolPoint,
     UR10_ROBOTIQ_2F_140_TCP as ROBOTIQ_2F_140_TCP,
@@ -81,6 +87,7 @@ from .tcp_presets import (
 )
 
 if TYPE_CHECKING:
+    import pytorch_kinematics as pk
     from embodichain.lab.sim.motion.expansion import (
         TrajectoryVariant,
         TrajectoryVariantSet,
@@ -114,15 +121,6 @@ ROBOTIQ_HAND_JOINT_PATTERN = r".*(?:finger|knuckle)_joint"
 # warning during tutorial robot construction.
 _UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
     (-2.0 * math.pi, 2.0 * math.pi) for _ in range(6)
-)
-TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
-    model_id="dh_pgi_140_80",
-    min_opening_width=0.003,
-    max_opening_width=0.100,
-    finger_length=0.10,
-    finger_width=0.040,
-    finger_thickness=0.01,
-    palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
 NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
@@ -1930,7 +1928,9 @@ def create_parallel_jaw_grasp_pose_generator(
     *,
     n_sample: int,
     force_refresh: bool,
-    opening_margin: float = 0.03,
+    robot: Robot,
+    arm_control_part: str = "arm",
+    collision_geometry: FixedGripperCollisionGeometry | None = None,
     gripper_model: ParallelJawGripperModelCfg | None = None,
     approach_direction_samples: int = 4,
 ) -> AntipodalGraspPoseGenerator:
@@ -1939,22 +1939,37 @@ def create_parallel_jaw_grasp_pose_generator(
     Args:
         n_sample: Number of antipodal contact-pair samples.
         force_refresh: Whether to regenerate cached object annotations.
-        opening_margin: Additional clearance used for grasp collision checks.
-        gripper_model: Explicit fixture geometry; omission uses the PGI sample.
+        robot: Actual mounted robot supplying the runtime TCP calibration.
+        arm_control_part: Arm whose mounted tool is sampled.
+        collision_geometry: Explicit geometry for custom/native embodiments.
+        gripper_model: Explicit contact aperture; omission uses the mounted tool.
         approach_direction_samples: Candidate approach draws; the fixed-scene
             CLI uses one to isolate geometric and trajectory factors.
 
     Returns:
         A generator with an independently owned gripper model.
     """
+    if collision_geometry is None:
+        from .gripper_geometry import mounted_gripper_geometry
+
+        mounted_model, collision_geometry = mounted_gripper_geometry(
+            robot.cfg, arm_control_part=arm_control_part
+        )
+        if gripper_model is None:
+            gripper_model = mounted_model
+        elif gripper_model.model_id != mounted_model.model_id:
+            raise ValueError(
+                "The requested gripper model does not match the mounted URDF."
+            )
+    if gripper_model is None:
+        raise ValueError("Explicit collision geometry also requires a gripper model.")
     return AntipodalGraspPoseGenerator(
-        TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model,
+        gripper_model,
+        collision_geometry=collision_geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample, approach_direction_samples=approach_direction_samples
         ),
         collision_cfg=ParallelJawGraspCollisionCfg(
-            opening_margin=opening_margin,
-            point_sample_density=0.012,
             filter_ground_collision=False,
         ),
         annotation_cfg=GraspAnnotationCfg(
@@ -1981,6 +1996,9 @@ def make_top_down_eef_pose(position: torch.Tensor) -> torch.Tensor:
         device=position.device,
     )
     pose[:3, 3] = position
+    # Restore orthonormality lost by the authored four-decimal rotation.
+    u, _, vh = torch.linalg.svd(pose[:3, :3])
+    pose[:3, :3] = u @ vh
     return pose
 
 
@@ -2592,7 +2610,7 @@ def create_ur5_gripper_robot_cfg(
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
-    The arm is taken from :class:`~embodichain_robots.ur_robot.URRobotCfg`
+    The arm is taken from :class:`~embodichain_robots.universal_robots.ur_robot.URRobotCfg`
     so the URDF, joint names and drive defaults match the canonical UR family
     config. The gripper and tool-center-point offset are added on top to match
     the existing atomic-skill tutorial setups.
@@ -2605,7 +2623,7 @@ def create_ur5_gripper_robot_cfg(
         assembled robot keeps the source URDF's lowercase joint names
         (``joint1``..``joint6`` and ``gripper_finger1_joint_1``), matching the
         control parts produced by
-        :class:`~embodichain_robots.ur_robot.URRobotCfg`.
+        :class:`~embodichain_robots.universal_robots.ur_robot.URRobotCfg`.
 
     Args:
         init_pos: Initial root position of the robot in the arena.
@@ -2661,6 +2679,194 @@ def create_ur5_gripper_robot_cfg(
     )
 
 
+_FRANKA_URDF_DIR: dict[str, str] = {
+    "panda": "Panda",
+}
+
+# Default init_qpos: arm in a neutral ready pose, fingers open.
+# Derived from the Isaac Lab Franka Emika Panda reference configuration.
+_FRANKA_DEFAULT_INIT_QPOS = [
+    0.0,  # Joint1
+    -0.569,  # Joint2
+    0.0,  # Joint3
+    -2.810,  # Joint4
+    0.0,  # Joint5
+    3.037,  # Joint6
+    0.741,  # Joint7
+    0.04,  # finger_joint1
+    0.04,  # finger_joint2 (mimic of finger_joint1)
+]
+
+_FRANKA_ARM_JOINTS = [f"fr3_joint{i}" for i in range(1, 8)]
+
+# DH Robotics PGI-140-80 parallel gripper mounted on the arm-only Panda flange.
+_PGI_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
+_PGI_JOINT = "gripper_finger1_joint_1"
+_PGI_FINGER_LINKS = ["gripper_finger1_link_1", "gripper_finger2_link_1"]
+_PGI_TCP = [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.17],
+    [0.0, 0.0, 0.0, 1.0],
+]
+
+
+def _newton_gripper_contacts(link_names_expr: list[str]) -> LinkPhysicsOverrideCfg:
+    """Return the Newton fingertip contact group for the given finger links."""
+    return LinkPhysicsOverrideCfg(
+        link_names_expr=list(link_names_expr),
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=NewtonCollisionPropertiesCfg(condim=4),
+            material_props=NewtonRigidBodyMaterialCfg(
+                ke=40000.0,
+                kd=400.0,
+                torsional_friction=0.1,
+                rolling_friction=0.01,
+            ),
+        ),
+    )
+
+
+def _resolve_robot_type(init_dict: dict, default: str) -> str:
+    """Return the requested Franka variant, rejecting unknown ones."""
+    robot_type = init_dict.get("robot_type", default)
+    if robot_type not in _FRANKA_URDF_DIR:
+        raise ValueError(
+            f"Unknown Franka robot_type: {robot_type!r}. "
+            f"Expected one of {sorted(_FRANKA_URDF_DIR)}."
+        )
+    return robot_type
+
+
+@configclass
+class _FrankaPgiCfg(RobotCfg):
+    """Scene-local Panda and PGI assembly, outside the official robot catalog.
+
+    The arm-only Panda URDF is assembled with the ``DH_PGI_140_80`` parallel
+    gripper on the ``fr3_link8`` flange. The configuration owns the whole
+    assembly: the ``arm`` and ``eef`` control parts, the PGI finger drive and
+    open initial state, the PGI tool center point, and the Newton fingertip
+    contacts on the PGI finger links. End-effector settings are owned by this
+    explicit assembly rather than the bare Franka arm preset.
+
+    The arm solver and the FK/IK serial chain both end at ``fr3_link8`` on the
+    arm URDF used by the assembly. The solver's ``tcp`` gives the PGI tool
+    center point in that frame; :meth:`build_pk_serial_chain` returns the
+    flange pose without it.
+
+    Example:
+
+        cfg = _FrankaPgiCfg.from_dict({"init_pos": [0.5, 0.0, 0.0]})
+        robot = sim.add_robot(cfg=cfg)
+    """
+
+    robot_type: str = "panda"
+
+    @classmethod
+    def from_dict(cls, init_dict: dict[str, Any]) -> _FrankaPgiCfg:
+        """Initialize ``_FrankaPgiCfg`` from a dictionary.
+
+        Args:
+            init_dict: Dictionary of configuration parameters. ``robot_type``
+                selects the Franka arm variant (currently ``"panda"``). All
+                other keys are merged on top of the defaults via
+                :func:`merge_robot_cfg`.
+
+        Returns:
+            A ``_FrankaPgiCfg`` instance.
+        """
+        cfg = cls()
+        cfg._build_defaults(init_dict)
+        return merge_robot_cfg(cfg, init_dict)
+
+    def _build_defaults(self, init_dict: dict | None = None) -> None:
+        """Populate the arm-only Panda and PGI assembly defaults.
+
+        Args:
+            init_dict: The raw override dict passed to ``from_dict``.
+                ``robot_type`` is read from here (falling back to the class
+                default).
+        """
+        init_dict = init_dict or {}
+        self.robot_type = _resolve_robot_type(init_dict, self.robot_type)
+        self.uid = "FrankaPandaPgi"
+
+        self.urdf_cfg = URDFCfg(
+            components=[
+                {
+                    "component_type": "arm",
+                    "urdf_path": self._pk_urdf_path,
+                    "transform": np.eye(4),
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": get_data_path(_PGI_URDF_PATH),
+                    "transform": np.eye(4),
+                },
+            ]
+        )
+
+        self.control_parts = {
+            "arm": list(_FRANKA_ARM_JOINTS),
+            "eef": [_PGI_JOINT],
+        }
+
+        self.solver_cfg = {
+            "arm": FEPSolverCfg(
+                end_link_name="fr3_link8",
+                root_link_name="base",
+                tcp=[list(row) for row in _PGI_TCP],
+                redundancy_search=True,
+            ),
+        }
+
+        self.joint_drive_props = JointDrivePropertiesCfg(
+            drive_type="force",
+            stiffness={"fr3_joint[1-7]": 1e4, _PGI_JOINT: 1e3},
+            damping={"fr3_joint[1-7]": 1e3, _PGI_JOINT: 1e2},
+            max_effort={"fr3_joint[1-7]": 1e5, _PGI_JOINT: 1e4},
+        )
+        self.link_attrs = {
+            "newton_gripper_contacts": _newton_gripper_contacts(_PGI_FINGER_LINKS)
+        }
+
+        # Arm in the stock ready pose; both PGI finger joints open.
+        self.init_qpos = [*_FRANKA_DEFAULT_INIT_QPOS[:7], 0.0, 0.0]
+
+    @property
+    def _pk_urdf_path(self) -> str:
+        """Arm-only URDF used by both the assembly and the FK/IK chain."""
+        urdf_dir = _FRANKA_URDF_DIR[self.robot_type]
+        return get_data_path(f"Franka/{urdf_dir}/{urdf_dir}.urdf")
+
+    def build_pk_serial_chain(
+        self, device: torch.device = torch.device("cpu"), **kwargs: Any
+    ) -> dict[str, pk.SerialChain]:
+        """Build the pytorch-kinematics serial chain for the arm.
+
+        The chain uses the arm solver's root and end links, so its end pose is
+        the ``fr3_link8`` flange; compose it with the solver ``tcp`` to obtain
+        the PGI tool center point.
+
+        Args:
+            device: The device to which the chain will be moved. Defaults to CPU.
+            **kwargs: Additional arguments for building the serial chain.
+
+        Returns:
+            A ``{"arm": pk.SerialChain}`` mapping.
+        """
+        from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
+
+        solver = self.solver_cfg["arm"]
+        chain = create_pk_serial_chain(
+            urdf_path=self._pk_urdf_path,
+            device=device,
+            end_link_name=solver.end_link_name,
+            root_link_name=solver.root_link_name,
+        )
+        return {"arm": chain}
+
+
 def create_franka_panda_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
@@ -2671,7 +2877,7 @@ def create_franka_panda_robot_cfg(
 ) -> RobotCfg:
     """Build the Franka arm + PGI gripper configuration for the tutorials.
 
-    :class:`~embodichain_robots.FrankaPandaPgiCfg` owns the assembly,
+    The local assembly configuration owns the assembly,
     control parts, drives, gripper contacts, and flange kinematic chain. The
     sample owns its placement, initial pose, and TCP calibration in
     ``tcp_presets.py``. The shared scenes place manipulation targets on the
@@ -2698,7 +2904,7 @@ def create_franka_panda_robot_cfg(
     }
     if init_qpos is not None:
         overrides["init_qpos"] = list(init_qpos)
-    return FrankaPandaPgiCfg.from_dict(overrides)
+    return _FrankaPgiCfg.from_dict(overrides)
 
 
 def create_ur10_robotiq_robot_cfg(

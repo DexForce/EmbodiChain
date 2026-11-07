@@ -1,0 +1,39 @@
+# Dynamics workflow configuration; not a runnable Gym deployment.
+dataset: ../../../../../outputs/dynamics/ant/full/data
+output_dir: ../../../../../outputs/dynamics/ant/full/train
+model:
+  input_dims:
+    states_embedding: 29
+    contact_normals: 75
+    contact_points_1: 75
+    contact_depths: 25
+    joint_f: 8
+    gravity_dir: 3
+  output_dim: 29
+  n_embd: 384
+  n_layer: 6
+  n_head: 12
+  block_size: 32
+  history_length: 10
+  head_hidden_dims:
+  - 64
+  bias: false
+  dropout: 0.0
+  normalize_input: true
+  normalize_output: true
+train:
+  total_steps: 4995000
+  batch_size: 512
+  learning_rate: 0.001
+  final_learning_rate: 0.0001
+  max_grad_norm: 1.0
+  seed: 0
+  device: cuda:0
+  validation_interval: 5000
+  validation_batches: 100
+  checkpoint_interval: 5000
+  lr_update_interval: 5000
+  lr_offset: 1
+  log_interval: 500
+  # Full Ant data exceed the former 4 GiB hard cache budget; use bounded reads.
+  resident_cache_bytes: 0

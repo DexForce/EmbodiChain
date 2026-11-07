@@ -549,7 +549,14 @@ class SlideCases(AtomicSkillCaseProvider):
             0, slide_direction(case.case_parameters["direction"])
         )
         release = compiled.segment(0, "open")
+        close = compiled.segment(0, "close")
         return (
+            ReplayObservationWindow(
+                "slide_grasp",
+                close.start,
+                close.stop,
+                frozenset({"gripper_contact", "gripper_qpos"}),
+            ),
             ReplayObservationWindow(
                 "slide_actuation",
                 actuation.start,
@@ -795,7 +802,14 @@ class TwistCases(AtomicSkillCaseProvider):
         del case
         actuation = compiled.segment(0, "twist")
         release = compiled.segment(0, "open")
+        close = compiled.segment(0, "close")
         return (
+            ReplayObservationWindow(
+                "twist_grasp",
+                close.start,
+                close.stop,
+                frozenset({"gripper_contact", "gripper_qpos"}),
+            ),
             ReplayObservationWindow(
                 "twist_actuation",
                 actuation.start,

@@ -704,7 +704,7 @@ partial dispatch. Safe stop cancels every armed runtime target, then asks its
 transport to hold from the latest observed context. The simulation adapter
 advances physics instead of sleeping in wall-clock time.
 ``ExecutionRunnerCfg`` contains runner-level transport and scheduling settings;
-it is not an atomic-skill option and is not replaced by invocation revision.
+it is not an atomic-action option and is not replaced by invocation revision.
 
 For an application that already owns its event loop, call the non-blocking
 :meth:`~embodichain.lab.sim.atomic_skills.ExecutionRunner.step` method. A step

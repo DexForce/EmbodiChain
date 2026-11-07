@@ -1,0 +1,118 @@
+{
+  "source_asset": "Robotiq2F85/Robotiq2F85.urdf",
+  "source_urdf": "/root/.cache/embodichain_data/extract/Robotiq2F85/Robotiq2F85.urdf",
+  "source_urdf_sha256": "caff31f48fe3d1d5f1d1602f568bd8bb756018fef77dc715d5e6b5d267ead689",
+  "image": "robotiq_2f85.png",
+  "image_sha256": "a141e2c92df1901d5ce4397f1a8c0746ad49d0c097c263eae1ffa5c6b97277aa",
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "offscreen": "dlss"
+    },
+    "dlss_quality": 2,
+    "tone_mapping_enabled": false
+  },
+  "camera": {
+    "eye": [
+      0.21931963071227076,
+      -0.31070805072784424,
+      0.26557494163513184
+    ],
+    "target": [
+      -3.6992132663726807e-06,
+      0.0,
+      0.101082444190979
+    ],
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "intrinsics": [
+      2100,
+      2100,
+      800,
+      540
+    ],
+    "near": 0.005,
+    "far": 60,
+    "width": 1600,
+    "height": 1080
+  },
+  "bounds": {
+    "min": [
+      -0.07119418680667877,
+      -0.03750000149011612,
+      0.019999999552965164
+    ],
+    "max": [
+      0.07118678838014603,
+      0.03750000149011612,
+      0.18216489255428314
+    ]
+  },
+  "physics_stepped": false,
+  "joint_positions": {
+    "finger_joint": 0.0,
+    "left_inner_knuckle_joint": 0.0,
+    "right_inner_knuckle_joint": 0.0,
+    "right_outer_knuckle_joint": 0.0,
+    "left_inner_finger_joint": 0.0,
+    "right_inner_finger_joint": 0.0
+  },
+  "warmup_frames": 48,
+  "configuration": "Source articulation at zero-coordinate display pose",
+  "material_overrides": [],
+  "root_position": [
+    -1.2951204553246498e-09,
+    1.6271851643878676e-09,
+    0.023000000044703484
+  ],
+  "root_rotation_degrees": [
+    0,
+    0,
+    0
+  ],
+  "emission_intensity": 80,
+  "emission_color": [
+    0.92,
+    0.95,
+    1.0
+  ],
+  "rect_lights": [
+    {
+      "name": "key",
+      "relative_to_bounds_center": [
+        1.0,
+        -1.2,
+        2.0
+      ],
+      "intensity": 180,
+      "size": 0.2741541624069214
+    },
+    {
+      "name": "fill",
+      "relative_to_bounds_center": [
+        -1.5,
+        -0.5,
+        1.0
+      ],
+      "intensity": 100,
+      "size": 0.2741541624069214
+    },
+    {
+      "name": "rim",
+      "relative_to_bounds_center": [
+        0.0,
+        1.5,
+        1.5
+      ],
+      "intensity": 150,
+      "size": 0.2741541624069214
+    }
+  ],
+  "description": "Source visual geometry and materials rendered by native OfflineRT with environment intensity 80 and three rectangular studio lights; no physics steps.",
+  "display_preprocessing": [],
+  "renderer_runtime": "DexSim native OfflineRT via Python 3.11, Torch 2.7.0+cu128; NVIDIA RTX PRO 5000 72GB Blackwell"
+}

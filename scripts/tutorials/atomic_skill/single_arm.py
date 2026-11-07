@@ -83,7 +83,7 @@ def main() -> None:
         },
         grasp_pose_generators={
             "eef": create_parallel_jaw_grasp_pose_generator(
-                n_sample=args.n_sample, force_refresh=args.force_reannotate
+                robot=robot, n_sample=args.n_sample, force_refresh=args.force_reannotate
             )
         },
     )

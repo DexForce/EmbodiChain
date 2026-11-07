@@ -272,7 +272,7 @@ def _engine_for_integration(
     generator.supports_dynamic_collision_world = supports_dynamic_collision_world
     return AtomicSkillEngine(
         generator,
-        control_profiles=integration.robot_profile.action_control_profiles(),
+        control_profiles=integration.robot_profile.skill_control_profiles(),
     )
 
 
@@ -517,7 +517,7 @@ def test_semantic_integration_rejects_monitor_for_unknown_call_with_path() -> No
     )
 
 
-def test_semantic_integration_rejects_unknown_action_option_call() -> None:
+def test_semantic_integration_rejects_unknown_skill_option_call() -> None:
     registry, _ = _scene_registry(with_default=True)
 
     with pytest.raises(SemanticValidationError) as error:
@@ -531,7 +531,7 @@ def test_semantic_integration_rejects_unknown_action_option_call() -> None:
         )
 
     diagnostic = error.value.diagnostic
-    assert diagnostic.code == "unknown_action_option_call"
+    assert diagnostic.code == "unknown_skill_option_call"
     assert diagnostic.path[-2:] == (
         "skill_option_templates",
         "vendor.unknown",
@@ -571,7 +571,7 @@ def test_semantic_integration_rejects_compiler_owned_option_fields() -> None:
                 },
             ),
         )
-    assert pick_error.value.diagnostic.code == "reserved_action_option_field"
+    assert pick_error.value.diagnostic.code == "reserved_skill_option_field"
     assert pick_error.value.diagnostic.path[-1] == ("downstream_object_target_poses")
 
 
@@ -1115,3 +1115,43 @@ def test_pose_source_revision_requires_a_provider_and_defaults_to_none() -> None
         ValueError, match="pose_source_revision requires state_provider"
     ):
         SceneEntityRegistration(**declaration, pose_source_revision="pose-v1")
+
+
+def test_uninstalled_recovery_is_static_preflight_error_without_acquisition():
+    from embodichain.lab.sim.atomic_skills import PlanningRecovery, RecoveryPolicy
+
+    registry, provider = _scene_registry(with_default=True)
+    integration = _semantic_integration(
+        registry,
+        preset=_preset(
+            "default",
+            recovery_policy=RecoveryPolicy(
+                planning_recovery=PlanningRecovery("not_installed", "pick_up", 1)
+            ),
+        ),
+    )
+    with pytest.raises(SemanticValidationError) as failure:
+        integration.link_call(Pick(object=SceneObjectRef("cube")))
+    assert failure.value.diagnostic.code == "incompatible_planning_recovery"
+    assert provider.calls == 0
+
+
+def test_segment_recovery_without_handler_is_rejected_by_static_preflight():
+    registry, provider = _scene_registry(with_default=True)
+    integration = _semantic_integration(
+        registry,
+        preset=_preset(
+            "default",
+            motion_policy=MotionPolicy(
+                strategy="ik_interp",
+                interpolation_mode="fixed_grid",
+                ik_seed_mode="sequential",
+                acceleration_limit=None,
+                segment_sample_count_retries=(4, 6),
+            ),
+        ),
+    )
+    with pytest.raises(SemanticValidationError) as failure:
+        integration.link_call(Pick(object=SceneObjectRef("cube")))
+    assert failure.value.diagnostic.code == "incompatible_motion_policy"
+    assert provider.calls == 0

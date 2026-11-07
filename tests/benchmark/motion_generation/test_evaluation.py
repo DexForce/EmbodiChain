@@ -160,23 +160,50 @@ def _aggregates(
 
 
 @pytest.mark.parametrize(
-    "error,passed", [(0.0029, True), (0.003, True), (0.0031, False), (-0.001, False)]
+    "position,rotation,passed",
+    [
+        (0.0099, 0.0, True),
+        (0.01, 0.0, True),
+        (0.0101, 0.0, False),
+        (-0.001, 0.0, False),
+        (0.0, 0.0999, True),
+        (0.01, 0.1, True),
+        (0.0, 0.1001, False),
+        (0.0, -0.001, False),
+    ],
 )
-def test_measured_primitive_boundary(error: float, passed: bool) -> None:
-    result = _primitive(error)
+def test_measured_primitive_boundary(
+    position: float, rotation: float, passed: bool
+) -> None:
+    result = evaluate_skill_stages(
+        "move_end_effector",
+        {
+            "reached": _evidence(
+                "terminal_settle",
+                tcp_position_error_m=position,
+                tcp_rotation_error_rad=rotation,
+            )
+        },
+        env_index=0,
+    )
     assert result.task_success is passed
     validate_standard_evaluation("move_end_effector", result)
 
 
-def test_joint_criterion_uses_l2_measurement_not_max_joint_error() -> None:
+@pytest.mark.parametrize("error,passed", [(0.0999, True), (0.1, True), (0.1001, False)])
+def test_joint_criterion_uses_l2_measurement_not_max_joint_error(
+    error: float, passed: bool
+) -> None:
     result = evaluate_skill_stages(
         "move_joints",
         {
-            "reached": _evidence("terminal_settle", joint_error_l2_rad=0.006),
+            "reached": _evidence("terminal_settle", joint_error_l2_rad=error),
         },
         env_index=0,
     )
-    assert result.failure_code == "task_goal_miss"
+    assert result.task_success is passed
+    assert result.failure_code == (None if passed else "task_goal_miss")
+    validate_standard_evaluation("move_joints", result)
 
 
 def test_batched_stage_evidence_preserves_environment_order() -> None:
@@ -193,7 +220,7 @@ def test_batched_stage_evidence_preserves_environment_order() -> None:
             {
                 "reached": _evidence(
                     "terminal_settle",
-                    tcp_position_error_m=0.004,
+                    tcp_position_error_m=0.02,
                     tcp_rotation_error_rad=0.0,
                 )
             },
@@ -347,7 +374,7 @@ def test_handover_signed_height_bounds(height: float, passed: bool) -> None:
     ["missing_stage", "fake_pass", "no_provenance", "wrong_version", "inapplicable"],
 )
 def test_claimed_standard_cannot_bypass_criteria(mutation: str) -> None:
-    result = _primitive(0.004)
+    result = _primitive(0.02)
     if mutation == "missing_stage":
         result = replace(result, stages=(StageOutcome("different", "passed"),))
     elif mutation == "fake_pass":
@@ -403,7 +430,7 @@ def test_jsonl_and_report_preserve_layers_and_stage_denominators(
     physical = (
         _primitive(0.002),
         evaluate_skill_stages("move_end_effector", {}, env_index=1),
-        _primitive(0.004, 2),
+        _primitive(0.02, 2),
     )
     outcomes = tuple(
         with_physical_evaluation(_outcome(i), value, skill_id=case.skill_id)

@@ -792,6 +792,7 @@ class OpenDoor(AtomicSkill[OpenDoorGoal, OpenDoorOptions]):
             sample_count,
             dt=result.dt,
             control_dt=interpolation_dt,
+            arrival_indices=result.waypoint_indices,
         )
 
     def _opened_link_and_eef_poses(

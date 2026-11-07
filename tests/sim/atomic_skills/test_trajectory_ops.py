@@ -26,6 +26,7 @@ import torch
 from embodichain.lab.sim.atomic_skills.plans import normalize_success_mask
 from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     resolve_object_target,
+    resample_planned_trajectory,
     split_joint_trajectory_at_pose,
 )
 from embodichain.lab.sim.atomic_skills.trajectory_ops import (
@@ -332,6 +333,74 @@ def test_split_joint_trajectory_uses_per_environment_target_pose_boundary():
     assert second_input[:, :, 0].tolist() == [[2, 3, 4, 4, 4], [3, 4, 4, 4, 4]]
 
 
+def test_split_uses_declared_repeated_visit_and_retains_later_target():
+    trajectory = torch.tensor([[[0.0], [1.0], [0.0], [1.0], [2.0]]])
+    poses = torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 5, 1, 1)
+    poses[0, :, 0, 3] = trajectory[0, :, 0]
+    target = poses[:, 1]
+    robot = Mock()
+    robot.compute_batch_fk.return_value = poses
+    first, second = split_joint_trajectory_at_pose(
+        trajectory,
+        target,
+        robot=robot,
+        control_part="arm",
+        first_sample_count=2,
+        second_sample_count=2,
+        dt=torch.tensor([[0.0, 0.04, 0.04, 0.04, 0.04]]),
+        control_dt=0.04,
+        arrival_indices=torch.tensor([[1, 2, 3, 4]]),
+        split_target_index=2,
+    )
+    torch.testing.assert_close(first, trajectory[:, [0, 1, 1, 2, 2, 3, 3]])
+    torch.testing.assert_close(second, trajectory[:, [3, 4, 4]])
+
+
+def test_composite_arrival_holds_preserve_rows_and_terminal_junctions():
+    q = torch.tensor(
+        [
+            [[0.0], [0.25], [0.5], [0.75], [1.0]],
+            [[0.0], [0.25], [0.5], [0.5], [0.5]],
+            [[0.0], [0.25], [0.5], [0.5], [1.0]],
+            [[0.0], [0.25], [0.5], [0.75], [1.0]],
+        ],
+        dtype=torch.float64,
+    )
+    dt = torch.tensor(
+        [
+            [0, 0.25, 0.25, 0.25, 0.25],
+            [0, 0.25, 0.25, 0, 0],
+            [0, 0.25, 0.25, 0.25, 0.25],
+            [0, 0.25, 0.25, 0.25, 0.25],
+        ],
+        dtype=torch.float64,
+    )
+    arrivals = torch.tensor([[2, 4, -1], [2, -1, -1], [2, 3, 4], [-1, -1, -1]])
+    expected = [
+        [0, 0.25, 0.5, 0.5, 0.75, 1, 1],
+        [0, 0.25, 0.5, 0.5],
+        [0, 0.25, 0.5, 0.5, 1, 1],
+        [0, 0.25, 0.5, 0.75, 1],
+    ]
+    batch = resample_planned_trajectory(
+        q, 1, dt=dt, control_dt=0.25, arrival_indices=arrivals
+    )
+    for row, values in enumerate(expected):
+        single = resample_planned_trajectory(
+            q[row : row + 1],
+            1,
+            dt=dt[row : row + 1],
+            control_dt=0.25,
+            arrival_indices=arrivals[row : row + 1],
+        )
+        torch.testing.assert_close(single[0, :, 0], torch.tensor(values))
+        torch.testing.assert_close(batch[row, : len(values)], single[0])
+        torch.testing.assert_close(
+            batch[row, len(values) :],
+            single[0, -1:].expand(batch.shape[1] - len(values), -1),
+        )
+
+
 class TestTranslatePoseWorld:
     def test_offset_adds_to_translation(self):
         pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
@@ -471,31 +540,94 @@ class TestInterpolateJointTrajectory:
             interpolate_joint_trajectory(start, waypoints, n_waypoints=2)
 
 
-def test_full_robot_trajectory_uses_retimed_positions_and_velocities() -> None:
+def test_full_robot_grid_keeps_internal_corner_and_distinct_return_visit() -> None:
+    q = torch.tensor(
+        [[[0.0, 0.0], [0.5, 0.0], [0.5, 0.5], [0.5, 0.0], [0.5, 0.5]]],
+        dtype=torch.float64,
+    )
     result = PlanResult(
         success=torch.tensor([True]),
-        positions=torch.tensor([[[0.0, 10.0], [1.0, 12.0]]]),
-        velocities=torch.full((1, 2, 2), 99.0),
-        accelerations=torch.full((1, 2, 2), 88.0),
-        dt=torch.tensor([[0.0, 0.75]]),
+        positions=q,
+        dt=torch.tensor([[0.0, 0.01, 0.01, 0.01, 0.01]], dtype=torch.float64),
+        waypoint_indices=torch.tensor([[1, 2, 3, 4]]),
     )
+    _, trajectory = to_full_robot_trajectory(
+        result,
+        base_qpos=torch.zeros(1, 3),
+        joint_ids=[0, 2],
+        env_ids=torch.tensor([0]),
+        control_dt=0.1,
+    )
+    torch.testing.assert_close(trajectory.positions[:, :, [0, 2]], q.float())
+    torch.testing.assert_close(
+        trajectory.dt,
+        torch.tensor([[0.0, 0.1, 0.1, 0.1, 0.1]], dtype=trajectory.dt.dtype),
+    )
+    torch.testing.assert_close(result.positions, q)
+
+
+def test_full_robot_grid_preserves_velocity_targets_at_internal_stop() -> None:
+    positions = torch.tensor([[[0.0], [0.25], [0.5], [0.75], [1.0]]])
+    result = PlanResult(
+        success=torch.tensor([True]),
+        positions=positions,
+        dt=torch.tensor([[0.0, 0.25, 0.25, 0.25, 0.25]]),
+        waypoint_indices=torch.tensor([[2, 4]]),
+    )
+    _, timed = to_full_robot_trajectory(
+        result,
+        base_qpos=torch.zeros(1, 2),
+        joint_ids=[1],
+        env_ids=torch.tensor([0]),
+        control_dt=0.25,
+    )
+    torch.testing.assert_close(timed.positions[:, :, 1:], positions)
+    torch.testing.assert_close(
+        timed.velocities[0, :, 1], torch.tensor([0.0, 1.0, 0.0, 1.0, 0.0])
+    )
+    assert timed.velocities[0, :, 0].count_nonzero() == 0
+
+
+@pytest.mark.parametrize("planner_dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("command_dtype", [torch.float32, torch.float64])
+def test_full_robot_trajectory_uses_retimed_positions_and_velocities(
+    planner_dtype: torch.dtype, command_dtype: torch.dtype
+) -> None:
+    result = PlanResult(
+        success=torch.tensor([True]),
+        positions=torch.tensor([[[0.0, 10.0], [1.0, 12.0]]], dtype=planner_dtype),
+        velocities=torch.full((1, 2, 2), 99.0, dtype=planner_dtype),
+        accelerations=torch.full((1, 2, 2), 88.0, dtype=planner_dtype),
+        dt=torch.tensor([[0.0, 0.75]], dtype=planner_dtype),
+    )
+    native = {
+        name: getattr(result, name).clone()
+        for name in ("positions", "velocities", "accelerations", "dt")
+    }
+    base_qpos = torch.tensor([[5.0, 6.0, 7.0, 8.0]], dtype=command_dtype)
+    original_base = base_qpos.clone()
 
     success, trajectory = to_full_robot_trajectory(
         result,
-        base_qpos=torch.tensor([[5.0, 6.0, 7.0, 8.0]]),
+        base_qpos=base_qpos,
         joint_ids=[1, 3],
         env_ids=torch.tensor([7]),
         control_dt=0.5,
     )
 
     expected_positions = torch.tensor(
-        [[[5.0, 0.0, 7.0, 10.0], [5.0, 0.5, 7.0, 11.0], [5.0, 1.0, 7.0, 12.0]]]
+        [[[5.0, 0.0, 7.0, 10.0], [5.0, 0.5, 7.0, 11.0], [5.0, 1.0, 7.0, 12.0]]],
+        dtype=command_dtype,
     )
     expected_velocities = torch.tensor(
-        [[[0.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 0.0, 0.0]]]
+        [[[0.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 0.0, 0.0]]],
+        dtype=command_dtype,
     )
     assert torch.equal(success, torch.tensor([True]))
     torch.testing.assert_close(trajectory.positions, expected_positions)
     torch.testing.assert_close(trajectory.velocities, expected_velocities)
     torch.testing.assert_close(trajectory.dt, torch.tensor([[0.0, 0.5, 0.5]]))
     assert trajectory.accelerations is None
+    torch.testing.assert_close(base_qpos, original_base, rtol=0, atol=0)
+    for name, original in native.items():
+        torch.testing.assert_close(getattr(result, name), original, rtol=0, atol=0)

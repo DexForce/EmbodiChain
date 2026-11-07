@@ -132,6 +132,9 @@ for suffix in ("core", "plans", "primitives", "primitives.pick_up", "_plan_expan
     assert importlib.import_module(legacy_name + "." + suffix) is importlib.import_module(canonical_name + "." + suffix)
 assert legacy.primitives.PickUp is canonical.PickUp
 assert legacy.core.AtomicAction is canonical.AtomicSkill
+namespace = {}
+exec("from " + legacy_name + ".core import *", namespace)
+assert namespace["AtomicAction"] is canonical.AtomicSkill
 engine = canonical.AtomicSkillEngine(
     SimpleNamespace(robot=SimpleNamespace(device="cpu"), device="cpu"),
     load_builtins=False,

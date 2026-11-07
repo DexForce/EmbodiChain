@@ -375,9 +375,24 @@ skill_profile:
       left_eef:
         kind: antipodal_parallel_jaw
         model: tianji_marvin_gripper
+        side: left
+        # Actual LEFT_HAND_TOOL origin multiplied by this embodiment's solver
+        # TCP above; expressed in left_hand_base_link, including URDF rounding.
+        root_from_tcp:
+          - [0.9999999999999997, -2.6794896412773994e-08, 7.216449660063518e-16, 8.118505867571458e-17]
+          - [2.6794896468285145e-08, 0.9999999999999993, -2.6794896412773994e-08, -3.0144258464370744e-09]
+          - [-5.551115123125783e-17, 2.6794896468285145e-08, 0.9999999999999997, 0.11249999999999996]
+          - [0.0, 0.0, 0.0, 1.0]
       right_eef:
         kind: antipodal_parallel_jaw
         model: tianji_marvin_gripper
+        side: right
+        # Same source transform for RIGHT_HAND_TOOL, in right_hand_base_link.
+        root_from_tcp:
+          - [0.9999999999999997, -2.6794896412773994e-08, 7.216449660063518e-16, 8.118505867571458e-17]
+          - [2.6794896468285145e-08, 0.9999999999999993, -2.6794896412773994e-08, -3.0144258464370744e-09]
+          - [-5.551115123125783e-17, 2.6794896468285145e-08, 0.9999999999999997, 0.11249999999999996]
+          - [0.0, 0.0, 0.0, 1.0]
     control_part_evidence:
       kind: joint_position_constraint
       control_parts: [left_eef, right_eef]

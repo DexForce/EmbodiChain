@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Articulation, RigidObject, Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 
@@ -273,6 +274,7 @@ def create_simulation_atomic_skill_engine(
     control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
     grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
     *,
+    hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
     load_builtins: bool = True,
     tracking_runtime: TrackingRuntime | None = None,
 ) -> AtomicSkillEngine:
@@ -291,6 +293,7 @@ def create_simulation_atomic_skill_engine(
             in automatically captured initial scene snapshots.
         control_profiles: Semantic commands keyed by robot control-part name.
         grasp_pose_generators: Grasp-pose services keyed by grasp endpoint target.
+        hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint target.
         load_builtins: Whether to install all built-in atomic skills.
         tracking_runtime: Optional typed tracking runtime shared by action plans.
 
@@ -318,6 +321,7 @@ def create_simulation_atomic_skill_engine(
         motion_generator,
         control_profiles=control_profiles,
         grasp_pose_generators=grasp_pose_generators,
+        hand_geometry_cfgs=hand_geometry_cfgs,
         load_builtins=load_builtins,
         tracking_runtime=tracking_runtime,
         scene_provider=RigidObjectSceneProvider(entities_by_id),

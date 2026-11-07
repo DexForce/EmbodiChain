@@ -420,6 +420,14 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
     return {
         "strategy": policy.strategy,
         "sample_count": policy.sample_count,
+        "velocity_targets": policy.velocity_targets,
+        "interpolation_mode": policy.interpolation_mode,
+        "ik_seed_mode": policy.ik_seed_mode,
+        "sample_count_retries": list(policy.sample_count_retries),
+        "require_final_velocity": policy.require_final_velocity,
+        "final_velocity_rejection": policy.final_velocity_rejection,
+        "segment_sample_count_retries": list(policy.segment_sample_count_retries),
+        "segment_continuous_ik_recovery": policy.segment_continuous_ik_recovery,
         "velocity_limit": _metadata_value(policy.velocity_limit),
         "acceleration_limit": _metadata_value(policy.acceleration_limit),
         "dynamic_collision_mode": policy.dynamic_collision_mode.value,
@@ -429,7 +437,7 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
 
 def _recovery_policy_to_metadata(policy: RecoveryPolicy) -> dict[str, object]:
     """Serialize all bounded-recovery settings."""
-    return {
+    metadata = {
         "max_replans": policy.max_replans,
         "max_skill_retries": policy.max_skill_retries,
         "goal_translation_threshold": _metadata_value(
@@ -438,6 +446,17 @@ def _recovery_policy_to_metadata(policy: RecoveryPolicy) -> dict[str, object]:
         "goal_rotation_threshold": _metadata_value(policy.goal_rotation_threshold),
         "skill_timeout": _metadata_value(policy.skill_timeout),
     }
+
+    if policy.retry_all_failed_plans is False:
+        metadata["retry_all_failed_plans"] = False
+    for name in ("planning_recovery", "planning_budget"):
+        declaration = getattr(policy, name, None)
+        if declaration is not None:
+            metadata[name] = {
+                value.name: _metadata_value(getattr(declaration, value.name))
+                for value in fields(declaration)
+            }
+    return metadata
 
 
 def _tracking_metric_to_metadata(metric: TrackingMetricCfg) -> dict[str, object]:

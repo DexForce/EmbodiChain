@@ -417,6 +417,7 @@ def test_engine_skills_only_exposes_visible_explicit_installed_contracts() -> No
     }
 
     assert set(engine.skill_catalog) == expected
+    assert "park" not in engine.skill_implementations
     assert "move_joints" in engine.skill_implementations
     assert "move_joints" in engine.skill_catalog
 
@@ -1664,7 +1665,7 @@ def test_profile_configures_engine_before_semantic_binding() -> None:
 
     engine = AtomicSkillEngine(
         source_engine.motion_generator,
-        control_profiles=profile.action_control_profiles(),
+        control_profiles=profile.skill_control_profiles(),
     )
     bound = profile.bind(engine)
 

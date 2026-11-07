@@ -137,7 +137,6 @@ def create_pick_object(sim) -> RigidObject:
 
 def make_place_eef_poses(device: torch.device) -> torch.Tensor:
     """Build hover and release waypoints for the multi-waypoint Place target."""
-    # Construct a rigid rotation from the nearly top-down yaw, pitch and roll.
     rotation = matrix_from_euler(
         torch.tensor(
             [math.atan2(0.9977, 0.0539), math.asin(0.0401), math.pi],
@@ -147,6 +146,9 @@ def make_place_eef_poses(device: torch.device) -> torch.Tensor:
         convention="ZYX",
     )
     poses = []
+    # The authored four-decimal orientation needs projection onto SO(3).
+    u, _, vh = torch.linalg.svd(rotation)
+    rotation = u @ vh
     for position in ((-0.40, 0.48, 0.20), (-0.40, 0.48, 0.10)):
         pose = torch.eye(4, dtype=torch.float32, device=device)
         pose[:3, :3], pose[:3, 3] = rotation, torch.tensor(position, device=device)
@@ -198,6 +200,7 @@ def run(args: argparse.Namespace) -> None:
         },
         grasp_pose_generators={
             "eef": create_parallel_jaw_grasp_pose_generator(
+                robot=robot,
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
                 approach_direction_samples=getattr(args, "grasp_approach_samples", 4),

@@ -169,6 +169,8 @@ class SkillInvocation(Generic[GoalT, OptionsT]):
             raise TypeError("tracking_policy must be a TrackingPolicy.")
         if not isinstance(self.recovery_policy, RecoveryPolicy):
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
+        self.recovery_policy.validate_skill(self.skill_id)
+        object.__setattr__(self, "recovery_policy", deepcopy(self.recovery_policy))
         phase_effect_gates = tuple(self.phase_effect_gates)
         if not all(
             type(value) is PhaseEffectGateRequirement for value in phase_effect_gates
@@ -236,6 +238,7 @@ class ResolvedSkillRequest(Generic[GoalT, OptionsT]):
             raise TypeError("tracking_policy must be a TrackingPolicy.")
         if not isinstance(self.recovery_policy, RecoveryPolicy):
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
+        self.recovery_policy.validate_skill(self.skill_id)
         phase_effect_gates = tuple(self.phase_effect_gates)
         if not all(
             type(value) is PhaseEffectGateRequirement for value in phase_effect_gates

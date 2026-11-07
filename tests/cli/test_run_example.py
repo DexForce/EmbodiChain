@@ -200,13 +200,10 @@ def test_missing_example_data_reports_installation_error(
     assert "Reinstall EmbodiChain" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("command", ["run-atomic-skill", "run-atomic-action"])
-def test_existing_atomic_command_forwards_to_ordinary_example(
-    monkeypatch, command: str
-) -> None:
+def test_existing_atomic_command_forwards_to_ordinary_example(monkeypatch) -> None:
     run = Mock()
     monkeypatch.setattr(launcher, "main", run)
-    cli.main([command, "--skill", "place", "--variants", "2"])
+    cli.main(["run-atomic-skill", "--skill", "place", "--variants", "2"])
     run.assert_called_once_with(
         ["sim/atomic_skill", "--skill", "place", "--variants", "2"]
     )

@@ -177,13 +177,17 @@ def _template(output: Path) -> Path:
             task["embodiment"]["component"], base_dir=source.parent
         ).resolve()
     )
-    policy = resolve_config_path(
-        task["task_program"]["execution_policy"], base_dir=source.parent
-    )
+    policy = task["task_program"]["execution_policy"]
+    if isinstance(policy, dict):
+        policy["component"] = str(
+            resolve_config_path(policy["component"], base_dir=source.parent).resolve()
+        )
+    else:
+        policy = str(resolve_config_path(policy, base_dir=source.parent).resolve())
     task["task_program"] = {
         "program": "program.yaml",
         "integration": "integration.yaml",
-        "execution_policy": str(policy.resolve()),
+        "execution_policy": policy,
     }
     for name, value in (
         ("task", task),

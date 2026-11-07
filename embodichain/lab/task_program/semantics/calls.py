@@ -436,11 +436,12 @@ class HandOver(SemanticCallSpec):
     """Pick up, transfer, and place an object with two robot resources.
 
     Args:
-        object: Authoritative scene-object reference. The object must not
-            already be held when the unified action starts.
+        object: Authoritative scene-object reference. A policy preset with
+            ``HandOverOptions.release_at_target=False`` requires an incoming
+            verified source attachment and transfers it to ``destination``.
         final_target: Optional final object-space delivery pose.
-        resources: Optional skill-local resource overrides. Select the second
-            candidate with the ``destination`` slot when needed.
+        resources: Optional skill-local resource overrides. ``source`` and
+            ``destination`` are authoritative for a continuation transfer.
     """
 
     call_kind: ClassVar[str] = "hand_over"

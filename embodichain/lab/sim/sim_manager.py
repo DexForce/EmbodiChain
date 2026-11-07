@@ -923,6 +923,19 @@ class SimulationManager:
         return spawn_scene.builder.result
 
     @property
+    def physics_step_index(self) -> int:
+        """Number of physics substeps completed through :meth:`update`.
+
+        The counter advances before the substep observer, with or without
+        rendering. Observation reads, topology rebuilds and selected resets
+        leave it unchanged; it is independent of the backend's resettable clock.
+
+        Returns:
+            Monotonic completed-substep count for this manager's lifetime.
+        """
+        return self._visualization_sim_step
+
+    @property
     def is_use_gpu_physics(self) -> bool:
         """Whether the active physics backend is running on GPU."""
         return self.device.type == "cuda"
@@ -1871,7 +1884,15 @@ class SimulationManager:
         Args:
             enable (bool): whether to enable physics simulation.
         """
+        if type(enable) is not bool:
+            raise TypeError("enable must be a bool")
         self._world.enable_physics(enable)
+        self._physics_enabled = enable
+
+    @property
+    def physics_enabled(self) -> bool:
+        """Whether physics is enabled through this manager's owned runtime API."""
+        return getattr(self, "_physics_enabled", True)
 
     def init_gpu_physics(self) -> None:
         """Prepare the Spawn-owned physics runtime.
@@ -1960,6 +1981,22 @@ class SimulationManager:
 
             if step > 0:
                 self._log_scene_summary()
+
+    @property
+    def simulation_time(self) -> float:
+        """Return elapsed time advanced through this manager's ``update`` calls.
+
+        The sum starts at manager construction and includes explicit warmup
+        updates. It is published after each successful physics substep, before
+        ``after_substep`` observers. Preparation and zero-duration render-state
+        synchronization do not advance it; object/environment resets do not
+        rewind it. Direct low-level backend/world calls are outside this clock.
+
+        This manager-relative timeline can have an offset from a Task Program's
+        episode-relative EnvironmentStepClock; consumers must map the domains
+        explicitly instead of comparing their timestamps directly.
+        """
+        return self._visualization_sim_time
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.
@@ -3964,12 +4001,17 @@ class SimulationManager:
                     f"prepared ({len(self._arenas)} of {self.num_envs} ready)."
                 )
             parent_nodes = None
+            result = self.spawn_result
             if (
                 sensor_cfg.extrinsics.parent is not None
-                and self._spawn_scene.builder.result is not None
+                and result is not None
+                and self._ready_spawn_topology_revision == int(result.topology_revision)
+                and not result.needs_rebuild
+                and not self._spawn_scene.builder.has_pending_changes
             ):
                 # Resolve before allocating native camera views so an invalid
                 # parent cannot leave partially constructed render resources.
+                # Pre-created Arenas alone do not make Newton assets ready.
                 parent_nodes = self._resolve_spawn_sensor_parent_nodes(
                     sensor_cfg.extrinsics.parent
                 )
@@ -3980,6 +4022,9 @@ class SimulationManager:
             )
             if parent_nodes is not None:
                 sensor.attach_to_parent_nodes(parent_nodes)
+            elif sensor_cfg.extrinsics.parent is not None:
+                # Also retry at the same topology revision after a failed bind.
+                self._camera_attachment_topology_revision = -1
         elif isinstance(sensor_factory, type) and issubclass(
             sensor_factory, ContactSensor
         ):
@@ -4017,10 +4062,17 @@ class SimulationManager:
         sensor.attach_to_parent_nodes(parent_nodes)
 
     def _attach_parented_cameras(self) -> None:
-        """Restore parented cameras after a Spawn topology change."""
+        """Attach pending cameras without resetting already attached views."""
         for sensor in self._sensors.values():
             if isinstance(sensor, Camera) and sensor.cfg.extrinsics.parent is not None:
-                self._attach_camera_parent(sensor)
+                if sensor.is_attached:
+                    # Eager Default additions can change link-name ambiguity
+                    # without replacing this camera's existing parent nodes.
+                    self._resolve_spawn_sensor_parent_nodes(
+                        sensor.cfg.extrinsics.parent
+                    )
+                else:
+                    self._attach_camera_parent(sensor)
 
     def _resolve_spawn_sensor_parent_nodes(self, parent: str) -> list[object]:
         """Resolve one canonical articulation link to a render node per Arena.

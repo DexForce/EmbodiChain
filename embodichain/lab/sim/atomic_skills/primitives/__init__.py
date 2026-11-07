@@ -45,14 +45,20 @@ from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
-from .press import Press, PressGoal, PressOptions
+from .press import (
+    Press,
+    PressGoal,
+    PressOptions,
+    PressPlanningRecovery,
+    validate_press_extra_distance,
+)
 from .push_object import (
     PushObject,
     PushObjectGoal,
     PushObjectOptions,
     PushObjectToolCalibration,
 )
-from .pour import Pour, PourGoal, PourOptions
+from .pour import Pour, PourGoal, PourOptions, PourTarget
 from .slide import (
     Slide,
     SlideGoal,
@@ -116,9 +122,12 @@ __all__ = [
     "Pour",
     "PourGoal",
     "PourOptions",
+    "PourTarget",
     "Press",
     "PressGoal",
     "PressOptions",
+    "PressPlanningRecovery",
+    "validate_press_extra_distance",
     "PushObject",
     "PushObjectGoal",
     "PushObjectOptions",

@@ -76,6 +76,14 @@ except ImportError:
     _HAS_DEPTH_CODEC = False
 
 
+def _subtask_description(sample: dict, root: Path) -> str:
+    # 0.4.4 resolves the table in __getitem__; 0.6.1 exposes only its index.
+    if "subtask" in sample:
+        return sample["subtask"]
+    table = pd.read_parquet(root / "meta/subtasks.parquet")
+    return str(table.index[table["subtask_index"] == int(sample["subtask_index"])][0])
+
+
 class MockRobot:
     """Mock robot for dataset functor tests."""
 
@@ -323,40 +331,57 @@ class TestLeRobotRecorderInitialization:
         image = np.zeros((8, 10, 3), dtype=np.uint8)
         image[2:6, 3:8] = (13, 101, 247)
         image[0, 0] = (255, 7, 91)
-        dataset = datasets._ImageCompressionLeRobotDataset.__new__(
-            datasets._ImageCompressionLeRobotDataset
+        dataset = datasets._ImageCompressionLeRobotDataset.create(
+            repo_id="local/compression",
+            root=tmp_path / "dataset",
+            fps=30,
+            features={},
+            use_videos=False,
         )
-        dataset.image_writer = None
         dataset.image_compress_level = image_compress_level
         path = tmp_path / f"image_{image_compress_level}.png"
 
-        dataset._save_image(image, path, compress_level=6)
+        writer = dataset if hasattr(dataset, "episode_buffer") else dataset.writer
+        try:
+            writer._save_image(image, path, compress_level=6)
+        finally:
+            dataset.finalize()
 
         from PIL import Image
+        from io import BytesIO
 
         with Image.open(path) as decoded:
             np.testing.assert_array_equal(np.asarray(decoded), image)
+        expected = BytesIO()
+        Image.fromarray(image).save(
+            expected, format="PNG", compress_level=image_compress_level
+        )
+        assert path.read_bytes() == expected.getvalue()
 
     def test_image_compress_level_reaches_async_image_writer(self, tmp_path):
         """The configured level reaches a real LeRobot image-writer thread."""
-        from lerobot.datasets.image_writer import AsyncImageWriter
         from embodichain.lab.gym.envs.managers import datasets
 
         image = np.zeros((8, 10, 3), dtype=np.uint8)
         image[2:6, 3:8] = (13, 101, 247)
-        dataset = datasets._ImageCompressionLeRobotDataset.__new__(
-            datasets._ImageCompressionLeRobotDataset
+        dataset = datasets._ImageCompressionLeRobotDataset.create(
+            repo_id="local/compression",
+            root=tmp_path / "dataset",
+            fps=30,
+            features={},
+            use_videos=False,
+            image_writer_threads=2,
         )
-        writer = AsyncImageWriter(num_processes=0, num_threads=2)
-        dataset.image_writer = writer
+        owner = dataset if hasattr(dataset, "episode_buffer") else dataset.writer
+        writer = owner.image_writer
         dataset.image_compress_level = 3
         path = tmp_path / "async_image.png"
 
         try:
-            dataset._save_image(image, path, compress_level=6)
+            owner._save_image(image, path, compress_level=6)
             writer.wait_until_done()
         finally:
-            writer.stop()
+            dataset.finalize()
 
         from PIL import Image
 
@@ -2049,7 +2074,9 @@ def test_multisegment_episode_round_trips_task_and_subtasks(
     assert {sample["task"] for sample in samples} == {
         "Move the cube between two targets."
     }
-    assert [sample["subtask"] for sample in samples] == [
+    assert [
+        _subtask_description(sample, recorder.dataset_full_path) for sample in samples
+    ] == [
         "Pick up the cube.",
         "Pick up the cube.",
         "Place the cube at the next target.",
@@ -2158,7 +2185,9 @@ def test_action_contract_preserves_task_and_subtask(
     samples = [loaded[index] for index in range(2)]
 
     assert [sample["task"] for sample in samples] == ["Move the cube."] * 2
-    assert [sample["subtask"] for sample in samples] == [
+    assert [
+        _subtask_description(sample, recorder.dataset_full_path) for sample in samples
+    ] == [
         "Pick up the cube.",
         "Move the cube.",
     ]
@@ -2311,7 +2340,7 @@ def test_recording_journal_survives_restart_and_deduplicates_commits(tmp_path) -
         },
         batch_size=[2],
     )
-    assert recorder._persist_episode_payload(
+    assert recorder.persist_episode_payload(
         0, observations, torch.zeros(2, 6), episode_metadata=metadata
     )
     recorder.finalize()
@@ -2324,10 +2353,771 @@ def test_recording_journal_survives_restart_and_deduplicates_commits(tmp_path) -
     restarted._env = recorder._env
     restarted._recording_journal = RecordingJournal(root)
     restarted._save_single_episode = MagicMock()
-    assert restarted._persist_episode_payload(
+    assert restarted.persist_episode_payload(
         0, observations, torch.zeros(2, 6), episode_metadata=metadata
     )
     restarted._save_single_episode.assert_not_called()
+
+
+def _real2sim_sink_fixture(tmp_path):
+    import hashlib
+
+    from embodichain.data_pipeline.real2sim import (
+        JointSpec,
+        PhaseAnnotation,
+        Real2SimTrajectory,
+        prepare_prototype,
+    )
+    from embodichain.lab.gym.envs.managers.real2sim_sink import (
+        Real2SimLeRobotEpisodeSink,
+    )
+    from embodichain.lab.sim.motion.expansion import (
+        CandidateIdentity,
+        ExpertEpisode,
+        ValidationCheck,
+        ValidationResult,
+    )
+
+    source = Real2SimTrajectory(
+        source_id="synthetic",
+        source_revision="1",
+        unit_id="pick",
+        skill_id="pick_up",
+        origin="synthetic_reference",
+        joint_names=("arm",),
+        joint_units=("rad",),
+        qpos=np.zeros((6, 1)),
+        timestamps=np.arange(6) / 30,
+        time_unit="s",
+        phases=(
+            PhaseAnnotation("approach", 0, 2, "free", "object"),
+            PhaseAnnotation("close", 2, 4, "contact", "object"),
+            PhaseAnnotation("lift", 4, 6, "hold", "gravity"),
+        ),
+        object_pose=np.eye(4),
+        eef_poses=np.tile([0, 0, 0, 0, 0, 0, 1.0], (6, 1)),
+        world_from_pose_frame=np.eye(4),
+        observed_link_to_tcp=np.eye(4),
+        pose_length_unit="m",
+        quaternion_order="xyzw",
+        pose_origin="fk_derived",
+    )
+    manifest = prepare_prototype(
+        source,
+        joints=(JointSpec("arm", "revolute"),),
+        control_dt=1 / 30,
+        directory=tmp_path / "prototype",
+    )
+    bundle_paths = {
+        "prototype_manifest": manifest,
+        "normalized_arrays": manifest.parent / "normalized.npz",
+        "source_manifest": manifest.parent / "source" / "trajectory.json",
+        "source_arrays": manifest.parent / "source" / "trajectory.npz",
+    }
+    artifacts = {
+        name: {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        for name, path in bundle_paths.items()
+    }
+    recorder = LeRobotRecorder(
+        MockFunctorCfg(params={"save_path": tmp_path / "dataset"}),
+        MockEnvForDataset(num_envs=1, has_sensors=False),
+    )
+    sink = Real2SimLeRobotEpisodeSink(
+        recorder,
+        observation_fields={
+            "qpos": ("robot", "qpos"),
+            "qvel": ("robot", "qvel"),
+            "qf": ("robot", "qf"),
+        },
+        action_representation="joint_position",
+        required_check_ids=("motion", "collision", "task"),
+    )
+    trace_path = tmp_path / "trace.npz"
+    np.savez_compressed(
+        trace_path,
+        step_call_index=np.zeros(6, dtype=np.int64),
+        step_plan_index=np.arange(6, dtype=np.int64),
+        call_0_left=np.arange(6, dtype=np.int64),
+        call_0_right=np.arange(6, dtype=np.int64),
+        call_0_weight=np.zeros(6, dtype=np.float64),
+        call_0_source_events=np.arange(6, dtype=np.int64),
+        call_0_plan_events=np.arange(6, dtype=np.int64),
+    )
+    lineage = {
+        "scene_revision": "synthetic-scene-v1",
+        "program_fingerprint": "a" * 64,
+        "trace": {
+            "path": str(trace_path),
+            "sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest(),
+        },
+        "calls": [
+            {
+                "call_index": 0,
+                "source_bundle": "default",
+                "geometry_family_id": "geometry",
+                "source_sample_offset": 0,
+                "operator": "nominal",
+                "prototype_sha256": artifacts["prototype_manifest"]["sha256"],
+            }
+        ],
+    }
+    episode = ExpertEpisode(
+        identity=CandidateIdentity(
+            "scene", "initial", "candidate-1", "geometry", "synthetic", "1", "pick"
+        ),
+        observations={key: torch.zeros(7, 6) for key in ("qpos", "qvel", "qf")},
+        actions=torch.zeros(6, 6),
+        timestamps=torch.arange(7, dtype=torch.float64) / 30,
+        action_representation="joint_position",
+        validation=ValidationResult(
+            tuple(
+                ValidationCheck(name, "passed")
+                for name in ("motion", "collision", "task")
+            )
+        ),
+        episode_id="episode-1",
+        commit_id="commit-1",
+        metadata={"real2sim_source_artifacts": artifacts, "real2sim_lineage": lineage},
+    )
+    return recorder, sink, episode, manifest, artifacts
+
+
+@pytest.mark.parametrize("with_refinement", [False, True])
+def test_real2sim_sink_confirms_only_closed_durable_episodes(
+    tmp_path, with_refinement
+) -> None:
+    from dataclasses import replace
+    from embodichain.data_pipeline.real2sim import load_prototype
+    from embodichain.data_pipeline.recording.journal import inspect_recording
+
+    recorder, sink, episode, manifest, artifacts = _real2sim_sink_fixture(tmp_path)
+    if with_refinement:
+        import hashlib
+        from embodichain.data_pipeline.real2sim import PhaseAnnotation
+        from embodichain.lab.sim.motion.refinement import (
+            InteractionConstraintSet,
+            KinematicMotionRefiner,
+            MotionRefinementCfg,
+        )
+
+        raw = np.repeat(np.eye(4)[None], 6, axis=0)
+        goal = np.eye(4)
+        goal[0, 3] = 0.005
+        phases = (
+            PhaseAnnotation("approach", 0, 2, "free", "object"),
+            PhaseAnnotation("close", 2, 4, "contact", "object"),
+            PhaseAnnotation("lift", 4, 6, "hold", "gravity"),
+        )
+        result = KinematicMotionRefiner(MotionRefinementCfg()).refine(
+            raw, InteractionConstraintSet("pick_up", phases, 4, goal, "b" * 64)
+        )
+        lineage = dict(episode.metadata["real2sim_lineage"])
+        lineage["calls"] = [{**lineage["calls"][0], "refinement": dict(result.report)}]
+        path = Path(lineage["trace"]["path"])
+        with np.load(path, allow_pickle=False) as payload:
+            arrays = {name: np.array(payload[name]) for name in payload.files}
+        arrays.update(
+            call_0_refinement_original_tcp=raw,
+            call_0_refinement_target_tcp=result.fit.poses,
+        )
+        np.savez_compressed(path, **arrays)
+        lineage["trace"] = {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        episode = replace(
+            episode, metadata={**episode.metadata, "real2sim_lineage": lineage}
+        )
+        tampered = {
+            **lineage,
+            "calls": [
+                {
+                    **lineage["calls"][0],
+                    "refinement": {**result.report, "baseline_id": "c" * 64},
+                }
+            ],
+        }
+        rejected = sink.submit(
+            replace(
+                episode, metadata={**episode.metadata, "real2sim_lineage": tampered}
+            ),
+            submission_id=0,
+        )
+        assert not rejected.confirmed and "baseline digest" in rejected.error
+        assert recorder.dataset.meta.total_episodes == 0
+    first = sink.submit(episode, submission_id=0)
+    assert first.confirmed, first.error
+    archived = (
+        recorder.dataset_full_path
+        / "meta"
+        / "real2sim"
+        / "prototypes"
+        / artifacts["prototype_manifest"]["sha256"]
+        / "prototype.json"
+    )
+    assert load_prototype(archived).unit.source.unit_id == "pick"
+    again = sink.submit(episode, submission_id=1)
+    assert again.confirmed, again.error
+    second_episode = replace(
+        episode,
+        identity=replace(episode.identity, candidate_id="candidate-2"),
+        episode_id="episode-2",
+        commit_id="commit-2",
+    )
+    second = sink.submit(second_episode, submission_id=0)
+    assert second.confirmed, second.error
+    report = inspect_recording(recorder.dataset_full_path)
+    assert report["ok"], report
+    assert len(report["commits"]) == 2
+    sidecars = [
+        json.loads(line)
+        for line in (recorder.dataset_full_path / "meta" / "embodichain_episodes.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert len(sidecars) == 2
+    assert sidecars[0]["source_episode_uuid"] == sidecars[1]["source_episode_uuid"]
+    assert sidecars[0]["episode_uuid"] != sidecars[1]["episode_uuid"]
+    recorder.finalize()
+
+
+def test_real2sim_sink_rejects_changed_source_before_commit(tmp_path) -> None:
+    from dataclasses import replace
+    from embodichain.lab.sim.motion.expansion import ValidationCheck, ValidationResult
+
+    recorder, sink, episode, manifest, _ = _real2sim_sink_fixture(tmp_path)
+    insufficient = replace(
+        episode, validation=ValidationResult((ValidationCheck("task", "passed"),))
+    )
+    with pytest.raises(ValueError, match="lacks required"):
+        sink.submit(insufficient, submission_id=0)
+    manifest.write_text("changed")
+    receipt = sink.submit(episode, submission_id=0)
+    assert not receipt.confirmed
+    assert "missing or changed" in receipt.error
+    assert recorder.dataset.meta.total_episodes == 0
+    recorder.finalize()
+
+
+def test_droid_original_evidence_is_required_and_archived_before_receipt(
+    tmp_path,
+) -> None:
+    import hashlib
+    import h5py
+    from dataclasses import replace
+    from embodichain.data_pipeline.real2sim import (
+        JointSpec,
+        PhaseAnnotation,
+        prepare_prototype,
+    )
+    from embodichain.data_pipeline.real2sim.droid import (
+        build_droid_trajectory,
+        load_droid_episode,
+        save_droid_unit_evidence,
+    )
+
+    recorder, sink, episode, _, _ = _real2sim_sink_fixture(tmp_path)
+    raw = tmp_path / "original.h5"
+    with h5py.File(raw, "w") as f:
+        f["observation/robot_state/joint_positions"] = np.zeros((6, 7))
+        f["observation/robot_state/joint_velocities"] = np.full((6, 7), 0.123)
+        f["observation/robot_state/cartesian_position"] = np.zeros((6, 6))
+        f["observation/robot_state/gripper_position"] = np.full(6, 0.25)
+        f["action/joint_position"] = np.full((6, 7), 0.8)
+        f["action/gripper_position"] = np.ones(6)
+        f["observation/timestamp/robot_state/read_start"] = (
+            np.arange(6, dtype=np.int64) * 100
+        )
+        f["observation/timestamp/control/control_start"] = (
+            np.arange(6, dtype=np.int64) * 100 + 1
+        )
+        f["observation/timestamp/skip_action"] = np.zeros(6, dtype=bool)
+    original = load_droid_episode(raw)
+    arm = tuple(f"joint{i}" for i in range(7))
+    hand = np.full((6, 1), 0.2)
+    unit = build_droid_trajectory(
+        original,
+        source_id="DROID-fixture",
+        unit_id="pick",
+        skill_id="pick_up",
+        start=0,
+        stop=6,
+        arm_joint_names=arm,
+        gripper_joint_names=("finger",),
+        gripper_joint_units=("rad",),
+        observed_gripper_qpos=hand,
+        phases=(
+            PhaseAnnotation("approach", 0, 2, "free", "object"),
+            PhaseAnnotation("close", 2, 4, "contact", "object"),
+            PhaseAnnotation("lift", 4, 6, "hold", "gravity"),
+        ),
+        world_from_base=np.eye(4),
+        reported_link_to_tcp=np.eye(4),
+        object_pose=np.eye(4),
+        target_pose=None,
+        calibration_revision="measured-map",
+        annotation_revision="manual",
+    )
+    manifest = prepare_prototype(
+        unit,
+        joints=tuple(JointSpec(name, "revolute") for name in (*arm, "finger")),
+        control_dt=0.1,
+        directory=tmp_path / "droid-prototype",
+    )
+    evidence = save_droid_unit_evidence(
+        original,
+        tmp_path / "evidence.npz",
+        source_id=unit.source_id,
+        unit_id=unit.unit_id,
+        start=0,
+        stop=6,
+        arm_joint_names=arm,
+        calibrated_gripper_qpos=hand,
+        annotation={"gripper_mapping": "observed linear fixture"},
+        calibration={
+            "world_from_base": np.eye(4).tolist(),
+            "reported_link_to_tcp": np.eye(4).tolist(),
+        },
+    )
+    paths = dict(
+        prototype_manifest=manifest,
+        normalized_arrays=manifest.parent / "normalized.npz",
+        source_manifest=manifest.parent / "source/trajectory.json",
+        source_arrays=manifest.parent / "source/trajectory.npz",
+    )
+    artifacts = {
+        name: dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+        for name, path in paths.items()
+    }
+    lineage = dict(episode.metadata["real2sim_lineage"])
+    lineage["calls"] = [
+        {
+            **lineage["calls"][0],
+            "prototype_sha256": artifacts["prototype_manifest"]["sha256"],
+        }
+    ]
+    episode = replace(
+        episode,
+        identity=replace(
+            episode.identity,
+            source_id=unit.source_id,
+            source_revision=unit.source_revision,
+        ),
+        metadata={"real2sim_source_artifacts": artifacts, "real2sim_lineage": lineage},
+    )
+    rejected = sink.submit(episode, submission_id=0)
+    assert not rejected.confirmed and "original recording" in rejected.error
+    assert recorder.dataset.meta.total_episodes == 0
+    for role, path in (("original_recording", raw), ("source_evidence", evidence)):
+        artifacts[role] = dict(
+            path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest()
+        )
+    episode = replace(
+        episode,
+        metadata={"real2sim_source_artifacts": artifacts, "real2sim_lineage": lineage},
+    )
+    receipt = sink.submit(episode, submission_id=0)
+    assert receipt.confirmed, receipt.error
+    copied = (
+        recorder.dataset_full_path
+        / "meta/real2sim/prototypes"
+        / artifacts["prototype_manifest"]["sha256"]
+        / "source"
+    )
+    assert (copied / "original.h5").read_bytes() == raw.read_bytes()
+    with np.load(copied / "evidence.npz", allow_pickle=False) as arrays:
+        np.testing.assert_allclose(arrays["arm_qvel"], 0.123)
+    recorder.finalize()
+
+
+@pytest.mark.parametrize("observed_geometry", [False, True])
+def test_replay_export_preserves_commit_identity_and_rejects_changed_attachment(
+    tmp_path,
+    observed_geometry: bool,
+) -> None:
+    import hashlib
+    from dataclasses import replace
+    from embodichain.data_pipeline.real2sim.replay import (
+        export_real2sim_replay_manifest,
+    )
+
+    recorder, sink, episode, _, _ = _real2sim_sink_fixture(tmp_path)
+    observed = tmp_path / "observed.npz"
+    np.savez_compressed(
+        observed,
+        object_pose=np.tile([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0], (7, 1)),
+        target_pose=np.eye(4),
+        timestamps=episode.timestamps.numpy(),
+    )
+    if observed_geometry:
+        from embodichain.lab.sim.motion.expansion import (
+            ValidationCheck,
+            ValidationResult,
+        )
+
+        episode = replace(
+            episode,
+            validation=ValidationResult(
+                episode.validation.checks
+                + (ValidationCheck("observed_collision", "passed"),)
+            ),
+            metadata={
+                **episode.metadata,
+                "real2sim_observed_geometry": dict(
+                    path=str(observed),
+                    sha256=hashlib.sha256(observed.read_bytes()).hexdigest(),
+                ),
+            },
+        )
+    receipt = sink.submit(episode, submission_id=0)
+    assert receipt.confirmed, receipt.error
+    recorder.finalize()
+    root = recorder.dataset_full_path
+    from dataclasses import asdict
+    from uuid import NAMESPACE_URL, uuid5
+
+    receipt_path = (
+        root
+        / "meta/real2sim/receipts"
+        / f"{uuid5(NAMESPACE_URL, receipt.commit_id)}.json"
+    )
+    receipt_path.parent.mkdir(parents=True)
+    receipt_path.write_text(json.dumps(asdict(receipt)))
+    rows = root / "meta/embodichain_episodes.jsonl"
+    before = rows.read_bytes()
+    exported = export_real2sim_replay_manifest([root], tmp_path / "replay.json")
+    payload = json.loads(exported.read_text())
+    assert payload["read_only"] and not payload["collection_identity_created"]
+    entry = payload["episodes"][0]
+    assert entry["receipt"]["commit_id"] == episode.commit_id
+    assert entry["receipt"]["episode_id"] == episode.episode_id
+    assert entry["receipt"]["submission_id"] == 0
+    assert entry["sources"][0]["origin"] == "synthetic_reference"
+    assert rows.read_bytes() == before
+    with pytest.raises(FileExistsError):
+        export_real2sim_replay_manifest([root], exported)
+    journal = next((root / "meta/embodichain_commits").glob("*.json"))
+    journal_bytes = journal.read_bytes()
+    journal.unlink()
+    with pytest.raises(ValueError, match="matching complete journal"):
+        export_real2sim_replay_manifest([root], tmp_path / "missing-journal.json")
+    rows.unlink()
+    with pytest.raises(ValueError, match="matching complete journal"):
+        export_real2sim_replay_manifest(
+            [root], tmp_path / "missing-journal-and-sidecar.json"
+        )
+    rows.write_bytes(before)
+    journal.write_bytes(journal_bytes)
+    trace = root / entry["metadata"]["real2sim_lineage"]["trace"]["path"]
+    trace.write_bytes(b"damaged")
+    with pytest.raises(ValueError, match="missing, changed"):
+        export_real2sim_replay_manifest([root], tmp_path / "changed-replay.json")
+
+
+def test_real2sim_sink_rejects_missing_or_incomplete_action_lineage(tmp_path) -> None:
+    import hashlib
+    from dataclasses import replace
+
+    recorder, sink, episode, _, artifacts = _real2sim_sink_fixture(tmp_path)
+    missing = replace(episode, metadata={"real2sim_source_artifacts": artifacts})
+    receipt = sink.submit(missing, submission_id=0)
+    assert not receipt.confirmed and "execution lineage" in receipt.error
+
+    trace_path = tmp_path / "missing-plan-sample.npz"
+    np.savez_compressed(
+        trace_path,
+        step_call_index=np.zeros(6, dtype=np.int64),
+        step_plan_index=np.array([0, 1, 2, 3, 4, 4], dtype=np.int64),
+        call_0_left=np.arange(6, dtype=np.int64),
+        call_0_right=np.arange(6, dtype=np.int64),
+        call_0_weight=np.zeros(6),
+        call_0_source_events=np.arange(6, dtype=np.int64),
+        call_0_plan_events=np.arange(6, dtype=np.int64),
+    )
+    lineage = dict(episode.metadata["real2sim_lineage"])
+    lineage["trace"] = {
+        "path": str(trace_path),
+        "sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest(),
+    }
+    incomplete = replace(
+        episode,
+        metadata={"real2sim_source_artifacts": artifacts, "real2sim_lineage": lineage},
+    )
+    receipt = sink.submit(incomplete, submission_id=1)
+    assert not receipt.confirmed and "every plan sample" in receipt.error
+    assert recorder.dataset.meta.total_episodes == 0
+    recorder.finalize()
+
+
+def test_real2sim_sink_requires_measured_geometry_for_collision_evidence(
+    tmp_path,
+) -> None:
+    import hashlib
+    from dataclasses import replace
+
+    from embodichain.lab.sim.motion.expansion import ValidationCheck, ValidationResult
+
+    recorder, sink, episode, _, _ = _real2sim_sink_fixture(tmp_path)
+    sink._required_check_ids = ("motion", "collision", "task", "observed_collision")
+    episode = replace(
+        episode,
+        validation=ValidationResult(
+            episode.validation.checks
+            + (ValidationCheck("observed_collision", "passed"),)
+        ),
+    )
+    missing = sink.submit(episode, submission_id=0)
+    assert not missing.confirmed and "geometry sidecar" in missing.error
+    assert recorder.dataset.meta.total_episodes == 0
+
+    path = tmp_path / "observed.npz"
+    poses = np.tile(np.array([0, 0, 0, 0, 0, 0, 1.0]), (len(episode.actions) + 1, 1))
+    np.savez_compressed(
+        path,
+        object_pose=poses,
+        target_pose=np.eye(4),
+        timestamps=episode.timestamps.numpy(),
+    )
+    entry = {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    episode = replace(
+        episode, metadata={**episode.metadata, "real2sim_observed_geometry": entry}
+    )
+    receipt = sink.submit(episode, submission_id=1)
+    assert receipt.confirmed, receipt.error
+    metadata = json.loads(
+        (recorder.dataset_full_path / "meta" / "embodichain_episodes.jsonl")
+        .read_text()
+        .splitlines()[0]
+    )
+    archived = (
+        recorder.dataset_full_path / metadata["real2sim_observed_geometry"]["path"]
+    )
+    with np.load(archived, allow_pickle=False) as evidence:
+        np.testing.assert_array_equal(evidence["object_pose"], poses)
+    recorder.finalize()
+
+
+def test_real2sim_sink_never_retries_a_partial_commit(tmp_path, monkeypatch) -> None:
+    recorder, sink, episode, _, _ = _real2sim_sink_fixture(tmp_path)
+    monkeypatch.setattr(
+        "embodichain.lab.gym.envs.managers.real2sim_sink.inspect_recording",
+        lambda root: {"errors": ["injected verification failure"], "commits": []},
+    )
+    receipt = sink.submit(episode, submission_id=0)
+    assert not receipt.confirmed
+    assert recorder.dataset.meta.total_episodes == 1
+    with pytest.raises(RuntimeError, match="partial commit"):
+        sink.submit(episode, submission_id=1)
+    recorder.finalize()
+
+
+def test_real2sim_capture_preserves_actual_terminal_observation() -> None:
+    from embodichain.lab.gym.envs.managers.real2sim_sink import capture_real2sim_episode
+    from embodichain.lab.sim.motion.expansion import (
+        CandidateIdentity,
+        ValidationCheck,
+        ValidationResult,
+    )
+
+    qpos = torch.tensor([[[0.0], [1.0], [2.0], [3.0]]])
+    actions = torch.tensor([[[10.0], [11.0], [12.0], [0.0]]])
+    buffer = TensorDict(
+        {"obs": {"robot": {"qpos": qpos}}, "actions": actions}, batch_size=[1, 4]
+    )
+    env = SimpleNamespace(
+        num_envs=1,
+        rollout_action_semantics="expert_controller_command",
+        rollout_buffer=buffer,
+        rollout_steps=torch.tensor([3]),
+        step_dt=0.02,
+    )
+    arguments = dict(
+        identity=CandidateIdentity(
+            "scene", "initial", "candidate", "geometry", "source", "1", "unit"
+        ),
+        validation=ValidationResult((ValidationCheck("task", "passed"),)),
+        episode_id="episode",
+        commit_id="commit",
+        observation_fields={"qpos": ("robot", "qpos")},
+        action_representation="joint_position",
+        metadata={},
+    )
+    episode = capture_real2sim_episode(env, **arguments)
+    assert torch.equal(episode.observations["qpos"], qpos[0])
+    assert torch.equal(episode.actions, actions[0, :3])
+    env.rollout_steps = torch.tensor([4])
+    with pytest.raises(ValueError, match="terminal observation"):
+        capture_real2sim_episode(env, **arguments)
+
+
+def test_real2sim_execution_trace_accounts_for_holds_and_every_plan_sample() -> None:
+    from embodichain.data_pipeline.real2sim import TrajectoryTimeMap
+    from embodichain.lab.gym.envs.managers.real2sim_sink import (
+        build_real2sim_execution_trace,
+    )
+    from embodichain.lab.sim.atomic_skills import (
+        InstantiatedSkillMotion,
+        TimedTrajectory,
+    )
+
+    identity = np.arange(6, dtype=np.int64)
+    motion = InstantiatedSkillMotion(
+        trajectory=TimedTrajectory.from_uniform_step(
+            torch.zeros(1, 6, 1), env_ids=torch.tensor([0]), step_dt=0.1
+        ),
+        success=torch.tensor([True]),
+        segment_lengths={"approach": 2, "close": 2, "lift": 2},
+        initial_qpos=torch.zeros(1, 1),
+        source_id="demo",
+        source_revision="1",
+        unit_id="pick",
+        origin="synthetic_reference",
+        joint_names=("arm",),
+        source_time_map=TrajectoryTimeMap(
+            identity,
+            identity,
+            np.zeros(6),
+            np.array([0, 2, 4, 5]),
+            np.array([0, 2, 4, 5]),
+            0.0,
+        ),
+    )
+    values = [(0, 0), (0, 1), (0, 1), (-1, -1), (0, 2), (0, 3), (0, 4), (0, 5)]
+    consumed = tuple(
+        {"step": step, "call_index": call, "plan_index": sample}
+        for step, (call, sample) in enumerate(values)
+    )
+    trace = build_real2sim_execution_trace(consumed, {0: motion})
+    assert trace["step_plan_index"].tolist() == [sample for _, sample in values]
+    assert trace["call_0_source_events"].tolist() == list(range(6))
+    with pytest.raises(ValueError, match="every plan sample"):
+        build_real2sim_execution_trace(consumed[:-1], {0: motion})
+
+
+def test_real2sim_sink_blocks_reset_time_duplicate(tmp_path) -> None:
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.real2sim_sink import (
+        submit_and_discard_real2sim_episode,
+    )
+
+    recorder, sink, episode, _, _ = _real2sim_sink_fixture(tmp_path)
+    env = recorder._env
+    env.episode_context = EpisodeContext(1)
+    env.episode_context._begin_episode([0])
+    env.episode_context._finish_initialization([0])
+    env.reset = Mock()
+    receipt = submit_and_discard_real2sim_episode(env, sink, episode, submission_id=0)
+    assert receipt.confirmed, receipt.error
+    assert len(env.episode_context.filter_recordable([0])) == 0
+    env.reset.assert_called_once_with(options={"save_data": False})
+    recorder.finalize()
+
+
+def test_real2sim_sink_rejects_receipt_for_another_candidate(
+    tmp_path, monkeypatch
+) -> None:
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.real2sim_sink import (
+        submit_and_discard_real2sim_episode,
+    )
+    from embodichain.lab.sim.motion.expansion import CommitReceipt
+
+    recorder, sink, episode, _, _ = _real2sim_sink_fixture(tmp_path)
+    env = recorder._env
+    env.episode_context = EpisodeContext(1)
+    env.episode_context._begin_episode([0])
+    env.episode_context._finish_initialization([0])
+    env.reset = Mock()
+    stale = CommitReceipt(
+        episode_id=episode.episode_id,
+        candidate_id="different-candidate",
+        attempt_id=episode.identity.attempt_id,
+        storage_id="store",
+        commit_id=episode.commit_id,
+        scene_case_id=episode.identity.scene_case_id,
+        submission_id=0,
+    )
+    monkeypatch.setattr(sink, "submit", lambda *_args, **_kwargs: stale)
+    with pytest.raises(ValueError, match="receipt does not match"):
+        submit_and_discard_real2sim_episode(env, sink, episode, submission_id=0)
+    env.reset.assert_not_called()
+    recorder.finalize()
+
+
+def test_real2sim_sink_updates_expansion_coverage_only_after_receipt(tmp_path) -> None:
+    from dataclasses import replace
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.real2sim_sink import (
+        submit_and_discard_real2sim_episode,
+    )
+    from embodichain.lab.sim.motion.expansion import (
+        CandidateTrajectoryBatch,
+        ExpansionSession,
+        SceneCase,
+        TrajectoryExpansionJobCfg,
+        ValidationCheck,
+        ValidationResult,
+    )
+
+    recorder, sink, episode, _, _ = _real2sim_sink_fixture(tmp_path)
+    session = ExpansionSession(TrajectoryExpansionJobCfg())
+    case = SceneCase("scene", "initial", "scene-v1", "pick", "robot")
+    names = tuple(f"joint_{index}" for index in range(6))
+    session.register_case(case, torch.tensor([[-2.0, 2.0]] * 6), joint_names=names)
+    identity, _ = session.propose(
+        "scene",
+        "initial",
+        source_id="synthetic",
+        source_revision="1",
+        template_id="pick",
+        operator_id="nominal",
+        geometry_family_id="geometry",
+    )
+    session.add_planned(
+        CandidateTrajectoryBatch(
+            torch.zeros(1, 2, 6),
+            torch.tensor([[0.0, 1.0]]),
+            torch.tensor([2]),
+            (identity,),
+            names,
+        ),
+        ValidationResult((ValidationCheck("path_collision", "passed"),)),
+    )
+    assert (
+        session.take_ready("scene", "initial", episode_byte_budget=100000) is not None
+    )
+    session.mark_rollout_started(identity)
+    episode_id, commit_id = session.episode_ids(identity)
+    checks = tuple(
+        ValidationCheck(name, "passed")
+        for name in ("motion", "collision", "task", "path_collision", "task_success")
+    )
+    episode = replace(
+        episode,
+        identity=identity,
+        episode_id=episode_id,
+        commit_id=commit_id,
+        validation=ValidationResult(checks),
+        observations={
+            **episode.observations,
+            "joint_positions": episode.observations["qpos"],
+        },
+    )
+    env = recorder._env
+    env.episode_context = EpisodeContext(1)
+    env.episode_context._begin_episode([0])
+    env.episode_context._finish_initialization([0])
+    env.reset = Mock()
+    receipt = submit_and_discard_real2sim_episode(
+        env, sink, episode, submission_id=0, session=session
+    )
+    assert receipt.confirmed, receipt.error
+    assert session.snapshot()["counts"]["committed"] == 1
+    assert not session.apply_receipt(receipt)
+    recorder.finalize()
 
 
 def test_unknown_sdk_commit_blocks_later_payloads(tmp_path) -> None:
@@ -2484,7 +3274,11 @@ def test_unknown_dynamic_snapshot_is_not_replaced_by_static_recorder_language(
     dataset = LeRobotDataset(
         repo_id=recorder.dataset_full_path.name, root=recorder.dataset_full_path
     )
-    assert dataset[0]["task"] == dataset[0]["subtask"] == "unknown_task"
+    assert (
+        dataset[0]["task"]
+        == _subtask_description(dataset[0], recorder.dataset_full_path)
+        == "unknown_task"
+    )
     record = json.loads(
         (recorder.dataset_full_path / "meta/embodichain_episodes.jsonl").read_text()
     )

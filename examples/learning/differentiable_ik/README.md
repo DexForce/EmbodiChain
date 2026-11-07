@@ -6,6 +6,12 @@ grasp position**. The position and downward approach remain fixed. During traini
 plus pose residuals backpropagate into the predictor. After training, frozen
 weights handle new tasks with one network evaluation and one fixed-step IK solve.
 
+The shared `DifferentiableFKLayer` maps joints to TCP poses with `fk(qpos)`;
+`DifferentiableIKLayer(fk, cfg)` composes it to solve the reverse mapping. FK also
+supports pose supervision for a network that predicts joints: apply `pose_error`
+to the predicted and target TCP transforms and backpropagate that loss. Geometry
+and TCP stay fixed, and task code owns loss weights and joint-limit handling.
+
 ```text
 (q_current, grasp_position) → MLP → yaw → TCP target → differentiable IK
                                   ↑                     ↓

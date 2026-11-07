@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.motion._budget import _planning_call
+
 import torch
 import numpy as np
 
@@ -32,7 +34,7 @@ from embodichain.lab.sim.motion.workspace.runtime import (
     RobotWorkspace,
     WorkspaceSample,
 )
-from embodichain.utils.math import quat_from_matrix, matrix_from_quat
+from embodichain.utils.math import quat_from_matrix, matrix_from_quat, pose_inv
 from embodichain.utils.string import (
     is_regular_expression,
     resolve_matching_names_values,
@@ -862,6 +864,7 @@ class Robot(Articulation):
             quat = quat_from_matrix(result_matrix[:, :3, :3])
             return torch.cat((pos, quat), dim=-1)
 
+    @_planning_call("ik")
     def compute_ik(
         self,
         pose: torch.Tensor | np.ndarray,
@@ -929,7 +932,7 @@ class Robot(Articulation):
         base_pose = self.get_link_pose(
             link_name=solver.root_link_name, env_ids=local_env_ids, to_matrix=True
         )
-        pose = torch.bmm(torch.inverse(base_pose), pose)
+        pose = torch.bmm(pose_inv(base_pose), pose)
 
         ret, qpos = solver.get_ik(
             target_xpos=pose,
@@ -1007,6 +1010,7 @@ class Robot(Articulation):
             result = result.reshape(len(local_env_ids), n_batch, 7)
             return result
 
+    @_planning_call("ik", batched=True)
     def compute_batch_ik(
         self,
         pose: torch.Tensor | np.ndarray,
@@ -1119,26 +1123,15 @@ class Robot(Articulation):
         base_xpos_n_envs = self.get_link_pose(
             link_name=solver.root_link_name, env_ids=local_env_ids, to_matrix=True
         )
-        base_inv_xpos_n_envs = torch.inverse(base_xpos_n_envs)
+        base_inv_xpos_n_envs = pose_inv(base_xpos_n_envs)
         pose_batch = torch.matmul(
             base_inv_xpos_n_envs[:, None],
             pose_batch.reshape(len(local_env_ids), n_batch, 4, 4),
         )
         if continuous:
-            repeated_seed = (
-                joint_seed_tensor[:, None]
-                .expand(batch_size, n_batch, n_dof)
-                .reshape(-1, n_dof)
-            )
-            candidate_valid, candidate_qpos = solver.get_ik(
-                target_xpos=pose_batch.reshape(-1, 4, 4),
-                qpos_seed=repeated_seed,
-                return_all_solutions=True,
-            )
-            return solver._select_continuous_ik_path(
-                candidate_qpos.reshape(batch_size, n_batch, -1, n_dof),
-                candidate_valid.reshape(batch_size, n_batch, -1),
-                joint_seed_tensor,
+            return solver._get_continuous_ik_path(
+                target_xpos=pose_batch,
+                qpos_seed=joint_seed_tensor,
             )
 
         joint_seed_batch = joint_seed.reshape(-1, n_dof)

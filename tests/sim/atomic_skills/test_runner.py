@@ -498,6 +498,7 @@ def _make_runner(
     clock: FakeClock | None = None,
     minimum_cycle_time: float = MINIMUM_CYCLE_TIME,
     timing_fault: str | None = None,
+    plan_lifecycle=None,
 ) -> tuple[
     ExecutionRunner,
     FakeClock,
@@ -552,7 +553,9 @@ def _make_runner(
             else ()
         ),
     )
-    session = engine.start((invocation,), initial_context)
+    session = engine.start(
+        (invocation,), initial_context, plan_lifecycle=plan_lifecycle
+    )
     runner = ExecutionRunner(
         session,
         provider,
@@ -1857,3 +1860,159 @@ def test_blocking_runner_fails_safely_for_a_mismatched_effect_result() -> None:
     assert sink.cancel_count == 1
     assert failed.message is not None
     assert "verification_id does not match" in failed.message
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_plan_lifecycle_is_before_dispatch_and_cleanup_follows_safe_stop(cleanup_fails):
+    attempts, aborts, sinks = [], [], []
+
+    class Lifecycle:
+        def on_plan_installed(self, attempt):
+            attempts.append(attempt)
+            attempt.plan.joint_trajectory.positions.fill_(99)
+
+        def on_execution_aborted(self, reason):
+            assert sinks[0].cancel_count == 1 and len(sinks[0].held) == 1
+            aborts.append(reason)
+            if cleanup_fails:
+                raise RuntimeError("owned resource close failed")
+
+    runner, _, _, sink, _ = _make_runner(plan_lifecycle=Lifecycle())
+    sinks.append(sink)
+    assert len(attempts) == 1 and not sink.sent
+    assert not torch.any(runner.session.active_plan.joint_trajectory.positions == 99)
+    stopped = runner.cancel("operator stop")
+    assert stopped.status is (
+        RunnerStatus.FAILED if cleanup_fails else RunnerStatus.CANCELLED
+    )
+    assert [item.operation for item in stopped.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert aborts == ["operator stop"]
+    assert runner.session.status.value == "failed"
+    assert runner.session.tick(runner.session.latest_context).command is None
+    if cleanup_fails:
+        assert "owned resource close failed" in stopped.message
+    runner.cancel("again")
+    assert len(aborts) == 1
+
+
+def test_initial_plan_lifecycle_exception_invalidates_owner_before_any_dispatch():
+    aborts = []
+
+    class Lifecycle:
+        def on_plan_installed(self, attempt):
+            raise ValueError("adoption rejected")
+
+        def on_execution_aborted(self, reason):
+            aborts.append(reason)
+
+    with pytest.raises(ValueError, match="adoption rejected"):
+        _make_runner(plan_lifecycle=Lifecycle())
+    assert aborts == ["adoption rejected"]
+
+
+def test_rejected_manual_revision_cannot_resume_dispatch_before_safe_stop():
+    attempts, aborts, sinks = [], [], []
+
+    class Lifecycle:
+        def on_plan_installed(self, attempt):
+            attempts.append(attempt)
+            if len(attempts) > 1:
+                raise ValueError("replacement adoption rejected")
+
+        def on_execution_aborted(self, reason):
+            assert sinks[0].cancel_count == 1 and len(sinks[0].held) == 1
+            aborts.append(reason)
+
+    runner, _, provider, sink, action = _make_runner(plan_lifecycle=Lifecycle())
+    sinks.append(sink)
+    pose = torch.eye(4)
+    pose[0, 3] = 2 * TARGET_POSITION
+    revision = SkillInvocation(
+        skill_id="timed",
+        goal=EndEffectorPoseGoal(pose),
+        binding=_timed_action_binding(action),
+        motion_policy=MotionPolicy(sample_count=3),
+        recovery_policy=RecoveryPolicy(max_replans=2, skill_timeout=10.0),
+        revision=1,
+    )
+    session = runner.session
+    context = provider.observe(session.task_state)
+    with pytest.raises(ValueError, match="replacement adoption rejected"):
+        session.revise_current(revision, context=context)
+    assert not sink.sent and aborts == []
+    with pytest.raises(RuntimeError, match="rejected plan installation"):
+        session.tick(context)
+    with pytest.raises(RuntimeError, match="rejected plan installation"):
+        session.revise_current(replace(revision, revision=2), context=context)
+
+    failed = runner.step()
+    assert failed.status is RunnerStatus.FAILED and not sink.sent
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert len(attempts) == 2 and len(aborts) == 1
+    assert session.tick(context).command is None
+    runner.cancel("already stopped")
+    assert len(aborts) == 1
+
+
+def test_failed_plan_still_reaches_logical_lifecycle_without_successful_adoption(
+    monkeypatch,
+):
+    attempts, aborts = [], []
+
+    class Lifecycle:
+        def on_plan_installed(self, attempt):
+            attempts.append(attempt)
+
+        def on_execution_aborted(self, reason):
+            aborts.append(reason)
+
+    def failed(self, request, context):
+        return self.failed_plan(
+            request, context, message="frozen failed candidate", retryable=False
+        )
+
+    monkeypatch.setattr(TimedAction, "_plan", failed)
+    runner, _, _, sink, _ = _make_runner(plan_lifecycle=Lifecycle())
+    assert len(attempts) == 1 and not attempts[0].planned_mask.any()
+    assert not attempts[0].plan.plan_success.any()
+    result = runner.step()
+    assert result.status is RunnerStatus.FAILED and not sink.sent
+    assert len(aborts) == 1
+
+
+def test_replanned_lifecycle_exception_stops_before_new_commands():
+    attempts, aborts = [], []
+
+    class Lifecycle:
+        def on_plan_installed(self, attempt):
+            attempts.append(attempt)
+            if len(attempts) > 1:
+                raise ValueError("replacement adoption rejected")
+
+        def on_execution_aborted(self, reason):
+            aborts.append(reason)
+
+    runner, clock, _, sink, _ = _make_runner(plan_lifecycle=Lifecycle())
+    sink.follow_commands.extend([True, False, True])
+    runner.step()
+    clock.advance(FIRST_INTERVAL)
+    runner.step()
+    sent_before = len(sink.sent)
+    clock.advance(SECOND_INTERVAL)
+    failed = runner.step()
+    assert (
+        len(attempts) == 2 and attempts[-1].event_kind is ExecutionEventKind.REPLANNED
+    )
+    assert failed.status is RunnerStatus.FAILED
+    assert len(sink.sent) == sent_before and sink.cancel_count == 1
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert len(aborts) == 1 and "replacement adoption rejected" in aborts[0]

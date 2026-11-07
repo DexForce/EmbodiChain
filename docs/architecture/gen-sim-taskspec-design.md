@@ -56,7 +56,7 @@ flowchart TD
 
 | 层 | 所有者 | 职责 |
 |---|---|---|
-| 资产 | `gen_sim/simready_pipeline` | 资产 ingest、几何、物理和语义元数据 |
+| 资产 | `gen_sim/asset_engine` | 资产 ingest、几何、物理和语义元数据 |
 | 场景 | `gen_sim/scene_engine` | 图片理解、资产生成、布局编辑、settling、场景导出和 USD 交付 |
 | 任务语言 | `lab/task_program/language` | Task Program schema、decoder、loader 和输入边界 |
 | 任务语义 | `lab/task_program/semantics` | Semantic Call、scene/profile/effect/evidence contract |

@@ -1001,7 +1001,9 @@ def test_unresolved_phase_effect_gate_replays_preceding_command_for_full_cohort(
     session = engine.start((_phase_gate_invocation(engine),), initial)
 
     first = session.tick(initial)
+    assert session.last_commanded_plan_sample[1] == 0
     boundary = session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.4), 0))
+    assert session.last_commanded_plan_sample[1] == 1
     request = boundary.pending_phase_effect_gate
     assert request is not None
     assert request.gate_id == "physical_ready"
@@ -1022,6 +1024,7 @@ def test_unresolved_phase_effect_gate_replays_preceding_command_for_full_cohort(
     )
 
     assert unresolved.status is ExecutionStatus.RUNNING
+    assert session.last_commanded_plan_sample[1] == 1
     assert unresolved.pending_phase_effect_gate is not None
     assert unresolved.pending_phase_effect_gate.verification_id == (
         request.verification_id + 1

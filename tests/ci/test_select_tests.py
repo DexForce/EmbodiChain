@@ -77,7 +77,7 @@ def test_repository_manifest_selectors_resolve() -> None:
     ("source_path", "expected_selector"),
     [
         (
-            "extensions/embodichain_robots/franka_panda.py",
+            "extensions/embodichain_robots/franka/panda.py",
             "tests/sim/robots/test_entrypoints.py",
         ),
         (

@@ -27,7 +27,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Articulation, Robot
 from embodichain.lab.sim.objects.backends.newton import _default_mujoco_mimic_solref
-from embodichain_robots.dexforce_w1 import DexforceW1Cfg
+from embodichain_robots.dexforce.w1 import DexforceW1Cfg
 from embodichain.lab.sim.cfg import physics_cfg_for_backend
 from embodichain.lab.sim.motion.solvers.base_solver import BaseSolver
 from embodichain.data import get_data_path
@@ -96,6 +96,12 @@ def test_compute_batch_ik_continuous_reuses_all_solver_candidates() -> None:
     selected = torch.ones(2, 3, dtype=torch.bool)
     selected_qpos = torch.full((2, 3, 2), 0.25)
     solver.get_ik.return_value = (candidate_valid, candidate_qpos)
+    solver._get_continuous_ik_candidates.side_effect = (
+        lambda **kwargs: BaseSolver._get_continuous_ik_candidates(solver, **kwargs)
+    )
+    solver._get_continuous_ik_path.side_effect = (
+        lambda **kwargs: BaseSolver._get_continuous_ik_path(solver, **kwargs)
+    )
     solver._select_continuous_ik_path.return_value = (selected, selected_qpos)
     robot._solvers = {"arm": solver}
     robot.get_link_pose = Mock(return_value=torch.eye(4).repeat(2, 1, 1))
@@ -153,6 +159,54 @@ def test_compute_batch_ik_without_continuity_uses_ordinary_solver() -> None:
     assert qpos.shape == (1, 3, 2)
     assert solver.get_ik.call_args.kwargs["return_all_solutions"] is False
     solver._select_continuous_ik_path.assert_not_called()
+
+
+@pytest.mark.no_sim
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_ik_root_conversion_preserves_frames_and_gradients_without_host_sync() -> None:
+    roots = torch.eye(4).repeat(2, 1, 1)
+    roots[0, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    roots[1, :3, :3] = torch.tensor(
+        [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+    )
+    roots[:, :3, 3] = torch.tensor([[0.2, -0.3, 0.4], [-0.4, 0.1, 0.5]])
+    roots = roots.cuda()
+    local = torch.eye(4, device="cuda").repeat(2, 3, 1, 1)
+    local[:, :, :3, 3] = torch.tensor(
+        [[[0.1, 0.2, 0.3], [0.2, 0.3, 0.4], [0.3, 0.4, 0.5]]], device="cuda"
+    )
+    arena = (roots[:, None] @ local).detach().requires_grad_(True)
+    seen = []
+
+    def solve(*, target_xpos, qpos_seed, return_all_solutions):
+        seen.append(target_xpos)
+        return (
+            torch.ones(len(target_xpos), dtype=torch.bool, device="cuda"),
+            target_xpos[:, :2, 3],
+        )
+
+    robot = object.__new__(Robot)
+    robot.device, robot._all_indices = torch.device("cuda"), [0, 1]
+    robot._solvers = {
+        "arm": SimpleNamespace(dof=2, root_link_name="base", get_ik=solve)
+    }
+    robot.get_link_pose = Mock(return_value=roots)
+    seeds = torch.zeros(2, 3, 2, device="cuda")
+    previous = torch.cuda.get_sync_debug_mode()
+    try:
+        torch.cuda.set_sync_debug_mode("error")
+        single = robot.compute_ik(arena[:, 0], seeds[:, 0], "arm")
+        batch = robot.compute_batch_ik(arena, seeds, "arm")
+    finally:
+        torch.cuda.set_sync_debug_mode(previous)
+    torch.testing.assert_close(seen[0], local[:, 0], atol=1e-6, rtol=0)
+    torch.testing.assert_close(seen[1], local.reshape(6, 4, 4), atol=1e-6, rtol=0)
+    assert single[0].shape == (2,) and batch[0].shape == (2, 3)
+    (single[1].sum() + batch[1].sum()).backward()
+    assert arena.grad is not None and torch.isfinite(arena.grad).all()
 
 
 @pytest.mark.no_sim

@@ -202,7 +202,7 @@ def _prepare_held_state(
             )
         },
         grasp_pose_generators={
-            "eef": create_benchmark_grasp_pose_generator(pickup_args)
+            "eef": create_benchmark_grasp_pose_generator(pickup_args, robot)
         },
     )
     semantics = create_antipodal_object_semantics(

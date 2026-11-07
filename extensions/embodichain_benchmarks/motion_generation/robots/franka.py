@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain_robots import FrankaPandaCfg, FrankaPandaPgiCfg
+from .._atomic_fixtures import _create_franka_pgi_cfg, _create_franka_native_hand_cfg
 
 from ..registry import register_robot_provider
 from .base import RobotProvider
@@ -28,20 +28,22 @@ __all__ = ["FrankaPandaProvider", "FrankaPgiProvider"]
 
 
 class FrankaPandaProvider(RobotProvider):
-    """Build the stock Franka Panda used by the free-space track."""
+    """Build the stock Franka Panda with its native two-finger hand and TCP."""
 
     def build_cfg(self) -> RobotCfg:
         """Build a stock Panda while applying optional suite overrides."""
         values = {
             "uid": "benchmark_franka_panda",
-            "robot_type": "panda",
             **dict(self.spec.config),
         }
-        return FrankaPandaCfg.from_dict(values)
+        values.pop(
+            "robot_type", None
+        )  # Legacy suite selector; the embodiment selects FR3.
+        return _create_franka_native_hand_cfg(values)
 
 
 class FrankaPgiProvider(RobotProvider):
-    """Build the library Franka + PGI assembly used by the Atomic Skill suites.
+    """Build the benchmark-owned Franka + PGI assembly used by the Atomic Skill suites.
 
     The suites were authored with the base rotated 180 degrees, as in the
     atomic-skill tutorial scenes, so the provider keeps that rotation; suite
@@ -50,7 +52,7 @@ class FrankaPgiProvider(RobotProvider):
 
     def build_cfg(self) -> RobotCfg:
         """Build the Franka + PGI benchmark configuration."""
-        return FrankaPandaPgiCfg.from_dict(
+        return _create_franka_pgi_cfg(
             {
                 "uid": "benchmark_franka_pgi",
                 "init_rot": [0.0, 0.0, 180.0],

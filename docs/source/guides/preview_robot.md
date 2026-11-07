@@ -20,7 +20,7 @@ IDs are exact catalog names, including installed third-party providers.
 preserves the robot's existing construction defaults.
 
 W1 lists V021/V022/V025 hand and bare-body profiles, plus the standard V030
-bare body. See {doc}`/resources/robot/dexforce_w1` for version-specific solvers,
+bare body. See {doc}`/resources/robot/dexforce/w1` for version-specific solvers,
 TCPs and optional attachments.
 
 `--robot-params` accepts a JSON object of robot configuration overrides:

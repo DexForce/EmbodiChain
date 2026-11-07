@@ -30,8 +30,50 @@ import warp as wp
     [
         ("embodichain.compute", ["warp", "torch", "embodichain.lab"]),
         (
-            "embodichain.compute.geometry.rigid",
-            ["embodichain.lab", "dexsim"],
+            "embodichain.compute.geometry.mesh_bounds",
+            ["embodichain.lab", "embodichain.gen_sim", "dexsim", "trimesh"],
+        ),
+        (
+            tuple(
+                "embodichain.compute.geometry" + suffix
+                for suffix in (
+                    "",
+                    ".aabb",
+                    ".convex_projection",
+                    ".envelope",
+                    ".grasp_fit",
+                    ".gripper",
+                    ".hand_clearance",
+                    ".landing",
+                    ".measured_manipulation",
+                    ".mesh_bounds",
+                    ".placement_dimensions",
+                    ".placement_proposals",
+                    ".pose_checks",
+                    ".pour_region",
+                    ".pouring",
+                    ".rigid",
+                    ".source_relations",
+                    ".source_targets",
+                    ".staging",
+                )
+            ),
+            [
+                "embodichain.lab",
+                "embodichain.gen_sim",
+                "embodichain_robots",
+                "embodichain_tasks",
+                "dexsim",
+                "fcl",
+            ],
+        ),
+        (
+            "embodichain.compute.kinematics.ik_path",
+            ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
+        ),
+        (
+            "embodichain.compute.trajectory.limits",
+            ["embodichain.lab", "embodichain.gen_sim", "dexsim"],
         ),
         (
             "embodichain.compute.geometry._warp.convex_query",
@@ -49,11 +91,15 @@ import warp as wp
             "embodichain.compute.kinematics._warp.trapezoidal",
             ["embodichain.lab", "embodichain.utils.warp", "dexsim"],
         ),
+        (
+            "embodichain.learning.layers.toppra",
+            ["embodichain.lab", "dexsim", "tensordict"],
+        ),
         ("embodichain.utils.warp", ["embodichain.lab", "dexsim"]),
     ],
 )
 def test_computation_imports_do_not_load_unrelated_domains(
-    module: str, forbidden: list[str]
+    module: str | tuple[str, ...], forbidden: list[str]
 ) -> None:
     code = f"""
 import importlib
@@ -64,7 +110,10 @@ class BlockImports(importlib.abc.MetaPathFinder):
         if any(fullname == name or fullname.startswith(name + '.') for name in {forbidden!r}):
             raise AssertionError('Unexpected import: ' + fullname)
 sys.meta_path.insert(0, BlockImports())
-importlib.import_module({module!r})
+for name in {(module,) if isinstance(module, str) else module!r}:
+    loaded = importlib.import_module(name)
+    for exported in getattr(loaded, '__all__', ()):
+        getattr(loaded, exported)
 """
     result = subprocess.run(
         [sys.executable, "-c", code],

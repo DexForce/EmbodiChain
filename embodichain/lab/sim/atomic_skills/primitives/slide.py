@@ -688,6 +688,7 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
             sample_count,
             dt=result.dt,
             control_dt=interpolation_dt,
+            arrival_indices=result.waypoint_indices,
         )
 
 

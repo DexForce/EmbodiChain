@@ -513,6 +513,7 @@ def test_create_antipodal_semantics_keeps_mesh_data_on_affordance() -> None:
     generator = create_parallel_jaw_grasp_pose_generator(
         n_sample=64,
         force_refresh=True,
+        robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur5")),
     )
     assert generator.algorithm_cfg.sample_count == 64
     assert generator.annotation_cfg.force_refresh is True

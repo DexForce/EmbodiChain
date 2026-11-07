@@ -315,3 +315,14 @@ def test_policy_budget_keeps_unset_defaults_and_selected_backend_vectors() -> No
         joint_acceleration_limit_rad_s2=[3.0, 2.0],
     )
     assert with_motion_budget(selected, protocol) is selected
+
+
+def test_scenario_owned_ik_keeps_scalar_budget_when_options_are_injected() -> None:
+    from embodichain.lab.sim.motion.planners import ToppraPlanOptions
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+        with_plan_options,
+    )
+
+    invocation = _budget_invocation("coordinated_pickment", "motion_gen")
+    updated = with_plan_options(invocation, ToppraPlanOptions())
+    assert updated.motion_policy.acceleration_limit == 0.5
