@@ -23,6 +23,8 @@ import json
 import math
 import random
 from dataclasses import replace
+from types import SimpleNamespace as NS
+from unittest.mock import Mock
 
 import numpy as np
 import torch
@@ -33,6 +35,7 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionCommand,
     MotionPolicy,
     ObjectSemantics,
+    PlanningContext,
     Press,
     PressAffordance,
     PressGoal,
@@ -45,12 +48,76 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     TaskState,
 )
+from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from _ordinary_pick_fixture import ordinary_fixture
+
+
+def _press_runtime(directory):
+    """Provide a Cartesian robot without depending on other migration layers."""
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 5
+    robot.num_instances = 1
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.joint_names = ["x", "y", "z", "h0", "h1"]
+    robot.get_joint_ids.side_effect = lambda name=None: {
+        None: list(range(5)),
+        "arm": [0, 1, 2],
+        "hand": [3, 4],
+    }[name]
+    initial = torch.tensor([[0.0, 0.0, 0.4, 0.04, 0.04]])
+    robot.get_qpos.return_value = initial
+    robot.get_qvel.return_value = torch.zeros_like(initial)
+    robot.get_qvel_limits.side_effect = lambda name=None, **kw: torch.ones(
+        1, len(kw.get("joint_ids", robot.get_joint_ids(name=name)))
+    )
+    robot.get_qpos_limits.side_effect = (
+        lambda name=None, **kw: torch.tensor([[[-2.0, 2.0]]])
+        .expand(1, len(kw.get("joint_ids", robot.get_joint_ids(name=name))), 2)
+        .clone()
+    )
+    robot.get_solver.return_value = NS(
+        get_iteration_params=lambda: {"pos_eps": 1e-5, "rot_eps": 1e-5}
+    )
+    path = directory / "press_fixture.urdf"
+    path.write_text(
+        '<robot name="fixture">'
+        + "".join(
+            f'<joint name="{name}" type="prismatic"><limit velocity="1"/></joint>'
+            for name in robot.joint_names
+        )
+        + "</robot>"
+    )
+    robot.cfg.fpath = str(path)
+    robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = [], [], []
+
+    def fk(qpos, **kwargs):
+        poses = torch.eye(4).expand(*qpos.shape[:-1], 4, 4).clone()
+        poses[..., :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+        poses[..., :3, 3] = qpos[..., :3]
+        return poses
+
+    robot.compute_fk.side_effect = fk
+    robot.compute_batch_fk.side_effect = fk
+    generator = object.__new__(MotionGenerator)
+    generator.robot = robot
+    generator.device = robot.device
+    generator.planner = NS(cfg=NS(planner_type="oracle"), collision_world_info=None)
+    pose = torch.eye(4)[None]
+    pose[:, :3, 3] = torch.tensor([0.2, 0.0, 0.1])
+    context = PlanningContext(
+        RobotObservation(0.0, initial, torch.zeros_like(initial)),
+        TaskState(1, "cpu"),
+        SceneSnapshot(0.0, 0, {"object": EntityState(pose)}),
+        torch.tensor([0]),
+        control_dt=0.04,
+    )
+    return generator, context
 
 
 def press_fixture(directory, mode, *, batch_size=1):
-    generator, context, _, calls, _ = ordinary_fixture(directory)
+    generator, context = _press_runtime(directory)
+    calls = []
     if batch_size != 1:
         qpos = context.robot.qpos.repeat(batch_size, 1)
         generator.robot.num_instances = batch_size
