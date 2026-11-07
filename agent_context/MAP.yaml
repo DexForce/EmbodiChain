@@ -602,7 +602,7 @@ topics:
     ODSFlowController, ODSFlowControllerCfg, get_flow_status, ODS 供数控制,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
     OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
-    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, Real2SimTrajectory, NormalizedReal2SimUnit, SkillMotionPrototype, TrajectoryTimeMap, DROID, DroidEpisode, export_real2sim_replay_manifest, 数据集加载, 离线加载]
+    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, RobotDemonstration, DemoSkill, DemoSkillArtifact, DemoSkillReference, DemoSkillSpec, ExecuteDemoSkill, 示教技能, Real2SimTrajectory, NormalizedReal2SimUnit, SkillMotionPrototype, TrajectoryTimeMap, DROID, DroidEpisode, export_real2sim_replay_manifest, 数据集加载, 离线加载]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py

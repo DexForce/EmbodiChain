@@ -674,10 +674,14 @@ def test_repeated_skill_occurrences_select_distinct_nominal_sources() -> None:
     )
 
 
-def test_tracing_source_factory_owns_one_instantiation_per_call() -> None:
+@pytest.mark.parametrize("monitored", [False, True])
+def test_tracing_source_factory_preserves_monitoring_and_owned_instantiation(
+    monitored: bool,
+) -> None:
     from embodichain.lab.sim.atomic_actions import (
         ActionInvocation,
         InstantiatedSkillMotion,
+        MonitoredNominalMotionSource,
         TimedTrajectory,
     )
     from embodichain.lab.task_program.integrations.nominal import (
@@ -704,16 +708,45 @@ def test_tracing_source_factory_owns_one_instantiation_per_call() -> None:
         def instantiate(self, request, context):
             return motion
 
+    observations = []
+    effect_request, effect_result = object(), object()
+
+    class MonitoredSource(Source):
+        def observe_execution(self, context, sample_index, *, terminal):
+            observations.append((context, sample_index, terminal))
+
+        def owns_effect(self, request):
+            return request is effect_request
+
+        def verify_effect(self, context, request):
+            assert request is effect_request
+            return effect_result
+
+    source = MonitoredSource() if monitored else Source()
     adapter = TaskProgramEnvironmentAdapter(_FakeEnvironmentFactory(), step_dt=_STEP_DT)
     program = adapter.compile(_program())
     binding = TracingTaskProgramNominalSources(
-        program, BoundTaskProgramNominalSources(program, {0: Source()})
+        program, BoundTaskProgramNominalSources(program, {0: source})
     )
     call = next(iter(program.iter_segments())).calls[0].call
     request = TaskProgramPlanRequest(
         "fake_pick/segment", 0, 0, call, Mock(spec=ActionInvocation)
     )
     selected = binding.create_nominal_source(request, engine=_engine(_robot_profile()))
+    assert isinstance(selected, MonitoredNominalMotionSource) is monitored
+    if monitored:
+        # Python 3.12+ runtime protocols use static lookup; __getattr__ cannot
+        # supply these protocol members even on Python 3.11 test hosts.
+        from inspect import getattr_static
+
+        for member in ("observe_execution", "owns_effect", "verify_effect"):
+            assert callable(getattr_static(selected, member))
+        context = Mock()
+        selected.observe_execution(context, 1, terminal=True)
+        assert observations == [(context, 1, True)]
+        assert selected.owns_effect(effect_request)
+        assert not selected.owns_effect(object())
+        assert selected.verify_effect(context, effect_request) is effect_result
     selected.instantiate(Mock(), Mock())
     assert binding.motions[0].unit_id == "pick"
     binding.motions[0].trajectory.positions[0, 0, 0] = 1
