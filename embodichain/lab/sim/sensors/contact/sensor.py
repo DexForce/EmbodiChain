@@ -194,6 +194,7 @@ class ContactSensor(BaseSensor):
         self.device = device
         self.cfg = config
         self._query: ContactQuery | None = None
+        self._empty_contact_buffer: ContactBuffer | None = None
         self._metadata_actor_table: tuple[ContactActorInfo, ...] | None = None
         self._metadata_selected_ids: tuple[int, ...] | None = None
 
@@ -391,30 +392,34 @@ class ContactSensor(BaseSensor):
         Repeated calls reuse the scattered data and establish readiness on the
         caller's CUDA stream. Resetting sensor buffers permits a fresh read of
         the current backend snapshot without advancing contact history. This
-        does not recompute contacts after physical state writes: backend rules
-        still determine whether a solved contact snapshot is available.
+        does not recompute contacts after physical state writes. A report
+        invalidated by physics reset yields invalid rows until the next solve.
+        Call outside caller-owned CUDA capture; graphs may consume get_data().
 
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
 
+        self._require_eager_sampling()
         self._wait_for_sample()
-        capturing = (
-            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
-        )
-        key = None if capturing else self._contact_sample_key()
-        if not capturing and key == self._last_update_key:
+        key = self._contact_sample_key()
+        if key == self._last_update_key:
             return
         buffer = self._fetch_contacts()
         if not self.requires_substep_update:
             self._query_dropped_count.copy_(buffer.dropped_count_device)
             self._scatter_dropped_count.copy_(self._sample_scatter_dropped_count)
         self._last_update_key = key
-        self._last_contact_buffer = None if capturing else buffer
-        if capturing:
-            self._last_history_key = None
-        else:
-            self._record_sample_stream()
+        self._last_contact_buffer = buffer
+        self._record_sample_stream()
+
+    def _require_eager_sampling(self) -> None:
+        if self.device.type == "cuda" and torch.cuda.is_current_stream_capturing():
+            raise RuntimeError(
+                "Contact sampling must run outside external CUDA capture. "
+                "Sample eagerly before capture/replay, establish stream "
+                "dependencies, and consume get_data() buffers inside the graph."
+            )
 
     def _contact_sample_key(self) -> tuple[int, int, int]:
         """Consult public query metadata so topology refreshes cannot be skipped."""
@@ -446,10 +451,25 @@ class ContactSensor(BaseSensor):
 
     def _read_contacts(self) -> ContactBuffer:
         assert self._query is not None
-        if self.device.type == "cuda":
-            buffer = self._query.fetch_solver_report_async()
-        else:
-            buffer = self._query.fetch_solver_report()
+        try:
+            if self.device.type == "cuda":
+                buffer = self._query.fetch_solver_report_async()
+            else:
+                buffer = self._query.fetch_solver_report()
+        except RuntimeError as error:
+            # DexSim 0.6 has no public report-availability flag or dedicated
+            # exception. Only this reset-time state is an empty observation;
+            # unrelated query and device failures must still reach the caller.
+            if str(error) != (
+                "Contact state is unavailable after reset until the next World.update"
+            ):
+                raise
+            if self._empty_contact_buffer is None:
+                from dexsim.scene import ContactBuffer
+
+                self._empty_contact_buffer = ContactBuffer.allocate(1, self.device)
+            buffer = self._empty_contact_buffer
+        if self.device.type == "cpu":
             buffer.device_counts[0] = buffer.count
             buffer.device_counts[1] = buffer.dropped_count
         self._sync_filter_actor_metadata()
@@ -763,18 +783,11 @@ class ContactSensor(BaseSensor):
         """
         if dt <= 0:
             raise ValueError("Contact sampling dt must be positive.")
+        self._require_eager_sampling()
         self._wait_for_sample()
-        # Capturing records future work; Python cache keys cannot track replay.
-        capturing = (
-            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
-        )
         observers = self._sampling_observers
-        if observers and capturing:
-            raise RuntimeError(
-                "Contact sampling observers require calls outside external CUDA capture."
-            )
-        key = None if capturing else self._contact_sample_key()
-        if not capturing and key == self._last_history_key:
+        key = self._contact_sample_key()
+        if key == self._last_history_key:
             return
         # Keep the default history-only path free of observer snapshots and
         # generator allocation. Capture a stable subscription set only when used.
@@ -786,24 +799,34 @@ class ContactSensor(BaseSensor):
             )
         buffer = (
             self._last_contact_buffer
-            if not capturing and key == self._last_update_key
+            if key == self._last_update_key
             else self._read_contacts()
         )
         assert buffer is not None
         self._sample_physics_contacts(buffer, dt)
         self._last_update_key = key
         self._last_history_key = key
-        self._last_contact_buffer = None if capturing else buffer
-        if not capturing:
-            self._record_sample_stream()
+        self._last_contact_buffer = buffer
+        self._record_sample_stream()
         if tokens is not None:
             for observer, token in tokens:
                 observer.after_sample(dt, token)
 
     def _sample_physics_contacts(self, buffer: ContactBuffer, dt: float) -> None:
         """Run the reduction on the existing caller/capture stream boundary."""
-        if self.device.type != "cuda" or torch.cuda.is_current_stream_capturing():
-            self._sample_contacts(buffer, dt)
+        impulse_dt = dt
+        if (
+            self._histories
+            and getattr(getattr(self._sim, "physics", None), "name", None) == "newton"
+        ):
+            from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+            backend = get_newton_backend(self._sim._world)
+            # Newton reports the last internal solver substep's impulse, not
+            # the impulse integrated over the whole World.update interval.
+            impulse_dt = dt / max(int(backend.cfg.num_substeps), 1)
+        if self.device.type != "cuda":
+            self._sample_contacts(buffer, dt, impulse_dt)
             return
         key = (
             id(buffer),
@@ -811,6 +834,7 @@ class ContactSensor(BaseSensor):
             self.contact_capabilities.impulse,
             self.contact_capabilities.friction,
             dt,
+            impulse_dt,
             self.cfg.max_contacts_per_env,
             tuple(
                 (
@@ -838,17 +862,19 @@ class ContactSensor(BaseSensor):
                 self._sample_graph_key = key
                 # This real sample also compiles/warms every kernel. Do not
                 # execute history updates twice while preparing capture.
-                self._sample_contacts(buffer, dt)
+                self._sample_contacts(buffer, dt, impulse_dt)
             else:
                 if self._sample_graph is None:
                     with wp.ScopedCapture(stream=self._sample_stream) as capture:
-                        self._sample_contacts(buffer, dt)
+                        self._sample_contacts(buffer, dt, impulse_dt)
                     self._sample_graph = capture.graph
                 wp.capture_launch(self._sample_graph, stream=self._sample_stream)
         if not same_stream:
             caller.wait_stream(self._sample_torch_stream)
 
-    def _sample_contacts(self, buffer: ContactBuffer, dt: float) -> None:
+    def _sample_contacts(
+        self, buffer: ContactBuffer, dt: float, impulse_dt: float
+    ) -> None:
         self._scatter_contacts(buffer)
         self._query_dropped_count.add_(buffer.dropped_count_device)
         self._scatter_dropped_count.add_(self._sample_scatter_dropped_count)
@@ -856,6 +882,7 @@ class ContactSensor(BaseSensor):
             history._update_from_query(
                 buffer,
                 dt,
+                impulse_dt=impulse_dt,
                 impulse_available=self.contact_capabilities.impulse,
                 friction_available=self.contact_capabilities.friction,
             )

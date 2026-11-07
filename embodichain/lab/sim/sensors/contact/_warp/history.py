@@ -94,7 +94,7 @@ def reduce_contact_rows(
     accept_all: bool,
     accept_unknown: bool,
     threshold: float,
-    dt: float,
+    impulse_dt: float,
     forces: wp.array(dtype=wp.float32, ndim=3),
     hits: wp.array(dtype=wp.int32, ndim=2),
     env_hits: wp.array(dtype=wp.int32),
@@ -117,7 +117,7 @@ def reduce_contact_rows(
         force = wp.vec3(data[i, 3], data[i, 4], data[i, 5]) * data[i, 9]
     if tangent_valid:
         force = force - wp.vec3(data[i, 6], data[i, 7], data[i, 8])
-    force = force / dt
+    force = force / impulse_dt
     reduce_pair(
         env,
         actors[i, 0],
@@ -151,7 +151,7 @@ def reduce_contact_batch(
     accept_all: bool,
     accept_unknown: bool,
     threshold: float,
-    dt: float,
+    impulse_dt: float,
     forces: wp.array(dtype=wp.float32, ndim=3),
     hits: wp.array(dtype=wp.int32, ndim=2),
     env_hits: wp.array(dtype=wp.int32),
@@ -169,7 +169,7 @@ def reduce_contact_batch(
         force = force - wp.vec3(
             friction[env, i, 0], friction[env, i, 1], friction[env, i, 2]
         )
-    force = force / dt
+    force = force / impulse_dt
     reduce_pair(
         env,
         actors[env, i, 0],

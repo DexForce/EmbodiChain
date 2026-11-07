@@ -901,6 +901,8 @@ def test_timeline_reset_matches_sensor_indices_without_double_generation(
     indices, generations
 ):
     source = ContactSource(count=3)
+    for name in ("impulse_valid", "friction_valid"):
+        source.data[name] = source.data["is_valid"].clone()
     timeline, _ = make_timeline(source)
     capture_step(timeline, source)
     before = timeline.snapshot()
