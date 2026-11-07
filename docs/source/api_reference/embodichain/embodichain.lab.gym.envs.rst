@@ -143,6 +143,11 @@ containing one or more semantic subtasks. Segment action iterables may be lazy,
 and the common executor records per-environment lengths, terminal status, and
 segment spans.
 
+``execute_demo_episode(on_segment_completed=...)`` optionally observes finalized
+segment results after recording and before the next segment, including failure
+and cancellation. Observers must not step or reset the environment; their errors
+propagate to the caller. The default ``None`` retains ordinary execution.
+
 Overall language belongs to the task: Task Programs declare a root
 ``instruction``, and handwritten/direct-control tasks use
 ``EmbodiedEnvCfg.task_instruction``. An explicit ``execute_demo_episode``

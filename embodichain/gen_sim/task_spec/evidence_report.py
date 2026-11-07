@@ -24,12 +24,17 @@ from .evidence import (
     SupportedPlacementEvidenceBinding,
     evaluate_supported_placement_evidence,
 )
+from .placement_group_evidence import (
+    PlacementEvidenceGroupBinding,
+    evaluate_placement_group_evidence,
+)
 from .condition_evidence import ConditionEvidenceBinding, evaluate_condition_evidence
-
+from .condition_group_evidence import (
+    ConditionEvidenceGroupBinding,
+    evaluate_condition_group_evidence,
+)
 from .control_evidence import ControlEvidenceBinding, evaluate_control_evidence
-
 from .pour_evidence import PourEvidenceBinding, evaluate_pour_evidence
-
 from .manipulation_evidence import (
     ManipulationEvidenceBinding,
     evaluate_manipulation_evidence,
@@ -46,15 +51,21 @@ def _binding(
     value: Any,
 ) -> (
     SupportedPlacementEvidenceBinding
+    | PlacementEvidenceGroupBinding
     | ConditionEvidenceBinding
+    | ConditionEvidenceGroupBinding
     | ControlEvidenceBinding
     | PourEvidenceBinding
     | ManipulationEvidenceBinding
 ):
     if isinstance(value, ManipulationEvidenceBinding):
         return ManipulationEvidenceBinding.from_dict(value)
+    if isinstance(value, PlacementEvidenceGroupBinding):
+        return PlacementEvidenceGroupBinding.from_dict(value)
     if isinstance(value, SupportedPlacementEvidenceBinding):
         return SupportedPlacementEvidenceBinding.from_dict(value)
+    if isinstance(value, ConditionEvidenceGroupBinding):
+        return ConditionEvidenceGroupBinding.from_dict(value)
     if isinstance(value, ConditionEvidenceBinding):
         return ConditionEvidenceBinding.from_dict(value)
     if isinstance(value, ControlEvidenceBinding):
@@ -65,14 +76,28 @@ def _binding(
         version = value.get("schema_version")
         if version == "task_spec.manipulation_evidence_binding/v1":
             return ManipulationEvidenceBinding.from_dict(value)
-        if version == "task_spec.placement_evidence_binding/v2":
+        if version == "task_spec.placement_group_evidence_binding/v1":
+            return PlacementEvidenceGroupBinding.from_dict(value)
+        if version in {
+            "task_spec.placement_evidence_binding/v2",
+            "task_spec.placement_evidence_binding/v3",
+            "task_spec.placement_evidence_binding/v4",
+            "task_spec.placement_evidence_binding/v5",
+            "task_spec.placement_evidence_binding/v6",
+            "task_spec.placement_evidence_binding/v7",
+        }:
             return SupportedPlacementEvidenceBinding.from_dict(value)
-        if version == "task_spec.pour_evidence_binding/v1":
-            return PourEvidenceBinding.from_dict(value)
-        if version == "task_spec.control_evidence_binding/v1":
-            return ControlEvidenceBinding.from_dict(value)
+        if version == "task_spec.condition_group_evidence_binding/v1":
+            return ConditionEvidenceGroupBinding.from_dict(value)
         if version == "task_spec.condition_evidence_binding/v1":
             return ConditionEvidenceBinding.from_dict(value)
+        if version in {
+            "task_spec.control_evidence_binding/v1",
+            "task_spec.control_evidence_binding/v2",
+        }:
+            return ControlEvidenceBinding.from_dict(value)
+        if version == "task_spec.pour_evidence_binding/v1":
+            return PourEvidenceBinding.from_dict(value)
     raise ValueError(
         "Unsupported physical evidence binding schema; rebuild the deployment declaration."
     )
@@ -82,7 +107,9 @@ def evaluate_physical_evidence_report(
     spec: TaskSpec | Mapping[str, Any],
     bindings: Sequence[
         SupportedPlacementEvidenceBinding
+        | PlacementEvidenceGroupBinding
         | ConditionEvidenceBinding
+        | ConditionEvidenceGroupBinding
         | ControlEvidenceBinding
         | PourEvidenceBinding
         | ManipulationEvidenceBinding
@@ -97,7 +124,7 @@ def evaluate_physical_evidence_report(
 
     Args:
         spec: Frozen normative specification.
-        bindings: Unique placement/orientation/joint declarations, sharing one
+        bindings: Unique placement/state/control declarations, sharing one
             row, episode and raw-or-historical input contract.
         evidence: Physical/execution snapshots keyed by predicate identity.
         program: Exact serialized program identified by every binding.
@@ -157,7 +184,9 @@ def evaluate_physical_evidence_report(
         snapshot = json_snapshot(evidence.get(binding.predicate_id, {}))
         verifier = {
             SupportedPlacementEvidenceBinding: evaluate_supported_placement_evidence,
+            PlacementEvidenceGroupBinding: evaluate_placement_group_evidence,
             ConditionEvidenceBinding: evaluate_condition_evidence,
+            ConditionEvidenceGroupBinding: evaluate_condition_group_evidence,
             ControlEvidenceBinding: evaluate_control_evidence,
             PourEvidenceBinding: evaluate_pour_evidence,
             ManipulationEvidenceBinding: evaluate_manipulation_evidence,
@@ -168,8 +197,30 @@ def evaluate_physical_evidence_report(
         )
         assert predicate is not None  # The public verifier checked this identity.
         frame_indices = None
+        if binding.predicate_id in milestones and isinstance(
+            binding, (ConditionEvidenceGroupBinding, PlacementEvidenceGroupBinding)
+        ):
+            # B0 emits an incomplete slot at earlier member terminals. Retaining
+            # those slots matters: an eventual valid negative must not erase an
+            # earlier unavailable achievement while scanning the milestone.
+            packets = snapshot.get("members", {})
+            for member in packets.values() if isinstance(packets, Mapping) else ():
+                frames = (
+                    member.get("boundary_frames")
+                    if isinstance(member, Mapping)
+                    else None
+                )
+                if (
+                    isinstance(frames, list)
+                    and len(frames) == num_envs
+                    and all(type(frame) is int and frame > 0 for frame in frames)
+                ):
+                    for row, frame in enumerate(frames):
+                        events[row].setdefault(frame, {})
         if binding.predicate_id in milestones:
             frames = snapshot.get("boundary_frames")
+            if frames is None:
+                frames = snapshot.get("recorded_contacts", {}).get("boundary_frames")
             if frames is None:
                 frames = (
                     snapshot.get("record", {})

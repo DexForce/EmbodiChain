@@ -1106,6 +1106,69 @@ def test_cancellation_after_last_action_does_not_advance_lazy_plan() -> None:
     assert result.terminal_reasons == ("interrupted",)
 
 
+@pytest.mark.parametrize("explicit_segments", [False, True])
+@pytest.mark.parametrize(
+    "terminal", ["success", "segment_validation_failed", "interrupted"]
+)
+def test_segment_completion_observer_receives_recorded_terminal_boundaries(
+    explicit_segments: bool, terminal: str
+) -> None:
+    env = (
+        _CancellationEnv()
+        if terminal == "interrupted"
+        else _ValidatedSegmentEnv(validation=terminal == "success")
+    )
+    observed: list[DemoSegmentResult] = []
+    next_requested: list[bool] = []
+
+    def observe(result: DemoSegmentResult) -> None:
+        assert env.segment_results[-1] is result
+        observed.append(result)
+        next_requested.append(env.requested_second_segment)
+
+    result = execute_demo_episode(
+        env,
+        segments=env.create_demo_segments() if explicit_segments else None,
+        should_stop=(lambda: bool(env.actions)) if terminal == "interrupted" else None,
+        on_segment_completed=observe,
+    )
+
+    assert result.terminal_reason == terminal
+    assert len(observed) == len(result.segments)
+    assert all(
+        left is right for left, right in zip(observed, result.segments, strict=True)
+    )
+    assert next_requested == ([False, True] if terminal == "success" else [False])
+    assert env.actions == ([1, 3] if terminal == "success" else [1])
+
+
+def test_segment_completion_observer_rejects_noncallable_before_execution() -> None:
+    env = _SegmentedEnv()
+
+    with pytest.raises(TypeError, match="on_segment_completed must be callable"):
+        execute_demo_episode(env, on_segment_completed=object())
+
+    assert env.actions == []
+    assert env.segment_results == []
+
+
+def test_segment_completion_observer_error_restores_execution_scope() -> None:
+    env = _ValidatedSegmentEnv(validation=True)
+
+    def fail(result: DemoSegmentResult) -> None:
+        assert env.segment_results[-1] is result
+        raise ValueError("boundary acquisition failed")
+
+    with pytest.raises(ValueError, match="boundary acquisition failed"):
+        execute_demo_episode(env, on_segment_completed=fail)
+
+    assert env.actions == [1]
+    assert len(env.segment_results) == 1
+    assert not env.requested_second_segment
+    assert not env._demo_no_auto_reset
+    assert env._demo_instruction_snapshot is None
+
+
 class _LegacyEnv(_SegmentedEnv):
     create_demo_segments = EmbodiedEnv.create_demo_segments
     metadata = {"dataset": {"instruction": {"lang": "Complete the legacy task"}}}

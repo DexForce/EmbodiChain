@@ -13,204 +13,97 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Data-only qualification of original Press/Twist operation receipts."""
+
+"""Normative comparison of source-bound normalized physical control facts."""
 
 from __future__ import annotations
+
 from collections.abc import Mapping
-from copy import deepcopy
 import math
 from typing import Any
-from .canonicalization import canonical_hash, json_snapshot
+
+from .canonicalization import canonical_hash
+from .evidence import _digest
 
 __all__: list[str] = []
 
 
-def qualified_control_record(
-    declaration: Mapping[str, Any],
-    runtime: Mapping[str, Any],
-    program: Mapping[str, Any],
-    num_envs: int,
-) -> dict[str, Any]:
-    """Recheck a source operation using only sealed declaration/receipt data.
-
-    The caller owns TaskSpec role selection and raw acquisition qualification.
-    This source receipt checker does not infer an event from final joint state,
-    query sensors or relax the original all-active execution requirement.
-    """
-    declaration, runtime, program = (
-        json_snapshot(value) for value in (declaration, runtime, program)
-    )
-    kind = declaration["control_kind"]
-    if kind not in {"press", "twist"}:
-        raise ValueError("Control evidence requires an explicit Press or Twist kind.")
-    if type(num_envs) is not int or num_envs < 1:
-        raise ValueError("Control evidence requires a positive native row count.")
-    route = declaration["route_payload"]
-    declared_binding = route["binding"]
-    criterion = route.get("success_criterion", "contact_backed_press")
-    expected_criteria = (
-        {"contact_backed_coarse_turn", "calibrated_setting"}
-        if kind == "twist"
-        else {"contact_backed_press"}
-    )
-    if criterion not in expected_criteria:
+def control_value(binding: Any, snapshot: Mapping[str, Any], row: int) -> bool:
+    """Read one valid control-effect observation without a runtime dependency."""
+    if snapshot.get("schema_version") != "physical_evidence.normalized/v1":
         raise ValueError(
-            "The requested control criterion has no source qualification contract."
+            "Control evidence must first be normalized by the Lab adapter."
         )
-    required = declaration["required_execution"]
+    if snapshot.get("measurement_hash") != canonical_hash(
+        {key: value for key, value in snapshot.items() if key != "measurement_hash"}
+    ):
+        raise ValueError("Normalized control evidence changed under its identity.")
+    refs = snapshot.get("evidence_refs")
+    if not isinstance(refs, list) or len(refs) != 2 or refs[0] != binding.binding_hash:
+        raise ValueError("Normalized control references have another source.")
+    _digest(refs[1], "source_evidence_hash")
     if (
-        not required
-        or len({item["segment_id"] for item in required}) != len(required)
-        or required[-1]
-        != {
-            "segment_id": declaration["terminal_segment_id"],
-            "source_path": declaration["terminal_source_path"],
-        }
+        snapshot.get("source_binding_hash") != binding.binding_hash
+        or any(type(v) is not int for v in snapshot.get("env_ids", ()))
+        or (
+            snapshot.get("episode_ids") is not None
+            and any(type(v) is not int for v in snapshot["episode_ids"])
+        )
+        or snapshot.get("kind") != "control_" + binding.control_kind
+        or snapshot.get("evidence_format") != binding.evidence_format
+        or snapshot.get("criterion")
+        != binding.operation["route_payload"].get(
+            "success_criterion", "contact_backed_press"
+        )
+        or snapshot.get("env_ids") != list(binding.env_ids)
+        or snapshot.get("episode_ids")
+        != (None if binding.episode_ids is None else list(binding.episode_ids))
+    ):
+        raise ValueError("Normalized control facts have another declared scope.")
+    if "unavailable" in snapshot:
+        raise ValueError(str(snapshot["unavailable"]))
+    frame = snapshot["frame"]
+    timestamp = frame["timestamp"]
+    if (
+        frame["env_ids"] != list(binding.env_ids)
+        or any(type(v) is not int for v in frame["env_ids"])
+        or type(frame["observation_revision"]) is not int
+        or frame["observation_revision"] < 0
+        or type(timestamp) not in (int, float)
+        or not math.isfinite(timestamp)
+        or timestamp < 0
+    ):
+        raise ValueError("Normalized control frame has another row or clock identity.")
+    boundaries = snapshot.get("boundary_frames")
+    if binding.observation_kind == "recorded" or boundaries is not None:
+        if (
+            not isinstance(boundaries, list)
+            or len(boundaries) != len(binding.env_ids)
+            or any(type(v) is not int or v <= 0 for v in boundaries)
+            or frame["observation_revision"] != max(boundaries)
+        ):
+            raise ValueError("Control facts have another completed event boundary.")
+    batch = frame["batches"]["control_complete"]
+    count = len(binding.env_ids)
+    if (
+        batch["evidence_id"] != "control_complete"
+        or batch["value_dtype"] != "torch.bool"
+        or ("value_shape" in batch and batch["value_shape"] != [count])
+        or batch["env_ids"] != frame["env_ids"]
+        or any(type(v) is not int for v in batch["env_ids"])
+        or batch["timestamp"] != timestamp
+        or batch["observation_revision"] != frame["observation_revision"]
+        or any(
+            not isinstance(batch[key], list) or len(batch[key]) != count
+            for key in ("values", "valid", "acquisition_errors")
+        )
+        or any(type(value) is not bool for value in (*batch["values"], *batch["valid"]))
     ):
         raise ValueError(
-            "Control evidence requires its full ordered occurrence prefix and terminal boundary."
+            "Normalized control channel has inconsistent identities or rows."
         )
-    segments = {item["name"]: item for item in runtime.get("segments", ())}
-    if len(segments) != len(runtime.get("segments", ())):
-        raise ValueError("Duplicate control segment receipts.")
-    terminal = declaration["terminal_segment_id"]
-    for occurrence in declaration["required_execution"]:
-        name = occurrence["segment_id"]
-        segment = segments.get(name, {})
-        identities = segment.get("metadata", {}).get("runtime", {}).get("env_ids", [])
-        if (
-            segment.get("metadata", {}).get("program_segment_source_path")
-            != occurrence["source_path"]
-        ):
-            raise ValueError("Control prefix has another compiled occurrence.")
-        flags = (*segment.get("successes", ()), *segment.get("active", ()))
-        if any(type(value) is not int for value in identities) or any(
-            type(value) is not bool for value in flags
-        ):
-            raise ValueError(
-                "Control receipt has malformed environment identities or masks."
-            )
-        if (
-            segment.get("metadata", {}).get("runtime", {}).get("env_ids")
-            != list(range(num_envs))
-            or segment.get("successes") != [True] * num_envs
-            or segment.get("active") != [True] * num_envs
-        ):
-            raise ValueError("Control occurrence did not complete all active segments.")
-    segment = segments[terminal]
-    frames = segment.get("end_steps")
-    if (
-        not isinstance(frames, list)
-        or len(frames) != num_envs
-        or any(type(v) is not int or v <= 0 for v in frames)
-    ):
-        raise ValueError("Control receipt has no measured terminal boundary.")
-    source_path = declaration["terminal_source_path"]
-    terminal_item = program
-    for component in source_path:
-        terminal_item = terminal_item[component]
-    expected_preset = declaration["preset"]
-    if terminal_item.get("name") != terminal or terminal_item.get("post") != [
-        {
-            "kind": "wait_stable",
-            "entity": declared_binding["object_id"],
-            "preset": expected_preset,
-        }
-    ]:
-        raise ValueError("Control terminal policy differs from its declared route.")
-    receipts = [
-        p
-        for p in segment.get("metadata", {}).get("post_policies", ())
-        if p.get("policy_index") == 0
-        and type(p.get("policy_index")) is int
-        and p.get("source_path") == [*source_path, "post", 0]
-    ]
-    if len(receipts) != 1:
-        raise ValueError("Control terminal policy receipt is missing or duplicated.")
-    receipt = receipts[0]
-    result = receipt.get("result", {})
-    identity = result.get("control", {})
-    expected = {
-        "revision": 1,
-        "operation_id": route["operation_id"],
-        "object_id": declared_binding["object_id"],
-        "joint": declared_binding["joint"],
-        "link": declared_binding["link"],
-        "source_sha256": declared_binding["source_sha256"],
-        "route_digest": canonical_hash(route),
-        "criterion": criterion,
-    }
-    if (
-        result.get("kind") != "control_operation"
-        or type(identity.get("revision")) is not int
-        or result.get("preset") != expected_preset
-        or any(identity.get(key) != value for key, value in expected.items())
-    ):
-        raise ValueError("Control receipt identity differs from its occurrence.")
-    window = identity.get("window")
-    if (
-        not isinstance(window, list)
-        or len(window) != 2
-        or any(type(v) not in (int, float) or not math.isfinite(v) for v in window)
-        or not 0 <= window[0] < window[1]
-        or type(identity.get("sample_count")) is not int
-        or identity["sample_count"] < 2
-    ):
-        raise ValueError("Control receipt has no valid operation sampling window.")
-    if (
-        receipt.get("result_mask") != [True] * num_envs
-        or any(type(value) is not bool for value in receipt.get("result_mask", ()))
-        or result.get("accepted") is not True
-        or result.get("terminal") is not True
-        or result.get("contact_released") is not True
-    ):
-        raise ValueError("Control cleanup was not physically accepted.")
-    if kind == "twist":
-
-        if (
-            result.get("stable") is not True
-            or result.get("others_unchanged") is not True
-        ):
-            raise ValueError("Twist stability or other-joint evidence is missing.")
-        path = result.get("contact_path")
-        if (
-            type(path) not in (int, float)
-            or not math.isfinite(path)
-            or path < math.radians(15.0)
-        ):
-            raise ValueError("Twist has insufficient measured contact travel.")
-        if criterion == "calibrated_setting" and (
-            result.get("target_qpos_reached") is not True
-            or result.get("target_error", math.inf) > math.radians(5.0)
-        ):
-            raise ValueError("Strict setting was not physically reached.")
-        clearance = result.get("clearance")
-    else:
-        if any(
-            result.get(key) is not True
-            for key in (
-                "event_accepted",
-                "retreat_verified",
-                "housing_contact_released",
-            )
-        ):
-            raise ValueError("Press event or retreat evidence is missing.")
-        clearance = result.get("terminal_clearance")
-    if (
-        type(clearance) not in (int, float)
-        or not math.isfinite(clearance)
-        or clearance < 0.04
-    ):
-        raise ValueError("Control terminal clearance is insufficient.")
-    return {
-        "group_id": route["operation_id"],
-        "uid": declared_binding["object_id"],
-        "part_id": None,
-        "accepted": [True] * num_envs,
-        "measurements": {
-            "scope": "measured_control_operation",
-            "boundary_frames": frames,
-            "control": deepcopy(identity),
-            "result": deepcopy(result),
-        },
-    }
+    if not batch["valid"][row] or batch["acquisition_errors"][row] is not None:
+        raise ValueError(
+            batch["acquisition_errors"][row] or "Control acquisition unavailable."
+        )
+    return batch["values"][row]

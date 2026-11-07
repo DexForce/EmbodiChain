@@ -1059,19 +1059,26 @@ and semantic hash; it does not qualify a partial binding or physical evidence.
 embodichain.gen_sim.task_spec.control_evidence
 ----------------------------------------------
 
-Control bindings seal a plain source route payload and explicit terminal policy,
-source path and complete execution prefix. Historical Press/Twist replay checks
-the same operation/source-asset/route digest, sampling window, cleanup, clearance
-and declared coarse or calibrated criterion as the original source observer.
-There are no imports of live factories, sensors or Task Engine objects.
+Control bindings seal their normative/program identities and source declaration.
+Versions 1 (``historical_record``) and 2 (``raw_snapshot``) retain their serialized
+fields and hashes. The source declaration is interpreted by the Lab adapter;
+TaskSpec imports no Lab, simulator, native SDK or skill event implementation.
 
-Only explicitly selected ``historical_record`` inputs are currently qualified;
-raw input is rejected at binding construction until its complete operation-window
-acquisition contract is available. Missing or failed receipt qualification stays
-unavailable. A contact-backed Press event is not device activation, and the
-coarse Twist criterion is not silently upgraded to calibrated-setting success.
-The common physical report assembler accepts these bindings without filling
-missing final goals, past milestones or continuous trajectory requirements.
+First call
+:func:`embodichain.lab.task_program.integrations.evidence.normalize_control_evidence`
+with the serialized binding, original evidence and program. It validates the
+original actor, occurrence, sampling-window and control-event protocol, then
+returns source-bound ``PhysicalEvidenceFrame``/``Batch`` JSON. Supply that packet
+to :func:`evaluate_control_evidence` or the common physical evidence report.
+Direct raw receipts must be normalized before normative evaluation.
+
+The normative evaluator checks the measurement hash, declared source, row and
+episode identities, channel validity and the requested physical-effect fact.
+Valid negative observations fail; unavailable acquisition stays unavailable.
+The Lab adapter retains the original all-active proof requirement, Press event
+threshold and coarse-turn versus calibrated-setting rules. A Press event does
+not establish device activation. Bindings and historical certificates are never
+automatically upgraded or re-signed.
 
 .. currentmodule:: embodichain.gen_sim.task_spec.control_evidence
 
@@ -1100,23 +1107,25 @@ Raw snapshots require the complete ``support.com_patch`` acquisition channel,
 including values, validity/errors, timestamp, environment IDs, observation
 revision and clock domain. Values must agree with the native measurements.
 Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
-raw/historical input contracts. Raw sampled-timeline collection is not yet
-implemented and cannot be substituted with the COM-patch channel.
+raw/historical input contracts. Explicit version-4 raw sampled timelines seal
+the native/program acquisition universe and original substep lineage; a
+COM-patch sample cannot substitute for that timeline.
 
-Legacy ``native_contact_support`` and explicit
-``native_stable_reference_support/v2`` sampled windows retain their scopes.
-``native_supported_placement`` requires revision 1 and rechecks release-phase
-windows, actor/episode identity, original stable clocks and raw contact patches.
-Its declared ``supported_region`` variant checks complete planar footprints for
-``on`` and ``inside`` without claiming general volume containment. Stronger
-measurements never select a stronger scope implicitly. E4/E5 still require
-separate transfer/coordinated-transport proofs and reject in this slice.
+Rigid ``on`` relations retain their explicit legacy ``native_contact_support``
+or ``native_stable_reference_support/v2`` sampled-window contract. The separate
+``native_supported_placement`` scope requires revision 1 and rechecks the exact
+release phase, actor/episode provenance, original stable-clock trace and raw
+contact COM patch. Its explicitly declared ``supported_region`` variant also
+checks complete planar-footprint measurements for ``on`` or ``inside``; it does
+not claim general volume containment. A stronger payload never selects a scope
+implicitly. Operation-linked version-3 E4/E5 declarations require the independent
+transfer/coordinated-transport proof before the receiver/coordinated release.
+Version-5 planar and version-6 directional declarations preserve their explicit
+native geometry mode, owners, bounds and unavailable cases. Finite-count
+version-7 placement groups retain every declared member/occurrence.
 
-Recorded region geometry is recomputed from the ObservationManager's exact,
-available history slots and the original owned geometry/support snapshot.
-It cannot borrow the old footprint after a boundary pose changes, resample
-contacts or substitute a live pose. Import is standard-library-only; numerical
-proof re-evaluation lazily uses shared Torch/NumPy/Shapely algorithms.
+Imports and binding validation use only the standard library; numerical proof
+re-evaluation lazily loads the existing shared Torch/NumPy/Shapely algorithms.
 
 The verifier distinguishes unavailable acquisition from measured negatives and
 checks measured release receipts independently of plan/segment success. Raw Lab
@@ -1148,10 +1157,12 @@ invariants. The ordinary TaskSpec evaluator remains the certificate authority.
 
 .. autofunction:: evaluate_placement_evidence_report
 
+
+
 embodichain.gen_sim.task_spec.evidence_report
 ---------------------------------------------
 
-Combine verified placement, orientation and joint evidence using the existing
+Combine verified placement, orientation, joint and historical control evidence using the existing
 TaskSpec evaluator. Bindings must share the native row, episode and input-format
 contract. Final observations cannot fill past milestones; sparse boundary
 observations cannot establish continuous invariants or complete temporal windows.
@@ -1163,7 +1174,6 @@ observations cannot establish continuous invariants or complete temporal windows
    evaluate_physical_evidence_report
 
 .. autofunction:: evaluate_physical_evidence_report
-
 
 embodichain.gen_sim.task_spec.expressions
 -----------------------------------------
@@ -2306,6 +2316,16 @@ embodichain.lab.gym.utils
    EnvProfilerCfg
    capture_trajectory_state
    restore_trajectory_state
+
+embodichain.lab.gym.utils.control_timing
+----------------------------------------
+
+Resolve the existing integer physics/control grid before environment creation.
+BaseEnv uses the same resolver during setup, retaining validation order,
+frequency priority and exact representability checks.
+
+.. automodule:: embodichain.lab.gym.utils.control_timing
+   :members:
 
 embodichain.lab.gym.utils.gym_utils
 -----------------------------------
@@ -4663,9 +4683,99 @@ substituted, and recorded joint claims require the original executed policy.
 
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_pour_evidence_binding
 
+embodichain.gen_sim.task_spec.condition_group_evidence
+------------------------------------------------------
+
+Finite-count orientation and articulation-state proofs retain the unchanged
+full TaskSpec and program. The group requires a complete bijection between the
+declared count, execution groups and logical/native member channels; articulation
+members are identified by both entity and part/joint. No synthetic child spec,
+subset selection or unobserved ``all`` universe can stand in for that proof.
+
+Every required member retains its row, episode, occurrence and input-format
+identity. Missing members or historical failures remain unavailable; complete
+valid negative final measurements remain failed. E1 final upright/vertical facts
+are independent of placement, while its original recorded scope remains upright
+only. E6 normal multi-part milestone availability is unchanged. Single-member
+binding serialization, semantic identity and successful-case hashes remain stable.
+The common physical report accepts these condition-group bindings without adding
+support for unrelated held/transport evidence.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.condition_group_evidence
+
+.. autosummary::
+
+   ConditionEvidenceGroupBinding
+   evaluate_condition_group_evidence
+
+.. autoclass:: ConditionEvidenceGroupBinding
+   :members:
+
+.. autofunction:: evaluate_condition_group_evidence
 
 embodichain.gen_sim.task_spec.coordinated_evidence
 --------------------------------------------------
+
+Normalized coordinated acceptance uses the sealed manipulation binding.
+Lab validates raw actor/query/execution protocols before this evaluator runs.
+No runtime monitor output defines normative criteria.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.coordinated_evidence
+
+.. autofunction:: evaluate_coordinated_hold_evidence
+
+embodichain.gen_sim.task_spec.handover_evidence
+-----------------------------------------------
+
+Normalized handover acceptance uses the sealed manipulation binding.
+Lab validates raw actor/query/execution protocols before this evaluator runs.
+No runtime monitor output defines normative criteria.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.handover_evidence
+
+.. autofunction:: evaluate_handover_evidence
+
+
+embodichain.gen_sim.task_spec.placement_group_evidence
+------------------------------------------------------
+
+A complete finite-count declaration binds every member to its exact release,
+settle and boundary occurrence. All member outcomes contribute without filling
+missing evidence or collapsing native environment identity. This layer evaluates
+facts; Lab owns collection and the frontend owns semantic projection.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.placement_group_evidence
+
+.. autoclass:: PlacementEvidenceGroupBinding
+   :members:
+
+.. autofunction:: evaluate_placement_group_evidence
+
+embodichain.gen_sim.task_spec.transport_evidence
+------------------------------------------------
+
+Normalized transport acceptance uses the sealed manipulation binding.
+Lab validates raw actor/query/execution protocols before this evaluator runs.
+No runtime monitor output defines normative criteria.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.transport_evidence
+
+.. autofunction:: evaluate_coordinated_transport_evidence
+
+
+
+embodichain.compute.geometry.directional
+----------------------------------------
+
+Fixed world-axis relation operands are shared by geometric observation adapters.
+
+.. currentmodule:: embodichain.compute.geometry.directional
+
+.. autosummary::
+
+   DIRECTIONAL_RELATION_AXES
+
+.. autodata:: DIRECTIONAL_RELATION_AXES
 
 This normative entry point evaluates normalized held-object facts using an explicit manipulation binding. Raw actor, query, receipt and phase validation belongs to the Lab adapter.
 
@@ -4695,6 +4805,8 @@ This normative entry point evaluates normalized held-object facts using an expli
 embodichain.gen_sim.task_spec.manipulation_evidence
 ---------------------------------------------------
 
+Explicit task criteria are compared with normalized measurements, independently of execution-monitor thresholds. Missing evidence remains unavailable.
+
 Explicit task acceptance compares normalized measurements with sealed bounds. Missing acquisition remains unavailable; valid measured negatives fail. Runtime monitor output never defines task thresholds.
 
 .. currentmodule:: embodichain.gen_sim.task_spec.manipulation_evidence
@@ -4717,6 +4829,8 @@ Explicit task acceptance compares normalized measurements with sealed bounds. Mi
 embodichain.lab.evidence
 ------------------------
 
+Owned physical values preserve explicit environment rows, validity, errors and observation revisions without importing a simulator.
+
 Owned physical values retain row identity, validity, missing reasons and observation revisions. JSON snapshots are independent and encode nonfinite observations as null without discarding validity.
 
 .. currentmodule:: embodichain.lab.evidence
@@ -4731,6 +4845,7 @@ Owned physical values retain row identity, validity, missing reasons and observa
 .. autoclass:: PhysicalObservationStamp
    :members:
 
+
 .. autoclass:: PhysicalEvidenceBatch
    :members:
 
@@ -4744,6 +4859,8 @@ Owned physical values retain row identity, validity, missing reasons and observa
 embodichain.lab.task_program.integrations.evidence
 --------------------------------------------------
 
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
 Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.evidence
@@ -4754,6 +4871,18 @@ Offline held-object adapters validate exact execution and acquisition identities
    normalize_handover_evidence
    CoordinatedHoldEvidenceBinding
    normalize_coordinated_hold_evidence
+   CoordinatedTransportEvidenceBinding
+   normalize_coordinated_transport_evidence
+   held_observation_request
+   resolve_hold_observation_condition
+   sampled_support_window
+   directional_observation_axes
+   normalize_control_evidence
+   validate_control_declaration
+   normalize_placement_evidence
+   normalize_pour_release_evidence
+   validate_placement_declaration
+
    held_observation_request
    resolve_hold_observation_condition
 
@@ -4767,13 +4896,51 @@ Offline held-object adapters validate exact execution and acquisition identities
 
 .. autofunction:: normalize_coordinated_hold_evidence
 
+.. autoclass:: CoordinatedTransportEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_transport_evidence
+
 .. autofunction:: held_observation_request
 
 .. autofunction:: resolve_hold_observation_condition
 
+.. autofunction:: sampled_support_window
+
+.. autofunction:: directional_observation_axes
+
+.. autofunction:: normalize_control_evidence
+.. autofunction:: validate_control_declaration
+.. autofunction:: normalize_placement_evidence
+
+.. autofunction:: normalize_pour_release_evidence
+
+.. autofunction:: validate_placement_declaration
+
+
+embodichain.lab.task_program.integrations.evidence.control_evidence
+-----------------------------------------------------------------
+
+Offline control adapters validate sealed source declarations, recheck original
+Press/Twist receipts against their acquired channels and emit normalized physical
+facts. Declaration preflight is standard-library-only and reads no physical state.
+Normalization uses the existing Lab evidence value contract without importing
+TaskSpec, Task Engine or simulator packages.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.control_evidence
+
+.. autosummary::
+
+   normalize_control_evidence
+   validate_control_declaration
+
+.. autofunction:: normalize_control_evidence
+.. autofunction:: validate_control_declaration
 
 embodichain.lab.task_program.integrations.evidence.coordinated_evidence
 -----------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
 
 Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
 
@@ -4793,6 +4960,8 @@ Offline held-object adapters validate exact execution and acquisition identities
 embodichain.lab.task_program.integrations.evidence.handover_evidence
 --------------------------------------------------------------------
 
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
 Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.evidence.handover_evidence
@@ -4811,11 +4980,64 @@ Offline held-object adapters validate exact execution and acquisition identities
 embodichain.lab.task_program.integrations.evidence.observation_requests
 -----------------------------------------------------------------------
 
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
 Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.evidence.observation_requests
 
 .. autosummary::
+
+   resolve_hold_observation_condition
+   held_observation_request
+   sampled_support_window
+   directional_observation_axes
+
+.. autofunction:: resolve_hold_observation_condition
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: sampled_support_window
+
+.. autofunction:: directional_observation_axes
+
+
+embodichain.lab.task_program.integrations.evidence.placement_evidence
+---------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.placement_evidence
+
+.. autosummary::
+
+   normalize_placement_evidence
+   normalize_pour_release_evidence
+   validate_placement_declaration
+
+.. autofunction:: normalize_placement_evidence
+
+.. autofunction:: normalize_pour_release_evidence
+
+.. autofunction:: validate_placement_declaration
+
+
+embodichain.lab.task_program.integrations.evidence.transport_evidence
+---------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.transport_evidence
+
+.. autosummary::
+
+   CoordinatedTransportEvidenceBinding
+   normalize_coordinated_transport_evidence
+
+.. autoclass:: CoordinatedTransportEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_transport_evidence
 
    held_observation_request
    resolve_hold_observation_condition
