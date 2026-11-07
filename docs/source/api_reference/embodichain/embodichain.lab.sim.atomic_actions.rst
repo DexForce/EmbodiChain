@@ -679,6 +679,11 @@ Planning probes
 
 These ports separate read-only geometry and observed backend queries from Pick and Place phase construction. Missing declared inputs fail explicitly.
 
+Place sends every required approach frame of non-support input envelopes to the
+Scene-owned collision query. Raw tensor bounds do not decide native capability
+or conversion precision. Unavailable evidence is retained as unavailable, while
+intended support contact remains a separate physical-evidence requirement.
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions.planning_probes
 
 Complete plan proposal diagnostics

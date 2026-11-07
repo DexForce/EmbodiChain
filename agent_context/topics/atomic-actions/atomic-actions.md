@@ -93,8 +93,12 @@ actual recovery type and segment handler. `ActionPlanningServices` borrows
 same-robot Motion/collision services and typed Pick/Place fact providers from
 `planning_probes`, `measured_rigid` and `place_continuation`; no semantic graph,
 compiler, skill-registry replacement or simulator stepping belongs here.
-Required missing providers fail before planning. Complete release previews stay
-on the same engine and observation and authorize no physical effects. The
+Required missing providers fail before planning. Place delegates every required
+approach frame of each non-support envelope to the Scene-owned native query;
+raw tensor bounds alone never authorize clearance or bypass unavailable native
+precision. Intended support contact remains deferred to physical evidence.
+Complete release previews stay on the same engine and observation and authorize
+no physical effects. The
 single-environment source paths reject other batches. AxisAlign rejects inherited
 Pick-only options it does not implement; explicit drawer Place and held transport require the installed
 `drawer_planning` provider and complete-plan handler.

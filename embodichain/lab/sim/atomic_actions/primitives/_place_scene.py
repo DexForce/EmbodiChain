@@ -123,30 +123,27 @@ def inspect_place_plan(
                         (lower[:, :, 2] - other_upper[:, None, 2]).min()
                     )
                 continue
-            margin = _SCENE_CLEARANCE_M + _DISTANCE_TOLERANCE_M
-            overlap = (
-                (upper >= other_lower[:, None] - margin)
-                & (lower <= other_upper[:, None] + margin)
-            ).all(-1)
-            if overlap.any():
-                checked = convex_input_clearance(
-                    vertices,
-                    poses,
-                    mesh,
-                    pose,
-                    overlap[0].nonzero().flatten(),
-                    clearance_m=_SCENE_CLEARANCE_M,
-                    numerical_allowance_m=_DISTANCE_TOLERANCE_M,
-                )
-                convex_checks.append({"entity": uid, "component": component, **checked})
-                if not checked["valid"]:
-                    return {
-                        "valid": False,
-                        "reason": "held_object_scene_envelope_rejected",
-                        "entity": uid,
-                        "component": component,
-                        "convex_clearance": convex_checks,
-                    }
+            # Float bounds alone cannot certify the native query's conversion
+            # precision or supported geometry. Let the Scene-owned public query
+            # classify every required approach frame, including unavailable.
+            checked = convex_input_clearance(
+                vertices,
+                poses,
+                mesh,
+                pose,
+                torch.arange(poses.shape[1], device=poses.device),
+                clearance_m=_SCENE_CLEARANCE_M,
+                numerical_allowance_m=_DISTANCE_TOLERANCE_M,
+            )
+            convex_checks.append({"entity": uid, "component": component, **checked})
+            if not checked["valid"]:
+                return {
+                    "valid": False,
+                    "reason": "held_object_scene_envelope_rejected",
+                    "entity": uid,
+                    "component": component,
+                    "convex_clearance": convex_checks,
+                }
             if uid == inputs.floor_entity_id:
                 minimum_gap = float((lower[:, :, 2] - other_upper[:, None, 2]).min())
     except (ImportError, ValueError, TypeError, AttributeError, RuntimeError) as error:
