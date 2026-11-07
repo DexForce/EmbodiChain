@@ -18,6 +18,7 @@ of those owners.
 | Placement binding, physical proof checks and certificate assembly | `evidence.py` |
 | Orientation/joint state and milestone qualification | `condition_evidence.py` |
 | Common per-environment physical reports | `evidence_report.py` |
+| Explicit held-object acceptance over normalized facts | `manipulation_evidence.py`; `handover_evidence.py`, `coordinated_evidence.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
 | JSON snapshots and semantic hashing | `canonicalization.py` |
@@ -58,34 +59,38 @@ existing named conditions; it reads no pose buffer and computes no acceptance.
 New placement bundles project the configured owner condition directly through
 `project_configured_placement_evidence_binding`, without a legacy constraint
 file or digest. The B0 fixture adapter separately checks its frozen source identity.
-Lab validates raw receipts, acquisition masks, actor/episode identities, sampled
-support windows and recorded execution prefixes before normalization. TaskSpec
-checks normalized facts against the sealed task criteria. Lab owns the collector;
+TaskSpec verifies receipts, acquisition masks, episode IDs, sampled support windows
+and recorded execution prefixes. Lab owns the physical collector;
 [episode recording](../env-framework/env-framework.md#expert-trajectory-contract)
 supplies historical values with validity and episode/lifetime checks; the
 observation manager owns their semantic schema.
 Env dispatches capture/reset boundaries;
 no Lab module imports TaskSpec or Task Engine.
 
-HandOver and coordinated acquisition/holding use
-`manipulation_evidence.py`: `ManipulationEvidenceBinding` seals the predicate,
-final/recorded scope and explicit `HoldAcceptanceCriteria`. The evaluator reads
-normalized `PhysicalEvidenceFrame`/`Batch` JSON, retaining validity, missing
-reasons, interval coverage and per-environment episode identities. It never
-selects control parts, interprets skill phases or adopts monitor thresholds.
-Instance and mapping inputs both verify their original content identities.
+The pure evidence owner includes finite-member condition/placement groups,
+HandOver, coordinated holding/transport and explicit raw control v2. Import
+these through their `task_spec.<family>_evidence` modules; the core package
+exports remain unchanged. `evidence_report.evaluate_physical_evidence_report`
+dispatches the supported binding versions without importing Lab or Task Engine.
+`sampled_support_window`, `directional_observation_axes` and
+`observation_requests.held_observation_request` supply pure observation operands,
+not acquisition. Task Engine's binding projection and runtime collection consume
+this complete module set as a separate higher layer.
 
-Raw actor/query, receipt, release, contact timeline and geometry normalization
-belong to `lab/task_program/integrations/evidence/`; see
-[Task Program ownership](../task-programs/task-programs.md). The legacy placement,
-condition, control and Pour binding APIs retain their existing declarations.
-Placement and Pour receive normalized release facts; linked placement receives
-normalized operation prerequisites and geometric measurements. Normative math,
-role cardinality, milestone ordering and certificate assembly remain here.
-`evidence_report.evaluate_physical_evidence_report` dispatches normalized
-manipulation and the existing normative binding families without importing Lab
-or Task Engine. Raw integration tests and frozen protocol fixtures live with Lab;
-TaskSpec tests exercise task criteria, identity and normalized facts.
+HandOver and coordinated holding separate protocol validation from task acceptance.
+Lab's `task_program/integrations/evidence/` owns raw receipt/actor/query/clock
+validation and observation requests. Its offline normalizers emit source-bound
+physical frame/batch JSON without importing TaskSpec or Task Engine.
+`ManipulationEvidenceBinding` seals explicit `HoldAcceptanceCriteria`, predicate,
+program, episode and final/recorded scope. TaskSpec compares attachment drift,
+grips, target position, orientation and observed duration against those criteria;
+it never derives acceptance limits from a runtime monitor's resolved parameters.
+Valid measured negatives fail; missing or contradictory acquisition stays
+unavailable. Historical boundary overrides must match the verified record. Raw held poses
+retain the canonical history row/episode/step identities and original native
+acquisition times; final observations match source time, while recorded reads
+may be collected later without equating native time to episode step count.
+Existing placement/state/control/Pour APIs keep their current contracts.
 
 Current goals cannot borrow recorded milestone success. The legacy instantaneous
 final-support scope requires its exact measured release and actual final runtime
