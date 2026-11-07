@@ -783,6 +783,11 @@ convex envelope of each vertex cloud; its hull is the query object rather than a
 substitute for a native physical mesh. Newton supplies bounded clearance and
 native contact information; unsupported geometry or an ambiguous comparison
 raises instead of converting a distance interval into a guessed boolean.
+A frame may use the shared canonical separation lower bound only when it is
+strictly above the original clearance plus allowance. All selected frames and
+repeats remain counted. Native-query and bound-only frame counts are distinct;
+the last-frame receipt identifies its query kind and never reuses a prior native
+contact result for a bound-only frame.
 
 .. currentmodule:: embodichain.lab.sim.scene.convex_clearance
 

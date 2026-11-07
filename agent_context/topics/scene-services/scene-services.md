@@ -111,7 +111,9 @@ metadata. Float64 broadphase separation is not a native precision certificate;
 near-threshold queries must reach the shared native comparison. Far-pair culling
 uses only the shared canonical conversion lower bound, strictly above the original
 threshold; zero or unavailable bounds are never clearance. Native and culled-pair
-counts are reported independently.
+counts are reported independently. Input-envelope clearance retains every selected
+frame and repeat, including bound-only frames; its last-frame receipt distinguishes
+a canonical bound from a native contact result without carrying stale contact data.
 `NativeHandSceneQuery.obstacle_bounds` retains independently owned numeric bounds
 for HandOver proposal construction only; candidates and complete commands still
 pass native inspection. Reading these bounds never supplies a clearance verdict.
