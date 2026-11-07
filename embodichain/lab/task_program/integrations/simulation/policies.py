@@ -200,6 +200,7 @@ class SimulationSegmentPolicyPort:
             | None
         ) = None,
         env_ids: torch.Tensor | None = None,
+        select_rows: bool = False,
         step_dt: float | None = None,
         support_registry: SupportObservationRegistry | None = None,
         sensor_suite: MutableMapping[str, BaseSensor] | None = None,
@@ -220,8 +221,15 @@ class SimulationSegmentPolicyPort:
             )
         if not isinstance(env_ids, torch.Tensor):
             raise TypeError("env_ids must be a torch.Tensor or None.")
-        if env_ids.dtype != torch.long or env_ids.shape != (qpos.shape[0],):
-            raise ValueError("env_ids must be int64 with one ID per simulator row.")
+        if type(select_rows) is not bool:
+            raise TypeError("select_rows must be bool")
+        if env_ids.dtype != torch.long or env_ids.ndim != 1 or not env_ids.numel():
+            raise ValueError("env_ids must be a nonempty int64 vector")
+        if select_rows:
+            if bool((env_ids < 0).any()) or bool((env_ids >= qpos.shape[0]).any()):
+                raise ValueError("selected env_ids must index physical rows")
+        elif env_ids.shape != (qpos.shape[0],):
+            raise ValueError("env_ids must have one identifier per simulator row")
         if env_ids.device != qpos.device:
             raise ValueError("env_ids and robot qpos must share a device.")
         if torch.unique(env_ids).numel() != env_ids.numel():
@@ -332,10 +340,10 @@ class SimulationSegmentPolicyPort:
         self._scene_binding = scene_binding
         self._step_dt = step_dt
         self._env_ids = env_ids.clone()
-        self._row_indices = torch.arange(
-            qpos.shape[0],
-            dtype=torch.long,
-            device=qpos.device,
+        self._row_indices = (
+            env_ids.clone()
+            if select_rows
+            else torch.arange(qpos.shape[0], device=qpos.device)
         )
         self._settle_presets = MappingProxyType(normalized_presets)
         if bound_post_policy_presets is not None:
@@ -1510,7 +1518,7 @@ class SimulationSegmentPolicyPort:
                 "construction-time current full qpos shape and device."
             )
         if bool(active_mask.all().item()):
-            return target_qpos
+            return target_qpos.index_select(0, self._row_indices)
 
         current_qpos = self._read_robot_qpos(self._robot, target=False)
         if (
@@ -1521,8 +1529,10 @@ class SimulationSegmentPolicyPort:
                 "robot.get_qpos(target=False) current full qpos must match the "
                 "construction-time current full qpos shape and device."
             )
-        hold_qpos = current_qpos.clone()
-        hold_qpos[active_mask] = target_qpos[active_mask]
+        hold_qpos = current_qpos.index_select(0, self._row_indices)
+        hold_qpos[active_mask] = target_qpos.index_select(0, self._row_indices)[
+            active_mask
+        ]
         return hold_qpos
 
     def _validate_active_mask(self, active_mask: torch.Tensor) -> torch.Tensor:
@@ -1910,13 +1920,13 @@ class SimulationSegmentPolicyPort:
         qpos = getter()
         if not isinstance(qpos, torch.Tensor) or not qpos.is_floating_point():
             raise TypeError("Articulation get_qpos() must return a floating tensor.")
-        batch_size = int(self._env_ids.numel())
+        batch_size = self._robot_qpos_shape[0]
         if qpos.dim() != 2 or qpos.shape[0] != batch_size or qpos.shape[1] == 0:
             raise ValueError(
                 f"Articulation {entity_id!r} qpos must have shape "
                 f"({batch_size}, J) with J > 0."
             )
-        return qpos.clone()
+        return qpos.index_select(0, self._row_indices)
 
     def _read_pose(
         self, entity: Any, *, entity_id: str, require_finite: bool = True
@@ -1934,7 +1944,9 @@ class SimulationSegmentPolicyPort:
         batch_size = int(self._env_ids.numel())
         if pose.shape == (4, 4):
             pose = pose.unsqueeze(0).expand(batch_size, -1, -1)
-        elif pose.shape != (batch_size, 4, 4):
+        elif pose.shape == (self._robot_qpos_shape[0], 4, 4):
+            pose = pose.index_select(0, self._row_indices)
+        else:
             raise ValueError(
                 f"Rigid object {entity_id!r} pose must have shape "
                 f"({batch_size}, 4, 4)."
