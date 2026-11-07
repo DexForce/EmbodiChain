@@ -34,6 +34,7 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
 )
 from ._newton_queries import _ConvexCollection
 from embodichain.compute.geometry.pose_checks import as_rigid_matrix as _pose
+from embodichain.compute.geometry.mesh_bounds import input_mesh_bounds
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -202,6 +203,10 @@ class NativeHandSceneQuery(_QueryLifetime):
         self._link_names = tuple(part.link for part in self.parts)
         if len(set(self._link_names)) != len(self._link_names):
             raise ValueError("Native hand query link identities must be unique.")
+        self._proposal_bounds = tuple(
+            input_mesh_bounds(body.meshes, body.pose) if body.meshes else None
+            for body in self.obstacles
+        )
         self._inventory = _neutral_identity({"inventory": list(inventory)})["inventory"]
         self.native_revision = native_revision
         self._read_native_revision = read_native_revision
@@ -222,6 +227,21 @@ class NativeHandSceneQuery(_QueryLifetime):
     def inventory(self) -> list[dict[str, Any]]:
         """Return independently owned plain native capture diagnostics."""
         return deepcopy(self._inventory)
+
+    @property
+    def obstacle_bounds(self) -> tuple[tuple[np.ndarray, np.ndarray] | None, ...]:
+        """Return owned numeric bounds for ordered translation proposals only.
+
+        These float64 input bounds carry no native precision or clearance
+        certificate. A proposal must still pass this query's native inspection
+        and the complete emitted-command guard. Returned arrays are independent
+        copies; changing them never changes captured geometry or native results.
+        """
+        self.assert_current()
+        return tuple(
+            None if bounds is None else (bounds[0].copy(), bounds[1].copy())
+            for bounds in self._proposal_bounds
+        )
 
     @property
     def link_names(self) -> tuple[str, ...]:
@@ -401,6 +421,7 @@ class NativeHandSceneQuery(_QueryLifetime):
         self.obstacle_managers = ()
         self.parts = ()
         self.obstacles = ()
+        self._proposal_bounds = ()
         self._read_native_revision = None
 
     def __enter__(self) -> NativeHandSceneQuery:

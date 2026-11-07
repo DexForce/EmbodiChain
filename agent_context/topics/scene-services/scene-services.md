@@ -112,6 +112,9 @@ near-threshold queries must reach the shared native comparison. Far-pair culling
 uses only the shared canonical conversion lower bound, strictly above the original
 threshold; zero or unavailable bounds are never clearance. Native and culled-pair
 counts are reported independently.
+`NativeHandSceneQuery.obstacle_bounds` retains independently owned numeric bounds
+for HandOver proposal construction only; candidates and complete commands still
+pass native inspection. Reading these bounds never supplies a clearance verdict.
 
 Drawer source adapters follow enabled fixed-joint descendants of the selected
 prismatic body, independently of USD parent paths. Structural meshes exclude the

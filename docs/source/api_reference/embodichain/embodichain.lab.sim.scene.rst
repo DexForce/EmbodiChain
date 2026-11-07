@@ -720,6 +720,9 @@ cannot bypass native conversion uncertainty near a threshold. Far pairs are
 culled only when the shared canonical conversion budget gives a separation lower
 bound strictly above the unchanged threshold. Zero or unavailable bounds continue
 to the native pipeline; query and culled-pair counts remain separate.
+``NativeHandSceneQuery.obstacle_bounds`` supplies independent, ordered numeric
+bounds to HandOver translation proposals. They do not authorize clearance or
+replace native candidate and complete-command inspection.
 
 .. currentmodule:: embodichain.lab.sim.scene.native_hand_scene
 
