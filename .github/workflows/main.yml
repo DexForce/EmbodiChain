@@ -372,9 +372,9 @@ jobs:
           source activate py311
           set -euo pipefail
           if [[ "${NEEDS_GENSIM}" == "true" ]]; then
-            package='.[gensim,planning-geometry]'
+            package='.[gensim]'
           else
-            package='.[planning-geometry]'
+            package='.'
           fi
           # The private index redirects public packages to a mirror with missing
           # msgspec wheel metadata. Resolve viser's dependency from PyPI first.
