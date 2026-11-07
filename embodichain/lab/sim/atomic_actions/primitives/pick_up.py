@@ -213,6 +213,13 @@ class PickUpOptions(ActionOptions):
     grasps and ``fixed_object_to_eef`` bypass this sampled-grasp selection.
     """
 
+    approach_along_grasp_axis: bool = False
+    """Use the realized calibrated TCP +Z for native pre-grasp translation.
+
+    Requires ``fixed_object_to_eef``. The approach then follows the object's
+    observed rotation instead of a shared world vector.
+    """
+
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
@@ -261,6 +268,10 @@ class PickUpOptions(ActionOptions):
         ):
             raise ValueError("obj_upright_direction must be a finite (3,) tensor.")
         _validate_single_se3(self.grasp_frame_to_eef, "grasp_frame_to_eef")
+        if type(self.approach_along_grasp_axis) is not bool:
+            raise TypeError("approach_along_grasp_axis must be boolean.")
+        if self.approach_along_grasp_axis and self.fixed_object_to_eef is None:
+            raise ValueError("Grasp-axis approach requires fixed_object_to_eef.")
         if self.fixed_object_to_eef is not None:
             _validate_single_se3(self.fixed_object_to_eef, "fixed_object_to_eef")
         object.__setattr__(self, "approach_direction", self.approach_direction.clone())
@@ -354,6 +365,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         hand_grasp_qpos: torch.Tensor,
         interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
+        if options.approach_along_grasp_axis:
+            approach_direction = grasp_xpos[:, :3, 2]
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
         )
@@ -400,6 +413,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             control_dt=interpolation_dt,
             arrival_indices=motion_result.waypoint_indices,
             split_target_index=1,
+            env_ids=self.planning_services.env_ids,
         )
         n_approach = approach_arm.shape[1]
         n_lift = lift_arm.shape[1]
@@ -668,7 +682,14 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             # candidate is derived from the robot's FK at the declared anchor.
             qpos = motion.trajectory.positions[:, grasp_index, list(endpoint.joint_ids)]
             grasp_xpos = self.robot.compute_fk(
-                qpos=qpos, name=endpoint.control_part, to_matrix=True
+                qpos=qpos,
+                name=endpoint.control_part,
+                to_matrix=True,
+                **(
+                    {"env_ids": self.planning_services.env_ids}
+                    if self.planning_services.env_ids is not None
+                    else {}
+                ),
             )
             if (
                 not isinstance(grasp_xpos, torch.Tensor)
@@ -964,6 +985,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             qpos=start_qpos,
             name=manipulator.control_part,
             to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
         )
         start_quat = quat_from_matrix(start_xpos[:, :3, :3])
         # Preserve the established preference between symmetric roll variants;
@@ -1040,6 +1066,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             pose=flat_poses,
             name=manipulator.control_part,
             joint_seed=flat_seed,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
         )
         return (
             is_success.to(device=self.device, dtype=torch.bool).reshape(

@@ -145,7 +145,11 @@ class TabletopPrototypeCollisionValidator:
         contact_depth_m: float,
         base_ground_depth_m: float,
         gripper_contact: GripperContactProjectionCfg | None = None,
+        env_id: int | None = None,
     ) -> None:
+        if env_id is not None and (type(env_id) is not int or env_id < 0):
+            raise ValueError("env_id must be nonnegative")
+        self._env_id = env_id
         if not isinstance(checker, SampledRobotCollisionChecker):
             raise TypeError("checker must be a SampledRobotCollisionChecker")
         if not callable(getattr(robot, "compute_batch_fk", None)):
@@ -471,6 +475,7 @@ class TabletopPrototypeCollisionValidator:
             qpos=positions[:, :, list(endpoint.joint_ids)],
             name=endpoint.control_part,
             to_matrix=True,
+            **({"env_ids": [self._env_id]} if self._env_id is not None else {}),
         )
         if not isinstance(tcp, torch.Tensor) or tcp.shape != (
             1,
