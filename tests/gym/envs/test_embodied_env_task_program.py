@@ -194,3 +194,224 @@ def test_direct_planning_keeps_an_explicit_executor_language_snapshot() -> None:
     env._demo_episode_metadata = [{"instruction": "Explicit task"}]
     tuple(env.create_demo_segments(task_program=object()))
     assert env._demo_episode_metadata[0]["instruction"] == "Explicit task"
+
+
+class _CompletedDemoBridge(_FakeBridge):
+    """Publish a successful bridge only after the one supplied segment."""
+
+    program_completed = False
+    completion_mask = torch.ones(2, dtype=torch.bool)
+    expansion_records = ()
+
+    def iter_segments(self):
+        yield from super().iter_segments()
+        self.program_completed = True
+
+
+def _final_acceptance_env():
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+
+    from embodichain.lab.evaluation import NearTargetHoldSpec
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.task_program._final_acceptance import (
+        _deployment_final_rules,
+    )
+    from embodichain.lab.gym.utils.trajectory_state import _evaluation_observation_cfgs
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        SimulationRigidObjectBinding,
+        SimulationSceneBinding,
+    )
+
+    env = _uninitialized_env(_DeclarativeEnv, object())
+    env.cfg.events = None
+    env.cfg.observations = None
+    env.cfg.rewards = None
+    env.cfg.dataset = None
+    env.episode_context = EpisodeContext(2)
+    env.episode_context._begin_episode([0, 1])
+    env.episode_context._finish_initialization([0, 1])
+    target = torch.zeros(2, 7)
+    target[:, 6] = 1
+    position = target.clone()
+    position[:, 0] = torch.tensor([0.1, 0.9])
+    objects = {
+        "payload": SimpleNamespace(get_local_pose=Mock(return_value=position)),
+        "support": SimpleNamespace(get_local_pose=Mock(return_value=target)),
+    }
+    env.sim.asset_uids = objects.keys()
+    env.sim.get_asset = objects.get
+    env.sim.simulation_time = 0.3
+    env.sim.reset_objects_state = Mock()
+    env.sim.render_frame = lambda **kwargs: nullcontext()
+    env.sensors = {}
+    env._detached_uids_for_reset = []
+    env._profiler = SimpleNamespace(section=lambda name, **kwargs: nullcontext())
+    env._elapsed_steps = torch.zeros(2, dtype=torch.long)
+    env._demo_active_segment_ids = torch.zeros(2, dtype=torch.long)
+    env._demo_active_mask = torch.ones(2, dtype=torch.bool)
+    env._demo_segment_participants = torch.zeros(2, dtype=torch.bool)
+    env._demo_steps = torch.zeros(2, dtype=torch.long)
+    env.rollout_steps = torch.zeros(2, dtype=torch.long)
+    env._recording_provenance = {}
+    env._demo_episode_metadata = [{}, {}]
+    env.rollout_buffer = None
+    env.episode_success_status = torch.zeros(2, dtype=torch.bool)
+    env._normalize_demo_action = None
+    env._mask_demo_action = None
+    env._seed_recording_state = lambda *args: None
+    env._record_initial_observation = lambda *args: None
+    env.get_obs = lambda **kwargs: {}
+    env.get_info = lambda **kwargs: {}
+    env.compiled_program = object()
+    env.bridge = _CompletedDemoBridge(
+        DemoSegment(actions=(torch.zeros(2, 1),), name="move")
+    )
+    registration = SimpleNamespace(
+        scene_binding=SimulationSceneBinding(
+            registry_id="test_scene",
+            rigid_objects=tuple(
+                SimulationRigidObjectBinding(entity_id=uid, simulation_uid=uid)
+                for uid in objects
+            ),
+        ),
+        evaluation_conditions={
+            "near_support": NearTargetHoldSpec(
+                "rigid_objects/payload/pose", "rigid_objects/support/pose", 0.5, 2, 4
+            )
+        },
+        evaluation_final_refs=("near_support",),
+    )
+    env._final_acceptance_rules = _deployment_final_rules(registration)
+    env._evaluation_recording = _evaluation_observation_cfgs(registration)
+    return env, position, objects["payload"].get_local_pose
+
+
+def test_live_final_acceptance_revokes_after_movement_but_reset_saves_the_terminal_result(
+    tmp_path,
+):
+    import json
+
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+
+    env, position, read_pose = _final_acceptance_env()
+    replacement = object()
+    assert env.is_task_success().tolist() == [False, False]
+    read_pose.assert_not_called()
+
+    def step(action):
+        env._demo_steps += 1
+        return (
+            {},
+            torch.zeros(2),
+            torch.zeros(2, dtype=torch.bool),
+            torch.zeros(2, dtype=torch.bool),
+            {},
+        )
+
+    env.step = step
+    result = execute_demo_episode(env, task_program=replacement)
+    assert env.compiled_input is replacement
+    assert env.bridge.program_completed
+    assert result.success == (True, False)
+    terminal = [env.get_demo_episode_metadata(row) for row in (0, 1)]
+    assert terminal[0]["final_acceptance"]["conditions"]["near_support"][
+        "distance"
+    ] == pytest.approx(0.1)
+    assert terminal[1]["final_acceptance"]["program_accepted"] is True
+    assert terminal[1]["final_acceptance"]["physical_satisfied"] is False
+    assert terminal[1]["final_acceptance"]["accepted"] is False
+    assert read_pose.call_count == 1
+
+    position[:, 0] = torch.tensor([0.9, 0.1])
+    assert env.is_task_success().tolist() == [False, True]
+    position[1, 0] = float("nan")
+    assert env.is_task_success().tolist() == [False, False]
+    position[1, 0] = 0.1
+    assert [env.get_demo_episode_metadata(row) for row in (0, 1)] == terminal
+    assert read_pose.call_count == 3
+
+    # The ordinary dataset selection ignores both the new live result and
+    # a sticky Gym success flag when a deployment terminal result exists.
+    env.episode_success_status[:] = True
+    artifact = tmp_path / "saved_episodes.json"
+
+    def save(*, mode, env_ids):
+        assert mode == "save"
+        artifact.write_text(
+            json.dumps([env.get_demo_episode_metadata(row) for row in env_ids.tolist()])
+        )
+
+    env.dataset_manager = SimpleNamespace(
+        available_modes=["save"], save_failed_episodes=False, apply=save
+    )
+    env.reset(options={"reset_ids": [0]})
+    assert env.episode_context.episode_ids == (1, 0)
+    assert "final_acceptance" not in env.get_demo_episode_metadata(0)
+    assert env.get_demo_episode_metadata(1) == terminal[1]
+
+    env.reset(options={"reset_ids": [1]})
+    assert read_pose.call_count == 3
+    assert json.loads(artifact.read_text()) == [terminal[0]]
+    assert env.episode_context.episode_ids == (1, 1)
+
+
+def test_gym_terminal_success_cannot_bypass_incomplete_final_gated_program():
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+
+    env, _, read_pose = _final_acceptance_env()
+
+    def step(action):
+        return (
+            {},
+            torch.zeros(2),
+            torch.ones(2, dtype=torch.bool),
+            torch.zeros(2, dtype=torch.bool),
+            {"success": torch.ones(2, dtype=torch.bool)},
+        )
+
+    env.step = step
+    result = execute_demo_episode(env)
+    assert result.success == (False, False)
+    assert not env.bridge.program_completed
+    assert (
+        env.get_demo_episode_metadata(0)["final_acceptance"]["conditions"][
+            "near_support"
+        ]["status"]
+        == "not_run"
+    )
+    read_pose.assert_not_called()
+
+
+def test_reset_seals_manually_completed_program_before_persistence_retry():
+    from unittest.mock import Mock
+
+    env, position, read_pose = _final_acceptance_env()
+    env._begin_demo_episode_recording()
+    tuple(env.create_demo_segments())
+    env._demo_steps[:] = 1
+    save = Mock(side_effect=OSError("unavailable storage"))
+    env.dataset_manager = SimpleNamespace(
+        available_modes=["save"], save_failed_episodes=False, apply=save
+    )
+
+    with pytest.raises(OSError, match="unavailable storage"):
+        env.reset(options={"reset_ids": [0]})
+    terminal = env.get_demo_episode_metadata(0)
+    assert terminal["success"] is True
+    assert terminal["length"] == 1
+    assert terminal["final_acceptance"]["accepted"] is True
+    assert read_pose.call_count == 1
+
+    position[0, 0] = 0.9
+    assert env.is_task_success().tolist() == [False, False]
+    recorded = []
+
+    def record(*, mode, env_ids):
+        assert mode == "save"
+        recorded.append(env.get_demo_episode_metadata(env_ids.item()))
+
+    save.side_effect = record
+    env.reset(options={"reset_ids": [0]})
+    assert recorded == [terminal]
+    assert read_pose.call_count == 2

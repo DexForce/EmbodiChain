@@ -3873,3 +3873,57 @@ def test_legacy_task_program_identities_keep_pre_evaluation_values():
         task_program_fingerprint(compiled)
         == "6a003a01768251ee76d19a489760437f0f3f0c7ccbee780d1a511def7466c040"
     )
+
+
+def test_final_acceptance_is_registered_independently_of_program_override(
+    evaluation_deployment,
+):
+    import yaml
+
+    path, rule_path, program_path = evaluation_deployment
+    config = load_config(path)
+    component = load_config(rule_path)
+    component["final_acceptance"] = ["delivered"]
+    rule_path.write_text(yaml.safe_dump(component))
+    replacement = load_config(program_path)
+    replacement["program"].pop("validators")
+    override = path.parent / "replacement.yaml"
+    override.write_text(yaml.safe_dump(replacement))
+
+    cfg = config_to_cfg(config, source_path=path, task_program_path_override=override)
+    registration = REGISTERED_ENVS[config["id"]].task_program_registration
+    assert not next(
+        registration.catalog.preflight(cfg.task_program).iter_segments()
+    ).validators
+    assert registration.evaluation_final_refs == ("delivered",)
+    assert registration.fingerprint_payload()["evaluation"]["final_acceptance"] == [
+        "delivered"
+    ]
+
+    component.pop("final_acceptance")
+    rule_path.write_text(yaml.safe_dump(component))
+    with pytest.raises(ValueError, match="already registered with a different"):
+        config_to_cfg(config, source_path=path, task_program_path_override=override)
+
+
+@pytest.mark.parametrize(
+    ("refs", "message"),
+    [
+        ([], "must be a nonempty list"),
+        (["unregistered"], "Unknown evaluation.final_acceptance ref"),
+        (["delivered", "delivered"], "refs must be unique"),
+    ],
+)
+def test_final_acceptance_rejects_invalid_refs_before_registration(
+    evaluation_deployment, refs, message
+):
+    import yaml
+
+    path, rule_path, _ = evaluation_deployment
+    component = load_config(rule_path)
+    component["final_acceptance"] = refs
+    rule_path.write_text(yaml.safe_dump(component))
+    config = load_config(path)
+    with pytest.raises(ValueError, match=message):
+        config_to_cfg(config, source_path=path)
+    assert config["id"] not in REGISTERED_ENVS

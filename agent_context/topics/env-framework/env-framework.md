@@ -186,10 +186,12 @@ opt-in instead processes joint targets through the configured policy terms,
 retaining exact FK targets and expert recording schema. Both paths retain the
 ordinary observation, reward, termination, and rollout lifecycle.
 
-Read final task success before resetting scene/bridge state. A Task Program
-reports success only after its bridge completes normally and combines runtime,
-post-policy and validator acceptance. Segment acceptance and append-only
-dataset persistence are separate contracts; see
+A Task Program's bridge combines runtime, post-policy and segment acceptance.
+For deployments with final predicates, `is_task_success()` combines bridge
+completion with fresh raw physical measurements. The demo executor seals the
+measurement and outcome for each episode row at its terminal boundary.
+Reset-time recording consumes that sealed result before clearing row state.
+Segment acceptance and append-only dataset persistence remain separate; see
 [Task Programs](../task-programs/task-programs.md) and
 [data pipeline](../data-pipeline/data-pipeline.md).
 

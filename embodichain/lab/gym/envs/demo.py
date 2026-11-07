@@ -873,6 +873,7 @@ def execute_demo_episode(
     mask_action = _get_env_callable(env, "_mask_demo_action")
     set_active_mask = _get_env_callable(env, "_set_demo_active_mask")
     success_fn = _get_env_callable(env, "is_task_success")
+    final_acceptance_fn = _get_env_callable(env, "_finalize_demo_task_success")
 
     if active_env_ids is not None and (
         not active_env_ids
@@ -1293,6 +1294,22 @@ def execute_demo_episode(
             if segment_reason is not None or not any(active):
                 break
 
+        final_acceptance = (
+            final_acceptance_fn() if final_acceptance_fn is not None else None
+        )
+        final_gate = (
+            None
+            if final_acceptance is None
+            else _as_bool_tuple(final_acceptance, num_envs)
+        )
+        if final_gate is not None:
+            # A step outcome cannot bypass the deployment gate or bridge completion.
+            for env_id, accepted in enumerate(final_gate):
+                if success[env_id] and not accepted:
+                    success[env_id] = False
+                    completed_by_env[env_id] = False
+                    terminal_reasons[env_id] = "task_incomplete"
+
         if segment_count == 0 and fatal_reason is None:
             fatal_reason = "empty_plan"
             for env_id, is_active in enumerate(active):
@@ -1304,12 +1321,14 @@ def execute_demo_episode(
             # Normal plan exhaustion validates only rows that have not already
             # reached sticky episode success. Legacy expert tasks use
             # is_task_success() for this final validation.
-            success_source = (
-                success_fn()
-                if success_fn is not None
-                else last_info.get("success", True)
-            )
-            final_success = _as_bool_tuple(success_source, num_envs)
+            final_success = final_gate
+            if final_success is None:
+                success_source = (
+                    success_fn()
+                    if success_fn is not None
+                    else last_info.get("success", True)
+                )
+                final_success = _as_bool_tuple(success_source, num_envs)
             for env_id, is_active in enumerate(active):
                 if not is_active:
                     continue

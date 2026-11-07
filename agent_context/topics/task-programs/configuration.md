@@ -341,6 +341,18 @@ The compiler resolves references against the registered deployment, including
 when a program is supplied as an override. The selected rule and its bindings
 participate in registration identity.
 
+Add `final_acceptance` beside `conditions` to require all listed predicates
+after program completion.
+
+```yaml
+final_acceptance: [near_support]
+```
+
+This selection uses each rule's current physical predicate. Its segment hold
+window is evaluated when a segment explicitly references the rule. Program
+overrides keep the deployment's final selection and can use a different set of
+segment validators. The final selection is part of registration identity.
+
 ## Asset role requirements
 
 An integration may declare optional `asset_requirements`; decoding validates its

@@ -184,6 +184,9 @@ def _apply_asset_deployment(
     native mutation; consumers bind afterward to the new native objects. Failures
     stop collection, since the backend does not offer rollback.
     """
+    from embodichain.lab.gym.envs.task_program._final_acceptance import (
+        _deployment_final_rules,
+    )
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.gym.utils.registration import get_env_spec
     from embodichain.utils.utility import load_config
@@ -206,6 +209,10 @@ def _apply_asset_deployment(
     # Physical UIDs are explicit scene bindings; logical role names need not
     # equal native object names.
     registration = get_env_spec(config["id"]).task_program_registration
+    if getattr(env, "_final_acceptance_rules", ()) != _deployment_final_rules(
+        registration
+    ):
+        raise ValueError("Asset replacement must preserve deployment final acceptance.")
     bindings = {
         binding.entity_id: binding.simulation_uid
         for binding in registration.scene_binding.rigid_objects

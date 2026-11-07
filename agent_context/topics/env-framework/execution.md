@@ -96,11 +96,13 @@ stable online language IDs. Language intent does not establish physical success.
 - `create_demo_segments()` retains the active `TaskProgramDemoBridge` while its lazy
   segments execute.
 - For an enabled program, `is_task_success()` returns all false until the bridge
-  iterator completes normally. It then returns the bridge's final row-local
-  acceptance mask, which already combines runtime, post-policy, and validator
-  results.
-- `reset()` lets `BaseEnv` read that final mask before clearing the active
-  bridge, preventing completed state from leaking into the next episode.
+  iterator completes normally. The bridge's row-local acceptance mask combines
+  runtime, post-policy, and validator results. When the deployment selects
+  `evaluation.final_acceptance`, each query also checks the selected predicates
+  against fresh physical observations.
+- The demo executor seals the terminal result and its measurement per episode
+  row. `reset()` uses the sealed result before clearing the active bridge.
+  For a manually driven completed bridge, reset seals the result before saving.
 - `DemoSegmentResult.successes` is the persisted segment acceptance authority.
   `DemoExecutionCfg` keeps continuous episodes as the default and can instead
   make each eligible natural segment an independent dataset fragment. This
@@ -184,7 +186,7 @@ EmbodiedEnv.__init__(cfg)
 ```
 reset(options)
   ├── validate selections and episode_prepare callback
-  ├── is_task_success() → capture old task outcome
+  ├── _task_success_before_reset() → capture old task outcome
   ├── _before_episode_reset() → existing save policy × EpisodeContext eligibility
   ├── begin selected context episodes only after old buffers are consumed
   ├── sim.reset_objects_state(env_ids, excluded_uids)

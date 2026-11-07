@@ -1122,6 +1122,7 @@ def _registration_payload(
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
     evaluation_conditions: Mapping[str, NearTargetHoldSpec],
+    evaluation_final_refs: tuple[str, ...],
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
     payload = {
@@ -1236,6 +1237,11 @@ def _registration_payload(
         payload["evaluation"] = {
             "near_target_hold_revision": 1,
             "conditions": evaluation_conditions,
+            **(
+                {"final_acceptance": evaluation_final_refs}
+                if evaluation_final_refs
+                else {}
+            ),
         }
     return payload
 
@@ -1268,6 +1274,8 @@ class SimulationTaskProgramRegistration:
         default_factory=dict, kw_only=True
     )
     """Deployment-owned near-target hold rules, keyed by exact reference."""
+    evaluation_final_refs: tuple[str, ...] = field(default=(), kw_only=True)
+    """Rule references whose instantaneous predicates gate final acceptance."""
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1316,6 +1324,15 @@ class SimulationTaskProgramRegistration:
             "evaluation_conditions",
             _snapshot_evaluation_conditions(self.evaluation_conditions),
         )
+        refs = self.evaluation_final_refs
+        if type(refs) is not tuple:
+            raise TypeError("evaluation_final_refs must be a tuple.")
+        for ref in refs:
+            _exact_identifier(ref, field_name="evaluation.final_acceptance ref")
+            if ref not in self.evaluation_conditions:
+                raise ValueError(f"Unknown evaluation.final_acceptance ref {ref!r}.")
+        if len(set(refs)) != len(refs):
+            raise ValueError("evaluation.final_acceptance refs must be unique.")
         rigid_ids = {binding.entity_id for binding in self.scene_binding.rigid_objects}
         reference_ids = (
             rigid_ids
@@ -1433,6 +1450,7 @@ class SimulationTaskProgramRegistration:
                 robot_profile=profile,
                 call_catalog=self.call_catalog,
                 evaluation_conditions=self.evaluation_conditions,
+                evaluation_final_refs=self.evaluation_final_refs,
                 settle_presets=settle_presets,
                 relation_grounder_keys=relation_grounder_keys,
                 relation_grounders=relation_grounders,
@@ -1540,6 +1558,7 @@ class SimulationTaskProgramRegistration:
                 robot_profile=profile,
                 call_catalog=self.call_catalog,
                 evaluation_conditions=self.evaluation_conditions,
+                evaluation_final_refs=self.evaluation_final_refs,
                 settle_presets=self.settle_presets,
                 relation_grounder_keys=relation_grounder_keys,
                 relation_grounders=relation_grounders,

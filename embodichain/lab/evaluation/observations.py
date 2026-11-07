@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from . import EvaluationResult, EvaluationSession, NearTargetHoldSpec
+from embodichain.compute.geometry._distance import _measure_near_target
 
 if TYPE_CHECKING:
     import torch
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs.managers.observation_types import (
         ObservationDescriptor,
         ObservationFrame,
+        ObservationSample,
     )
 
 __all__ = ["advance_observation", "evaluate_recording"]
@@ -48,6 +50,32 @@ def _check_pose(field: str, descriptor: ObservationDescriptor) -> None:
         or descriptor.shape != (7,)
     ):
         raise ValueError(f"Evaluation field {field!r} must be a raw arena pose.")
+
+
+def _near_target_samples(
+    spec: NearTargetHoldSpec, frame: ObservationFrame
+) -> tuple[ObservationSample, ObservationSample]:
+    position_field, target_field = spec.required_fields
+    position = frame.fields[position_field]
+    target = frame.fields[target_field]
+    _check_pose(position_field, position.descriptor)
+    _check_pose(target_field, target.descriptor)
+    return position, target
+
+
+def _measure_near_target_frame(
+    spec: NearTargetHoldSpec, frame: ObservationFrame
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    position, target = _near_target_samples(spec, frame)
+    satisfied, finite, distance = _measure_near_target(
+        position.values[:, :3],
+        target.values[:, :3],
+        spec.tolerance,
+        spec.axes,
+        spec.inclusive,
+    )
+    valid = position.valid & target.valid & finite
+    return satisfied & valid, valid, distance
 
 
 def advance_observation(
@@ -85,11 +113,7 @@ def advance_observation(
         != session.episode_ids
     ):
         raise ValueError("Live observation does not belong to the evaluation episodes.")
-    position_field, target_field = session.spec.required_fields
-    position = frame.fields[position_field]
-    target = frame.fields[target_field]
-    _check_pose(position_field, position.descriptor)
-    _check_pose(target_field, target.descriptor)
+    position, target = _near_target_samples(session.spec, frame)
     rows = torch.tensor(session.env_ids, dtype=torch.long, device=session.device)
     session.advance(
         step,

@@ -987,7 +987,7 @@ class BaseEnv(gym.Env):
 
         with self._profiler.section("reset", is_root=True):
             with self._profiler.section("is_task_success"):
-                self._task_success = self.is_task_success()
+                self._task_success = self._task_success_before_reset(reset_ids)
             # Consume old buffers before any physical state or eligibility changes.
             self._before_episode_reset(reset_ids, **options)
             context._begin_episode(reset_ids)
@@ -1025,6 +1025,10 @@ class BaseEnv(gym.Env):
                 context._abort_initialization(reset_ids, error)
                 raise
         return obs, info
+
+    def _task_success_before_reset(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Return task acceptance for recording the rows about to be reset."""
+        return self.is_task_success()
 
     def _before_episode_reset(self, env_ids: torch.Tensor, **kwargs: Any) -> None:
         """Consume old recording buffers before the selected physical rows change."""

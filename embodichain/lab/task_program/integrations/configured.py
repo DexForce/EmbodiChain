@@ -3230,13 +3230,18 @@ class _ConfiguredTaskProgramAdapterFactory:
         return adapter
 
 
-def _decode_evaluation_conditions(
+def _decode_evaluation(
     value: Mapping[str, object] | None, scene: SimulationSceneBinding
-) -> dict[str, NearTargetHoldSpec]:
+) -> tuple[dict[str, NearTargetHoldSpec], tuple[str, ...]]:
     if value is None:
-        return {}
+        return {}, ()
     path = "evaluation.conditions"
-    component = _mapping(value, path="evaluation", required=frozenset({"conditions"}))
+    component = _mapping(
+        value,
+        path="evaluation",
+        required=frozenset({"conditions"}),
+        optional=frozenset({"final_acceptance"}),
+    )
     conditions = component["conditions"]
     if not isinstance(conditions, Mapping) or not conditions:
         raise ValueError(f"{path} must be a nonempty mapping.")
@@ -3277,7 +3282,18 @@ def _decode_evaluation_conditions(
             )
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{rule_path}: {exc}") from exc
-    return result
+    refs = ()
+    if "final_acceptance" in component:
+        raw = component["final_acceptance"]
+        if type(raw) is not list or not raw:
+            raise ValueError(
+                "evaluation.final_acceptance must be a nonempty list of rule refs."
+            )
+        refs = tuple(
+            _identifier(ref, path=f"evaluation.final_acceptance[{index}]")
+            for index, ref in enumerate(raw)
+        )
+    return result, refs
 
 
 def _decode_configured_task_program_integration(
@@ -3316,9 +3332,11 @@ def _decode_configured_task_program_integration(
                 target_descriptor=lowerer_factory.target_descriptor,
             )
         )
+    conditions, final_refs = _decode_evaluation(evaluation, scene_binding)
     registration = SimulationTaskProgramRegistration(
         scene_binding=scene_binding,
-        evaluation_conditions=_decode_evaluation_conditions(evaluation, scene_binding),
+        evaluation_conditions=conditions,
+        evaluation_final_refs=final_refs,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,

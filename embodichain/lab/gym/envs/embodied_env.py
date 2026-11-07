@@ -100,6 +100,12 @@ from embodichain.lab.gym.utils.gym_utils import (
     _close_raw_rollout,
 )
 from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+from embodichain.lab.gym.envs.task_program._final_acceptance import (
+    _FinalMeasurement,
+    _deployment_final_rules,
+    _final_acceptance_rows,
+    _measure_final_conditions,
+)
 from embodichain.lab.gym.utils.trajectory_state import (
     trajectory_observation_cfgs,
     _evaluation_observation_cfgs,
@@ -140,6 +146,30 @@ def _outcome_row(value: Any, env_id: int) -> Any:
     if isinstance(value, float) and not isfinite(value):
         return None
     return value
+
+
+def _demo_recorded_length(env: EmbodiedEnv, env_id: int) -> int:
+    rollout_steps = getattr(env, "rollout_steps", None)
+    steps = (
+        rollout_steps
+        if rollout_steps is not None and env.rollout_buffer is not None
+        else env._demo_steps
+    )
+    return int(steps[env_id].item())
+
+
+def _demo_last_rollout_flags(
+    env: EmbodiedEnv, env_id: int, length: int
+) -> tuple[bool, bool]:
+    buffer = env.rollout_buffer
+    if buffer is None or length == 0:
+        return False, False
+    return (
+        bool(
+            "terminated" in buffer.keys() and buffer["terminated"][env_id, length - 1]
+        ),
+        bool("truncated" in buffer.keys() and buffer["truncated"][env_id, length - 1]),
+    )
 
 
 @configclass
@@ -489,6 +519,10 @@ class EmbodiedEnv(BaseEnv):
         self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
 
         registration = getattr(task_program_adapter_factory, "registration", None)
+        self._final_acceptance_rules = _deployment_final_rules(registration)
+        self._pending_final_acceptance: (
+            tuple[tuple[int, ...], torch.Tensor, _FinalMeasurement | None] | None
+        ) = None
         self._evaluation_recording = (
             _evaluation_observation_cfgs(registration)
             if getattr(registration, "evaluation_conditions", None)
@@ -1399,6 +1433,69 @@ class EmbodiedEnv(BaseEnv):
             getattr(self, key).copy_(value)
         self.initialize_task_outcome()
 
+    def _task_success_before_reset(self, env_ids: torch.Tensor) -> torch.Tensor:
+        rules = getattr(self, "_final_acceptance_rules", ())
+        if not rules:
+            return super()._task_success_before_reset(env_ids)
+        success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        episode_ids = self.episode_context.episode_ids
+        pending = []
+        sealed = []
+        accepted = []
+        for env_id in env_ids.tolist():
+            snapshot = self._demo_episode_metadata[env_id].get("final_acceptance")
+            if snapshot is None or snapshot["episode_id"] != episode_ids[env_id]:
+                pending.append(env_id)
+            else:
+                sealed.append(env_id)
+                accepted.append(snapshot["accepted"])
+        if sealed:
+            success[sealed] = torch.tensor(
+                accepted, dtype=torch.bool, device=self.device
+            )
+        if pending:
+            self._seal_final_acceptance_before_reset(pending, episode_ids, success)
+        return success
+
+    def _seal_final_acceptance_before_reset(
+        self,
+        env_ids: list[int],
+        episode_ids: tuple[int, ...],
+        success: torch.Tensor,
+    ) -> None:
+        """Finalize a completed bridge driven outside the demo executor."""
+        accepted, completion, measurement = self._evaluate_final_task_acceptance()
+        if measurement is None:
+            return
+        final_rows = _final_acceptance_rows(
+            self._final_acceptance_rules,
+            episode_ids,
+            tuple(accepted.tolist()),
+            completion,
+            measurement,
+        )
+        for env_id in env_ids:
+            length = _demo_recorded_length(self, env_id)
+            terminated, truncated = _demo_last_rollout_flags(self, env_id, length)
+            snapshot = final_rows[env_id]
+            passed = snapshot["accepted"] and not truncated
+            snapshot["accepted"] = passed
+            success[env_id] = passed
+            reason = "success" if passed else "task_incomplete"
+            if truncated:
+                reason = "truncated"
+            elif terminated and not passed:
+                reason = "failure"
+            self._demo_episode_metadata[env_id].update(
+                final_acceptance=snapshot,
+                length=length,
+                completed=passed,
+                success=passed,
+                terminated=terminated,
+                truncated=truncated,
+                terminal_reason=reason,
+            )
+
     def _before_episode_reset(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
@@ -1465,7 +1562,9 @@ class EmbodiedEnv(BaseEnv):
                 elif self.dataset_manager.save_failed_episodes:
                     env_ids_to_save = env_ids_to_process
                 else:
-                    successful_envs = self.episode_success_status | self._task_success
+                    successful_envs = self._task_success
+                    if not getattr(self, "_final_acceptance_rules", ()):
+                        successful_envs = successful_envs | self.episode_success_status
                     fragment_envs = torch.tensor(
                         [
                             EmbodiedEnv._demo_fragment_row_is_persistable(
@@ -1695,6 +1794,7 @@ class EmbodiedEnv(BaseEnv):
         self._demo_attempt_id = attempt_id
         self._demo_continuity_id = 0
         self._demo_program_run_id = f"{episode_index}:{attempt_id}"
+        self._pending_final_acceptance = None
         self._demo_active_segment_id = 0
         self._demo_active_segment_ids.zero_()
         self._demo_active_mask.fill_(True)
@@ -1784,6 +1884,20 @@ class EmbodiedEnv(BaseEnv):
 
     def _end_demo_episode_recording(self, result: DemoEpisodeResult) -> None:
         """Finalize per-environment metadata after demonstration execution."""
+        final_rows = None
+        rules = getattr(self, "_final_acceptance_rules", ())
+        if rules:
+            episode_ids = self.episode_context.episode_ids
+            pending = getattr(self, "_pending_final_acceptance", None)
+            completion, measurement = None, None
+            if pending is not None:
+                if pending[0] != episode_ids:
+                    raise RuntimeError("Final acceptance belongs to another episode.")
+                _, completion, measurement = pending
+            final_rows = _final_acceptance_rows(
+                rules, episode_ids, result.success, completion, measurement
+            )
+            self._pending_final_acceptance = None
         bridge = getattr(self, "_active_task_program_bridge", None)
         program = getattr(bridge, "_program", None)
         program_hash = None
@@ -1793,6 +1907,14 @@ class EmbodiedEnv(BaseEnv):
             program_hash = stable_config_hash(program)
         for env_id in range(self.num_envs):
             metadata = self._demo_episode_metadata[env_id]
+            if final_rows is not None:
+                sealed = metadata.get("final_acceptance")
+                if (
+                    sealed is not None
+                    and sealed["episode_id"] == final_rows[env_id]["episode_id"]
+                ):
+                    continue
+                metadata["final_acceptance"] = final_rows[env_id]
             length = (
                 result.lengths[env_id]
                 if result.lengths
@@ -1913,13 +2035,15 @@ class EmbodiedEnv(BaseEnv):
                     terminated=bool(outcome["terminated"]),
                     truncated=bool(outcome["truncation"]),
                 )
-        rollout_steps = getattr(self, "rollout_steps", None)
-        length = int(
-            (
-                rollout_steps[env_id]
-                if rollout_steps is not None and self.rollout_buffer is not None
-                else self._demo_steps[env_id]
-            ).item()
+        sealed = metadata.get("final_acceptance")
+        has_terminal_acceptance = (
+            sealed is not None
+            and sealed["episode_id"] == metadata["episode_context"]["episode"]
+        )
+        length = (
+            metadata["length"]
+            if has_terminal_acceptance
+            else _demo_recorded_length(self, env_id)
         )
         metadata["length"] = length
         if metadata.get("instruction") is None:
@@ -1930,7 +2054,7 @@ class EmbodiedEnv(BaseEnv):
             )
         if length > 0 and not metadata["segments"]:
             instruction = metadata["instruction"]
-            if outcome is not None:
+            if outcome is not None or has_terminal_acceptance:
                 success = metadata["success"]
                 terminated = metadata["terminated"]
                 truncated = metadata["truncated"]
@@ -1939,19 +2063,13 @@ class EmbodiedEnv(BaseEnv):
                 success_status = getattr(self, "episode_success_status", None)
                 task_success = getattr(self, "_task_success", None)
                 success = bool(
-                    (success_status is not None and success_status[env_id])
-                    or (task_success is not None and task_success[env_id])
+                    not getattr(self, "_final_acceptance_rules", ())
+                    and (
+                        (success_status is not None and success_status[env_id])
+                        or (task_success is not None and task_success[env_id])
+                    )
                 )
-                terminated = bool(
-                    self.rollout_buffer is not None
-                    and "terminated" in self.rollout_buffer.keys()
-                    and self.rollout_buffer["terminated"][env_id, length - 1]
-                )
-                truncated = bool(
-                    self.rollout_buffer is not None
-                    and "truncated" in self.rollout_buffer.keys()
-                    and self.rollout_buffer["truncated"][env_id, length - 1]
-                )
+                terminated, truncated = _demo_last_rollout_flags(self, env_id, length)
                 if truncated:
                     success = False
                     terminal_reason = "truncated"
@@ -1961,15 +2079,16 @@ class EmbodiedEnv(BaseEnv):
                     terminal_reason = "failure"
                 else:
                     terminal_reason = "task_incomplete"
-            metadata.update(
-                {
-                    "completed": success,
-                    "success": success,
-                    "terminated": terminated,
-                    "truncated": truncated,
-                    "terminal_reason": terminal_reason,
-                }
-            )
+            if not has_terminal_acceptance:
+                metadata.update(
+                    {
+                        "completed": success,
+                        "success": success,
+                        "terminated": terminated,
+                        "truncated": truncated,
+                        "terminal_reason": terminal_reason,
+                    }
+                )
             metadata["segments"] = [
                 {
                     "segment_id": 0,
@@ -3358,8 +3477,8 @@ class EmbodiedEnv(BaseEnv):
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
         """Return configured RL, completed Task Program, or legacy acceptance.
 
-        Task Program success is published only after its bridge has consumed
-        every segment lifecycle, including post-policies and validators.
+        Task Program success requires a completed bridge and, when selected,
+        a fresh measurement of the deployment's final predicates.
 
         Args:
             **kwargs: Compatibility keywords forwarded for tasks without a Task Program.
@@ -3370,17 +3489,18 @@ class EmbodiedEnv(BaseEnv):
         outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             return outcome.task_state()[0]
+        if getattr(self, "_final_acceptance_rules", ()):
+            return self._evaluate_final_task_acceptance()[0]
+        if (
+            self._active_task_program_bridge is None
+            and getattr(getattr(self, "cfg", None), "task_program", None) is None
+        ):
+            return super().is_task_success(**kwargs)
+        return self._task_program_completion_mask()
+
+    def _task_program_completion_mask(self) -> torch.Tensor:
         bridge = self._active_task_program_bridge
-        task_program = getattr(getattr(self, "cfg", None), "task_program", None)
-        if bridge is None:
-            if task_program is None:
-                return super().is_task_success(**kwargs)
-            return torch.zeros(
-                self.num_envs,
-                dtype=torch.bool,
-                device=self.device,
-            )
-        if not bridge.program_completed:
+        if bridge is None or not bridge.program_completed:
             return torch.zeros(
                 self.num_envs,
                 dtype=torch.bool,
@@ -3393,6 +3513,28 @@ class EmbodiedEnv(BaseEnv):
                 "environment."
             )
         return completion.to(device=self.device)
+
+    def _evaluate_final_task_acceptance(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, _FinalMeasurement | None]:
+        completion = self._task_program_completion_mask()
+        bridge = self._active_task_program_bridge
+        if bridge is None or not bridge.program_completed:
+            return completion, completion, None
+        measured = _measure_final_conditions(self, self._final_acceptance_rules)
+        return completion & measured.satisfied, completion, measured
+
+    def _finalize_demo_task_success(self) -> torch.Tensor | None:
+        """Take the final demo measurement for its terminal result and metadata."""
+        if not getattr(self, "_final_acceptance_rules", ()):
+            return None
+        accepted, completion, measurement = self._evaluate_final_task_acceptance()
+        self._pending_final_acceptance = (
+            self.episode_context.episode_ids,
+            completion.clone(),
+            measurement,
+        )
+        return accepted
 
     def create_demo_segments(
         self,
