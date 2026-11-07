@@ -86,13 +86,14 @@ bound. Otherwise all three checker entry points retain unavailable evidence.
 ``NativeContactResult`` records the mixed-route clearance limitation explicitly;
 the convex-only default retains its original semantics.
 
-Mesh/mesh absence of contacts likewise does not certify solid clearance: a
-closed mesh can be deeply contained inside another without a nearby surface
-being reported by the SDK's bounded queries. All checker entries require a
-canonical AABB separation proof for such zero-contact pairs, or retain
-unavailable evidence. Known contact pairs remain usable. This conservative
-boundary can also reject a genuinely empty concave gap with overlapping AABBs;
-it does not modify that input or manufacture solid containment evidence.
+Mesh/mesh negative decisions likewise require canonical AABB separation. A
+closed component can be deeply contained inside another without being reported
+by the SDK's bounded queries, even while a different component yields positive
+halo contacts. Neither missing contacts nor a positive minimum over reported
+contacts certifies complete solid clearance. Native contact evidence may still
+decide the original threshold positively. Near separated pairs and genuinely
+empty concave gaps with overlapping AABBs can remain unavailable; inputs and
+thresholds are not changed to manufacture a negative certificate.
 
 The shared mesh-group adapter can cull a far pair using a frozen AABB separation
 lower bound after the same geometry/pose conversion allowance. It allocates no
