@@ -91,10 +91,17 @@ embodichain.lab.sim.atomic_actions
       EffectVerificationRequest
       EffectVerificationRequirement
       EffectVerificationResult
+      PhysicalEvidenceBatch
+      PhysicalEvidenceFrame
+      PhysicalEvidenceProvider
+      PhysicalEvidenceRequest
       PhaseEffectGateRequest
       PhaseEffectGateResult
+      PhysicalEffectVerifier
+      PhysicalPhaseEffectGateVerifier
       HeldObjectGuardRequest
       HeldObjectGuardResult
+      PhysicalHeldObjectGuardVerifier
       ExecutionPlanAttempt
       ExecutionEvent
       ExecutionEventKind
@@ -341,6 +348,18 @@ Engine and execution
 .. autoclass:: ObservationProvider
    :members:
 
+.. autoclass:: PhysicalEvidenceProvider
+   :members:
+
+.. autoclass:: PhysicalEvidenceRequest
+   :members:
+
+.. autoclass:: PhysicalEvidenceBatch
+   :members:
+
+.. autoclass:: PhysicalEvidenceFrame
+   :members:
+
 .. autoclass:: CommandSink
    :members:
 
@@ -405,6 +424,12 @@ Engine and execution
 .. autoclass:: EffectVerificationResult
    :members:
 
+.. autodata:: PhysicalEffectVerifier
+
+.. autodata:: PhysicalPhaseEffectGateVerifier
+
+.. autodata:: PhysicalHeldObjectGuardVerifier
+
 .. autoclass:: ExecutionPlanAttempt
    :members:
 
@@ -420,6 +445,28 @@ Semantic objects and helpers
 Verification implementation module
 ----------------------------------
 
+.. currentmodule:: embodichain.lab.sim.atomic_actions.evidence
+
+.. autosummary::
+
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+   PhysicalEvidenceProvider
+   PhysicalEvidenceRequest
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.runner
+
+.. autosummary::
+
+   PhysicalEffectVerifier
+   PhysicalPhaseEffectGateVerifier
+   PhysicalHeldObjectGuardVerifier
+
+Evidence-backed execution keeps acquisition separate from the existing
+symbolic effect verifier. The runner collects one aligned frame after each
+fresh observation and passes it only to the explicitly selected evidence-aware
+verifier.
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions.verification
 
 .. autosummary::
@@ -431,3 +478,100 @@ Verification implementation module
    HeldObjectGuardResult
    PhaseEffectGateRequest
    PhaseEffectGateResult
+
+Named held-object transport
+---------------------------
+
+``HeldObjectPoseGoal.object_id`` optionally identifies the exact object already
+held by the bound resource. A named goal validates that identity before native
+or external nominal planning and declares the unchanged attachment as its
+terminal effect. The execution owner verifies this effect before committing it;
+planning does not establish physical attachment. Motion and timing use the same
+path as an unnamed goal. Omitting the field preserves the existing effectless
+``MoveHeldObject`` behavior. Task Program's routed transport uses named goals
+and additionally selects a verified input-hold guard for its transport segment.
+
+
+Scoped grasp preparation
+------------------------
+
+``ActionPlanningServices.prepare_grasp_query()`` resolves the declared hand
+calibration by endpoint target ID and binds Scene capture to GraspKit's explicit
+``ClosingContactPolicy`` and the existing isolated Newton backend. It accepts no
+experiment revision selector and installs no alternate skill registration.
+Ordinary PickUp defaults remain unchanged. Source-compatible capture uses the
+caller's explicit 65-sample hand declaration.
+
+Use this service as a context manager. Closing, optional release-opening and
+rigid-scene query resources close together on normal exit, failure or cancellation;
+borrowed simulation entities are never destroyed. ``GraspOpeningTarget`` carries
+already-grounded poses from the same observation scope. An undeclared hand
+calibration fails before capture. Diagnostic metadata never selects policy.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.runtime
+
+.. autosummary::
+   :nosignatures:
+
+   GraspOpeningTarget
+
+.. autoclass:: GraspOpeningTarget
+   :members:
+   :no-index:
+
+.. automethod:: ActionPlanningServices.prepare_grasp_query
+
+Explicit source contact-policy composition
+------------------------------------------
+
+The shared ``GraspOpeningTarget`` definition lives in ``grasp_geometry``;
+``atomic_actions`` and ``runtime`` retain the same public class identity. Its
+poses and metadata stay owned and bound to one preparation scope.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.grasp_geometry
+   :members:
+
+``source_native_contact`` maps the explicitly selected preserved source revision
+to GraspKit's existing typed ``ClosingContactPolicy`` and the shared Newton collision
+pipeline. Closing, opening and rigid-clearance algorithms remain solely in
+GraspKit. Source builders consume the existing Default/B1 native capture API,
+retain the explicit hand sampling grid and original contact thresholds, and never step
+physics or infer a Task Program policy. Missing Newton fails explicitly; this is
+geometric qualification, not physical acquisition/release evidence.
+
+Close each query with its context manager or a ``finally`` block. It releases
+only owned query resources, never borrowed simulation entities. Ordinary
+``prepare_grasp_query`` keeps its existing Newton backend and defaults.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.source_native_contact
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Explicit Press planning recovery
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``PressPlanningRecovery`` selects the existing Press skill's failure-only B1
+recovery. Nominal planning and at most one declared contact-roll alternative share
+the original two-complete-plan budget and RNG progression. Failed Cartesian
+phases may retry through the shared unchanged-target, unchanged-time IK resolver.
+The final emitted full-robot trajectory retains velocity qualification after
+resampling and transforms. Missing motion or excessive velocity remains failure.
+Default ``PressOptions`` enables no contact-roll alternatives or recovery.
+
+``validate_press_extra_distance`` accepts only an optional finite addition in
+``[0, 0.010]`` metres. It does not alter the authored stroke or determine physical
+contact, release or task success. Configured recovery accepts only
+``{kind: press_bounded, revision: 1}``; budgets and callbacks cannot be supplied
+through that declaration.
+
+.. autosummary::
+   :nosignatures:
+
+   PressPlanningRecovery
+   validate_press_extra_distance
+
+.. autoclass:: PressPlanningRecovery
+   :members:
+
+.. autofunction:: validate_press_extra_distance

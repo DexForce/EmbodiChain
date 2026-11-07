@@ -35,20 +35,28 @@ class _View:
         self.pose = pose.copy()
 
 
-@pytest.mark.parametrize("extrinsics_kind", ["pose", "look_at", "look_at_default_up"])
-@pytest.mark.parametrize(
-    "env_ids",
-    [None, [1], (1,), (2, 0), (), [], torch.tensor([2, 0])],
-    ids=[
-        "all",
-        "list",
-        "tuple_one",
-        "tuple_ordered",
-        "tuple_empty",
-        "list_empty",
-        "tensor",
-    ],
-)
+# Pose exercises every shared env_ids normalization path. Each look-at
+# representation also exercises all, nonempty reordered, and empty slicing.
+_INDEX_CASES = [
+    ("all", None),
+    ("list", [1]),
+    ("tuple_one", (1,)),
+    ("tuple_ordered", (2, 0)),
+    ("tuple_empty", ()),
+    ("list_empty", []),
+    ("tensor", torch.tensor([2, 0])),
+]
+_RESET_CASES = [
+    pytest.param("pose", env_ids, id=f"pose-{selection}")
+    for selection, env_ids in _INDEX_CASES
+] + [
+    pytest.param(kind, env_ids, id=f"{kind}-{selection}")
+    for kind in ("look_at", "look_at_default_up")
+    for selection, env_ids in (("all", None), ("tuple_ordered", (2, 0)), ("empty", ()))
+]
+
+
+@pytest.mark.parametrize(("extrinsics_kind", "env_ids"), _RESET_CASES)
 def test_reset_preserves_batch_dimension_and_unselected_views(
     extrinsics_kind: str, env_ids: Sequence[int] | torch.Tensor | None
 ) -> None:

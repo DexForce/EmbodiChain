@@ -22,6 +22,9 @@ reset, execution, task acceptance, and persistence belong to host integrations.
 
 from __future__ import annotations
 
+from importlib import import_module
+from typing import Any
+
 from .cfg import SceneExpansionCfg
 from .contracts import ScenePoseChange, SceneVariant
 from .source import FixedSceneCandidateSource
@@ -31,4 +34,41 @@ __all__ = [
     "ScenePoseChange",
     "SceneVariant",
     "FixedSceneCandidateSource",
+    "SceneLayoutInput",
+    "PreparedSceneRandomization",
+    "SceneRandomizationBatch",
+    "SceneVariantApplicationResult",
+    "SceneRandomizationPolicyCfg",
+    "SceneRandomizationJobCfg",
+    "MemberRandomizationCfg",
+    "IntraGroupRandomizationCfg",
+    "SupportOverrideCfg",
+    "scene_layout_input_from_sim",
+    "prepare_scene_randomization",
+    "generate_scene_variants",
+    "apply_scene_variants",
+    "LoadedSceneVariants",
+    "save_scene_variants",
+    "load_scene_variants",
 ]
+
+_POLICY_EXPORTS = {
+    "SceneRandomizationPolicyCfg",
+    "SceneRandomizationJobCfg",
+    "MemberRandomizationCfg",
+    "IntraGroupRandomizationCfg",
+    "SupportOverrideCfg",
+}
+_IO_EXPORTS = {"LoadedSceneVariants", "save_scene_variants", "load_scene_variants"}
+
+
+def __getattr__(name: str) -> Any:
+    """Load geometry and persistence APIs only when requested."""
+    if name not in __all__:
+        raise AttributeError(name)
+    module = (
+        "_policy"
+        if name in _POLICY_EXPORTS
+        else "persistence" if name in _IO_EXPORTS else "layout"
+    )
+    return getattr(import_module(f"{__name__}.{module}"), name)

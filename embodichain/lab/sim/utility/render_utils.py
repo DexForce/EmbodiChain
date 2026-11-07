@@ -57,7 +57,7 @@ def select_default_renderer(gpu_id: int = 0) -> str:
     - If :data:`embodichain.lab.sim.cfg.DEFAULT_RENDERER` is set to a concrete
       value (anything other than ``"auto"``), that value is honored. This lets
       callers (e.g. test fixtures) force a renderer regardless of hardware.
-    - During ``run-task`` / ``run-env``, native auto selection uses ``"fast-rt"``
+    - During ``run-task``, native auto selection uses ``"fast-rt"``
       independently of hardware. Outside that launcher scope, GPU selection applies.
     - RTX-series cards use ``"hybrid"`` (ray tracing for shadows/reflections with
       rasterized primary rendering).

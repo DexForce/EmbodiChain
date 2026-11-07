@@ -230,6 +230,12 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                 passed through by ``DatasetManager.apply``; honored in
                 :meth:`__init__`, ignored here.
         """
+        context = getattr(env, "episode_context", None)
+        if context is not None:
+            env_ids = context.filter_recordable(env_ids)
+            if len(env_ids) == 0:
+                return
+
         # Serializing enqueue with finalize prevents an episode from being
         # placed behind the worker's shutdown sentinel.
         with self._async_finalize_lock:

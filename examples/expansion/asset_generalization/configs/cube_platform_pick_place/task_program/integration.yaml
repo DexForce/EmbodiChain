@@ -1,0 +1,39 @@
+integration_id: cube_platform_pick_place_v1
+program_id: cube_platform_pick_place
+requires:
+  scene_contract: cube_platform_pick_place_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: cube_platform_pick_place_scene_v1
+  registry_id: task_program_cube_platform_pick_place
+  rigid_objects:
+  - entity_id: cube
+    simulation_uid: cube
+    dynamics: dynamic
+    semantic_type: cube
+    affordances:
+    - entity_id: cube_grasp
+      kind: antipodal_grasp
+  - entity_id: platform
+    simulation_uid: platform
+    dynamics: static
+    semantic_type: platform
+    affordances:
+    - kind: support_surface
+      entity_id: platform_top
+      native_name: top
+      object_target_frame: parent
+      object_target_pose: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.047, 0.0, 0.0, 0.0,
+        1.0]
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+    place:
+      kind: place
+  effect_monitors: {}

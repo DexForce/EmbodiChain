@@ -293,6 +293,10 @@ def interpolate_hand_qpos(
     n_waypoints: int,
 ) -> torch.Tensor:
     """Interpolate hand joint positions between two semantic commands."""
+    if isinstance(n_waypoints, bool) or not isinstance(n_waypoints, int):
+        raise TypeError("n_waypoints must be an integer.")
+    if n_waypoints < 1:
+        raise ValueError("n_waypoints must be at least one.")
     is_unbatched = start_hand_qpos.dim() == 1 and end_hand_qpos.dim() == 1
     end_hand_qpos = end_hand_qpos.to(
         device=start_hand_qpos.device,
@@ -302,12 +306,20 @@ def interpolate_hand_qpos(
         start_hand_qpos = start_hand_qpos.unsqueeze(0)
     if end_hand_qpos.dim() == 1:
         end_hand_qpos = end_hand_qpos.unsqueeze(0)
-    weights = torch.linspace(
-        0,
-        1,
-        steps=n_waypoints,
-        device=start_hand_qpos.device,
-        dtype=start_hand_qpos.dtype,
+    weights = (
+        torch.ones(
+            1,
+            device=start_hand_qpos.device,
+            dtype=start_hand_qpos.dtype,
+        )
+        if n_waypoints == 1
+        else torch.linspace(
+            0,
+            1,
+            steps=n_waypoints,
+            device=start_hand_qpos.device,
+            dtype=start_hand_qpos.dtype,
+        )
     )
     result = torch.lerp(
         start_hand_qpos.unsqueeze(1),
@@ -325,7 +337,12 @@ def to_full_robot_trajectory(
     env_ids: torch.Tensor,
     control_dt: float,
 ) -> tuple[torch.Tensor, TimedTrajectory]:
-    """Retime and embed a controlled-joint plan into a full-robot trajectory."""
+    """Compile a controlled-joint plan onto the full-robot control grid.
+
+    Sampling retains the native planner precision. Only the resulting control
+    positions and velocities adopt ``base_qpos``'s dtype and device; the input
+    :class:`PlanResult` is unchanged.
+    """
     positions = result.positions
     if positions is None or positions.dim() != 3:
         raise ValueError("PlanResult.positions must have shape (B, N, control_dof).")
@@ -335,19 +352,29 @@ def to_full_robot_trajectory(
         raise ValueError("PlanResult controlled DoF does not match joint_ids.")
     if result.dt is None:
         raise ValueError("PlanResult must include explicit dt.")
-    positions, velocities, dt, _ = retime_to_control_grid(
-        positions,
-        result.dt,
-        control_dt,
-    )
+    if result.waypoint_indices is None:
+        positions, velocities, dt, _ = retime_to_control_grid(
+            positions,
+            result.dt,
+            control_dt,
+        )
+    else:
+        from embodichain.compute.trajectory._arrival_timing import _resample_at_arrivals
+
+        retained = _resample_at_arrivals(
+            positions, result.dt, control_dt, result.waypoint_indices
+        )
+        positions, velocities, dt = (
+            retained[name] for name in ("positions", "velocities", "dt")
+        )
     full_positions = base_qpos.unsqueeze(1).expand(-1, positions.shape[1], -1).clone()
-    full_positions[:, :, joint_ids] = positions
+    full_positions[:, :, joint_ids] = positions.to(full_positions)
 
     def embed_derivative(value: torch.Tensor | None) -> torch.Tensor | None:
         if value is None:
             return None
         full = torch.zeros_like(full_positions)
-        full[:, :, joint_ids] = value
+        full[:, :, joint_ids] = value.to(full)
         return full
 
     timed = TimedTrajectory.from_positions(

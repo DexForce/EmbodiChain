@@ -16,8 +16,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from math import log
+from collections.abc import Callable, Mapping, Sequence, Iterator
+from contextlib import contextmanager
+from math import isfinite, log
 from functools import wraps
 from datetime import datetime
 import logging
@@ -27,6 +28,7 @@ import copy
 from pathlib import Path
 import tempfile
 from uuid import uuid4
+import embodichain
 import torch
 import numpy as np
 import gymnasium as gym
@@ -40,6 +42,7 @@ from typing import (
     Any,
     Iterable,
     List,
+    Literal,
     Optional,
 )
 from tensordict import TensorDict
@@ -48,6 +51,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     RobotPresetCfg,
     RigidObjectCfg,
+    VisualObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
     LightCfg,
@@ -83,14 +87,23 @@ from embodichain.lab.gym.envs.managers import (
     ActionTrace,
     DatasetManager,
     FunctorCfg,
+    TerminationManager,
+    RLTaskCfg,
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
     _collect_sensor_cfgs,
     build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
+    _init_raw_rollout,
+    _write_raw_rollout,
+    _close_raw_rollout,
 )
-from embodichain.lab.gym.utils.trajectory_state import capture_trajectory_state
+from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+from embodichain.lab.gym.utils.trajectory_state import (
+    trajectory_observation_cfgs,
+    export_observation_history,
+)
 from embodichain.data_pipeline.recording import build_recording_provenance
 from embodichain.utils import configclass, logger
 from embodichain.utils.string import string_to_callable
@@ -98,6 +111,10 @@ from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
+    from embodichain.lab.task_program.runtime.expansion import (
+        TaskProgramNominalSourceFactory,
+        TaskProgramPlanTransformFactory,
+    )
     from embodichain.lab.sim.motion.expansion import (
         CombinedExpansionProfile,
     )
@@ -110,6 +127,18 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
 
 __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
+
+
+def _outcome_row(value: Any, env_id: int) -> Any:
+    if isinstance(value, torch.Tensor):
+        return _outcome_row(value[env_id].detach().cpu().tolist(), env_id)
+    if isinstance(value, Mapping):
+        return {key: _outcome_row(child, env_id) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_outcome_row(child, env_id) for child in value]
+    if isinstance(value, float) and not isfinite(value):
+        return None
+    return value
 
 
 @configclass
@@ -201,6 +230,9 @@ class EmbodiedEnvCfg(EnvCfg):
     ground collisions or the Viser grid.
     """
 
+    visual_object: list[VisualObjectCfg] = []
+    """Render-only assets with no collision or rigid-body state."""
+
     background: List[RigidObjectCfg] = []
 
     rigid_object: List[RigidObjectCfg] = []
@@ -242,6 +274,16 @@ class EmbodiedEnvCfg(EnvCfg):
     into robot control format.
 
     Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.
+    """
+
+    rollout_action_semantics: Literal["expert_controller_command", "policy_request"] = (
+        "expert_controller_command"
+    )
+    """Meaning of episode rollout actions, independently of the expert schema.
+
+    ``policy_request`` stores the flat ActionManager input and requires an
+    ActionManager. It also enables raw-policy recording without a DatasetManager.
+    The default preserves active-joint expert-controller recording.
     """
 
     objective: OrderedPlacementObjectiveCfg | None = None
@@ -311,6 +353,13 @@ class EmbodiedEnvCfg(EnvCfg):
     """If True (and record_trajectory is True), auto-save each env's trajectory to
     ``trajectory_save_dir`` before an explicitly committed episode reset.
     Closing discards trajectories that were never committed."""
+
+    rl_task: embodichain.lab.gym.envs.managers.RLTaskCfg | None = None
+    """Optional measured RL success, failure and truncation conditions.
+
+    Configured conditions use cached per-step outcomes and recorded reset-target
+    context. Keep this declaration and ``task_program`` in separate deployments.
+    """
 
     task_program: TaskProgramCfg | None = None
     """Optional declarative Task Program used to generate demo segments.
@@ -382,6 +431,21 @@ class EmbodiedEnv(BaseEnv):
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         **kwargs,
     ):
+        rl_task = getattr(cfg, "rl_task", None)
+        if rl_task is not None:
+            if not isinstance(rl_task, RLTaskCfg):
+                raise TypeError("rl_task must be an RLTaskCfg or None.")
+            if (
+                getattr(cfg, "task_program", None) is not None
+                or task_program_adapter_factory is not None
+            ):
+                raise ValueError(
+                    "rl_task and task_program cannot share one deployment."
+                )
+        self.termination_manager: (
+            embodichain.lab.gym.envs.managers.TerminationManager | None
+        ) = None
+        self._task_initial_states: list[dict[str, Any]] = []
         if task_program_adapter_factory is not None:
             from embodichain.lab.task_program.integrations import (
                 TaskProgramAdapterFactory,
@@ -400,8 +464,6 @@ class EmbodiedEnv(BaseEnv):
         self.affordance_datas = {}
         self._task_program_adapter: TaskProgramEnvironmentAdapter | None = None
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
-        self._scene_expansion_attempt_active = False
-        self._scene_expansion_recording_rejected = False
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -414,7 +476,13 @@ class EmbodiedEnv(BaseEnv):
         self.reward_manager: RewardManager | None = None
         self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
-        self._record_raw_actions = False
+        if cfg.rollout_action_semantics not in {
+            "expert_controller_command",
+            "policy_request",
+        }:
+            raise ValueError("Unknown rollout_action_semantics.")
+        self._explicit_policy_rollout = cfg.rollout_action_semantics == "policy_request"
+        self._record_raw_actions = self._explicit_policy_rollout
         self._last_action_manager_qpos: torch.Tensor | None = None
         self._last_action_trace: ActionTrace | None = None
         self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
@@ -422,6 +490,10 @@ class EmbodiedEnv(BaseEnv):
         super().__init__(cfg, **kwargs)
 
         try:
+            if self._explicit_policy_rollout and self.action_manager is None:
+                raise ValueError(
+                    "policy_request rollout recording requires an ActionManager."
+                )
             self._initialize_physical_objective()
             self.expert_action_spec = build_expert_action_spec(
                 joint_names=[
@@ -454,8 +526,11 @@ class EmbodiedEnv(BaseEnv):
             if dataset_terms and not self.cfg.filter_dataset_saving:
                 self.dataset_manager = DatasetManager(self.cfg.dataset, self)
                 self.cfg.init_rollout_buffer = True
-                self._record_raw_actions = self.dataset_manager.requires_raw_actions
+                self._record_raw_actions |= self.dataset_manager.requires_raw_actions
 
+            # One storage owner; policy, raw-state and training windows are views.
+            self._rollout_storage = TensorDict({}, batch_size=[self.num_envs])
+            self._expert_obs_buffer: TensorDict | None = None
             self.rollout_buffer: TensorDict | None = None
             self._max_rollout_steps = 0
             self._rollout_buffer_mode: str | None = None
@@ -466,14 +541,17 @@ class EmbodiedEnv(BaseEnv):
                     if self._record_raw_actions
                     else self._expert_action_space
                 )
-                self.rollout_buffer = init_rollout_buffer_from_gym_space(
+                policy_storage = init_rollout_buffer_from_gym_space(
                     obs_space=self.observation_space,
                     action_space=rollout_action_space,
-                    max_episode_steps=self.max_episode_steps,
+                    max_episode_steps=self.max_episode_steps + 1,
                     num_envs=self.num_envs,
                     device=self.device,
                 )
-                self._max_rollout_steps = self.rollout_buffer.shape[1]
+                self._rollout_storage["policy"] = policy_storage
+                self._expert_obs_buffer = policy_storage["obs"]
+                self.rollout_buffer = policy_storage[:, : self.max_episode_steps]
+                self._max_rollout_steps = self.max_episode_steps
                 self._rollout_buffer_mode = "expert"
                 self._rollout_action_semantics = (
                     "policy_request"
@@ -497,19 +575,34 @@ class EmbodiedEnv(BaseEnv):
                 )
                 self._traj_buffer = build_trajectory_buffer(
                     env=self,
-                    max_steps=self.max_episode_steps,
+                    max_steps=self.max_episode_steps + 1,
                     num_envs=self.num_envs,
                     device=self.device,
                     uids=self.cfg.trajectory_uids,
                     action_space=self._trajectory_action_space(),
                 )
-                self._traj_steps = torch.zeros(
-                    self.num_envs, dtype=torch.long, device=self.device
+                self._rollout_storage["trajectory"] = self._traj_buffer
+                fields = {
+                    "/".join(path): values
+                    for path, values in self._traj_buffer["states"].items(
+                        include_nested=True, leaves_only=True
+                    )
+                }
+                _init_raw_rollout(
+                    self._rollout_storage,
+                    self.episode_context,
+                    fields,
+                    self._traj_buffer["actions"][:, : self.max_episode_steps],
                 )
+                self.observation_manager.bind_rollout_storage(self._rollout_storage)
+                # Private aliases preserve existing replay/persistence adapters;
+                # acquisition, cursors and lifetime belong to the host rollout.
+                self._traj_steps = self._rollout_storage["raw_steps"]
 
             self.rollout_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
             )
+            self._rollout_storage["policy_steps"] = self.rollout_steps
             self._demo_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
             )
@@ -544,9 +637,6 @@ class EmbodiedEnv(BaseEnv):
             self._closed = False
             self._close_error: BaseException | None = None
             self._close_lock = threading.RLock()
-
-            all_env_ids = torch.arange(self.num_envs, device=self.device)
-            self._seed_recording_state(self._init_raw_obs, all_env_ids)
 
             self._log_initialization_summary()
         except Exception:
@@ -634,39 +724,27 @@ class EmbodiedEnv(BaseEnv):
         names = [str(name) for name in active_functors]
         return [("terms", names)] if names else []
 
-    def reset(
-        self, seed: int | None = None, options: dict | None = None
-    ) -> tuple[EnvObs, Dict]:
-        """Reset environments and seed pre-action recording state.
-
-        Expert frames must pair the observation before an action with that
-        action. The base reset computes the authoritative post-reset
-        observation, so recording is seeded only after it returns.
-
-        Args:
-            seed: Optional random seed forwarded to :class:`BaseEnv`.
-            options: Reset options. ``reset_ids`` may select only some vector
-                environment rows. ``commit_env_ids`` may select a subset of
-                the reset rows whose pending dataset episodes are persisted.
-
-        Returns:
-            The reset observation and info dictionary.
-        """
-        obs, info = super().reset(seed=seed, options=options)
+    def _after_episode_reset(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         self._active_task_program_bridge = None
-        if options is None or "reset_ids" not in options:
-            reset_ids = torch.arange(self.num_envs, device=self.device)
-        else:
-            reset_ids = torch.as_tensor(
-                options["reset_ids"], dtype=torch.long, device=self.device
-            ).reshape(-1)
-        self._seed_recording_state(obs, reset_ids)
-        return obs, info
+        self._seed_recording_state(obs, env_ids)
+        if not self.cfg.events or self.event_manager is None or not len(env_ids):
+            return
+        from embodichain.lab.gym.envs.managers.record import record_camera_data
+
+        for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
+            for functor_cfg in mode_cfgs:
+                if isinstance(functor_cfg.func, record_camera_data):
+                    recorder = functor_cfg.func
+                    # A reset event may capture before episode_prepare restores
+                    # the final state. Replace only the newly reset live rows.
+                    recorder.discard_and_clear(env_ids=env_ids)
+                    params = dict(functor_cfg.params)
+                    params.setdefault("name", recorder._name)
+                    recorder(self, env_ids=env_ids, **params)
 
     def _seed_recording_state(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
-        """Seed all enabled recorders from the current environment state."""
+        """Seed pending expert policy observations from the reset observation."""
         self._seed_expert_observations(obs, env_ids)
-        self._seed_trajectory_states(env_ids)
 
     def _seed_expert_observations(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         """Copy current observations into pending expert-transition slots."""
@@ -676,31 +754,53 @@ class EmbodiedEnv(BaseEnv):
             or env_ids.numel() == 0
         ):
             return
-        eligible = self.rollout_steps[env_ids] < self._max_rollout_steps
+        target = getattr(self, "_expert_obs_buffer", None)
+        if target is None:
+            target = self.rollout_buffer["obs"]
+        eligible = self.rollout_steps[env_ids] < target.shape[1]
         env_ids = env_ids[eligible]
         if env_ids.numel() == 0:
             return
         step_ids = self.rollout_steps[env_ids]
-        buffer_device = self.rollout_buffer.device
+        buffer_device = target.device
         buffer_env_ids = env_ids.to(buffer_device)
         buffer_step_ids = step_ids.to(buffer_device)
         obs_device = getattr(obs, "device", None) or self.device
         obs_env_ids = env_ids.to(obs_device)
-        self.rollout_buffer["obs"][buffer_env_ids, buffer_step_ids] = obs[
-            obs_env_ids
-        ].to(buffer_device)
+        target[buffer_env_ids, buffer_step_ids] = obs[obs_env_ids].to(buffer_device)
 
-    def _seed_trajectory_states(self, env_ids: torch.Tensor) -> None:
-        """Copy current states into pending trajectory-transition slots."""
-        if self._traj_buffer is None or env_ids.numel() == 0:
-            return
-        env_ids = env_ids.to(device=self.device, dtype=torch.long)
-        eligible = self._traj_steps[env_ids] < self._traj_buffer.shape[1]
-        env_ids = env_ids[eligible]
-        if env_ids.numel() == 0:
-            return
-        step_ids = self._traj_steps[env_ids]
-        capture_trajectory_state(self, self._traj_buffer["states"], env_ids, step_ids)
+    def _record_initial_observation(
+        self, frame: ObservationFrame, env_ids: torch.Tensor
+    ) -> None:
+        manager = getattr(self, "observation_manager", None)
+        if manager is not None and manager.has_history:
+            if frame.episode_owner is not self.episode_context:
+                raise ValueError("Observation frame belongs to another episode owner.")
+            manager._bind_schema(frame)
+            _write_raw_rollout(
+                self._rollout_storage,
+                self.episode_context,
+                frame,
+                field_ids=tuple(dict.fromkeys(manager.field_ids.values())),
+                env_ids=env_ids,
+            )
+            storage = getattr(self, "_rollout_storage", None)
+            if (
+                storage is not None
+                and "policy" in storage.keys()
+                and self._rollout_buffer_mode == "expert"
+            ):
+                policy = storage["policy"]
+                if policy.shape[1] == self._rollout_storage["raw_actions"].shape[1] + 1:
+                    for key in (
+                        "raw_obs",
+                        "raw_valid",
+                        "raw_revision",
+                        "raw_timestamp",
+                    ):
+                        policy[key] = storage[key]
+                    # Existing consumers retain their transition-length view.
+                    self.rollout_buffer = policy[:, : self._max_rollout_steps]
 
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
@@ -745,6 +845,18 @@ class EmbodiedEnv(BaseEnv):
                     f"Invalid rollout buffer shape: {rollout_buffer.shape}. The expected shape is (num_envs, max_episode_steps) for each key."
                 )
             self._max_rollout_steps = self.rollout_buffer.shape[1]
+        storage = getattr(self, "_rollout_storage", None)
+        if storage is not None:
+            if self._rollout_buffer_mode == "rl":
+                storage["training"] = rollout_buffer
+                if "policy" in storage.keys():
+                    del storage["policy"]
+                self._expert_obs_buffer = None
+            else:
+                storage["policy"] = rollout_buffer
+                self._expert_obs_buffer = rollout_buffer["obs"]
+                if "training" in storage.keys():
+                    del storage["training"]
         self.rollout_steps.zero_()
         self.current_rollout_step = 0
         if self._rollout_buffer_mode != "rl":
@@ -767,8 +879,16 @@ class EmbodiedEnv(BaseEnv):
             if "startup" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="startup")
 
-        if self.cfg.observations:
-            self.observation_manager = ObservationManager(self.cfg.observations, self)
+        if self.cfg.observations or self.cfg.record_trajectory:
+            self.observation_manager = ObservationManager(
+                self.cfg.observations,
+                self,
+                recording=(
+                    trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
+                    if self.cfg.record_trajectory
+                    else None
+                ),
+            )
 
         if self.cfg.rewards:
             self.reward_manager = RewardManager(self.cfg.rewards, self)
@@ -777,6 +897,10 @@ class EmbodiedEnv(BaseEnv):
             self.action_manager = ActionManager(self.cfg.actions, self)
             # Override action space to match ActionManager output dim.
             self.single_action_space = self.action_manager.single_action_space
+
+        if getattr(self.cfg, "rl_task", None) is not None:
+            self.termination_manager = TerminationManager(self.cfg.rl_task, self)
+            self._task_initial_states = [{} for _ in range(self.num_envs)]
 
     def _apply_functor_filter(self) -> None:
         """Apply functor filters to the environment components based on configuration.
@@ -1032,7 +1156,10 @@ class EmbodiedEnv(BaseEnv):
                 demo_steps += active_mask.to(demo_steps.device, dtype=demo_steps.dtype)
 
         with self._profiler.section("trajectory_write"):
-            self._write_trajectory_step()
+            self._write_trajectory_step(
+                kwargs.get("observation_frame"),
+                active=kwargs.get("recording_active_mask"),
+            )
 
         self._update_episode_success_status(info, dones)
 
@@ -1099,6 +1226,15 @@ class EmbodiedEnv(BaseEnv):
                 with self._profiler.section("event_interval"):
                     self.event_manager.apply(mode="interval")
 
+        termination = getattr(self, "termination_manager", None)
+        if termination is not None:
+            # BaseEnv advances elapsed steps after rewards. Supply this
+            # transition's deadline once; Gym flags later consume this cache.
+            termination.compute(
+                self._elapsed_steps + 1 >= self.max_episode_steps,
+                ignore_terminations=self.cfg.ignore_terminations,
+            )
+
     def _initialize_physical_objective(self) -> None:
         """Bind an optional objective to an existing measured rigid object."""
         cfg = getattr(self.cfg, "objective", None)
@@ -1141,8 +1277,113 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             objective.reset(env_ids)
+        if getattr(self, "termination_manager", None) is not None:
+            self.initialize_task_outcome(env_ids)
 
-    def _initialize_episode(
+    def _rl_target_keys(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    cfg.params["target_pose_key"]
+                    for group in ("success", "failure", "truncation")
+                    for cfg in getattr(self.cfg.rl_task, group).values()
+                    if "target_pose_key" in cfg.params
+                }
+            )
+        )
+
+    def initialize_task_outcome(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None
+    ) -> None:
+        """Initialize configured RL rows after reset events or replay restore.
+
+        Args:
+            env_ids: Rows with their final initial physical state restored.
+        """
+        if getattr(self, "termination_manager", None) is None:
+            return
+        ids = self.episode_context._ids(env_ids)
+        targets = {}
+        for key in self._rl_target_keys():
+            value = getattr(self, key, None)
+            if not isinstance(value, torch.Tensor) or value.shape not in (
+                (self.num_envs, 3),
+                (self.num_envs, 4, 4),
+            ):
+                raise ValueError(f"Missing or malformed reset target {key!r}.")
+            if not value.is_floating_point() or not bool(
+                torch.isfinite(value[ids]).all()
+            ):
+                raise ValueError(
+                    f"Reset target {key!r} must contain finite floating poses."
+                )
+            targets[key] = value
+        self.termination_manager.reset(ids)
+        for env_id in ids.cpu().tolist():
+            self._task_initial_states[env_id] = {
+                "schema_version": 1,
+                "targets": {
+                    key: value[env_id].detach().cpu().tolist()
+                    for key, value in targets.items()
+                },
+            }
+
+    def get_task_initial_state(self, env_id: int = 0) -> dict[str, Any]:
+        """Return an owned initial virtual-target context for configured RL.
+
+        Args:
+            env_id: Environment row to snapshot.
+
+        Returns:
+            Versioned JSON-compatible reset target values.
+
+        Raises:
+            ValueError: The environment has no configured RL task.
+        """
+        if getattr(self, "termination_manager", None) is None:
+            raise ValueError("Initial task context requires an rl_task declaration.")
+        return copy.deepcopy(self._task_initial_states[env_id])
+
+    def restore_task_initial_state(self, state: Mapping[str, Any]) -> None:
+        """Restore a recorded single-environment configured RL target context.
+
+        Args:
+            state: Versioned initial state from episode trajectory metadata.
+
+        Raises:
+            ValueError: RL context is absent, malformed, or replay is vectorized.
+        """
+        if getattr(self, "termination_manager", None) is None:
+            raise ValueError("Task context restore requires an rl_task declaration.")
+        if self.num_envs != 1:
+            raise ValueError("Task-outcome replay requires a single environment.")
+        if not isinstance(state, Mapping) or state.get("schema_version") != 1:
+            raise ValueError(
+                "Dynamic task replay requires task_initial_state metadata."
+            )
+        targets = state.get("targets")
+        if not isinstance(targets, Mapping) or set(targets) != set(
+            self._rl_target_keys()
+        ):
+            raise ValueError("Replay virtual targets do not match the configured task.")
+        prepared = {}
+        for key, value in targets.items():
+            current = getattr(self, key, None)
+            restored = torch.as_tensor(
+                value, dtype=torch.float32, device=self.device
+            ).unsqueeze(0)
+            if (
+                current is None
+                or restored.shape != current.shape
+                or not bool(torch.isfinite(restored).all())
+            ):
+                raise ValueError(f"Invalid replay target {key!r}.")
+            prepared[key] = restored.to(dtype=current.dtype)
+        for key, value in prepared.items():
+            getattr(self, key).copy_(value)
+        self.initialize_task_outcome()
+
+    def _before_episode_reset(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
         if logger.logger.isEnabledFor(logging.DEBUG):
@@ -1186,41 +1427,18 @@ class EmbodiedEnv(BaseEnv):
                     "commit_env_ids must be a subset of the rows being reset."
                 )
 
-        # Scene eligibility follows the recording buffers, not replaceable demo
-        # annotations. Preparation and measurement resets cannot commit an
-        # active attempt; rejected buffers stay blocked until a full row reset.
-        episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if self.num_envs == 1:
-            scene_attempt_active = getattr(
-                self, "_scene_expansion_attempt_active", False
-            )
-            if episode_metadata:
-                scene_expansion = episode_metadata[0].get("scene_expansion")
-                if (
-                    not scene_attempt_active
-                    and isinstance(scene_expansion, Mapping)
-                    and scene_expansion.get("accepted") is not True
-                ):
-                    self._scene_expansion_recording_rejected = True
-            if scene_attempt_active or getattr(
-                self, "_scene_expansion_recording_rejected", False
-            ):
-                save_data = False
-                env_ids_to_commit = torch.empty(
-                    0, device=status_device, dtype=torch.long
-                )
-
         # Persist replay state before the dataset recorder snapshots metadata
         # (including asynchronous snapshots). The existing state buffer retains
         # the source episode's initial state even when training exports fragments.
         _traj_buffer = getattr(self, "_traj_buffer", None)
+        valid_recording_ids = self.episode_context.filter_recordable(env_ids_to_process)
         if (
             save_data
             and _traj_buffer is not None
             and getattr(self.cfg, "trajectory_auto_save", False)
         ):
             with self._profiler.section("trajectory_save"):
-                for env_id in env_ids_to_process.tolist():
+                for env_id in valid_recording_ids.tolist():
                     self._save_trajectory_for_env(env_id)
 
         # Save dataset before clearing buffers for environments that are being reset
@@ -1246,6 +1464,9 @@ class EmbodiedEnv(BaseEnv):
                         successful_envs[env_ids_to_process] | fragment_envs
                     ]
 
+                env_ids_to_save = self.episode_context.filter_recordable(
+                    env_ids_to_save
+                )
                 if env_ids_to_save.numel() > 0:
                     with self._profiler.section("dataset_save"):
                         self.dataset_manager.apply(
@@ -1261,14 +1482,19 @@ class EmbodiedEnv(BaseEnv):
                 for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
                     for functor_cfg in mode_cfgs:
                         if isinstance(functor_cfg.func, record_camera_data):
-                            if save_data:
+                            if save_data and valid_recording_ids.numel():
                                 functor_cfg.func.save_and_clear(
-                                    env_ids=env_ids_to_process
+                                    env_ids=valid_recording_ids
                                 )
-                            else:
-                                functor_cfg.func.discard_and_clear(
-                                    env_ids=env_ids_to_process
-                                )
+                            discard_ids = (
+                                env_ids_to_process[
+                                    ~torch.isin(env_ids_to_process, valid_recording_ids)
+                                ]
+                                if save_data
+                                else env_ids_to_process
+                            )
+                            if discard_ids.numel():
+                                functor_cfg.func.discard_and_clear(env_ids=discard_ids)
 
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
@@ -1283,10 +1509,6 @@ class EmbodiedEnv(BaseEnv):
                 rollout_steps[rollout_ids] = 0
                 self.current_rollout_step = int(rollout_steps.max().item())
 
-        episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if episode_metadata is not None:
-            for env_id in env_ids_to_process.cpu().tolist():
-                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
         if active_segment_ids is not None:
             demo_ids = env_ids_to_process.to(active_segment_ids.device)
@@ -1299,6 +1521,14 @@ class EmbodiedEnv(BaseEnv):
 
         self.episode_success_status.index_fill_(0, env_ids_to_process, False)
 
+    def _initialize_episode(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
+    ) -> None:
+        env_ids_to_process = self.episode_context._ids(env_ids)
+        episode_metadata = getattr(self, "_demo_episode_metadata", None)
+        if episode_metadata is not None:
+            for env_id in env_ids_to_process.cpu().tolist():
+                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -1337,13 +1567,6 @@ class EmbodiedEnv(BaseEnv):
             for env_id in env_ids_to_process.cpu().tolist():
                 if 0 <= env_id < len(executed_qpos_history):
                     executed_qpos_history[env_id].clear()
-
-        if (
-            self.num_envs == 1
-            and env_ids_to_process.numel() == 1
-            and int(env_ids_to_process[0].item()) == 0
-        ):
-            self._scene_expansion_recording_rejected = False
 
     def _clear_expert_rollout_rows(self, env_ids: torch.Tensor) -> None:
         """Invalidate selected expert-buffer rows without clearing large frames."""
@@ -1644,11 +1867,36 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             A JSON-compatible metadata dictionary.
         """
-        metadata = dict(self._demo_episode_metadata[env_id])
+        metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
+        metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata["segments"] = [
             dict(segment)
             for segment in self._demo_episode_metadata[env_id].get("segments", [])
         ]
+        termination_manager = getattr(self, "termination_manager", None)
+        outcome = None
+        if termination_manager is not None:
+            outcome = _outcome_row(termination_manager.snapshot(), env_id)
+            metadata["task_initial_state"] = self.get_task_initial_state(env_id)
+            metadata["task_outcome"] = outcome
+            if not metadata["segments"]:
+                accepted = bool(outcome["accepted"])
+                reason = (
+                    "truncated"
+                    if outcome["truncation"]
+                    else (
+                        "failure"
+                        if outcome["failure"]
+                        else "success" if accepted else "task_incomplete"
+                    )
+                )
+                metadata.update(
+                    success=accepted,
+                    completed=accepted,
+                    terminal_reason=reason,
+                    terminated=bool(outcome["terminated"]),
+                    truncated=bool(outcome["truncation"]),
+                )
         rollout_steps = getattr(self, "rollout_steps", None)
         length = int(
             (
@@ -1666,31 +1914,37 @@ class EmbodiedEnv(BaseEnv):
             )
         if length > 0 and not metadata["segments"]:
             instruction = metadata["instruction"]
-            success_status = getattr(self, "episode_success_status", None)
-            task_success = getattr(self, "_task_success", None)
-            success = bool(
-                (success_status is not None and success_status[env_id])
-                or (task_success is not None and task_success[env_id])
-            )
-            terminated = bool(
-                self.rollout_buffer is not None
-                and "terminated" in self.rollout_buffer.keys()
-                and self.rollout_buffer["terminated"][env_id, length - 1]
-            )
-            truncated = bool(
-                self.rollout_buffer is not None
-                and "truncated" in self.rollout_buffer.keys()
-                and self.rollout_buffer["truncated"][env_id, length - 1]
-            )
-            if truncated:
-                success = False
-                terminal_reason = "truncated"
-            elif success:
-                terminal_reason = "success"
-            elif terminated:
-                terminal_reason = "failure"
+            if outcome is not None:
+                success = metadata["success"]
+                terminated = metadata["terminated"]
+                truncated = metadata["truncated"]
+                terminal_reason = metadata["terminal_reason"]
             else:
-                terminal_reason = "task_incomplete"
+                success_status = getattr(self, "episode_success_status", None)
+                task_success = getattr(self, "_task_success", None)
+                success = bool(
+                    (success_status is not None and success_status[env_id])
+                    or (task_success is not None and task_success[env_id])
+                )
+                terminated = bool(
+                    self.rollout_buffer is not None
+                    and "terminated" in self.rollout_buffer.keys()
+                    and self.rollout_buffer["terminated"][env_id, length - 1]
+                )
+                truncated = bool(
+                    self.rollout_buffer is not None
+                    and "truncated" in self.rollout_buffer.keys()
+                    and self.rollout_buffer["truncated"][env_id, length - 1]
+                )
+                if truncated:
+                    success = False
+                    terminal_reason = "truncated"
+                elif success:
+                    terminal_reason = "success"
+                elif terminated:
+                    terminal_reason = "failure"
+                else:
+                    terminal_reason = "task_incomplete"
             metadata.update(
                 {
                     "completed": success,
@@ -1928,29 +2182,35 @@ class EmbodiedEnv(BaseEnv):
             )
 
         self.rollout_steps[env_ids] += 1
-        next_env_ids = env_ids[self.rollout_steps[env_ids] < self._max_rollout_steps]
-        self._seed_expert_observations(obs, next_env_ids)
+        self._seed_expert_observations(obs, env_ids)
         self.current_rollout_step = int(self.rollout_steps.max().item())
 
-    def _write_trajectory_step(self) -> None:
-        """Complete one pre-action ``state`` + ``action`` trajectory row."""
-        if self._traj_buffer is None:
+    def _write_trajectory_step(
+        self,
+        frame: ObservationFrame | None = None,
+        *,
+        active: torch.Tensor | None = None,
+    ) -> None:
+        """Commit the actual action and its captured post-transition state."""
+        manager = getattr(self, "observation_manager", None)
+        if manager is None or not manager.has_history:
             return
-        max_steps = self._traj_buffer.shape[1]
-        step = self._traj_steps
-        mask = step < max_steps
-        demo_active = getattr(self, "_demo_active_mask", None)
-        if demo_active is not None:
-            mask &= demo_active.to(mask.device)
-        idx = mask.nonzero(as_tuple=False).squeeze(-1)
-        if idx.numel() == 0:
-            return
-        st = step[idx]
-        if self._traj_raw_action is not None:
-            self._traj_buffer["actions"][idx, st] = self._traj_raw_action[idx]
-        self._traj_steps[idx] += 1
-        next_env_ids = idx[self._traj_steps[idx] < self._traj_buffer.shape[1]]
-        self._seed_trajectory_states(next_env_ids)
+        if frame is None or self._traj_raw_action is None:
+            raise RuntimeError(
+                "Trajectory recording requires an explicit observation frame and action."
+            )
+        manager._bind_schema(frame)
+        _write_raw_rollout(
+            self._rollout_storage,
+            self.episode_context,
+            frame,
+            action=self._traj_raw_action,
+            active=(
+                active
+                if active is not None
+                else getattr(self, "_demo_active_mask", None)
+            ),
+        )
         self._traj_raw_action = None
 
     def _write_rl_rollout_step(
@@ -2292,6 +2552,10 @@ class EmbodiedEnv(BaseEnv):
         """
 
         if isinstance(action, ControllerAction):
+            if getattr(self, "_step_uses_action_manager", False):
+                self.action_manager.apply_action()
+                self._last_action_trace = self.action_manager.action_trace()
+                return action.value
             return EmbodiedEnv._apply_controller_action(self, action.value)
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -2299,6 +2563,33 @@ class EmbodiedEnv(BaseEnv):
             self._last_action_trace = action_manager.action_trace()
             return action
         return EmbodiedEnv._apply_controller_action(self, action)
+
+    def _advance_physics(self) -> None:
+        """Connect manager callbacks to physics and sensor sampling."""
+        manager = getattr(self, "action_manager", None)
+        if not getattr(self, "_step_uses_action_manager", False) or manager is None:
+            return super()._advance_physics()
+        refresh_actions = manager.get_substep_callback(self.cfg.sim_steps_per_control)
+        if refresh_actions is None:
+            return super()._advance_physics()
+
+        sensors = [
+            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+        ]
+        for sensor in sensors:
+            sensor.begin_control_step()
+
+        def observe_substep(dt: float) -> None:
+            for sensor in sensors:
+                sensor.update_physics_step(dt)
+            refresh_actions(dt)
+
+        self.sim.update(
+            self.physics_dt,
+            self.cfg.sim_steps_per_control,
+            after_substep=observe_substep,
+            render_final_step=False,
+        )
 
     @property
     def last_action_trace(self) -> ActionTrace | None:
@@ -2351,14 +2642,16 @@ class EmbodiedEnv(BaseEnv):
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Compute task-specific state: success, fail, and metrics.
 
-        Override this method in subclass to define task-specific logic for RL tasks.
+        Configured ``rl_task`` conditions return cached acceptance. Subclasses
+        can override this method for handwritten task-specific logic.
 
         Returns:
-            Tuple of (success, fail, metrics):
-                - success: Boolean tensor of shape (num_envs,)
-                - fail: Boolean tensor of shape (num_envs,)
-                - metrics: Dict of metric tensors
+            tuple[torch.Tensor, torch.Tensor, dict[str, Any]]: Success and failure
+            masks of shape ``(num_envs,)``, followed by the metric tensor mapping.
         """
+        outcome = getattr(self, "termination_manager", None)
+        if outcome is not None:
+            return outcome.task_state()
         success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         metrics: Dict[str, Any] = {}
@@ -2367,8 +2660,8 @@ class EmbodiedEnv(BaseEnv):
     def get_info(self, **kwargs) -> Dict[str, Any]:
         """Get environment info dictionary.
 
-        Calls compute_task_state() to get task-specific success/fail/metrics when
-        available. Subclasses should override compute_task_state() for RL tasks.
+        Calls compute_task_state() for success/failure/metrics and includes an
+        owned outcome snapshot when ``rl_task`` is configured.
 
         Returns:
             Info dictionary with success, fail, elapsed_steps, metrics
@@ -2383,7 +2676,35 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             info["physical_objective"] = objective.snapshot()
+        outcome = getattr(self, "termination_manager", None)
+        if outcome is not None:
+            info["task_outcome"] = outcome.snapshot()
+        info["episode_context"] = self.episode_context.snapshot()
         return info
+
+    def check_truncated(self, obs: EnvObs, info: dict[str, Any]) -> torch.Tensor:
+        """Return cached RL truncation, or the ordinary host's custom mask.
+
+        Args:
+            obs: Current observations.
+            info: Cached task information.
+
+        Returns:
+            Per-environment truncation mask.
+        """
+        outcome = getattr(self, "termination_manager", None)
+        if outcome is not None:
+            return outcome.truncated
+        return super().check_truncated(obs, info)
+
+    def _get_termination_flags(
+        self, obs: EnvObs, info: Dict[str, Any]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Use the same cached flags consumed by observations and rewards."""
+        termination = getattr(self, "termination_manager", None)
+        if termination is not None:
+            return termination.terminated, termination.truncated
+        return super()._get_termination_flags(obs, info)
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         """Evaluate the environment state.
@@ -2407,6 +2728,17 @@ class EmbodiedEnv(BaseEnv):
         self._last_action_manager_qpos = None
         self._last_action_trace = None
         is_controller_action = isinstance(action, ControllerAction)
+        expert_cfg = getattr(getattr(self, "cfg", None), "expert_trajectory", None)
+        managed_expert = is_controller_action and bool(
+            getattr(expert_cfg, "use_action_manager", False)
+        )
+        if managed_expert and self.action_manager is None:
+            raise ValueError(
+                "ActionManager expert execution requires configured action terms."
+            )
+        self._step_uses_action_manager = self.action_manager is not None and (
+            not is_controller_action or managed_expert
+        )
         controller_metadata = action.metadata if is_controller_action else None
         policy_trajectory = self._traj_buffer is not None and (
             getattr(self, "_trajectory_action_kind", None) == "policy"
@@ -2442,14 +2774,29 @@ class EmbodiedEnv(BaseEnv):
             if retain_raw_action
             else action
         )
-        if self.action_manager is not None and not is_controller_action:
+        if self.action_manager is not None and (
+            not is_controller_action or managed_expert
+        ):
             if policy_recording:
-                if self.dataset_manager is None:
+                explicit_policy = getattr(self, "_explicit_policy_rollout", False)
+                if explicit_policy:
+                    self._validate_policy_rollout_action(action)
+                if self.dataset_manager is not None:
+                    self.dataset_manager.validate_policy_action(action)
+                elif not explicit_policy:
                     raise RuntimeError(
                         "Policy action recording requires an initialized DatasetManager."
                     )
-                self.dataset_manager.validate_policy_action(action)
-            self.action_manager.process_action(action)
+            if managed_expert:
+                action = self._prepare_controller_action(action)
+                if getattr(self, "_demo_no_auto_reset", False):
+                    action = self._mask_controller_demo_action(action)
+                qpos = action if isinstance(action, torch.Tensor) else action["qpos"]
+                full_targets = self.robot.get_qpos().clone()
+                full_targets[:, self.active_joint_ids] = self._active_qpos_command(qpos)
+                self.action_manager.process_joint_targets(full_targets)
+            else:
+                self.action_manager.process_action(action)
             if getattr(self, "_demo_no_auto_reset", False):
                 self.action_manager.mask_inactive(self._demo_active_mask)
             if self.dataset_manager is not None and not policy_recording:
@@ -2508,6 +2855,23 @@ class EmbodiedEnv(BaseEnv):
         if is_controller_action:
             return ControllerAction(value=action, metadata=controller_metadata)
         return action
+
+    def _validate_policy_rollout_action(self, action: EnvAction) -> None:
+        """Validate explicit raw-policy recording before changing term state."""
+        if not isinstance(action, torch.Tensor) or not action.is_floating_point():
+            raise TypeError("Policy rollout actions must be floating tensors.")
+        expected = (self.num_envs, self.action_manager.total_action_dim)
+        if tuple(action.shape) != expected:
+            raise ValueError(f"Policy rollout action must have shape {expected}.")
+        if not bool(torch.isfinite(action).all()):
+            raise ValueError("Policy rollout actions must contain only finite values.")
+        space = self.action_manager.single_action_space
+        low = torch.as_tensor(space.low, dtype=action.dtype, device=action.device)
+        high = torch.as_tensor(space.high, dtype=action.dtype, device=action.device)
+        if bool(((action < low) | (action > high)).any()):
+            raise ValueError(
+                "Policy rollout actions must remain within action-space bounds."
+            )
 
     def _record_raw_action(self, action: EnvAction) -> None:
         """Keep a CPU copy of raw policy actions for explicit dataset contracts."""
@@ -2752,16 +3116,14 @@ class EmbodiedEnv(BaseEnv):
 
     def _setup_background(self) -> None:
         """Setup the static rigid objects in the environment."""
+        for cfg in self.cfg.visual_object:
+            self.sim.add_visual_object(cfg)
         for cfg in self.cfg.background:
-            unresolved = cfg.body_type is None
-            if unresolved:
-                self.sim.add_rigid_object(cfg=cfg)
+            self.sim.add_rigid_object(cfg=cfg)
             if cfg.body_type == "dynamic":
                 logger.log_error(
                     f"Background object must be kinematic or static rigid object."
                 )
-            if not unresolved:
-                self.sim.add_rigid_object(cfg=cfg)
 
     def _setup_interactive_objects(self) -> None:
         """Setup the interactive objects in the environment."""
@@ -2770,15 +3132,11 @@ class EmbodiedEnv(BaseEnv):
             self.sim.add_articulation(cfg=cfg)
 
         for cfg in self.cfg.rigid_object:
-            unresolved = cfg.body_type is None
-            if unresolved:
-                self.sim.add_rigid_object(cfg=cfg)
+            self.sim.add_rigid_object(cfg=cfg)
             if cfg.body_type != "dynamic":
                 logger.log_error(
                     f"Interactive rigid object must be dynamic rigid object."
                 )
-            if not unresolved:
-                self.sim.add_rigid_object(cfg=cfg)
 
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)
@@ -2915,6 +3273,29 @@ class EmbodiedEnv(BaseEnv):
         """
         return self._checked_task_program_adapter().compile(program)
 
+    @contextmanager
+    def task_program_bridge_scope(
+        self, bridge: TaskProgramDemoBridge
+    ) -> Iterator[None]:
+        """Publish a borrowed bridge for one execution and restore the prior binding.
+
+        Args:
+            bridge: Bridge whose commands are consumed by this environment owner.
+
+        Yields:
+            No value. The caller retains reset, stepping and cleanup ownership.
+        """
+        from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
+
+        if not isinstance(bridge, TaskProgramDemoBridge):
+            raise TypeError("bridge must be a TaskProgramDemoBridge")
+        previous = self._active_task_program_bridge
+        self._active_task_program_bridge = bridge
+        try:
+            yield
+        finally:
+            self._active_task_program_bridge = previous
+
     def create_task_program_bridge(
         self,
         program: CompiledTaskProgram,
@@ -2922,6 +3303,8 @@ class EmbodiedEnv(BaseEnv):
         expansion_profile: CombinedExpansionProfile | None = None,
         expansion_candidate_index: int = 0,
         expansion_recipe_indices: tuple[int, ...] | None = None,
+        nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+        plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
 
@@ -2935,11 +3318,17 @@ class EmbodiedEnv(BaseEnv):
             Atomic demo bridge whose segments are consumed lazily.
 
         """
+        kwargs = {}
+        if nominal_source_factory is not None:
+            kwargs["nominal_source_factory"] = nominal_source_factory
+        if plan_transform_factory is not None:
+            kwargs["plan_transform_factory"] = plan_transform_factory
         return self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,
             candidate_index=expansion_candidate_index,
             recipe_indices=expansion_recipe_indices,
+            **kwargs,
         )
 
     @property
@@ -2951,7 +3340,7 @@ class EmbodiedEnv(BaseEnv):
         return () if bridge is None else bridge.expansion_records
 
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
-        """Return completed Task Program acceptance or legacy task success.
+        """Return configured RL, completed Task Program, or legacy acceptance.
 
         Task Program success is published only after its bridge has consumed
         every segment lifecycle, including post-policies and validators.
@@ -2962,6 +3351,9 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Per-environment task-success mask.
         """
+        outcome = getattr(self, "termination_manager", None)
+        if outcome is not None:
+            return outcome.task_state()[0]
         bridge = self._active_task_program_bridge
         task_program = getattr(getattr(self, "cfg", None), "task_program", None)
         if bridge is None:
@@ -2993,6 +3385,8 @@ class EmbodiedEnv(BaseEnv):
         expansion_profile: CombinedExpansionProfile | None = None,
         expansion_candidate_index: int = 0,
         expansion_recipe_indices: tuple[int, ...] | None = None,
+        nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+        plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
@@ -3035,14 +3429,22 @@ class EmbodiedEnv(BaseEnv):
                 expansion_profile is None
                 and expansion_candidate_index == 0
                 and expansion_recipe_indices is None
+                and nominal_source_factory is None
+                and plan_transform_factory is None
             ):
                 bridge = self.create_task_program_bridge(compiled_program)
             else:
+                bridge_kwargs = {}
+                if nominal_source_factory is not None:
+                    bridge_kwargs["nominal_source_factory"] = nominal_source_factory
+                if plan_transform_factory is not None:
+                    bridge_kwargs["plan_transform_factory"] = plan_transform_factory
                 bridge = self.create_task_program_bridge(
                     compiled_program,
                     expansion_profile=expansion_profile,
                     expansion_candidate_index=expansion_candidate_index,
                     expansion_recipe_indices=expansion_recipe_indices,
+                    **bridge_kwargs,
                 )
             self._active_task_program_bridge = bridge
             if getattr(self, "_demo_instruction_snapshot", None) is None:
@@ -3058,6 +3460,10 @@ class EmbodiedEnv(BaseEnv):
 
         if expansion_profile is not None:
             raise ValueError("expansion_profile requires a selected Task Program")
+        if nominal_source_factory is not None:
+            raise ValueError("nominal_source_factory requires a selected Task Program")
+        if plan_transform_factory is not None:
+            raise ValueError("plan_transform_factory requires a selected Task Program")
         if expansion_candidate_index != 0:
             raise ValueError(
                 "expansion_candidate_index requires a selected Task Program"
@@ -3072,16 +3478,25 @@ class EmbodiedEnv(BaseEnv):
             return None
         return (DemoSegment(actions=actions, name="legacy"),)
 
-    def save_trajectory(self, path: str, env_ids: Sequence[int] | None = None) -> str:
+    def save_trajectory(
+        self,
+        path: str,
+        env_ids: Sequence[int] | None = None,
+        *,
+        purpose: str = "recording",
+    ) -> str:
         """Save a causally aligned trajectory to a ``.pt`` file.
 
         ``states[t]`` is the state immediately before ``actions[t]`` is applied,
-        matching the frame alignment used by expert/LeRobot trajectories.
+        matching the frame alignment used by expert/LeRobot trajectories. New
+        recordings also include ``terminal_states`` and described
+        ``raw_observations`` with all T+1 state boundaries.
 
         Args:
             path: Destination ``.pt`` file path.
             env_ids: Env indices to save (default: all). Each saved env's actual
                 recorded length is stored in ``meta["lengths"]``.
+            purpose: Normal recording or explicitly labeled diagnostic export.
 
         Raises:
             RuntimeError: If trajectory recording was never enabled.
@@ -3093,15 +3508,56 @@ class EmbodiedEnv(BaseEnv):
         if env_ids is None:
             env_ids = list(range(self.num_envs))
         env_ids = list(env_ids)
+        if purpose not in ("recording", "diagnostic"):
+            raise ValueError("Trajectory purpose must be recording or diagnostic.")
+        if purpose == "recording" and len(
+            self.episode_context.filter_recordable(env_ids)
+        ) != len(env_ids):
+            raise RuntimeError(
+                "Cannot save uninitialized, pending or rejected recording rows."
+            )
         if not env_ids:
             raise ValueError("env_ids must contain at least one environment row.")
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         lengths = self._traj_steps[env_ids_t]
         max_len = int(lengths.max().item()) if len(env_ids) > 0 else 0
-        sub = self._traj_buffer[env_ids_t]
-        states = sub["states"][:, :max_len].clone()
-        actions = sub["actions"][:, :max_len].clone()
+        manager = getattr(self, "observation_manager", None)
+        recording = (
+            self._rollout_storage
+            if manager is not None and manager.has_history
+            else None
+        )
+        history = (
+            export_observation_history(manager, env_ids, device=self.device)
+            if recording is not None and purpose == "recording"
+            else None
+        )
+        if history is not None:
+            all_states = TensorDict(
+                {}, batch_size=[len(env_ids), max_len + 1], device=self.device
+            )
+            for key in self._traj_buffer["states"].keys(
+                include_nested=True, leaves_only=True
+            ):
+                all_states[key] = history["fields"]["/".join(key)]["values"]
+            states = all_states[:, :max_len]
+            terminal_states = all_states[
+                torch.arange(len(env_ids), device=self.device), lengths
+            ]
+            actions = recording["raw_actions"][env_ids_t, :max_len].detach()
+        else:
+            sub = self._traj_buffer[env_ids_t]
+            states = sub["states"][:, :max_len].clone()
+            actions = sub["actions"][:, :max_len].clone()
+            terminal_states = (
+                sub["states"][
+                    torch.arange(len(env_ids), device=self.device), lengths
+                ].clone()
+                if recording is not None
+                else None
+            )
         meta = {
+            "artifact_purpose": purpose,
             "lengths": lengths.tolist(),
             "num_steps": max_len,
             "num_envs": int(len(env_ids)),
@@ -3161,7 +3617,13 @@ class EmbodiedEnv(BaseEnv):
         )
         try:
             with os.fdopen(descriptor, "wb") as stream:
-                torch.save({"states": states, "actions": actions, "meta": meta}, stream)
+                payload = {"states": states, "actions": actions, "meta": meta}
+                if terminal_states is not None:
+                    payload["terminal_states"] = terminal_states
+                    meta["state_frame_layout"] = "pre_action_plus_terminal/v1"
+                if history is not None:
+                    payload["raw_observations"] = history
+                torch.save(payload, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, destination)
@@ -3172,10 +3634,13 @@ class EmbodiedEnv(BaseEnv):
                 os.close(directory)
         finally:
             Path(temporary).unlink(missing_ok=True)
-        for env_id, episode in zip(env_ids, meta["demo_episodes"]):
-            live_metadata = self._demo_episode_metadata[env_id]
-            live_metadata["trajectory_path"] = replay_path
-            live_metadata["replay_artifact"] = copy.deepcopy(episode["replay_artifact"])
+        if purpose == "recording":
+            for env_id, episode in zip(env_ids, meta["demo_episodes"]):
+                live_metadata = self._demo_episode_metadata[env_id]
+                live_metadata["trajectory_path"] = replay_path
+                live_metadata["replay_artifact"] = copy.deepcopy(
+                    episode["replay_artifact"]
+                )
         return path
 
     def _save_trajectory_for_env(self, env_id: int) -> str | None:
@@ -3283,6 +3748,7 @@ class EmbodiedEnv(BaseEnv):
                 return
 
             errors: list[Exception] = []
+            _close_raw_rollout(getattr(self, "_rollout_storage", None))
             try:
                 self._discard_pending_recordings()
             except Exception as error:
@@ -3290,6 +3756,17 @@ class EmbodiedEnv(BaseEnv):
             if self.dataset_manager:
                 try:
                     self.dataset_manager.finalize()
+                except Exception as error:
+                    errors.append(error)
+
+            # The synchronous demo executor owns its normal abort/safe-hold
+            # handshake. Closing here is pure cleanup, including for an
+            # abandoned manual generator: never guess an action acknowledgement
+            # or advance physics while detaching runtime observation hooks.
+            adapter = getattr(self, "_task_program_adapter", None)
+            if adapter is not None:
+                try:
+                    adapter.close()
                 except Exception as error:
                     errors.append(error)
 

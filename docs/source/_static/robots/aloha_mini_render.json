@@ -1,0 +1,239 @@
+{
+  "robot": "AlohaMini",
+  "model": "Aloha Mini 2 Pro",
+  "configuration": "AlohaMini catalog defaults",
+  "source_asset": "AlohaMini/alohamini2pro.urdf",
+  "source_commit": "66033036bea07486a33b7027810956681287b4a3",
+  "source_urdf_sha256": "444805be9200095dcd972c1e39fc2c6f7b95d2d675af074ca5ce16febd7e7210",
+  "configured_control_dof": 15,
+  "native_articulation_dof": 21,
+  "control_parts": {
+    "left_arm": [
+      "left_shoulder_pan",
+      "left_shoulder_lift",
+      "left_elbow_flex",
+      "left_wrist_flex",
+      "left_wrist_yaw_joint",
+      "left_wrist_roll"
+    ],
+    "right_arm": [
+      "right_shoulder_pan",
+      "right_shoulder_lift",
+      "right_elbow_flex",
+      "right_wrist_flex",
+      "right_wrist_yaw_joint",
+      "right_wrist_roll"
+    ],
+    "left_eef": [
+      "left_gripper"
+    ],
+    "right_eef": [
+      "right_gripper"
+    ],
+    "torso": [
+      "vertical_move"
+    ]
+  },
+  "additional_source_joints": [
+    "root_x_axis_joint",
+    "root_y_axis_joint",
+    "root_z_rotation_joint",
+    "wheel1_joint",
+    "wheel2_joint",
+    "wheel3_joint"
+  ],
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "window": "dlss",
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "upsample_ratio": null,
+      "render_width": 0,
+      "render_height": 0,
+      "target_width": 0,
+      "target_height": 0,
+      "tiled_enabled": true,
+      "exposure_compensation": 1.0
+    },
+    "nrd": {
+      "max_indirect_bounces": 1,
+      "denoising_range": 500000.0,
+      "disocclusion_threshold": 0.01,
+      "disocclusion_threshold_alternate": 0.05,
+      "disocclusion_threshold_mix_enabled": true,
+      "history_confidence_enabled": true,
+      "history_confidence_probe_stride": 5,
+      "history_confidence_sigma_scale": 2.0,
+      "history_confidence_sensitivity": 1.0,
+      "max_accumulated_frame_num": 30,
+      "max_fast_accumulated_frame_num": 6,
+      "history_fix_frame_num": 3,
+      "diffuse_prepass_blur_radius": 30.0,
+      "specular_prepass_blur_radius": 50.0,
+      "anti_firefly_enabled": false,
+      "sh_mode_enabled": false,
+      "validation_enabled": false,
+      "max_stabilized_frame_num": 63,
+      "min_blur_radius": 1.0,
+      "max_blur_radius": 30.0,
+      "antilag_luminance_sigma_scale": 2.0,
+      "antilag_luminance_sensitivity": 3.0,
+      "taa_min_current_weight": 0.0625,
+      "taa_sigma_scale": 2.0,
+      "taa_depth_rejection_enabled": true,
+      "taa_tone_mapping_enabled": false
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0,
+    "min_bounces": 4,
+    "max_bounces": 8
+  },
+  "camera": {
+    "width": 960,
+    "height": 1200,
+    "intrinsics": [
+      2350.0,
+      2350.0,
+      480.0,
+      600.0
+    ],
+    "eye": [
+      2.423019975423813,
+      -1.5453052818775177,
+      1.4318970441818237
+    ],
+    "target": [
+      0.10995551943778992,
+      -0.0032623112201690674,
+      0.5507296323776245
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "near": 0.03,
+    "far": 60.0
+  },
+  "scene": {
+    "presentation": "SimulationManager defaults with studio area lights",
+    "direct_lights": [
+      "studio_key",
+      "studio_fill",
+      "studio_rim"
+    ],
+    "emission_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "emission_intensity": 80.0,
+    "studio_lights": [
+      {
+        "uid": "studio_key",
+        "light_type": "rect",
+        "init_pos": [
+          1.4,
+          -1.0,
+          2.0
+        ],
+        "direction": [
+          -0.6028605644882187,
+          0.4637388957601683,
+          -0.6492344540642356
+        ],
+        "color": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "intensity": 40.0,
+        "rect_width": 1.6,
+        "rect_height": 1.8,
+        "enable_shadow": true
+      },
+      {
+        "uid": "studio_fill",
+        "light_type": "rect",
+        "init_pos": [
+          1.1,
+          1.2,
+          1.5
+        ],
+        "direction": [
+          -0.5547001962252291,
+          -0.665640235470275,
+          -0.49923017660270624
+        ],
+        "color": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "intensity": 25.0,
+        "rect_width": 1.4,
+        "rect_height": 1.6,
+        "enable_shadow": true
+      },
+      {
+        "uid": "studio_rim",
+        "light_type": "rect",
+        "init_pos": [
+          -1.0,
+          0.3,
+          1.8
+        ],
+        "direction": [
+          0.6645343026631946,
+          -0.18123662799905305,
+          -0.7249465119962123
+        ],
+        "color": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "intensity": 40.0,
+        "rect_width": 1.4,
+        "rect_height": 1.5,
+        "enable_shadow": true
+      }
+    ]
+  },
+  "root_position": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "joint_positions": {
+    "root_x_axis_joint": 0.0,
+    "root_y_axis_joint": 0.0,
+    "root_z_rotation_joint": 0.0,
+    "vertical_move": 0.0,
+    "wheel1_joint": 0.0,
+    "wheel2_joint": 0.0,
+    "wheel3_joint": 0.0,
+    "left_shoulder_pan": -0.15000000596046448,
+    "right_shoulder_pan": 0.15000000596046448,
+    "left_shoulder_lift": -0.6000000238418579,
+    "right_shoulder_lift": -0.6000000238418579,
+    "left_elbow_flex": 0.800000011920929,
+    "right_elbow_flex": 0.800000011920929,
+    "left_wrist_flex": 0.0,
+    "right_wrist_flex": 0.0,
+    "left_wrist_yaw_joint": 0.0,
+    "right_wrist_yaw_joint": 0.0,
+    "left_wrist_roll": 0.0,
+    "right_wrist_roll": 0.0,
+    "left_gripper": -0.5,
+    "right_gripper": -0.5
+  },
+  "physics_stepped": false,
+  "warmup_frames": 48,
+  "image": "aloha_mini_2_pro.png",
+  "description": "Aloha Mini 2 Pro documentation illustration with native OfflineRT rendering, a display pose and three rectangular studio lights."
+}

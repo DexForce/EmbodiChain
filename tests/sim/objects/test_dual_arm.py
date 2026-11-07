@@ -28,7 +28,7 @@ from embodichain.lab.sim.robots.dual_arm import (
     build_dual_arm_cfg,
     resolve_mounts,
 )
-from embodichain_robots.ur_robot import URRobotCfg
+from embodichain_robots.universal_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import URSolverCfg
 
 # --------------------------------------------------------------------------- #
@@ -191,15 +191,6 @@ def test_build_dual_arm_mirrors_newton_joint_overrides():
 # --------------------------------------------------------------------------- #
 
 
-def test_dual_arm_from_dict_one_liner():
-    cfg = DualArmRobotCfg.from_dict(
-        {"base_robot": "ur5", "mount": {"preset": "side_by_side", "separation": 0.6}}
-    )
-    assert set(["left_arm", "right_arm", "dual_arm"]).issubset(cfg.control_parts.keys())
-    assert isinstance(cfg.solver_cfg["left_arm"], URSolverCfg)
-    assert cfg.solver_cfg["left_arm"].ur_type == "ur5"
-
-
 def test_dual_arm_from_dict_explicit_base_robot():
     cfg = DualArmRobotCfg.from_dict(
         {
@@ -218,7 +209,8 @@ def test_dual_arm_from_dict_franka_base_robot():
         }
     )
     assert set(["left_arm", "right_arm", "dual_arm"]).issubset(cfg.control_parts.keys())
-    assert set(["left_eef", "right_eef"]).issubset(cfg.control_parts.keys())
+    assert {"left_eef", "right_eef"}.isdisjoint(cfg.control_parts)
+    assert len(cfg.control_parts["dual_arm"]) == 14
 
 
 def test_dual_arm_unknown_base_robot_raises():
@@ -230,6 +222,7 @@ def test_dual_arm_roundtrip():
     cfg = DualArmRobotCfg.from_dict(
         {"base_robot": "ur5", "mount": {"preset": "side_by_side", "separation": 0.6}}
     )
+    assert {"left_arm", "right_arm", "dual_arm"} <= set(cfg.control_parts)
     d = cfg.to_dict()
     assert d["base_robot"] == "ur5"
     cfg2 = DualArmRobotCfg.from_dict(d)

@@ -82,4 +82,4 @@ pose variation. This first runner supports one environment and dynamic replay
 through the recorded horizon; a compatible DexSim build is required for native
 physical qualification.
 
-For launch and recording options, see {doc}`run_env`.
+For launch and recording options, see {doc}`run_task`.

@@ -45,6 +45,7 @@ def asset_type(request):
 def _material(name: str):
     material = MagicMock(name=name)
     material.get_name.return_value = name
+    material.get_material_id.return_value = hash(name)
     template = MagicMock(name=f"{name}_template")
     template.get_name.return_value = f"{name}_template"
     material.get_template.return_value = template

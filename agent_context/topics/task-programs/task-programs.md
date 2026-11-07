@@ -36,19 +36,34 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Parallel scheduling and safety boundary | `embodichain/lab/task_program/runtime/parallel.py`, `parallel_executor.py` |
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
 | Immutable catalog and extension declarations | `embodichain/lab/task_program/integrations/catalog.py`, `extensions.py` |
+| Program-bound occurrence policy selection | `embodichain/lab/task_program/integrations/invocation_policy.py` |
 | Environment adapter and runtime assembly | `embodichain/lab/task_program/integrations/environment.py` |
 | Expansion source adapter, candidate transform and records | `embodichain/lab/task_program/integrations/expansion.py` |
 | Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
-| Configured semantic/policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
+| Public configured deployment composition | `embodichain/lab/task_program/integrations/composition.py` |
+| Component resolution and policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
+| Physical acquisition, history and support observations | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py`, `support_observation.py` |
+| Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
+| Offline held-object protocol normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
+| Shared SDK-independent physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
+| Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
 | Episode selection, recording, final success | `embodichain/lab/gym/envs/embodied_env.py`, `demo.py` |
 | MLLM untrusted-JSON frontend | `embodichain/agents/mllm/task_program.py` |
 
 The core `language`, `semantics`, `compiler`, and `runtime` packages must not
-import Gym. Provider-specific dependencies are confined to `integrations`.
+import Gym. Provider-specific dependencies are confined to `integrations`. Public package
+exports resolve lazily while retaining their existing names and objects, so an
+offline evidence adapter can import without initializing a simulator.
+
+The held-object adapter validates receipt, actor, query and time identities and
+cross-checks world-position/orientation measurements against the original policy.
+It imports neither TaskSpec nor Task Engine and makes no normative task judgment.
+Declared task bounds belong to the separately supplied normative criteria. Invalid
+capture boundaries return unavailable evidence instead of failing report assembly.
 Gym retains only lifecycle coupling; it does not own schemas, compilers,
 catalogs, lowerers, or simulation assembly.
 
@@ -80,11 +95,30 @@ Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
 
-The configured combined transform supports batches and Pick Affordance
-expansion; timing expansion is not connected to this transform. Batch expansion
-records retain the stable environment IDs from the planning context, including
-reordered batches. Generic profile decoding, source adapters, candidate
-identity and coordination are owned by the
+Source-bound bridges request independent session state from the simulation
+post-policy/validator port while retaining its registered scene bindings. This
+isolates lift baselines and policy results across episodes. Native bridges and
+ports without the optional session factory retain their existing ownership.
+
+Simulation settling defaults to reported native velocities. An explicit
+`simulation.policies.SimulationSettleMonitorCfg(measurement="pose_delta")`
+retains the shared monitor's cadence and per-row timeout rules while deriving
+speed from consecutive rigid poses. The runtime supplies its control `step_dt`;
+the first observation is unresolved. Registration/catalog preflight rejects
+non-rigid targets before live assembly. Preset names do not select algorithms,
+and plain settle configurations preserve existing defaults and fingerprints.
+
+An optional nominal source is selected separately before Atomic planning and
+is bound to a compiled sequential call occurrence. Its configured declaration
+and verification boundary are described in [Real2Sim motion](../data-pipeline/real2sim.md).
+
+The configured combined transform supplies each selected call's Affordance
+context before planning and delegates trajectory adaptation and rebuilding to
+the shared Atomic plan expansion service. Built-in phase permissions can only
+be narrowed by a profile. The global analysis call index identifies each call,
+while stable environment IDs correlate outputs without seeding variants.
+Timing expansion is not connected to this transform. Generic profile decoding,
+source adapters, candidate identity and coordination are owned by the
 [Motion Planning augmentation boundary](../motion-planning/motion-planning.md#trajectory-augmentation-boundary),
 not by Task Program or Gym.
 
@@ -96,32 +130,32 @@ not by Task Program or Gym.
 - [Scene services](../scene-services/scene-services.md): shared layout, physical state, deterministic changes and measured checks; Task Program retains semantics and execution lifecycle.
 - [Scene expansion](../scene-expansion/scene-expansion.md): fixed scene proposals, injected preparation, independent measured acceptance and reset-time persistence gates.
 
-## Reference integrations
+## Find a configured deployment
 
-| Environment | Assurance | Source |
-|---|---|---|
-| `TaskProgramRubiksCubePickPlace-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/` |
-| `TaskProgramRepeatedPickPlace-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
-| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml` with `--physics newton` |
-| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` with `--physics newton` |
-| `TaskProgramOpenDrawer-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/` |
-| `TaskProgramOpenDrawer-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml` with `--physics newton` |
-| `HandOver-v1` | verified | `extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/` |
-| `PourWater-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
+Use `embodichain list-task` and the task-local `catalog.yaml` / runnable YAML
+under `extensions/embodichain_tasks/configs/tasks/` for current IDs, embodiments
+and available deployments. The catalog implementation is
+`embodichain/cli/_task_catalog.py`; this overview does not maintain a second
+inventory of IDs or backend-specific defaults.
 
-Marvin deployments use `task.tianji_marvin.yaml` in `repeated_pick_place`,
-`hand_over` and `tableware/pour_water`. The first two select verified tabletop
-programs; pouring selects a 750 mm table variant that lowers the scene and
-absolute targets by 125 mm while retaining the four-segment program behavior,
-dual-arm slow policy and independent measured checkpoints. All three inherit
-the shared compact ready pose. The shared embodiment owns calibrated
-grasp-frame TCPs and gripper evidence, not task-local object IDs.
+For a minimal projected workflow, start with
+[repeated pick/place](../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/README.md).
+For measured handover, inspect the selected deployment and execution policy in
+`extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/`.
+For fixed real-motion source binding and qualified expansion, use
+`extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml`.
+It selects three real-source prototypes through verified asset references and
+the existing Real2Sim recorder owner; the example rebuilds sources from the same templates.
+Assurance belongs to that policy, not the task name or backend. Read the
+[environment selection contract](../env-framework/configuration.md#reusable-gym-deployment-components)
+for backend variants: selecting a physical component does not rename a Gym ID.
 
-The task-local configured expansion example is bound through the deployment's
-shared expansion policy; its README routes to
-`examples/sim/motion/repeated_pick_place_expansion_showcase.py`. That showcase
-reports projected completion and candidate provenance, not measured physical
-success or receipt-confirmed coverage.
+Embodiments own robot/sensor calibration and skill profiles; deployment files
+own scene selection and task-local targets. Read their source configurations
+for dimensions, offsets and tuning values. The configured expansion showcase
+is linked from the repeated-pick/place README; projected completion and
+candidate provenance are distinct from measured physical success and
+receipt-confirmed coverage.
 
 ## Recommended change sites
 

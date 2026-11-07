@@ -46,7 +46,7 @@ Module Categories
 
 - Algorithm (`algo/`): RL algorithm implementations, including `BaseAlgorithm`, `PPO`, etc.
 - Buffer (`buffer/`): Trajectory data buffer, such as `RolloutBuffer`.
-- Models (`models/`): Policy network modules, including `Policy`, `ActorCritic`, `MLP`.
+- Models (`learning/rl/policies/`): RL policy interfaces, actor-critic models and policy builders. Generic MLPs and normalization live in `learning/models/`.
 - Trainer (`utils/trainer.py`): Main training loop and logging management.
 - Config (`utils/config.py`): Algorithm config class definitions.
 - Train Script (`train.py`): RL training entry script.
@@ -97,3 +97,5 @@ See Also
 - :doc:`/overview/gym/env` — EmbodiedEnv configuration and Action Manager
 - :doc:`/features/online_data` — Online data streaming pipeline
 - :doc:`/resources/task/index` — Available RL task environments
+
+For external training, see :doc:`/guides/rlinf`. The :doc:`/guides/training_frameworks` comparison also covers LeRobot imitation learning and native SL.

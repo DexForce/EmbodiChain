@@ -22,7 +22,7 @@ disabled-sensor filtering run before the World is constructed.
 sets headless for scene setup. With auto, no global default override and demand
 explicitly false, the manager selects NoRender without probing the GPU. Explicit
 renderer selections and global defaults retain precedence. The default demand
-`None` preserves standalone GPU selection. The run-task/run-env launcher scopes
+`None` preserves standalone GPU selection. The run-task launcher scopes
 its native auto preference through `utility/render_utils.py`; this preference is
 consulted only after NoRender demand selection and explicit global overrides,
 and is restored on launcher exit. Custom camera/visual code, including
@@ -45,7 +45,9 @@ retained, and physical replication must still fit the effective capacity.
 The manager skips native background, light and visual-material setup, keeps
 physical ground, and skips Newton render-state publication. Gym additionally
 skips configured lights/IBL and built-in native visual effects; background
-objects and collision geometry remain. DexSim uses its existing package and
+objects and collision geometry remain. Render-only `VisualObject` declarations
+stay in the registry without native handles; visual pose events must skip
+native writes in this mode. DexSim uses its existing package and
 device-free NoRender engine. Native camera and window operations require a
 native renderer. Viser retains native rendering because its current exporter
 reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid

@@ -66,13 +66,22 @@ from .control import (
     OPEN_COMMAND,
     PARK_COMMAND,
 )
-from .core import AtomicAction, ObjectSemantics, SkillDescriptor
+from .core import AtomicAction, CompletePlanBuilder, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
+from .evidence import (
+    PhysicalEvidenceBatch,
+    PhysicalEvidenceFrame,
+    PhysicalEvidenceProvider,
+    PhysicalEvidenceRequest,
+)
 from .engine import AtomicActionEngine, PlanTransform
+from .nominal import NominalMotionSource, InstantiatedSkillMotion
+from .prototype_source import PrototypeMotionProvider
 from .execution import (
     ExecutionEvent,
     ExecutionEventKind,
     ExecutionPlanAttempt,
+    ExecutionPlanLifecycle,
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
@@ -102,11 +111,19 @@ from .plans import (
     CompiledTrajectory,
     EffectVerificationRequirement,
     PlannerDiagnostics,
+    PlanQualification,
+    PlanningRecoveryOutcome,
     PlanningFailure,
     TimedTrajectory,
     TrajectorySegment,
 )
-from .policies import DynamicCollisionMode, MotionPolicy, RecoveryPolicy
+from .policies import (
+    DynamicCollisionMode,
+    MotionPolicy,
+    PlanningBudget,
+    PlanningRecovery,
+    RecoveryPolicy,
+)
 from .requirements import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
@@ -120,7 +137,7 @@ from .requirements import (
     SkillEndpointRequirement,
     SkillResourceSlot,
 )
-from .runtime import ActionPlanningServices
+from .runtime import ActionPlanningServices, GraspOpeningTarget
 from .runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
@@ -206,9 +223,12 @@ from .primitives import (
     Pour,
     PourGoal,
     PourOptions,
+    PourTarget,
     Press,
     PressGoal,
     PressOptions,
+    PressPlanningRecovery,
+    validate_press_extra_distance,
     PushObject,
     PushObjectGoal,
     PushObjectOptions,
@@ -234,6 +254,9 @@ from .runner import (
     HeldObjectGuardVerifier,
     MonotonicExecutionClock,
     ObservationProvider,
+    PhysicalEffectVerifier,
+    PhysicalHeldObjectGuardVerifier,
+    PhysicalPhaseEffectGateVerifier,
     PhaseEffectGateVerifier,
     RunnerStatus,
     RunnerStep,
@@ -268,6 +291,7 @@ __all__ = [
     "ActionOptions",
     "ActionPlan",
     "ActionPlanningServices",
+    "GraspOpeningTarget",
     "Affordance",
     "AffordancePoseCandidates",
     "AffordanceSample",
@@ -285,8 +309,12 @@ __all__ = [
     "AxisAlignGoal",
     "AxisAlignOptions",
     "AtomicAction",
+    "CompletePlanBuilder",
     "AtomicActionEngine",
     "PlanTransform",
+    "NominalMotionSource",
+    "InstantiatedSkillMotion",
+    "PrototypeMotionProvider",
     "BUILTIN_ACTION_TYPES",
     "BATCH_INVERSE_KINEMATICS_CAPABILITY",
     "CARTESIAN_POSE_CAPABILITY",
@@ -322,11 +350,17 @@ __all__ = [
     "EffectVerificationRequest",
     "EffectVerificationRequirement",
     "EffectVerificationResult",
+    "PhysicalEvidenceBatch",
+    "PhysicalEvidenceFrame",
+    "PhysicalEvidenceProvider",
+    "PhysicalEvidenceRequest",
     "EffectVerifier",
+    "PhysicalEffectVerifier",
     "ExecutionClock",
     "ExecutionEvent",
     "ExecutionEventKind",
     "ExecutionPlanAttempt",
+    "ExecutionPlanLifecycle",
     "ExecutionRunner",
     "ExecutionRunnerCfg",
     "ExecutionSession",
@@ -338,6 +372,8 @@ __all__ = [
     "PhaseEffectGateRequirement",
     "PhaseEffectGateResult",
     "PhaseEffectGateVerifier",
+    "PhysicalPhaseEffectGateVerifier",
+    "PhysicalHeldObjectGuardVerifier",
     "HeldObjectGuardVerifier",
     "EndpointTrackingChannelBinding",
     "EndpointTrackingFeedbackAddress",
@@ -363,6 +399,7 @@ __all__ = [
     "JointPositionTrackingMetric",
     "JointPositionTrackingState",
     "MotionPolicy",
+    "PlanningBudget",
     "MonotonicExecutionClock",
     "MoveEndEffector",
     "MoveEndEffectorOptions",
@@ -388,8 +425,11 @@ __all__ = [
     "Pour",
     "PourGoal",
     "PourOptions",
+    "PourTarget",
     "PlannerDiagnostics",
+    "PlanQualification",
     "PlanningFailure",
+    "PlanningRecoveryOutcome",
     "PlanningContext",
     "PoseGoalValue",
     "PoseTrackingMetric",
@@ -398,6 +438,8 @@ __all__ = [
     "PressAffordance",
     "PressGoal",
     "PressOptions",
+    "PressPlanningRecovery",
+    "validate_press_extra_distance",
     "PushObject",
     "PushObjectGoal",
     "PushObjectOptions",
@@ -411,6 +453,7 @@ __all__ = [
     "TwistGoal",
     "TwistOptions",
     "RecoveryPolicy",
+    "PlanningRecovery",
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
     "ResolvedActionRequest",

@@ -55,7 +55,7 @@ Embodied Environment Classes
 
 .. autoclass:: EmbodiedEnv
     :members:
-    :exclude-members: get_generator
+    :exclude-members: get_generator, check_truncated, get_task_initial_state, initialize_task_outcome, restore_task_initial_state
     :inherited-members:
     :show-inheritance:
 
@@ -64,7 +64,7 @@ Embodied Environment Classes
 
 .. autoclass:: EmbodiedEnvCfg
     :members:
-    :exclude-members: __init__, class_type
+    :exclude-members: __init__, class_type, visual_object, rl_task
 
     Configuration class for embodied environments with extended settings for lighting, observation management,
     and advanced simulation features.

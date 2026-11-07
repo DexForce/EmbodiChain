@@ -1,0 +1,52 @@
+program_id: stack_two_blocks
+instruction: Stack the two blocks into a stable tower with block 2 on top of block
+  1.
+targets: {}
+program:
+  kind: sequence
+  items:
+  - kind: segment
+    name: pick_block_2
+    instruction: Grasp and lift block 2 clear of the table.
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: block_2
+        grasp: block_2_grasp
+    validators:
+    - kind: object_lifted
+      object: block_2
+      minimum_lift: 0.05
+  - kind: segment
+    name: place_block_2_on_block_1
+    instruction: Place block 2 on top of block 1, release it, and let the stack settle.
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: block_2
+        'on': block_1_top
+    post:
+    - kind: wait_stable
+      entity: block_2
+    - kind: wait_stable
+      entity: block_1
+    validators:
+    - kind: object_relative_position
+      object: block_2
+      reference: block_1
+      position_offset:
+      - 0.0
+      - 0.0
+      - 0.05
+      position_tolerance:
+      - 0.025
+      - 0.025
+      - 0.012
+    - kind: object_upright
+      object: block_1
+      maximum_tilt_degrees: 45.0
+    - kind: object_upright
+      object: block_2
+      maximum_tilt_degrees: 45.0

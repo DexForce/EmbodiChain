@@ -40,7 +40,7 @@ Use ``show-task`` before launch when a logical task has several deployments:
 .. code-block:: bash
 
    embodichain show-task embodichain_tasks:repeated_pick_place
-   embodichain run-env \
+   embodichain run-task \
        --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --physics newton
 
 The UR5 deployment keeps its augmentation settings in the task-facing

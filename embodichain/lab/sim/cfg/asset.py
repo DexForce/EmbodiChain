@@ -19,13 +19,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Dict, Literal
+from typing import Dict, Literal
 
 import numpy as np
 
 from embodichain.utils import configclass, is_configclass, logger
-
-__all__ = ["AssetPhysicsMode", "ObjectBaseCfg", "UsdSourceCfg"]
 
 AssetPhysicsMode = Literal["preserve", "overlay"]
 """Policy for applying EmbodiChain physics to a file-backed asset."""
@@ -40,101 +38,6 @@ def _resolve_asset_physics_mode(
             f"asset_physics_mode must be 'preserve' or 'overlay', got {mode!r}."
         )
     return mode
-
-
-def _is_usd_source(path: object) -> bool:
-    return path is not None and str(path).lower().endswith(
-        (".usd", ".usda", ".usdc", ".usdz")
-    )
-
-
-@configclass
-class UsdSourceCfg:
-    """Selection and placement intent for a USD source.
-
-    Source lengths, mass and world axes are normalized by DexSim. Physics
-    overlays remain owned by the containing rigid/articulation configuration.
-    """
-
-    prim_path: str | None = None
-    """Absolute source subtree; None selects the default prim."""
-
-    variants: dict[str, dict[str, str]] | None = None
-    """Absolute prim paths mapped to variant-set names and choices."""
-
-    namespace: str | None = None
-    """Optional prefix for imported scene entity/material names."""
-
-    pose_mode: Literal["auto", "config", "preserve", "offset"] = "auto"
-    """Root placement policy, independent of the physics overlay policy.
-
-    Auto preserves the source pose unless init_local_pose or a nonzero
-    init_pos/init_rot is configured. Config replaces it, preserve retains it,
-    and offset left-multiplies the configured transform onto the source pose.
-    Use config or an explicit identity init_local_pose to place at the origin.
-    """
-
-    def __post_init__(self) -> None:
-        if self.pose_mode not in {"auto", "config", "preserve", "offset"}:
-            raise ValueError(f"Unsupported USD pose_mode {self.pose_mode!r}.")
-        if self.prim_path is not None and (
-            not isinstance(self.prim_path, str) or not self.prim_path.startswith("/")
-        ):
-            raise ValueError("USD prim_path must be an absolute path.")
-        if self.namespace is not None and (
-            not isinstance(self.namespace, str)
-            or not self.namespace
-            or "/" in self.namespace
-        ):
-            raise ValueError("USD namespace must be non-empty and cannot contain '/'.")
-        if self.variants is not None:
-            if not isinstance(self.variants, Mapping):
-                raise ValueError(
-                    "USD variants must map prim paths to variant selections."
-                )
-            for path, choices in self.variants.items():
-                if (
-                    not isinstance(path, str)
-                    or not path.startswith("/")
-                    or not isinstance(choices, Mapping)
-                ):
-                    raise ValueError(
-                        "USD variants require absolute prim paths and mappings."
-                    )
-                if any(
-                    not isinstance(name, str) or not isinstance(choice, str)
-                    for name, choice in choices.items()
-                ):
-                    raise ValueError(
-                        "USD variant-set names and choices must be strings."
-                    )
-
-    @classmethod
-    def from_dict(cls, init_dict: Mapping[str, Any]) -> UsdSourceCfg:
-        """Parse source options, rejecting misspelled fields.
-
-        Args:
-            init_dict: USD source configuration fields.
-
-        Returns:
-            Validated source configuration.
-        """
-        unknown = set(init_dict) - {"prim_path", "variants", "namespace", "pose_mode"}
-        if unknown:
-            raise ValueError(f"Unknown USD source fields: {sorted(unknown)}.")
-        return cls(**dict(init_dict))
-
-    def parse_kwargs(self) -> dict[str, Any]:
-        """Return configured DexSim parser options.
-
-        Returns:
-            Non-None selection options; placement is applied by EmbodiChain.
-        """
-        return {
-            name: getattr(self, name)
-            for name in ("prim_path", "variants", "namespace")
-            if getattr(self, name) is not None
-        }
 
 
 @configclass
@@ -159,11 +62,20 @@ class ObjectBaseCfg:
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> ObjectBaseCfg:
         """Initialize the configuration from a dictionary."""
+        from .source import _raise_removed_source_fields, _usd_source_from_value
+
+        _raise_removed_source_fields(init_dict)
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():
             if hasattr(cfg, key):
                 attr = getattr(cfg, key)
-                if key == "attrs" and isinstance(value, Mapping):
+                if key == "source":
+                    setattr(cfg, key, _usd_source_from_value(value))
+                elif key == "shape" and isinstance(value, Mapping):
+                    from ..shapes import ShapeCfg
+
+                    setattr(cfg, key, ShapeCfg.from_dict(dict(value)))
+                elif key == "attrs" and isinstance(value, Mapping):
                     # Keep the base module independent of rigid schemas at
                     # import time; only rigid-derived configs expose this key.
                     from .rigid import _rigid_body_physics_from_dict

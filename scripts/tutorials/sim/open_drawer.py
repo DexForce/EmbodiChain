@@ -96,7 +96,9 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlanOptions,
     TrajectorySampleMethod,
 )
-from embodichain_robots import FrankaPandaCfg
+from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+    _create_franka_native_hand_cfg,
+)
 from embodichain.lab.visualization import visualization_cfg_from_args
 
 __all__ = [
@@ -170,12 +172,11 @@ def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
     Raises:
         RuntimeError: If the robot could not be added.
     """
-    # Add the existing Franka configuration. Higher contact friction helps the
+    # Explicitly mount the native hand. Higher contact friction helps the
     # fingertips retain the narrow drawer handle during the pull phase.
-    robot_cfg = FrankaPandaCfg.from_dict(
+    robot_cfg = _create_franka_native_hand_cfg(
         {
             "uid": "tutorial_franka",
-            "robot_type": "panda",
             "attrs": {
                 "material_props": {
                     "static_friction": 1.0,
@@ -600,8 +601,6 @@ def main(args: argparse.Namespace | None = None) -> None:
             cfg=MotionGenCfg(
                 planner_cfg=ToppraPlannerCfg(
                     robot_uid=robot.uid,
-                    # Keep this small tutorial deterministic across platforms.
-                    max_workers=1,
                 ),
             )
         )

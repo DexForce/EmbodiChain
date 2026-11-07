@@ -35,7 +35,9 @@ Serialization (``to_dict`` / ``to_string`` / ``save_to_file``) is inherited from
 Checklist
 ---------
 
-1. **Prepare the URDF** — place the URDF (+ meshes) in the assets directory.
+1. **Prepare the URDF** — publish versioned URDF/mesh resources and declare their asset class in
+   the owning vendor/model package. Register the class through the lightweight
+   robot asset catalog; reuse the core download/cache implementation.
 2. **Override** ``_build_defaults(self, init_dict=None)`` — set variant fields from
    ``init_dict``, then populate ``urdf_cfg`` / ``control_parts`` / ``solver_cfg`` /
    ``joint_drive_props`` / ``attrs``.
@@ -51,8 +53,12 @@ Checklist
    ``embodichain_robots/__init__.py`` and its ID, class import path, defaults,
    and control metadata in ``embodichain_robots/_catalog.py``. External packages
    advertise a catalog through an ``embodichain.robots`` entry point.
-9. **Add documentation** — ``docs/source/resources/robot/<name>.md`` + update
-   ``resources/robot/index.rst``.
+9. **Add documentation** — create
+   ``docs/source/resources/robot/<vendor>/<model>.md`` and include it in the
+   owning vendor's ``index.rst`` and the Supported Robots overview. Reuse the
+   source namespace; community projects with an unknown manufacturer use their
+   project namespace. Add an index for a new vendor or project and link it from
+   ``resources/robot/index.rst``. Generic composition remains separate.
 10. **Test** — a ``__main__`` smoke test + the DOF drift guard + ``preview-asset`` CLI.
 
 Refresh the editable install after changing package entry-point metadata, then
@@ -64,10 +70,15 @@ load robot implementations or download assets.
 Approaches
 ----------
 
-- **Single-file** (variant-less robots): one ``my_robot.py`` with everything.
-- **Package** (robots with variants — versions/arm-kinds/hand-brands): a directory
-  with ``types.py`` (enums), ``cfg.py`` (a variant-aware ``_build_defaults``),
-  optional ``params.py`` / ``utils.py`` helpers, and ``__init__.py``.
+- **Single-file**: ``<vendor>/<model>.py`` when archives are shared at vendor level.
+- **Package**: ``<vendor>/<model>/`` for model-owned assets, revisions or calibrations.
+  Keep ``cfg.py``, ``assets.py``, optional specification/type helpers, and a lazy
+  ``__init__.py`` together. Asset imports must not load configuration modules.
+
+Asset classes register through ``embodichain_robots/_asset_catalog.py`` and the
+``embodichain.assets`` entry point. Each asset ID declares a ``class_path`` and
+``category``. Keep source versions, checksums and cache prefixes with the asset;
+the core owns reusable download, locking and extraction machinery.
 
 Key parameters
 --------------

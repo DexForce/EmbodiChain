@@ -30,6 +30,7 @@ from __future__ import annotations
 from numbers import Integral
 from typing import TYPE_CHECKING, Any, Sequence
 
+import numpy as np
 import torch
 
 from .base import ArticulationViewBase, RigidBodyViewBase
@@ -103,6 +104,66 @@ def _embodichain_pose(data: torch.Tensor) -> torch.Tensor:
     result[..., 0:3] = data[..., 4:7]
     result[..., 3:7] = data[..., 0:4]
     return result
+
+
+class _SceneVisualObjectView:
+    """Adapt pure-visual World batches from world to arena-local matrices.
+
+    Parent transforms and native IDs are captured once per topology revision.
+    Steady-state reads and writes each use one synchronous native tensor call,
+    including selections on CUDA. Outputs belong to the caller.
+    """
+
+    def __init__(
+        self, scene: Scene, entities: Sequence[SpawnedRigidBody], device: torch.device
+    ) -> None:
+        self.scene = scene
+        self.device = device
+        self.refresh(entities)
+
+    def refresh(self, entities: Sequence[SpawnedRigidBody]) -> None:
+        self.rows = torch.arange(len(entities), dtype=torch.long, device=self.device)
+        self.user_ids = torch.tensor(
+            [entity.get_user_id() for entity in entities],
+            dtype=torch.int32,
+            device=self.device,
+        )
+        local = torch.as_tensor(
+            np.stack([entity.get_local_pose() for entity in entities]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        world = torch.as_tensor(
+            np.stack([entity.get_world_pose() for entity in entities]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._parent_world = world @ torch.linalg.inv(local)
+        self._parent_inverse = torch.linalg.inv(self._parent_world)
+
+    def fetch_pose(self, rows: torch.Tensor) -> torch.Tensor:
+        transforms = torch.empty(
+            (len(rows), 4, 4), dtype=torch.float32, device=self.device
+        )
+        if len(rows):
+            _checked_batch_call(
+                self.scene.world,
+                "fetch_object_transform",
+                transforms,
+                self.user_ids.index_select(0, rows),
+            )
+            transforms = self._parent_inverse.index_select(0, rows) @ transforms
+        return transforms
+
+    def apply_pose(self, poses: torch.Tensor, rows: torch.Tensor) -> None:
+        if len(rows):
+            transforms = self._parent_world.index_select(0, rows) @ poses
+            _checked_batch_call(
+                self.scene.world,
+                "apply_object_transform",
+                transforms.contiguous(),
+                self.user_ids.index_select(0, rows),
+            )
 
 
 class _SceneBatchSelectionAdapter:

@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 import json
 from types import SimpleNamespace
 
@@ -211,10 +213,17 @@ def test_objective_selection_is_strict(selection, tmp_path):
 def test_absent_objective_preserves_info_keys():
     env = object.__new__(EmbodiedEnv)
     env._num_envs = 2
+    env.episode_context = EpisodeContext(2)
     env.sim = SimpleNamespace(device=torch.device("cpu"))
     env._elapsed_steps = torch.zeros(2, dtype=torch.int32)
     assert EmbodiedEnvCfg().objective is None
-    assert set(env.get_info()) == {"success", "fail", "elapsed_steps", "metrics"}
+    assert set(env.get_info()) == {
+        "success",
+        "fail",
+        "elapsed_steps",
+        "metrics",
+        "episode_context",
+    }
 
 
 def test_binding_rejects_missing_physical_uid_before_rollout():
@@ -258,6 +267,9 @@ class _LifecycleEnv(EmbodiedEnv):
 
     def __init__(self):
         self._num_envs = 2
+        self.episode_context = EpisodeContext(2)
+        self.episode_context._begin_episode([0, 1])
+        self.episode_context._finish_initialization([0, 1])
         self._profiler = _Profiler()
         self._elapsed_steps = torch.zeros(2, dtype=torch.int32)
         self._task_success = torch.zeros(2, dtype=torch.bool)

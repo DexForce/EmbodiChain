@@ -48,6 +48,18 @@ class FEPSolverCfg(SolverCfg):
     class_type: str = "FEPSolver"
     position_tolerance: float = 1e-5
     rotation_tolerance: float = 1e-5
+    reference_qpos: list[float] | None = None
+    """URDF joint angles defining the canonical FEP posture, in radians.
+
+    Defaults to zero. Inputs, outputs, seeds and limits always retain the
+    original URDF joint coordinates; only geometric reconstruction is rebased.
+    """
+    axis_alignment_tolerance: float = 1e-6
+    """Maximum sine of axis misalignment when extracting the geometric model.
+
+    An explicit calibration allowance does not relax FK acceptance against
+    the original URDF, controlled by position and rotation tolerances.
+    """
     batch_size: int | None = None
     """Targets per chunk; default 16384, capped at 4096 for search or 1024 for Jacobians."""
     ik_solution_selection: str = "nearest"
@@ -85,6 +97,14 @@ class FEPSolverCfg(SolverCfg):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
+        if self.reference_qpos is not None:
+            reference = np.asarray(self.reference_qpos, dtype=float)
+            if reference.shape != (7,) or not np.isfinite(reference).all():
+                raise ValueError("reference_qpos must contain seven finite angles")
+        if not math.isfinite(self.axis_alignment_tolerance) or not (
+            0 < self.axis_alignment_tolerance < 1
+        ):
+            raise ValueError("axis_alignment_tolerance must be finite and in (0, 1)")
         if type(self.redundancy_search) is not bool:
             raise ValueError("redundancy_search must be a boolean")
         for name in ("arm_angle_weight", "joint_limit_weight"):
@@ -156,7 +176,9 @@ class FEPSolver(BaseSolver):
             )
         if cfg.joint_names is not None and list(cfg.joint_names) != names:
             raise ValueError("FEP joint_names must match the serial chain order")
-        dimensions, scales, base_inverse, tool, origins, axes = _extract_geometry(chain)
+        dimensions, scales, base_inverse, tool, origins, axes = _extract_geometry(
+            chain, cfg.reference_qpos, cfg.axis_alignment_tolerance
+        )
         resolved = cfg.copy()
         resolved.joint_names = names
         super().__init__(resolved, device=device, pk_serial_chain=chain, **kwargs)
@@ -733,13 +755,21 @@ class FEPSolver(BaseSolver):
 
 def _extract_geometry(
     chain: pk.SerialChain,
+    reference_qpos: list[float] | None = None,
+    axis_alignment_tolerance: float = 1e-6,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Recover and validate Franka screw-axis lines in the URDF home pose.
+    """Recover and validate screw-axis lines at the configured reference pose.
 
-    Fixed frames are accumulated before recording each revolute axis. The
-    1e-6 structural tolerance accommodates the chain's float32 transforms;
-    solving still requires FK acceptance against that actual chain.
+    Geometric coordinates are relative to ``reference_qpos``. Original joint
+    origins and local axes remain unchanged for final URDF FK validation.
+    Line offsets retain the 1e-6 metre structural tolerance; the explicit axis
+    allowance accommodates small CAD errors without changing FK acceptance.
     """
+    reference = (
+        np.zeros(7)
+        if reference_qpos is None
+        else np.asarray(reference_qpos, dtype=float)
+    )
     home, pending = np.eye(4), np.eye(4)
     points, axes, origins, local_axes = [], [], [], []
     for frame in chain._serial_frames:
@@ -759,6 +789,20 @@ def _extract_geometry(
             points.append(home[:3, 3].copy())
             axis = home[:3, :3] @ frame.joint.axis.detach().cpu().numpy()
             axes.append(axis / np.linalg.norm(axis))
+            angle = reference[len(axes) - 1]
+            local_axis = local_axes[-1] / np.linalg.norm(local_axes[-1])
+            cross = np.array(
+                [
+                    [0.0, -local_axis[2], local_axis[1]],
+                    [local_axis[2], 0.0, -local_axis[0]],
+                    [-local_axis[1], local_axis[0], 0.0],
+                ]
+            )
+            rotation = np.eye(4)
+            rotation[:3, :3] = (
+                np.eye(3) + np.sin(angle) * cross + (1 - np.cos(angle)) * cross @ cross
+            )
+            home = home @ rotation
     points, axes = np.asarray(points), np.asarray(axes)
     z = axes[0].copy()
     shoulder = points[0] + z * np.dot(z, points[1] - points[0])
@@ -798,7 +842,8 @@ def _extract_geometry(
     directions = canonical_axes @ base[:3, :3].T
     offsets = canonical_points @ base[:3, :3].T + shoulder - points
     if (
-        np.linalg.norm(np.cross(axes, directions), axis=-1).max() > 1e-6
+        np.linalg.norm(np.cross(axes, directions), axis=-1).max()
+        > axis_alignment_tolerance
         or np.linalg.norm(np.cross(offsets, directions), axis=-1).max() > 1e-6
     ):
         raise ValueError(message)
@@ -815,6 +860,7 @@ def _extract_geometry(
                 np.arctan2(a4, d3),
                 np.arctan2(a5, d5),
             ],
+            reference,
         )
     )
     origins.append(pending)

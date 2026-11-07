@@ -4,11 +4,64 @@
 [![Year](https://img.shields.io/badge/year-2025--2026-blue?style=for-the-badge)](#)
 ---
 
-This page contains bibliographic information for academic papers related to EmbodiChain. Papers are ordered by year (newest first).
+This page contains bibliographic information for academic papers and competition projects related to EmbodiChain. Entries are ordered by year (newest first).
 
 ## Publications
 
 ### 2026
+
+#### RoboSynChallenge: Mastering Real-World Dexterity via Generalizing Synthesized Manipulation Skills
+
+**Authors:** RoboSynChallenge Organizing Team
+
+**Venue:** NeurIPS 2026 Competition
+
+**Links:** [Website](https://robosyn-bench.net/#/home) | [Report](https://robosyn-bench.net/material/RoboSynChallenge-report.pdf) | [Code](https://github.com/EDEM-AI/RoboSynChallenge)
+
+```bibtex
+@misc{robosynchallenge2026,
+  title = {RoboSynChallenge: Mastering Real-World Dexterity via Generalizing Synthesized Manipulation Skills},
+  author = {{RoboSynChallenge Organizing Team}},
+  howpublished = {NeurIPS 2026 Competition},
+  year = {2026},
+  url = {https://robosyn-bench.net/}
+}
+```
+
+---
+
+#### Backpropagating Through Simulation: Analytic Policy Gradients for Sample and Learning Efficient Differentiable Continuous Control
+
+**Authors:** Yueci Deng
+
+**Venue:** arXiv preprint arXiv:2606.21525, 2026
+
+**Links:** [Paper](https://arxiv.org/abs/2606.21525) | [Code](https://github.com/yuecideng/analytic_policy_gradients)
+
+**EmbodiChain integration:** See the [APG algorithm](../../overview/rl/algorithm.md#apg), [differentiable trainer](../../overview/rl/trainer.md#differentiabletrainer), and [training CLI](../../overview/rl/train_script.md) documentation. The Newton-backed [differentiable route](../../overview/sim/sim_manager/physics/newton/runtime_qualification.md#differentiable-route) currently provides a kinematics gradient bridge.
+
+**Examples:**
+
+- **PointMass APG training:** [Training configuration](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml) and [differentiable environment](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/embodichain_tasks/classic_control/point_mass.py). Run the configuration with:
+
+  ```bash
+  embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
+  ```
+
+- **Franka FR3 differentiable kinematics:** [Reference environment](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py), demonstrating the Warp-tape / PyTorch-autograd bridge through forward kinematics and reward kernels.
+
+```bibtex
+@article{deng2026backpropagating,
+  title = {Backpropagating Through Simulation: Analytic Policy Gradients for Sample and Learning Efficient Differentiable Continuous Control},
+  author = {Deng, Yueci},
+  journal = {arXiv preprint arXiv:2606.21525},
+  year = {2026},
+  doi = {10.48550/arXiv.2606.21525},
+  url = {https://arxiv.org/abs/2606.21525}
+}
+```
+
+---
 
 #### From Reaction to Anticipation: Proactive Failure Recovery through Agentic Task Graph for Robotic Manipulation
 

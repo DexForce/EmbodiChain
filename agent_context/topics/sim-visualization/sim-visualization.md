@@ -25,7 +25,7 @@
 | `embodichain/lab/scripts/_preview.py`, `preview_joint_control.py` | Shared preview stepping, frontend setup, and simulation-thread joint controls |
 
 Human-facing behavior and usage are documented in
-`docs/source/overview/sim/viser_visualization.md`.
+`docs/source/overview/sim/visualization/index.rst`.
 
 ## Ownership and Data Flow
 
@@ -45,6 +45,11 @@ VisualizationRuntime
 VisualizationBackend
              └── ViserBackend → HTTP/WebSocket browser UI
 ```
+
+Render-only `VisualObject` meshes export as `visual_object` nodes with root poses
+and live per-environment visibility. They share the mesh manifest/frame protocol
+without entering physical-object registries; non-mesh representations require a
+separate protocol extension.
 
 The simulation owns physics and assets. Scene export is read-only. When
 `allow_commands=True`, Viser Gizmo callbacks enqueue pose commands that

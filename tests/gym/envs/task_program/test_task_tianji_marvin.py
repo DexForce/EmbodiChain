@@ -131,7 +131,7 @@ def test_marvin_deployments_preflight_and_register(
 ) -> None:
     """Each real task selects compatible contracts and registers EmbodiedEnv."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path, payload, physical, deployment = _deployment(task)
     registration = deployment.integration.registration
@@ -148,7 +148,8 @@ def test_marvin_deployments_preflight_and_register(
     assert compiled.segment_count == segments
     assert registration.robot_profile_binding.profile_id == "tianji_marvin"
     assert isinstance(cfg.sim_cfg.physics_config, DefaultPhysicsCfg)
-    assert cfg.sensor == []
+    assert [camera.uid for camera in cfg.sensor] == ["cam_high"]
+    assert cfg.sensor[0].enable_color
     assert "init_qpos" not in payload["embodiment"].get("overrides", {})
     assert cfg.robot.init_qpos == TianjiMarvinCfg.from_dict({}).init_qpos
     assert physical.config["robot"]["init_qpos"] == cfg.robot.init_qpos
@@ -201,11 +202,16 @@ def test_marvin_grasp_tcp_aligns_with_physical_hand_axes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The task-facing frame opens on hand X and approaches on hand Z."""
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path, payload, _, _ = _deployment("repeated_pick_place")
     cfg = config_to_cfg(payload, source_path=path)
+    solver_cfg = cfg.robot.solver_cfg[f"{side}_arm"]
+    assert isinstance(solver_cfg, SSIKSolverCfg)
+    assert solver_cfg.backend == "warp" and solver_cfg.srs_search == "seed_local"
     # Both URDF hand-tool fixed joints rotate by Rz(-pi/2) @ Ry(-pi/2).
     hand_to_tool = torch.tensor(
         [
@@ -215,9 +221,64 @@ def test_marvin_grasp_tcp_aligns_with_physical_hand_axes(
             [0.0, 0.0, 0.0, 1.0],
         ]
     )
-    hand_to_tcp = hand_to_tool @ torch.tensor(cfg.robot.solver_cfg[f"{side}_arm"].tcp)
+    hand_to_tcp = hand_to_tool @ torch.tensor(solver_cfg.tcp)
     torch.testing.assert_close(hand_to_tcp[:3, :3], torch.eye(3))
     torch.testing.assert_close(hand_to_tcp[:3, 3], torch.tensor([0.0, 0.0, 0.1125]))
+
+
+def test_marvin_stack_open_fingers_clear_the_cube_support() -> None:
+    """The inclined grasp must not drive an open finger through the table."""
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+    import trimesh
+
+    path, payload, physical, deployment = _deployment("tableware/stack_blocks_two")
+    cfg = config_to_cfg(payload, source_path=path)
+    asset = Path(cfg.robot.fpath)
+    robot_xml = ET.parse(asset).getroot()
+    preset = deployment.integration.registration.robot_profile_binding.presets[0]
+    grasp = preset.action_option_templates["pick"].fixed_object_to_eef.numpy()
+
+    def origin_pose(origin: ET.Element | None) -> np.ndarray:
+        result = np.eye(4)
+        if origin is not None:
+            result[:3, :3] = Rotation.from_euler(
+                "xyz", np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
+            ).as_matrix()
+            result[:3, 3] = np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
+        return result
+
+    tool_joint = robot_xml.find("joint[@name='LEFT_HAND_TOOL']")
+    assert tool_joint is not None
+    hand_to_tcp = origin_pose(tool_joint.find("origin")) @ np.asarray(
+        cfg.robot.solver_cfg["left_arm"].tcp
+    )
+    block = next(
+        item
+        for item in physical.scene_config["rigid_object"]
+        if item["uid"] == "block_2"
+    )
+    support_z = -0.5 * block["shape"]["size"][2] * block["body_scale"][2]
+    for index in (1, 2):
+        joint = robot_xml.find(f"joint[@name='LEFT_HAND_FINGER_{index}']")
+        collision = robot_xml.find(
+            f"link[@name='left_hand_finger_{index}_link']/collision"
+        )
+        assert joint is not None and collision is not None
+        mesh = collision.find("geometry/mesh")
+        assert mesh is not None
+        fingers = trimesh.load(
+            asset.parent / mesh.attrib["filename"], force="mesh", process=False
+        )
+        fingers.apply_scale(np.fromstring(mesh.get("scale", "1 1 1"), sep=" "))
+        fingers.apply_transform(
+            grasp
+            @ np.linalg.inv(hand_to_tcp)
+            @ origin_pose(joint.find("origin"))
+            @ origin_pose(collision.find("origin"))
+        )
+        # Open jaws at the nominal grip must clear both scene contact offsets.
+        assert fingers.bounds[0, 2] - support_z > 0.004
 
 
 @pytest.mark.parametrize("side", ["left", "right"])
@@ -273,7 +334,7 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
 ) -> None:
     """The 750 mm table variant shifts assets and targets together by 125 mm."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path, payload, _, deployment = _deployment("tableware/pour_water")
     reference = load_config(path.parent / "task.cobotmagic.yaml")
@@ -316,7 +377,7 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
     cfg = config_to_cfg(payload, source_path=path)
     assert cfg.target_control_frequency == 100
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
-    assert preset.motion_policy.sample_count == 480
+    assert preset.motion_policy.sample_count == 160
     assert preset.action_option_templates[
         "simulation.pour"
     ].rotate_angle == pytest.approx(-torch.pi / 3)

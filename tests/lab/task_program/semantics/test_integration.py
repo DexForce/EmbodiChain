@@ -1056,3 +1056,102 @@ def test_bound_semantic_integration_rejects_manifest_subclass_behavior() -> None
             robot_profile=bound_profile,
             engine=engine,
         )
+
+
+def test_pose_source_revision_survives_projection_and_rejects_live_identity_drift() -> (
+    None
+):
+    """Provider pose declarations participate in static/live identity matching."""
+    provider = _NeverObservedStateProvider()
+
+    def registry(revision: str | None) -> SceneRegistry:
+        return SceneRegistry(
+            (
+                SceneEntityRegistration(
+                    ref=SceneObjectRef("cube"),
+                    state_provider=provider,
+                    pose_source_revision=revision,
+                ),
+            )
+        )
+
+    original = registry("pose-v1")
+    projected = SceneEntityMetadata.from_registration(original.registrations[0])
+    assert projected.pose_source_revision == "pose-v1"
+    manifest = SceneManifest.from_registry(original)
+    assert manifest.entries[0].pose_source_revision == "pose-v1"
+    manifest.validate_registry(registry("pose-v1"))
+    for changed_revision in ("pose-v2", None):
+        with pytest.raises(SemanticValidationError) as error:
+            manifest.validate_registry(registry(changed_revision))
+        assert error.value.diagnostic.code == "scene_manifest_mismatch"
+    assert provider.calls == 0
+
+
+@pytest.mark.parametrize("revision", ["", " padded", "padded ", 1, True])
+def test_pose_source_revision_requires_an_identifier(revision: object) -> None:
+    """Static metadata and live registration share revision validation."""
+    with pytest.raises((TypeError, ValueError), match="pose_source_revision"):
+        SceneEntityMetadata(ref=SceneObjectRef("cube"), pose_source_revision=revision)
+    with pytest.raises((TypeError, ValueError), match="pose_source_revision"):
+        SceneEntityRegistration(
+            ref=SceneObjectRef("cube"),
+            state_provider=_NeverObservedStateProvider(),
+            pose_source_revision=revision,
+        )
+
+
+def test_pose_source_revision_requires_a_provider_and_defaults_to_none() -> None:
+    """Existing parent-relative affordances remain compatible without revisions."""
+    declaration = {
+        "ref": SceneAffordanceRef("cube.grasp"),
+        "parent": SceneObjectRef("cube"),
+        "native_name": "grasp",
+        "relative_pose": torch.eye(4),
+        "affordance": Affordance(),
+    }
+    assert SceneEntityRegistration(**declaration).pose_source_revision is None
+    with pytest.raises(
+        ValueError, match="pose_source_revision requires state_provider"
+    ):
+        SceneEntityRegistration(**declaration, pose_source_revision="pose-v1")
+
+
+def test_uninstalled_recovery_is_static_preflight_error_without_acquisition():
+    from embodichain.lab.sim.atomic_actions import PlanningRecovery, RecoveryPolicy
+
+    registry, provider = _scene_registry(with_default=True)
+    integration = _semantic_integration(
+        registry,
+        preset=_preset(
+            "default",
+            recovery_policy=RecoveryPolicy(
+                planning_recovery=PlanningRecovery("not_installed", "pick_up", 1)
+            ),
+        ),
+    )
+    with pytest.raises(SemanticValidationError) as failure:
+        integration.link_call(Pick(object=SceneObjectRef("cube")))
+    assert failure.value.diagnostic.code == "incompatible_planning_recovery"
+    assert provider.calls == 0
+
+
+def test_segment_recovery_without_handler_is_rejected_by_static_preflight():
+    registry, provider = _scene_registry(with_default=True)
+    integration = _semantic_integration(
+        registry,
+        preset=_preset(
+            "default",
+            motion_policy=MotionPolicy(
+                strategy="ik_interp",
+                interpolation_mode="fixed_grid",
+                ik_seed_mode="sequential",
+                acceleration_limit=None,
+                segment_sample_count_retries=(4, 6),
+            ),
+        ),
+    )
+    with pytest.raises(SemanticValidationError) as failure:
+        integration.link_call(Pick(object=SceneObjectRef("cube")))
+    assert failure.value.diagnostic.code == "incompatible_motion_policy"
+    assert provider.calls == 0

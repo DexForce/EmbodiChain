@@ -20,6 +20,7 @@ pages are ordered as a progressive learning path.
    ../solver
    ../motion_gen
    ../trajectory_planning
+   ../robot_workspace
    ../robot_articulation
    ../atomic_actions
    ../task_program_python

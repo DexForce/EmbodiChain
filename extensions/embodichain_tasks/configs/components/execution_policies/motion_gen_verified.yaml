@@ -11,6 +11,9 @@ planner:
 motion:
   strategy: motion_gen
   sample_count: 140
+  # Keep the physically qualified tabletop speed budget across robot limits.
+  velocity_limit: 0.2
+  acceleration_limit: 0.5
   dynamic_collision_mode: auto
 
 tracking:
@@ -19,6 +22,8 @@ tracking:
   terminal_max_abs_error: 1.0
 
 recovery:
+  # Composite transfers retain native timing and can exceed 30 seconds.
+  action_timeout: 120.0
   max_replans: 3
   max_action_retries: 0
   goal_rotation_threshold: 0.5

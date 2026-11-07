@@ -96,18 +96,70 @@ The expert planner must **not** call ``env.step()`` itself. The common executor
 owns stepping so observations, actions, terminal signals, segment annotations,
 and dataset frames stay causally aligned.
 
+Recording eligibility and component evidence
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every environment exposes an
+:class:`~embodichain.lab.gym.envs.episode_context.EpisodeContext`. Components
+report their own acceptance through a synchronous check; the context combines
+those reports without deciding geometry validity or task success. For example,
+a host can publish an already measured row mask and its evidence:
+
+.. code-block:: python
+
+   with env.episode_context.check("task/validation", env_ids) as finish:
+       accepted, evidence, reasons = measure_task_acceptance(env, env_ids)
+       finish(accepted=accepted, metadata=evidence, reasons=reasons)
+
+   eligible_ids = env.episode_context.filter_recordable(env_ids)
+   row_snapshots = env.episode_context.snapshot(env_ids)
+
+``accepted`` is a bool or a boolean mask in selected-row order. Metadata may be
+a shared JSON mapping or an integer-row-keyed mapping; reasons may be a string
+or a row-keyed mapping. Report exactly once before leaving the scope. Exceptions,
+cancellation and a missing report reject those buffers; a missing report also
+raises an error. Overlapping checks from the same source are rejected.
+
+A row can be submitted only after successful reset initialization, with no
+pending check and no earlier rejection in its current buffers. Different
+sources combine by intersection. An outer check remains pending across internal
+resets. Replacing demo metadata, starting another demo or reseeding cannot
+remove a rejection; the host must successfully consume or discard the buffers
+and begin a new episode. Existing success/failed-episode, fragment and explicit
+commit policies still apply after this eligibility filter.
+
+Reset consumes the old recording before changing physical state. A save error
+preserves the episode and its buffers for retry. New observations and the first
+frame must be registered before initialization completes. Construction alone
+does not create an eligible recording. ``close()`` never implicitly commits.
+
+Read the same row snapshots through ``info["episode_context"]`` and
+``env.get_demo_episode_metadata(row)["episode_context"]``. They contain episode
+numbers, initialization/recording eligibility, pending sources, rejection
+reasons and independent source metadata. Asynchronous writers copy their data
+and snapshots before enqueueing.
+
+The reset event is named ``ExpandSceneLayout`` in Python and YAML. It records
+layout provenance under ``sources["events/<configured_event_name>"]``. Its name
+replaces ``RandomizeSceneLayout`` directly, while the configured event name and
+its random stream remain unchanged. See the runnable
+`scene expansion examples <https://github.com/DexForce/EmbodiChain/tree/main/scripts/tutorials/scene>`_
+for online generation, saved-layout replay and the portable tabletop assets.
+
+Normal videos are independent files under
+``videos/env_NNN/episode_NNNNNN_<camera>.mp4``, with JSON context sidecars.
+Selected-row reset leaves other rows' frames untouched. Failed writes retain
+an owned job and retry under the same episode identity. Explicit diagnostic
+exports use ``purpose="diagnostic"`` and a separate diagnostics directory;
+their evidence is excluded from normal datasets. Mosaics remain previews.
+
 Paradigm 1: Handwritten Trajectories
 ------------------------------------
 
-A handwritten expert lives beside its registered task entry point, for example:
-
-* ``embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py``;
-* ``embodichain_tasks/embodichain_tasks/manipulation/tableware/blocks_ranking_rgb.py``.
-
-Both examples build a ``MotionGenerator`` backed by TOPPRA and pass it to an
-``AtomicActionEngine``. The engine then plans reusable PickUp and Place
-invocations while the task retains control over scene queries, command timing,
-segment metadata, and success checks.
+A handwritten expert lives beside its task's registered Python entry point.
+The task owns scene queries, command timing, segment metadata, and success
+checks. The official stacking and RGB-ranking experts use the configured Task
+Program route described below; they no longer provide Python task subclasses.
 
 Direct Motion Generator or Atomic Skills
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -130,88 +182,41 @@ match its active action space. If the environment controls more joints than
 the planned arm, merge the arm plan with hold or gripper commands before
 yielding it; do not silently rely on incompatible dimensions.
 
-Build the planning services
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The two-block stacking task demonstrates the recommended Atomic Skills setup:
-
-.. dropdown:: Motion Generator and AtomicActionEngine setup
-   :icon: code
-
-   .. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
-      :language: python
-      :start-at:     def _initialize_atomic_actions(self) -> None:
-      :end-before:     def create_demo_segments(
-      :linenos:
-
-The task constructs the motion generator once, declares command profiles for
-the gripper, and reuses the engine for every episode. Object semantics are
-explicit inputs to the skills rather than being inferred from simulator names.
-
 Return semantic demonstration segments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``create_demo_segments()`` is the preferred handwritten expert API:
+``create_demo_segments()`` is the preferred handwritten expert API. This
+schematic subclass method assumes an existing planner and physical validators:
 
-.. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
-   :language: python
-   :start-at:     def create_demo_segments(
-   :end-before:     def _plan_stack(
-   :linenos:
+.. code-block:: python
 
-The two segments keep three outcomes separate:
+   from embodichain.lab.gym.envs import DemoSegment
 
-* ``actions`` is the controller-command stream consumed by the common runner;
-* ``planning_success`` records whether PickUp and Place were planned; and
-* ``validator`` checks measured lift after the grasp, then planning success and
-  the physical stack after placement and settling.
+   def create_demo_segments(self, **kwargs):
+       pick_actions, place_actions = self.plan_pick_and_place(**kwargs)
+       yield DemoSegment(
+           actions=pick_actions,
+           name="pick_object",
+           instruction="Grasp and lift the object.",
+           validator=self.validate_lift,
+       )
+       yield DemoSegment(
+           actions=place_actions,
+           name="place_object",
+           instruction="Place the object, release it, and let it settle.",
+           validator=self.validate_placement,
+       )
 
-The task creates typed PickUp and Place requests and threads the projected
-held-object state from the first plan into the second:
-
-.. dropdown:: Compile the PickUp and Place trajectory
-   :icon: code
-
-   .. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
-      :language: python
-      :start-at:         pick_compiled = self._action_engine.compile(
-      :end-before:     def _insert_grasp_hold(self, trajectory: torch.Tensor) -> torch.Tensor:
-      :linenos:
-
-For a multi-object episode, yield segments lazily. The
-``BlocksRankingRGBEnv.create_demo_segments()`` example yields the red-block
-grasp and placement first, then queries the updated reference-block pose before
-planning the blue-block grasp and placement. This avoids planning later
-subtasks against stale scene state.
+The planner must merge arm, gripper and hold commands into the environment's
+active action layout. Keep release settling in the placement iterable and
+measure its physical outcome independently of planning success. For a
+multi-object episode, yield lazily so later planning reads the updated scene.
+See :doc:`atomic_actions` for reusable Atomic Skill planning and execution.
 
 Legacy tasks implementing ``create_demo_action_list()`` remain supported and
-are wrapped as one segment named ``legacy``. New tasks should implement
-``create_demo_segments()`` so subtask boundaries, language, metadata, and
-validators remain explicit.
-
-Try the handwritten expert
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The shipped stacking config includes a dataset recorder. First smoke-test the
-expert while suppressing dataset writes:
-
-.. code-block:: bash
-
-   embodichain run-env \
-       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json \
-       --headless \
-       --filter_dataset_saving \
-       --max_episodes 1
-
-To collect it, run the same config without ``--filter_dataset_saving``. Customize
-the recorder using `Configure Dataset Recording`_:
-
-.. code-block:: bash
-
-   embodichain run-env \
-       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json \
-       --headless \
-       --max_episodes 5
+are wrapped as one segment named ``legacy``. New handwritten experts should
+provide explicit semantic segments; configured tasks should declare those
+boundaries in their Task Program.
 
 Paradigm 2: Task Program
 ------------------------
@@ -220,6 +225,19 @@ Task Program replaces the task-specific expert method with declarative task
 intent. It does not introduce a second rollout or recording API: the configured
 adapter compiles the program, creates lazy demonstration segments, and returns
 them to the same executor used by handwritten tasks.
+
+The migrated two-block stacking and RGB-ranking experts use the same configured
+route. For example, smoke-test stacking without writing a dataset:
+
+.. code-block:: bash
+
+   embodichain run-task \
+       --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml \
+       --headless --filter_dataset_saving --max_episodes 1
+
+To collect demonstrations, remove ``--filter_dataset_saving`` and configure
+the recorder using `Configure Dataset Recording`_. The deployment selects the
+physical scene, embodiment, execution policy, and declarative program.
 
 The current Pour Water example is a complete configuration-defined task:
 
@@ -238,7 +256,7 @@ Compose the deployment
 
 The runnable deployment is intentionally thin:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
    :language: yaml
    :linenos:
 
@@ -248,7 +266,7 @@ only physical simulation and ordinary Gym values:
 .. dropdown:: Pour Water reusable environment
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
       :language: yaml
       :linenos:
 
@@ -266,7 +284,7 @@ Python callables or naming simulator joints:
 .. dropdown:: Pour Water Task Program
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
+   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
       :language: yaml
       :linenos:
 
@@ -277,7 +295,7 @@ registered transport and pour lowerers:
 .. dropdown:: Pour Water integration
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
+   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
       :language: yaml
       :linenos:
 
@@ -295,7 +313,7 @@ runnable deployment can record directly:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml \
        --headless \
        --max_episodes 1
@@ -360,7 +378,7 @@ Important fields are:
 
 The real Pour Water recorder block can be inspected directly:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
    :language: yaml
    :start-at: dataset:
    :end-at: control_parts: [left_arm, left_eef, right_arm, right_eef]
@@ -369,7 +387,7 @@ The real Pour Water recorder block can be inspected directly:
 Execution, Validation, and Persistence
 --------------------------------------
 
-Without ``--preview`` or ``--replay``, ``embodichain run-env`` performs offline
+Without ``--preview`` or ``--replay``, ``embodichain run-task`` performs offline
 data expansion:
 
 1. Resolve ``create_demo_segments()`` from the handwritten task or configured
@@ -468,7 +486,7 @@ Useful modes and options are:
 * ``--max_episodes`` overrides the configured ``collection.target_episodes``.
 * ``collection.max_attempts`` controls retries for one selected batch.
 
-See :doc:`/guides/run_env` for preview, dataset recording, debug video,
+See :doc:`/guides/run_task` for preview, dataset recording, debug video,
 trajectory recording, and replay modes, and :doc:`/guides/cli` for the complete
 argument list.
 

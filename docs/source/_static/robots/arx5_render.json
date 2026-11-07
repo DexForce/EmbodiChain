@@ -1,0 +1,319 @@
+{
+  "robot": "ARX5",
+  "model": "ARX5 X5A",
+  "configuration": "ARX5 catalog defaults; adjusted outward-elbow ready pose",
+  "source_asset": "ARX5/X5A.urdf",
+  "source_commit": "19c2545772ad7b9821aebe2bbe71ed2ffefd2dbd",
+  "source_urdf_sha256": "826b5392ef2d37526a73a95a2a379e6c23e2fec7f81923934d8d642ef8fa3116",
+  "configuration_source_sha256": "9e259f97008dec322496f8feafbb4f277702e56d992ec7f25a0f3e5bec387488",
+  "independent_control_dof": 8,
+  "control_parts": {
+    "arm": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6"
+    ],
+    "eef": [
+      "joint7",
+      "joint8"
+    ]
+  },
+  "joint_positions": {
+    "joint1": -2.8399999141693115,
+    "joint2": 1.8250000476837158,
+    "joint3": 1.7430000305175781,
+    "joint4": -1.4889999628067017,
+    "joint5": 0.0,
+    "joint6": -1.2660000324249268,
+    "joint7": 0.04399999976158142,
+    "joint8": 0.04399999976158142
+  },
+  "root_position": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "self_collision_enabled": true,
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "window": "dlss",
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "upsample_ratio": null,
+      "render_width": 0,
+      "render_height": 0,
+      "target_width": 0,
+      "target_height": 0,
+      "tiled_enabled": true,
+      "exposure_compensation": 1.0
+    },
+    "nrd": {
+      "max_indirect_bounces": 1,
+      "denoising_range": 500000.0,
+      "disocclusion_threshold": 0.01,
+      "disocclusion_threshold_alternate": 0.05,
+      "disocclusion_threshold_mix_enabled": true,
+      "history_confidence_enabled": true,
+      "history_confidence_probe_stride": 5,
+      "history_confidence_sigma_scale": 2.0,
+      "history_confidence_sensitivity": 1.0,
+      "max_accumulated_frame_num": 30,
+      "max_fast_accumulated_frame_num": 6,
+      "history_fix_frame_num": 3,
+      "diffuse_prepass_blur_radius": 30.0,
+      "specular_prepass_blur_radius": 50.0,
+      "anti_firefly_enabled": false,
+      "sh_mode_enabled": false,
+      "validation_enabled": false,
+      "max_stabilized_frame_num": 63,
+      "min_blur_radius": 1.0,
+      "max_blur_radius": 30.0,
+      "antilag_luminance_sigma_scale": 2.0,
+      "antilag_luminance_sensitivity": 3.0,
+      "taa_min_current_weight": 0.0625,
+      "taa_sigma_scale": 2.0,
+      "taa_depth_rejection_enabled": true,
+      "taa_tone_mapping_enabled": false
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0,
+    "min_bounces": 4,
+    "max_bounces": 8
+  },
+  "presentation_material_settings": {
+    "base_link": {
+      "source": {
+        "base_color": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.8164966106414795
+      },
+      "presentation": {
+        "base_color": [
+          0.1803921568627451,
+          0.1803921568627451,
+          0.1803921568627451,
+          1.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.408248290463863
+      }
+    },
+    "link1": {
+      "source": {
+        "base_color": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.8164966106414795
+      },
+      "presentation": {
+        "base_color": [
+          0.1803921568627451,
+          0.1803921568627451,
+          0.1803921568627451,
+          1.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.408248290463863
+      }
+    },
+    "link2": {
+      "source": {
+        "base_color": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.8164966106414795
+      },
+      "presentation": {
+        "base_color": [
+          0.1803921568627451,
+          0.1803921568627451,
+          0.1803921568627451,
+          1.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.408248290463863
+      }
+    },
+    "link4": {
+      "source": {
+        "base_color": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.8164966106414795
+      },
+      "presentation": {
+        "base_color": [
+          0.1803921568627451,
+          0.1803921568627451,
+          0.1803921568627451,
+          1.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.408248290463863
+      }
+    },
+    "link5": {
+      "source": {
+        "base_color": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.8164966106414795
+      },
+      "presentation": {
+        "base_color": [
+          0.1803921568627451,
+          0.1803921568627451,
+          0.1803921568627451,
+          1.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.408248290463863
+      }
+    },
+    "link6": {
+      "source": {
+        "base_color": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.8164966106414795
+      },
+      "presentation": {
+        "base_color": [
+          0.1803921568627451,
+          0.1803921568627451,
+          0.1803921568627451,
+          1.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.408248290463863
+      }
+    },
+    "link7": {
+      "source": {
+        "base_color": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.8164966106414795
+      },
+      "presentation": {
+        "base_color": [
+          0.1803921568627451,
+          0.1803921568627451,
+          0.1803921568627451,
+          1.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.408248290463863
+      }
+    },
+    "link8": {
+      "source": {
+        "base_color": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.8164966106414795
+      },
+      "presentation": {
+        "base_color": [
+          0.1803921568627451,
+          0.1803921568627451,
+          0.1803921568627451,
+          1.0
+        ],
+        "metallic": 0.0,
+        "roughness": 0.408248290463863
+      }
+    }
+  },
+  "camera": {
+    "width": 1600,
+    "height": 1080,
+    "intrinsics": [
+      2100.0,
+      2100.0,
+      800.0,
+      540.0
+    ],
+    "eye": [
+      -0.95,
+      -0.85,
+      0.65
+    ],
+    "target": [
+      -0.15,
+      -0.04,
+      0.23
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "near": 0.02,
+    "far": 60.0
+  },
+  "scene": {
+    "presentation": "SimulationManager default ground and environment emission",
+    "emission_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "emission_intensity": 80.0,
+    "studio_lights": [],
+    "direct_lights": []
+  },
+  "physics_stepped": false,
+  "warmup_frames": 48,
+  "image": "arx5.png",
+  "image_sha256": "1a02c3e63eb17ff0ca26bc7d232e2c39be81d69b62c228a4339b75534aa189dc",
+  "description": "Standalone ARX5 X5A illustration using the shared UR/W1 OfflineRT renderer and default environment illumination, without additional direct lights.",
+  "render_parameter_references": [
+    "ur/render_manifest.json",
+    "dexforcew1_render.json"
+  ],
+  "presentation_material_reference": {
+    "manifest": "dexforcew1_render.json",
+    "image": "dexforcew1_v030.jpg",
+    "black_srgb": [
+      46,
+      46,
+      46
+    ],
+    "roughness": 0.408248290463863,
+    "metallic": 0.0
+  },
+  "presentation_material_note": "Zero-diffuse source materials use the documented W1 V030 black display material in this illustration only."
+}

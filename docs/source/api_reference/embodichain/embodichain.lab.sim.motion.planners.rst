@@ -17,6 +17,8 @@ embodichain.lab.sim.motion.planners
     MovePart
     MoveType
     PlanResult
+    RejectedMotionCandidate
+    MotionRecoveryTrace
     PlanState
 
 .. currentmodule:: embodichain.lab.sim.motion.planners
@@ -140,7 +142,43 @@ Utilities
     :undoc-members:
     :show-inheritance:
 
+.. autoclass:: RejectedMotionCandidate
+    :members:
+
+.. autoclass:: MotionRecoveryTrace
+    :members:
+
+``PlanResult.recovery`` is an optional immutable receipt for one linear motion
+request. It records actual sample-count attempts and whether continuous IK
+supplied the result. The default is ``None``; complete-action retry counters and
+physical success remain separate. The result type, timing and failure holds stay
+under the existing ``PlanResult`` contract.
+
+Fixed-grid rejection retains the original candidate in
+``PlanResult.rejected_candidate`` while failed executable rows hold the start.
+Use the candidate's positions, arrival intervals and row mask when deciding
+whether a bounded retry is needed; the replacement hold is not an accepted plan.
+
 .. autoclass:: PlanState
     :members:
     :undoc-members:
     :show-inheritance:
+
+Joint path retiming
+------------------
+
+TOPPRA uses a single Warp calculation chain on CPU and CUDA. Its configuration
+accepts ``grid_size`` and the shared robot/manager fields; the removed
+``backend``, ``max_workers`` and ``mp_context`` fields are no longer accepted.
+CPU inference uses shared threads without creating planner-owned processes.
+
+Re-parameterize existing joint paths with the same differentiable timing
+solve. The helper preserves float32/float64 input precision, supports valid
+per-row waypoint prefixes, and returns explicit timing with isolated failures.
+
+.. autosummary::
+   :nosignatures:
+
+   embodichain.lab.sim.motion.planners.toppra_planner.retime_joint_paths
+
+.. autofunction:: embodichain.lab.sim.motion.planners.toppra_planner.retime_joint_paths

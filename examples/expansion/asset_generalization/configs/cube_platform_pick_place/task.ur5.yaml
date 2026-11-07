@@ -1,0 +1,16 @@
+id: ExpansionPrimitivePickPlace-v0
+environment:
+  component: env.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy: extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml
+embodiment:
+  component: extensions/embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_qpos: [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
+headless: true
+renderer: no-render
+enable_sensor: false
+collection:
+  target_episodes: 1

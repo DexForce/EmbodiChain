@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Articulation, RigidObject, Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 
@@ -273,6 +274,7 @@ def create_simulation_atomic_action_engine(
     control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
     grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
     *,
+    hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
     load_builtins: bool = True,
     tracking_runtime: TrackingRuntime | None = None,
 ) -> AtomicActionEngine:
@@ -291,6 +293,7 @@ def create_simulation_atomic_action_engine(
             in automatically captured initial scene snapshots.
         control_profiles: Semantic commands keyed by robot control-part name.
         grasp_pose_generators: Grasp-pose services keyed by grasp endpoint target.
+        hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint target.
         load_builtins: Whether to install all built-in atomic actions.
         tracking_runtime: Optional typed tracking runtime shared by action plans.
 
@@ -318,6 +321,7 @@ def create_simulation_atomic_action_engine(
         motion_generator,
         control_profiles=control_profiles,
         grasp_pose_generators=grasp_pose_generators,
+        hand_geometry_cfgs=hand_geometry_cfgs,
         load_builtins=load_builtins,
         tracking_runtime=tracking_runtime,
         scene_provider=RigidObjectSceneProvider(entities_by_id),
@@ -449,6 +453,18 @@ class SimulationExecutionAdapter:
         )
         if not math.isfinite(resolved_control_dt) or resolved_control_dt <= 0.0:
             raise ValueError("control_dt must be finite and greater than zero.")
+        control_ratio = resolved_control_dt / resolved_physics_dt
+        control_step_count = round(control_ratio)
+        if (
+            not math.isclose(
+                control_ratio,
+                control_step_count,
+                rel_tol=1.0e-6,
+                abs_tol=1.0e-9,
+            )
+            or control_step_count < 1
+        ):
+            raise ValueError("control_dt must be an integer multiple of physics_dt.")
         qpos = robot.get_qpos()
         if not isinstance(qpos, torch.Tensor) or qpos.dim() != 2:
             raise ValueError("robot.get_qpos() must return shape (B, robot_dof).")
@@ -491,8 +507,13 @@ class SimulationExecutionAdapter:
         """
         return self._elapsed_time
 
+    @property
+    def sleep_quantum(self) -> float:
+        """Return the smallest representable simulated sleep duration."""
+        return self.physics_dt
+
     def sleep(self, duration: float) -> None:
-        """Advance physics by at least the requested duration.
+        """Advance physics by exactly the requested grid-aligned duration.
 
         Args:
             duration: Requested simulated duration in seconds.
@@ -503,19 +524,14 @@ class SimulationExecutionAdapter:
             return
         step_ratio = duration / self.physics_dt
         nearest_step_count = round(step_ratio)
-        step_count = max(
-            1,
-            (
-                nearest_step_count
-                if math.isclose(
-                    step_ratio,
-                    nearest_step_count,
-                    rel_tol=1.0e-6,
-                    abs_tol=1.0e-9,
-                )
-                else math.ceil(step_ratio)
-            ),
-        )
+        if nearest_step_count < 1 or not math.isclose(
+            step_ratio,
+            nearest_step_count,
+            rel_tol=1.0e-6,
+            abs_tol=1.0e-9,
+        ):
+            raise ValueError("duration must be an integer multiple of physics_dt.")
+        step_count = nearest_step_count
         self.simulation.update(physics_dt=self.physics_dt, step=step_count)
         self._elapsed_time += step_count * self.physics_dt
 

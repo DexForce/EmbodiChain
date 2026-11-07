@@ -28,6 +28,28 @@ __all__ = ["ScenePoseChange", "SceneVariant"]
 from .._validation import _identifier, _nonnegative_integer, _rigid_pose
 
 
+def _variant_id(
+    parent_scene_id: str,
+    seed: int,
+    ordinal: int,
+    pose_changes: tuple,
+    metadata: tuple,
+) -> str:
+    """Hash already validated, canonically ordered proposal values."""
+    payload = {
+        "schema": "scene-variant/v1",
+        "parent_scene_id": parent_scene_id,
+        "seed": seed,
+        "ordinal": ordinal,
+        "pose_changes": pose_changes,
+        "metadata": metadata,
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return "scene-variant:" + hashlib.sha256(encoded).hexdigest()
+
+
 @dataclass(frozen=True)
 class ScenePoseChange:
     """A proposed pose for one existing physical entity.
@@ -124,17 +146,12 @@ class SceneVariant:
             SHA-256 identity independent of Python hash randomization and
             temporary physical environment assignments.
         """
-        payload = {
-            "schema": "scene-variant/v1",
-            "parent_scene_id": self.parent_scene_id,
-            "seed": self.seed,
-            "ordinal": self.ordinal,
-            "pose_changes": tuple(
+        return _variant_id(
+            self.parent_scene_id,
+            self.seed,
+            self.ordinal,
+            tuple(
                 (change.entity_uid, change.arena_pose) for change in self.pose_changes
             ),
-            "metadata": self.metadata,
-        }
-        encoded = json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode("utf-8")
-        return "scene-variant:" + hashlib.sha256(encoded).hexdigest()
+            self.metadata,
+        )

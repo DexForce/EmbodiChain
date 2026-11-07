@@ -26,13 +26,31 @@ subset rejects modes that require unimplemented scheduling or retry policies.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from dataclasses import fields
 import math
-from typing import Any, get_args, get_origin, get_type_hints
+from typing import Any, get_type_hints, TYPE_CHECKING
 
+from embodichain.compute.kinematics import DifferentiableIKCfg
 from embodichain.utils import configclass
 
+from embodichain.lab.expansion.session_cfg import (
+    ExpansionExecutionCfg as _ExecutionCfg,
+    ExpansionValidationCfg as _ValidationCfg,
+    ExpansionCollectionCfg as _CollectionCfg,
+    ExpansionPersistenceCfg as _PersistenceCfg,
+    _boolean,
+    _count,
+    _decode,
+    _fixed,
+    _id,
+    _positive,
+    _validate_nested,
+)
+
 from .operators import TIMING_PROFILES
+
+if TYPE_CHECKING:
+    from embodichain.lab.expansion.session_cfg import ExpansionSessionCfg
+    from embodichain.lab.expansion.coverage import ExpansionCoverage
 
 __all__ = [
     "SPATIAL_METHODS",
@@ -49,112 +67,6 @@ _MAX_VIA_POINTS = 8
 
 _SPATIAL_JACOBIAN_ROWS = 6
 """Row count of a spatial Jacobian: linear velocity first, then angular."""
-
-
-def _positive(value: float, name: str, *, allow_zero: bool = False) -> None:
-    if (
-        type(value) not in (int, float)
-        or not math.isfinite(value)
-        or (value < 0 if allow_zero else value <= 0)
-    ):
-        raise ValueError(
-            f"{name} must be finite and {'nonnegative' if allow_zero else 'positive'}"
-        )
-
-
-def _count(value: int, name: str, minimum: int = 1) -> None:
-    if type(value) is not int or value < minimum:
-        raise ValueError(f"{name} must be an integer >= {minimum}")
-
-
-def _boolean(value: bool, name: str) -> None:
-    if type(value) is not bool:
-        raise ValueError(f"{name} must be a boolean")
-
-
-def _id(value: str, name: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} must be a nonempty registered ID")
-
-
-def _fixed(value: str, supported: str, name: str) -> None:
-    if value != supported:
-        raise ValueError(f"{name} currently supports only {supported!r}")
-
-
-def _decode_tuple_value(
-    value: object,
-    *,
-    member_type: type,
-    name: str,
-) -> tuple[object, ...]:
-    if not isinstance(value, (list, tuple)):
-        raise ValueError(f"{name} must be a sequence")
-    if any(type(item) is not member_type for item in value):
-        raise ValueError(f"{name} contains an invalid value type")
-    return tuple(value)
-
-
-def _decode(cls: type, data: Mapping[str, Any], path: str = "") -> Any:
-    if not isinstance(data, Mapping):
-        raise ValueError(f"{path or cls.__name__} must be a mapping")
-    hints = get_type_hints(cls)
-    allowed = {field.name for field in fields(cls)}
-    unknown = set(data) - allowed
-    if unknown:
-        raise ValueError(
-            f"unknown fields in {path or cls.__name__}: {sorted(unknown, key=str)}"
-        )
-    decoded = {}
-    for key, value in data.items():
-        expected = hints[key]
-        name = f"{path}.{key}" if path else key
-        if hasattr(expected, "__dataclass_fields__"):
-            decoded[key] = _decode(expected, value, name)
-        elif get_origin(expected) is tuple:
-            member = get_args(expected)[0]
-            # ``spatial.method`` used to name a single method, so a bare string
-            # still decodes there. Every other sequence field requires a
-            # sequence, which keeps its own schema check from being skipped.
-            if (cls, key) in _SINGLE_NAME_COMPATIBLE and isinstance(value, str):
-                value = (value,)
-            if not isinstance(value, (list, tuple)):
-                raise ValueError(f"{name} must be a sequence")
-            if any(
-                type(item) not in ((float, int) if member is float else (member,))
-                for item in value
-            ):
-                raise ValueError(f"{name} contains an invalid value type")
-            decoded[key] = tuple(value)
-        elif get_origin(expected) is dict:
-            key_type, value_type = get_args(expected)
-            if key_type is not str or not isinstance(value, Mapping):
-                raise ValueError(f"{name} must be a string-keyed mapping")
-            if any(type(item_key) is not str for item_key in value):
-                raise ValueError(f"{name} must use string keys")
-            if get_origin(value_type) is tuple:
-                member_type = get_args(value_type)[0]
-                decoded[key] = {
-                    item_key: _decode_tuple_value(
-                        item_value,
-                        member_type=member_type,
-                        name=f"{name}.{item_key}",
-                    )
-                    for item_key, item_value in value.items()
-                }
-            elif value_type is str:
-                if any(type(item_value) is not str for item_value in value.values()):
-                    raise ValueError(f"{name} must map strings to strings")
-                decoded[key] = dict(value)
-            else:
-                raise TypeError(f"unsupported config mapping annotation: {expected}")
-        elif expected is float and type(value) in (float, int):
-            decoded[key] = float(value)
-        elif type(value) is expected:
-            decoded[key] = value
-        else:
-            raise ValueError(f"{name} has an invalid type")
-    return cls(**decoded)
 
 
 @configclass
@@ -207,7 +119,7 @@ class _SpatialCfg:
             raise ValueError(f"spatial.via_count must be at most {_MAX_VIA_POINTS}")
 
 
-_SINGLE_NAME_COMPATIBLE = frozenset({(_SpatialCfg, "method")})
+_SpatialCfg.__tuple_shorthand__ = frozenset({"method"})
 """Sequence fields that also accept one bare name, for backward compatibility."""
 
 
@@ -234,6 +146,42 @@ class _IkCfg:
                     f"[0, {_SPATIAL_JACOBIAN_ROWS})"
                 )
         self.task_rows = rows
+
+
+@configclass
+class _TaskSpaceCfg:
+    """Root-frame deformation bounds and fixed-step trajectory IK options."""
+
+    enabled: bool = False
+    frame_id: str = "tool"
+    translation_axes: tuple[bool, bool, bool] = (True, True, True)
+    rotation_axes: tuple[bool, bool, bool] = (True, True, True)
+    max_translation_m: float = 0.02
+    max_rotation_rad: float = 0.05
+    ik: DifferentiableIKCfg = DifferentiableIKCfg()
+
+    def __post_init__(self) -> None:
+        _boolean(self.enabled, "task_space.enabled")
+        _id(self.frame_id, "task_space.frame_id")
+        for name in ("translation_axes", "rotation_axes"):
+            axes = tuple(getattr(self, name))
+            if len(axes) != 3 or any(type(value) is not bool for value in axes):
+                raise ValueError(f"task_space.{name} must contain three booleans")
+            setattr(self, name, axes)
+        for name in ("max_translation_m", "max_rotation_rad"):
+            _positive(getattr(self, name), f"task_space.{name}", allow_zero=True)
+        if self.enabled and not (
+            any(self.translation_axes)
+            and self.max_translation_m > 0
+            or any(self.rotation_axes)
+            and self.max_rotation_rad > 0
+        ):
+            raise ValueError(
+                "enabled task_space deformation must permit a non-zero change"
+            )
+        if not isinstance(self.ik, DifferentiableIKCfg):
+            raise ValueError("task_space.ik must be a DifferentiableIKCfg")
+        _decode(DifferentiableIKCfg, self.ik.to_dict(), "task_space.ik")
 
 
 @configclass
@@ -334,6 +282,7 @@ class _FactorsCfg:
     ik: _IkCfg = _IkCfg()
     approach: _ApproachCfg = _ApproachCfg()
     spatial: _SpatialCfg = _SpatialCfg()
+    task_space: _TaskSpaceCfg = _TaskSpaceCfg()
     timing: _TimingCfg = _TimingCfg()
     manipulability: _ManipulabilityCfg = _ManipulabilityCfg()
     contact_timing: _DisabledFactorCfg = _DisabledFactorCfg()
@@ -404,14 +353,19 @@ class TrajectoryAugmentationCfg:
             "max_variants_per_reference",
         )
         spatial = self.factors.spatial
+        guided_residual = (
+            self.factors.manipulability.enabled
+            and self.factors.manipulability.guided_proposals > 1
+            and not self.factors.task_space.enabled
+            and not self.factors.ik.enabled
+        )
         # A spatial offset at or below the deduplication tolerance measures as a
         # duplicate of the reference, so the reference survives alone and the
         # enabled factor silently contributes nothing. Only a disabled factor
         # may hold a scale that low.
         if (
-            spatial.enabled
-            and spatial.joint_offset_scale <= self.coverage.joint_dedup_normalized_tol
-        ):
+            spatial.enabled or guided_residual
+        ) and spatial.joint_offset_scale <= self.coverage.joint_dedup_normalized_tol:
             raise ValueError(
                 "factors.spatial.joint_offset_scale must exceed "
                 "coverage.joint_dedup_normalized_tol; a combined expansion "
@@ -545,34 +499,6 @@ class _PlanningCfg:
 
 
 @configclass
-class _ExecutionCfg:
-    pool_mode: str = "per_env_case"
-    scheduler: str = "full_batch"
-    ready_low_watermark: int = 1
-    ready_high_watermark: int = 16
-    ready_max_bytes: int = 268435456
-    max_inflight: int = 1
-    overlap_planning_and_physics: bool = False
-
-    def __post_init__(self) -> None:
-        _fixed(self.pool_mode, "per_env_case", "execution.pool_mode")
-        _fixed(self.scheduler, "full_batch", "execution.scheduler")
-        _count(self.ready_low_watermark, "ready_low_watermark", 0)
-        _count(self.ready_high_watermark, "ready_high_watermark")
-        _count(self.ready_max_bytes, "ready_max_bytes")
-        _count(self.max_inflight, "execution.max_inflight")
-        if self.max_inflight != 1:
-            raise ValueError("execution.max_inflight currently supports only 1")
-        if self.ready_low_watermark >= self.ready_high_watermark:
-            raise ValueError(
-                "ready_low_watermark must be less than ready_high_watermark"
-            )
-        _boolean(self.overlap_planning_and_physics, "overlap_planning_and_physics")
-        if self.overlap_planning_and_physics:
-            raise ValueError("overlapping planning and physics is not implemented")
-
-
-@configclass
 class _ResetCfg:
     outer_mode: str = "provided"
     inner_mode: str = "restore_initial"
@@ -589,88 +515,6 @@ class _ResetCfg:
             self.initial_state_tolerances_profile_id,
             "initial_state_tolerances_profile_id",
         )
-
-
-@configclass
-class _ValidationCfg:
-    validator_id: str = "task_success"
-    profile_id: str = "verified_motion"
-    motion_limits_profile_id: str = "robot_execution_limits"
-    require_path_collision: bool = True
-    require_task_success: bool = True
-    path_length_ratio_max: float = 1.5
-    duration_ratio_max: float = 1.5
-
-    def __post_init__(self) -> None:
-        for name in ("validator_id", "profile_id", "motion_limits_profile_id"):
-            _id(getattr(self, name), name)
-        for name in ("require_path_collision", "require_task_success"):
-            _boolean(getattr(self, name), name)
-            if not getattr(self, name):
-                raise ValueError(f"expert collection requires {name}")
-        _positive(self.path_length_ratio_max, "path_length_ratio_max")
-        _positive(self.duration_ratio_max, "duration_ratio_max")
-
-
-@configclass
-class _CollectionCfg:
-    target_committed_episodes: int = 1
-    max_proposals: int = 100
-    max_rollout_attempts: int = 100
-    max_attempts_per_candidate: int = 1
-    max_wall_time_s: float = 60.0
-
-    def __post_init__(self) -> None:
-        for name in (
-            "target_committed_episodes",
-            "max_proposals",
-            "max_rollout_attempts",
-            "max_attempts_per_candidate",
-        ):
-            _count(getattr(self, name), name)
-        _positive(self.max_wall_time_s, "max_wall_time_s")
-        if self.max_attempts_per_candidate != 1:
-            raise ValueError(
-                "rollout retries are not implemented; max_attempts_per_candidate must be 1"
-            )
-        if self.target_committed_episodes > min(
-            self.max_proposals, self.max_rollout_attempts
-        ):
-            raise ValueError(
-                "collection budgets cannot be smaller than the committed target"
-            )
-
-
-@configclass
-class _PersistenceCfg:
-    sink: str = "lerobot"
-    accepted_only: bool = True
-    async_write: bool = False
-    pending_episode_limit: int = 8
-    pending_max_bytes: int = 536870912
-    save_audit: bool = True
-    split_unit: str = "trajectory_family"
-
-    def __post_init__(self) -> None:
-        _id(self.sink, "sink")
-        for name in ("accepted_only", "async_write", "save_audit"):
-            _boolean(getattr(self, name), name)
-        if not self.accepted_only or not self.save_audit:
-            raise ValueError("expert collection requires accepted_only and save_audit")
-        if self.async_write:
-            raise ValueError("asynchronous persistence is not implemented")
-        _count(self.pending_episode_limit, "pending_episode_limit")
-        _count(self.pending_max_bytes, "pending_max_bytes")
-        _fixed(self.split_unit, "trajectory_family", "split_unit")
-
-
-def _validate_nested(value: Any, expected: type, name: str) -> None:
-    if not isinstance(value, expected):
-        raise ValueError(
-            f"{name} must use its typed configuration; use from_mapping for dictionaries"
-        )
-    # Re-decode a plain mapping to reject mutated nested types and unsupported values.
-    _decode(expected, value.to_dict(), name)
 
 
 @configclass
@@ -691,6 +535,28 @@ class TrajectoryExpansionCfg:
     validation: _ValidationCfg = _ValidationCfg()
     collection: _CollectionCfg = _CollectionCfg()
     persistence: _PersistenceCfg = _PersistenceCfg()
+
+    def to_session_cfg(self) -> ExpansionSessionCfg:
+        """Project legacy settings into the canonical source-independent session config."""
+        from embodichain.lab.expansion.session_cfg import ExpansionSessionCfg
+
+        self.__post_init__()
+        values = self.to_dict()
+        return ExpansionSessionCfg.from_mapping(
+            {
+                "seed": self.augmentation.seed,
+                **{
+                    name: values[name]
+                    for name in ("execution", "validation", "collection", "persistence")
+                },
+            }
+        )
+
+    def create_session_coverage(self) -> ExpansionCoverage:
+        """Create the trajectory-specific measured coverage adapter for this session."""
+        from .session_coverage import TrajectorySessionCoverage
+
+        return TrajectorySessionCoverage(self.augmentation)
 
     def __post_init__(self) -> None:
         for name, expected in get_type_hints(type(self)).items():
@@ -738,6 +604,28 @@ class TrajectoryExpansionJobCfg:
     validation: _ValidationCfg = _ValidationCfg()
     collection: _CollectionCfg = _CollectionCfg()
     persistence: _PersistenceCfg = _PersistenceCfg()
+
+    def to_session_cfg(self) -> ExpansionSessionCfg:
+        """Project legacy settings into the canonical source-independent session config."""
+        from embodichain.lab.expansion.session_cfg import ExpansionSessionCfg
+
+        self.__post_init__()
+        values = self.to_dict()
+        return ExpansionSessionCfg.from_mapping(
+            {
+                "seed": self.augmentation.seed,
+                **{
+                    name: values[name]
+                    for name in ("execution", "validation", "collection", "persistence")
+                },
+            }
+        )
+
+    def create_session_coverage(self) -> ExpansionCoverage:
+        """Create the trajectory-specific measured coverage adapter for this session."""
+        from .session_coverage import TrajectorySessionCoverage
+
+        return TrajectorySessionCoverage(self.augmentation)
 
     def __post_init__(self) -> None:
         self.validate_semantics()
@@ -822,6 +710,8 @@ class TrajectoryExpansionJobCfg:
             raise ValueError(
                 f"ik operator capability unavailable: {factors.ik.method!r}"
             )
+        if factors.task_space.enabled and "task_space_residual" not in operators:
+            raise ValueError("task-space operator capability unavailable")
         if factors.approach.enabled and "perturb_approach_direction" not in operators:
             raise ValueError("approach operator capability unavailable")
         if factors.timing.enabled and "retime" not in operators:

@@ -80,7 +80,7 @@ def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=_DEFAULT_IMAGE_FPS,
         help=(
-            "Maximum Viser camera RGB preview rate. run-env synchronizes once "
+            "Maximum Viser camera RGB preview rate. run-task synchronizes once "
             "per environment step when this option is omitted."
         ),
     )

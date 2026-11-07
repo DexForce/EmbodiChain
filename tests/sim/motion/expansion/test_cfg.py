@@ -558,3 +558,63 @@ def test_only_spatial_method_accepts_a_bare_name(payload: dict[str, object]) -> 
     # unsupported name would be split into characters or silently wrapped.
     with pytest.raises(ValueError, match="must be a sequence"):
         TrajectoryExpansionJobCfg.from_mapping(payload)
+
+
+def test_task_space_config_round_trips_and_requires_an_operator_capability() -> None:
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
+        {
+            "augmentation": {
+                "factors": {
+                    "task_space": {
+                        "enabled": True,
+                        "frame_id": "arm_tcp",
+                        "translation_axes": [False, True, False],
+                        "max_translation_m": 0.04,
+                        "max_rotation_rad": 0.0,
+                        "ik": {"max_iterations": 12, "pos_eps": 1e-6},
+                    }
+                }
+            }
+        }
+    )
+    restored = TrajectoryExpansionJobCfg.from_mapping(cfg.to_dict())
+    assert restored.augmentation.factors.task_space.translation_axes == (
+        False,
+        True,
+        False,
+    )
+    assert restored.augmentation.factors.task_space.ik.max_iterations == 12
+    assert restored.to_dict() == cfg.to_dict()
+    with pytest.raises(ValueError, match="task-space operator capability"):
+        cfg.validate_capabilities(**_capabilities())
+    capabilities = _capabilities()
+    capabilities["operators"] |= {"task_space_residual"}
+    cfg.validate_capabilities(**capabilities)
+
+
+@pytest.mark.parametrize(
+    "task_space",
+    [
+        {"enabled": True, "max_translation_m": 0.0, "max_rotation_rad": 0.0},
+        {"translation_axes": [True, False]},
+        {"ik": {"max_iterations": 0}},
+        {"ik": {"unknown": 1}},
+    ],
+)
+def test_task_space_configuration_rejects_invalid_bounds_and_ik(
+    task_space: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        TrajectoryAugmentationCfg.from_mapping({"factors": {"task_space": task_space}})
+
+
+def test_implicit_guided_joint_sampling_requires_a_distinguishable_offset() -> None:
+    with pytest.raises(ValueError, match="joint_offset_scale must exceed"):
+        TrajectoryAugmentationCfg.from_mapping(
+            {
+                "factors": {
+                    "spatial": {"enabled": False, "joint_offset_scale": 0.0},
+                    "manipulability": {"enabled": True, "guided_proposals": 4},
+                }
+            }
+        )

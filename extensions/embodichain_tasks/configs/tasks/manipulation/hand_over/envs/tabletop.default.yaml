@@ -1,7 +1,8 @@
 environment_id: hand_over_tabletop
 physics: default
 max_episodes: 1
-max_episode_steps: 1600
+# Marvin's native transfer uses about 2500 control steps at the shared limits.
+max_episode_steps: 3200
 num_envs: 1
 arena_space: 3.0
 physics_config:

@@ -491,6 +491,313 @@ def test_blend_tolerance_generates_continuous_corner_motion() -> None:
     assert result.constraint_report["peak_jerk"].item() <= 1.5 + 1e-9
 
 
+@pytest.mark.parametrize("profile", ["trapezoidal", "double_s"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize(
+    "method", [TrajectorySampleMethod.QUANTITY, TrajectorySampleMethod.TIME]
+)
+def test_blended_return_path_retains_exact_reversal_stops(
+    profile: str, dtype: torch.dtype, method: TrajectorySampleMethod
+) -> None:
+    waypoints = torch.tensor(
+        [
+            [[0, 0], [0.25, 0], [0.5, 0], [0.25, 0], [0, 0]],
+            [[0, 0], [0.25, 0], [0.5, 0], [0.75, 0.1], [1, 0.2]],
+        ],
+        dtype=dtype,
+    )
+    options = TrapezoidalPlanOptions(
+        profile=profile,
+        stop_at_waypoints=False,
+        blend_tolerance=0.001,
+        sample_method=method,
+        sample_interval=121 if method is TrajectorySampleMethod.QUANTITY else 0.02,
+    )
+    result = _plan_linear_profiles(waypoints, options)
+    assert bool(result.success.all())
+    assert bool(result.constraint_report["within_limits"].all())
+    torch.testing.assert_close(result.positions[:, 0], waypoints[:, 0])
+    torch.testing.assert_close(result.positions[:, -1], waypoints[:, -1])
+    turnaround = (result.positions[0] - waypoints[0, 2]).norm(dim=-1).argmin()
+    torch.testing.assert_close(result.positions[0, turnaround], waypoints[0, 2])
+    torch.testing.assert_close(
+        result.velocities[0, turnaround], torch.zeros(2, dtype=dtype)
+    )
+    torch.testing.assert_close(
+        result.accelerations[0, turnaround], torch.zeros(2, dtype=dtype)
+    )
+    if method is TrajectorySampleMethod.QUANTITY:
+        assert result.positions.shape[1] == 121
+    else:
+        for row in range(2):
+            valid = int((result.dt[row] > 0).sum()) + 1
+            torch.testing.assert_close(
+                result.positions[row, valid - 1 :],
+                waypoints[row, -1:].expand_as(result.positions[row, valid - 1 :]),
+            )
+            assert bool((result.velocities[row, valid - 1 :] == 0).all())
+    assert options.minimum_duration is None
+
+
+def test_near_reversal_blending_does_not_inflate_duration() -> None:
+    # Press follows the incoming joint path almost exactly in reverse.
+    waypoints = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [0.5, 1e-5]]])
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            stop_at_waypoints=False, blend_tolerance=0.001, sample_interval=121
+        ),
+    )
+    assert bool(result.constraint_report["within_limits"].all())
+    assert result.duration[0] < 10.0
+    assert bool(torch.isfinite(result.positions).all())
+    torch.testing.assert_close(result.positions[:, -1], waypoints[:, -1])
+
+
+def test_reversal_minimum_duration_applies_to_the_complete_path() -> None:
+    waypoints = torch.tensor([[[0.0], [0.5], [0.0]]], dtype=torch.float64)
+    options = TrapezoidalPlanOptions(
+        stop_at_waypoints=False,
+        blend_tolerance=0.001,
+        minimum_duration=12.0,
+        sample_interval=121,
+    )
+    result = _plan_linear_profiles(waypoints, options)
+    torch.testing.assert_close(
+        result.duration, torch.tensor([12.0], dtype=torch.float64)
+    )
+    assert bool(result.constraint_report["within_limits"].all())
+    assert options.minimum_duration == 12.0
+
+
+def test_blended_reversal_and_stationary_rows_keep_independent_timing() -> None:
+    waypoints = torch.tensor([[[0.0], [0.5], [0.0]], [[0.2], [0.2], [0.2]]])
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            stop_at_waypoints=False,
+            blend_tolerance=0.001,
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.05,
+        ),
+    )
+    assert result.duration[0] > 0
+    assert result.duration[1] == 0
+    assert bool((result.positions[1] == 0.2).all())
+    assert bool((result.velocities[1] == 0).all())
+    assert bool((result.accelerations[1] == 0).all())
+    assert bool(result.constraint_report["within_limits"].all())
+
+
+@pytest.mark.parametrize("profile", ["trapezoidal", "double_s"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("minimum_duration", [None, 30.0])
+@pytest.mark.parametrize(
+    "method", [TrajectorySampleMethod.QUANTITY, TrajectorySampleMethod.TIME]
+)
+def test_unequal_reversal_legs_retain_exact_rest_samples(
+    profile: str,
+    dtype: torch.dtype,
+    minimum_duration: float | None,
+    method: TrajectorySampleMethod,
+) -> None:
+    waypoints = torch.tensor(
+        [[[0.0], [0.37], [-0.19], [0.83], [-0.12], [0.56]]], dtype=dtype
+    )
+    options = TrapezoidalPlanOptions(
+        profile=profile,
+        constraints={"velocity": 1.0, "acceleration": 1.0, "jerk": 2.0},
+        stop_at_waypoints=False,
+        blend_tolerance=0.001,
+        sample_method=method,
+        sample_interval=61 if method is TrajectorySampleMethod.QUANTITY else 0.17,
+        minimum_duration=minimum_duration,
+    )
+    result = _plan_linear_profiles(waypoints, options)
+    cursor = 0
+    for point in waypoints[0, 1:-1]:
+        resting = (
+            (result.positions[0] == point).all(dim=-1)
+            & (result.velocities[0] == 0).all(dim=-1)
+            & (result.accelerations[0] == 0).all(dim=-1)
+        )
+        arrivals = resting[cursor:].nonzero().flatten()
+        assert len(arrivals), f"Missing exact rest at {point}"
+        cursor += int(arrivals[0]) + 1
+    assert bool(result.constraint_report["within_limits"].all())
+    assert float(result.velocities.abs().max()) <= 1.0 + 1e-6
+    assert float(result.accelerations.abs().max()) <= 1.0 + 1e-6
+    if profile == "double_s":
+        jerk = result.accelerations.diff(dim=1) / result.dt[:, 1:, None]
+        assert float(jerk.abs().max()) <= 2.0 + 1e-3
+    if minimum_duration is not None:
+        torch.testing.assert_close(
+            result.duration, waypoints.new_tensor([minimum_duration])
+        )
+    assert options.minimum_duration == minimum_duration
+
+
+def test_reversal_sampling_requires_enough_samples_for_all_mandatory_stops() -> None:
+    waypoints = torch.tensor([[[0.0], [0.37], [-0.19], [0.83], [-0.12], [0.56]]])
+    options = TrapezoidalPlanOptions(
+        stop_at_waypoints=False, blend_tolerance=0.001, sample_interval=5
+    )
+    with pytest.raises(ValueError, match="requires at least 6"):
+        _plan_linear_profiles(waypoints, options)
+
+
+def test_reversal_stop_only_samples_report_their_rest_derivatives() -> None:
+    waypoints = torch.tensor([[[0.0], [0.37], [-0.19], [0.83], [-0.12], [0.56]]])
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            stop_at_waypoints=False, blend_tolerance=0.001, sample_interval=6
+        ),
+    )
+    torch.testing.assert_close(result.positions, waypoints)
+    for name in ("velocity", "acceleration"):
+        assert torch.count_nonzero(result.constraint_report[f"peak_{name}"]) == 0
+        assert (
+            torch.count_nonzero(result.constraint_report[f"peak_{name}_per_joint"]) == 0
+        )
+        assert torch.count_nonzero(result.constraint_report[f"{name}_utilization"]) == 0
+
+
+@pytest.mark.parametrize("profile", ["trapezoidal", "double_s"])
+@pytest.mark.parametrize(
+    "method", [TrajectorySampleMethod.QUANTITY, TrajectorySampleMethod.TIME]
+)
+def test_reversal_batch_keeps_other_rows_standalone_timing(
+    profile: str, method: TrajectorySampleMethod
+) -> None:
+    waypoints = torch.tensor(
+        [
+            [
+                [0.0, 0.0],
+                [0.37, 0.0],
+                [-0.19, 0.0],
+                [0.83, 0.0],
+                [-0.12, 0.0],
+                [0.56, 0.0],
+            ],
+            [[0.0, 0.0], [0.1, 0.1], [0.3, 0.2], [0.4, 0.5], [0.7, 0.6], [0.8, 0.9]],
+        ],
+        dtype=torch.float64,
+    )
+    options = TrapezoidalPlanOptions(
+        profile=profile,
+        stop_at_waypoints=False,
+        blend_tolerance=0.001,
+        sample_method=method,
+        sample_interval=61 if method is TrajectorySampleMethod.QUANTITY else 0.17,
+    )
+    batch = _plan_linear_profiles(waypoints, options)
+    standalone = _plan_linear_profiles(waypoints[1:], options)
+    count = standalone.positions.shape[1]
+    for name in ("positions", "velocities", "accelerations", "dt"):
+        torch.testing.assert_close(
+            getattr(batch, name)[1:2, :count], getattr(standalone, name)
+        )
+    for key, value in standalone.constraint_report.items():
+        torch.testing.assert_close(batch.constraint_report[key][1:2], value)
+
+
+@pytest.mark.parametrize("profile", ["trapezoidal", "double_s"])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_blended_reversals_warp_matches_torch(profile: str, device: str) -> None:
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    points = torch.tensor(
+        [[[0.0], [0.37], [-0.19], [0.83], [-0.12], [0.56]]], device=device
+    )
+    options = TrapezoidalPlanOptions(
+        profile=profile,
+        constraints={"velocity": 1.0, "acceleration": 1.0, "jerk": 2.0},
+        stop_at_waypoints=False,
+        blend_tolerance=0.001,
+        sample_method=TrajectorySampleMethod.TIME,
+        sample_interval=0.17,
+        backend="torch",
+    )
+    reference = _plan_linear_profiles(points, options)
+    options.backend = "warp"
+    actual = _plan_linear_profiles(points, options)
+    for name in ("positions", "velocities", "accelerations", "dt"):
+        torch.testing.assert_close(
+            getattr(actual, name), getattr(reference, name), rtol=1e-4, atol=1e-4
+        )
+    assert bool(actual.constraint_report["within_limits"].all())
+    for point in points[0, 1:-1]:
+        stopped = (actual.positions[0] == point).all(dim=-1)
+        stopped &= (actual.velocities[0] == 0).all(dim=-1)
+        stopped &= (actual.accelerations[0] == 0).all(dim=-1)
+        assert bool(stopped.any())
+
+
+@pytest.mark.parametrize("profile", ["trapezoidal", "double_s"])
+def test_blended_legs_keep_joint_bounds_and_smooth_nonreversing_corners(
+    profile: str,
+) -> None:
+    points = torch.tensor(
+        [
+            [
+                [0.0, 0.0],
+                [0.4, 0.0],
+                [0.4, 0.5],
+                [0.4, 0.2],
+                [0.8, 0.2],
+                [0.6, 0.2],
+                [0.6, 0.6],
+            ]
+        ],
+        dtype=torch.float64,
+    )
+    limits = {"velocity": [0.4, 0.8], "acceleration": [0.6, 1.2], "jerk": [1.0, 2.0]}
+    result = _plan_linear_profiles(
+        points,
+        TrapezoidalPlanOptions(
+            profile=profile,
+            constraints=limits,
+            stop_at_waypoints=False,
+            blend_tolerance=0.03,
+            sample_interval=1001,
+        ),
+    )
+    assert bool(result.constraint_report["within_limits"].all())
+    for name, values in (
+        ("velocity", result.velocities),
+        ("acceleration", result.accelerations),
+    ):
+        caps = points.new_tensor(limits[name])
+        assert bool((values.abs().amax(dim=1) <= caps * (1 + 1e-6)).all())
+        torch.testing.assert_close(
+            result.constraint_report[f"peak_{name}_per_joint"], values.abs().amax(dim=1)
+        )
+        assert bool(
+            (
+                result.constraint_report[f"{name}_upper_bound_per_joint"]
+                <= caps * (1 + 1e-6)
+            ).all()
+        )
+    if profile == "double_s":
+        jerk = result.accelerations.diff(dim=1) / result.dt[:, 1:, None]
+        assert bool(
+            (
+                jerk.abs().amax(dim=1) <= points.new_tensor(limits["jerk"]) * (1 + 1e-6)
+            ).all()
+        )
+    for index in (2, 4):
+        exact = (result.positions[0] == points[0, index]).all(dim=-1)
+        exact &= (result.velocities[0] == 0).all(dim=-1)
+        exact &= (result.accelerations[0] == 0).all(dim=-1)
+        assert bool(exact.any())
+    for index in (1, 3, 5):
+        distances = (result.positions[0] - points[0, index]).norm(dim=-1)
+        nearest = distances.argmin()
+        assert 0 < float(distances[nearest]) <= 0.03
+        assert float(result.velocities[0, nearest].norm()) > 0
+
+
 def test_blended_paths_support_batched_time_sampling() -> None:
     waypoints = torch.tensor(
         [
@@ -1127,6 +1434,13 @@ def test_planner_adapts_batched_plan_states() -> None:
     planner = TrapezoidalPlanner.__new__(TrapezoidalPlanner)
     planner.device = torch.device("cpu")
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")
+    planner.robot = SimpleNamespace(
+        joint_names=["first", "second"],
+        mimic_ids=(),
+        mimic_parents=(),
+        mimic_multipliers=(),
+        get_qvel_limits=lambda **kwargs: torch.tensor([[0.2, 0.2]]),
+    )
     states = [
         PlanState.from_qpos(torch.tensor([[0.0, 0.0]])),
         PlanState.from_qpos(torch.tensor([[0.5, -0.25]])),

@@ -33,6 +33,14 @@ class MyTaskEnv(EmbodiedEnv):
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
 RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 
+### Render-only scene objects
+
+`visual_object` lists `VisualObjectCfg` declarations in inline configs or the
+physical environment component. The production loader resolves mesh assets and
+`EmbodiedEnv` declares them alongside background objects. Their state participates
+in selected-environment reset, while physical background/collision semantics stay
+with `background` and `rigid_object`. See the [simulation object boundary](../simulation-system/simulation-system.md).
+
 ### Component ownership
 
 | File / component | Owns | Must not own |
@@ -52,7 +60,22 @@ Gym configs remain supported when no conflicting component selector is used.
 
 ### Reusable Gym deployment components
 
-`config_to_cfg()` resolves optional `environment.component`,
+`resolve_gym_components()` in `lab.gym.utils.composition` exposes physical
+component expansion without Gym registration or simulator construction. Its
+`ResolvedGymComponents` owns independent config/profile/scene mappings for each
+call. Task Program selectors remain declarations; pass the returned skill
+profile to the public Task Program deployment composer for semantic preflight.
+This is not complete runtime-config validation.
+
+Both `resolve_gym_components` and `config_to_cfg` accept optional
+`component_sources`: a complete mapping of selected physical-component paths to
+owned declarations. Snapshot mode reads no component files and rejects missing
+or duplicate resolved selections; relative asset paths retain their component
+owner. Callers verify snapshot provenance and external assets separately.
+`ResolvedGymComponents.validate_scene_bindings` checks semantic native roots
+against the expanded physical scene without runtime construction.
+
+`config_to_cfg()` resolves optional `environment`,
 `embodiment.component`, and `scene.component` selections before ordinary Gym
 parsing. This is not
 coupled to Task Program: an import-registered handwritten-demo task can reuse
@@ -69,19 +92,37 @@ without `base_dir` retains its ordinary filesystem/CWD behavior.
 Component-owned fields and their
 inline counterparts are mutually exclusive; without a selector, the original
 inline `robot`, `sensor`, and scene fields continue to parse unchanged.
-`build_env_cfg_from_args()` expands `environment.component` before applying
+`build_env_cfg_from_args()` expands the selected environment before applying
 launcher arguments so environment-owned run controls such as `max_episodes`
 remain visible to the run loop while explicit CLI values retain precedence.
 New offline collection configs should use `collection.target_episodes`; the
 legacy field and `--max_episodes` option map to that committed-row target.
 
+Source-bound tabletop collection can declare `real2sim: {profile: profile.yaml}`
+in the runnable deployment. This closed launcher binding is resolved relative
+to that deployment, retained in the returned launch metadata and removed before
+`EnvCfg` parsing. `--real2sim-profile` overrides it. Its exclusive synchronous
+recorder owns `--dataset-dir`; ordinary dataset-manager path rewriting is skipped.
+Execution and receipt limits belong to [Real2Sim motion](../data-pipeline/real2sim.md).
+The official `carton_stocking` deployment uses fixed real-source asset references
+and needs no example-generated configuration. Catalog commands include its
+required dataset destination without initializing source assets during browsing.
+
 An inline runnable config must declare exactly one
 `physics: default|newton` backend. A reusable environment component also owns
 exactly one backend and its optional `physics_config`; the thin deployment
 cannot repeat either field. `config_to_cfg()` constructs the backend-specific
-typed physics config and rejects fields from the other backend. Launcher
-`--physics` may confirm the declared value but cannot switch the file-owned
-backend. Use separate environment files when one logical task needs both.
+typed physics config and rejects fields from the other backend.
+
+An `environment` selection may name one `component`, or declare separate
+`default` / `newton` component paths (also accepted inside `variants`). These
+forms are mutually exclusive. `build_env_cfg_from_args()` first uses
+`--physics` to select a declared variant, defaulting to `default` when omitted.
+It then loads that concrete file and checks the CLI value against its owned
+backend. With an explicit `environment.component` or inline config, the CLI
+only confirms the declared backend; it cannot rewrite it. Each variant still
+owns exactly one backend in a separate environment file. Backend selection
+does not rename the deployment's Gym `id`.
 
 `renderer: auto` resolves from environment render demand before World creation.
 For cameras or native visual resources created by custom Python code, select
@@ -113,10 +154,19 @@ The component boundary is implemented in
 is consumed only by a configured Task Program deployment. Scene components are
 always physical-only; semantic entity mappings and affordances live in the
 task integration's nested `scene_binding`. The shared
-`cobotmagic.yaml` component owns a top-view RGB camera and an optional right-arm
-skill profile. Its selected `CobotMagicCfg` owns the two mounted wrist cameras.
-Tableware handwritten and configured Task Program deployments reuse the combined
-suite. Gym copies the selected robot configuration and overrides its
+`cobotmagic.yaml` component owns a top-view RGB camera and a skill profile with
+the right arm as primary and the left arm as a secondary resource. Its selected
+`CobotMagicCfg` owns the two mounted wrist cameras. Tableware Task Program
+deployments reuse the combined suite.
+The dual-UR5 and Marvin embodiments also own the shared `cam_high`
+view; Marvin retains its robot-owned wrist cameras. Their `left` / `right`
+resources expose primary/secondary manipulator aliases as composite resources
+with the same physical leaves, so both program naming conventions retain
+physical conflict detection. See `extensions/embodichain_tasks/README.md` for
+the supported task/deployment matrix and qualification boundaries.
+
+Gym copies the selected robot configuration
+and overrides its
 `enable_sensor` with the environment-wide switch. `cfg.sensor` retains
 independent declarations; effective sensors combine those with
 `cfg.robot.sensors` and reject duplicate UIDs before resource creation.
@@ -161,6 +211,25 @@ allowlisted implementation and decoder entry; never serialize dotted imports
 or arbitrary callables into this config boundary. The official Task Program
 examples use this path and have no task environment subclass.
 
+### Configuration-owned manipulation RL
+
+A runnable deployment with root `rl_task` uses `EmbodiedEnv` and needs no
+Python task registration module. `config_to_cfg` decodes `RLTaskCfg`, reuses the
+ordinary manager and physical-component configuration, and registers the common
+host with explicit RL capability. Conditions are grouped as success, failure
+and truncation; their `func`/`params` use the manager registry and entity binding.
+The same deployment cannot select both `rl_task` and `task_program`.
+
+The registration signature preserves manager ordering, measured conditions,
+physical declarations and episode limits while excluding runtime device, batch
+size and seed. Identical loads are idempotent; a conflicting ID fails without
+overriding an existing task. Load the configuration before `gym.make(id)`.
+
+The lifecycle and recorded target restoration are owned by
+[environment execution](execution.md#configured-manipulation-rl-outcomes).
+See the [configuration guide](../../../docs/source/guides/configured_manipulation_rl.md)
+and the PushCube `env.configured_rl.yaml` deployment for authoring examples.
+
 ### Instantiation
 
 ```python
@@ -186,8 +255,10 @@ selected embodiment, supported use, and runnable config filename:
 
 - `[Expert Demo: Task Program]` comes from a task-local Gym config declaring
   the `task_program` component mapping;
-- `[Expert Demo: Handwritten Trajectory]` means the registered task class
-  overrides `create_demo_segments()` or `create_demo_action_list()`;
+- `[Expert Demo: Handwritten Trajectory]` uses an explicit per-registration
+  `supports_handwritten_demo` value when provided, otherwise it checks whether
+  the task class overrides `create_demo_segments()` or `create_demo_action_list()`.
+  Shared classes can disable this label on deployments without a configured expert;
 - `[RL]` comes from explicit simulator `supports_rl`, a training configuration
   whose `trainer.gym_config` resolves to that deployment (or equivalent
   JSON/YAML environment entry), or a registered lightweight learning environment;
@@ -228,7 +299,9 @@ Use the `/add-task-env` skill. It first selects one of two registration paths:
 1. Import-backed handwritten or RL tasks add a task-named module at
    `extensions/embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`, keep
    `@register_env("<GymId>")` and `__all__` there, and add a runnable config.
-2. Supported configuration-defined Task Programs omit the Python module. They
+2. Supported configuration-defined manipulation RL deployments omit the Python
+   module and declare `rl_task`; see the configuration-owned RL contract above.
+3. Supported configuration-defined Task Programs omit the Python module. They
    add a reusable physical `env.yaml`, one or more runnable
    `task.<embodiment>.yaml` deployments, and
    `task_program/{program,integration}.yaml`; semantic scene bindings are
@@ -244,3 +317,13 @@ tasks can stay directly under `manipulation`.
 Do not organize task ownership around a solution method such as `rl` or
 `task_program`. Keep registration in the task-named module and do not create
 a same-named Python package for a task that has only one Python entry point.
+
+
+## Explicit local resource paths
+
+Mesh `fpath`, `urdf_path`, and `xml_path` values prefixed with `./` or `../`
+resolve from the physical environment, scene, or embodiment component that
+declares them. Inline resources resolve from the deployment file. Bare dataset
+identifiers retain the existing data registry behavior and are not probed against
+the current working directory. Asset-batch materialization uses this boundary;
+see [asset generalization](../asset-generalization/asset-generalization.md).

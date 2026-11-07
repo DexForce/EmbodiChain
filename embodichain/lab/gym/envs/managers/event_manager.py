@@ -142,6 +142,7 @@ class EventManager(ManagerBase):
         self._mode_functor_cfgs: dict[str, list[EventCfg]] = dict()
         self._mode_class_functor_cfgs: dict[str, list[EventCfg]] = dict()
         self._functor_invocation_counts: dict[tuple[str, str, str], int] = {}
+        self._seed_revision = 0
 
         cfg_seed = getattr(getattr(env, "cfg", None), "seed", None)
         self._seed = (
@@ -196,6 +197,11 @@ class EventManager(ManagerBase):
         return self._mode_functor_names
 
     @property
+    def seed_revision(self) -> int:
+        """Return the explicit reseed revision, including repeated seed values."""
+        return self._seed_revision
+
+    @property
     def available_modes(self) -> list[str]:
         """Modes of events."""
         return list(self._mode_functor_names.keys())
@@ -246,6 +252,7 @@ class EventManager(ManagerBase):
         ):
             raise TypeError(f"Event seed must be an integer or None, got {type(seed)}.")
         self._seed = None if seed is None else int(seed)
+        self._seed_revision += 1
         self._functor_invocation_counts.clear()
         for count in getattr(self, "_interval_functor_step_count", []):
             count.zero_()

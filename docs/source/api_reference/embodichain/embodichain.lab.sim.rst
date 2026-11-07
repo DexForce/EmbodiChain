@@ -138,14 +138,6 @@ Scene Services
 
    embodichain.lab.sim.scene
 
-Scene Expansion Compatibility
------------------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   embodichain.lab.sim.scene_expansion
-
 Shared Types
 ------------
 
@@ -153,6 +145,42 @@ Shared Types
    :members:
    :undoc-members:
    :show-inheritance:
+
+Authored source geometry
+------------------------
+
+Object collision-input adapters and static Scene inspections share fresh USD
+reads through ``spawn.source_geometry``. ``read_usd_source`` creates an anonymous
+stage and binds its source bytes without constructing a simulator. Geometry
+consumers require the existing self-contained metre subset through
+``require_geometry``. Metadata-only readers can first distinguish absent control
+annotations from invalid declared controls. A snapshot
+can be explicitly reused within one assembly; freshness checks reject changed
+bytes or source selections rather than loading a new baseline silently.
+
+``mesh_arrays`` preserves polygon inputs for stricter consumer qualification.
+``link_mesh_arrays`` returns newly allocated, scaled link-local vertices and
+fan-triangulated faces. ``link_mesh`` captures these as an owned ``LinkMesh``;
+its buffers preserve order/dtype and cannot be made writable. These authored
+inputs remain distinct from runtime ``get_link_collision_shapes`` observations.
+Control roles, acceptance rules and native collision cooking stay with their
+respective owners.
+
+.. currentmodule:: embodichain.lab.sim.spawn.source_geometry
+
+.. autosummary::
+
+   LinkMesh
+   UsdSourceSnapshot
+   read_usd_source
+
+.. autoclass:: LinkMesh
+   :members:
+
+.. autoclass:: UsdSourceSnapshot
+   :members:
+
+.. autofunction:: read_usd_source
 
 Utility
 -------

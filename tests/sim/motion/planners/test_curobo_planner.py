@@ -30,6 +30,7 @@ import math
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -44,6 +45,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanner,
     CuroboPlannerCfg as CuroboPlannerCfgDirect,
     CuroboWorldCfg,
+    _CuroboBackend,
     _CuroboProfile,
     _configure_curobo_logging,
     _matrix_to_position_quaternion,
@@ -55,7 +57,6 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
 from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
     _curobo_pose_to_components,
     _convex_hull_to_voxel_entry,
-    _parse_mimic_joint_names,
     _world_collision_sphere_data,
     generate_curobo_robot_yaml,
     generate_curobo_world_scene,
@@ -70,34 +71,6 @@ _SIM_ROBOT_UID = "curobo_franka_inprocess_test"
 _SIM_CONTROL_PART = "arm"
 _SIM_BLOCK_DIMS = [0.18, 0.40, 0.36]
 _SIM_BLOCK_POS = (0.45, 0.0, 0.18)
-
-# Minimal URDF mirroring the Franka Panda hand: finger joint 2 mimics joint 1.
-_MIMIC_URDF = """\
-<?xml version="1.0"?>
-<robot name="panda_hand">
-  <link name="base"/>
-  <link name="fr3_hand"/>
-  <link name="fr3_leftfinger"/>
-  <link name="fr3_rightfinger"/>
-  <joint name="fr3_hand_joint" type="fixed">
-    <parent link="base"/>
-    <child link="fr3_hand"/>
-  </joint>
-  <joint name="fr3_finger_joint1" type="prismatic">
-    <parent link="fr3_hand"/>
-    <child link="fr3_leftfinger"/>
-    <axis xyz="0 1 0"/>
-    <limit effort="100" lower="0.0" upper="0.04" velocity="0.2"/>
-  </joint>
-  <joint name="fr3_finger_joint2" type="prismatic">
-    <parent link="fr3_hand"/>
-    <child link="fr3_rightfinger"/>
-    <axis xyz="0 1 0"/>
-    <limit effort="100" lower="0.0" upper="0.04" velocity="0.2"/>
-    <mimic joint="fr3_finger_joint1"/>
-  </joint>
-</robot>
-"""
 
 _NO_MIMIC_URDF = """\
 <?xml version="1.0"?>
@@ -170,11 +143,13 @@ def test_missing_curobo_is_actionable(monkeypatch):
     "failure_module",
     [
         None,
+        "curobo.trajectory_timeopt",
         "curobo.motion_planner",
         "curobo.batch_motion_planner",
         "curobo.collision_checking",
         "curobo.types",
         "curobo.scene",
+        "curobo._src.runtime",
     ],
 )
 def test_curobo_import_preserves_caller_precision(
@@ -196,6 +171,7 @@ def test_curobo_import_preserves_caller_precision(
                 "Pose",
                 "GoalToolPose",
                 "DeviceCfg",
+                "ToolPoseCriteria",
                 "Scene",
             )
         }
@@ -293,6 +269,7 @@ def test_cspace_planning_uses_direct_seed_before_graph_seed(
     )
     planner.device = torch.device("cpu")
     planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(Runtime=SimpleNamespace(cuda_graphs=True))
     monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(
         planner,
@@ -354,6 +331,7 @@ def test_pose_planning_uses_direct_seed_before_graph_seed(
     )
     planner.device = torch.device("cpu")
     planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(Runtime=SimpleNamespace(cuda_graphs=True))
     monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(
         planner,
@@ -389,6 +367,68 @@ def test_pose_planning_uses_direct_seed_before_graph_seed(
             "enable_graph_attempt": 1,
         }
     ]
+
+
+def test_partial_pose_native_costs_reset_and_unused_targets_are_sanitized(monkeypatch):
+    """Mixed Cartesian semantics reach cuRobo without hidden pose completion."""
+    criteria_calls, goals = [], []
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(max_attempts=1, max_planning_time=None)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(
+        ToolPoseCriteria=lambda **values: values,
+        DeviceCfg=lambda **values: values,
+        Runtime=SimpleNamespace(cuda_graphs=True),
+    )
+    backend = SimpleNamespace(
+        planner=SimpleNamespace(
+            update_tool_pose_criteria=lambda values: criteria_calls.append(
+                values["tcp"]
+            ),
+            plan_pose=lambda *_args, **_kwargs: None,
+        ),
+        tool_frame="tcp",
+        profile=SimpleNamespace(tool_frame_to_tcp=None),
+        tool_to_frame_matrix=None,
+        use_cuda_graph=False,
+    )
+    monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(planner, "_to_curobo_joint_state", lambda *_: object())
+    monkeypatch.setattr(
+        planner, "_to_curobo_pose_goal", lambda pose, *_: goals.append(pose.clone())
+    )
+    position, orientation, full = (torch.eye(4)[None].clone() for _ in range(3))
+    position[:, :3, :3] = torch.nan
+    position[:, 0, 3] = 0.4
+    orientation[:, :3, 3] = torch.nan
+    planner._plan_segments(
+        [PlanState.from_xpos(pose) for pose in (position, orientation, full)],
+        torch.zeros(1, 7),
+        {MoveType.EEF_MOVE: backend},
+        CuroboPlanOptions(waypoint_modalities=["position", "orientation", "pose"]),
+    )
+    assert [item["terminal_pose_axes_weight_factor"] for item in criteria_calls] == [
+        [1, 1, 1, 0, 0, 0],
+        [0, 0, 0, 1, 1, 1],
+        [1] * 6,
+    ]
+    assert all(
+        item["non_terminal_pose_axes_weight_factor"] == [0] * 6
+        for item in criteria_calls
+    )
+    assert all(bool(torch.isfinite(pose).all()) for pose in goals)
+    assert float(goals[0][0, 0, 3]) == pytest.approx(0.4)
+    torch.testing.assert_close(goals[1][0, :3, 3], torch.zeros(3))
+
+
+def test_position_only_rejects_translated_tool_origin():
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    transform = torch.eye(4)
+    transform[2, 3] = 0.1
+    backend = SimpleNamespace(tool_to_frame_matrix=transform)
+    with pytest.raises(ValueError, match="coincident tool/TCP"):
+        planner._set_pose_modality(backend, "position")
 
 
 def test_extract_segment_uses_curobo_exclusive_last_tstep(monkeypatch):
@@ -608,15 +648,54 @@ def test_curobo_planner_class_is_lazy_import_safe():
     assert "curobo" not in sys.modules
 
 
-def test_backend_disables_curobo_self_collision(monkeypatch):
+@pytest.mark.parametrize(
+    (
+        "batch_size",
+        "algorithm",
+        "enable_timeopt",
+        "use_graph",
+        "effective_algorithm",
+        "expected_lanes",
+    ),
+    [
+        (1, "rrt", True, True, "rrt", 8),
+        (2, "prm", False, False, "prm", None),
+        (17, "rrt", False, True, "rrt", 256),
+        (1, "rrt", True, False, "rrt", 8),
+    ],
+)
+def test_backend_forwards_fast_settings_and_disables_self_collision(
+    monkeypatch,
+    batch_size,
+    algorithm,
+    enable_timeopt,
+    use_graph,
+    effective_algorithm,
+    expected_lanes,
+):
     create_kwargs = {}
+    cost_manager = SimpleNamespace(disable_self_collision=Mock())
+    graph_rollout = SimpleNamespace(get_cost_manager_configs=lambda: [cost_manager])
 
     class FakeMotionPlannerCfg:
         @staticmethod
         def create(**kwargs):
             create_kwargs.update(kwargs)
+            assert runtime.cuda_graphs is use_graph
             return SimpleNamespace(
-                trajopt_solver_config=SimpleNamespace(interpolation_dt=None)
+                trajopt_solver_config=SimpleNamespace(
+                    interpolation_dt=None,
+                    num_seeds=8,
+                    robot_config=SimpleNamespace(
+                        dynamics=SimpleNamespace(gravity=None)
+                    ),
+                ),
+                **{
+                    f"{effective_algorithm}_graph_planner_config": SimpleNamespace(
+                        resources_config=SimpleNamespace(rollout_config=graph_rollout),
+                        planner_config=SimpleNamespace(max_batched_lanes=128),
+                    )
+                },
             )
 
     class FakeMotionPlanner:
@@ -626,13 +705,17 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
             self.cfg = cfg
 
     planner = CuroboPlanner.__new__(CuroboPlanner)
-    planner.cfg = SimpleNamespace(
-        world=SimpleNamespace(multi_env=False),
-        collision_activation_distance=0.01,
-        interpolation_dt=0.025,
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        graph_planner_algorithm=algorithm,
+        enable_timeopt=enable_timeopt,
+        interpolation_dt=0.01,
     )
     planner._curobo_device = torch.device("cuda:0")
+    planner._timeopt_gravity = lambda backend: (0.0, 0.0, 0.0)
+    runtime = SimpleNamespace(cuda_graphs=True)
     planner._bindings = SimpleNamespace(
+        Runtime=runtime,
         MotionPlannerCfg=FakeMotionPlannerCfg,
         DeviceCfg=lambda device: device,
         MotionPlanner=FakeMotionPlanner,
@@ -652,20 +735,39 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
     }
     monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
 
-    planner._build_backend(
+    backend = planner._build_backend(
         control_part="arm",
-        batch_size=1,
+        batch_size=batch_size,
         profile=_CuroboProfile(
             robot_config_path="robot.yml",
             sim_to_curobo_joint_names={"joint": "joint"},
         ),
         sim_joint_names=["joint"],
         scene_model=None,
-        use_cuda_graph=False,
+        use_cuda_graph=use_graph,
         planning_mode=MoveType.EEF_MOVE,
     )
 
     assert create_kwargs["self_collision_check"] is False
+    assert create_kwargs["max_batch_size"] == batch_size
+    assert create_kwargs["graph_planner_algorithm"] == effective_algorithm
+    assert backend.graph_planner_algorithm == effective_algorithm
+    assert create_kwargs["use_cuda_graph"] is use_graph
+    assert runtime.cuda_graphs is True
+    assert create_kwargs["enable_timeopt"] is enable_timeopt
+    assert create_kwargs["interpolation_dt"] == 0.01
+    cost_manager.disable_self_collision.assert_called_once()
+    if enable_timeopt:
+        assert create_kwargs["robot"]["robot_cfg"]["load_dynamics"] is True
+        assert (
+            backend.planner.cfg.trajopt_solver_config.robot_config.dynamics.gravity
+            == [0.0, 0.0, 0.0]
+        )
+    if expected_lanes is not None:
+        assert (
+            backend.planner.cfg.rrt_graph_planner_config.planner_config.max_batched_lanes
+            == expected_lanes
+        )
     assert create_kwargs["robot"]["robot_cfg"]["kinematics"] == {
         "source": "robot.yml",
         "self_collision_buffer": {},
@@ -689,6 +791,136 @@ def test_multi_env_scene_model_clones_scene_dictionaries_independently():
     assert copies[0] is not copies[1]
     copies[0]["voxel"]["block"]["feature_tensor"].zero_()
     assert torch.all(copies[1]["voxel"]["block"]["feature_tensor"] == 1.0)
+
+
+@pytest.mark.parametrize(
+    ("world_gravity", "tilted", "observed", "expected"),
+    [
+        ([0, 0, -9.81], False, False, [0, 0, -9.81]),
+        ([0, 0, 0], True, False, [0, 0, 0]),
+        ([0, 0, -9.81], True, False, [9.81, 0, 0]),
+        ([0, 0, -9.81], True, True, [9.81, 0, 0]),
+    ],
+)
+def test_timeopt_gravity_uses_physics_and_the_planning_frame(
+    monkeypatch, world_gravity, tilted, observed, expected
+):
+    from embodichain.lab.sim import SimulationManager
+
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot", sim_instance_id=3)
+    planner._curobo_device = torch.device("cpu")
+    world_to_base = torch.eye(4)[None]
+    if tilted:
+        # Inverse of a +90 degree world rotation about Y.
+        world_to_base[0, :3, :3] = torch.tensor(
+            [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+        )
+    pose = torch.linalg.inv(world_to_base)
+    planner.robot = SimpleNamespace(get_link_pose=Mock(return_value=pose))
+    if observed:
+        planner._query_snapshot = SimpleNamespace(
+            full_qpos=torch.zeros(1, 1),
+            world_to_base=world_to_base,
+        )
+        planner.robot.get_link_pose.side_effect = AssertionError("live pose reread")
+    manager = SimpleNamespace(
+        sim_config=SimpleNamespace(physics_cfg=SimpleNamespace(gravity=world_gravity))
+    )
+    getter = Mock(return_value=manager)
+    monkeypatch.setattr(SimulationManager, "get_instance", getter)
+    backend = _CuroboBackend(
+        planner=None,
+        control_part="arm",
+        sim_joint_names=["joint"],
+        tool_frame="tool",
+        profile=_CuroboProfile(
+            "robot.yml", {"joint": "joint"}, sim_base_link_name="base"
+        ),
+        batch_size=1,
+        use_cuda_graph=False,
+        planning_mode=MoveType.JOINT_MOVE,
+    )
+    assert planner._timeopt_gravity(backend) == pytest.approx(expected)
+    getter.assert_called_once_with(3)
+
+    # A single native solver cannot use contradictory per-row gravity.
+    if tilted:
+        planner._query_snapshot = SimpleNamespace(
+            full_qpos=torch.zeros(2, 1),
+            world_to_base=torch.cat([world_to_base, torch.eye(4)[None]]),
+        )
+        backend.batch_size = 2
+        if world_gravity == [0, 0, 0]:
+            assert planner._timeopt_gravity(backend) == (0.0, 0.0, 0.0)
+        else:
+            with pytest.raises(ValueError, match="entire batch"):
+                planner._timeopt_gravity(backend)
+
+
+@pytest.mark.parametrize(("batch_size", "seeds", "lanes"), [(1, 4, 4), (8, 2, 16)])
+def test_warmup_covers_rrt_seed_lanes_and_graph_seed_fitting(
+    monkeypatch, batch_size, seeds, lanes
+):
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner._curobo_device = torch.device("cpu")
+    planner._synchronize_device = Mock()
+    planner._bindings = SimpleNamespace(
+        Runtime=SimpleNamespace(cuda_graphs=True),
+        JointState=SimpleNamespace(
+            from_position=lambda position, **kwargs: SimpleNamespace(
+                position=position,
+                clone=lambda: SimpleNamespace(position=position.clone()),
+            )
+        ),
+    )
+    native = SimpleNamespace(
+        default_joint_state=SimpleNamespace(position=torch.zeros(1)),
+        joint_names=["joint"],
+        ik_solver=SimpleNamespace(config=SimpleNamespace(exit_early=True)),
+        trajopt_solver=SimpleNamespace(config=SimpleNamespace(num_seeds=seeds)),
+        plan_cspace=Mock(),
+        reset_seed=Mock(),
+        graph_planner=Mock(),
+        graph_seed_fitter=Mock(),
+    )
+    backend = SimpleNamespace(
+        planner=native,
+        batch_size=batch_size,
+        use_cuda_graph=True,
+        planning_mode=MoveType.JOINT_MOVE,
+        graph_planner_algorithm="rrt",
+    )
+    monkeypatch.setattr(torch.cuda, "device", lambda *args: nullcontext())
+    planner._warmup_backend(backend)
+    native.graph_planner.warmup.assert_called_once_with(
+        num_warmup_iterations=1, max_batch_size=lanes
+    )
+    native.graph_seed_fitter.warmup.assert_called_once_with()
+    assert native.ik_solver.config.exit_early is True
+
+
+def test_changing_gravity_rebuilds_a_cached_backend():
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner.robot = SimpleNamespace(cfg=SimpleNamespace(fpath="robot.urdf"))
+    planner._robot_yaml_cache_key = Mock(return_value="same geometry and limits")
+    planner._timeopt_gravity = Mock(return_value=(0.0, 0.0, 0.0))
+    cached = SimpleNamespace(
+        planner=Mock(),
+        motion_limits_key="same geometry and limits",
+        gravity=(0.0, 0.0, 0.0),
+    )
+    key = ("arm", 1, False, MoveType.EEF_MOVE)
+    planner._backend_cache = {key: cached}
+    assert planner._get_backend("arm", 1) is cached
+    planner._timeopt_gravity.return_value = (0.0, 0.0, -9.81)
+    planner._materialize_profile = Mock(side_effect=RuntimeError("rebuild"))
+    with pytest.raises(RuntimeError, match="rebuild"):
+        planner._get_backend("arm", 1)
+    cached.planner.close.assert_called_once()
+    assert key not in planner._backend_cache
 
 
 def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_path):
@@ -719,7 +951,8 @@ def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_pa
     assert "self_collision_ignore" not in persisted["robot_cfg"]["kinematics"]
 
 
-def test_disable_self_collision_reaches_all_curobo_rollouts():
+@pytest.mark.parametrize("algorithm", ["prm", "rrt"])
+def test_disable_self_collision_reaches_all_curobo_rollouts(algorithm):
     class FakeCostCfg:
         def __init__(self):
             self.disable_calls = 0
@@ -752,7 +985,11 @@ def test_disable_self_collision_reaches_all_curobo_rollouts():
                 optimizer_rollout_configs=[trajopt_optimizer],
             )
         ),
-        graph_planner_config=SimpleNamespace(rollout_config=graph_rollout),
+        **{
+            f"{algorithm}_graph_planner_config": SimpleNamespace(
+                resources_config=SimpleNamespace(rollout_config=graph_rollout)
+            )
+        },
     )
 
     CuroboPlanner._disable_curobo_self_collision_rollouts(planner_cfg)
@@ -812,45 +1049,115 @@ def test_graph_capture_mode_rejects_unknown_value():
             pass
 
 
+def test_lazy_planning_capture_is_coordinated_and_released_on_error(monkeypatch):
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner._curobo_device = torch.device("cpu")
+    planner._synchronize_device = Mock()
+    planner._bindings = SimpleNamespace(Runtime=SimpleNamespace(cuda_graphs=True))
+    coordinator = Mock()
+    coordinator.acquire_for_capture.return_value = True
+    monkeypatch.setattr(
+        "embodichain.lab.sim.motion.planners.curobo.curobo_planner._get_capture_coordinator",
+        lambda: coordinator,
+    )
+    with pytest.raises(RuntimeError, match="native planning error"):
+        with planner._planning_capture_scope(SimpleNamespace(use_cuda_graph=True)):
+            coordinator.acquire_for_capture.assert_called_once()
+            coordinator.release_for_capture.assert_not_called()
+            raise RuntimeError("native planning error")
+    coordinator.release_for_capture.assert_called_once()
+    assert planner._synchronize_device.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("previous", "enabled"), [(True, False), (True, True), (False, True)]
+)
+def test_native_graph_mode_restores_runtime_flags_on_failure(previous, enabled):
+    planner = object.__new__(CuroboPlanner)
+    runtime = SimpleNamespace(cuda_graphs=previous)
+    planner._bindings = SimpleNamespace(Runtime=runtime)
+    with pytest.raises(RuntimeError, match="native error"):
+        with planner._native_graph_mode(enabled):
+            assert runtime.cuda_graphs is (previous and enabled)
+            raise RuntimeError("native error")
+    assert runtime.cuda_graphs is previous
+
+
 # Robot YAML generation
 
 
-def test_parse_mimic_joint_names_detects_mimic_joint(tmp_path):
-    urdf = tmp_path / "panda_hand.urdf"
-    urdf.write_text(_MIMIC_URDF, encoding="utf-8")
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    ("authored_velocity", "runtime_velocity", "expected_velocity", "mimic_multiplier"),
+    [
+        (2.0, 0.3, 0.3, None),
+        (1e10, 0.3, 0.3, None),
+        (None, float("inf"), 0.2, None),
+        (2.0, 0.0, 0.0, None),
+        (0.0, 1.0, 1.0, None),
+        (0.05, 0.3, 0.3, None),
+        (0.4, 0.3, 0.15, -2.0),
+        pytest.param(0.05, 0.05, 0.05, None, id="alohamini-lift"),
+        pytest.param(1.0, 0.25, 0.25, None, id="cobotmagic-gripper-override"),
+        pytest.param(0.0, float("inf"), 0.2, None, id="unspecified-gripper-speed"),
+        pytest.param(0.0, float("inf"), 0.2, -2.0, id="unspecified-mimic-speeds"),
+    ],
+)
+def test_robot_yaml_preserves_limits_through_curobo_loading(
+    tmp_path,
+    monkeypatch,
+    authored_velocity,
+    runtime_velocity,
+    expected_velocity,
+    mimic_multiplier,
+):
+    from dataclasses import replace
 
-    assert _parse_mimic_joint_names(str(urdf)) == {"fr3_finger_joint2"}
-
-
-def test_parse_mimic_joint_names_returns_empty_without_mimic(tmp_path):
-    urdf = tmp_path / "arm.urdf"
-    urdf.write_text(_NO_MIMIC_URDF, encoding="utf-8")
-
-    assert _parse_mimic_joint_names(str(urdf)) == set()
-
-
-def test_parse_mimic_joint_names_handles_missing_file(tmp_path):
-    assert _parse_mimic_joint_names(str(tmp_path / "does_not_exist.urdf")) == set()
-
-
-def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
     pytest.importorskip("curobo")
     import dexsim.kit.meshproc as meshproc
+    from curobo._src.types.robot import RobotCfg as CuroboRobotCfg
+    from curobo._src.types.device_cfg import DeviceCfg
 
-    urdf_path = tmp_path / "robot.urdf"
-    urdf_path.write_text(
-        '<?xml version="1.0"?><robot name="test"><link name="base"/></robot>',
-        encoding="utf-8",
+    urdf_path = tmp_path / "assets" / "robot.urdf"
+    urdf_path.parent.mkdir()
+    source_xml = _NO_MIMIC_URDF.replace(
+        'velocity="2.0"',
+        f'velocity="{authored_velocity}"' if authored_velocity is not None else "",
     )
+    if mimic_multiplier is not None:
+        source_xml = source_xml.replace(
+            "</robot>",
+            f'<link name="finger"/><joint name="follower" type="revolute">'
+            '<parent link="base"/><child link="finger"/><axis xyz="0 0 1"/>'
+            f'<limit effort="100" lower="-3.14" upper="3.14" velocity="{authored_velocity}"/>'
+            f'<mimic joint="joint1" multiplier="{mimic_multiplier}"/>'
+            "</joint></robot>",
+        )
+    urdf_path.write_text(source_xml, encoding="utf-8")
 
     class FakeRobot:
+        mimic_ids = [1] if mimic_multiplier is not None else []
+        mimic_parents = [0] if mimic_multiplier is not None else []
+        mimic_multipliers = [mimic_multiplier] if mimic_multiplier is not None else []
+        active_joint_ids = [0]
         cfg = type(
             "Cfg",
             (),
-            {"fpath": str(urdf_path), "init_qpos": [], "base_link_name": "base"},
+            {
+                "fpath": str(urdf_path),
+                "init_qpos": [0.0, 0.0] if mimic_multiplier is not None else [0.0],
+            },
         )()
-        joint_names = []
-        control_parts = {"arm": []}
+        joint_names = (
+            ["joint1", "follower"] if mimic_multiplier is not None else ["joint1"]
+        )
+        control_parts = {"arm": ["joint1"]}
+
+        def get_qvel_limits(self, **kwargs):
+            return torch.full(
+                (1, len(self.joint_names)), runtime_velocity, dtype=torch.float64
+            )
 
         def get_link_names(self):
             return ["base"]
@@ -859,7 +1166,7 @@ def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
             return _unit_cube_vertices(), _cube_faces()
 
         def get_control_part_link_names(self, control_part):  # noqa: ARG002
-            return ["base"]
+            return ["link1"]
 
     calls = []
 
@@ -873,14 +1180,19 @@ def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(meshproc, "sphere_fit", fake_sphere_fit)
-    output_path = tmp_path / "robot.yml"
+    output_path = tmp_path / "cache" / "robot.yml"
+
+    if expected_velocity == 0:
+        with pytest.raises(ValueError, match="zero velocity"):
+            generate_curobo_robot_yaml(
+                FakeRobot(), "arm", str(output_path), max_acceleration=0.4, device="cpu"
+            )
+        assert urdf_path.read_text(encoding="utf-8") == source_xml
+        assert not output_path.exists()
+        return
 
     generate_curobo_robot_yaml(
-        FakeRobot(),
-        "arm",
-        str(output_path),
-        urdf_path=str(urdf_path),
-        device="cuda:0",
+        FakeRobot(), "arm", str(output_path), max_acceleration=0.4, device="cpu"
     )
 
     assert len(calls) == 1
@@ -893,6 +1205,28 @@ def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
     assert kinematics["collision_spheres"]["base"][0]["radius"] == pytest.approx(0.25)
     assert "self_collision_buffer" not in kinematics
     assert "self_collision_ignore" not in kinematics
+    assert kinematics["urdf_path"] != str(urdf_path)
+    assert kinematics["asset_root_path"] == str(urdf_path.parent)
+    assert urdf_path.read_text(encoding="utf-8") == source_xml
+
+    model = CuroboRobotCfg.create(
+        {"robot_cfg": {"kinematics": kinematics}},
+        device_cfg=DeviceCfg(device="cpu"),
+        load_collision_spheres=False,
+    )
+    expected = torch.tensor([[-expected_velocity], [expected_velocity]])
+    torch.testing.assert_close(
+        model.kinematics.get_joint_limits().acceleration, torch.tensor([[-0.4], [0.4]])
+    )
+    torch.testing.assert_close(model.kinematics.get_joint_limits().velocity, expected)
+    # Reinitialize copied native limits with the CPU device preserved. cuRobo's
+    # clone() omits device_cfg and otherwise assumes CUDA even for a CPU model.
+    copied = replace(
+        model.kinematics.kinematics_config,
+        joint_limits=model.kinematics.get_joint_limits().clone(),
+    )
+    torch.testing.assert_close(copied.joint_limits.velocity, expected)
+    torch.testing.assert_close(model.cspace.velocity_scale, torch.ones(1))
 
 
 def test_robot_collision_visualization_reads_cache_and_live_link_pose(tmp_path):
@@ -1139,7 +1473,7 @@ class _FakeDexsimMaterial:
     def __init__(self, name, color):
         self.name = name
         self.color = color
-        self.pbr_type = None
+        self.transmission = None
         self.pbr_params = {}
 
     def set_base_color(self, color):
@@ -1148,8 +1482,8 @@ class _FakeDexsimMaterial:
     def get_inst(self):
         return self
 
-    def update_pbr_material_type(self, material_type):
-        self.pbr_type = material_type
+    def set_transmission(self, value):
+        self.transmission = value
 
     def set_pbr_param(self, name, *values):
         self.pbr_params[name] = values
@@ -1228,6 +1562,9 @@ def test_obstacle_collision_visualization_loads_one_combined_dexsim_actor():
     assert bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
     assert actors[0].material.name == "curobo_world_collision_material"
     assert actors[0].material.color == [1.0, 0.0, 0.0]
+    assert actors[0].material.transmission == pytest.approx(0.55)
+    assert "colorAbsorption" not in actors[0].material.pbr_params
+    assert "scaleAbsorption" not in actors[0].material.pbr_params
 
 
 def test_combined_collision_visualization_colors_and_cleans_two_actors(
@@ -1291,11 +1628,13 @@ def test_combined_collision_visualization_colors_and_cleans_two_actors(
     assert robot_bounds.get_extent() == pytest.approx([0.22, 0.22, 0.22])
     assert robot_actor.material.name == "curobo_robot_collision_material"
     assert robot_actor.material.color == [0.75, 0.75, 1.0]
+    assert robot_actor.material.transmission == pytest.approx(0.55)
     obstacle_bounds = obstacle_actor.mesh.get_axis_aligned_bounding_box()
     assert obstacle_bounds.get_center() == pytest.approx([2.0, 2.0, 3.0])
     assert obstacle_bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
     assert obstacle_actor.material.name == "curobo_world_collision_material"
     assert obstacle_actor.material.color == [1.0, 0.75, 0.75]
+    assert obstacle_actor.material.transmission == pytest.approx(0.55)
     assert env.removed_actors == list(reversed(env.actors))
     assert all(not Path(path).exists() for path in env.loaded_paths)
     assert "Showing 2 cuRobo collision spheres" in prompts[0]
@@ -2140,3 +2479,44 @@ def test_curobo_failed_native_derivatives_do_not_poison_successful_peers() -> No
     _, _, _, actual, _ = planner._extract_segment(result, backend)
     torch.testing.assert_close(actual[0], velocities[0])
     assert torch.count_nonzero(actual[1]) == 0
+
+
+def test_curobo_assembly_preserves_exact_start_across_zero_time_action_boundary() -> (
+    None
+):
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    start = torch.tensor([[1.3, -2.1]])
+    rounded = torch.nextafter(start, torch.full_like(start, torch.inf))
+    path = torch.cat([rounded, start + 0.1, start + 0.2]).unsqueeze(0)
+    original = path.clone()
+    result = planner._assemble_result(
+        [[path[0]]],
+        [[torch.tensor([0.0, 0.5, 0.5])]],
+        start,
+        torch.tensor([True]),
+        1,
+        2,
+    )
+    # The preceding action ends at start; the next action repeats that sample
+    # at dt=0. No displacement may be introduced at that shared timestamp.
+    joined = torch.cat([start[:, None], result.positions], dim=1)
+    assert torch.equal(joined[:, 0], joined[:, 1])
+    assert torch.equal(result.positions[:, 1:], path[:, 1:])
+    assert torch.equal(path, original)
+
+
+def test_curobo_assembly_does_not_hide_a_real_start_mismatch() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    start = torch.tensor([[1.3, -2.1]])
+    path = torch.cat([start + 0.001, start + 0.1]).unsqueeze(0)
+    result = planner._assemble_result(
+        [[path[0]]],
+        [[torch.tensor([0.0, 0.5])]],
+        start,
+        torch.tensor([True]),
+        1,
+        2,
+    )
+    assert torch.equal(result.positions, path)

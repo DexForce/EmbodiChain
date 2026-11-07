@@ -40,6 +40,19 @@ __all__ = ["list_robot_cfgs", "resolve_robot_cfg"]
 
 def _validate_control_metadata(name: str, spec: Mapping[str, Any]) -> None:
     """Validate optional display metadata before exposing it to CLI consumers."""
+    for field in ("vendor", "morphology"):
+        value = spec.get(field)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise TypeError(
+                f"Robot {name!r} {field} must be a nonempty string or None."
+            )
+    arm_count = spec.get("arm_count")
+    if arm_count is not None and (
+        not isinstance(arm_count, int) or isinstance(arm_count, bool) or arm_count < 0
+    ):
+        raise TypeError(
+            f"Robot {name!r} arm_count must be a nonnegative integer or None."
+        )
     if "defaults" in spec and not isinstance(spec["defaults"], Mapping):
         raise TypeError(f"Robot {name!r} defaults must be a mapping.")
     dof = spec.get("dof")
@@ -182,6 +195,9 @@ def _robot_specs() -> dict[str, Mapping[str, Any]]:
     specs: dict[str, Mapping[str, Any]] = {
         "DualArmRobot": {
             "class_path": "embodichain.lab.sim.robots.dual_arm:DualArmRobotCfg",
+            "vendor": None,
+            "morphology": "fixed_manipulator",
+            "arm_count": 2,
             "dof": 12,
             "control_parts": {"left_arm": 6, "right_arm": 6, "dual_arm": 12},
             "mimic_joints": {},

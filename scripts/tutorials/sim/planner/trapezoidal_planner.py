@@ -47,8 +47,9 @@ from embodichain.lab.sim.motion.planners import (
     TrapezoidalPlanOptions,
     BezierPath,
 )
-from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
-    _plan_linear_profiles,
+from embodichain.lab.sim.motion.planners._cartesian_profiles import (
+    plan_cartesian_path,
+    compute_eef_trajectory,
 )
 from embodichain_robots import CobotMagicCfg
 from embodichain.lab.sim.cfg import MarkerCfg, physics_cfg_for_backend
@@ -259,113 +260,29 @@ def build_cartesian_line_poses(
     return [start_pose, goal_pose]
 
 
-def joint_derivatives_from_path_time_law(
-    jacobians: torch.Tensor,
-    path_positions: torch.Tensor,
-    path_velocities: torch.Tensor,
-    path_accelerations: torch.Tensor,
-    cartesian_tangent: torch.Tensor,
-    cartesian_curvature: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Convert scalar path derivatives into joint derivatives.
-
-    For a Cartesian line ``x(s)`` the tangent is constant and
-    ``d²x/ds² = 0``. The joint path derivatives therefore satisfy
-    ``J q_s = x_s`` and ``J q_ss = -J_s q_s``. Double-S then supplies the
-    time law through ``q_dot = q_s s_dot`` and
-    ``q_ddot = q_ss s_dot² + q_s s_ddot``.
-
-    Args:
-        jacobians: Geometric Jacobians shaped ``(B, N, 6, DOF)``.
-        path_positions: Scalar metric path positions shaped ``(B, N)``.
-        path_velocities: Scalar path velocities shaped ``(B, N)``.
-        path_accelerations: Scalar path accelerations shaped ``(B, N)``.
-        cartesian_tangent: Constant unit twists shaped ``(B, 6)``.
-
-    Returns:
-        Joint velocity and acceleration tensors shaped ``(B, N, DOF)``.
-    """
-    batch_size, sample_count, _, dof = jacobians.shape
-    expected_scalar_shape = (batch_size, sample_count)
-    if (
-        path_positions.shape != expected_scalar_shape
-        or path_velocities.shape != expected_scalar_shape
-        or path_accelerations.shape != expected_scalar_shape
-        or cartesian_tangent.shape
-        not in ((batch_size, 6), (batch_size, sample_count, 6))
-    ):
-        raise ValueError("Path derivative tensors have incompatible shapes.")
-    if sample_count < 3:
-        raise ValueError("At least three path samples are required.")
-    if bool((torch.diff(path_positions, dim=1) <= 0.0).any().item()):
-        raise ValueError("Path positions must be strictly increasing.")
-
-    if cartesian_curvature is None:
-        jacobian_pinv = torch.linalg.pinv(jacobians)
-    else:
-        damping = 1e-4
-        identity = torch.eye(6, dtype=jacobians.dtype, device=jacobians.device)
-        identity = identity.expand(batch_size, sample_count, -1, -1)
-        normal = (
-            torch.matmul(jacobians, jacobians.transpose(-1, -2)) + damping**2 * identity
-        )
-        jacobian_pinv = torch.matmul(
-            jacobians.transpose(-1, -2), torch.linalg.solve(normal, identity)
-        )
-    if cartesian_tangent.dim() == 2:
-        tangent = cartesian_tangent[:, None].expand(-1, sample_count, -1)
-    else:
-        tangent = cartesian_tangent
-    tangent = tangent[..., None]
-    q_s = torch.matmul(jacobian_pinv, tangent).squeeze(-1)
-    jacobian_s_rows: list[torch.Tensor] = []
-    for batch_index in range(batch_size):
-        jacobian_s_rows.append(
-            torch.gradient(
-                jacobians[batch_index],
-                spacing=(path_positions[batch_index],),
-                dim=(0,),
-                edge_order=2,
-            )[0]
-        )
-    jacobian_s = torch.stack(jacobian_s_rows)
-    jacobian_term = torch.matmul(jacobian_s, q_s.unsqueeze(-1))
-    if cartesian_curvature is None:
-        curvature = torch.zeros_like(jacobian_term)
-    else:
-        if cartesian_curvature.shape != (batch_size, sample_count, 6):
-            raise ValueError("Cartesian curvature must have shape (B, N, 6).")
-        curvature = cartesian_curvature[..., None]
-    q_ss = torch.matmul(jacobian_pinv, curvature - jacobian_term).squeeze(-1)
-    velocities = q_s * path_velocities[..., None]
-    accelerations = (
-        q_ss * path_velocities.square()[..., None] + q_s * path_accelerations[..., None]
-    )
-    if velocities.shape != (batch_size, sample_count, dof):
-        raise RuntimeError("Unexpected joint derivative shape.")
-    return velocities, accelerations
-
-
-def nearest_equivalent_joint_solution(
-    solution: torch.Tensor,
-    seed: torch.Tensor,
-    limits: torch.Tensor,
-) -> torch.Tensor:
-    """Select the limit-valid ``2π`` equivalent closest to the previous seed."""
-    if solution.shape != seed.shape or limits.shape != (*solution.shape, 2):
-        raise ValueError("solution, seed, and limits have incompatible shapes.")
-    turns = torch.round((seed - solution) / (2.0 * torch.pi))
-    nearest = solution + turns * (2.0 * torch.pi)
-    valid = (nearest >= limits[..., 0]) & (nearest <= limits[..., 1])
-    return torch.where(valid, nearest, solution)
-
-
 def plan_cartesian_line(
     robot: Robot,
     control_part: str,
     start_qpos: torch.Tensor,
+    **kwargs,
+) -> tuple[PlanResult, torch.Tensor, PlanResult]:
+    """Apply the production Cartesian path adapter to the demo's straight line."""
+    distance = float(kwargs.pop("distance"))
+    start_pose, goal_pose = build_cartesian_line_poses(
+        robot, control_part, start_qpos, distance
+    )
+    return plan_cartesian_path(
+        robot,
+        control_part,
+        start_qpos,
+        start_pose,
+        goal_pose,
+        options=_cartesian_options(**kwargs),
+    )
+
+
+def _cartesian_options(
     *,
-    distance: float,
     profile: str,
     sample_count: int,
     velocity_limit: float,
@@ -373,101 +290,18 @@ def plan_cartesian_line(
     jerk_limit: float,
     backend: str,
     minimum_duration: float | None = None,
-) -> tuple[PlanResult, torch.Tensor, PlanResult]:
-    """Time-parameterize Cartesian line distance, then solve continuous IK.
-
-    Returns:
-        Joint trajectory, desired Cartesian pose samples, and the scalar
-        Cartesian path-parameter trajectory carrying metric derivatives.
-    """
-    if sample_count < 3:
-        raise ValueError("Cartesian planning requires sample_count >= 3.")
-    start_pose, goal_pose = build_cartesian_line_poses(
-        robot, control_part, start_qpos, distance
-    )
-    batch_size = start_qpos.shape[0]
-    scalar_waypoints = start_qpos.new_zeros((batch_size, 2, 1))
-    scalar_waypoints[:, 1, 0] = distance
-    scalar_plan = _plan_linear_profiles(
-        scalar_waypoints,
-        TrapezoidalPlanOptions(
-            profile=profile,
-            constraints={
-                "velocity": velocity_limit,
-                "acceleration": acceleration_limit,
-                "jerk": jerk_limit,
-            },
-            sample_interval=sample_count,
-            minimum_duration=minimum_duration,
-            backend=backend,
-        ),
-    )
-    progress = scalar_plan.positions[..., 0] / distance
-    desired_poses = start_pose[:, None].expand(-1, sample_count, -1, -1).clone()
-    translation = torch.lerp(
-        start_pose[:, None, :3, 3],
-        goal_pose[:, None, :3, 3],
-        progress[..., None],
-    )
-    desired_poses[:, :, :3, 3] = translation
-
-    joint_ids = robot.get_joint_ids(name=control_part)
-    joint_limits = robot.get_qpos_limits(joint_ids=joint_ids).to(start_qpos)
-    ik_result = robot.compute_batch_ik(
-        desired_poses,
-        start_qpos,
-        control_part,
-        continuous=True,
-    )
-    if ik_result is None:
-        raise RuntimeError("Cartesian line IK solver is unavailable.")
-    sample_success, positions = ik_result
-    sample_success = sample_success.bool()
-    if not bool(sample_success.all().item()):
-        failure = torch.nonzero(~sample_success, as_tuple=False)[0].tolist()
-        raise RuntimeError(
-            f"Cartesian line IK failed at env {failure[0]}, sample {failure[1]}."
-        )
-    previous = torch.cat((start_qpos[:, None], positions[:, :-1]), dim=1)
-    positions = nearest_equivalent_joint_solution(
-        positions,
-        previous,
-        joint_limits[:, None].expand(-1, sample_count, -1, -1),
-    )
-    success = sample_success.all(dim=1)
-    solver = robot.get_solver(control_part)
-    if solver is None:
-        raise RuntimeError(f"Kinematic solver is unavailable for {control_part!r}.")
-    jacobians = solver.get_jacobian(
-        positions.reshape(batch_size * sample_count, -1), jac_type="full"
-    ).reshape(batch_size, sample_count, 6, -1)
-    base_pose = robot.get_control_part_base_pose(control_part, to_matrix=True)
-    world_direction = goal_pose[:, :3, 3] - start_pose[:, :3, 3]
-    world_direction /= torch.linalg.vector_norm(world_direction, dim=-1, keepdim=True)
-    root_direction = torch.matmul(
-        base_pose[:, :3, :3].transpose(-1, -2), world_direction.unsqueeze(-1)
-    ).squeeze(-1)
-    cartesian_tangent = torch.cat(
-        (root_direction, torch.zeros_like(root_direction)), dim=-1
-    ).to(jacobians)
-    velocities, accelerations = joint_derivatives_from_path_time_law(
-        jacobians,
-        scalar_plan.positions[..., 0],
-        scalar_plan.velocities[..., 0],
-        scalar_plan.accelerations[..., 0],
-        cartesian_tangent,
-    )
-    return (
-        PlanResult(
-            success=success,
-            xpos_list=desired_poses,
-            positions=positions,
-            velocities=velocities,
-            accelerations=accelerations,
-            dt=scalar_plan.dt,
-        ),
-        desired_poses,
-        scalar_plan,
+) -> TrapezoidalPlanOptions:
+    """Describe the sample's scalar distance timing."""
+    return TrapezoidalPlanOptions(
+        profile=profile,
+        constraints={
+            "velocity": velocity_limit,
+            "acceleration": acceleration_limit,
+            "jerk": jerk_limit,
+        },
+        sample_interval=sample_count,
+        minimum_duration=minimum_duration,
+        backend=backend,
     )
 
 
@@ -479,7 +313,6 @@ def plan_cartesian_bezier(
 ) -> tuple[PlanResult, torch.Tensor, PlanResult]:
     """Plan a quintic Cartesian Bézier path with Double-S-compatible timing."""
     distance = float(kwargs["distance"])
-    sample_count = int(kwargs["sample_count"])
     start_pose, goal_pose = build_cartesian_line_poses(
         robot, control_part, start_qpos, distance
     )
@@ -501,70 +334,15 @@ def plan_cartesian_bezier(
         dim=1,
     )
     path = BezierPath(control_points)
-    total_length = path.length
-    scalar_waypoints = start_qpos.new_zeros((start_qpos.shape[0], 2, 1))
-    scalar_waypoints[:, 1, 0] = total_length
-    scalar_plan = _plan_linear_profiles(
-        scalar_waypoints,
-        TrapezoidalPlanOptions(
-            profile=str(kwargs["profile"]),
-            constraints={
-                "velocity": float(kwargs["velocity_limit"]),
-                "acceleration": float(kwargs["acceleration_limit"]),
-                "jerk": float(kwargs["jerk_limit"]),
-            },
-            sample_interval=sample_count,
-            minimum_duration=kwargs.get("minimum_duration"),
-            backend=str(kwargs["backend"]),
-        ),
-    )
-    parameter = path.parameter_at_arc_length(scalar_plan.positions[..., 0])
-    translations = path.evaluate(parameter)
-    desired_poses = start_pose[:, None].expand(-1, sample_count, -1, -1).clone()
-    desired_poses[:, :, :3, 3] = translations
-    ik_result = robot.compute_batch_ik(
-        desired_poses, start_qpos, control_part, continuous=True
-    )
-    if ik_result is None or not bool(ik_result[0].all().item()):
-        raise RuntimeError("Cartesian Bézier IK failed.")
-    positions = ik_result[1]
-    solver = robot.get_solver(control_part)
-    if solver is None:
-        raise RuntimeError(f"Kinematic solver is unavailable for {control_part!r}.")
-    jacobians = solver.get_jacobian(
-        positions.reshape(start_qpos.shape[0] * sample_count, -1), jac_type="full"
-    ).reshape(start_qpos.shape[0], sample_count, 6, -1)
-    world_tangent = path.arc_tangent(parameter)
-    world_curvature = path.arc_curvature(parameter)
-    base_pose = robot.get_control_part_base_pose(control_part, to_matrix=True)
-    world_to_root = base_pose[:, None, :3, :3].transpose(-1, -2)
-    root_tangent = torch.matmul(world_to_root, world_tangent[..., None]).squeeze(-1)
-    root_curvature = torch.matmul(world_to_root, world_curvature[..., None]).squeeze(-1)
-    cartesian_tangent = torch.cat(
-        (root_tangent, torch.zeros_like(root_tangent)), dim=-1
-    )
-    cartesian_curvature = torch.cat(
-        (root_curvature, torch.zeros_like(root_curvature)), dim=-1
-    )
-    velocities, accelerations = joint_derivatives_from_path_time_law(
-        jacobians,
-        scalar_plan.positions[..., 0],
-        scalar_plan.velocities[..., 0],
-        scalar_plan.accelerations[..., 0],
-        cartesian_tangent,
-        cartesian_curvature,
-    )
-    return (
-        PlanResult(
-            success=ik_result[0].all(dim=1),
-            xpos_list=desired_poses,
-            positions=positions,
-            velocities=velocities,
-            accelerations=accelerations,
-            dt=scalar_plan.dt,
-        ),
-        desired_poses,
-        scalar_plan,
+    kwargs.pop("distance")
+    return plan_cartesian_path(
+        robot,
+        control_part,
+        start_qpos,
+        start_pose,
+        goal_pose,
+        options=_cartesian_options(**kwargs),
+        path=path,
     )
 
 
@@ -629,36 +407,6 @@ def replay_plan(
             remaining = wall_start + target_elapsed - time.perf_counter()
             if remaining > 0.0:
                 time.sleep(remaining)
-
-
-def compute_eef_trajectory(
-    robot: Robot,
-    control_part: str,
-    joint_positions: torch.Tensor,
-    env_index: int,
-) -> torch.Tensor:
-    """Evaluate FK for one row of a trajectory shaped ``(B, N, DOF)``.
-
-    Returns:
-        End-effector position and quaternion as ``(N, 7)`` in the local arena
-        frame, ordered as ``x, y, z, qx, qy, qz, qw`` (``xyz + xyzw``).
-    """
-    if joint_positions.ndim != 3:
-        raise ValueError("joint_positions must have shape (B, N, DOF).")
-    if not 0 <= env_index < joint_positions.shape[0]:
-        raise ValueError(
-            f"env_index must be in [0, {joint_positions.shape[0]}), got {env_index}."
-        )
-    sample_count = joint_positions.shape[1]
-    poses = robot.compute_fk(
-        qpos=joint_positions[env_index],
-        name=control_part,
-        env_ids=[env_index] * sample_count,
-        to_matrix=False,
-    )
-    if poses is None:
-        raise RuntimeError(f"Forward kinematics is unavailable for {control_part!r}.")
-    return poses
 
 
 def unwrap_angles(angles: torch.Tensor) -> torch.Tensor:

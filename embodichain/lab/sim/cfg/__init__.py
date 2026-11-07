@@ -38,12 +38,8 @@ from .articulation import (
     _raise_removed_articulation_cfg_fields,
     link_attrs_from_dict,
 )
-from .asset import (
-    AssetPhysicsMode,
-    ObjectBaseCfg,
-    UsdSourceCfg,
-    _resolve_asset_physics_mode,
-)
+from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .source import UsdSourceCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -68,6 +64,7 @@ from .rigid import (
     RigidBodyPhysicsCfg,
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
+from .visual_object import VisualObjectCfg
 from .scene import LightCfg, RigidConstraintCfg
 from .physics import (
     DefaultPhysicsCfg,
@@ -93,7 +90,6 @@ from .robot import RobotCfg, RobotPresetCfg  # noqa: E402
 __all__ = [
     "DEFAULT_RENDERER",
     "AssetPhysicsMode",
-    "UsdSourceCfg",
     "DenoisingCfg",
     "DenoisingMode",
     "DLSSCfg",
@@ -123,8 +119,10 @@ __all__ = [
     "NewtonRigidBodyMaterialCfg",
     "RigidBodyPhysicsCfg",
     "ObjectBaseCfg",
+    "UsdSourceCfg",
     "LightCfg",
     "RigidObjectCfg",
+    "VisualObjectCfg",
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",

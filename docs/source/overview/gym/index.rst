@@ -1,5 +1,5 @@
-Gym
-===
+Environment Framework
+=====================
 
 .. currentmodule:: embodichain.lab.gym
 
@@ -62,8 +62,8 @@ functors.
 Architecture
 ------------
 
-The Gym module sits above the simulation module and below training or data
-collection code:
+The environment framework sits above the simulation module and below training
+or data collection code:
 
 .. code-block:: text
 
@@ -200,8 +200,8 @@ Choosing Where to Start
 Documentation Quality Notes
 ---------------------------
 
-Gym documentation should make the runtime contract explicit: tensor shapes,
-whether data is batched by ``num_envs``, which manager mode invokes a functor,
+Environment documentation should make the runtime contract explicit: tensor
+shapes, whether data is batched by ``num_envs``, which manager mode invokes a functor,
 and which scene entity each functor expects. Prefer linking to the simulation
 overview for asset and sensor details, and keep task pages focused on the
 environment lifecycle, manager configuration, and learning interface.

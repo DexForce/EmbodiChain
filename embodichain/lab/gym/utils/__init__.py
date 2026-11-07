@@ -18,6 +18,10 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.utils.composition import (
+    ResolvedGymComponents,
+    resolve_gym_components,
+)
 from embodichain.lab.gym.utils.profiler import EnvProfiler, EnvProfilerCfg
 from embodichain.lab.gym.utils.trajectory_state import (
     capture_trajectory_state,
@@ -25,6 +29,8 @@ from embodichain.lab.gym.utils.trajectory_state import (
 )
 
 __all__ = [
+    "ResolvedGymComponents",
+    "resolve_gym_components",
     "EnvProfiler",
     "EnvProfilerCfg",
     "capture_trajectory_state",

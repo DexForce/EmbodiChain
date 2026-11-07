@@ -1,6 +1,5 @@
 Public API Supplement
-=====================
-
+==============
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -22,6 +21,87 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.cli.expansion
+-------------------------
+
+Offline job preflight, run, resume and verified inspection commands.
+
+.. currentmodule:: embodichain.cli.expansion
+
+.. autosummary::
+
+   main
+
+embodichain.compute.geometry.shading
+------------------------------------
+
+Pure float64 triangle/corner-normal consistency for source mesh preparation.
+The check uses equally weighted unit-face accumulation and the source strict
+negative-dot decision. It does not require a mesh library, runtime object or
+simulator, and does not establish collision or manifold validity.
+
+.. currentmodule:: embodichain.compute.geometry.shading
+
+.. autosummary::
+
+   has_inconsistent_shading_normals
+
+.. autofunction:: has_inconsistent_shading_normals
+
+embodichain.compute.kinematics.ik_path
+--------------------------------------
+
+Bounded fixed-time branch search for one Cartesian path. Solver callbacks own
+kinematics; this numeric routine preserves serial/batched seed order and accepts
+no simulation objects. Failure means the bounded search did not produce a path.
+
+.. currentmodule:: embodichain.compute.kinematics.ik_path
+
+.. autosummary::
+
+   resolve_seeded_ik_path
+
+embodichain.compute.trajectory.limits
+-------------------------------------
+
+Per-environment sampled joint-speed checks with explicit arrival intervals.
+The result checks finite positions and declared speeds; it does not establish
+continuous collision freedom or acceleration compliance.
+``joint_velocity_diagnostics`` retains the worst row, interval, joint and
+original operands, representing nonfinite ratios as None. These diagnostics
+do not make an invalid trajectory valid.
+
+.. currentmodule:: embodichain.compute.trajectory.limits
+
+.. autosummary::
+
+   joint_velocity_validity
+   joint_velocity_diagnostics
+
+embodichain.data
+----------------
+
+The public data namespace exposes dataset resolution, legacy database locations,
+and resource metadata. Its asset namespace loads on first access so extension
+asset definitions can import the dataset base without circular initialization.
+
+.. currentmodule:: embodichain.data
+
+.. autosummary::
+
+   assets
+   EMBODICHAIN_DEFAULT_DATABASE_ROOT
+   database_dir
+   database_2d_dir
+   database_agent_prompt_dir
+   database_demo_dir
+   EmbodiChainDataset
+   DEFAULT_DATA_MODULES
+   get_data_class
+   get_data_path
+   list_default_materials
+   get_default_material_info
+
 embodichain.data.assets.demo_assets
 -----------------------------------
 
@@ -38,6 +118,36 @@ EmbodiChain data cache.
    MultiW1Data
    RubiksCube
    ScoopIceNewEnv
+   TabletopFourBases
+   Real2SimCarton
+
+``Real2SimCarton`` downloads a checksum-pinned original DROID episode, manual
+annotations, two motion-prototype sources and estimated physical proxies. Its
+revision-specific cache verifies extracted files. Measured DROID derivatives
+retain CC BY 4.0; the bundle is not a generated training dataset or hardware
+qualification.
+
+.. autoclass:: Real2SimCarton
+
+embodichain.data.assets.materials
+------------------------------------
+
+Material, environment-map and background bundles use the shared asset cache.
+``DefaultMaterials`` downloads the pinned 18-preset collection and its auxiliary
+soap-film layer; it does not create a simulator World.
+
+.. currentmodule:: embodichain.data.assets.materials
+
+.. autosummary::
+
+   SimResources
+   EnvMapHDR
+   CocoBackground
+   BackgroundTexture
+   DefaultMaterials
+
+.. autoclass:: DefaultMaterials
+   :members: get_material_path
 
 embodichain.data.assets.planner_assets
 --------------------------------------
@@ -72,6 +182,134 @@ embodichain.data.assets.solver_assets
 
    download_neural_ik_checkpoint
 
+embodichain.data.assets.w1_assets
+---------------------------------
+
+Versioned W1 URDF archives use the shared data-root and download cache. V021
+provides separate body components; V022 and V025 bundle the full robot and
+components. V030 packages the standard 20-DOF body without detachable grippers
+or wrist-camera attachments. Its component visuals and inertials match the
+corrected full-body definition.
+
+.. currentmodule:: embodichain.data.assets.w1_assets
+
+.. autosummary::
+   :nosignatures:
+
+   DexforceW1V021
+   DexforceW1V022
+   DexforceW1V025
+   DexforceW1V030
+   DexforceW1ChassisV021
+   DexforceW1TorsoV021
+   DexforceW1EyesV021
+   DexforceW1HeadV021
+   DexforceW1LeftArmV021
+   DexforceW1RightArmV021
+
+.. autoclass:: DexforceW1V021
+
+.. autoclass:: DexforceW1V022
+
+.. autoclass:: DexforceW1V025
+
+.. autoclass:: DexforceW1V030
+
+.. autoclass:: DexforceW1ChassisV021
+
+.. autoclass:: DexforceW1TorsoV021
+
+.. autoclass:: DexforceW1EyesV021
+
+.. autoclass:: DexforceW1HeadV021
+
+.. autoclass:: DexforceW1LeftArmV021
+
+.. autoclass:: DexforceW1RightArmV021
+
+embodichain.data.default_materials
+------------------------------------
+
+The wheel includes catalog metadata so these functions work offline without
+asset downloads. Both functions are also available from ``embodichain.data``. The 24-preset
+catalog combines six built-in parameter definitions and 18 downloadable
+resources; metadata identifies their source and download requirement.
+Metadata includes compatible renderer names, source revision, dependencies,
+auxiliary resources and suggested physical texture dimensions. Dimensions do
+not change geometry or UVs.
+
+.. currentmodule:: embodichain.data.default_materials
+
+.. autosummary::
+
+   list_default_materials
+   get_default_material_info
+
+.. autofunction:: list_default_materials
+
+.. autofunction:: get_default_material_info
+
+.. currentmodule:: embodichain.data
+
+.. autofunction:: list_default_materials
+   :no-index:
+
+.. autofunction:: get_default_material_info
+   :no-index:
+
+embodichain.data_pipeline
+-------------------------
+
+The configuration submodule derives bounded pipeline settings without starting
+an online worker. Importing the data-pipeline package remains lazy.
+
+.. currentmodule:: embodichain.data_pipeline
+
+.. autosummary::
+
+   configuration
+
+embodichain.data_pipeline.configuration
+---------------------------------------
+
+Configure ODS from measured generation and training capacities. A versioned
+profile bounds selections per trajectory; the planner never promotes provisional
+bounds to qualified ones. Runtime metadata constrains cache storage, refill
+latency and short-window consumption. The online engine and consumer must enforce
+the returned quota and pacing targets. Measurement helpers preserve the units,
+common monotonic window and difference between active and wall-clock rates.
+
+.. currentmodule:: embodichain.data_pipeline.configuration
+
+.. autosummary::
+
+   ODSReuseProfileCfg
+   ODSRuntimeCfg
+   ODSConfiguration
+   configure_ods
+   ODSRateMeasurementCfg
+   ODSThroughputMeasurement
+   measure_ods_throughput
+
+.. autoclass:: ODSReuseProfileCfg
+   :members:
+
+.. autoclass:: ODSRuntimeCfg
+   :members:
+
+.. autoclass:: ODSConfiguration
+   :members:
+
+.. autofunction:: configure_ods
+
+.. autoclass:: ODSRateMeasurementCfg
+   :members:
+
+.. autoclass:: ODSThroughputMeasurement
+   :members:
+
+.. autofunction:: measure_ods_throughput
+
 embodichain.data_pipeline.depth_video
 -------------------------------------
 
@@ -87,6 +325,131 @@ embodichain.data_pipeline.depth_video
    DEPTH_METER_UNIT
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
+
+embodichain.data_pipeline.recording.media
+-----------------------------------------
+
+Byte-bounded owned frame chunks with checksums, timestamps and final manifests.
+
+.. currentmodule:: embodichain.data_pipeline.recording.media
+
+.. autosummary::
+
+   MediaSpool
+   verify_media_manifest
+
+
+.. autosummary::
+
+   MediaFrameReader
+
+embodichain.data_pipeline.recording.schema
+------------------------------------------
+
+Simulation-independent camera dimensions used to reconstruct recording features from frozen evidence.
+
+.. currentmodule:: embodichain.data_pipeline.recording.schema
+
+.. autosummary::
+
+   RecordedCamera
+
+embodichain.gen_sim.asset_engine.cli.start
+-----------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
+
+.. autosummary::
+
+   cli_ingest_single
+   main
+
+embodichain.gen_sim.asset_engine.clients
+----------------------------------------
+
+Asset-owned service client for generating and downloading articulated USDC assets.
+Close the client after use to release its HTTP session.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.clients.articulated_generation
+---------------------------------------------------------------
+
+HTTP generation client with bounded retry attempts, health checks, and validation
+of returned articulation artifacts before publication.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.configs
+----------------------------------------
+
+Read Asset Engine settings from the shared GenSim dotenv file. Legacy Scene
+Engine articulation keys remain accepted as aliases.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.configs.environment
+----------------------------------------------------
+
+Resolves requested Asset Engine dotenv keys and reports missing configuration
+without mutating process environment variables.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.pipeline
+-----------------------------------------
+
+Generate articulated assets from scene-independent asset records. The operation
+updates their USDC path and scale metadata after normalization.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.pipeline.articulation
+------------------------------------------------------
+
+Materializes functional articulated records through the Asset Engine client.
+Records provide source observations and coarse scales; the owning scene pipeline
+continues to control layout and export.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.articulation
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.utils.geometry_utils
+----------------------------------------------------------
+
+File-based OBJ cleanup and simplification through the isolated Blender runtime.
+The caller retains ownership of its input and destination asset paths.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.utils.geometry_utils
+
+.. autosummary::
+
+   process_obj
+
+.. autofunction:: process_obj
 
 embodichain.gen_sim.env
 -----------------------
@@ -260,6 +623,54 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.scene_engine.asset_normalization
+-----------------------------------------------------
+
+Prepare independent runtime declarations and content-addressed GLB assets from
+explicit source objects. Node transforms and source scale are baked using the
+original v3 coordinate policy; safe topology is retained, while inconsistent
+corner normals trigger vertex splitting. Authored files and declarations remain
+unchanged. Invalid geometry is preserved with its original digest and diagnostic
+instead of silently substituting a different asset. This stage creates no task
+bundle or simulator and does not certify physical validity.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.asset_normalization
+
+.. autosummary::
+
+   NormalizedSceneAssets
+   normalize_source_scene_assets
+
+.. autoclass:: NormalizedSceneAssets
+   :members:
+
+.. autofunction:: normalize_source_scene_assets
+
+embodichain.gen_sim.scene_engine.cli.randomization
+--------------------------------------------------
+
+Command-line entry point for grouped layout generation from an existing
+Scene Engine workspace. Validates the YAML policy, prepares a reusable
+baseline and saves successful candidates with a completion manifest.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.cli.randomization
+
+.. autosummary::
+
+   main
+
+embodichain.gen_sim.scene_engine.configs.environment
+----------------------------------------------------
+
+Read Scene Engine settings from the shared GenSim dotenv file through the common
+parser, retaining the existing Scene Engine key names.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.configs.environment
+
+.. autosummary::
+
+   read_scene_engine_env_values
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -269,6 +680,60 @@ embodichain.gen_sim.scene_engine.core.scene_edit_plan
 
    SceneEditOperation
    SceneEditPlan
+
+embodichain.gen_sim.scene_engine.errors
+---------------------------------------
+
+Identifies Scene Engine service failures separately from input or scene-schema
+validation failures.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.errors
+
+.. autosummary::
+
+   SceneServiceError
+
+embodichain.gen_sim.scene_engine.pipeline
+-----------------------------------------
+
+Stage-oriented Scene Engine API. Analyze an image or edit into an in-process
+blueprint with a persisted audit document, then materialize its assets and layout.
+Materialization copies the supplied scene/graph and closes only clients it owns.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
+embodichain.gen_sim.scene_engine.pipeline.api
+---------------------------------------------
+
+Blueprint value objects and their implementation entry points. Image and edit
+blueprints have separate versioned schemas and content identities. Materialization
+returns the exported scene configuration; it does not construct a Gym task.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.api
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
 
 embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 -------------------------------------------------------------------------------
@@ -294,15 +759,861 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
    UsdSceneBinding
    UsdSceneIndex
 
-embodichain.gen_sim.simready_pipeline.cli.start
------------------------------------------------
+embodichain.gen_sim.scene_engine.randomization.adapter
+------------------------------------------------------
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.cli.start
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.adapter
 
 .. autosummary::
 
-   cli_ingest_single
+   scene_layout_input_from_export
+   randomize_scene_export
+   convert_layouts
+
+embodichain.gen_sim.scene_engine.randomization.baseline
+-------------------------------------------------------
+
+Extracts one table work area, group AABBs and root-relative member poses from
+rigid GLB exports. A group contains a direct table child and all descendants.
+The baseline cache is reused only when source identity, extraction version,
+structure and checksum match; preparation leaves the source export untouched.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.baseline
+
+.. autosummary::
+
+   PreparedSceneBaseline
+   prepare_scene_baseline
+
+embodichain.gen_sim.scene_engine.randomization.cfg
+--------------------------------------------------
+
+Loads a closed, versioned YAML policy and resolves the workspace's
+``scene_export/`` input and ``scene_randomization_base.yaml`` baseline path.
+The workspace is supplied separately through ``output_root``. For example:
+
+.. code-block:: yaml
+
+   schema_version: 1
+   seed: 42
+   candidate_count: 10
+   max_attempts: 1000
+   collision_margin_m: 0.02
+
+Generate and save layouts, then cycle the original scene and saved candidates:
+
+.. code-block:: bash
+
+   embodichain scene-randomization --output_root ./workspace --config policy.yaml
+   python -m embodichain.gen_sim.scene_engine.randomization.loading \
+       --layout-dir ./workspace/scene_layouts/run_001/layouts --interval 3
+
+Version 3 adds hierarchical member XY/yaw sampling on CPU or CUDA:
+
+.. code-block:: yaml
+
+   schema_version: 3
+   backend: batched
+   device: cuda:0
+   randomize_groups: true
+   intra_group:
+     targets:
+       mug_001:
+         xy_offset_bounds_m: null
+         yaw_delta_range_deg: [-180, 180]
+
+``randomize_groups: false`` holds group roots fixed. Unselected members retain
+parent-relative poses and follow moved ancestors. XY bounds, when supplied as
+``[[min_x, min_y], [max_x, max_y]]``, bound the original entity origin's offset
+in its parent support frame. A null bound uses the complete feasible region.
+Yaw increments rotate around the support normal while retaining authored tilt.
+Defaults are 2 mm boundary and sibling margins, 1 mm support gap and 1 mm grid
+resolution. ``intra_group.support_overrides`` accepts parent UID entries with
+a proper rigid ``parent_from_support`` matrix and GeoJSON ``polygon``; overrides
+must have mesh support evidence. Invalid polygons are rejected during policy
+loading before scene preparation. Ambiguous automatic layers raise an error.
+The positive height deviation of the selected near-planar layer is included in
+its conservative support height, retaining the configured minimum gap over
+shallow raised geometry.
+
+Content-addressed geometry caches leave the original baseline unchanged.
+Hierarchical layouts save v3 root XY translations and full selected member
+poses relative to their parents, using JSON or packed storage. Replay validates
+source, cache, policy, geometry and identity before exposing lazy variants and
+does not sample again. The existing v1/v2 group layouts and earlier v3
+hierarchical layouts remain readable. New hierarchical proposals use algorithm
+version 2: dynamic group centers are sampled from the remaining free rectangular
+area without nested retries. Support caches use extraction version 2 and include
+a conservative layer height ceiling; older caches retain their recorded height
+semantics on replay. Saving compares the on-disk cache against the generated
+snapshot before publishing a completed run.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.cfg
+
+.. autosummary::
+
+   MemberRandomizationCfg
+   SupportOverrideCfg
+   IntraGroupRandomizationCfg
+   SceneRandomizationCfg
+   load_randomization_config
+
+embodichain.gen_sim.scene_engine.randomization.generation
+---------------------------------------------------------
+
+Uses the shared seeded procedural generator and XY layout solver, then expands
+every group from the same baseline. Successful candidates contain a full
+``SceneFragment`` and a ``SceneVariant``. Group-only sampling preserves authored
+orientation and height. Hierarchical sampling changes selected members' support
+XY/yaw, aligns their geometric bottom to the support gap and propagates subtrees.
+Scale and exported collision hull budgets are preserved. Acceptance checks
+conservative support coverage, sibling/group AABBs and table bounds; it does not
+establish physical stability or task success.
+
+``budget_exhausted`` is a normal result that retains any successful candidates.
+The result records actual parameters, proposal attempts and solver outcomes;
+generation does not save candidates until ``save_layouts`` is called.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.generation
+
+.. autosummary::
+
+   SceneRandomizationResult
+   randomize_scene
+
+embodichain.gen_sim.scene_engine.randomization.loading
+------------------------------------------------------
+
+Validates a completed run's candidate files against its manifest, policy,
+baseline and unchanged source export, then reconstructs every group member's
+absolute pose without generating layouts or rewriting caches. Playback loads
+assets once and cycles original and candidate poses without advancing physics.
+Runs with no successful candidates cannot be previewed.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.loading
+
+.. autosummary::
+
+   LoadedLayouts
+   load_layouts
+   preview_layouts
    main
+
+embodichain.gen_sim.scene_engine.randomization.persistence
+----------------------------------------------------------
+
+Saves each result in a distinct ``scene_layouts/run_NNN/`` directory containing
+the resolved policy and candidate group centers. Relative references identify
+the existing source export and baseline, so those files must remain available
+and unchanged. The completion manifest is published last, including for a run
+with zero candidates; interrupted writes may leave a run without that manifest.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.persistence
+
+.. autosummary::
+
+   save_layouts
+
+embodichain.gen_sim.task_engine.evidence
+----------------------------------------
+
+The Task Engine adapter projects frozen role/lineage declarations and explicit
+compiled occurrence descriptors into TaskSpec bindings. It verifies source
+content identities and retains declared preset/occurrence IDs. Missing compiled
+capabilities fail explicitly; projection reads no simulation or physical trace
+and decides no predicate outcome.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.evidence
+
+.. autosummary::
+
+   project_placement_evidence_binding
+   project_configured_placement_evidence_binding
+
+.. autofunction:: project_placement_evidence_binding
+
+New bundles use ``project_configured_placement_evidence_binding`` with a detached
+condition from the configured owner's named settle preset. It requires no
+``constraints.json`` or constraints digest and does not write either artifact.
+The original projection remains only a frozen B0 source-comparison adapter,
+checking that source payload's identity before sharing the same projection.
+Neither entry point derives numerical policy values from task or object names.
+
+.. autofunction:: project_configured_placement_evidence_binding
+
+embodichain.gen_sim.task_spec
+-----------------------------
+
+Simulator-independent task identity, predicate evaluation and content-addressed
+storage. TaskSpec describes roles, initial and final conditions, invariants,
+bounded temporal conditions and ordered milestones; callers supply observations.
+Missing evidence remains unavailable and cannot produce a certificate.
+
+``TaskSpec.from_dict`` decodes existing instances through the same semantic-hash
+validation as JSON documents and returns independent nested values. Use a new
+TaskSpec (for example, ``dataclasses.replace``) when intentionally changing its
+normative conditions; mutating a nested value invalidates the previous identity.
+Valid documents retain their hashes. Task identifiers, instructions and metadata
+are provenance rather than normative identity.
+
+.. currentmodule:: embodichain.gen_sim.task_spec
+
+.. autosummary::
+
+   CANONICALIZATION_VERSION
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   MILESTONE_SCHEMA
+   PREDICATE_OPERATORS
+   TASK_SPEC_SCHEMA
+   EvaluationReport
+   EvaluationStatus
+   MilestoneSpec
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   RoleSpec
+   TaskRequirement
+   TaskSpec
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+   TaskSpecValidationError
+   TaskTemplate
+   TemporalCondition
+   TemporalSpec
+   canonical_hash
+   canonical_json
+   canonicalize
+   evaluate_predicate
+   evaluate_task_spec
+   evaluate_task_template
+   evaluate_temporal_condition
+   json_snapshot
+   lookup_observation
+   validate_task_spec
+   validate_task_template
+
+embodichain.gen_sim.task_spec.canonicalization
+----------------------------------------------
+
+Deterministic JSON snapshots and SHA-256 identities. Nonfinite numbers,
+callables, byte strings and unordered sets are rejected before serialization.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.canonicalization
+
+.. autosummary::
+
+   CANONICALIZATION_VERSION
+   canonical_hash
+   canonical_json
+   canonicalize
+   json_snapshot
+
+embodichain.gen_sim.task_spec.condition_evidence
+------------------------------------------------
+
+Sealed state bindings select explicit orientation or articulation endpoint
+criteria, native and episode identities, and separate current or recorded input
+contracts. Current orientation uses the shared rigid-pose axis computation;
+current joints use the declared target tolerance. Neither implies task execution
+success. Historical milestones require their full successful occurrence prefix
+and the original policy receipts; E6 also verifies the exact semantic operation,
+joint validator, target bounds and one-second stability contract.
+
+New raw observations require their complete acquisition channels and cannot
+switch to the historical verifier by adding a record. Missing channels, failed
+milestone receipts and unbound episodes remain unavailable per environment.
+Cold import and binding normalization do not load a simulation or numeric backend.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.condition_evidence
+
+.. autosummary::
+
+   ConditionEvidenceBinding
+   evaluate_condition_evidence
+
+.. autoclass:: ConditionEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_condition_evidence
+
+
+embodichain.gen_sim.task_spec.contracts
+---------------------------------------
+
+Logical role requirements for downstream grounding, including cardinality,
+affordances, attributes and declared initial state. No simulator handles are
+stored in these contracts.
+
+``RoleSpec.is_single_member`` reports whether ``one`` or an explicit
+``count=1`` selects one member. It preserves authored cardinality, serialization
+and semantic hash; it does not qualify a partial binding or physical evidence.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.contracts
+
+.. autosummary::
+
+   RoleSpec
+
+embodichain.gen_sim.task_spec.control_evidence
+----------------------------------------------
+
+Control bindings seal a plain source route payload and explicit terminal policy,
+source path and complete execution prefix. Historical Press/Twist replay checks
+the same operation/source-asset/route digest, sampling window, cleanup, clearance
+and declared coarse or calibrated criterion as the original source observer.
+There are no imports of live factories, sensors or Task Engine objects.
+
+Only explicitly selected ``historical_record`` inputs are currently qualified;
+raw input is rejected at binding construction until its complete operation-window
+acquisition contract is available. Missing or failed receipt qualification stays
+unavailable. A contact-backed Press event is not device activation, and the
+coarse Twist criterion is not silently upgraded to calibrated-setting success.
+The common physical report assembler accepts these bindings without filling
+missing final goals, past milestones or continuous trajectory requirements.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.control_evidence
+
+.. autosummary::
+
+   ControlEvidenceBinding
+   evaluate_control_evidence
+
+.. autoclass:: ControlEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_control_evidence
+
+
+embodichain.gen_sim.task_spec.evidence
+--------------------------------------
+
+Placement evidence binds the frozen serialized-program/TaskSpec digests to exact
+release, support and boundary occurrences. Binding schema version 2 also seals
+``evidence_format``: new runtime snapshots use ``raw_snapshot`` and historical
+B0 re-evaluation explicitly selects ``historical_record``. Existing instances
+are re-decoded and their content hash is checked, including nested JSON data.
+Older binding versions must be rebuilt; the TaskSpec v0.1 identity is unchanged.
+
+Raw snapshots require the complete ``support.com_patch`` acquisition channel,
+including values, validity/errors, timestamp, environment IDs, observation
+revision and clock domain. Values must agree with the native measurements.
+Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
+raw/historical input contracts. Raw sampled-timeline collection is not yet
+implemented and cannot be substituted with the COM-patch channel.
+
+Legacy ``native_contact_support`` and explicit
+``native_stable_reference_support/v2`` sampled windows retain their scopes.
+``native_supported_placement`` requires revision 1 and rechecks release-phase
+windows, actor/episode identity, original stable clocks and raw contact patches.
+Its declared ``supported_region`` variant checks complete planar footprints for
+``on`` and ``inside`` without claiming general volume containment. Stronger
+measurements never select a stronger scope implicitly. E4/E5 still require
+separate transfer/coordinated-transport proofs and reject in this slice.
+
+Recorded region geometry is recomputed from the ObservationManager's exact,
+available history slots and the original owned geometry/support snapshot.
+It cannot borrow the old footprint after a boundary pose changes, resample
+contacts or substitute a live pose. Import is standard-library-only; numerical
+proof re-evaluation lazily uses shared Torch/NumPy/Shapely algorithms.
+
+The verifier distinguishes unavailable acquisition from measured negatives and
+checks measured release receipts independently of plan/segment success. Raw Lab
+snapshots require an explicit episode binding and carry no accepted/released
+conclusion; TaskSpec computes those results. Historical B0 claims are checked
+when supplied. Legacy scope remains legacy even when a timeline is present. Its instantaneous
+final observation needs the exact measured release and actual final runtime
+boundary, not an unexecuted later wait/park policy. This preserves measured final
+negatives when execution stops early, while recorded milestones still require
+the full successful prefix and their original support receipt.
+
+``evaluate_placement_evidence_report`` preserves goal/final and milestone/recorded
+separation, verifies declared execution prefixes and orders exact boundary slots.
+Sparse segment snapshots cannot certify complete temporal windows or continuous
+invariants. The ordinary TaskSpec evaluator remains the certificate authority.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.evidence
+
+.. autosummary::
+
+   SupportedPlacementEvidenceBinding
+   evaluate_supported_placement_evidence
+   evaluate_placement_evidence_report
+
+.. autoclass:: SupportedPlacementEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_supported_placement_evidence
+
+.. autofunction:: evaluate_placement_evidence_report
+
+embodichain.gen_sim.task_spec.evidence_report
+---------------------------------------------
+
+Combine verified placement, orientation and joint evidence using the existing
+TaskSpec evaluator. Bindings must share the native row, episode and input-format
+contract. Final observations cannot fill past milestones; sparse boundary
+observations cannot establish continuous invariants or complete temporal windows.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.evidence_report
+
+.. autosummary::
+
+   evaluate_physical_evidence_report
+
+.. autofunction:: evaluate_physical_evidence_report
+
+
+embodichain.gen_sim.task_spec.expressions
+-----------------------------------------
+
+A finite vocabulary of observation-backed predicates and bounded temporal
+conditions. Evaluations distinguish satisfied, failed, unknown, unavailable and
+not-run outcomes; an incomplete always-window cannot certify success.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.expressions
+
+.. autosummary::
+
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   PREDICATE_OPERATORS
+   EvaluationStatus
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   TemporalCondition
+   TemporalSpec
+   evaluate_predicate
+   evaluate_temporal_condition
+   lookup_observation
+
+embodichain.gen_sim.task_spec.pour_evidence
+-------------------------------------------
+
+Rigid Pour proof retains the source ``measured_tilt_restore/v1`` criterion:
+30 degrees of observed tilt, restore error at most 15 degrees, the gravity-top
+proxy above the receiver projection, and an independently measured release.
+This is not a detected spout or fluid-transfer witness. ``poured`` remains
+unqualified by these APIs.
+
+Bindings seal exact compiled segment/invocation IDs, source/receiver/resource
+identities, the actual compiled program fingerprint and recording cadence and explicit raw or historical input format.
+New Lab snapshots carry synchronized geometry channels; missing validity or
+release acquisition remains unavailable per environment. Recorded milestones
+also require their full successful occurrence prefix. Core imports and binding
+normalization are standard-library-only.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.pour_evidence
+
+.. autosummary::
+
+   PourEvidenceBinding
+   evaluate_pour_evidence
+
+.. autoclass:: PourEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_pour_evidence
+
+
+embodichain.gen_sim.task_spec.registry
+--------------------------------------
+
+Validated TaskSpec documents are stored by semantic hash using atomic file
+replacement. Reads reject corrupt or mismatched identities. Metadata differences
+do not create different semantic identities; existing cache entries are reused
+unless replacement is requested.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.registry
+
+.. autosummary::
+
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+
+embodichain.gen_sim.task_spec.spec
+----------------------------------
+
+Normative task models and their canonical JSON form. Milestone dependencies
+must form an acyclic graph; each milestone requires its predicates to hold in one
+snapshot strictly after its predecessors. ``TaskTemplate`` is an alias of
+``TaskSpec`` for callers using the earlier spelling.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.spec
+
+.. autosummary::
+
+   MILESTONE_SCHEMA
+   TASK_SPEC_SCHEMA
+   MilestoneSpec
+   TaskRequirement
+   TaskSpec
+   TaskTemplate
+
+embodichain.gen_sim.task_spec.validation
+----------------------------------------
+
+Validate documents or instances, then evaluate caller-provided snapshots and
+trajectories. A certificate is ready only when all required checks are satisfied.
+These functions do not acquire physical evidence or execute a task. The template
+spellings are aliases of the TaskSpec functions.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.validation
+
+.. autosummary::
+
+   EvaluationReport
+   TaskSpecValidationError
+   evaluate_task_spec
+   evaluate_task_template
+   validate_task_spec
+   validate_task_template
+
+embodichain.lab.expansion
+------------------------
+
+.. currentmodule:: embodichain.lab.expansion
+
+Compatible-cohort orchestration for explicitly supplied host and writer ports.
+The engine reuses the canonical session for admission, budgets and receipts.
+``ExpansionEngine.from_job(ExpansionRunCfg(...))`` selects the native Gym host,
+Task Program with native or pinned prototype motion, bounded media, render-only variants,
+and durable episode-boundary recovery. See the offline expansion example.
+
+.. autosummary::
+
+   ExpansionEngine
+   ExpansionJobCfg
+   ExpansionAssignment
+   ExpansionHost
+   EpisodeSink
+   ExpansionSession
+
+.. autosummary::
+
+   ExpansionRunCfg
+   load_expansion_job
+   preflight_expansion_job
+   run_expansion_job
+   inspect_expansion_job
+   ArtifactEpisodeSink
+   EpisodeCandidate
+   ExpertSource
+   ExpansionOperator
+   ExpansionContext
+   OperatorCapability
+   PinnedExpertSource
+   UniformRangeOperator
+   JointSceneSource
+
+.. autosummary::
+
+   ExpansionEpisode
+
+
+.. autosummary::
+
+   resume_expansion_export
+   ExpansionRecipe
+   RecipeOperation
+   BatchCompatibility
+   PreparedEpisodeWorkItem
+   ExpansionWorkItem
+   ExpansionRecipeSource
+   PreparingExpansionHost
+   GymExpansionHost
+   ExpansionJournal
+   RecipeAttempt
+   ArtifactReference
+   EpisodeArtifactManifest
+   load_expansion_episode
+   resolve_expansion_job
+   build_expansion_report
+
+
+.. autosummary::
+
+   ExpansionSessionCfg
+   ExpansionCoverage
+   EpisodeCoverage
+
+embodichain.lab.expansion.artifacts
+-----------------------------------
+
+Typed content-addressed numeric, media and source references. Paths remain contained within the artifact directory so bundles can move independently of their producing job.
+
+.. currentmodule:: embodichain.lab.expansion.artifacts
+
+.. autosummary::
+
+   ArtifactReference
+   EpisodeArtifactManifest
+   resolve_artifact_path
+
+embodichain.lab.expansion.configured
+------------------------------------
+
+Closed file configuration resolves existing deployments without changing backend ownership.
+
+.. currentmodule:: embodichain.lab.expansion.configured
+
+.. autosummary::
+
+   ExpansionRunCfg
+   load_expansion_job
+   preflight_expansion_job
+
+
+.. autosummary::
+
+   resolve_expansion_job
+
+embodichain.lab.expansion.contracts
+-----------------------------------
+
+Immutable source, candidate, numerical episode and commit identities shared with motion expansion. Old motion import paths remain compatible.
+
+.. currentmodule:: embodichain.lab.expansion.contracts
+
+.. autosummary::
+
+   EpisodeCandidate
+   SceneCase
+   MotionSnapshot
+   TrajectoryPhase
+   TrajectoryTemplate
+   CandidateIdentity
+   ProposalRequest
+   CandidateSpec
+   CandidateTrajectoryBatch
+   ValidationCheck
+   ValidationResult
+   ExpertEpisode
+   CommitReceipt
+
+.. autosummary::
+
+   ExpansionEpisode
+
+embodichain.lab.expansion.coverage
+----------------------------------
+
+Coverage reservations belong to the session lifecycle. The default policy counts confirmed episode identities; trajectory geometry and manipulability require the explicit motion-owned policy.
+
+.. currentmodule:: embodichain.lab.expansion.coverage
+
+.. autosummary::
+
+   ExpansionCoverage
+   EpisodeCoverage
+
+embodichain.lab.expansion.engine
+-------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.engine
+
+Candidates must be proposed in the supplied session before enqueueing.
+``preflight`` groups their existing compatibility keys without changing state.
+``run`` reserves payload capacity before invoking the host once per cohort.
+The host reports actual starts independently for each row and returns measured
+T+1 observations with T submitted commands. Rejected rows do not commit.
+
+Accepted payloads are staged before writes begin. When a submission is ambiguous,
+obtain its final receipt from the writer and pass it to ``resolve_receipt``;
+``flush`` then submits the remaining staged rows without another physical rollout.
+These methods reconcile supplied in-process ports. Configured jobs instead use
+``resume`` to verify disk receipts, repair frozen writes and restart interrupted
+attempts at episode boundaries. Native failures invalidate the active host.
+
+.. autosummary::
+
+   ExpansionJobCfg
+   ExpansionAssignment
+   ExpansionHost
+   EpisodeSink
+   ExpansionEngine
+
+
+.. autosummary::
+
+   PreparedEpisodeWorkItem
+   ExpansionWorkItem
+   ExpansionRecipeSource
+   PreparingExpansionHost
+
+embodichain.lab.expansion.export
+--------------------------------
+
+Stream confirmed numeric episodes and observation children through the existing LeRobot recorder. A finalized export attests the exact physical and visual episode set. Portable bundles retain relative media, calibration and source references; frame reads do not materialize an entire image trajectory.
+
+.. currentmodule:: embodichain.lab.expansion.export
+
+.. autosummary::
+
+   export_expansion_lerobot
+
+embodichain.lab.expansion.host
+------------------------------
+
+The native Gym adapter owns World preparation, parameter readback and Task Program execution. Admission, receipt handling and retries remain in the common engine.
+
+.. currentmodule:: embodichain.lab.expansion.host
+
+.. autosummary::
+
+   GymExpansionHost
+
+embodichain.lab.expansion.journal
+---------------------------------
+
+Persist logical recipe identity separately from physical attempt and invocation identity. Resource revisions may change batch capacity without changing sampled conditions.
+
+.. currentmodule:: embodichain.lab.expansion.journal
+
+.. autosummary::
+
+   RecipeAttempt
+   ExpansionJournal
+
+embodichain.lab.expansion.persistence
+-------------------------------------
+
+Stage immutable numeric evidence and archived source attachments before publishing a confirmed commit receipt. Recovery retries the same artifact without replaying physics.
+
+.. currentmodule:: embodichain.lab.expansion.persistence
+
+.. autosummary::
+
+   ArtifactEpisodeSink
+
+
+.. autosummary::
+
+   load_expansion_episode
+
+embodichain.lab.expansion.program
+---------------------------------
+
+Drive either one vector Task Program or independently bound source runtimes through one World loop. Finished and unused rows contribute no padding samples.
+
+.. currentmodule:: embodichain.lab.expansion.program
+
+.. autosummary::
+
+   ProgramBatchResult
+   collect_program_batch
+   collect_vector_program
+
+
+.. autosummary::
+
+   TaskProgramBatchExecutor
+
+embodichain.lab.expansion.recipes
+---------------------------------
+
+Source-pinned, versioned random streams depend on logical candidate identity rather than arena assignment. Operators declare resource scope and return immutable changes.
+
+.. currentmodule:: embodichain.lab.expansion.recipes
+
+.. autosummary::
+
+   ExpansionContext
+   ExpertSource
+   PinnedExpertSource
+   OperatorCapability
+   ExpansionOperator
+   UniformRangeOperator
+
+
+.. autosummary::
+
+   BatchCompatibility
+   RecipeOperation
+   ExpansionRecipe
+
+embodichain.lab.expansion.reporting
+-----------------------------------
+
+Report trajectory geometry, actual physical conditions, visual descendants and source ancestry separately. Coverage is diagnostic and does not silently alter admission.
+
+.. currentmodule:: embodichain.lab.expansion.reporting
+
+.. autosummary::
+
+   build_expansion_report
+
+embodichain.lab.expansion.scene
+-------------------------------
+
+Reuse complete scene/workspace joint candidates without splitting their conditional geometry. Every applied proposal requires new measured execution evidence.
+
+.. currentmodule:: embodichain.lab.expansion.scene
+
+.. autosummary::
+
+   JointSceneSource
+   apply_joint_scene_candidates
+
+embodichain.lab.expansion.session
+---------------------------------
+
+Canonical source-independent candidate, budget, evidence and receipt state machine. Legacy motion imports re-export this exact class, and domain configuration adapters preserve their original coverage behavior.
+
+.. currentmodule:: embodichain.lab.expansion.session
+
+.. autosummary::
+
+   ExpansionSession
+   SessionConfigAdapter
+
+embodichain.lab.expansion.session_cfg
+-------------------------------------
+
+Source-independent session limits. These settings are separate from deployment-owned simulation configuration and from domain-specific trajectory augmentation settings.
+
+.. currentmodule:: embodichain.lab.expansion.session_cfg
+
+.. autosummary::
+
+   ExpansionSessionCfg
+   ExpansionExecutionCfg
+   ExpansionValidationCfg
+   ExpansionCollectionCfg
+   ExpansionPersistenceCfg
+
+embodichain.lab.expansion.visual
+--------------------------------
+
+Apply one native visual profile per compatible World cohort. Render complete recorded scene states with physics disabled and preserve physical parent lineage.
+
+.. currentmodule:: embodichain.lab.expansion.visual
+
+.. autosummary::
+
+   load_visual_profiles
+   render_observation_variants
+   inspect_observation_variants
+
+embodichain.lab.expansion.workflow
+----------------------------------
+
+Assemble the common engine, native host, durable journal and independently recoverable render/export stages. Frozen export recovery needs neither source configuration nor a simulator.
+
+.. currentmodule:: embodichain.lab.expansion.workflow
+
+.. autosummary::
+
+   run_expansion_job
+   inspect_expansion_job
+
+
+.. autosummary::
+
+   resume_expansion_export
 
 embodichain.lab.gym.envs.base_env
 ---------------------------------
@@ -342,6 +1653,384 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.sim.motion.expansion.session_coverage
+-----------------------------------------------------
+
+Adapt legacy phase-aligned geometry, timing and measured manipulability to the canonical session coverage protocol. Existing trajectory configurations select this adapter automatically.
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.session_coverage
+
+.. autosummary::
+
+   TrajectorySessionCoverage
+
+embodichain.lab.sim.scene.operations
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.operations
+
+``apply_changes_batch`` accepts an environment-indexed change set for each row
+of a scene view. It preflights every row before any mutation, then batches writes
+by entity. Neighboring rows remain untouched; no operation steps physics.
+
+.. autosummary::
+
+   apply_changes_batch
+
+.. currentmodule:: embodichain.lab.sim.scene
+
+.. autosummary::
+
+   apply_changes_batch
+
+.. autosummary::
+
+   restore_render_state
+
+embodichain.lab.sim.scene.physics
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.physics
+
+Capture and restore measured mass, principal inertia and friction for explicitly
+selected dynamic rigid bodies on Default or Newton. Applying a mass scale also
+scales inertia from the original baseline, so repeated application does not
+accumulate. Every parameter is preflighted before writes; actual backend readback
+must match the request. These operations do not step physics or verify task success.
+Native failures may leave partial changes, requiring the host to stop execution.
+
+.. autosummary::
+
+   RigidPhysicsState
+   capture_rigid_physics
+   apply_rigid_physics
+   restore_rigid_physics
+
+.. autosummary::
+
+   capture_physics_properties
+
+embodichain.lab.sim.motion.planners.curobo.payload
+--------------------------------------------------
+
+Runtime observation values for a fresh cuRobo query. Without payload, queries
+support the complete robot environment batch in canonical row order, with a
+shared static collision world and identical passive joint locks. Full joint
+state and world-to-base transforms belong to the query snapshot. Payload queries
+remain B=1; the carried body owns its identity, control part, local spheres and
+observed world pose. These values are separate from serialized configuration.
+Subsets, reordered environments, and per-environment worlds are unsupported.
+An omitted start uses the captured selected joint rows; the motion facade reports
+the world as immutable.
+
+The owned motion factory closes backend-local attachments on exit and makes no
+skill-phase decisions. Queries require CUDA graphs off, a static snapshot world
+and preserved native samples. No-payload exact trajectory checks retain observed
+passive locks; arbitrary trajectory checks with payload fail closed because their
+separate checker does not own those attachments.
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.payload
+
+.. autosummary::
+
+   CuroboPayload
+   CuroboQuerySnapshot
+   curobo_motion_generator
+
+embodichain.lab.sim.scene.collision_sources
+-------------------------------------------
+
+Explicit collision descriptors and same-observation poses become owned planner
+providers through one caller-supplied world-to-frame transform. No pose getter
+is called and no scale is applied twice. The USD link-box reader preserves
+connected-component order and its conservative input-envelope policy.
+
+.. currentmodule:: embodichain.lab.sim.scene.collision_sources
+
+.. autosummary::
+
+   CollisionObjectSnapshot
+   read_articulation_link_boxes
+   snapshot_collision_sources
+
+embodichain.lab.sim.motion.ik
+-----------------------------
+
+Stateful adapters connect the numeric branch search to a MotionGenerator and
+Robot. Cartesian target sampling preserves every requested waypoint within an
+explicit sample budget. Continuous recovery is restricted to one environment
+and restores the caller's RNG state without changing requested timing.
+
+.. currentmodule:: embodichain.lab.sim.motion.ik
+
+.. autosummary::
+
+   resolve_continuous_ik_path
+   sample_cartesian_targets
+
+embodichain.lab.sim.motion.limits
+---------------------------------
+
+Strictly intersect runtime speed limits with the assembled URDF's named joint
+caps. Missing or nonpositive authored limits are rejected rather than replaced
+with an inferred default.
+
+.. currentmodule:: embodichain.lab.sim.motion.limits
+
+.. autosummary::
+
+   authored_joint_velocity_limits
+
+embodichain.lab.sim.motion.search
+---------------------------------
+
+Explicit call-local search ledgers and cooperative wall deadlines. Nested
+scopes reuse the outer ledger, timings may overlap, and native work is not
+preempted. Hosts choose budgets; no deadline is enabled by default.
+
+PlanningRandomState captures only explicitly selected Python/NumPy/Torch streams
+and restores them without a new seed or draw. It is transient runtime state.
+
+.. currentmodule:: embodichain.lab.sim.motion.search
+
+.. autosummary::
+
+   PlanningBudgetExceeded
+   SearchCost
+   current_search_cost
+   search_cost_scope
+   record_search
+   measure_search
+
+   PlanningRandomState
+
+embodichain.lab.sim.scene.expansion.layout
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion.layout
+
+.. autosummary::
+
+   SceneLayoutInput
+   PreparedSceneRandomization
+   SceneRandomizationBatch
+   SceneVariantApplicationResult
+   scene_layout_input_from_sim
+   prepare_scene_randomization
+   generate_scene_variants
+   apply_scene_variants
+
+embodichain.lab.sim.scene.expansion.persistence
+-----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion.persistence
+
+.. autosummary::
+
+   LoadedSceneVariants
+   save_scene_variants
+   load_scene_variants
+
+embodichain.lab.sim.sensors.contact.observation
+-----------------------------------------------
+
+Standard sensor observers can collect a selected joint alongside native contact
+facts in explicit B=1 windows. Substeps reuse the completed contact sample;
+initial prepare acquisitions explicitly request one refresh. Joint channels use
+actual simulation time and retain independent validity and acquisition errors.
+Only valid contact slots are retained, with native loss diagnostics preserved.
+Window generations reject delayed callbacks across reset/reuse; completed copies
+remain independent. Integrations own invocation/episode binding and action-effect
+interpretation. The observer neither computes success nor advances simulation.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.observation
+
+.. autosummary::
+
+   JointContactObservation
+   JointContactObserver
+
+.. autoclass:: JointContactObservation
+   :members:
+
+.. autoclass:: JointContactObserver
+   :members:
+
+embodichain.lab.sim.sensors.contact.sampling
+---------------------------------------------------------------------
+
+ContactSensor acquisition into the existing PhysicalEvidenceFrame and
+PhysicalEvidenceBatch contracts. The first axis follows explicit native environment
+IDs; a valid-contact mask accompanies raw actor pairs, Arena-frame positions and
+normals, and native impulses. Per-channel validity distinguishes unsupported
+capabilities, nonfinite active data, saturation and source drift from measured
+negative observations. Native contact revision remains separate from runtime
+observation revision. The Default-only revision reader fails explicitly when its
+SDK contract is unavailable.
+
+``sample`` keeps frame tensors on its request's environment-ID device. The
+``collect`` provider port retains that same device contract. Host observers may
+request CPU frames; ``source_device`` records where the original numerical
+observation was produced. The common frame has no invocation field.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sampling
+
+.. autosummary::
+
+   CONTACT_ACTOR_IDS
+   CONTACT_VALID_MASK
+   CONTACT_NORMALS
+   CONTACT_IMPULSES
+   CONTACT_POSITIONS
+   CONTACT_DISTANCES
+   DEFAULT_CHANNELS
+   ContactEvidenceSample
+   ContactEvidenceSampler
+   ContactSourceStamp
+   native_contact_revision
+
+Signed contact distances require explicit channel selection. Empty requests
+retain the original five ``DEFAULT_CHANNELS``; a missing or nonfinite active
+distance keeps that requested channel unavailable without invalidating unrelated
+contact channels.
+
+embodichain.lab.sim.sensors.contact.timeline
+---------------------------------------------------------------------
+
+Bounded raw substep history attached with
+``sensor.add_sampling_observer(name, timeline)``. The host supplies a control
+clock returning completed steps and elapsed control time, or None while inactive,
+and makes the sensor available in its environment sensor suite. BaseEnv.step
+then drives the existing begin/substep hooks; the observer never fetches a second
+time or advances physics.
+
+Records retain only packed valid contacts on CPU. Reset clears selected
+environments and advances their generations, leaving other rows intact. Loss,
+missing source revisions, incomplete intervals and capacity exhaustion remain
+explicit. The contact-row budget is a soft threshold checked before each whole sample;
+no native sample is truncated. With N environments and per-environment sensor
+capacity C, charged rows stay below ``max_contact_rows + N*C``. Once the threshold
+is reached, the next sample records unavailable capacity loss. Control-step and
+substep caps also bound empty histories.
+Frontend code owns actor/semantic label maps, serialized report schema IDs and
+any task-success evaluation.
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.timeline
+
+.. autosummary::
+
+   ContactTimeline
+   ContactTimelineCfg
+
+embodichain.lab.sim.sensors.support_observation
+-----------------------------------------------
+
+Native support acquisition uses a standard borrowed ``ContactSensor`` and the
+public sampling observer lifecycle. Each explicit runtime registry owns one
+observer per exact native pair. Replacing native instances under the same UID
+requires release and rebind; closing an old observer cannot detach a new owner
+registered under the same hook name. Borrowed sensors and bodies are never
+destroyed by this registry.
+
+Every physical batch has a real timestamp and a collector-owned revision.
+Legacy acquisition uses the simulation clock. Strong frames and results use the
+bound environment clock and observed substep offset; their fixed mapping to
+simulation time is checked, including warmup offsets. Unobserved advancement
+cannot be hidden by rebasing that mapping. The bound clock qualifies support contract
+revision 1, including native source identity, topology, episode generation and
+the complete substep interval. Legacy metadata stays legacy even when sharing
+an observer whose strong clock is bound. Its strong-only sample serial and the
+all-acquisition frame revision are separate identities.
+
+``NativeSupportResult.support.valid`` must be checked before using its values.
+Acquisition errors invalidate the whole pair's witness batch; selected resets
+leave the other rows intact. Positive contact patches may persist through
+sleep while both body poses remain within the original tolerance. Missing,
+overflowed or changed observations invalidate those witnesses. A complete empty
+sample is an instantaneous negative, not proof of absent support throughout a
+stability window. Normative task acceptance remains outside this module.
+
+.. currentmodule:: embodichain.lab.sim.sensors.support_observation
+
+.. autosummary::
+
+   NATIVE_SUPPORT_CHANNEL
+   SupportControlClock
+   NativeSupportResult
+   NativeSupportObservation
+   SupportObservationRegistry
+   qualified_support_heights
+
+.. autoclass:: NativeSupportResult
+   :members:
+
+.. autoclass:: NativeSupportObservation
+   :members:
+
+.. autoclass:: SupportObservationRegistry
+   :members:
+
+
+Qualified contact-height adaptation remains sensor-owned. It uses only a
+positive-load COM-qualified patch and returns the highest point; invalid rows
+remain NaN. Pure transformed mesh envelopes live in
+``compute.geometry.rigid.support_mesh_envelope`` and establish no contact.
+
+.. autofunction:: qualified_support_heights
+
+embodichain.lab.task_program.integrations.simulation.grip_evidence
+------------------------------------------------------------------
+
+Target-specific paired-pad observations using explicit semantic/native object
+bindings and control-part/pad-link declarations. NativeGripEvidenceFactory uses
+the public control-part provider injection API and preserves its provider ID and
+revision. Each provider owns its observer and bounded raw-query trace.
+
+``capture_grip_observation`` performs one requested bilateral observation and
+returns an owned batch plus the exact query snapshot. The standard simulation
+factory forwards this capability through its lifetime and explicit runtime-scope
+guards; native sensor and engine ownership are checked around acquisition.
+It does not invoke effect collection or refresh a second contact sample.
+
+Physical interpretation revision 1 preserves the opposed positive-impulse
+criterion and absent-positive-contact observations. Revision 2 requires explicit
+opening calibration and opt-in; its one-sided open-hand release observation is
+not geometric separation or acquisition evidence. Driver indices and joint names
+are supplied by the robot/profile owner, with no model-name or suffix inference.
+
+Host frames receive all normal public ownership/validity checks. Grip arithmetic
+still runs on the original sensor device and BinaryEffectObservation returns on
+the caller's context device. Raw trace data remains observational; application
+serializers and TaskSpec evaluation belong outside this module.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.grip_evidence
+
+.. autosummary::
+
+   NativeGripEvidenceCfg
+   NativeGripEvidenceFactory
+   NativeGripEvidenceProvider
+   NativeGripObserver
+
+
+embodichain.lab.sim.scene.mesh_snapshot
+---------------------------------------
+
+Capture scaled rigid visual envelopes and ordered articulation collision-input
+components through plain UID/link mappings. Geometry stays in owning frames
+until supplied observations are projected. Planner roles are neutral metadata;
+missing or unsupported input geometry remains unavailable. These snapshots do
+not replace native cooked-shape, rest-offset, contact, or CCD evidence.
+
+.. currentmodule:: embodichain.lab.sim.scene.mesh_snapshot
+
+.. autosummary::
+
+   SceneMeshComponent
+   SceneMeshSnapshot
+   capture_scene_meshes
+   iter_scene_components
+
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
 
@@ -350,6 +2039,146 @@ embodichain.lab.task_program.integrations.simulation.handover
 .. autosummary::
 
    ConfiguredHandOverPoseProvider
+
+embodichain.lab.task_program.integrations.simulation.observations
+-----------------------------------------------------------------
+
+Bind the physical collector to an initialized environment and its actual bridge
+before the first bridge control step. It uses the bridge's policy session and episode
+IDs; later episodes, closed resources and superseded current clock bindings are
+rejected. Independent runtime owners retain independent state.
+
+Current capture selects the registered pair/scope and uses the native
+rest-envelope COM tolerance. Recorded capture preserves the original policy
+parameters and reads the exact seeded end-step slots through an explicitly
+injected ``ObservationManager``. The collector binds pose fields from its schema,
+reads original values and masks, and converts only qualified arena poses.
+Omitting observation history keeps current capture available but rejects historical capture. It never resamples current contacts for
+a historical pose or falls back to a live pose/previous frame.
+The result owns physical metadata and availability only; TaskSpec and Task Engine
+are not dependencies of this Lab collector.
+
+``SimulationStateObservationCollector.capture_current_grip`` requires the explicit
+``ObservationManager`` dependency and its current completed row boundaries. It
+selects the runtime's declared ``GripEvidenceObservationPort``, retaining raw
+validity, acquisition errors, actor identities and query revision. Environment,
+episode, robot, object, provider and clock ownership are checked around the read.
+Its timestamp describes the collection query clock; it does not claim that native
+impulses were refreshed at that time or establish task acceptance.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
+
+.. autosummary::
+
+   SimulationSupportObservationCollector
+   SimulationStateObservationCollector
+
+.. autoclass:: SimulationSupportObservationCollector
+   :members:
+
+embodichain.lab.task_program.integrations.simulation.stability
+--------------------------------------------------------------
+
+Named geometric conditions share ``SimulationTaskProgramRegistration.settle_presets``
+with ordinary dynamic settle monitors. ``SimulationStabilityConditionCfg`` owns
+its duration, timeout, pose/axis targets, attachment-drift bounds and optional
+native-support declaration. Registration snapshots and fingerprints the complete
+configuration; names do not select hidden behavior.
+
+``SimulationJointStabilityConditionCfg`` observes an explicitly bound native
+joint, with independently declared target tolerance and full-window drift.
+The standard port preserves the initial observed robot hold, counts only
+acknowledged ticks after the initial sample, and records the original
+``joint_position_and_stability`` receipt. This is joint retention evidence;
+it does not qualify contact safety. When an execution clock is bound, the
+receipt additionally includes the actual final joint acquisition with per-row
+validity, environment IDs and a policy-window sample sequence. ``joint_window``
+retains sampled coordinates, validity/errors, actual step/timestamp arrays,
+native joint identity and compiled policy/segment identity for independent
+reassessment. ``monitor_initial_values`` preserves the pre-sample range anchor
+as numerical initialization, separately from the clock-verified acquisitions.
+A final sample alone does not establish a complete time window.
+Without a clock, no timestamped raw evidence is fabricated.
+
+The default ``invalid_observation_policy="abort_batch"`` retains the source
+behavior. Explicit ``isolate_rows`` marks the first invalid active row unavailable
+for that execution while other rows continue. The receipt separates execution
+termination from per-row condition status; timeout, unavailable observation and
+cancellation are not interchangeable. Cancellation preserves partial diagnostic
+facts but publishes no post-policy success.
+
+``max_observation_samples`` bounds raw retention, independently of the runtime
+condition. The default 4096 comfortably holds the 126 samples from a 5-second
+wait at a 0.04-second control period. Longer waits may drop old samples, report
+``dropped_samples`` and set ``record_complete=false``; a truncated history must
+not certify complete coverage. Storage is O(batch times retained samples), and
+conversion to JSON occurs after sampling, without per-step device-to-host trace
+copies. Runtime row handling and retention settings remain registration-owned;
+``to_condition_dict()`` preserves the original normative parameter fields.
+
+Target, tolerance and range drift use native runtime joint units. Translation
+and rotation require their own explicitly selected policy values; the default
+0.001 is not a universal physical distance or velocity threshold. Robot holds
+retain the source observed posture, and neither this monitor nor the policy
+advances environment time itself.
+
+Every environment-adapter bridge obtains fresh policy/validator session state,
+including execution without nominal sources. A later bridge supersedes the
+earlier session's observation ownership instead of replacing its clock. Captured
+position holds use the configured Gym action encoder, supplying zero velocity
+targets in ``position_velocity`` mode while retaining the original positions.
+
+Supported conditions declare a standard contact sensor through
+``SupportSensorDeclarationCfg``. The scene binding supplies its exact two native
+rigid UIDs; the runtime factory creates or reuses the sensor and the environment
+suite drives the same instance. Incompatible existing UIDs and missing clock,
+geometry or support inputs fail before execution. There is no geometry-only
+success fallback for native support.
+
+The standard policy port preserves the source time grid: the initial observation
+does not count toward duration, ordinary pose drift resets the anchor/window,
+and held-object failures remain latched. It yields controller-target holds and
+leaves environment stepping, cancellation and task acceptance with their owners.
+Incomplete support windows keep their per-row validity/errors and continue holds;
+other valid rows can qualify independently. Metadata includes the physical
+``support_acquisition`` channel, missing-observation counts and the latest error
+for each row. A failed result following missing evidence retains
+``support_result_available=false`` unless a complete successful window is later
+established. This distinguishes unavailable outcomes from measured negatives.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.stability
+
+.. autosummary::
+
+   SupportSensorDeclarationCfg
+   SimulationStabilityConditionCfg
+   SimulationJointStabilityConditionCfg
+
+.. autoclass:: SupportSensorDeclarationCfg
+   :members:
+
+.. autoclass:: SimulationStabilityConditionCfg
+   :members:
+
+.. autoclass:: SimulationJointStabilityConditionCfg
+   :members:
+
+embodichain.lab.gym.envs.episode_context
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.episode_context
+
+Row-local recording eligibility follows the buffered episode, independently of
+replaceable demo annotations. Synchronous checks retain pending and rejected
+state across internal resets, and snapshots own their JSON provenance.
+
+.. autosummary::
+   :nosignatures:
+
+   EpisodeContext
+
+.. autoclass:: EpisodeContext
+   :members:
 
 embodichain.lab.gym.envs.managers.action_manager
 ------------------------------------------------
@@ -375,6 +2204,8 @@ embodichain.lab.gym.envs.managers.actions
    JointPositionToLimitsAction
    JointVelocityAction
    ParallelGripperAction
+   RelativeEefDlsAction
+   RelativeEefPoseAction
    RelativeJointPositionAction
 
 embodichain.lab.gym.envs.managers.action_types
@@ -388,6 +2219,24 @@ embodichain.lab.gym.envs.managers.action_types
    ActionTermDescriptor
    ActionTrace
 
+embodichain.lab.gym.envs.managers.observation_manager
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observation_manager
+
+.. autosummary::
+
+   ObservationManager
+
+embodichain.lab.gym.envs.managers.reward_manager
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.reward_manager
+
+.. autosummary::
+
+   RewardManager
+
 embodichain.lab.gym.envs.objectives
 ----------------------------------
 
@@ -400,6 +2249,9 @@ per environment. Stable region occupancy does not establish gripper detachment.
 
 .. autosummary::
 
+   ConditionResult
+   evaluate_near_target
+   evaluate_below_height
    GoalRegionCfg
    OrderedPlacementObjectiveCfg
    MeasuredRigidObjectState
@@ -455,6 +2307,16 @@ embodichain.lab.gym.utils
    capture_trajectory_state
    restore_trajectory_state
 
+embodichain.lab.gym.utils.control_timing
+----------------------------------------
+
+Resolve the existing integer physics/control grid before environment creation.
+BaseEnv uses the same resolver during setup, retaining validation order,
+frequency priority and exact representability checks.
+
+.. automodule:: embodichain.lab.gym.utils.control_timing
+   :members:
+
 embodichain.lab.gym.utils.gym_utils
 -----------------------------------
 
@@ -494,8 +2356,51 @@ embodichain.lab.gym.utils.profiler
    EnvProfilerCfg
    EnvProfiler
 
+embodichain.lab.gym.envs.managers.observation_types
+---------------------------------------------------
+
+The observation manager owns source acquisition and the single raw-field schema.
+Policy views receive separate tensors before in-place normalization/noise;
+ordinary queries do not advance history. The existing rollout writer stores raw observations by canonical field ID.
+Indexed reads use those tensors and episode/frame metadata directly, with no
+history instance, separate write lifecycle or entity-specific reader. Internal
+expert policy observations keep T+1 states; the public rollout remains a
+compatible T-transition view and also exposes raw views when enabled. Learner
+windows retain their own horizon/device, and reuse does not erase episode data. Contact histories
+retain their sensor physics clocks and complete-window contracts.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observation_types
+
+.. autosummary::
+
+   ObservationDescriptor
+   ObservationSample
+   ObservationFrame
+   ObservationHistorySnapshot
+
+.. autoclass:: ObservationDescriptor
+   :members:
+
+.. autoclass:: ObservationSample
+   :members:
+
+.. autoclass:: ObservationFrame
+   :members:
+
+.. autoclass:: ObservationHistorySnapshot
+   :members:
+
 embodichain.lab.gym.utils.trajectory_state
 ------------------------------------------
+
+Capture/restore helpers retain the standalone replay surface.
+``export_observation_history`` combines numeric history with the observation
+manager's schema for file output. Alias state views share the same owned tensor
+snapshot. ``trajectory_observation_cfgs`` declares replay state fields as raw observation
+functors, preserving full robot/mimic joint order, articulation root states and
+rigid velocities. Declaration assembly performs no physical acquisition.
+The standard environment recorder uses these functors and shares pose acquisition
+with policy ``get_object_pose`` / ``get_rigid_object_pose`` within a boundary.
 
 .. currentmodule:: embodichain.lab.gym.utils.trajectory_state
 
@@ -503,6 +2408,12 @@ embodichain.lab.gym.utils.trajectory_state
 
    capture_trajectory_state
    restore_trajectory_state
+   trajectory_observation_cfgs
+   export_observation_history
+
+.. autofunction:: trajectory_observation_cfgs
+
+.. autofunction:: export_observation_history
 
 embodichain.lab.scripts.analyze_workspace
 -----------------------------------------
@@ -557,6 +2468,24 @@ embodichain.lab.scripts.preview_lerobot_data
    main
    resolve_dataset_root
 
+embodichain.lab.scripts.preview_material
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_material
+
+Query the default catalog without loading simulation dependencies, or render
+presets and parameter variants with fixed preview settings and managed cleanup.
+
+.. autosummary::
+
+   main
+   cli
+
+.. autofunction:: main
+
+.. autofunction:: cli
+
+
 embodichain.lab.scripts.preview_robot
 -------------------------------------
 
@@ -578,10 +2507,10 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: main
 
 
-embodichain.lab.scripts.run_env
+embodichain.lab.scripts.run_task
 -------------------------------
 
-.. currentmodule:: embodichain.lab.scripts.run_env
+.. currentmodule:: embodichain.lab.scripts.run_task
 
 .. autosummary::
 
@@ -721,9 +2650,25 @@ embodichain.lab.sim.atomic_actions.core
 .. autosummary::
 
    AtomicAction
+   CompletePlanBuilder
    ObjectSemantics
    SkillDescriptor
    resolve_runtime_device
+
+``SkillDescriptor.supports_segment_motion_recovery`` is derived from the real
+Atomic override and cannot be supplied as a constructor or replace claim. Static
+semantic preflight validates motion policy against this capability. Canonical
+descriptor metadata omits false; enabled capabilities remain fingerprinted.
+
+``CompletePlanBuilder`` keeps complete-request sampling, caller transforms and
+final qualification inside the owning engine. A suffix preview retains the exact
+observed robot, world stamp, scene, rows, root and binding owner while declaring
+an independent occurrence and explicit preview role. Selected-candidate
+finalization transforms once and cannot replace the logical recovery proposal.
+
+.. autoclass:: CompletePlanBuilder
+   :members:
+
 
 embodichain.lab.sim.atomic_actions.effects
 ------------------------------------------
@@ -746,6 +2691,10 @@ embodichain.lab.sim.atomic_actions.engine
 embodichain.lab.sim.atomic_actions.execution
 --------------------------------------------
 
+An explicit host lifecycle observes owned installed plans before dispatch. A
+rejected installation blocks ticks and revisions until the runner completes its
+ordinary safe stop and invalidates the lifecycle. Omission preserves execution.
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions.execution
 
 .. autosummary::
@@ -756,6 +2705,8 @@ embodichain.lab.sim.atomic_actions.execution
    ExecutionSession
    ExecutionStatus
    ExecutionTick
+
+   ExecutionPlanLifecycle
 
 embodichain.lab.sim.atomic_actions.verification
 ------------------------------------------------
@@ -808,6 +2759,10 @@ embodichain.lab.sim.atomic_actions.invocation
 embodichain.lab.sim.atomic_actions.plans
 ----------------------------------------
 
+Qualification masks and immutable recovery proposals carry planned information.
+A proposal identifies its invocation and plan, and is never a physical effect
+or an automatic state commit. ActionPlan snapshots own these values.
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions.plans
 
 .. autosummary::
@@ -821,8 +2776,24 @@ embodichain.lab.sim.atomic_actions.plans
    TrajectorySegment
    normalize_success_mask
 
+   PlanQualification
+   PlanningRecoveryOutcome
+
 embodichain.lab.sim.atomic_actions.policies
 -------------------------------------------
+
+PlanningRecovery is immutable finite scalar/tuple data for an exact skill and
+revision. Descriptors validate supported concrete types during static preflight;
+unimplemented source kinds remain rejected. PlanningBudget selects a complete
+request ledger and optional cooperative wall deadline; nested calls retain the
+parent ledger/deadline, while omission preserves ordinary planning.
+
+Whole-action sample retries, per-segment retries and final emitted-speed gates
+are independent explicit modes. Best-effort alternatives preserve declared
+order, the source Torch-only stream boundary and original-plan exhaustion.
+Segment recovery requires fixed-grid sequential IK; unsupported Atomic skills
+reject it before request/provider preparation. Final speed rejection retains
+its explicit hold or mask-only representation and cannot promote failed rows.
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions.policies
 
@@ -831,6 +2802,9 @@ embodichain.lab.sim.atomic_actions.policies
    DynamicCollisionMode
    MotionPolicy
    RecoveryPolicy
+
+   PlanningRecovery
+   PlanningBudget
 
 embodichain.lab.sim.atomic_actions.primitives
 ---------------------------------------------
@@ -999,6 +2973,35 @@ embodichain.lab.sim.diff.bridge
    NewtonStepFunc
    tape_context
 
+embodichain.lab.sim.cfg.source
+-------------------------------
+
+USD source configuration identifies a file and an optional exact prim inside
+that file. Source selection is independent of runtime identity, placement and
+parent/link attachment. Supply it through ``source`` on a visual, rigid-object
+or articulation configuration. Existing mesh and URDF file inputs remain
+available; each asset has one file owner.
+
+.. currentmodule:: embodichain.lab.sim.cfg.source
+
+.. autosummary::
+
+   UsdSourceCfg
+
+.. autoclass:: UsdSourceCfg
+   :members:
+
+embodichain.lab.sim.cfg.visual_object
+-------------------------------------
+
+Render-only geometry or a USD source, and initial visual state.
+
+.. currentmodule:: embodichain.lab.sim.cfg.visual_object
+
+.. autosummary::
+
+   VisualObjectCfg
+
 embodichain.lab.sim.diff.runtime
 --------------------------------
 
@@ -1077,6 +3080,18 @@ embodichain.lab.sim.objects.robot
    ControlGroup
    Robot
 
+
+embodichain.lab.sim.objects.visual_object
+-----------------------------------------
+
+Batched render-only objects provide pose, visibility and material-assignment operations without physical buffers or collision APIs.
+
+.. currentmodule:: embodichain.lab.sim.objects.visual_object
+
+.. autosummary::
+
+   VisualObject
+   VisualObjectCfg
 
 embodichain.lab.sim.physics
 ---------------------------
@@ -1198,11 +3213,17 @@ embodichain.lab.sim.motion.planners.toppra_planner
 
 .. currentmodule:: embodichain.lab.sim.motion.planners.toppra_planner
 
+Time-optimal joint-path parameterization. The planner solves timing for
+waypoint input; :func:`retime_joint_paths` applies the same parameterization to
+paths another planner already produced, such as a closed-loop policy rollout
+whose samples carry only nominal timing.
+
 .. autosummary::
 
    ToppraPlanner
    ToppraPlannerCfg
    ToppraPlanOptions
+   retime_joint_paths
 
 embodichain.lab.sim.motion.planners.se3
 ---------------------------------------
@@ -1254,6 +3275,8 @@ embodichain.lab.sim.motion.planners.utils
    MoveType
    PlanState
    PlanResult
+   RejectedMotionCandidate
+   MotionRecoveryTrace
    normalize_success_mask
    calculate_point_allocations
    interpolate_xpos
@@ -1280,10 +3303,10 @@ embodichain.lab.sim.sensors.camera
    Camera
    CameraCfg
 
-embodichain.lab.sim.sensors.contact_sensor
+embodichain.lab.sim.sensors.contact.sensor
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+.. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
 
 .. autosummary::
 
@@ -1498,7 +3521,9 @@ into DexSim Spawn descriptors.
    articulation_desc_from_cfg
    articulation_desc_from_usd
    rigid_desc_from_cfg
+   visual_desc_from_cfg
    rigid_desc_from_usd
+   visual_desc_from_usd
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -1512,6 +3537,7 @@ embodichain.lab.sim.spawn.descriptors
    articulation_desc_from_cfg
    configure_articulation_desc
    rigid_desc_from_cfg
+   visual_desc_from_cfg
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -1542,6 +3568,7 @@ embodichain.lab.sim.spawn.usd
 
    articulation_desc_from_usd
    rigid_desc_from_usd
+   visual_desc_from_usd
 
 embodichain.lab.sim.utility.dynamic_pybind
 ----------------------------------------
@@ -2013,28 +4040,28 @@ Row-wise action-adjoint clipping and its rollout-level diagnostics.
    BatchedGradientNormStats
    clip_batched_gradient_norm
 
-embodichain.learning.rl.models.actor_critic
--------------------------------------------
+embodichain.learning.rl.policies.actor_critic
+---------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_critic
+.. currentmodule:: embodichain.learning.rl.policies.actor_critic
 
 .. autosummary::
 
    ActorCritic
 
-embodichain.learning.rl.models.actor_only
------------------------------------------
+embodichain.learning.rl.policies.actor_only
+-------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_only
+.. currentmodule:: embodichain.learning.rl.policies.actor_only
 
 .. autosummary::
 
    ActorOnly
 
-embodichain.learning.rl.models.policy
--------------------------------------
+embodichain.learning.rl.policies.policy
+---------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.policy
+.. currentmodule:: embodichain.learning.rl.policies.policy
 
 .. autosummary::
 
@@ -2112,6 +4139,15 @@ embodichain.toolkits.graspkit.pg_grasp.collision_checker
    ConvexCollisionCheckerCfg
    ConvexCollisionChecker
 
+embodichain.toolkits.graspkit.pg_grasp.fixed_geometry
+---------------------------------------------------
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.fixed_geometry
+
+.. autosummary::
+
+   FixedGripperCollisionGeometry
+
 embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
 ----------------------------------------------------------------
 
@@ -2121,7 +4157,16 @@ embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
 
    GripperCollisionCfg
    GripperCollisionChecker
-   box_surface_grid
+
+embodichain.toolkits.graspkit.pg_grasp.model_geometry
+---------------------------------------------------
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+
+.. autosummary::
+   :nosignatures:
+
+   get_parallel_jaw_collision_geometry
 
 embodichain.toolkits.graspkit.scripts.annotate_grasp
 ----------------------------------------------------
@@ -2259,15 +4304,6 @@ joint-position action variants.
 .. autosummary::
 
 
-embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
------------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
-
-.. autosummary::
-
-   BlocksRankingRGBEnv
-
 embodichain_tasks.manipulation.tableware.blocks_ranking_size
 ------------------------------------------------------------
 
@@ -2295,24 +4331,6 @@ embodichain_tasks.manipulation.tableware.place_object_drawer
 
    PlaceObjectDrawerEnv
 
-embodichain_tasks.manipulation.tableware.scoop_ice
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.scoop_ice
-
-.. autosummary::
-
-   ScoopIce
-
-embodichain_tasks.manipulation.tableware.stack_blocks_two
----------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_blocks_two
-
-.. autosummary::
-
-   StackBlocksTwoEnv
-
 embodichain_tasks.manipulation.tableware.stack_cups
 ---------------------------------------------------
 
@@ -2333,33 +4351,6 @@ kinematics route used by analytic policy-gradient experiments.
 .. autosummary::
 
    FrankaReachApgEnv
-
-embodichain_tasks.special.simple_task
--------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.simple_task
-
-.. autosummary::
-
-   SimpleTaskEnv
-
-embodichain_tasks.special.stay_still_save
------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save
-
-.. autosummary::
-
-   StayStillSaveEnv
-
-embodichain_tasks.special.stay_still_save_3cam
-----------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save_3cam
-
-.. autosummary::
-
-   StayStillSave3CamEnv
 
 embodichain_tasks.utils.importer
 --------------------------------
@@ -2424,3 +4415,421 @@ Gym uses its environment-wide sensor switch, which defaults to enabled.
 
 .. autoclass:: RobotPresetCfg
    :noindex:
+
+
+Asset generalization contracts
+------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   asset_generalization
+
+Real-to-simulation motion prototypes
+------------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   real2sim
+
+embodichain.lab.gym.envs.managers.cfg
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.cfg
+
+Manager configuration binds named functors and explicit scene entities. RL condition groups aggregate success with conjunction, failure and truncation with disjunction.
+
+.. autosummary::
+
+   FunctorCfg
+   ConditionCfg
+   RLTaskCfg
+   EventCfg
+   ObservationCfg
+   SceneEntityCfg
+   RewardCfg
+   ActionTermCfg
+   DatasetFunctorCfg
+
+.. autoclass:: FunctorCfg
+   :members:
+
+.. autoclass:: ConditionCfg
+   :members:
+
+.. autoclass:: RLTaskCfg
+   :members:
+
+.. autoclass:: EventCfg
+   :members:
+
+.. autoclass:: ObservationCfg
+   :members:
+
+.. autoclass:: SceneEntityCfg
+   :members:
+
+.. autoclass:: RewardCfg
+   :members:
+
+.. autoclass:: ActionTermCfg
+   :members:
+
+.. autoclass:: DatasetFunctorCfg
+   :members:
+
+
+embodichain.lab.gym.envs.managers.conditions
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.conditions
+
+Measured manipulation functors bind rigid objects and validate geometric parameters at construction. Calls read live physical state and reset-owned virtual targets. Missing target contexts fail explicitly.
+
+.. autosummary::
+
+   object_near_target
+   object_below_height
+
+.. autoclass:: object_near_target
+   :members:
+   :special-members: __call__
+
+.. autoclass:: object_below_height
+   :members:
+   :special-members: __call__
+
+
+embodichain.lab.gym.envs.managers.termination_manager
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.termination_manager
+
+The termination manager combines condition measurements with a host-supplied time limit once per control transition. It owns the cached Gym flags and task acceptance, resets selected rows and publishes owned snapshots without resampling.
+
+.. autosummary::
+
+   TerminationManager
+
+.. autoclass:: TerminationManager
+   :members:
+
+
+embodichain.lab.gym.envs.objectives.conditions
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.objectives.conditions
+
+Typed physical predicates provide shared distance and height measurements for RL and Task Program adapters. Invalid evidence never satisfies a condition.
+
+.. autosummary::
+
+   ConditionResult
+   evaluate_near_target
+   evaluate_below_height
+
+.. autoclass:: ConditionResult
+   :members:
+
+.. autofunction:: evaluate_near_target
+
+.. autofunction:: evaluate_below_height
+
+embodichain.lab.sim.evidence
+----------------------------
+
+Shared physical observation values. Atomic public imports refer to these same
+classes; sensor acquisition never imports Task Program or Atomic implementation.
+
+.. currentmodule:: embodichain.lab.sim.evidence
+
+.. autosummary::
+
+   PhysicalObservationStamp
+
+   PhysicalEvidenceRequest
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+
+``PhysicalObservationStamp`` retains a real host lifetime/source identity, native
+revision kind and manager-relative time. Semantic scene versions do not replace
+this native source identity. Values are immutable and contain no simulator.
+
+.. autoclass:: PhysicalObservationStamp
+   :members:
+
+
+embodichain.compute.geometry.grip_contacts
+------------------------------------------
+
+Pure bilateral contact arithmetic on explicitly supplied actor pairs, normals
+and impulses. Invalid or ambiguous data remains distinct from a measured negative.
+
+.. currentmodule:: embodichain.compute.geometry.grip_contacts
+
+.. autosummary::
+
+   classify_contacts
+
+embodichain.lab.sim.atomic_actions.grip_evidence
+------------------------------------------------
+
+Shared physical grip interpretation consumes a PhysicalEvidenceRequest and
+explicit actor bindings, without Semantic Call or Task Program types. Results
+are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrations.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.grip_evidence
+
+.. autosummary::
+
+   GripContactObserver
+   DriverOpeningBinding
+   GripEvidenceObservationPort
+
+``GripEvidenceObservationPort`` exposes one owned bilateral acquisition and its
+exact raw query without exposing the underlying provider or observer. Forwarders
+preserve their host and runtime lifetime checks. ``snapshot_latest_query`` rejects
+unrecorded or superseded query ordinals instead of substituting an older trace.
+
+.. autoclass:: GripEvidenceObservationPort
+   :members:
+
+``DriverOpeningBinding.bind(robot)`` validates the explicit joint order before
+creating a per-environment reader. It performs no qpos read during binding;
+observations require the entire hand row to be finite and retain the strict
+``abs(measured - open_qpos) < tolerance`` driver threshold. This calibration and
+release interpretation belong to Atomic, not to a separate sensor or reader
+factory. Integrations only select and bind the declared calibration.
+
+The former ``sensors.joint_opening`` module and standalone
+``create_joint_opening_reader`` export are removed. Declarations sealing the
+qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
+
+.. autoclass:: DriverOpeningBinding
+   :members:
+
+Stability execution ownership
+----------------------------
+
+A simulation factory with native support owns one unfinished bridge at a time.
+``validate_runtime_bridge_creation`` rejects overlap before rebinding clocks;
+``bind_runtime_bridge`` records the bridge created by the standard adapter.
+``TaskProgramDemoBridge.execution_finished`` requires closed segment iteration
+and a consumed/validated or explicitly aborted final segment, with no active
+action generator. It is distinct from ``program_completed`` and does not certify
+success or acknowledge commands. Non-support factories retain existing assembly.
+
+Factory-returned effect providers retain their public IDs/revisions and guard
+all collection through the shared lifetime. The same guard protects live scene
+snapshots and drive-target holds. Independently owned past reports remain readable.
+
+The source control grid, stability counters and held-failure latch are unchanged.
+CPU policy profiling can run with
+``python -m scripts.benchmark.task_program.stability --output /tmp/stability``.
+This measures constant-pose policy overhead and serialization separately from
+native contact acquisition, physical tasks and GPU execution.
+
+
+embodichain.lab.task_program.runtime.lifecycle
+----------------------------------------------
+
+Provider-free runtime factory interfaces select one explicit lifecycle for a
+grounded occurrence. Composite factories reject duplicate or competing owners;
+construction does not plan, transform commands or start a simulator. Hosts can
+pass the selected port to AtomicActionEngine.start.
+
+.. currentmodule:: embodichain.lab.task_program.runtime.lifecycle
+
+.. autosummary::
+
+   TaskProgramPlanLifecycleFactory
+   CompositeTaskProgramPlanLifecycleFactory
+
+.. autoclass:: TaskProgramPlanLifecycleFactory
+   :members:
+
+.. autoclass:: CompositeTaskProgramPlanLifecycleFactory
+   :members:
+
+State observation acquisition
+-----------------------------
+
+``SimulationStateObservationCollector`` binds the actual bridge/session and
+collects current poses or explicit joint positions without interpreting task
+acceptance. Recorded poses read the canonical ObservationManager's raw history;
+invalid finite values remain unavailable and original temporal metadata is kept.
+Missing source timestamps remain unavailable per environment. Owner replacement
+during capture raises before a packet can be published.
+Current reads work without history. Native owners, episodes and clocks cannot be
+substituted, and recorded joint claims require the original executed policy.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.observations
+
+.. autoclass:: SimulationStateObservationCollector
+   :members:
+
+.. autofunction:: embodichain.gen_sim.task_engine.evidence.project_condition_evidence_binding
+
+.. autofunction:: embodichain.gen_sim.task_engine.evidence.project_pour_evidence_binding
+
+
+embodichain.gen_sim.task_spec.coordinated_evidence
+--------------------------------------------------
+
+This normative entry point evaluates normalized held-object facts using an explicit manipulation binding. Raw actor, query, receipt and phase validation belongs to the Lab adapter.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.coordinated_evidence
+
+.. autosummary::
+
+   evaluate_coordinated_hold_evidence
+
+.. autofunction:: evaluate_coordinated_hold_evidence
+
+
+embodichain.gen_sim.task_spec.handover_evidence
+-----------------------------------------------
+
+This normative entry point evaluates normalized held-object facts using an explicit manipulation binding. Raw actor, query, receipt and phase validation belongs to the Lab adapter.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.handover_evidence
+
+.. autosummary::
+
+   evaluate_handover_evidence
+
+.. autofunction:: evaluate_handover_evidence
+
+
+embodichain.gen_sim.task_spec.manipulation_evidence
+---------------------------------------------------
+
+Explicit task acceptance compares normalized measurements with sealed bounds. Missing acquisition remains unavailable; valid measured negatives fail. Runtime monitor output never defines task thresholds.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.manipulation_evidence
+
+.. autosummary::
+
+   HoldAcceptanceCriteria
+   ManipulationEvidenceBinding
+   evaluate_manipulation_evidence
+
+.. autoclass:: HoldAcceptanceCriteria
+   :members:
+
+.. autoclass:: ManipulationEvidenceBinding
+   :members:
+
+.. autofunction:: evaluate_manipulation_evidence
+
+
+embodichain.lab.evidence
+------------------------
+
+Owned physical values retain row identity, validity, missing reasons and observation revisions. JSON snapshots are independent and encode nonfinite observations as null without discarding validity.
+
+.. currentmodule:: embodichain.lab.evidence
+
+.. autosummary::
+
+   PhysicalObservationStamp
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+   PhysicalEvidenceRequest
+
+.. autoclass:: PhysicalObservationStamp
+   :members:
+
+.. autoclass:: PhysicalEvidenceBatch
+   :members:
+
+.. autoclass:: PhysicalEvidenceFrame
+   :members:
+
+.. autoclass:: PhysicalEvidenceRequest
+   :members:
+
+
+embodichain.lab.task_program.integrations.evidence
+--------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   normalize_handover_evidence
+   CoordinatedHoldEvidenceBinding
+   normalize_coordinated_hold_evidence
+   held_observation_request
+   resolve_hold_observation_condition
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_handover_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_hold_evidence
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: resolve_hold_observation_condition
+
+
+embodichain.lab.task_program.integrations.evidence.coordinated_evidence
+-----------------------------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.coordinated_evidence
+
+.. autosummary::
+
+   CoordinatedHoldEvidenceBinding
+   normalize_coordinated_hold_evidence
+
+.. autoclass:: CoordinatedHoldEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_hold_evidence
+
+
+embodichain.lab.task_program.integrations.evidence.handover_evidence
+--------------------------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.handover_evidence
+
+.. autosummary::
+
+   HandOverEvidenceBinding
+   normalize_handover_evidence
+
+.. autoclass:: HandOverEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_handover_evidence
+
+
+embodichain.lab.task_program.integrations.evidence.observation_requests
+-----------------------------------------------------------------------
+
+Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.observation_requests
+
+.. autosummary::
+
+   held_observation_request
+   resolve_hold_observation_condition
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: resolve_hold_observation_condition

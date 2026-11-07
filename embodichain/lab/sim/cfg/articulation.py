@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import MISSING, fields
+from dataclasses import MISSING, field, fields
 import numbers
 from typing import Any, Dict, List, Literal, Sequence
 
@@ -28,13 +28,8 @@ import torch
 
 from embodichain.utils import configclass, is_configclass, logger
 
-from .asset import (
-    AssetPhysicsMode,
-    ObjectBaseCfg,
-    UsdSourceCfg,
-    _is_usd_source,
-    _resolve_asset_physics_mode,
-)
+from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .source import UsdSourceCfg, _raise_removed_source_fields, _usd_source_from_value
 from .rigid import (
     RigidBodyPhysicsCfg,
     _rigid_body_physics_from_dict,
@@ -72,9 +67,9 @@ class ArticulationRootPropertiesCfg:
 
     ``fixed_base`` and ``self_collision_enabled`` are consumed by both
     backends. ``sleep_threshold`` and the solver-iteration fields are supported
-    only by the Default backend and are ignored by Newton. Defaults preserve
-    USD root properties; URDF import defaults remain a fixed base with
-    self-collision disabled. Explicit values override source intent.
+    only by the Default backend and are ignored by Newton. Unset values
+    preserve USD intent; URDF and procedural imports resolve to a fixed root
+    without self-collision.
     """
 
     fixed_base: bool | None = None
@@ -133,6 +128,7 @@ _REMOVED_ARTICULATION_CFG_FIELDS = {
 
 def _raise_removed_articulation_cfg_fields(init_dict: Mapping[str, Any]) -> None:
     """Reject removed flat articulation fields with actionable replacements."""
+    _raise_removed_source_fields(init_dict)
     removed = _REMOVED_ARTICULATION_CFG_FIELDS.keys() & init_dict.keys()
     if not removed:
         return
@@ -402,8 +398,19 @@ class ArticulationCfg(ObjectBaseCfg):
     fpath: str = None
     """Path to the articulation asset file."""
 
+    source: UsdSourceCfg | None = field(default=None, kw_only=True)
+    """USD source asset; mutually exclusive with :attr:`fpath`."""
+
     body_scale: tuple | list | None = None
     """Scale of the articulation in the simulation world frame."""
+
+    def __post_init__(self) -> None:
+        path = self.source.file_path if self.source is not None else self.fpath
+        if path is None or not str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
+            if self.body_scale is None:
+                self.body_scale = (1.0, 1.0, 1.0)
 
     compute_uv: bool = False
     """Whether to compute the UV mapping for the articulation link.
@@ -439,8 +446,8 @@ class ArticulationCfg(ObjectBaseCfg):
 
     Fixed-base and self-collision intent is portable. Root sleep and solver
     iterations are Default-only fields and are ignored by Newton. The portable
-    fields preserve authored USD/backend values by default; URDF imports use
-    the established fixed-base, self-collision-off defaults.
+    fields default to ``None`` so USD imports retain their authored values.
+    URDF imports retain the fixed-base, self-collision-off defaults.
     """
 
     joint_drive_props: JointDrivePropertiesCfg | None = None
@@ -485,15 +492,6 @@ class ArticulationCfg(ObjectBaseCfg):
     Set False to load other joint topologies for simulation without FK.
     """
 
-    usd: UsdSourceCfg = UsdSourceCfg()
-    """USD source selection and root-pose policy."""
-
-    def __post_init__(self) -> None:
-        if isinstance(self.usd, Mapping):
-            self.usd = UsdSourceCfg.from_dict(self.usd)
-        if self.body_scale is None and not _is_usd_source(self.fpath):
-            self.body_scale = (1.0, 1.0, 1.0)
-
     def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
         """Return the effective file-backed physics policy."""
         return _resolve_asset_physics_mode(self.asset_physics_mode)
@@ -506,7 +504,9 @@ class ArticulationCfg(ObjectBaseCfg):
         _raise_removed_articulation_cfg_fields(init_dict)
         cfg = cls()
         for key, value in init_dict.items():
-            if key == "link_attrs" and isinstance(value, dict):
+            if key == "source":
+                cfg.source = _usd_source_from_value(value)
+            elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_physics_from_dict(value)
@@ -541,19 +541,13 @@ class ArticulationCfg(ObjectBaseCfg):
                 R.from_matrix(cfg.init_local_pose[:3, :3]).as_euler("xyz", degrees=True)
             )
 
-        if _is_usd_source(cfg.fpath):
+        path = cfg.source.file_path if cfg.source is not None else cfg.fpath
+        if path is not None and str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
             if "body_scale" not in init_dict:
                 cfg.body_scale = None
             if not {"init_pos", "init_rot", "init_local_pose"}.intersection(init_dict):
                 cfg.init_local_pose = None
+
         return cfg
-
-
-__all__ = [
-    "ArticulationRootPropertiesCfg",
-    "LinkPhysicsOverrideCfg",
-    "link_attrs_from_dict",
-    "JointDrivePropertiesCfg",
-    "NewtonJointDrivePropertiesCfg",
-    "ArticulationCfg",
-]

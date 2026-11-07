@@ -33,9 +33,11 @@ def test_combined_state_clamps_both_positions_before_one_write() -> None:
     art._entities = [object()] * 3
     art.__dict__["dof"] = 2
     art._data = SimpleNamespace(
+        is_newton_backend=False,
         qpos_limits=torch.tensor([[[-1.0, 1.0], [-2.0, 2.0]]] * 3),
         articulation_view=SimpleNamespace(apply_state=Mock()),
     )
+    art._world = SimpleNamespace(update=Mock())
     art._stabilize_newton_mimic_target_write = Mock()
     art.set_state(
         env_ids=[2, 0],
@@ -46,6 +48,7 @@ def test_combined_state_clamps_both_positions_before_one_write() -> None:
     )
     call = art._data.articulation_view.apply_state
     call.assert_called_once()
+    art._world.update.assert_called_once_with(0.0)
     rows, columns = call.call_args.args
     assert torch.as_tensor(rows).tolist() == [2, 0]
     assert torch.as_tensor(columns).tolist() == [1, 0]
@@ -56,6 +59,7 @@ def test_combined_state_clamps_both_positions_before_one_write() -> None:
         call.call_args.kwargs["target_qpos"], torch.tensor([[-2.0, 1.0], [2.0, -1.0]])
     )
     call.reset_mock()
+    art._world.update.reset_mock()
     with pytest.raises(ValueError, match="root_velocity"):
         art.set_state(
             qpos=torch.zeros((3, 2)),
@@ -63,3 +67,32 @@ def test_combined_state_clamps_both_positions_before_one_write() -> None:
             clear_dynamics=True,
         )
     call.assert_not_called()
+    art._world.update.assert_not_called()
+
+
+@pytest.mark.parametrize("newton", [False, True])
+@pytest.mark.parametrize(
+    "field", ["qpos", "target_qpos", "qvel", "target_qvel", "root_pose"]
+)
+def test_cpu_transform_publication_only_for_direct_pose_writes(
+    newton: bool, field: str
+) -> None:
+    art = object.__new__(Articulation)
+    art.device = torch.device("cpu")
+    art._entities = [object()]
+    art.__dict__["dof"] = 2
+    art._data = SimpleNamespace(
+        is_newton_backend=newton,
+        qpos_limits=torch.tensor([[[-1.0, 1.0], [-2.0, 2.0]]]),
+        articulation_view=SimpleNamespace(apply_state=Mock()),
+    )
+    art._world = SimpleNamespace(update=Mock())
+    art._stabilize_newton_mimic_target_write = Mock()
+    value = torch.tensor([[0.1, 0.2]])
+    if field == "root_pose":
+        value = torch.tensor([[0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 1.0]])
+    art.set_state(**{field: value})
+    if not newton and field in {"qpos", "root_pose"}:
+        art._world.update.assert_called_once_with(0.0)
+    else:
+        art._world.update.assert_not_called()

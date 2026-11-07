@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import MISSING
+from dataclasses import MISSING, field
 import os
 import warnings
 from typing import Any, Dict, Literal
@@ -29,14 +29,9 @@ from dexsim.types import ActorType
 from embodichain.utils import configclass, is_configclass, logger
 
 from ..shapes import ShapeCfg
-from .asset import (
-    AssetPhysicsMode,
-    ObjectBaseCfg,
-    UsdSourceCfg,
-    _is_usd_source,
-    _resolve_asset_physics_mode,
-)
+from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .rigid import RigidBodyPhysicsCfg
+from .source import UsdSourceCfg
 
 
 @configclass
@@ -47,8 +42,11 @@ class RigidObjectCfg(ObjectBaseCfg):
     such as physical attributes and collision group.
     """
 
-    shape: ShapeCfg = ShapeCfg()
+    shape: ShapeCfg | None = None
     """Shape configuration for the rigid body. """
+
+    source: UsdSourceCfg | None = field(default=None, kw_only=True)
+    """USD source asset; mutually exclusive with :attr:`shape`."""
 
     # TODO: supoort basic primitive shapes, such as box, sphere, etc cfg and spawn method.
 
@@ -59,7 +57,7 @@ class RigidObjectCfg(ObjectBaseCfg):
     """
 
     body_type: Literal["dynamic", "kinematic", "static"] | None = None
-    """Actor type override; omission retains USD intent or selects dynamic for other shapes."""
+    """Actor override; ``None`` retains a USD source's actor type."""
 
     body_scale: tuple | list | None = None
     """Scale of the rigid body in the simulation world frame."""
@@ -72,13 +70,15 @@ class RigidObjectCfg(ObjectBaseCfg):
     use config.
     """
 
-    usd: UsdSourceCfg = UsdSourceCfg()
-    """USD source selection and root-pose policy."""
-
     def __post_init__(self) -> None:
-        if isinstance(self.usd, Mapping):
-            self.usd = UsdSourceCfg.from_dict(self.usd)
-        if not _is_usd_source(getattr(self.shape, "fpath", None)):
+        path = (
+            self.source.file_path
+            if self.source is not None
+            else getattr(self.shape, "fpath", None)
+        )
+        if path is None or not str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
             if self.body_type is None:
                 self.body_type = "dynamic"
             if self.body_scale is None:
@@ -122,7 +122,14 @@ class RigidObjectCfg(ObjectBaseCfg):
                 stacklevel=2,
             )
         cfg = super().from_dict(data)
-        if _is_usd_source(getattr(cfg.shape, "fpath", None)):
+        path = (
+            cfg.source.file_path
+            if cfg.source is not None
+            else getattr(cfg.shape, "fpath", None)
+        )
+        if path is not None and str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
             if "body_type" not in data:
                 cfg.body_type = None
             if "body_scale" not in data:
@@ -230,7 +237,10 @@ class RigidObjectGroupCfg:
                                 list(init_dict["rigid_objects"].values())[0]
                             )
                             rigid_obj_cfg.uid = f"{cfg.uid}_obj_{i}"
-                            rigid_obj_cfg.shape.fpath = file_path
+                            if rigid_obj_cfg.source is not None:
+                                rigid_obj_cfg.source.file_path = file_path
+                            else:
+                                rigid_obj_cfg.shape.fpath = file_path
                             rigid_objects_cfg[rigid_obj_cfg.uid] = rigid_obj_cfg
                         setattr(cfg, "rigid_objects", rigid_objects_cfg)
                     else:
@@ -244,6 +254,3 @@ class RigidObjectGroupCfg:
                     f"Key '{key}' not found in {cfg.__class__.__name__}."
                 )
         return cfg
-
-
-__all__ = ["RigidObjectCfg", "RigidObjectGroupCfg"]

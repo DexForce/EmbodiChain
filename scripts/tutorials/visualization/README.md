@@ -40,7 +40,7 @@ own `--host`/`--port` options:
 python scripts/tutorials/sim/create_scene.py --viser
 python examples/sim/motion/solvers/srs_solver.py --viser
 python examples/sim/motion/workspace/analyze_joint_workspace.py --viser
-embodichain run-env --gym_config path/to/task.ur5.yaml --viser
+embodichain run-task --gym_config path/to/task.ur5.yaml --viser
 ```
 
 Use `--viser-host`, `--viser-port`, `--viser-fps`, `--viser-image-fps`,
@@ -48,7 +48,7 @@ Use `--viser-host`, `--viser-port`, `--viser-fps`, `--viser-image-fps`,
 server and sampling settings. `--viser` automatically runs the simulation
 headlessly and enables trusted clients to drag configured Gizmos; `--headless`
 by itself does not enable Viser.
-`embodichain run-env --viser` captures camera previews after every environment
+`embodichain run-task --viser` captures camera previews after every environment
 step by default; pass `--viser-image-fps` to restore wall-clock rate limiting.
 
 For camera frustums and low-frequency RGB preview:
@@ -71,8 +71,8 @@ python scripts/tutorials/sim/create_softbody.py --physics newton --viser
 python scripts/tutorials/sim/create_cloth.py --physics newton --viser
 ```
 
-The atomic-action tutorials receive the same options through
-`tutorial_utils.py`. Gym tutorials pass the generated visualization
+The Atomic Skill examples and two teaching walkthroughs receive the same
+options through `examples/sim/atomic_action/support.py`. Gym tutorials pass the generated visualization
 configuration into their environment configuration. Gizmo examples accept
 `--viser`, which uses a headless simulation with browser-native transform
 controls. Omit `--viser` to use the DexSim native window instead.

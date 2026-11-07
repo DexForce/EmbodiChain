@@ -18,6 +18,11 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from functools import wraps
+
+from dataclasses import replace
+from copy import deepcopy
 from types import MappingProxyType
 from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
@@ -28,7 +33,15 @@ from .bindings import ActionBinding
 from .core import AtomicAction, SkillDescriptor
 from .control import ActionControlOverrides, ControlPartCommandProfile
 from .invocation import ActionInvocation, GoalT, OptionsT, ResolvedActionRequest
-from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
+from .nominal import NominalMotionSource
+from .plans import (
+    ActionPlan,
+    CompiledTrajectory,
+    TimedTrajectory,
+    PlannerDiagnostics,
+    PlanQualification,
+    PlanningFailure,
+)
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .scene import SceneProvider
@@ -38,15 +51,34 @@ from .tracking import TrackingPolicy, TrackingRuntime
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
     from embodichain.toolkits.graspkit import GraspPoseGenerator
+    from embodichain.lab.sim.motion.expansion import (
+        MappedRetimeResult,
+        TrajectoryTemplate,
+    )
 
-    from .execution import ExecutionSession
+    from .execution import ExecutionSession, ExecutionPlanLifecycle
 
 
 PlanTransform = Callable[
     [ResolvedActionRequest, PlanningContext, ActionPlan],
     ActionPlan,
 ]
+
+
+def _profile_planning(method):
+    @wraps(method)
+    def measured(self, *args, **kwargs):
+        profiler = getattr(self, "_profiler", None)
+        with (
+            profiler.section("atomic_planning", is_root=True)
+            if profiler is not None
+            else nullcontext()
+        ):
+            return method(self, *args, **kwargs)
+
+    return measured
 
 
 class AtomicActionEngine:
@@ -58,9 +90,12 @@ class AtomicActionEngine:
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
+        hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
+        env_ids: tuple[int, ...] | None = None,
+        profiler: object | None = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -70,6 +105,8 @@ class AtomicActionEngine:
             grasp_pose_generators: Standalone grasp-pose services keyed by the
                 runtime target ID of each grasp endpoint, normally its robot
                 control-part name.
+            hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint
+                target ID. Settings are copied; construction performs no hand FK.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             tracking_runtime: Optional exact-version feedback, projector, and
@@ -78,14 +115,21 @@ class AtomicActionEngine:
             scene_provider: Optional default scene-observation source used by
                 :meth:`initial_context` when the caller does not supply an
                 explicit scene snapshot. The provider is borrowed by reference.
+            env_ids: Optional environment subset bound to planning services.
+            profiler: Optional owner-provided profiler exposing ``section``.
+                Planning is recorded under ``atomic_planning`` without taking
+                ownership of the profiler or looking up a simulation World.
         """
         if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
             raise TypeError("scene_provider must implement SceneProvider.")
+        self._profiler = profiler
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
             tracking_runtime=tracking_runtime,
             grasp_pose_generators=grasp_pose_generators,
+            env_ids=env_ids,
+            hand_geometry_cfgs=hand_geometry_cfgs,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}
@@ -132,6 +176,11 @@ class AtomicActionEngine:
     def grasp_pose_generators(self) -> Mapping[str, GraspPoseGenerator]:
         """Standalone grasp-pose services installed for endpoint targets."""
         return self._planning_services.grasp_pose_generators
+
+    @property
+    def hand_geometry_cfgs(self) -> Mapping[str, RobotHandGeometryCfg]:
+        """Return independently owned explicit hand calibrations by target ID."""
+        return self._planning_services.hand_geometry_cfgs
 
     @property
     def actions(self) -> dict[str, AtomicAction]:
@@ -324,6 +373,7 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -340,6 +390,7 @@ class AtomicActionEngine:
             request,
             context,
             plan_transform=plan_transform,
+            nominal_source=nominal_source,
         )
 
     def _resolve(
@@ -368,12 +419,243 @@ class AtomicActionEngine:
             )
         return action.resolve_request(invocation)
 
+    @_profile_planning
     def _plan_request(
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
+    ) -> ActionPlan:
+        """Own an explicitly selected planning ledger around the complete request."""
+        if not isinstance(request, ResolvedActionRequest):
+            raise TypeError("request must be a ResolvedActionRequest.")
+        from embodichain.lab.sim.motion.search import (
+            PlanningBudgetExceeded,
+            current_search_cost,
+            measure_search,
+            search_cost_scope,
+        )
+
+        budget = request.recovery_policy.planning_budget
+        parent = current_search_cost()
+        if budget is None and parent is None:
+            return self._plan_request_impl(
+                request,
+                context,
+                plan_transform=plan_transform,
+                nominal_source=nominal_source,
+            )
+        action = self._actions.get(request.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {request.skill_id!r}."
+            )
+        current = self.initial_context() if context is None else context
+        with search_cost_scope(
+            wall_seconds=None if budget is None else budget.wall_seconds
+        ) as cost:
+            try:
+                with measure_search("complete_plan_request"):
+                    plan = self._plan_request_impl(
+                        request,
+                        current,
+                        plan_transform=plan_transform,
+                        nominal_source=nominal_source,
+                    )
+            except PlanningBudgetExceeded as error:
+                if parent is not None:
+                    raise
+                plan = action.failed_plan(
+                    request,
+                    current,
+                    message=str(error),
+                    failure_code="planning_wall_budget_exhausted",
+                    retryable=False,
+                )
+            return replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "search_cost": cost.snapshot(),
+                    },
+                ),
+            )
+
+    def _plan_request_impl(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext | None = None,
+        *,
+        plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
+    ) -> ActionPlan:
+        if not isinstance(request, ResolvedActionRequest):
+            raise TypeError("request must be a ResolvedActionRequest.")
+        action = self._actions.get(request.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {request.skill_id!r}."
+            )
+        current = self.initial_context() if context is None else context
+
+        def validate_identity(selected: ResolvedActionRequest) -> None:
+            if (
+                selected.skill_id != request.skill_id
+                or selected.invocation_id != request.invocation_id
+                or selected.revision != request.revision
+            ):
+                raise ValueError(
+                    "Complete request alternatives must retain their invocation identity."
+                )
+
+        engine = self
+
+        class BoundBuilder:
+            def __call__(
+                self,
+                selected: ResolvedActionRequest,
+                *,
+                planner: (
+                    Callable[[ResolvedActionRequest, PlanningContext], ActionPlan]
+                    | None
+                ) = None,
+                apply_transform: bool = True,
+                action_qualifier: (
+                    Callable[
+                        [ResolvedActionRequest, PlanningContext, ActionPlan],
+                        PlanQualification | None,
+                    ]
+                    | None
+                ) = None,
+            ) -> ActionPlan:
+                validate_identity(selected)
+                if action_qualifier is not None and not callable(action_qualifier):
+                    raise TypeError(
+                        "Complete candidate action_qualifier must be callable."
+                    )
+                return engine._plan_request_candidate(
+                    selected,
+                    current,
+                    plan_transform=plan_transform if apply_transform else None,
+                    nominal_source=nominal_source,
+                    planner=planner,
+                    action_qualifier=action_qualifier,
+                )
+
+            def plan_preview(
+                self, selected: ResolvedActionRequest, projected: PlanningContext
+            ) -> ActionPlan:
+                observed = current.observed_robot or current.robot
+                roots_match = projected.robot.root_pose is current.robot.root_pose or (
+                    isinstance(projected.robot.root_pose, torch.Tensor)
+                    and isinstance(current.robot.root_pose, torch.Tensor)
+                    and torch.equal(projected.robot.root_pose, current.robot.root_pose)
+                )
+                if (
+                    not isinstance(selected, ResolvedActionRequest)
+                    or selected.binding.owner_id
+                    != engine.planning_services.binding_owner_id
+                    or selected.invocation_id == request.invocation_id
+                    or not projected.is_preview
+                    or projected.observed_robot is not observed
+                    or projected.scene is not current.scene
+                    or projected.world_source_stamp != current.world_source_stamp
+                    or projected.batch_size != current.batch_size
+                    or not torch.equal(projected.env_ids, current.env_ids)
+                    or projected.robot.timestamp != current.robot.timestamp
+                    or not roots_match
+                ):
+                    raise ValueError(
+                        "Complete suffix preview changed exact request/engine/observation identity."
+                    )
+                return engine.plan_request(
+                    selected, projected, plan_transform=plan_transform
+                )
+
+            def finalize_selected(
+                self, selected: ResolvedActionRequest, plan: ActionPlan
+            ) -> ActionPlan:
+                validate_identity(selected)
+                engine._validate_plan(plan, current, selected)
+                plan = engine._transform_plan(selected, current, plan, plan_transform)
+                return engine._qualify_completed_plan(
+                    action, selected, current, plan, plan_transform
+                )
+
+        build = BoundBuilder()
+
+        if type(action).plan_complete_request is AtomicAction.plan_complete_request:
+            result = build(request)
+        else:
+            result = action.plan_complete_request(
+                request,
+                current,
+                build=build,
+                external_nominal=nominal_source is not None,
+            )
+            self._validate_plan(result, current, request)
+        if (
+            request.motion_policy.require_final_velocity
+            and request.motion_policy.final_velocity_rejection == "mask_only"
+        ):
+            velocity_mask = self._final_velocity_mask(result)
+            success = result.plan_success & velocity_mask
+            failure = result.diagnostics.failure
+            if failure is None and not success.all():
+                failure = PlanningFailure("final_velocity_limit", retryable=False)
+            result = replace(
+                result,
+                plan_success=success,
+                diagnostics=replace(
+                    result.diagnostics,
+                    failure=failure,
+                    metadata={
+                        **result.diagnostics.metadata,
+                        "final_velocity_qualification": {
+                            "scope": "complete_request_post_recovery_and_transform",
+                            "valid_mask": velocity_mask.detach().cpu().tolist(),
+                            "physical_evidence": False,
+                        },
+                    },
+                ),
+            )
+            self._validate_plan(result, current, request)
+        failure = result.diagnostics.failure
+        if (
+            not request.recovery_policy.retry_all_failed_plans
+            and not result.plan_success.any()
+            and failure is not None
+            and failure.retryable
+        ):
+            result = replace(
+                result,
+                diagnostics=replace(
+                    result.diagnostics, failure=replace(failure, retryable=False)
+                ),
+            )
+        return result
+
+    def _plan_request_candidate(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext | None = None,
+        *,
+        plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
+        planner: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
+        action_qualifier: (
+            Callable[
+                [ResolvedActionRequest, PlanningContext, ActionPlan],
+                PlanQualification | None,
+            ]
+            | None
+        ) = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -397,18 +679,369 @@ class AtomicActionEngine:
             )
         current = self.initial_context() if context is None else context
         self._validate_context(current)
-        plan = action.plan(request, current)
-        self._validate_plan(plan, current, request)
+        if nominal_source is not None and not isinstance(
+            nominal_source, NominalMotionSource
+        ):
+            raise TypeError("nominal_source must implement NominalMotionSource.")
+        if nominal_source is not None and request.motion_policy.sample_count_retries:
+            raise ValueError(
+                "Sample-count retries do not support external nominal motion."
+            )
+        plan = self._generate_plan_once(
+            action,
+            request,
+            current,
+            plan_transform,
+            nominal_source,
+            planner=planner,
+        )
+        selected_request, plan = self._retry_sample_counts(
+            action, request, current, plan, plan_transform, planner=planner
+        )
+        return self._qualify_completed_plan(
+            action,
+            selected_request,
+            current,
+            plan,
+            plan_transform,
+            action_qualifier=action_qualifier,
+        )
+
+    def _qualify_completed_plan(
+        self,
+        action: AtomicAction,
+        request: ResolvedActionRequest,
+        current: PlanningContext,
+        plan: ActionPlan,
+        plan_transform: PlanTransform | None,
+        *,
+        action_qualifier: (
+            Callable[
+                [ResolvedActionRequest, PlanningContext, ActionPlan],
+                PlanQualification | None,
+            ]
+            | None
+        ) = None,
+    ) -> ActionPlan:
+        """Apply final qualification without rerunning planning or transforms."""
+        if (
+            request.motion_policy.require_final_velocity
+            and request.motion_policy.final_velocity_rejection == "hold"
+        ):
+            velocity_mask = self._final_velocity_mask(plan)
+            evidence = {
+                "scope": "final_full_robot_post_transform_and_retries",
+                "valid_mask": velocity_mask.detach().cpu().tolist(),
+                "physical_evidence": False,
+            }
+            plan = self._apply_plan_qualification(
+                action,
+                request,
+                current,
+                plan,
+                PlanQualification(
+                    velocity_mask,
+                    PlannerDiagnostics(
+                        backend=plan.diagnostics.backend,
+                        metadata={"final_velocity": evidence},
+                        failure=PlanningFailure(
+                            "final_velocity_limit", retryable=False
+                        ),
+                    ),
+                ),
+            )
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "final_velocity_qualification": evidence,
+                    },
+                ),
+            )
+        if plan_transform is not None and (
+            action_qualifier is not None
+            or type(action)._qualify_final_plan is not AtomicAction._qualify_final_plan
+        ):
+            qualifier = (
+                action._qualify_final_plan
+                if action_qualifier is None
+                else action_qualifier
+            )
+            qualification = qualifier(request, current, plan.snapshot())
+            plan = self._apply_plan_qualification(
+                action, request, current, plan, qualification
+            )
+        from embodichain.compute.trajectory._trace import _record_trajectory
+
+        if plan.joint_trajectory is not None:
+            _record_trajectory(
+                "action_compiled",
+                skill_id=plan.skill_id,
+                positions=plan.joint_trajectory.positions,
+                dt=plan.joint_trajectory.dt,
+                env_ids=plan.joint_trajectory.env_ids,
+                success=plan.plan_success,
+                segments=[
+                    {"name": s.name, "start": s.start, "stop": s.stop}
+                    for s in plan.segments
+                ],
+            )
+        return plan
+
+    def _generate_plan_once(
+        self,
+        action: AtomicAction,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        plan_transform: PlanTransform | None,
+        nominal_source: NominalMotionSource | None,
+        *,
+        planner: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
+    ) -> ActionPlan:
+        """Compose one complete candidate before final post-transform qualification."""
+        from embodichain.compute.trajectory._trace import _trajectory_scope
+
+        with _trajectory_scope(skill_id=request.skill_id):
+            plan = (
+                action.plan(
+                    request,
+                    context,
+                    **({"planner": planner} if planner is not None else {}),
+                )
+                if nominal_source is None
+                else action.plan(request, context, nominal_source=nominal_source)
+            )
+        self._validate_plan(plan, context, request)
+        return self._transform_plan(request, context, plan, plan_transform)
+
+    def _transform_plan(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        plan: ActionPlan,
+        plan_transform: PlanTransform | None,
+    ) -> ActionPlan:
+        """Apply one owned caller transform with standard validation."""
         if plan_transform is not None:
+            recovery_outcome = plan.planning_recovery_outcome
             if not callable(plan_transform):
                 raise TypeError("plan_transform must be callable or None.")
-            transformed = plan_transform(request, current, plan.snapshot())
+            transformed = plan_transform(request, context, plan.snapshot())
             if not isinstance(transformed, ActionPlan):
                 raise TypeError("plan_transform must return an ActionPlan.")
-            owned = transformed.snapshot()
-            self._validate_plan(owned, current, request)
-            plan = owned
+            plan = transformed.snapshot()
+            transformed_outcome = plan.planning_recovery_outcome
+            if (
+                transformed_outcome is not None
+                and transformed_outcome != recovery_outcome
+            ):
+                raise ValueError(
+                    "plan_transform cannot replace the current planning recovery outcome."
+                )
+            if recovery_outcome is not None and transformed_outcome is None:
+                # A host may reconstruct command fields through a plan builder;
+                # keep the action's logical proposal bound to this exact attempt.
+                plan = replace(plan, planning_recovery_outcome=recovery_outcome)
+            self._validate_plan(plan, context, request)
         return plan
+
+    def _final_velocity_mask(self, plan: ActionPlan) -> torch.Tensor:
+        """Check actual full-robot samples against unchanged authored/runtime caps."""
+        from embodichain.compute.trajectory.limits import joint_velocity_validity
+        from embodichain.lab.sim.motion.limits import authored_joint_velocity_limits
+
+        trajectory = plan.joint_trajectory
+        if trajectory is None:
+            if plan.plan_success.any():
+                raise ValueError(
+                    "Final velocity qualification requires joint trajectory evidence."
+                )
+            return plan.plan_success.clone()
+        limits = authored_joint_velocity_limits(self.robot, None).to(
+            trajectory.positions
+        )
+        return joint_velocity_validity(trajectory.positions, trajectory.dt, limits)
+
+    def _retry_sample_counts(
+        self,
+        action: AtomicAction,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        first: ActionPlan,
+        plan_transform: PlanTransform | None,
+        *,
+        planner: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
+    ) -> tuple[ResolvedActionRequest, ActionPlan]:
+        """Preserve source best-effort retry order and Torch-only stream boundary."""
+        alternatives = request.motion_policy.sample_count_retries
+        if not alternatives:
+            return request, first
+        selected, plan = request, first
+        attempted = []
+        segment_attempts = []
+        trajectory = first.joint_trajectory
+        if trajectory is not None and first.plan_success.any():
+            invalid = first.plan_success & ~self._final_velocity_mask(first)
+            if invalid.any():
+                device = trajectory.positions.device
+                devices = (
+                    [device.index]
+                    if device.type == "cuda" and device.index is not None
+                    else []
+                )
+                # Do not reset between alternatives or widen this source boundary
+                # to Python/NumPy: those streams retain their normal consumption.
+                with torch.random.fork_rng(devices=devices):
+                    for count in alternatives:
+                        if count <= request.motion_policy.sample_count:
+                            continue
+                        attempted.append(count)
+                        candidate_request = replace(
+                            request,
+                            motion_policy=replace(
+                                request.motion_policy, sample_count=count
+                            ),
+                        )
+                        candidate = self._generate_plan_once(
+                            action,
+                            candidate_request,
+                            context,
+                            plan_transform,
+                            None,
+                            planner=planner,
+                        )
+                        if (
+                            request.motion_policy.segment_sample_count_retries
+                            or request.motion_policy.segment_continuous_ik_recovery
+                        ):
+                            segment_attempts.append(
+                                {
+                                    "complete_sample_count": count,
+                                    "segment_sampling": deepcopy(
+                                        candidate.diagnostics.metadata.get(
+                                            "segment_sampling"
+                                        )
+                                    ),
+                                }
+                            )
+                        if candidate.joint_trajectory is None:
+                            continue
+                        candidate_invalid = (
+                            candidate.plan_success
+                            & ~self._final_velocity_mask(candidate)
+                        )
+                        retained_success = candidate.plan_success | ~first.plan_success
+                        if (
+                            candidate.plan_success.any()
+                            and not candidate_invalid.any()
+                            and retained_success.all()
+                        ):
+                            selected, plan = candidate_request, candidate
+                            break
+        return selected, replace(
+            plan,
+            diagnostics=replace(
+                plan.diagnostics,
+                metadata={
+                    **plan.diagnostics.metadata,
+                    "motion_sample_retries": {
+                        "sample_count": selected.motion_policy.sample_count,
+                        "velocity_retime_attempts": attempted,
+                        "exhaustion_policy": "retain_original_plan",
+                        **(
+                            {"segment_sampling_attempts": segment_attempts}
+                            if segment_attempts
+                            else {}
+                        ),
+                    },
+                },
+            ),
+        )
+
+    def _apply_plan_qualification(
+        self,
+        action: AtomicAction,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        plan: ActionPlan,
+        qualification: PlanQualification | None,
+    ) -> ActionPlan:
+        """Apply only rejection and diagnostics to the engine-owned plan."""
+        if qualification is None:
+            return plan
+        if not isinstance(qualification, PlanQualification):
+            raise TypeError(
+                "Final qualification must return PlanQualification or None."
+            )
+        valid = qualification.valid_mask
+        if valid.shape != plan.plan_success.shape or valid.device != self.device:
+            raise ValueError("Final qualification mask must match the planning rows.")
+        success = plan.plan_success & valid
+        report = qualification.diagnostics
+        failure = plan.diagnostics.failure
+        if (plan.plan_success & ~valid).any():
+            failure = (
+                report.failure
+                if report is not None and report.failure is not None
+                else PlanningFailure("final_plan_unqualified", retryable=False)
+            )
+        diagnostics = plan.diagnostics
+        if report is not None or failure is not diagnostics.failure:
+            diagnostics = PlannerDiagnostics(
+                backend=diagnostics.backend,
+                messages=diagnostics.messages
+                + (() if report is None else report.messages),
+                metadata={
+                    **diagnostics.metadata,
+                    **(
+                        {"final_qualification": dict(report.metadata)} if report else {}
+                    ),
+                },
+                failure=failure,
+            )
+        rejected = plan.plan_success & ~valid
+        rejected_candidate = plan.rejected_candidate
+        if plan.joint_trajectory is not None and rejected.any():
+            from embodichain.lab.sim.motion.planners.utils import (
+                RejectedMotionCandidate,
+            )
+
+            positions = plan.joint_trajectory.positions
+            combined = rejected
+            if rejected_candidate is not None:
+                # Earlier rejected rows already execute holds. Keep their first
+                # actual candidate, while newly rejected rows still hold originals.
+                positions = torch.where(
+                    rejected_candidate.env_mask[:, None, None],
+                    rejected_candidate.positions,
+                    positions,
+                )
+                combined = combined | rejected_candidate.env_mask
+            rejected_candidate = RejectedMotionCandidate(
+                positions, plan.joint_trajectory.dt, combined
+            )
+        result = replace(
+            plan,
+            plan_success=success,
+            diagnostics=diagnostics,
+            commands=action._authorize_command_targets(
+                request, plan.commands, active_mask=success
+            ),
+            joint_trajectory=(
+                plan.joint_trajectory.hold_rows(~rejected, context.robot.qpos)
+                if plan.joint_trajectory is not None and rejected.any()
+                else plan.joint_trajectory
+            ),
+            rejected_candidate=rejected_candidate,
+        )
+        self._validate_plan(result, context, request)
+        return result
 
     def plan(
         self,
@@ -416,6 +1049,7 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
     ) -> ActionPlan:
         """Plan one registered invocation through the engine-owned backend.
 
@@ -431,7 +1065,12 @@ class AtomicActionEngine:
         """
         current = self.initial_context() if context is None else context
         request = self._resolve(invocation)
-        return self._plan_request(request, current, plan_transform=plan_transform)
+        return self._plan_request(
+            request,
+            current,
+            plan_transform=plan_transform,
+            nominal_source=nominal_source,
+        )
 
     def initial_context(
         self,
@@ -464,8 +1103,14 @@ class AtomicActionEngine:
             if isinstance(candidate, torch.Tensor):
                 qvel_value = candidate.to(self.device)
         qvel = torch.zeros_like(qpos) if qvel_value is None else qvel_value
+        selection = self._planning_services.env_ids
+        env_ids = (
+            torch.arange(qpos.shape[0], dtype=torch.long, device=self.device)
+            if selection is None
+            else torch.tensor(selection, dtype=torch.long, device=self.device)
+        )
+        qpos, qvel = qpos.index_select(0, env_ids), qvel.index_select(0, env_ids)
         batch_size = int(qpos.shape[0])
-        env_ids = torch.arange(batch_size, dtype=torch.long, device=self.device)
         if task is None:
             task = TaskState.empty(batch_size=batch_size, device=self.device)
         if scene is None:
@@ -491,6 +1136,8 @@ class AtomicActionEngine:
         self,
         invocations: Iterable[ActionInvocation],
         context: PlanningContext | None = None,
+        *,
+        plan_transform: PlanTransform | None = None,
     ) -> CompiledTrajectory:
         """Compile a static sequence of grounded invocations.
 
@@ -502,6 +1149,8 @@ class AtomicActionEngine:
         Args:
             invocations: Grounded action requests in execution order.
             context: Optional initial planning context captured by the caller.
+            plan_transform: Optional same-grid transform applied to each plan
+                before concatenation and projected-state propagation.
 
         Returns:
             Concatenated timed trajectory, individual plans, and projected state.
@@ -523,7 +1172,7 @@ class AtomicActionEngine:
             if not alive.any():
                 break
             previous_qpos = projected.robot.qpos
-            plan = self.plan(invocation, projected)
+            plan = self.plan(invocation, projected, plan_transform=plan_transform)
             step_success = alive & plan.plan_success.to(self.device)
             if plan.joint_trajectory is None:
                 raise ValueError(
@@ -559,6 +1208,17 @@ class AtomicActionEngine:
             alive = step_success
 
         compiled = TimedTrajectory.concatenate(trajectories, empty_like=context)
+        from embodichain.compute.trajectory._trace import _record_trajectory
+
+        _record_trajectory(
+            "actions_concatenated",
+            positions=compiled.positions,
+            dt=compiled.dt,
+            env_ids=compiled.env_ids,
+            success=alive,
+            action_lengths=[item.waypoint_count for item in trajectories],
+            skill_ids=[plan.skill_id for plan in plans],
+        )
         return CompiledTrajectory(
             plan_success=alive,
             trajectory=compiled,
@@ -573,6 +1233,8 @@ class AtomicActionEngine:
         *,
         eligible_mask: torch.Tensor | None = None,
         plan_transform: PlanTransform | None = None,
+        nominal_source: NominalMotionSource | None = None,
+        plan_lifecycle: ExecutionPlanLifecycle | None = None,
     ) -> ExecutionSession:
         """Start incremental execution for a grounded invocation sequence.
 
@@ -585,6 +1247,8 @@ class AtomicActionEngine:
                 are eligible when omitted.
             plan_transform: Optional transform scoped to every planning call in
                 the returned execution session.
+            plan_lifecycle: Optional host-owned plan/adoption lifecycle, called
+                after complete validation and before dispatch.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -598,6 +1262,8 @@ class AtomicActionEngine:
             initial,
             eligible_mask=eligible_mask,
             plan_transform=plan_transform,
+            nominal_source=nominal_source,
+            plan_lifecycle=plan_lifecycle,
         )
 
     def _validate_context(self, context: PlanningContext) -> None:
@@ -608,7 +1274,13 @@ class AtomicActionEngine:
                 f"got {context.robot.robot_dof} and {self.robot.dof}."
             )
         robot_qpos = self.robot.get_qpos()
-        if context.batch_size != int(robot_qpos.shape[0]):
+        selection = self._planning_services.env_ids
+        expected_count = (
+            int(robot_qpos.shape[0]) if selection is None else len(selection)
+        )
+        if selection is not None and tuple(context.env_ids.tolist()) != selection:
+            raise ValueError("PlanningContext env_ids must match the engine selection")
+        if context.batch_size != expected_count:
             raise ValueError(
                 "PlanningContext batch size must match the engine robot, "
                 f"got {context.batch_size} and {robot_qpos.shape[0]}."
@@ -736,7 +1408,284 @@ class AtomicActionEngine:
             scene_dependency_monitor_until=owned_plan.scene_dependency_monitor_until,
             scene_dependency_end_segment=owned_plan.scene_dependency_end_segment,
         )
+        if owned_plan.rejected_candidate is not None:
+            rebuilt = replace(rebuilt, rejected_candidate=owned_plan.rejected_candidate)
+        if owned_plan.planning_recovery_outcome is not None:
+            rebuilt = replace(
+                rebuilt, planning_recovery_outcome=owned_plan.planning_recovery_outcome
+            )
         self._validate_plan(rebuilt, context, request)
+        return rebuilt
+
+    def rebuild_plan_from_mapped_trajectory(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        plan: ActionPlan,
+        reference: TrajectoryTemplate,
+        result: MappedRetimeResult,
+        *,
+        joint_limits: torch.Tensor,
+        velocity_limits: torch.Tensor,
+        acceleration_limits: torch.Tensor,
+    ) -> ActionPlan:
+        """Rebuild a B=1 plan after explicit, protected control-grid retiming.
+
+        The mapping must retain every protected phase sample and scene
+        dependency boundary. Skills' declared free phases remain authoritative;
+        a reference can narrow but never broaden those permissions. Commands,
+        tracking and effect information are rebuilt together. This does not
+        certify collision freedom or physical task success.
+
+        Args:
+            request: Resolved request used for the original plan.
+            context: Original planning context.
+            plan: Original validated action plan.
+            reference: Its exact full-joint expansion template.
+            result: Retimed trajectory with source brackets and hard events.
+            joint_limits: Full-layout joint limits with shape ``(D, 2)``.
+            velocity_limits: Positive full-layout joint speed limits ``(D,)``.
+            acceleration_limits: Positive full-layout acceleration limits ``(D,)``.
+
+        Returns:
+            A validated complete plan on the new control grid.
+
+        Raises:
+            ValueError: Mapping, phase permissions or protected samples differ.
+        """
+        from embodichain.lab.sim.motion.expansion import (
+            MappedRetimeResult,
+            TrajectoryTemplate,
+            validate_motion_limits,
+        )
+        from ._expansion_phases import FREE_PHASES
+
+        if not isinstance(reference, TrajectoryTemplate) or not isinstance(
+            result, MappedRetimeResult
+        ):
+            raise TypeError("reference and result must be mapped trajectory values")
+        self._validate_context(context)
+        owned = plan.snapshot()
+        self._validate_plan(owned, context, request)
+        original = owned.joint_trajectory
+        if context.batch_size != 1 or original is None:
+            raise ValueError("mapped plan rebuilding requires a B=1 joint trajectory")
+        if tuple(self.robot.joint_names) != reference.joint_names:
+            raise ValueError("reference joint names do not match the robot")
+        if not torch.equal(
+            reference.positions.to(original.positions), original.positions[0]
+        ) or not torch.equal(reference.dt.to(original.dt), original.dt[0]):
+            raise ValueError("reference must exactly match the original plan grid")
+        segments = tuple(owned.segments)
+        if tuple(
+            (phase.phase_id, phase.start_index, phase.stop_index)
+            for phase in reference.phases
+        ) != tuple((segment.name, segment.start, segment.stop) for segment in segments):
+            raise ValueError("reference phases must exactly match the original plan")
+        allowed = FREE_PHASES.get(request.skill_id)
+        selected = {
+            phase.phase_id
+            for phase in reference.phases
+            if "retime" in phase.allowed_operators
+        }
+        if allowed is None or not selected or not selected.issubset(allowed):
+            raise ValueError(
+                "retiming phases exceed the skill's free-phase permissions"
+            )
+        source_permissions = owned.diagnostics.metadata.get(
+            "prototype_phase_permissions"
+        )
+        if source_permissions is not None and (
+            not isinstance(source_permissions, Mapping)
+            or any(
+                "retime" not in source_permissions.get(name, ()) for name in selected
+            )
+        ):
+            raise ValueError("retiming phases exceed the source prototype permissions")
+        motion_ids = {
+            index
+            for endpoint in request.binding.endpoints
+            if endpoint.endpoint_id == "motion"
+            for index in endpoint.joint_ids
+        }
+        if not set(reference.controlled_joint_indices).issubset(motion_ids):
+            raise ValueError(
+                "retiming cannot control joints outside the motion binding"
+            )
+        candidate = result.template
+        mapping = result.time_map
+        if (
+            candidate.joint_names != reference.joint_names
+            or candidate.source_id != reference.source_id
+            or candidate.source_revision != reference.source_revision
+            or candidate.template_id != reference.template_id
+            or candidate.controlled_joint_indices != reference.controlled_joint_indices
+            or candidate.allowed_operators != reference.allowed_operators
+            or candidate.positions.shape[0] != len(mapping.left)
+        ):
+            raise ValueError("mapped trajectory does not match the original layout")
+        count = original.waypoint_count
+        if (
+            max(mapping.right, default=-1) >= count
+            or max(mapping.source_event_indices, default=-1) >= count
+            or max(mapping.execution_event_indices, default=-1)
+            >= candidate.positions.shape[0]
+        ):
+            raise ValueError("retiming map addresses samples outside its trajectories")
+        device, dtype = original.positions.device, original.positions.dtype
+        candidate_positions = candidate.positions.to(device=device, dtype=dtype)
+        candidate_dt = candidate.dt.to(original.dt)
+        if not torch.allclose(
+            candidate_dt[1:],
+            torch.full_like(candidate_dt[1:], context.require_control_dt()),
+            atol=1e-6,
+            rtol=0,
+        ):
+            raise ValueError("retimed trajectory must use the environment control grid")
+        limits = (
+            joint_limits.to(device=device, dtype=dtype)
+            if isinstance(joint_limits, torch.Tensor)
+            else None
+        )
+        if (
+            limits is None
+            or limits.shape != (original.robot_dof, 2)
+            or not bool(torch.isfinite(limits).all())
+            or not bool((limits[:, 0] <= limits[:, 1]).all())
+        ):
+            raise ValueError(
+                "joint_limits must contain finite ordered bounds for every joint"
+            )
+        controlled = list(reference.controlled_joint_indices)
+        if not controlled or bool(
+            (
+                (candidate_positions[:, controlled] < limits[controlled, 0])
+                | (candidate_positions[:, controlled] > limits[controlled, 1])
+            ).any()
+        ):
+            raise ValueError("retimed trajectory violates controlled joint limits")
+        if not validate_motion_limits(
+            candidate,
+            velocity_limits=velocity_limits,
+            acceleration_limits=acceleration_limits,
+        ).accepted:
+            raise ValueError("retimed trajectory violates sampled motion limits")
+        left = torch.as_tensor(mapping.left.copy(), device=device, dtype=torch.long)
+        right = torch.as_tensor(mapping.right.copy(), device=device, dtype=torch.long)
+        weight = torch.as_tensor(mapping.weight.copy(), device=device, dtype=dtype)
+        expected = torch.lerp(
+            original.positions[0, left], original.positions[0, right], weight[:, None]
+        )
+        if not torch.allclose(candidate_positions, expected, atol=1e-7, rtol=0):
+            raise ValueError("mapped positions do not match their source brackets")
+        event_map = dict(
+            zip(
+                mapping.source_event_indices.tolist(),
+                mapping.execution_event_indices.tolist(),
+            )
+        )
+        editable = set()
+        for phase in reference.phases:
+            if phase.phase_id in selected:
+                editable.update(range(phase.start_index + 1, phase.stop_index - 1))
+        hard = set(range(count)) - editable
+        for phase in reference.phases:
+            hard.update((phase.start_index, phase.stop_index - 1))
+        hard.update(
+            index
+            for index in owned.scene_dependency_monitor_until.values()
+            if index < count
+        )
+        protected = {
+            near
+            for index in hard
+            for near in (index - 1, index, index + 1)
+            if 0 <= near < count
+        }
+        if not protected.issubset(event_map):
+            raise ValueError("retiming map does not preserve all protected events")
+        for index in protected:
+            destination = event_map[index]
+            if (
+                mapping.left[destination] != index
+                or mapping.right[destination] != index
+                or mapping.weight[destination] != 0
+            ):
+                raise ValueError("protected events require exact source-index mappings")
+            if not torch.equal(
+                candidate_positions[event_map[index]], original.positions[0, index]
+            ):
+                raise ValueError("retiming modified a protected sample")
+        new_lengths = {}
+        previous_stop = 0
+        for segment in segments:
+            start = event_map[segment.start]
+            stop = event_map[segment.stop - 1] + 1
+            if start != previous_stop or stop <= start:
+                raise ValueError("retimed segments must remain contiguous and nonempty")
+            new_lengths[segment.name] = stop - start
+            previous_stop = stop
+        if previous_stop != candidate.positions.shape[0]:
+            raise ValueError("retimed segments do not cover the complete trajectory")
+        monitor_until = {
+            entity: candidate.positions.shape[0] if index == count else event_map[index]
+            for entity, index in owned.scene_dependency_monitor_until.items()
+        }
+        trajectory = TimedTrajectory.from_positions(
+            candidate_positions.unsqueeze(0),
+            env_ids=context.env_ids,
+            dt=candidate_dt.unsqueeze(0),
+        )
+        if (
+            float(trajectory.dt.sum()) + float(trajectory.dt[0, -1])
+            > owned.recovery_policy.action_timeout
+        ):
+            raise ValueError("retimed trajectory exceeds the action timeout")
+        action = self._actions[request.skill_id]
+        rebuilt = action.build_plan(
+            request,
+            context,
+            success=owned.plan_success,
+            trajectory=trajectory,
+            expected_effects=owned.expected_effects,
+            effect_candidates=owned.effect_candidates,
+            effect_verification=owned.effect_verification,
+            replannable=owned.replannable,
+            diagnostics=owned.diagnostics,
+            segment_lengths=new_lengths,
+            scene_dependency_monitor_until=monitor_until,
+            scene_dependency_end_segment=owned.scene_dependency_end_segment,
+        )
+        if owned.rejected_candidate is not None:
+            # The ActionPlan boundary rejects incompatible grids rather than
+            # relabeling a historical rejection as this new candidate.
+            rebuilt = replace(rebuilt, rejected_candidate=owned.rejected_candidate)
+        if owned.planning_recovery_outcome is not None:
+            rebuilt = replace(
+                rebuilt, planning_recovery_outcome=owned.planning_recovery_outcome
+            )
+        self._validate_plan(rebuilt, context, request)
+        if (
+            original.velocities is None
+            or rebuilt.joint_trajectory is None
+            or rebuilt.joint_trajectory.velocities is None
+        ):
+            raise ValueError(
+                "retiming requires original and rebuilt velocity references"
+            )
+        old_ids = torch.tensor(sorted(hard), dtype=torch.long, device=device)
+        new_ids = torch.tensor(
+            [event_map[index] for index in sorted(hard)],
+            dtype=torch.long,
+            device=device,
+        )
+        if not torch.allclose(
+            original.velocities[0, old_ids],
+            rebuilt.joint_trajectory.velocities[0, new_ids],
+            atol=1e-5,
+            rtol=0,
+        ):
+            raise ValueError("retiming changed a protected derivative boundary")
         return rebuilt
 
 

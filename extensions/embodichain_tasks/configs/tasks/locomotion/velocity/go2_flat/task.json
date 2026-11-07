@@ -53,60 +53,7 @@
     "history_substeps": 4
   },
   "robot": {
-    "joint_names": [
-      "FL_hip_joint",
-      "FL_thigh_joint",
-      "FL_calf_joint",
-      "FR_hip_joint",
-      "FR_thigh_joint",
-      "FR_calf_joint",
-      "RL_hip_joint",
-      "RL_thigh_joint",
-      "RL_calf_joint",
-      "RR_hip_joint",
-      "RR_thigh_joint",
-      "RR_calf_joint"
-    ],
-    "body_names": [
-      "base_link",
-      "FL_hip",
-      "FL_thigh",
-      "FL_calf",
-      "FR_hip",
-      "FR_thigh",
-      "FR_calf",
-      "RL_hip",
-      "RL_thigh",
-      "RL_calf",
-      "RR_hip",
-      "RR_thigh",
-      "RR_calf"
-    ],
-    "root_position": [
-      0.0,
-      0.0,
-      0.32
-    ],
-    "root_quaternion_wxyz": [
-      1.0,
-      0.0,
-      0.0,
-      0.0
-    ],
-    "default_joint_position": [
-      -0.1,
-      0.9,
-      -1.8,
-      0.1,
-      0.9,
-      -1.8,
-      -0.1,
-      0.9,
-      -1.8,
-      0.1,
-      0.9,
-      -1.8
-    ],
+    "class_type": "UnitreeGo2",
     "action_scale": [
       0.25,
       0.25,
@@ -120,62 +67,6 @@
       0.25,
       0.25,
       0.25
-    ],
-    "stiffness": [
-      20.0,
-      20.0,
-      40.0,
-      20.0,
-      20.0,
-      40.0,
-      20.0,
-      20.0,
-      40.0,
-      20.0,
-      20.0,
-      40.0
-    ],
-    "damping": [
-      1.0,
-      1.0,
-      2.0,
-      1.0,
-      1.0,
-      2.0,
-      1.0,
-      1.0,
-      2.0,
-      1.0,
-      1.0,
-      2.0
-    ],
-    "armature": [
-      0.01,
-      0.01,
-      0.02,
-      0.01,
-      0.01,
-      0.02,
-      0.01,
-      0.01,
-      0.02,
-      0.01,
-      0.01,
-      0.02
-    ],
-    "effort_limit": [
-      23.5,
-      23.5,
-      45.0,
-      23.5,
-      23.5,
-      45.0,
-      23.5,
-      23.5,
-      45.0,
-      23.5,
-      23.5,
-      45.0
     ],
     "soft_joint_position_limit_factor": 0.9,
     "collision_configuration": [

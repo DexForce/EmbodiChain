@@ -1,0 +1,1701 @@
+{
+  "schema": "ods-offline-pilot-results/v1",
+  "status": "completed_engineering_passed_formal_timing_not_qualified",
+  "generated_utc": "2026-10-18T19:18:46.948773+00:00",
+  "runtime_source_revision": "3cd6379a092f8106f08ea6073f13bec9a4bd6f63",
+  "protocol": {
+    "path": "/tmp/ods-offline-pilot/pilot-19001/protocol.json",
+    "sha256": "371ad87a0f9b4d6e9321a2b0779584414fe02cd3695d5b0afe964f2fdda2a224"
+  },
+  "prospective_protocol_markdown": {
+    "path": "/tmp/ods-offline-pilot/pilot-19001/prospective-protocol.md",
+    "sha256": "e4d03c7d312ff8bfe1189a5a91847edded0dc26218cd1e5bfad224507b5c6d88",
+    "git_object": "3cd6379a092f8106f08ea6073f13bec9a4bd6f63:extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/OFFLINE_PILOT.md"
+  },
+  "raw_report": {
+    "path": "/tmp/ods-offline-pilot/pilot-19001/pilot_report.json",
+    "sha256": "a061c313b31bfbe02a63b3b336f2428af89ded8e56851a4b0c8c6aee7933bb7e"
+  },
+  "runtime_identity": {
+    "path": "/tmp/ods-offline-pilot/pilot-19001/execution_identity.json",
+    "sha256": "33519a256801b7e8200afa7ef23605abdf5b9528ea601086d4b6d7f2fc651fe7"
+  },
+  "source_block_before": {
+    "path": "/tmp/ods-offline-pilot/pilot-19001/source-block-before.json",
+    "sha256": "287a64a0c48b4b16946dcbd183c75ca590692deb6fa009dea72ed005589dd5a5"
+  },
+  "source_block_after": {
+    "path": "/tmp/ods-offline-pilot/pilot-19001/source-block-after.json",
+    "sha256": "287a64a0c48b4b16946dcbd183c75ca590692deb6fa009dea72ed005589dd5a5"
+  },
+  "source_block_unchanged": true,
+  "hardware": {
+    "gpu_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+    "cpu_affinity": "32-47",
+    "sequential": true
+  },
+  "seeds": {
+    "learner": 19001,
+    "producer": 1019001,
+    "sampler": 29001,
+    "development": [
+      810000,
+      810001,
+      810002,
+      810003,
+      810004,
+      810005,
+      810006,
+      810007,
+      810008,
+      810009,
+      810010,
+      810011,
+      810012,
+      810013,
+      810014,
+      810015,
+      810016,
+      810017,
+      810018,
+      810019
+    ],
+    "final_test_scenes": 0
+  },
+  "evaluation": {
+    "steps": [
+      0,
+      500,
+      1000,
+      1500,
+      2000,
+      2500
+    ],
+    "panels": 24,
+    "rollouts": 480,
+    "unique_development_scenes": 20,
+    "independent_learner_seeds": 1,
+    "posthoc": true,
+    "fresh_process_per_panel": true
+  },
+  "arms": [
+    {
+      "arm": "lerobot256_unrestricted",
+      "label": "Offline256 practical",
+      "status": "complete",
+      "updates": 2500,
+      "chunks": 640000,
+      "valid_supervised_targets": 37076595,
+      "accepted_episodes": 256,
+      "failed_expert_episodes": 0,
+      "accepted_frames": 85129,
+      "exposure": {
+        "min": 2365,
+        "mean": 2500,
+        "max": 2628,
+        "quota_enabled": false,
+        "binding_cap_hits": null,
+        "above_reference_k2660": 0,
+        "by_generation": {
+          "1": {
+            "episodes": 32,
+            "chunks": 79839,
+            "reference_k2660_hits": 0
+          },
+          "2": {
+            "episodes": 32,
+            "chunks": 80305,
+            "reference_k2660_hits": 0
+          },
+          "3": {
+            "episodes": 32,
+            "chunks": 80338,
+            "reference_k2660_hits": 0
+          },
+          "4": {
+            "episodes": 32,
+            "chunks": 79829,
+            "reference_k2660_hits": 0
+          },
+          "5": {
+            "episodes": 32,
+            "chunks": 79861,
+            "reference_k2660_hits": 0
+          },
+          "6": {
+            "episodes": 32,
+            "chunks": 79630,
+            "reference_k2660_hits": 0
+          },
+          "7": {
+            "episodes": 32,
+            "chunks": 80361,
+            "reference_k2660_hits": 0
+          },
+          "8": {
+            "episodes": 32,
+            "chunks": 79837,
+            "reference_k2660_hits": 0
+          }
+        }
+      },
+      "timing": {
+        "origin": "measured launcher monotonic process start",
+        "reconstructed_origin_alignment_seconds": -0.9388516787439585,
+        "alignment_is_import_latency": false,
+        "initial_data_ready_seconds": 321.3100177529268,
+        "data_ready_scope": "entire collected corpus after audited SDK load",
+        "first_update_seconds": 322.08869673195295,
+        "first_evaluated_dev80_checkpoint_available_seconds": 326.9618719217833,
+        "first_evaluated_dev80_step": 500,
+        "true_threshold_crossing_seconds": null,
+        "online_certification_seconds": null,
+        "training_finished_seconds": 346.2149963078555,
+        "full_process_seconds": 1238.6196985819843,
+        "phase_union_seconds": {
+          "initial_fill": 59.95777018298395,
+          "offline_refill_wait": 208.7260311942082,
+          "offline_writer_finalize": 0.36411306797526777,
+          "offline_collection_and_persistence": 234.29789187922142,
+          "offline_load": 4.360941648017615,
+          "data_wait": 0.0,
+          "batch_service": 15.352521844441071,
+          "training_service": 23.341172608546913,
+          "training_loop": 24.2891168280039,
+          "evaluation_startup": 72.89365605870262,
+          "evaluation": 772.358858036343
+        },
+        "cleanup_seconds": 6.244657878065482,
+        "model_initialization_duration_seconds": null,
+        "normalization_fit_duration_seconds": null
+      },
+      "development_curve": [
+        {
+          "step": 0,
+          "successes": 0,
+          "count": 20,
+          "lift_rate": 0.0,
+          "mean_goal_error_m": 0.370201475918293,
+          "mean_episode_steps": 600.0,
+          "checkpoint_available_process_seconds": 321.6414365519304,
+          "failed_seeds": [
+            810000,
+            810001,
+            810002,
+            810003,
+            810004,
+            810005,
+            810006,
+            810007,
+            810008,
+            810009,
+            810010,
+            810011,
+            810012,
+            810013,
+            810014,
+            810015,
+            810016,
+            810017,
+            810018,
+            810019
+          ],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/initial_dev.json",
+            "sha256": "f2fb1f58596281579e3e1c8c6f59cd794691337fb48bcf7aa15d8e321311bd5f"
+          }
+        },
+        {
+          "step": 500,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.008655071794055402,
+          "mean_episode_steps": 340.35,
+          "checkpoint_available_process_seconds": 326.9618719217833,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/step_500_dev.json",
+            "sha256": "cbf756f48c12c856731e097190d0b75b19a203f6f764e33836a7e4b120056744"
+          }
+        },
+        {
+          "step": 1000,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.00934832210186869,
+          "mean_episode_steps": 312.6,
+          "checkpoint_available_process_seconds": 331.7042871438898,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/step_1000_dev.json",
+            "sha256": "36c2bbc40985f0336115e3b1fd7d2f47c3bb7ab161f3998f23a455f3d3bb1bc8"
+          }
+        },
+        {
+          "step": 1500,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.008643212274182587,
+          "mean_episode_steps": 315.85,
+          "checkpoint_available_process_seconds": 336.43722331593744,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/step_1500_dev.json",
+            "sha256": "dbb728a457201de1dab9bc8684c1f221fc721ea3e583fbd901cd659df68368f9"
+          }
+        },
+        {
+          "step": 2000,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.007093551172874868,
+          "mean_episode_steps": 308.75,
+          "checkpoint_available_process_seconds": 341.1776204078924,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/step_2000_dev.json",
+            "sha256": "41c5990116b8ad24b1d58980315c04a765a30cb22d1a7c65f1953e1799b12bdc"
+          }
+        },
+        {
+          "step": 2500,
+          "successes": 19,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.011590497882571072,
+          "mean_episode_steps": 325.75,
+          "checkpoint_available_process_seconds": 345.916813056916,
+          "failed_seeds": [
+            810002
+          ],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/step_2500_dev.json",
+            "sha256": "1dcdb755ce754338ab0eda5b1daa734ce5e30bcf9cf402e0860481d182e2d5ff"
+          }
+        }
+      ],
+      "latest_successes": 19,
+      "peak_successes": 20,
+      "max_observed_drawdown_pp": 5.000000000000004,
+      "latest_goal_error_m": 0.011590497882571072,
+      "selected_best_checkpoint": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/step_2000.pt",
+      "resources": {
+        "sampled_native_vram_peak_mib": 5864,
+        "sampled_process_tree_pss_peak_bytes": 6919672832,
+        "monitor_errors": [],
+        "final_dataset_plus_sdk_cache_bytes": 57604322,
+        "temporary_write_disk_peak_bytes": null,
+        "observed_cpu_core_seconds": 5325.429999999999
+      },
+      "offline_collection": {
+        "destination": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/lerobot_dataset",
+        "writer": {
+          "submitted_rows": 256,
+          "accepted_rows": 256,
+          "valid_frames": 85129,
+          "queue_capacity_rows": 2,
+          "max_queued_rows": 2,
+          "queue_wait_seconds": 25.100889379158616,
+          "clone_validation_seconds": 0.14297883352264762,
+          "sdk_create_seconds": 0.0062314891256392,
+          "persist_seconds": 27.601863388204947,
+          "hash_seconds": 0.14767797593958676,
+          "sdk_finalize_seconds": 0.007817347068339586,
+          "publish_seconds": 0.0001994050107896328,
+          "sidecar_seconds": 0.019329851027578115,
+          "finalize_wait_seconds": 0.35247368994168937,
+          "published": true,
+          "worker_joined": true,
+          "operation_timeout_seconds": 1800.0,
+          "shutdown_timeout_seconds": 30.0,
+          "scope": "writer CPU wall components; overlapping costs are not additive; excludes generation, training and audited learner load"
+        },
+        "collected_episodes": 256,
+        "intermediate_pt_file": false,
+        "collection_seconds_after_initial_fill": 234.29788973508403,
+        "timing_scope": "generation and writer intervals overlap; do not add service durations"
+      },
+      "offline_storage": {
+        "format": "lerobot",
+        "loader": "lerobot.datasets.lerobot_dataset.LeRobotDataset",
+        "lerobot_version": "0.4.4",
+        "sampling": "resident_cpu_after_official_lerobot_row_load",
+        "per_minibatch_lerobot_io": false,
+        "root": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/lerobot_dataset",
+        "numeric_read_mode": "sdk_hf_dataset_batch",
+        "numeric_read_batch_size": 1024,
+        "scalar_fallback_reason": null,
+        "sdk_cache_files": [
+          "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/dataset_cache/parquet/default-c278d861ef59872e/0.0.0/ec3958b52035e87929642b609b5a781870321434b151a14fbe8fd5a26ff494bb/parquet-train.arrow"
+        ]
+      },
+      "audit": {
+        "passed": true,
+        "checks": {
+          "parameters_updated": true,
+          "returncode_zero": true,
+          "source_unchanged": true,
+          "no_forced_cleanup": true,
+          "no_surviving_owned_processes": true,
+          "only_selected_gpu": true,
+          "exact_ordered_development_scenes": true,
+          "updates_within_cap": true,
+          "exact_checkpoint_steps": true,
+          "all_checkpoint_save_times_present": true,
+          "no_generation_panels": true,
+          "generation_panel_count_zero": true,
+          "fresh_evaluator_per_panel": true,
+          "evaluation_posthoc": true,
+          "accepted_episode_budget": true,
+          "unique_source_identities": true,
+          "all_accepted_sources_accounted": true,
+          "sampled_equals_completed": true,
+          "cleanup_success": true,
+          "initial_data_hash_present": true,
+          "quota_disabled_for_practical_baseline": true
+        },
+        "missing": [],
+        "failed": [],
+        "accepted_episodes": 256,
+        "accepted_cap": 256,
+        "accepted_below_cap": false,
+        "updates_below_cap": false,
+        "stop_reason": "update_budget",
+        "allowed_early_stop": false,
+        "required_checkpoint_steps": [
+          0,
+          500,
+          1000,
+          1500,
+          2000,
+          2500
+        ],
+        "actual_checkpoint_steps": [
+          0,
+          500,
+          1000,
+          1500,
+          2000,
+          2500
+        ],
+        "sampled_chunks_all_sources": 640000,
+        "completed_chunks_all_sources": 640000,
+        "early_stop_note": "ODS data cap is a maximum; fewer accepted episodes or quota-ended updates alone are not infrastructure failures."
+      },
+      "status_artifact": {
+        "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/status.json",
+        "sha256": "d80f0d67a8595ee8b568ae8d49299a68ac24dc5a83fba826381256569a0dc8c2"
+      },
+      "raw_artifacts": {
+        "summary.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/summary.json",
+          "sha256": "868aed4e6d3722446d276322cdd606debc24c7a1fcfa44f30255e54b319e97b7"
+        },
+        "config.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/config.json",
+          "sha256": "c821e6c7f79b9c108519cd0c73a7377b21c7bdc2e419890fa83172f1b2a1545c"
+        },
+        "timeline.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/timeline.json",
+          "sha256": "98658c42373ad5c2fa01415c037177224a7df1c75bfb6a959a80a90d3a10a712"
+        },
+        "data_manifest.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/data_manifest.json",
+          "sha256": "6f0ad1e72a76e43b8579cb2c26fd1ba2397695fad89f10872952cf91419b0804"
+        },
+        "usage.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/usage.json",
+          "sha256": "cf52a86a917bf51b458cefd06d3f12d76c37e8d38963dcc82086f98e4d9f4d13"
+        },
+        "sampling_budget.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/sampling_budget.json",
+          "sha256": "2c7112b9eb42e0944032ab6f63fb291349d477a5a004a4a89f5f5f41fd8ca77b"
+        },
+        "cleanup.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/cleanup.json",
+          "sha256": "1e5c419ffe2bb5fe916ac50ec3caf69d65101e6733b24e44d5608bd7935883d2"
+        },
+        "deferred_evaluation.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/deferred_evaluation.json",
+          "sha256": "d73b77f73531d623e5153974c8f68464a36068cdd56f56168395638d6c7c1157"
+        },
+        "efficiency.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_unrestricted/output/efficiency.json",
+          "sha256": "8ebc2284861880a0dec1379246bd168bde0640a5f42d04eaf161f6dcc94467a3"
+        }
+      }
+    },
+    {
+      "arm": "ods256_protected",
+      "label": "ODS256 protected",
+      "status": "complete",
+      "updates": 2500,
+      "chunks": 640000,
+      "valid_supervised_targets": 37082474,
+      "accepted_episodes": 256,
+      "failed_expert_episodes": 0,
+      "accepted_frames": 85129,
+      "exposure": {
+        "min": 630,
+        "mean": 2500,
+        "max": 2660,
+        "quota_enabled": true,
+        "binding_cap_hits": 224,
+        "above_reference_k2660": 0,
+        "by_generation": {
+          "1": {
+            "episodes": 32,
+            "chunks": 58366,
+            "reference_k2660_hits": 8
+          },
+          "2": {
+            "episodes": 32,
+            "chunks": 85120,
+            "reference_k2660_hits": 32
+          },
+          "3": {
+            "episodes": 32,
+            "chunks": 85120,
+            "reference_k2660_hits": 32
+          },
+          "4": {
+            "episodes": 32,
+            "chunks": 85120,
+            "reference_k2660_hits": 32
+          },
+          "5": {
+            "episodes": 32,
+            "chunks": 85120,
+            "reference_k2660_hits": 32
+          },
+          "6": {
+            "episodes": 32,
+            "chunks": 85120,
+            "reference_k2660_hits": 32
+          },
+          "7": {
+            "episodes": 32,
+            "chunks": 85120,
+            "reference_k2660_hits": 32
+          },
+          "8": {
+            "episodes": 32,
+            "chunks": 70914,
+            "reference_k2660_hits": 24
+          }
+        }
+      },
+      "timing": {
+        "origin": "measured launcher monotonic process start",
+        "reconstructed_origin_alignment_seconds": -0.9320732385385782,
+        "alignment_is_import_latency": false,
+        "initial_data_ready_seconds": 78.96003455691971,
+        "data_ready_scope": "first32 shared-cache trajectories",
+        "first_update_seconds": 79.83288746001199,
+        "first_evaluated_dev80_checkpoint_available_seconds": 131.2796748271212,
+        "first_evaluated_dev80_step": 500,
+        "true_threshold_crossing_seconds": null,
+        "online_certification_seconds": null,
+        "training_finished_seconds": 341.23243008111604,
+        "full_process_seconds": 1279.1308155360166,
+        "phase_union_seconds": {
+          "initial_fill": 59.90038462798111,
+          "quota_wait": 0.0,
+          "usage_throttle": 216.53518980974331,
+          "data_wait": 0.0,
+          "batch_service": 27.786094995681196,
+          "training_service": 40.290402420796454,
+          "training_loop": 258.4709989388939,
+          "evaluation_startup": 72.52009428734891,
+          "evaluation": 817.3720612563193
+        },
+        "cleanup_seconds": 6.377487275982276,
+        "model_initialization_duration_seconds": null,
+        "normalization_fit_duration_seconds": null
+      },
+      "development_curve": [
+        {
+          "step": 0,
+          "successes": 0,
+          "count": 20,
+          "lift_rate": 0.0,
+          "mean_goal_error_m": 0.370201475918293,
+          "mean_episode_steps": 600.0,
+          "checkpoint_available_process_seconds": 79.31849893392064,
+          "failed_seeds": [
+            810000,
+            810001,
+            810002,
+            810003,
+            810004,
+            810005,
+            810006,
+            810007,
+            810008,
+            810009,
+            810010,
+            810011,
+            810012,
+            810013,
+            810014,
+            810015,
+            810016,
+            810017,
+            810018,
+            810019
+          ],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/initial_dev.json",
+            "sha256": "de97a1dba2fc5ee684dcc14845a6f47518c35f01c212bc935a3a2dce7e7fc5f3"
+          }
+        },
+        {
+          "step": 500,
+          "successes": 19,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.012909967405721545,
+          "mean_episode_steps": 407.5,
+          "checkpoint_available_process_seconds": 131.2796748271212,
+          "failed_seeds": [
+            810011
+          ],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/step_500_dev.json",
+            "sha256": "de0dd55273f2a10d435c246b94c2fd258aa2e30aafb6f2b1edf7c3a2d5beb154"
+          }
+        },
+        {
+          "step": 1000,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.011080044147092849,
+          "mean_episode_steps": 314.25,
+          "checkpoint_available_process_seconds": 182.90287301293574,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/step_1000_dev.json",
+            "sha256": "a9a45a5a2fc8e7ffb71737832275a13002e8cc96dd6a8f81c02bdf5f327b799d"
+          }
+        },
+        {
+          "step": 1500,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.009710246592294424,
+          "mean_episode_steps": 327.8,
+          "checkpoint_available_process_seconds": 234.53004299011081,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/step_1500_dev.json",
+            "sha256": "f801385f7f4e6f28ca6d650fc8f8596298c2346d515b58b6089e447aca62d433"
+          }
+        },
+        {
+          "step": 2000,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.009768392867408692,
+          "mean_episode_steps": 324.6,
+          "checkpoint_available_process_seconds": 286.1575798681006,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/step_2000_dev.json",
+            "sha256": "2ff0b7c813471abe965a8875f4c87163cc02b069a8b5f0290ab8a179a46cc14d"
+          }
+        },
+        {
+          "step": 2500,
+          "successes": 19,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.011049308453220875,
+          "mean_episode_steps": 336.1,
+          "checkpoint_available_process_seconds": 337.7789670319762,
+          "failed_seeds": [
+            810009
+          ],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/step_2500_dev.json",
+            "sha256": "ac023e9bac94bb072f53525e4f62a7e90ec55db8b366aa3c22b5979759a03422"
+          }
+        }
+      ],
+      "latest_successes": 19,
+      "peak_successes": 20,
+      "max_observed_drawdown_pp": 5.000000000000004,
+      "latest_goal_error_m": 0.011049308453220875,
+      "selected_best_checkpoint": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/step_1500.pt",
+      "resources": {
+        "sampled_native_vram_peak_mib": 6324,
+        "sampled_process_tree_pss_peak_bytes": 8189394944,
+        "monitor_errors": [],
+        "final_dataset_plus_sdk_cache_bytes": 0,
+        "temporary_write_disk_peak_bytes": 0,
+        "observed_cpu_core_seconds": 5510.26
+      },
+      "offline_collection": null,
+      "offline_storage": null,
+      "audit": {
+        "passed": true,
+        "checks": {
+          "parameters_updated": true,
+          "returncode_zero": true,
+          "source_unchanged": true,
+          "no_forced_cleanup": true,
+          "no_surviving_owned_processes": true,
+          "only_selected_gpu": true,
+          "exact_ordered_development_scenes": true,
+          "updates_within_cap": true,
+          "exact_checkpoint_steps": true,
+          "all_checkpoint_save_times_present": true,
+          "no_generation_panels": true,
+          "generation_panel_count_zero": true,
+          "fresh_evaluator_per_panel": true,
+          "evaluation_posthoc": true,
+          "accepted_episode_budget": true,
+          "unique_source_identities": true,
+          "all_accepted_sources_accounted": true,
+          "sampled_equals_completed": true,
+          "cleanup_success": true,
+          "initial_data_hash_present": true,
+          "quota_enabled": true,
+          "quota_values": true,
+          "per_source_usage_bounded": true,
+          "quota_delivery_equals_completed": true,
+          "quota_rows_match_usage": true
+        },
+        "missing": [],
+        "failed": [],
+        "accepted_episodes": 256,
+        "accepted_cap": 256,
+        "accepted_below_cap": false,
+        "updates_below_cap": false,
+        "stop_reason": "update_budget",
+        "allowed_early_stop": true,
+        "required_checkpoint_steps": [
+          0,
+          500,
+          1000,
+          1500,
+          2000,
+          2500
+        ],
+        "actual_checkpoint_steps": [
+          0,
+          500,
+          1000,
+          1500,
+          2000,
+          2500
+        ],
+        "sampled_chunks_all_sources": 640000,
+        "completed_chunks_all_sources": 640000,
+        "early_stop_note": "ODS data cap is a maximum; fewer accepted episodes or quota-ended updates alone are not infrastructure failures."
+      },
+      "status_artifact": {
+        "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/status.json",
+        "sha256": "e2fb2eecac5c44895beac1d59feb0d9fe43d51f1019374f22328f95b44bb4c6f"
+      },
+      "raw_artifacts": {
+        "summary.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/summary.json",
+          "sha256": "b16f41d9b2a442b3c52ec8794da948136a3273c9e5f7086222f91dd3c4c9948b"
+        },
+        "config.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/config.json",
+          "sha256": "e5cdd2475379856d82db7d8b6fb82fd7678d0ac8f468a09836d82bb6a355fa09"
+        },
+        "timeline.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/timeline.json",
+          "sha256": "8609b28cfdad135326f7dca9e206ed51051a4aa60279152183ca52bcaadf8a7c"
+        },
+        "data_manifest.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/data_manifest.json",
+          "sha256": "f8cfafddb81520c9c647398a7fda6d0dcf9a12327d0e809bba4ec9e079c8b1dc"
+        },
+        "usage.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/usage.json",
+          "sha256": "48247c4bdaa4aa9f06ad28801224ddf7f44c1f52c123417a63298909accb253b"
+        },
+        "sampling_budget.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/sampling_budget.json",
+          "sha256": "5f4e15711b08666974fb99015649bacb85771b5dfce503c23282b46adfa7b2aa"
+        },
+        "cleanup.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/cleanup.json",
+          "sha256": "586b425f8d42dbca8ef6da95527c14dc3ecabc66a4f07f0751e3aa275708fd21"
+        },
+        "deferred_evaluation.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/deferred_evaluation.json",
+          "sha256": "99fa084ecdf5c53480a1f61ba4f300182d80bffa28f88d2094898da0238ef438"
+        },
+        "efficiency.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/efficiency.json",
+          "sha256": "487acd0c17c02ff1d9d74fbbbd629b2eea920eea775a902328b0baa55563989f"
+        }
+      }
+    },
+    {
+      "arm": "lerobot32_unrestricted",
+      "label": "Offline32 practical",
+      "status": "complete",
+      "updates": 2500,
+      "chunks": 640000,
+      "valid_supervised_targets": 37077767,
+      "accepted_episodes": 32,
+      "failed_expert_episodes": 0,
+      "accepted_frames": 10643,
+      "exposure": {
+        "min": 19749,
+        "mean": 20000,
+        "max": 20292,
+        "quota_enabled": false,
+        "binding_cap_hits": null,
+        "above_reference_k2660": 32,
+        "by_generation": {
+          "1": {
+            "episodes": 32,
+            "chunks": 640000,
+            "reference_k2660_hits": 0
+          }
+        }
+      },
+      "timing": {
+        "origin": "measured launcher monotonic process start",
+        "reconstructed_origin_alignment_seconds": -0.9366920706816018,
+        "alignment_is_import_latency": false,
+        "initial_data_ready_seconds": 87.84134151390754,
+        "data_ready_scope": "entire collected corpus after audited SDK load",
+        "first_update_seconds": 88.59369729901664,
+        "first_evaluated_dev80_checkpoint_available_seconds": 92.79183222097345,
+        "first_evaluated_dev80_step": 500,
+        "true_threshold_crossing_seconds": null,
+        "online_certification_seconds": null,
+        "training_finished_seconds": 109.84588985401206,
+        "full_process_seconds": 1018.3367735529318,
+        "phase_union_seconds": {
+          "initial_fill": 61.12765919812955,
+          "offline_writer_finalize": 0.3289294159039855,
+          "offline_collection_and_persistence": 3.4369643428362906,
+          "offline_load": 0.5348624738398939,
+          "data_wait": 0.0,
+          "batch_service": 13.880435130791739,
+          "training_service": 20.778827141504735,
+          "training_loop": 21.66709094098769,
+          "evaluation_startup": 72.41773265018128,
+          "evaluation": 787.954743408598
+        },
+        "cleanup_seconds": 6.17089177807793,
+        "model_initialization_duration_seconds": null,
+        "normalization_fit_duration_seconds": null
+      },
+      "development_curve": [
+        {
+          "step": 0,
+          "successes": 0,
+          "count": 20,
+          "lift_rate": 0.0,
+          "mean_goal_error_m": 0.370201475918293,
+          "mean_episode_steps": 600.0,
+          "checkpoint_available_process_seconds": 88.07558807195164,
+          "failed_seeds": [
+            810000,
+            810001,
+            810002,
+            810003,
+            810004,
+            810005,
+            810006,
+            810007,
+            810008,
+            810009,
+            810010,
+            810011,
+            810012,
+            810013,
+            810014,
+            810015,
+            810016,
+            810017,
+            810018,
+            810019
+          ],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/initial_dev.json",
+            "sha256": "40abb4e5167a36cfabfc737daba67a531893f573d962f25207f3393eb6b97802"
+          }
+        },
+        {
+          "step": 500,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.009401974582578987,
+          "mean_episode_steps": 314.55,
+          "checkpoint_available_process_seconds": 92.79183222097345,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/step_500_dev.json",
+            "sha256": "3d21b3400869f15a4baff8c9211d4eca96ab81f2ded0a84fbde724da66556a91"
+          }
+        },
+        {
+          "step": 1000,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.006608393904753029,
+          "mean_episode_steps": 332.0,
+          "checkpoint_available_process_seconds": 97.08668387494981,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/step_1000_dev.json",
+            "sha256": "5bb3811636459f4003ee8c60ce7fe08ff8a0da54eff66d3c1410c55363659821"
+          }
+        },
+        {
+          "step": 1500,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.008491823228541761,
+          "mean_episode_steps": 325.2,
+          "checkpoint_available_process_seconds": 101.31570112099871,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/step_1500_dev.json",
+            "sha256": "c7e2e607b429ea9593dacc7adf22da5534a3ebaa0e6ac20db16f3712aca28888"
+          }
+        },
+        {
+          "step": 2000,
+          "successes": 19,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.009749361430294812,
+          "mean_episode_steps": 341.0,
+          "checkpoint_available_process_seconds": 105.51746062096208,
+          "failed_seeds": [
+            810000
+          ],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/step_2000_dev.json",
+            "sha256": "a72906298b95cdcefa668638badbc5d7831fd856157598b08e62e068e2da816c"
+          }
+        },
+        {
+          "step": 2500,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.0046858807501848785,
+          "mean_episode_steps": 321.55,
+          "checkpoint_available_process_seconds": 109.72990560904145,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/step_2500_dev.json",
+            "sha256": "845abd305cc378fc698bd9fd5f9f070ac6d11f3d8e595fa16c03338d1a0378ae"
+          }
+        }
+      ],
+      "latest_successes": 20,
+      "peak_successes": 20,
+      "max_observed_drawdown_pp": 5.000000000000004,
+      "latest_goal_error_m": 0.0046858807501848785,
+      "selected_best_checkpoint": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/step_2500.pt",
+      "resources": {
+        "sampled_native_vram_peak_mib": 5864,
+        "sampled_process_tree_pss_peak_bytes": 6934819840,
+        "monitor_errors": [],
+        "final_dataset_plus_sdk_cache_bytes": 7296202,
+        "temporary_write_disk_peak_bytes": null,
+        "observed_cpu_core_seconds": 3929.44
+      },
+      "offline_collection": {
+        "destination": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/lerobot_dataset",
+        "writer": {
+          "submitted_rows": 32,
+          "accepted_rows": 32,
+          "valid_frames": 10643,
+          "queue_capacity_rows": 2,
+          "max_queued_rows": 2,
+          "queue_wait_seconds": 3.195464069256559,
+          "clone_validation_seconds": 0.01796406856738031,
+          "sdk_create_seconds": 0.005931759951636195,
+          "persist_seconds": 3.4044887989293784,
+          "hash_seconds": 0.01643570140004158,
+          "sdk_finalize_seconds": 0.003069549100473523,
+          "publish_seconds": 0.0001584028359502554,
+          "sidecar_seconds": 0.0025697939563542604,
+          "finalize_wait_seconds": 0.32713930611498654,
+          "published": true,
+          "worker_joined": true,
+          "operation_timeout_seconds": 1800.0,
+          "shutdown_timeout_seconds": 30.0,
+          "scope": "writer CPU wall components; overlapping costs are not additive; excludes generation, training and audited learner load"
+        },
+        "collected_episodes": 32,
+        "intermediate_pt_file": false,
+        "collection_seconds_after_initial_fill": 3.4369620599318296,
+        "timing_scope": "generation and writer intervals overlap; do not add service durations"
+      },
+      "offline_storage": {
+        "format": "lerobot",
+        "loader": "lerobot.datasets.lerobot_dataset.LeRobotDataset",
+        "lerobot_version": "0.4.4",
+        "sampling": "resident_cpu_after_official_lerobot_row_load",
+        "per_minibatch_lerobot_io": false,
+        "root": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/lerobot_dataset",
+        "numeric_read_mode": "sdk_hf_dataset_batch",
+        "numeric_read_batch_size": 1024,
+        "scalar_fallback_reason": null,
+        "sdk_cache_files": [
+          "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/dataset_cache/parquet/default-9195f412f0e9179f/0.0.0/ec3958b52035e87929642b609b5a781870321434b151a14fbe8fd5a26ff494bb/parquet-train.arrow"
+        ]
+      },
+      "audit": {
+        "passed": true,
+        "checks": {
+          "parameters_updated": true,
+          "returncode_zero": true,
+          "source_unchanged": true,
+          "no_forced_cleanup": true,
+          "no_surviving_owned_processes": true,
+          "only_selected_gpu": true,
+          "exact_ordered_development_scenes": true,
+          "updates_within_cap": true,
+          "exact_checkpoint_steps": true,
+          "all_checkpoint_save_times_present": true,
+          "no_generation_panels": true,
+          "generation_panel_count_zero": true,
+          "fresh_evaluator_per_panel": true,
+          "evaluation_posthoc": true,
+          "accepted_episode_budget": true,
+          "unique_source_identities": true,
+          "all_accepted_sources_accounted": true,
+          "sampled_equals_completed": true,
+          "cleanup_success": true,
+          "initial_data_hash_present": true,
+          "quota_disabled_for_practical_baseline": true
+        },
+        "missing": [],
+        "failed": [],
+        "accepted_episodes": 32,
+        "accepted_cap": 32,
+        "accepted_below_cap": false,
+        "updates_below_cap": false,
+        "stop_reason": "update_budget",
+        "allowed_early_stop": false,
+        "required_checkpoint_steps": [
+          0,
+          500,
+          1000,
+          1500,
+          2000,
+          2500
+        ],
+        "actual_checkpoint_steps": [
+          0,
+          500,
+          1000,
+          1500,
+          2000,
+          2500
+        ],
+        "sampled_chunks_all_sources": 640000,
+        "completed_chunks_all_sources": 640000,
+        "early_stop_note": "ODS data cap is a maximum; fewer accepted episodes or quota-ended updates alone are not infrastructure failures."
+      },
+      "status_artifact": {
+        "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/status.json",
+        "sha256": "7101614000bde3b5d686ecf25640019ed7d8ab5d98033552270fd915ab328905"
+      },
+      "raw_artifacts": {
+        "summary.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/summary.json",
+          "sha256": "f94ae4736230e9a179e32ef8293210f62902b60d3379a46e5334029db659154d"
+        },
+        "config.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/config.json",
+          "sha256": "183dfc9818b06bac8c417c70d38555ffeadb9e97279f11432df4bc81b5ae244b"
+        },
+        "timeline.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/timeline.json",
+          "sha256": "609641a6d59719b54b5ec0dc96f0cf916a4a96342c2cc4ebbe8ff288767ecf2d"
+        },
+        "data_manifest.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/data_manifest.json",
+          "sha256": "caf69f646099d06aceb625ec1323fdc285216fbf9738a01eff04ddff04c6d220"
+        },
+        "usage.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/usage.json",
+          "sha256": "ad060f1b46cf63c6473624de20ccfab92247af78506e126e93fb30b804ea579b"
+        },
+        "sampling_budget.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/sampling_budget.json",
+          "sha256": "2c7112b9eb42e0944032ab6f63fb291349d477a5a004a4a89f5f5f41fd8ca77b"
+        },
+        "cleanup.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/cleanup.json",
+          "sha256": "66b21d52783acc93c8674cbc15561db643863a2b13d33dd79a0b5e66b72ad18e"
+        },
+        "deferred_evaluation.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/deferred_evaluation.json",
+          "sha256": "647c5ef36f53f3c0105075dbade60fe89d27e4804b05e8af569ae42266a20272"
+        },
+        "efficiency.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot32_unrestricted/output/efficiency.json",
+          "sha256": "14d265a5436bd1e5a22def86681aeafa64da4ab15a72bfd6b6a3b11fd3b9f590"
+        }
+      }
+    },
+    {
+      "arm": "lerobot256_protected",
+      "label": "Offline256 protected",
+      "status": "complete",
+      "updates": 2500,
+      "chunks": 640000,
+      "valid_supervised_targets": 37076595,
+      "accepted_episodes": 256,
+      "failed_expert_episodes": 0,
+      "accepted_frames": 85129,
+      "exposure": {
+        "min": 2365,
+        "mean": 2500,
+        "max": 2628,
+        "quota_enabled": true,
+        "binding_cap_hits": 0,
+        "above_reference_k2660": 0,
+        "by_generation": {
+          "1": {
+            "episodes": 32,
+            "chunks": 79839,
+            "reference_k2660_hits": 0
+          },
+          "2": {
+            "episodes": 32,
+            "chunks": 80305,
+            "reference_k2660_hits": 0
+          },
+          "3": {
+            "episodes": 32,
+            "chunks": 80338,
+            "reference_k2660_hits": 0
+          },
+          "4": {
+            "episodes": 32,
+            "chunks": 79829,
+            "reference_k2660_hits": 0
+          },
+          "5": {
+            "episodes": 32,
+            "chunks": 79861,
+            "reference_k2660_hits": 0
+          },
+          "6": {
+            "episodes": 32,
+            "chunks": 79630,
+            "reference_k2660_hits": 0
+          },
+          "7": {
+            "episodes": 32,
+            "chunks": 80361,
+            "reference_k2660_hits": 0
+          },
+          "8": {
+            "episodes": 32,
+            "chunks": 79837,
+            "reference_k2660_hits": 0
+          }
+        }
+      },
+      "timing": {
+        "origin": "measured launcher monotonic process start",
+        "reconstructed_origin_alignment_seconds": -0.9351786223705858,
+        "alignment_is_import_latency": false,
+        "initial_data_ready_seconds": 327.23869539704174,
+        "data_ready_scope": "entire collected corpus after audited SDK load",
+        "first_update_seconds": 328.11277988296933,
+        "first_evaluated_dev80_checkpoint_available_seconds": 333.5325829300564,
+        "first_evaluated_dev80_step": 500,
+        "true_threshold_crossing_seconds": null,
+        "online_certification_seconds": null,
+        "training_finished_seconds": 355.17304534697905,
+        "full_process_seconds": 1246.6698466469534,
+        "phase_union_seconds": {
+          "initial_fill": 60.23147725383751,
+          "offline_refill_wait": 214.17000533617102,
+          "offline_writer_finalize": 0.3662483049556613,
+          "offline_collection_and_persistence": 240.0700785140507,
+          "offline_load": 4.443197939079255,
+          "data_wait": 0.0,
+          "batch_service": 15.894375277217478,
+          "training_service": 24.50306748272851,
+          "training_loop": 27.227955266134813,
+          "evaluation_startup": 72.23925264226273,
+          "evaluation": 771.0515230942983
+        },
+        "cleanup_seconds": 6.267010784940794,
+        "model_initialization_duration_seconds": null,
+        "normalization_fit_duration_seconds": null
+      },
+      "development_curve": [
+        {
+          "step": 0,
+          "successes": 0,
+          "count": 20,
+          "lift_rate": 0.0,
+          "mean_goal_error_m": 0.370201475918293,
+          "mean_episode_steps": 600.0,
+          "checkpoint_available_process_seconds": 327.6579609280452,
+          "failed_seeds": [
+            810000,
+            810001,
+            810002,
+            810003,
+            810004,
+            810005,
+            810006,
+            810007,
+            810008,
+            810009,
+            810010,
+            810011,
+            810012,
+            810013,
+            810014,
+            810015,
+            810016,
+            810017,
+            810018,
+            810019
+          ],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/initial_dev.json",
+            "sha256": "ba8f08181a35a1c23b5abbcbc900a7b9725988d78ca9e37fd2b2c7328e40cb41"
+          }
+        },
+        {
+          "step": 500,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.008655071794055402,
+          "mean_episode_steps": 340.35,
+          "checkpoint_available_process_seconds": 333.5325829300564,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/step_500_dev.json",
+            "sha256": "27f1096bd6467ea4173c10e241e069e9753e349daabe487ce11324dbceb6d751"
+          }
+        },
+        {
+          "step": 1000,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.00934832210186869,
+          "mean_episode_steps": 312.6,
+          "checkpoint_available_process_seconds": 338.87763740704395,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/step_1000_dev.json",
+            "sha256": "c56702aa2a0773622c8bf6429425f154198ecdb31977ff53de184cf60fec12d7"
+          }
+        },
+        {
+          "step": 1500,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.008643212274182587,
+          "mean_episode_steps": 315.85,
+          "checkpoint_available_process_seconds": 344.22697119414806,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/step_1500_dev.json",
+            "sha256": "843b8203147c46a385a1a39b4887e9542332050e8850c80c3bdbb9db5d348552"
+          }
+        },
+        {
+          "step": 2000,
+          "successes": 20,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.007093551172874868,
+          "mean_episode_steps": 308.75,
+          "checkpoint_available_process_seconds": 349.5596238069702,
+          "failed_seeds": [],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/step_2000_dev.json",
+            "sha256": "b75ff725afc3716a8d246a8933be2a056e2f26a14cef4a076af2a1dd7b771f4c"
+          }
+        },
+        {
+          "step": 2500,
+          "successes": 19,
+          "count": 20,
+          "lift_rate": 1.0,
+          "mean_goal_error_m": 0.011590497882571072,
+          "mean_episode_steps": 325.75,
+          "checkpoint_available_process_seconds": 354.8735187770799,
+          "failed_seeds": [
+            810002
+          ],
+          "artifact": {
+            "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/step_2500_dev.json",
+            "sha256": "2bf8198b58a80d83bb2403c9a0edf69fc89e08e9b0a7e9d71fe6d7fde10603bd"
+          }
+        }
+      ],
+      "latest_successes": 19,
+      "peak_successes": 20,
+      "max_observed_drawdown_pp": 5.000000000000004,
+      "latest_goal_error_m": 0.011590497882571072,
+      "selected_best_checkpoint": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/step_2000.pt",
+      "resources": {
+        "sampled_native_vram_peak_mib": 5864,
+        "sampled_process_tree_pss_peak_bytes": 6939651072,
+        "monitor_errors": [],
+        "final_dataset_plus_sdk_cache_bytes": 57604328,
+        "temporary_write_disk_peak_bytes": null,
+        "observed_cpu_core_seconds": 5380.349999999999
+      },
+      "offline_collection": {
+        "destination": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/lerobot_dataset",
+        "writer": {
+          "submitted_rows": 256,
+          "accepted_rows": 256,
+          "valid_frames": 85129,
+          "queue_capacity_rows": 2,
+          "max_queued_rows": 2,
+          "queue_wait_seconds": 25.434309624135494,
+          "clone_validation_seconds": 0.139384901849553,
+          "sdk_create_seconds": 0.006031853146851063,
+          "persist_seconds": 27.97657612594776,
+          "hash_seconds": 0.14654567767865956,
+          "sdk_finalize_seconds": 0.007419937988743186,
+          "publish_seconds": 0.00020587490871548653,
+          "sidecar_seconds": 0.018856785027310252,
+          "finalize_wait_seconds": 0.355039486894384,
+          "published": true,
+          "worker_joined": true,
+          "operation_timeout_seconds": 1800.0,
+          "shutdown_timeout_seconds": 30.0,
+          "scope": "writer CPU wall components; overlapping costs are not additive; excludes generation, training and audited learner load"
+        },
+        "collected_episodes": 256,
+        "intermediate_pt_file": false,
+        "collection_seconds_after_initial_fill": 240.0700764709618,
+        "timing_scope": "generation and writer intervals overlap; do not add service durations"
+      },
+      "offline_storage": {
+        "format": "lerobot",
+        "loader": "lerobot.datasets.lerobot_dataset.LeRobotDataset",
+        "lerobot_version": "0.4.4",
+        "sampling": "resident_cpu_after_official_lerobot_row_load",
+        "per_minibatch_lerobot_io": false,
+        "root": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/lerobot_dataset",
+        "numeric_read_mode": "sdk_hf_dataset_batch",
+        "numeric_read_batch_size": 1024,
+        "scalar_fallback_reason": null,
+        "sdk_cache_files": [
+          "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/dataset_cache/parquet/default-6a38a8616ab45ce1/0.0.0/ec3958b52035e87929642b609b5a781870321434b151a14fbe8fd5a26ff494bb/parquet-train.arrow"
+        ]
+      },
+      "audit": {
+        "passed": true,
+        "checks": {
+          "parameters_updated": true,
+          "returncode_zero": true,
+          "source_unchanged": true,
+          "no_forced_cleanup": true,
+          "no_surviving_owned_processes": true,
+          "only_selected_gpu": true,
+          "exact_ordered_development_scenes": true,
+          "updates_within_cap": true,
+          "exact_checkpoint_steps": true,
+          "all_checkpoint_save_times_present": true,
+          "no_generation_panels": true,
+          "generation_panel_count_zero": true,
+          "fresh_evaluator_per_panel": true,
+          "evaluation_posthoc": true,
+          "accepted_episode_budget": true,
+          "unique_source_identities": true,
+          "all_accepted_sources_accounted": true,
+          "sampled_equals_completed": true,
+          "cleanup_success": true,
+          "initial_data_hash_present": true,
+          "quota_enabled": true,
+          "quota_values": true,
+          "per_source_usage_bounded": true,
+          "quota_delivery_equals_completed": true,
+          "quota_rows_match_usage": true
+        },
+        "missing": [],
+        "failed": [],
+        "accepted_episodes": 256,
+        "accepted_cap": 256,
+        "accepted_below_cap": false,
+        "updates_below_cap": false,
+        "stop_reason": "update_budget",
+        "allowed_early_stop": false,
+        "required_checkpoint_steps": [
+          0,
+          500,
+          1000,
+          1500,
+          2000,
+          2500
+        ],
+        "actual_checkpoint_steps": [
+          0,
+          500,
+          1000,
+          1500,
+          2000,
+          2500
+        ],
+        "sampled_chunks_all_sources": 640000,
+        "completed_chunks_all_sources": 640000,
+        "early_stop_note": "ODS data cap is a maximum; fewer accepted episodes or quota-ended updates alone are not infrastructure failures."
+      },
+      "status_artifact": {
+        "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/status.json",
+        "sha256": "4de6c49b4eef68aeeb90a4879d26f1011fd430f4f8c50df4d3ee35ab5e180397"
+      },
+      "raw_artifacts": {
+        "summary.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/summary.json",
+          "sha256": "c4ab4b97437019a0eacf010e075be42dd10189ec22dd89bf5be34d77e94daf3b"
+        },
+        "config.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/config.json",
+          "sha256": "f4d40eb379b2c7af5a6b906cbee4ec6700157037313d9cd269a4ffa2bdabe597"
+        },
+        "timeline.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/timeline.json",
+          "sha256": "530d9679829aa83270f75693ad628cf767c41c1966c3b74f1ac5277842bc0e9f"
+        },
+        "data_manifest.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/data_manifest.json",
+          "sha256": "1a6223e72f4acdf5acb31e9c516131bff42a32390c3b9dc80fd277a83263894a"
+        },
+        "usage.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/usage.json",
+          "sha256": "e94e2b9224781ff4de3f92e45cb76577e37e2d8bd73b13dee5836d965e0df158"
+        },
+        "sampling_budget.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/sampling_budget.json",
+          "sha256": "4b3d2675999e33a65899fc7a1c987e2a5e8bdfeb5994139dc0c1d9cff9e5adfa"
+        },
+        "cleanup.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/cleanup.json",
+          "sha256": "630a6ec27775298a837acfd75d451656fe1789e0d1b346878dc20a60a20a1655"
+        },
+        "deferred_evaluation.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/deferred_evaluation.json",
+          "sha256": "e0b2df85000a24abfe882b2f3cc390219f4698346d707a79109c74108c168256"
+        },
+        "efficiency.json": {
+          "path": "/tmp/ods-offline-pilot/pilot-19001/lerobot256_protected/output/efficiency.json",
+          "sha256": "c958decf32278600b7035b547468ae57fc76b532b2bca330012b4d0eec2a7d4e"
+        }
+      }
+    }
+  ],
+  "pairing": {
+    "initialization": {
+      "initial_model_sha256": {
+        "all_present": true,
+        "all_equal": true,
+        "values": {
+          "lerobot256_unrestricted": "36a1195ffe3ab96878eb3072952b4e5379a6e322bbe1fac634b91dae467d43a2",
+          "ods256_protected": "36a1195ffe3ab96878eb3072952b4e5379a6e322bbe1fac634b91dae467d43a2",
+          "lerobot32_unrestricted": "36a1195ffe3ab96878eb3072952b4e5379a6e322bbe1fac634b91dae467d43a2",
+          "lerobot256_protected": "36a1195ffe3ab96878eb3072952b4e5379a6e322bbe1fac634b91dae467d43a2"
+        }
+      },
+      "normalization_sha256": {
+        "all_present": true,
+        "all_equal": true,
+        "values": {
+          "lerobot256_unrestricted": "2490f9be3fd128efa106eb39129c0b4761325fc4fa2c9e8279d5bd944c767bbe",
+          "ods256_protected": "2490f9be3fd128efa106eb39129c0b4761325fc4fa2c9e8279d5bd944c767bbe",
+          "lerobot32_unrestricted": "2490f9be3fd128efa106eb39129c0b4761325fc4fa2c9e8279d5bd944c767bbe",
+          "lerobot256_protected": "2490f9be3fd128efa106eb39129c0b4761325fc4fa2c9e8279d5bd944c767bbe"
+        }
+      },
+      "initial_data_content_id": {
+        "all_present": true,
+        "all_equal": true,
+        "values": {
+          "lerobot256_unrestricted": "528c522763069a4b3d6c2a5c759ebc9d7512eefd5fca374301c49572d4e0d0b6",
+          "ods256_protected": "528c522763069a4b3d6c2a5c759ebc9d7512eefd5fca374301c49572d4e0d0b6",
+          "lerobot32_unrestricted": "528c522763069a4b3d6c2a5c759ebc9d7512eefd5fca374301c49572d4e0d0b6",
+          "lerobot256_protected": "528c522763069a4b3d6c2a5c759ebc9d7512eefd5fca374301c49572d4e0d0b6"
+        }
+      }
+    },
+    "full_offline256_supervision": {
+      "content_ids": [
+        "00a94a512a6a61515e6c8e59b7a0ef6bf74928aac7950236c57df34d6b07dfd0",
+        "00a94a512a6a61515e6c8e59b7a0ef6bf74928aac7950236c57df34d6b07dfd0"
+      ],
+      "all256_ordered_episode_descriptors_equal": true,
+      "schema_equal": true,
+      "tensor_descriptors_equal": {
+        "observations": true,
+        "actions": true,
+        "valid": true,
+        "generations": true
+      },
+      "provenance_run_ids_expected_to_differ": true
+    },
+    "checkpoint_pairing": {
+      "path": "/tmp/ods-offline-pilot/pilot-19001/offline256_checkpoint_pairing.json",
+      "sha256": "66653f2e9520623f33b29344bc1bae45cca990df25911390a8786ec4bef5d72b"
+    },
+    "all_six_offline256_model_states_exact": true,
+    "offline256_evaluation_records": [
+      {
+        "step": 0,
+        "all20_records_equal": true
+      },
+      {
+        "step": 500,
+        "all20_records_equal": true
+      },
+      {
+        "step": 1000,
+        "all20_records_equal": true
+      },
+      {
+        "step": 1500,
+        "all20_records_equal": true
+      },
+      {
+        "step": 2000,
+        "all20_records_equal": true
+      },
+      {
+        "step": 2500,
+        "all20_records_equal": true
+      }
+    ],
+    "identical_full_sample_trace_verified": false
+  },
+  "controller": {
+    "packet": {
+      "path": "/tmp/ods-offline-pilot/pilot-19001/ods-input.json",
+      "sha256": "5e28b21aa71a4422aef8e243977c998325db8517b00d606a276108107336634b"
+    },
+    "observed_flow": {
+      "path": "/tmp/ods-offline-pilot/pilot-19001/ods256_protected/output/flow_measurements.json",
+      "sha256": "11d9315b24f22289f23e12697d3cb2ff431f9d8861aea49b43e4809828a2a831"
+    },
+    "input_generation_episodes_per_second": 0.93264,
+    "input_training_chunks_per_second": 14218.41,
+    "target_chunks_per_second": 2480.8224,
+    "observed_chunks_per_second": 2475.4550109280926,
+    "relative_target_error": -0.002163552325191609,
+    "warm_productive_episodes_per_second": 0.9154363232936442,
+    "productive_rate_scope": "complete G2-G8 refills, excluding idle gaps; not saturation capacity",
+    "active_seconds": 40.290402420796454,
+    "intentional_throttle_seconds": 216.53518980974331,
+    "missing_data_wait_seconds": 0.0,
+    "quota_wait_seconds": 0.0,
+    "g1_chunks": 58366,
+    "g1_nominal_full_update_ceiling": 332,
+    "profile_qualified": false,
+    "meaning": "Bounded source-budget use and paced throughput; not GPU occupancy or learning-quality superiority."
+  },
+  "instrumentation": {
+    "original_profile": {
+      "path": "/tmp/ods-offline-pilot/overhead-3cd6379a-attempt2/results.json",
+      "sha256": "2312ff01515397f7c956628c7af9a5991ce4bb2c247dea25310e92ad199a9533"
+    },
+    "isolated_later_report": {
+      "path": "/tmp/ods-offline-accounting-audit/RESULTS.json",
+      "sha256": "d6263dc7280fcad3bc9db41e9cfbeba3e494400c57f2814f7dc19c249865640c"
+    },
+    "original_metrics": [
+      {
+        "variant": "Original",
+        "resident_episodes": 32,
+        "p50_overhead": -0.005685686267195678,
+        "p95_overhead": -0.009856949375238844,
+        "mean_overhead": 0.0028462291787532124,
+        "five_percent_p50_p95_gate": true
+      },
+      {
+        "variant": "Original",
+        "resident_episodes": 256,
+        "p50_overhead": 0.12993077428383892,
+        "p95_overhead": 0.13553713858076533,
+        "mean_overhead": 0.12732361168481465,
+        "five_percent_p50_p95_gate": false
+      }
+    ],
+    "later_selected_metrics": [
+      {
+        "variant": "Fixed capacity hint: dict below64, blocked otherwise",
+        "resident_episodes": 32,
+        "selected_backend": "dict",
+        "p50_overhead": 0.051272263926348094,
+        "p95_overhead": 0.04685347208027091,
+        "mean_overhead": 0.050746220674389164,
+        "five_percent_p50_p95_gate": false
+      },
+      {
+        "variant": "Fixed capacity hint: dict below64, blocked otherwise",
+        "resident_episodes": 256,
+        "selected_backend": "blocked",
+        "p50_overhead": 0.0357727660916507,
+        "p95_overhead": 0.03923594332575986,
+        "mean_overhead": 0.035385595386278945,
+        "five_percent_p50_p95_gate": true
+      }
+    ],
+    "later_optimization_applied": false,
+    "strict_five_percent_gate_passed": false,
+    "full_pipeline_overhead_qualified": false
+  },
+  "cost": {
+    "four_arm_process_seconds": 4782.757134317886,
+    "four_arm_gpu_process_wall_hours": 1.328543648421635,
+    "three_sdk_smokes": [
+      {
+        "run": "g1_ready",
+        "status": "complete",
+        "process_seconds": 89.18660174496472,
+        "artifact": {
+          "path": "/tmp/ods-offline-pilot/smokes-v1/g1_ready/status.json",
+          "sha256": "f4317ce86c988f965bad40aa9ffc47215d178b660e618e9785d385b292a17ed8"
+        }
+      },
+      {
+        "run": "ods8",
+        "status": "complete",
+        "process_seconds": 154.73428780096583,
+        "artifact": {
+          "path": "/tmp/ods-offline-pilot/smokes-v1/ods8/status.json",
+          "sha256": "764f84d0dee096e6ff5a478f70831c12d72d815c984562461fcca6675a8d6b47"
+        }
+      },
+      {
+        "run": "offline8",
+        "status": "complete",
+        "process_seconds": 139.6206875559874,
+        "artifact": {
+          "path": "/tmp/ods-offline-pilot/smokes-v1/offline8/status.json",
+          "sha256": "cb59d15c5356a2e078b087a4f447bb432c9a6014e032ee8f52a9d064b4c994c4"
+        }
+      }
+    ],
+    "three_sdk_smoke_process_seconds": 383.54157710191794,
+    "separate_gpu5_diagnostics": [
+      {
+        "artifact": {
+          "path": "/tmp/ods-offline-pilot/overhead-3cd6379a/results.json",
+          "sha256": "4b780115221250e2097c406cbc41cec679287c4ca2ad7ac7ee0161ad91895108"
+        },
+        "status": "failed",
+        "observed_seconds": 11.368968779919669,
+        "scope": "Profile-reported elapsed or integration process wall; not necessarily full allocated campaign time."
+      },
+      {
+        "artifact": {
+          "path": "/tmp/ods-offline-pilot/overhead-3cd6379a-attempt2/results.json",
+          "sha256": "2312ff01515397f7c956628c7af9a5991ce4bb2c247dea25310e92ad199a9533"
+        },
+        "status": "completed",
+        "observed_seconds": 70.47723954194225,
+        "scope": "Profile-reported elapsed or integration process wall; not necessarily full allocated campaign time."
+      },
+      {
+        "artifact": {
+          "path": "/tmp/ods-offline-accounting-audit/consumer-candidate/results.json",
+          "sha256": "725f09f92a53944511bbe29fd445852c631d3b503c67e262b0032b42ebe50c5d"
+        },
+        "status": "completed",
+        "observed_seconds": 68.06105566699989,
+        "scope": "Profile-reported elapsed or integration process wall; not necessarily full allocated campaign time."
+      },
+      {
+        "artifact": {
+          "path": "/tmp/ods-offline-accounting-audit/consumer-candidate2/results.json",
+          "sha256": "c22bdcbd57b6af0715460d30fb739eff0e78e79bc959d8e330d82058af32cf52"
+        },
+        "status": "completed",
+        "observed_seconds": 67.26908773300238,
+        "scope": "Profile-reported elapsed or integration process wall; not necessarily full allocated campaign time."
+      },
+      {
+        "artifact": {
+          "path": "/tmp/ods-offline-accounting-audit/consumer-selected-backends/results.json",
+          "sha256": "82feba17bdc2b7913b1f3fa1751eb489ebec3be270ca0c26718dd6a338dd2f07"
+        },
+        "status": "completed",
+        "observed_seconds": 67.71417171298526,
+        "scope": "Profile-reported elapsed or integration process wall; not necessarily full allocated campaign time."
+      },
+      {
+        "artifact": {
+          "path": "/tmp/ods-offline-accounting-audit/integration-smokes-v2/full/status.json",
+          "sha256": "7e7aab2087eccaf8914e6c2c722cec23f00494d6ec0fc6310bde610a1e78ee94"
+        },
+        "status": "complete",
+        "observed_seconds": 92.89379566395655,
+        "scope": "Profile-reported elapsed or integration process wall; not necessarily full allocated campaign time."
+      },
+      {
+        "artifact": {
+          "path": "/tmp/ods-offline-accounting-audit/integration-smokes-v2/g1/status.json",
+          "sha256": "cfc877450cecd28b7fee36c53eb5ce9cd6ae8ec6269dbe55dc6b6e9dce191bbc"
+        },
+        "status": "complete",
+        "observed_seconds": 90.59864279604517,
+        "scope": "Profile-reported elapsed or integration process wall; not necessarily full allocated campaign time."
+      }
+    ],
+    "diagnostic_observed_seconds_sum": 468.3829618948512,
+    "scope": "Pilot and smoke process wall separate from scoped diagnostic elapsed. Failed diagnostic setup retained. Earlier qualification/development/CPU checks excluded; not a complete whole-project ledger."
+  },
+  "cleanup": {
+    "observed_unique_owned_pids": 44,
+    "surviving_owned_pids_after_queue": [],
+    "foreign_gpu3_allocation_observations": 0,
+    "wrong_gpu_observations": 0,
+    "forced_cleanup_runs": 0,
+    "all_arm_audits_passed": true,
+    "original_reporter_check_count": 92
+  },
+  "limitations": [
+    "One learner seed and20 reused development scenes.480 evaluation rollouts are24 panels of those same20 scenes, not480 independent samples. No held-out test or statistical superiority claim.",
+    "First noninitial checkpoint is500; earlier threshold crossing is unknown. Posthoc scores do not establish online certification time.",
+    "Prospective protocol item1 incorrectly interpreted application-origin offset as import/startup duration. psutil process-creation reconstruction produces roughly-0.94s offsets. Align absolute monotonic events to measured launcher start; do not interpret that offset as import latency.",
+    "Original pilot accounting remains applied: C256 resident full UsageTracker versus compact baseline adds12.993% p50/13.554% p95. No algebraic timing correction. ResourceSampler, producer/evaluation/I/O and protected-offline per-update quota snapshot caller are outside that profile.",
+    "Later isolated counter optimization was not applied to the pilot and does not comprehensively qualify overhead; selected C32 p50 remains5.127%, above strict5%.",
+    "Process-cold/software-cache-warm and fixed order. Separate GPU5/CPU128-143 profiles/integrations overlapped GPU3/CPU32-47. No observed foreign GPU3 allocations, but shared host/storage contention cannot be excluded.",
+    "Offline geometry is converted once at collection and SDK-loaded once into resident CPU tensors; ODS converts raw geometry during sampling. Both construct pose targets in learner loss. Whole-system comparison, not isolated file-I/O/memory transport.",
+    "All G1/model/normalizer hashes and full offline256 supervision match. Six offline256 model states match exactly, but full minibatch traces were not recorded. Full ODS256 payload identity is unverified.",
+    "Protected offline256 cap is inactive under2500 updates. No causal learning benefit from that cap can be inferred. Offline32 reuse beyond2660 is intentional.",
+    "Cache C32 does not bound whole-run VRAM/PSS. Simulator/native process memory dominates this small corpus; retain larger ODS peaks. Memory peaks are sampled, CPU counters incomplete, temporary-write disk peaks unknown.",
+    "Durable offline dataset reuse and already-available-data training are different workloads not measured by these cold acquisitions.",
+    "K2660 is a provisional fixed reference, not an optimal or generally qualified recommendation."
+  ],
+  "next_steps": [
+    "Retain offline32; do not treat this pilot as an ODS win.",
+    "Remove/bound redundant quota-snapshot materialization and qualify paired full consumer/instrumentation paths.",
+    "Freeze a balanced multi-seed formal protocol after review; keep held-out tests sealed until then."
+  ]
+}

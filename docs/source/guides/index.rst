@@ -12,12 +12,16 @@ Practical guides for common tasks in EmbodiChain.
    add_robot
    preview_asset
    preview_robot
-   run_env
+   preview_material
+   run_task
    expert_task_language
    offline_expert_datasets
    lerobot_export
    task_catalog
    robot_catalog
+   configured_manipulation_rl
    policy_evaluation
+   training_frameworks
+   lerobot
    rlinf
    cli

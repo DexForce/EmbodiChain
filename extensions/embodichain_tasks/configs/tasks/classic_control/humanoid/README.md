@@ -13,7 +13,7 @@ catalog defaults to `default`; backend selection belongs to the environment file
 
 ```bash
 embodichain show-task embodichain_tasks:humanoid
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/classic_control/humanoid/env.yaml
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/classic_control/humanoid/env.yaml
 embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/classic_control/humanoid/agents/ppo.yaml
 embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/classic_control/humanoid/agents/ppo.newton.yaml
 ```

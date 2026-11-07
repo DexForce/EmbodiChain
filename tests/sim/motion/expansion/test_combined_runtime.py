@@ -37,7 +37,7 @@ from embodichain.lab.sim.motion.expansion import (
 )
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
-from embodichain.lab.scripts.run_env import _create_parser, _resolve_expansion_request
+from embodichain.lab.scripts.run_task import _create_parser, _resolve_expansion_request
 
 _ROOT = Path(__file__).parents[4]
 _TASK_ROOT = (

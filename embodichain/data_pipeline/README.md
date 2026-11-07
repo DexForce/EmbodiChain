@@ -1,6 +1,32 @@
-# Expert dataset tools
+# Data pipeline
 
-EmbodiChain records with its existing Python >=3.10 runtime and LeRobot 0.4.x.
+The package owns live ODS supply, shared numeric training-data sources, durable
+recording and offline dataset tools.
+
+## ODS and training-data consumption
+
+Start with the [ODS user guide](../../docs/source/features/online_data.md) for
+engine lifecycle, manual refill, causal contexts, delivery budgets and source
+ownership. The reusable operational guides are:
+
+- [Architecture and data flow](../../docs/source/features/ods/architecture.md):
+  process ownership, online/offline routes and application boundaries.
+- [Throughput-based configuration](../../docs/source/features/ods/configuration.md):
+  measured rates, protected reuse profiles, cache/active-rate limits and the
+  host's pacing/refill responsibilities and runtime verification.
+- [Dataset/source architecture](../../docs/architecture/dataset-loading-design.md):
+  the public `BatchSource`/`SequenceDataset` contract and numeric LeRobot loading.
+
+The [simple BC demo](../../examples/ods/simple_bc_demo/README.md) binds these
+capabilities to one local task and learner. Its parameters and experimental
+results remain example evidence rather than generic ODS defaults.
+
+## Expert dataset tools
+
+EmbodiChain selects LeRobot 0.4.4 on Python 3.10/3.11 and LeRobot 0.6.1
+on Python >=3.12. The official ACT workflow uses Python 3.12; see the
+[LeRobot integration guide](../../docs/source/guides/lerobot.md) for training
+and simulation evaluation.
 Offline validation, quality filtering, and recovery do not start a simulator.
 LeRobot 0.6.1 conversion lives in the independent
 [`tools/lerobot_export`](../../tools/lerobot_export/) package and runs in its own
@@ -96,5 +122,5 @@ python -m scripts.benchmark.data_pipeline.benchmark_segment_annotations \
 
 The benchmark verifies exact annotation equivalence and reports lookup time and
 sampled process RSS. It does not measure simulation throughput or disk saving.
-The existing `benchmark_lerobot_save` script measures complete recording with a
-real environment.
+For complete recording measurements, run a surviving manipulation deployment
+with the Gym launcher profiler and dataset saving enabled.

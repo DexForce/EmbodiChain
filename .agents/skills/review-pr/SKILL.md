@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Review EmbodiChain pull requests, branches, commits, patches, or working-tree diffs for correctness regressions, architecture-contract violations, compatibility risks, unsafe resource behavior, and missing tests. Use when asked to review, audit, inspect, assess, or approve an EmbodiChain change; coordinate independent expert reviewers when subagents are available, and produce prioritized, evidence-backed findings without modifying the change unless the user explicitly asks for fixes.
+description: Review EmbodiChain pull requests, branches, commits, patches, or working-tree diffs for correctness regressions, architecture-contract violations, compatibility risks, unsafe resource behavior, and test coverage or necessity issues. Use when asked to review, audit, inspect, assess, or approve an EmbodiChain change; coordinate independent expert reviewers when subagents are available, and produce prioritized, evidence-backed findings without modifying the change unless the user explicitly asks for fixes.
 ---
 
 # Review EmbodiChain Changes
@@ -52,10 +52,12 @@ existing expert's scope:
 - **Reliability / operations engineer** (`reliability`) — Review lifecycle,
   restart, retries, idempotence, bounded queues, observability, and worker
   failure handling when these need coverage beyond the engine or agentic pass.
-- **Verification / test quality engineer** (`verification`) — Check test oracles,
-  regression claims, negative and boundary cases, determinism, and whether
-  tests exercise the contract rather than mirror the implementation. This pass
-  is required for test or validation changes, but a separate agent is optional.
+- **Verification / test quality engineer** (`verification`) — Check coverage
+  gaps, test necessity and duplication, independent oracles, regression claims,
+  relevant negative and boundary cases, determinism, and maintenance/resource
+  costs. Confirm that tests exercise the contract rather than mirror the
+  implementation. This pass is required for test or validation changes, but a
+  separate agent is optional.
 
 ### Role selection
 
@@ -237,14 +239,26 @@ synchronization, or per-environment regression on a reachable hot path.
 
 ### Validation and documentation
 
-Check whether focused tests cover the changed ownership boundary, including a
-negative or failure path when validation logic changed. Select the smallest
-read-only command that can confirm or refute a candidate issue; do not run the
-full suite by default. Start with static evidence, and do not launch live
-simulation, GPU, renderer, or distributed tests unless the user requests them
-or static evidence cannot resolve a material candidate. Before any command
-likely to take more than two minutes, explain its scope and why a narrower probe
-is insufficient. Keep these responsibilities distinct:
+Check whether focused tests cover the changed ownership boundary, including
+relevant failure behavior when validation logic changed. Apply the shared
+[test necessity review](../add-test/SKILL.md#test-necessity-review) to added or
+extended cases, comparing their verification value and costs with existing
+coverage. Adequate existing coverage can suffice; the absence of a new test
+file is not itself a defect.
+
+For a finding recommending removal or consolidation, identify redundant
+coverage or unjustified implementation coupling and explain the concrete
+validation, maintenance, or resource impact. Test count and reviewer preference
+alone do not establish a defect. Likewise, a request for more tests must identify
+an actual coverage gap in a supported behavior or explicit contract. Keep review
+read-only; recommendations to simplify tests do not authorize edits.
+
+Select the smallest read-only command that can confirm or refute a candidate
+issue; do not run the full suite by default. Start with static evidence, and do
+not launch live simulation, GPU, renderer, or distributed tests unless the user
+requests them or static evidence cannot resolve a material candidate. Before any
+command likely to take more than two minutes, explain its scope and why a
+narrower probe is insufficient. Keep these responsibilities distinct:
 
 - Use `$review-pr` to analyze change safety and report defects.
 - Use `$pre-commit-check` for comprehensive pre-commit gates and proportional

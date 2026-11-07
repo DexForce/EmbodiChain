@@ -140,13 +140,16 @@ def test_restore_rechecks_limits_changed_since_capture() -> None:
     assert sim.syncs == 0
 
 
-def test_boundary_positions_round_trip_through_production_articulation_setter() -> None:
+@pytest.mark.parametrize("position,tolerance", [(-1.0, 0.0), (-1.00005, 1e-4)])
+def test_boundary_positions_round_trip_through_production_articulation_setter(
+    position: float, tolerance: float
+) -> None:
     from types import MethodType, SimpleNamespace
     from embodichain.lab.sim.objects.articulation import Articulation
 
     sim = Sim()
     articulation = sim.articulations["drawer"]
-    articulation.state["qpos"][:] = -1.0
+    articulation.state["qpos"][:] = position
     articulation.state["target_qpos"][:] = 1.0
     articulation.device = sim.device
     articulation._resolve_env_ids = lambda ids: torch.tensor([0])
@@ -164,5 +167,47 @@ def test_boundary_positions_round_trip_through_production_articulation_setter() 
     saved = capture_state(view)
     articulation.state["qpos"][:] = 0.0
     articulation.state["target_qpos"][:] = 0.0
+    restore_state(view, saved, qpos_tolerance=tolerance)
+    assert compare_states(saved, capture_state(view)).passed
+
+
+@pytest.mark.parametrize("tolerance", [True, -1.0, float("nan"), float("inf")])
+def test_invalid_qpos_tolerance_rejected_before_writes(tolerance: object) -> None:
+    sim = Sim()
+    view = SceneView(sim)
+    saved = capture_state(view)
+    with pytest.raises(ValueError, match="qpos_tolerance"):
+        restore_state(view, saved, qpos_tolerance=tolerance)
+    assert all(body.writes == 0 for body in sim.rigid.values())
+    assert sim.syncs == 0
+
+
+def test_ordered_partial_snapshot_restores_only_selected_rows():
+    sim = Sim(4)
+    sim.rigid["cube"].value[:, 0] = torch.arange(4)
+    sim.articulations["drawer"].state["target_qpos"][:, 0] = torch.arange(4) * 0.1
+    view = SceneView(sim, env_ids=(3, 1))
+    saved = capture_state(view)
+    assert [next(e for e in b if e.uid == "cube").pose[0] for b in saved.batches] == [
+        3,
+        1,
+    ]
+    sim.rigid["cube"].value[:, 0] = 9
+    sim.articulations["drawer"].state["target_qpos"].zero_()
     restore_state(view, saved)
     assert compare_states(saved, capture_state(view)).passed
+    assert sim.rigid["cube"].value[:, 0].tolist() == [9, 1, 9, 3]
+    assert sim.articulations["drawer"].state["target_qpos"][[0, 2]].count_nonzero() == 0
+    assert sim.steps == 0
+
+
+def test_invalid_last_arena_prevents_every_native_write():
+    sim = Sim(4)
+    view = SceneView(sim, env_ids=(3, 1))
+    sim.articulations["drawer"].state["qpos"][1] = 2
+    saved = capture_state(view)
+    sim.articulations["drawer"].state["qpos"].zero_()
+    with pytest.raises(ValueError, match="exceeds"):
+        restore_state(view, saved)
+    assert all(entity.writes == 0 for entity in sim.rigid.values())
+    assert sim.syncs == 0

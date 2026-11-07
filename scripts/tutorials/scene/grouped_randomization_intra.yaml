@@ -1,0 +1,21 @@
+schema_version: 3
+seed: 42
+candidate_count: 20
+max_attempts: 200000
+collision_margin_m: 0.02
+backend: batched
+device: cuda:0
+batch_size: 4096
+randomize_groups: true
+intra_group:
+  boundary_margin_m: 0.002
+  sibling_margin_m: 0.002
+  support_gap_m: 0.001
+  grid_resolution_m: 0.001
+  targets:
+    bottle_001: {}
+    mug_001: {}
+    apple_001: {}
+    orange_001: {}
+    cube_001: {}
+    cylinder_001: {}

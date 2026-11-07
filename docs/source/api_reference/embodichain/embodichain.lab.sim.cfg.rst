@@ -15,7 +15,7 @@ drive properties, and the per-entity configs consumed by
 factory in :mod:`embodichain.lab.sim.utility.sim_utils`.
 
 Entity configs form a small inheritance hierarchy rooted at ``ObjectBaseCfg``
-(``LightCfg``, ``RigidObjectCfg``, ``VolumeDeformableObjectCfg``, ``SurfaceDeformableObjectCfg``,
+(``LightCfg``, ``VisualObjectCfg``, ``RigidObjectCfg``, ``VolumeDeformableObjectCfg``, ``SurfaceDeformableObjectCfg``,
 ``ArticulationCfg`` and its ``RobotCfg`` subclass), while ``URDFCfg`` and
 ``RigidConstraintCfg`` describe multi-component assembly and constraints.
 ``RobotPresetCfg`` provides replace-only complete robot alternatives when a
@@ -71,6 +71,7 @@ UV seams and render detail.
    ObjectBaseCfg
    UsdSourceCfg
    LightCfg
+   VisualObjectCfg
    RigidObjectCfg
    RigidObjectGroupCfg
    RigidConstraintCfg
@@ -78,6 +79,33 @@ UV seams and render detail.
    ArticulationCfg
    RobotCfg
    RobotPresetCfg
+
+USD source selection
+--------------------
+
+``UsdSourceCfg`` groups the source file and its optional exact
+``source_prim_path``. The path addresses an object inside the source USD stage;
+``uid`` identifies the resulting runtime instance. Source selection does not
+set a destination path or attach the instance to a parent/link.
+
+.. code-block:: python
+
+   from embodichain.lab.sim.cfg import UsdSourceCfg, VisualObjectCfg
+
+   mug = VisualObjectCfg(
+       uid="mug_visual",
+       source=UsdSourceCfg(
+           file_path="scene.usda",
+           source_prim_path="/World/Props/Mug",
+       ),
+   )
+
+The same ``source`` configuration is supported by ``RigidObjectCfg`` and
+``ArticulationCfg`` (including ``RobotCfg``). Supply either ``source`` or the
+existing ``shape``/``fpath`` input. Ordinary mesh files continue to use
+``MeshCfg(fpath=...)``. Without a selector, USD loading requires one candidate
+of the requested type; ambiguous sources fail instead of selecting the first
+object. Whole-scene imports preserve this source address on their facades.
 
 Deformable physics and meshing
 -----------------------------
@@ -109,31 +137,6 @@ Constructors and ``from_dict()`` accept only the current fields. Surface-element
 properties are grouped under ``attrs.surface_props``. Volume elasticity uses
 ``youngs`` and ``poissons``. Configuration dictionaries serialize this same
 schema; no legacy aliases or field migration are provided.
-
-USD source selection and placement
----------------------------------
-
-``RigidObjectCfg.usd`` and ``ArticulationCfg.usd`` select an original USD prim
-subtree, variant choices, and an optional namespace. Selection is performed by
-DexSim in a private session layer; source prim paths remain stable for
-``SimulationManager.add_usd(asset_cfgs=...)`` mappings. Root placement uses
-``pose_mode`` independently of ``asset_physics_mode``: ``auto`` preserves the
-source pose until an initial pose is configured, ``config`` replaces it,
-``preserve`` retains it, and ``offset`` composes a scene-space transform.
-
-Omitted USD actor types and overlay scales retain source intent. Articulation
-root defaults retain USD fixation and self-collision, while URDF defaults remain
-fixed with self-collision disabled. Explicit root fields still override the
-asset in either physics mode. Imported geometry keeps its authored collision
-representation.
-
-.. autodata:: embodichain.lab.sim.cfg.asset.AssetPhysicsMode
-
-.. autoclass:: embodichain.lab.sim.cfg.asset.ObjectBaseCfg
-   :members:
-
-.. autoclass:: embodichain.lab.sim.cfg.asset.UsdSourceCfg
-   :members:
 
 Rendering configuration module
 ------------------------------
@@ -220,42 +223,3 @@ accepts an optional ``priority`` for MuJoCo contact-parameter selection;
    RigidBodyMaterialCfg
    NewtonRigidBodyMaterialCfg
    RigidBodyPhysicsCfg
-
-USD dependency and constraint support
--------------------------------------
-
-USD loading requires the companion DexSim import update: SI/Z-up normalization,
-source selection, and ``SceneDesc.constraints``. A wheel predating that contract
-raises an actionable error before source loading. The dependency range permits
-compatible 0.5-series release and development wheels; install the companion
-DexSim build before using these USD APIs.
-
-Whole-scene imports retain standalone fixed, revolute, prismatic, spherical and
-representable D6 constraints on the Default backend. Retrieve their live handles
-through ``sim.spawn_result.get_constraint(path)`` after ``prepare()``. Explicit
-asset ``uid`` overrides also remap their endpoints. A scene-root pose transforms
-world anchors together with the imported objects. Singleton loaders reject
-sources containing standalone relationships and direct callers to ``add_usd``.
-
-Newton standalone constraints, closed loops, new deformable schemas, unsupported
-D6 drive combinations, and finite Direct GPU break thresholds fail explicitly.
-No deformable reader or closed-loop implementation is included in this update.
-Per-asset ``usd`` overrides control placement; pass subtree, variant and namespace
-selection through the outer ``add_usd(usd=...)`` argument.
-
-Configuration implementation modules
-------------------------------------
-
-The implementation modules expose the same configuration types as the public
-``cfg`` namespace, plus the link-override dictionary loader.
-
-.. autosummary::
-
-   embodichain.lab.sim.cfg.articulation.ArticulationRootPropertiesCfg
-   embodichain.lab.sim.cfg.articulation.LinkPhysicsOverrideCfg
-   embodichain.lab.sim.cfg.articulation.link_attrs_from_dict
-   embodichain.lab.sim.cfg.articulation.JointDrivePropertiesCfg
-   embodichain.lab.sim.cfg.articulation.NewtonJointDrivePropertiesCfg
-   embodichain.lab.sim.cfg.articulation.ArticulationCfg
-   embodichain.lab.sim.cfg.rigid_object.RigidObjectCfg
-   embodichain.lab.sim.cfg.rigid_object.RigidObjectGroupCfg

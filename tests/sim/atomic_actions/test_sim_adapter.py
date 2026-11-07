@@ -325,14 +325,22 @@ def test_simulation_adapter_cancel_validates_transport_targets() -> None:
     assert "outside robot DOF" in invalid.message
 
 
-def test_simulation_adapter_sleep_advances_integral_physics_steps() -> None:
+def test_simulation_adapter_sleep_rejects_off_grid_duration() -> None:
     simulation, robot = _simulation_and_robot()
     adapter = SimulationExecutionAdapter(simulation, robot)
 
-    adapter.sleep(0.025)
+    with pytest.raises(ValueError, match="integer multiple"):
+        adapter.sleep(0.025)
 
-    simulation.update.assert_called_once_with(physics_dt=PHYSICS_DT, step=3)
-    assert adapter.now() == pytest.approx(0.03)
+    simulation.update.assert_not_called()
+    assert adapter.now() == 0.0
+
+
+def test_simulation_adapter_rejects_off_grid_control_period() -> None:
+    simulation, robot = _simulation_and_robot()
+
+    with pytest.raises(ValueError, match="control_dt.*integer multiple"):
+        SimulationExecutionAdapter(simulation, robot, control_dt=0.025)
 
 
 def test_simulation_adapter_sleep_absorbs_float32_roundoff() -> None:

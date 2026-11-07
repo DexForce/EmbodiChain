@@ -80,10 +80,6 @@ checks, and task semantics remain explicit host responsibilities. To evaluate
 one proposal through the shared Task Program executor, use
 :mod:`embodichain.lab.task_program.integrations.scene_expansion`.
 
-Compatibility imports from ``embodichain.lab.sim.scene_expansion`` remain
-available and refer to the same classes and proposal identities. New code
-should use ``embodichain.lab.sim.scene.expansion``.
-
 Public contracts
 ----------------
 
@@ -121,3 +117,75 @@ Implementation module exports
 .. autosummary::
 
    FixedSceneCandidateSource
+
+Source-independent layout generation
+------------------------------------
+
+Prepare explicit scaled geometry and support trees once, sample CPU/CUDA batches,
+and publish poses only to selected environment rows. JSON/packed v4 packages
+validate their source, geometric evidence and identities before exposing lazy
+proposals. Hosts retain stepping, cache refresh and task-acceptance ownership.
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion
+
+.. autosummary::
+   :nosignatures:
+
+   SceneLayoutInput
+   PreparedSceneRandomization
+   SceneRandomizationBatch
+   SceneVariantApplicationResult
+   SceneRandomizationPolicyCfg
+   SceneRandomizationJobCfg
+   MemberRandomizationCfg
+   IntraGroupRandomizationCfg
+   SupportOverrideCfg
+   scene_layout_input_from_sim
+   prepare_scene_randomization
+   generate_scene_variants
+   apply_scene_variants
+   LoadedSceneVariants
+   save_scene_variants
+   load_scene_variants
+
+.. autoclass:: SceneLayoutInput
+   :members:
+
+.. autoclass:: PreparedSceneRandomization
+   :members:
+
+.. autoclass:: SceneRandomizationBatch
+   :members:
+
+.. autoclass:: SceneVariantApplicationResult
+   :members:
+
+.. autoclass:: SceneRandomizationPolicyCfg
+   :members:
+
+.. autoclass:: SceneRandomizationJobCfg
+   :members:
+
+.. autoclass:: MemberRandomizationCfg
+   :members:
+
+.. autoclass:: IntraGroupRandomizationCfg
+   :members:
+
+.. autoclass:: SupportOverrideCfg
+   :members:
+
+.. autofunction:: scene_layout_input_from_sim
+
+.. autofunction:: prepare_scene_randomization
+
+.. autofunction:: generate_scene_variants
+
+.. autofunction:: apply_scene_variants
+
+.. autoclass:: LoadedSceneVariants
+   :members:
+
+.. autofunction:: save_scene_variants
+
+.. autofunction:: load_scene_variants

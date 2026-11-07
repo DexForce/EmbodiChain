@@ -55,8 +55,10 @@ class UnitreeGo1FlatEnv(EmbodiChainVelocityEnv):
     build_observations_fn = staticmethod(build_observations)
     compute_rewards_fn = staticmethod(compute_rewards)
     compute_termination_fn = staticmethod(compute_termination)
-    foot_link_names = ("FR_foot", "FL_foot", "RR_foot", "RL_foot")
-    foot_offsets = ((0.0, 0.0, 0.0),) * 4
+    foot_link_names = tuple(_CONFIG.data["robot"]["frames"]["foot_link_names"])
+    foot_offsets = tuple(
+        tuple(offset) for offset in _CONFIG.data["robot"]["frames"]["foot_offsets"]
+    )
     illegal_contact_link_names = (
         "trunk",
         "FR_hip",
@@ -72,7 +74,7 @@ class UnitreeGo1FlatEnv(EmbodiChainVelocityEnv):
         "RL_thigh",
         "RL_calf",
     )
-    orientation_link_name = "trunk"
+    orientation_link_name = _CONFIG.data["robot"]["frames"]["orientation_link_name"]
 
     @staticmethod
     def corrupt_actor_fn(

@@ -1,0 +1,150 @@
+{
+  "asset": {
+    "fpath": "ANYmalCLocomotion/usd/anymal_c.usda",
+    "build_pk_chain": false,
+    "init_pos": [
+      0.0,
+      0.0,
+      0.6
+    ],
+    "init_qpos": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.4,
+      -0.4,
+      0.4,
+      -0.4,
+      -0.8,
+      0.8,
+      -0.8,
+      0.8
+    ],
+    "qpos_limits": {
+      "LF_HAA": [
+        -0.72,
+        0.49
+      ],
+      "LF_HFE": [
+        -6.283185307179586,
+        6.283185307179586
+      ],
+      "LF_KFE": [
+        -6.283185307179586,
+        6.283185307179586
+      ],
+      "LH_HAA": [
+        -0.72,
+        0.49
+      ],
+      "LH_HFE": [
+        -6.283185307179586,
+        6.283185307179586
+      ],
+      "LH_KFE": [
+        -6.283185307179586,
+        6.283185307179586
+      ],
+      "RF_HAA": [
+        -0.49,
+        0.72
+      ],
+      "RF_HFE": [
+        -6.283185307179586,
+        6.283185307179586
+      ],
+      "RF_KFE": [
+        -6.283185307179586,
+        6.283185307179586
+      ],
+      "RH_HAA": [
+        -0.49,
+        0.72
+      ],
+      "RH_HFE": [
+        -6.283185307179586,
+        6.283185307179586
+      ],
+      "RH_KFE": [
+        -6.283185307179586,
+        6.283185307179586
+      ]
+    },
+    "root_props": {
+      "fixed_base": false,
+      "min_position_iters": 4,
+      "min_velocity_iters": 0,
+      "self_collision_enabled": true
+    },
+    "asset_physics_mode": "overlay"
+  },
+  "robot": {
+    "root_body": "base",
+    "root_height": 0.6,
+    "joint_names": [
+      "LF_HAA",
+      "LF_HFE",
+      "LF_KFE",
+      "LH_HAA",
+      "LH_HFE",
+      "LH_KFE",
+      "RF_HAA",
+      "RF_HFE",
+      "RF_KFE",
+      "RH_HAA",
+      "RH_HFE",
+      "RH_KFE"
+    ],
+    "default_joint_position": [
+      0.0,
+      0.4,
+      -0.8,
+      0.0,
+      -0.4,
+      0.8,
+      0.0,
+      0.4,
+      -0.8,
+      0.0,
+      -0.4,
+      0.8
+    ],
+    "stiffness": 40.0,
+    "damping": 5.0,
+    "effort_limit": 80.0,
+    "velocity_limit": 7.5,
+    "actuator_model": "ANYDRIVE_3_SIMPLE_ACTUATOR_CFG"
+  },
+  "frames": {
+    "foot_link_names": [
+      "LF_FOOT",
+      "LH_FOOT",
+      "RF_FOOT",
+      "RH_FOOT"
+    ],
+    "foot_offsets": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "orientation_link_name": "base"
+  }
+}

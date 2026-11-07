@@ -1,0 +1,319 @@
+{
+  "physics": "default",
+  "planner": "trapezoidal",
+  "num_envs": 1,
+  "device": "cpu",
+  "renderer": "hybrid",
+  "recorded_fps": 20,
+  "source_sha256": {
+    "scripts/tutorials/atomic_action/embodiment_switching.py": "a90414864a4352260907c328efaf1683abae9d56ce6197422c2aae64c753f259",
+    "examples/sim/atomic_action/embodiments.py": "ced7b0e7ff04741905696854bb7843272a050f1fd3d170fd65451df61aba5577"
+  },
+  "combinations": [
+    {
+      "task": "pick_place",
+      "robot": "ur5",
+      "gripper": "pika",
+      "label": "UR5 + PikaGripper",
+      "view": "oblique",
+      "exit_code": 0,
+      "measured": {
+        "planning_success": true,
+        "playback_completed": true,
+        "task_success": true,
+        "lift_m": 0.12092825770378113,
+        "pickup_lift_m": 0.1181473433971405,
+        "placement_error_m": 0.0010331948287785053,
+        "settled_drift_m": 0.0,
+        "object_xyz": [
+          -0.3201482594013214,
+          0.11978667974472046,
+          0.23999999463558197
+        ],
+        "target_xyz": [
+          -0.3199999928474426,
+          0.11999999731779099,
+          0.2409999966621399
+        ]
+      },
+      "duration": 16.0,
+      "video": "ur5_pika.mp4",
+      "poster": "ur5_pika.png",
+      "width": 640,
+      "height": 480,
+      "recording_source_sha256": {
+        "scripts/tutorials/atomic_action/embodiment_switching.py": "a90414864a4352260907c328efaf1683abae9d56ce6197422c2aae64c753f259",
+        "examples/sim/atomic_action/embodiments.py": "8765ec0bf140d0705fa19bd765ee67fdb554638ba95942d315bd5c6d958edbee"
+      }
+    },
+    {
+      "task": "pick_place",
+      "robot": "ur5",
+      "gripper": "dh_ag95",
+      "label": "UR5 + DH_AG95",
+      "view": "oblique",
+      "exit_code": 0,
+      "measured": {
+        "planning_success": true,
+        "playback_completed": true,
+        "task_success": true,
+        "lift_m": 0.11796051263809204,
+        "pickup_lift_m": 0.11511582136154175,
+        "placement_error_m": 0.002235658699646592,
+        "settled_drift_m": 0.0,
+        "object_xyz": [
+          -0.3200429379940033,
+          0.12199907004833221,
+          0.23999997973442078
+        ],
+        "target_xyz": [
+          -0.3199999928474426,
+          0.11999999731779099,
+          0.2409999966621399
+        ]
+      },
+      "duration": 15.95,
+      "video": "ur5_dh_ag95.mp4",
+      "poster": "ur5_dh_ag95.png",
+      "width": 640,
+      "height": 480,
+      "recording_source_sha256": {
+        "scripts/tutorials/atomic_action/embodiment_switching.py": "a90414864a4352260907c328efaf1683abae9d56ce6197422c2aae64c753f259",
+        "examples/sim/atomic_action/embodiments.py": "8765ec0bf140d0705fa19bd765ee67fdb554638ba95942d315bd5c6d958edbee"
+      }
+    },
+    {
+      "task": "pick_place",
+      "robot": "franka",
+      "gripper": "auto",
+      "label": "Franka + native gripper",
+      "view": "oblique",
+      "exit_code": 0,
+      "measured": {
+        "planning_success": true,
+        "playback_completed": true,
+        "task_success": true,
+        "lift_m": 0.1251334249973297,
+        "pickup_lift_m": 0.11798560619354248,
+        "placement_error_m": 0.0014126357855275273,
+        "settled_drift_m": 0.0,
+        "object_xyz": [
+          -0.3193359076976776,
+          0.11925531178712845,
+          0.24000000953674316
+        ],
+        "target_xyz": [
+          -0.3199999928474426,
+          0.11999999731779099,
+          0.2409999966621399
+        ]
+      },
+      "duration": 14.1,
+      "video": "franka_auto.mp4",
+      "poster": "franka_auto.png",
+      "width": 640,
+      "height": 480,
+      "recording_source_sha256": {
+        "scripts/tutorials/atomic_action/embodiment_switching.py": "a90414864a4352260907c328efaf1683abae9d56ce6197422c2aae64c753f259",
+        "examples/sim/atomic_action/embodiments.py": "ced7b0e7ff04741905696854bb7843272a050f1fd3d170fd65451df61aba5577"
+      }
+    },
+    {
+      "task": "pick_place",
+      "robot": "arx5",
+      "gripper": "auto",
+      "label": "ARX5 + native gripper",
+      "view": "oblique",
+      "exit_code": 0,
+      "measured": {
+        "planning_success": true,
+        "playback_completed": true,
+        "task_success": true,
+        "lift_m": 0.12045767158269882,
+        "pickup_lift_m": 0.11823176592588425,
+        "placement_error_m": 0.0010319551220163703,
+        "settled_drift_m": 0.0,
+        "object_xyz": [
+          -0.31977230310440063,
+          0.11988560855388641,
+          0.08999999612569809
+        ],
+        "target_xyz": [
+          -0.3199999928474426,
+          0.11999999731779099,
+          0.09099999815225601
+        ]
+      },
+      "duration": 14.8,
+      "video": "arx5_auto.mp4",
+      "poster": "arx5_auto.png",
+      "width": 1280,
+      "height": 960,
+      "recording_source_sha256": {
+        "scripts/tutorials/atomic_action/embodiment_switching.py": "a90414864a4352260907c328efaf1683abae9d56ce6197422c2aae64c753f259",
+        "examples/sim/atomic_action/embodiments.py": "8765ec0bf140d0705fa19bd765ee67fdb554638ba95942d315bd5c6d958edbee"
+      }
+    },
+    {
+      "task": "handover",
+      "robot": "cobotmagic",
+      "gripper": "auto",
+      "label": "CobotMagic + native grippers",
+      "view": "front",
+      "exit_code": 0,
+      "measured": {
+        "planning_success": true,
+        "playback_completed": true,
+        "task_success": true,
+        "lift_m": 0.12047703564167023,
+        "pickup_lift_m": 0.059547677636146545,
+        "placement_error_m": 0.0012463417369872332,
+        "settled_drift_m": 0.0,
+        "object_xyz": [
+          0.46331167221069336,
+          -0.08158241957426071,
+          0.19750270247459412
+        ],
+        "target_xyz": [
+          0.4626423418521881,
+          -0.08191520720720291,
+          0.19850000739097595
+        ],
+        "source_open": true,
+        "receiver_drift_m": 0.00010475547605892643
+      },
+      "duration": 23.35,
+      "video": "cobotmagic_auto.mp4",
+      "poster": "cobotmagic_auto.png",
+      "width": 1280,
+      "height": 960,
+      "recording_source_sha256": {
+        "scripts/tutorials/atomic_action/embodiment_switching.py": "a90414864a4352260907c328efaf1683abae9d56ce6197422c2aae64c753f259",
+        "examples/sim/atomic_action/embodiments.py": "ced7b0e7ff04741905696854bb7843272a050f1fd3d170fd65451df61aba5577"
+      }
+    },
+    {
+      "task": "handover",
+      "robot": "tianji",
+      "gripper": "auto",
+      "label": "Tianji Marvin + native grippers",
+      "view": "front",
+      "exit_code": 0,
+      "measured": {
+        "planning_success": true,
+        "playback_completed": true,
+        "task_success": true,
+        "lift_m": 0.1273057460784912,
+        "pickup_lift_m": 0.09734117984771729,
+        "placement_error_m": 0.001096390071325004,
+        "settled_drift_m": 0.0,
+        "object_xyz": [
+          0.42037051916122437,
+          -0.23974217474460602,
+          0.78750079870224
+        ],
+        "target_xyz": [
+          0.41999998688697815,
+          -0.23999999463558197,
+          0.7884999513626099
+        ],
+        "source_open": true,
+        "receiver_drift_m": 5.935494755249238e-06
+      },
+      "duration": 22.2,
+      "video": "tianji_auto.mp4",
+      "poster": "tianji_auto.png",
+      "width": 1280,
+      "height": 960,
+      "recording_source_sha256": {
+        "scripts/tutorials/atomic_action/embodiment_switching.py": "a90414864a4352260907c328efaf1683abae9d56ce6197422c2aae64c753f259",
+        "examples/sim/atomic_action/embodiments.py": "8765ec0bf140d0705fa19bd765ee67fdb554638ba95942d315bd5c6d958edbee"
+      }
+    },
+    {
+      "task": "handover",
+      "robot": "w1_030",
+      "gripper": "pika",
+      "label": "DexForce W1 v030 + PikaGripper",
+      "view": "front",
+      "exit_code": 0,
+      "measured": {
+        "planning_success": true,
+        "playback_completed": true,
+        "task_success": true,
+        "lift_m": 0.12079083919525146,
+        "pickup_lift_m": 0.10026150941848755,
+        "placement_error_m": 0.002032079268246889,
+        "settled_drift_m": 0.0,
+        "object_xyz": [
+          0.4217689037322998,
+          -0.15999183058738708,
+          0.8374999165534973
+        ],
+        "target_xyz": [
+          0.41999998688697815,
+          -0.1599999964237213,
+          0.8385000228881836
+        ],
+        "source_open": true,
+        "receiver_drift_m": 1.883818526948744e-06
+      },
+      "duration": 23.4,
+      "video": "w1_030_pika.mp4",
+      "poster": "w1_030_pika.png",
+      "width": 1280,
+      "height": 960,
+      "recording_source_sha256": {
+        "scripts/tutorials/atomic_action/embodiment_switching.py": "a90414864a4352260907c328efaf1683abae9d56ce6197422c2aae64c753f259",
+        "examples/sim/atomic_action/embodiments.py": "8765ec0bf140d0705fa19bd765ee67fdb554638ba95942d315bd5c6d958edbee"
+      }
+    },
+    {
+      "task": "handover",
+      "robot": "w1_030",
+      "gripper": "dh_ag95",
+      "label": "DexForce W1 v030 + DH_AG95",
+      "view": "front",
+      "exit_code": 0,
+      "measured": {
+        "planning_success": true,
+        "playback_completed": true,
+        "task_success": true,
+        "lift_m": 0.11659842729568481,
+        "pickup_lift_m": 0.09801656007766724,
+        "placement_error_m": 0.002561149885877967,
+        "settled_drift_m": 0.0,
+        "object_xyz": [
+          0.42029473185539246,
+          -0.1576606035232544,
+          0.8375000953674316
+        ],
+        "target_xyz": [
+          0.41999998688697815,
+          -0.1599999964237213,
+          0.8385000228881836
+        ],
+        "source_open": true,
+        "receiver_drift_m": 3.0087383493082598e-05
+      },
+      "duration": 23.1,
+      "video": "w1_030_dh_ag95.mp4",
+      "poster": "w1_030_dh_ag95.png",
+      "width": 1280,
+      "height": 960,
+      "recording_source_sha256": {
+        "scripts/tutorials/atomic_action/embodiment_switching.py": "a90414864a4352260907c328efaf1683abae9d56ce6197422c2aae64c753f259",
+        "examples/sim/atomic_action/embodiments.py": "8765ec0bf140d0705fa19bd765ee67fdb554638ba95942d315bd5c6d958edbee"
+      }
+    }
+  ],
+  "arx5_self_collision": {
+    "enabled_in_simulation": true,
+    "report": "arx5_clearance.json"
+  },
+  "franka_trajectory_report": "franka_trajectory.json",
+  "cobotmagic_self_collision": {
+    "enabled_in_simulation": true,
+    "report": "cobotmagic_clearance.json"
+  }
+}

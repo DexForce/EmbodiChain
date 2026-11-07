@@ -168,6 +168,13 @@ cache
 *.filament
 *.filamat
 *.png
+# Curated standalone ARX5 robot documentation illustration.
+!/docs/source/_static/robots/arx5.png
+# Curated Franka bare-arm and explicit-tool documentation renders.
+!/docs/source/_static/robots/franka/*.png
+!/docs/source/_static/robots/eef/*.png
+# Curated Atomic Skills recording posters and comparison overviews.
+!/docs/source/_static/atomic_actions/embodiment_switching/*.png
 *.tiff
 *.npy
 *.pkl
@@ -192,10 +199,12 @@ outputs
 /output/
 test_configs/*
 embodichain_data/
-scripts/tutorials/atomic_action/*.glb
+examples/sim/atomic_action/*.glb
 
 wandb/
 *.mp4
+# Curated recordings embedded in the Atomic Skills switching tutorial.
+!/docs/source/_static/atomic_actions/embodiment_switching/*.mp4
 
 # vscode settings
 .vscode/
@@ -220,3 +229,6 @@ scripts/benchmark/rl/reports/*
 # Rebuilt by the architecture Sphinx extension
 /docs/source/_static/architecture/
 /docs/source/_static/.architecture-build-*/
+
+# Local ACT experiment outputs; existing tracked historical files are unchanged.
+/examples/learning/act/results/

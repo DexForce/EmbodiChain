@@ -50,14 +50,35 @@ skill_profile:
           capabilities:
             - interaction.grasp
           command_preset: right_parallel_jaw_commands
+    - resource_id: secondary_manipulator
+      endpoints:
+        - endpoint_id: motion
+          control_part: left_arm
+          capabilities:
+            - kinematics.batch_inverse
+            - motion.cartesian_pose
+            - kinematics.forward
+        - endpoint_id: grasp
+          control_part: left_eef
+          capabilities:
+            - interaction.grasp
+          command_preset: left_parallel_jaw_commands
   command_presets:
     - preset_id: right_parallel_jaw_commands
       control_part: right_eef
       commands:
         open: [0.05, 0.05]
         grasp: [0.0, 0.0]
+    - preset_id: left_parallel_jaw_commands
+      control_part: left_eef
+      commands:
+        open: [0.05, 0.05]
+        grasp: [0.0, 0.0]
   runtime_services:
     grasp_pose_generators:
       right_eef:
+        kind: antipodal_parallel_jaw
+        model: cobotmagic_v100_gripper
+      left_eef:
         kind: antipodal_parallel_jaw
         model: cobotmagic_v100_gripper

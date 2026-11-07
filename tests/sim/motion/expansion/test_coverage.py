@@ -136,6 +136,24 @@ def test_phase_connections_and_unlabelled_samples_are_preserved() -> None:
     assert float(result.geometry[2, -1, 0]) == 1.0
 
 
+def test_shared_phase_endpoint_is_described_once_per_adjacent_phase() -> None:
+    result = describe_trajectory(
+        torch.arange(5.0)[:, None],
+        torch.arange(5.0),
+        torch.tensor([[0.0, 4.0]]),
+        phases=(
+            TrajectoryPhase("first", 0, 3),
+            TrajectoryPhase("second", 2, 5),
+        ),
+        samples_per_phase=4,
+    )
+
+    assert result.phase_ids == (("first", "free"), ("second", "free"))
+    assert result.geometry[:, 0, 0].tolist() == pytest.approx([0.0, 0.5])
+    assert result.geometry[:, -1, 0].tolist() == pytest.approx([0.5, 1.0])
+    assert result.timing[:, -1].tolist() == pytest.approx([2.0, 2.0])
+
+
 @pytest.mark.parametrize(
     "times", [torch.tensor([0.0, 0.0]), torch.tensor([0.0, float("nan")])]
 )

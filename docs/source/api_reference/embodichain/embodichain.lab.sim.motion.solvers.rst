@@ -12,9 +12,10 @@ limits) and is constructed from a :class:`SolverCfg` subclass whose
 ``init_solver()`` factory produces the runtime instance inside
 :class:`~embodichain.lab.sim.objects.RobotCfg`. A robot may carry one solver per
 control part. All solvers share a ``pytorch_kinematics`` serial chain for FK and
-Jacobian computation, with ``torch.compile`` applied to the FK path.
+Jacobian computation, with ``torch.compile`` used by the base FK path. The differentiable solver
+uses eager Tensor FK with standard autograd for its full unrolled graph.
 
-Available implementations: analytic/closed-form (``SRS``, ``OPW``, ``UR``, ``FEP``),
+Available implementations: analytic/closed-form (``SRS``, ``OPW``, ``UR``, ``FEP``, ``SSIK``),
 numerical (``Pinocchio``, ``Pink`` with null-space posture tasks,
 ``Differential``), learning-based (``PytorchSolver``, ``NeuralIKSolver``).
 
@@ -33,6 +34,8 @@ numerical (``Pinocchio``, ``Pink`` with null-space posture tasks,
     PytorchSolver
     FEPSolverCfg
     FEPSolver
+    SSIKSolverCfg
+    SSIKSolver
     PinocchioSolverCfg
     PinocchioSolver
     PinkSolverCfg
@@ -69,6 +72,14 @@ ordinary batch IK and reject continuous requests before solving.
 PyTorch Solver
 --------------
 
+``PytorchSolver`` uses batched damped least squares. Set
+``PytorchSolverCfg.is_only_position_constraint=True`` for underactuated arms
+such as SO101: the objective and convergence test constrain only TCP position.
+Targets remain root-relative 4x4 poses, but their rotation is ignored, including
+when a translated or rotated TCP is configured. Runtime ``set_tcp()`` and
+``set_iteration_params()`` updates preserve this behavior. The default
+``False`` continues to require both position and rotation convergence.
+
 .. autoclass:: PytorchSolverCfg
     :members:
     :exclude-members: __init__, copy, replace, to_dict, validate
@@ -77,6 +88,18 @@ PyTorch Solver
     :members:
     :inherited-members:
     :show-inheritance:
+
+.. py:class:: embodichain.lab.sim.motion.solvers.pytorch_solver.PytorchSolverCfg
+    :no-index:
+
+    Implementation of :class:`PytorchSolverCfg`, configuring DLS tolerances,
+    position-only constraints and multi-start candidate selection.
+
+.. py:class:: embodichain.lab.sim.motion.solvers.pytorch_solver.PytorchSolver
+    :no-index:
+
+    Implementation of :class:`PytorchSolver`, including runtime TCP and
+    constraint-mode updates for the batched PK backend.
 
 FEP Solver
 ----------
@@ -137,6 +160,33 @@ and actual TCP paths and reports IK and physical tracking errors separately.
     :exclude-members: __init__, copy, replace, to_dict, validate
 
 .. autoclass:: FEPSolver
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+SSIK Solver
+-----------
+
+Model-derived three-parallel 6R and strict SRS 7R geometry uses the same Warp
+implementation on CPU and CUDA. The optional pinned CPU reference is selected
+explicitly and is never a fallback for a failed Warp solve. SRS all-candidate
+results cover a finite set of swivel samples. The independent original-chain
+FK gate, effective limits and optional per-joint step bound govern acceptance.
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.ssik_solver
+
+.. autosummary::
+
+    SSIKSolverCfg
+    SSIKSolver
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers
+
+.. autoclass:: SSIKSolverCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: SSIKSolver
     :members:
     :inherited-members:
     :show-inheritance:

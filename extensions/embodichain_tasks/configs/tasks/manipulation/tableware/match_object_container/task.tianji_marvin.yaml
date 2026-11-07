@@ -1,0 +1,10 @@
+id: MatchObjectContainer-TianjiMarvin-v1
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../../components/embodiments/tianji_marvin.yaml
+  overrides:
+    init_pos:
+    - 0.25
+    - 0.0
+    - 0.125

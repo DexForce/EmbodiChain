@@ -19,7 +19,7 @@ to ask from a user's or operator's point of view.
 | Public Python modules, `__all__`, config classes, YAML/JSON schemas, CLI, task IDs, package data, examples, or migration behavior | `api` | Public facades, strict loaders, callers, registration, docs checker, installed-package paths, and round-trip tests |
 | User-controlled files or programs, path resolution, dynamic imports, subprocesses, native extensions, plugins, secrets, or workflows | `security` | Loader and validation boundaries, path joins, execution APIs, dependency loading, workflow permissions, and failure paths |
 | Reset/close/cancel, retries, checkpoint/resume, asynchronous workers, distributed execution, or long-running services | `reliability` supplemental lens | Lifecycle owners, cleanup, idempotence, restart state, bounded queues, observability, and worker-failure handling |
-| Tests, fixtures, mocks, validation logic, or regression claims | `verification` mandatory pass | Test oracle, old-versus-new behavior, negative and boundary cases, partial batches, cleanup, determinism, and installation-level coverage |
+| Tests, fixtures, mocks, validation logic, or regression claims | `verification` mandatory pass | Coverage gaps, necessity, duplication, independent oracle, old-versus-new behavior, relevant negative and boundary cases, partial batches, cleanup, determinism, installation-level coverage, and maintenance/resource costs |
 
 ## Public API / developer experience
 
@@ -58,3 +58,8 @@ coverage needs a supplemental pass; `verification` remains required for test
 or validation changes. Separate agents are optional. Follow the
 [expert protocol](expert-protocol.md) to record either a dedicated supplemental
 role or a lens within an existing role's scope consistently.
+
+For `verification`, apply the shared
+[test necessity review](../../add-test/SKILL.md#test-necessity-review) to added
+or extended cases. Accept sufficient existing coverage and support requests to
+add, remove, or consolidate tests with a concrete gap or impact.

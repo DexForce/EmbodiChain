@@ -23,7 +23,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim.utility import atom_action_utils
-from embodichain.lab.sim.motion.planners.toppra_planner import _toppra_solve_one_env
+from embodichain.lab.sim.motion.planners.toppra_planner import retime_joint_paths
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 
 
@@ -31,26 +31,32 @@ from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 def test_legacy_plan_trajectory_keeps_requested_sample_count(monkeypatch, sample_count):
     """Count-based expert actions must not interpret their count as seconds."""
 
-    class WorkerMotionGenerator:
+    class RetimeMotionGenerator:
         def __init__(self, cfg):
             self.cfg = cfg
 
         def generate(self, *, target_states, options):
             plan = options.plan_opts
             assert plan.sample_method is TrajectorySampleMethod.QUANTITY
-            solved = _toppra_solve_one_env(
-                waypoints=np.stack(
-                    [state.qpos.reshape(-1).cpu().numpy() for state in target_states]
-                ),
-                vel_constraint=plan.constraints["velocity"],
-                acc_constraint=plan.constraints["acceleration"],
+            # This standalone fake has no robot from which to resolve caps.
+            limits = {
+                name: (
+                    fallback
+                    if plan.constraints[name] is None
+                    else plan.constraints[name]
+                )
+                for name, fallback in (("velocity", 0.2), ("acceleration", 0.5))
+            }
+            solved = retime_joint_paths(
+                torch.stack([state.qpos.reshape(-1) for state in target_states])[None],
+                constraints=limits,
                 sample_method=plan.sample_method,
                 sample_interval=plan.sample_interval,
             )
-            assert solved["success"]
-            return SimpleNamespace(positions=torch.tensor(solved["positions"])[None])
+            assert solved.is_all_success()
+            return solved
 
-    monkeypatch.setattr(atom_action_utils, "MotionGenerator", WorkerMotionGenerator)
+    monkeypatch.setattr(atom_action_utils, "MotionGenerator", RetimeMotionGenerator)
     env = SimpleNamespace(
         robot=SimpleNamespace(uid="robot"), sim=SimpleNamespace(instance_id="unused")
     )

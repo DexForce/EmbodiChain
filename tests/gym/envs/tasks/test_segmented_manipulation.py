@@ -14,183 +14,169 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""CPU checks for semantic boundaries in handwritten expert tasks."""
+"""CPU checks for measured, configuration-defined manipulation experts."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import Mock
+from pathlib import Path
 
 import pytest
-import torch
 
-from embodichain_tasks.manipulation.tableware import blocks_ranking_rgb as ranking
-from embodichain_tasks.manipulation.tableware import stack_blocks_two as stacking
-from embodichain_tasks.manipulation.tableware.scoop_ice import ScoopIce
-from embodichain_tasks.special.simple_task import SimpleTaskEnv
-from embodichain_tasks.special.stay_still_save import StayStillSaveEnv
+from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.utils._component_composition import (
+    _resolve_gym_components,
+    _validate_scene_binding_targets,
+)
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+from embodichain.lab.task_program import load_task_program
+from embodichain.lab.task_program.integrations._configured_composition import (
+    _load_configured_task_program_deployment,
+)
+from embodichain.utils.utility import load_config
+
+_CONFIG_ROOT = (
+    Path(__file__).resolve().parents[4]
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware"
+)
 
 
-def _block(pose: torch.Tensor) -> SimpleNamespace:
-    """Return a mutable measured pose with stationary body velocities."""
-    return SimpleNamespace(
-        get_local_pose=lambda **kwargs: pose,
-        clear_dynamics=Mock(),
-        body_data=SimpleNamespace(
-            lin_vel=torch.zeros(pose.shape[0], 3),
-            ang_vel=torch.zeros(pose.shape[0], 3),
-        ),
+def _deployment(task_name: str):
+    """Compose the production deployment and strictly preflight its program."""
+    path = _CONFIG_ROOT / task_name / "task.cobotmagic.yaml"
+    physical = _resolve_gym_components(load_config(path), base_dir=path.parent)
+    deployment = _load_configured_task_program_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
     )
-
-
-def test_stack_segments_preserve_commands_and_settle_only_after_release() -> None:
-    """Splitting does not drop, duplicate, or reorder controller commands."""
-    env = stacking.StackBlocksTwoEnv.__new__(stacking.StackBlocksTwoEnv)
-    env.sim = SimpleNamespace(device=torch.device("cpu"))
-    source = torch.eye(4).unsqueeze(0)
-    measured = source.clone()
-    env._stack_block = _block(measured)
-    env._base_block = _block(source)
-    pick_commands = torch.arange(10, dtype=torch.float32).reshape(1, 5, 2)
-    place_commands = torch.arange(8, dtype=torch.float32).reshape(1, 4, 2) + 10
-    env._plan_stack = Mock(
-        return_value=(
-            torch.tensor([True]),
-            torch.tensor([True]),
-            pick_commands,
-            place_commands,
-            source.clone(),
-            source.clone(),
-        )
+    _validate_scene_binding_targets(
+        deployment.scene_binding, simulation=physical.scene_config
     )
-    segments = iter(env.create_demo_segments())
-    pick = next(segments)
-    frames = list(pick.actions)
-    measured[:, 2, 3] = stacking.MIN_PICK_LIFT_HEIGHT * 2
-    assert pick.validator().tolist() == [True]
-    assert len(frames) == pick_commands.shape[1]
-    place = next(segments)
-    frames.extend(place.actions)
-    measured[:, 2, 3] = stacking.BLOCK_HEIGHT
-    assert place.validator().tolist() == [True]
-    with pytest.raises(StopIteration):
-        next(segments)
-
-    expected = torch.cat(
-        (
-            pick_commands,
-            place_commands,
-            place_commands[:, -1:].repeat(1, stacking.SETTLE_STEPS, 1),
-        ),
-        dim=1,
+    program = load_task_program(
+        deployment.program_path,
+        integration=deployment.selection,
+        validation_context=deployment.integration.registration.catalog,
     )
-    torch.testing.assert_close(torch.stack(frames, dim=1), expected)
-    assert [pick.name, place.name] == ["pick_block_2", "place_block_2_on_block_1"]
-    assert pick.metadata["atomic_actions"] == ["pick_up"]
-    assert place.metadata["atomic_actions"] == ["place"]
-    assert pick.instruction != place.instruction
-    env._stack_block.clear_dynamics.assert_called_once()
-    env._plan_stack.assert_called_once()
-
-
-def test_ranking_plans_next_block_only_after_grasp_and_placement() -> None:
-    """Each block retains its two original stages and its release-only settling."""
-    env = ranking.BlocksRankingRGBEnv.__new__(ranking.BlocksRankingRGBEnv)
-    env.sim = SimpleNamespace(device=torch.device("cpu"))
-    poses = {
-        uid: torch.eye(4).unsqueeze(0) for uid in ("block_1", "block_2", "block_3")
-    }
-    env._blocks = {uid: _block(pose) for uid, pose in poses.items()}
-    env._target_position = lambda offset: torch.tensor([[offset, 0.0, 0.0]])
-    pick_steps = (
-        round((ranking.PICK_SAMPLE_INTERVAL - ranking.HAND_INTERP_STEPS) * 0.6)
-        + ranking.HAND_INTERP_STEPS
-        + ranking.GRASP_HOLD_STEPS
-    )
-    place_steps = 4
-
-    def plan_block(*, uid: str, **kwargs: object) -> tuple:
-        del kwargs
-        value = 1.0 if uid == "block_1" else 3.0
-        return (
-            torch.tensor([True]),
-            torch.tensor([True]),
-            torch.full((1, pick_steps, 2), value),
-            torch.full((1, place_steps, 2), value + 1),
-            poses[uid].clone(),
-        )
-
-    env._plan_block_segment = Mock(side_effect=plan_block)
-    names = []
-    stages = []
-    for index, segment in enumerate(env.create_demo_segments()):
-        assert env._plan_block_segment.call_count == index // 2 + 1
-        names.append(segment.name)
-        frames = list(segment.actions)
-        stages.append(torch.stack(frames, dim=1))
-        uid = segment.target_uid
-        if index % 2 == 0:
-            poses[uid][:, 2, 3] = ranking.MIN_PICK_LIFT_HEIGHT * 2
-        else:
-            poses[uid][:, :3, 3] = torch.tensor(segment.metadata["target_position"])
-        assert segment.validator().tolist() == [True]
-        assert segment.metadata["segment_index"] == index
-        assert segment.metadata["segment_count"] == 4
-
-    assert names == [
-        "pick_red_block",
-        "place_red_block",
-        "pick_blue_block",
-        "place_blue_block",
-    ]
-    settling_steps = ranking.SETTLE_MIN_STEPS + ranking.SETTLE_STABLE_STEPS - 1
-    for index, commands in enumerate(stages):
-        expected_steps = pick_steps if index % 2 == 0 else place_steps + settling_steps
-        assert commands.shape[1] == expected_steps
-        assert (commands == index + 1).all()
-    env._blocks["block_1"].clear_dynamics.assert_called_once()
-    env._blocks["block_3"].clear_dynamics.assert_called_once()
-
-
-@pytest.mark.parametrize("task", ["stacking", "ranking"])
-def test_grasp_acceptance_requires_finite_measured_lift_and_successful_plan(
-    task: str,
-) -> None:
-    source = torch.eye(4).unsqueeze(0).repeat(4, 1, 1)
-    measured = source.clone()
-    measured[:, 2, 3] = torch.tensor([0.1, 0.01, float("nan"), 0.1])
-    planned = torch.tensor([True, True, True, False])
-    if task == "stacking":
-        env = stacking.StackBlocksTwoEnv.__new__(stacking.StackBlocksTwoEnv)
-        env._stack_block = _block(measured)
-        env.sim = SimpleNamespace(device=torch.device("cpu"))
-        accepted = env._validate_pick(planned, source)
-    else:
-        env = ranking.BlocksRankingRGBEnv.__new__(ranking.BlocksRankingRGBEnv)
-        env._blocks = {"block_1": _block(measured)}
-        env.sim = SimpleNamespace(device=torch.device("cpu"))
-        accepted = env._validate_block_pick("block_1", planned, source)
-    assert accepted.tolist() == [True, False, False, False]
+    compiled = deployment.integration.registration.catalog.preflight(program)
+    return deployment, program, compiled
 
 
 @pytest.mark.parametrize(
-    ("task_class", "segment_name"),
-    [
-        (SimpleTaskEnv, "oscillate_joints"),
-        (StayStillSaveEnv, "hold_still_100_steps"),
-        (ScoopIce, "scoop_ice"),
-    ],
+    ("task_name", "environment_id", "segment_names"),
+    (
+        (
+            "stack_blocks_two",
+            "StackBlocksTwo-v1",
+            ("pick_block_2", "place_block_2_on_block_1"),
+        ),
+        (
+            "blocks_ranking_rgb",
+            "BlocksRankingRGB-v1",
+            (
+                "pick_red_block",
+                "place_red_block",
+                "pick_blue_block",
+                "place_blue_block",
+            ),
+        ),
+    ),
 )
-def test_single_goal_tasks_preserve_existing_action_lists(
-    task_class: type, segment_name: str
+def test_manipulation_experts_use_common_environment_and_preserve_semantic_segments(
+    task_name: str, environment_id: str, segment_names: tuple[str, ...], monkeypatch
 ) -> None:
-    """Adding explicit labels preserves the old planner and its command objects."""
-    env = task_class.__new__(task_class)
-    actions = [torch.full((1, 3), float(index)) for index in range(3)]
-    env.create_demo_action_list = Mock(return_value=actions)
-    (segment,) = tuple(env.create_demo_segments())
-    assert segment.actions is actions
-    assert segment.name == segment_name
-    assert segment.instruction and segment.instruction != "unknown_task"
-    assert segment.progress_total_steps == len(actions)
-    env.create_demo_action_list.assert_called_once()
+    """The configured experts keep stable IDs without custom environment classes."""
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+    path = _CONFIG_ROOT / task_name / "task.cobotmagic.yaml"
+    cfg = config_to_cfg(load_config(path), source_path=path)
+    _, program, compiled = _deployment(task_name)
+
+    assert cfg.task_program.program_id == program.program_id
+    assert REGISTERED_ENVS[environment_id].cls is EmbodiedEnv
+    assert tuple(segment.name for segment in compiled.iter_segments()) == segment_names
+    assert all(segment.instruction for segment in program.program.items)
+    assert tuple(
+        call.call.semantic_id
+        for segment in compiled.iter_segments()
+        for call in segment.calls
+    ) == (
+        ("pick", "place")
+        if task_name == "stack_blocks_two"
+        else ("pick", "place", "pick", "place")
+    )
+
+
+def test_stack_program_keeps_measured_lift_and_relative_upright_stack_gates() -> None:
+    """Randomized base poses remain authoritative at placement and acceptance."""
+    deployment, program, _ = _deployment("stack_blocks_two")
+    picking, placing = program.program.items
+    (lift,) = picking.validators
+    assert (lift.kind, lift.object, lift.minimum_lift) == (
+        "object_lifted",
+        "block_2",
+        0.05,
+    )
+    position, base_upright, top_upright = placing.validators
+    assert (position.object, position.reference) == ("block_2", "block_1")
+    assert position.position_offset == (0.0, 0.0, 0.05)
+    assert position.position_tolerance == (0.025, 0.025, 0.012)
+    assert (base_upright.object, top_upright.object) == ("block_1", "block_2")
+    assert base_upright.maximum_tilt_degrees == top_upright.maximum_tilt_degrees == 45.0
+    assert {policy.entity for policy in placing.post} == {"block_1", "block_2"}
+    (support,) = deployment.integration.registration.scene_binding.support_surfaces
+    assert support.parent_id == "block_1"
+    assert support.object_target_frame == "world_axes"
+    assert support.object_target_pose[11] == 0.05
+
+
+def test_rgb_program_keeps_sequential_arm_ownership_and_world_relative_targets() -> (
+    None
+):
+    """Red uses the right arm, blue uses the left, and final acceptance rechecks red."""
+    deployment, program, _ = _deployment("blocks_ranking_rgb")
+    red_pick, red_place, blue_pick, blue_place = program.program.items
+    assert (
+        red_pick.steps.call.resources
+        == red_place.steps.call.resources
+        == {"primary": "primary_manipulator"}
+    )
+    assert (
+        blue_pick.steps.call.resources
+        == blue_place.steps.call.resources
+        == {"primary": "secondary_manipulator"}
+    )
+    resources = {
+        resource.resource_id: resource
+        for resource in deployment.integration.registration.robot_profile_binding.resources
+    }
+    assert resources["primary_manipulator"].endpoints[0].control_part == "right_arm"
+    assert resources["secondary_manipulator"].endpoints[0].control_part == "left_arm"
+    surfaces = deployment.integration.registration.scene_binding.support_surfaces
+    assert [support.parent_id for support in surfaces] == ["block_2", "block_2"]
+    assert [support.object_target_frame for support in surfaces] == [
+        "world_axes",
+        "world_axes",
+    ]
+    assert [support.object_target_pose[3] for support in surfaces] == [-0.08, 0.08]
+    assert [support.object_target_pose[11] for support in surfaces] == [0.08, 0.08]
+    assert red_place.validators[0].position_tolerance == (0.035, 0.03, None)
+    assert [validator.object for validator in blue_place.validators] == [
+        "block_3",
+        "block_1",
+    ]
+    assert red_place.post[0].entity == "block_1"
+    assert blue_place.post[0].entity == "block_3"
+
+
+@pytest.mark.parametrize("task_name", ("stack_blocks_two", "blocks_ranking_rgb"))
+def test_manipulation_grasp_dwell_and_placement_use_shared_atomic_options(
+    task_name: str,
+) -> None:
+    """Grasp preload lives in PickUp options and does not mutate object dynamics."""
+    deployment, _, _ = _deployment(task_name)
+    (preset,) = deployment.integration.registration.robot_profile_binding.presets
+    options = preset.action_option_templates
+    assert options["pick"].grasp_settle_steps == 45
+    assert options["pick"].hand_interp_steps == 10
+    assert options["place"].preserve_current_object_orientation is True
+    assert preset.motion_policy.sample_count == 90

@@ -26,6 +26,7 @@ import warp as wp
 
 from embodichain.compute.trajectory import (
     differentiate_positions,
+    interpolate_minimum_jerk,
     interpolate_with_distance,
     interpolate_with_nums,
     resample_in_time,
@@ -43,6 +44,7 @@ __all__ = [
     "compute_pose_offset_related_to_first",
     "differentiate_positions",
     "get_trajectory_object_offset_qpos",
+    "interpolate_minimum_jerk",
     "interpolate_with_distance",
     "interpolate_with_nums",
     "resample_in_time",

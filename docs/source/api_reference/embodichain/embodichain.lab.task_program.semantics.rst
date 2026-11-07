@@ -3,7 +3,34 @@ embodichain.lab.task_program.semantics
 
 .. automodule:: embodichain.lab.task_program.semantics
    :members:
-   :no-index:
+   :undoc-members:
+   :exclude-members: SemanticCallSpec, SemanticPose, Pick, Place, HandOver,
+      RegisteredSemanticCall, SemanticCallDescriptor, SemanticCallCatalog,
+      builtin_semantic_call_catalog, SceneEntityManifest, SceneManifest,
+      SemanticIntegrationManifest, SemanticDiagnostic, SemanticValidationError,
+      RobotSkillProfile, BoundRobotSkillProfile, RobotResource, ResourceEndpoint,
+      ResourceEndpointAdapter, EndpointResolution, ControlPartEndpoint,
+      ControlPartEndpointAdapter, ResourceBinding, ResolvedResourceEndpoint,
+      ResolvedRobotResource, ResolvedSkillBinding, ResourceClaim, SkillPolicyPreset,
+      EffectAssurance, ProfileValidationError, UnsupportedSkillError,
+      AmbiguousSkillBindingError, SemanticEffectSpec, EffectMonitorRef, EffectMonitor,
+      EffectEvidenceCollector, SceneRegistry, RegistrySceneProvider,
+      SceneEntityRegistration, SceneEntityMetadata, SceneEntityStateProvider,
+      SceneGeometryProvider, SceneEntityRef, SceneObjectRef, SceneArticulationRef,
+      SceneLinkRef, SceneAffordanceRef, SceneDynamics, SceneCollisionRole,
+      SceneCollisionWorldMode, GRASP_AFFORDANCE_CAPABILITY,
+      PLACE_ON_AFFORDANCE_CAPABILITY, PLACE_IN_AFFORDANCE_CAPABILITY,
+      UnsupportedSceneAffordanceError, AmbiguousSceneAffordanceError,
+      ArticulationJointObservationCallback, BinaryObservationCallback,
+      COMPOSITE_EFFECT_MONITOR_ID, COMPOSITE_EFFECT_MONITOR_REVISION,
+      CONTACT_EFFECT_CHANNEL, CONSTRAINT_EFFECT_CHANNEL,
+      CONTROL_PART_EVIDENCE_PROVIDER_ID, CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+      DeclarativeValue, EffectClause, EffectEvidenceBatch, EffectEvidenceQueryValue,
+      EffectMonitorParam, EffectStateExpectation, FORCE_EFFECT_CHANNEL,
+      JOINT_STATE_EFFECT_CHANNEL, POSE_RELATION_EFFECT_CHANNEL,
+      PLACEMENT_TARGET_AFFORDANCE_REVISION, PathPart, PlaceRelationTarget,
+      SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID,
+      SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION, ScalarObservationCallback
 
    .. rubric:: Semantic calls and catalog
 
@@ -269,3 +296,57 @@ Affordance capabilities and errors
 .. autoclass:: UnsupportedSceneAffordanceError
 
 .. autoclass:: AmbiguousSceneAffordanceError
+
+Evidence constants and type aliases
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.semantics
+
+These exported constants identify evidence channels and provider revisions;
+the aliases describe accepted clauses, observations and callback signatures.
+
+.. autodata:: ArticulationJointObservationCallback
+
+.. autodata:: BinaryObservationCallback
+
+.. autodata:: COMPOSITE_EFFECT_MONITOR_ID
+
+.. autodata:: COMPOSITE_EFFECT_MONITOR_REVISION
+
+.. autodata:: CONTACT_EFFECT_CHANNEL
+
+.. autodata:: CONSTRAINT_EFFECT_CHANNEL
+
+.. autodata:: CONTROL_PART_EVIDENCE_PROVIDER_ID
+
+.. autodata:: CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+.. autodata:: DeclarativeValue
+
+.. autodata:: EffectClause
+
+.. autodata:: EffectEvidenceBatch
+
+.. autodata:: EffectEvidenceQueryValue
+
+.. autodata:: EffectMonitorParam
+
+.. autodata:: EffectStateExpectation
+
+.. autodata:: FORCE_EFFECT_CHANNEL
+
+.. autodata:: JOINT_STATE_EFFECT_CHANNEL
+
+.. autodata:: POSE_RELATION_EFFECT_CHANNEL
+
+.. autodata:: PLACEMENT_TARGET_AFFORDANCE_REVISION
+
+.. autodata:: PathPart
+
+.. autodata:: PlaceRelationTarget
+
+.. autodata:: SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID
+
+.. autodata:: SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION
+
+.. autodata:: ScalarObservationCallback

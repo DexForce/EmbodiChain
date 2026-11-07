@@ -291,6 +291,12 @@ class DatasetManager(ManagerBase):
             )
             return
 
+        context = getattr(self._env, "episode_context", None)
+        if mode == "save" and context is not None:
+            env_ids = context.filter_recordable(env_ids)
+            if not len(env_ids):
+                return
+
         # iterate over all the dataset functors for this mode
         for functor_cfg in self._mode_functor_cfgs[mode]:
             functor_cfg.func(

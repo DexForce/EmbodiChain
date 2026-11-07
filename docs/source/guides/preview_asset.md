@@ -84,7 +84,7 @@ embodichain preview-asset \
 
 Use `--viser-host`, `--viser-port`, `--viser-fps`, and the other standard
 `--viser-*` options to configure the browser server and update rates. See
-{doc}`Viser browser visualization </overview/sim/viser_visualization>` for the
+{doc}`Viser browser visualization </overview/sim/visualization/viser>` for the
 complete backend reference and remote-access guidance.
 
 ## Asset Type and Placement

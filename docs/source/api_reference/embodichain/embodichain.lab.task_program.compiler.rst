@@ -3,7 +3,7 @@ embodichain.lab.task_program.compiler
 
 .. automodule:: embodichain.lab.task_program.compiler
    :members:
-   :no-index:
+   :undoc-members:
 
    The compiler expands a validated AST into immutable segments and calls.
    Semantic lowering is provider-independent; live planning starts only after
@@ -13,6 +13,7 @@ embodichain.lab.task_program.compiler
 
       CompiledArticulationJointPositionValidator
       CompiledBarrier
+      CompiledObjectNearRelativeTargetValidator
       CompiledObjectNearTargetValidator
       CompiledParallelBlock
       CompiledParallelBranch
@@ -26,3 +27,16 @@ embodichain.lab.task_program.compiler
       CompiledTaskProgramValidator
       TaskProgramCompileError
       TaskProgramCompiler
+
+Validator type aliases
+----------------------
+
+.. currentmodule:: embodichain.lab.task_program.compiler
+
+These aliases describe the compiled validator variants.
+
+.. autodata:: CompiledTaskProgramValidator
+
+Relative position acceptance retains both canonical scene references and a
+world-axis displacement. The simulation validator observes both objects again
+at acceptance time, independently of the pose used during action planning.
