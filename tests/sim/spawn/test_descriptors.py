@@ -87,6 +87,13 @@ from embodichain.lab.sim.spawn.usd import (
 
 pytestmark = pytest.mark.no_sim
 
+
+def test_packaged_usd_requires_typed_source_translation() -> None:
+    cfg = RigidObjectCfg(uid="packaged", shape=MeshCfg(fpath="source.usdz"))
+    with pytest.raises(NotImplementedError, match="typed scenes"):
+        rigid_desc_from_cfg(cfg)
+
+
 RESTITUTION = 0.25
 DEFORMABLE_MESH_PATH = "/assets/deformable.obj"
 
@@ -772,7 +779,7 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
     )
     scene = SimpleNamespace(materials={})
 
-    def parse_singleton(path, collection, label, *, prim_path=None):
+    def parse_singleton(path, collection, label, **kwargs):
         return scene, source
 
     monkeypatch.setattr(
@@ -817,7 +824,7 @@ def test_rigid_usd_can_recompute_source_inertia(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label, *, prim_path=None: (
+        lambda path, collection, label, **kwargs: (
             SimpleNamespace(materials={}),
             source,
         ),
@@ -853,7 +860,7 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label, *, prim_path=None: (
+        lambda path, collection, label, **kwargs: (
             SimpleNamespace(materials={}),
             source,
         ),
@@ -861,8 +868,6 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     cfg = RigidObjectCfg(
         uid="cube",
         shape=MeshCfg(fpath="cube.usd"),
-        body_type="static",
-        body_scale=(1.0, 1.0, 1.0),
         attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=1.0)),
     )
 
@@ -1276,7 +1281,7 @@ def test_explicit_root_properties_override_usd_in_preserve_mode() -> None:
     assert descriptor.enable_self_collision is False
 
 
-def test_default_root_properties_override_usd_values() -> None:
+def test_default_root_properties_preserve_usd_values() -> None:
     source = ArticulationDesc(
         name="source",
         fixed_base=False,
@@ -1294,8 +1299,8 @@ def test_default_root_properties_override_usd_values() -> None:
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
-    assert descriptor.fixed_base is True
-    assert descriptor.enable_self_collision is False
+    assert descriptor.fixed_base is False
+    assert descriptor.enable_self_collision is True
 
 
 def test_explicit_none_root_properties_preserve_usd_values() -> None:

@@ -67,18 +67,18 @@ class ArticulationRootPropertiesCfg:
 
     ``fixed_base`` and ``self_collision_enabled`` are consumed by both
     backends. ``sleep_threshold`` and the solver-iteration fields are supported
-    only by the Default backend and are ignored by Newton. By default, the
-    articulation root is fixed and self-collision is disabled. Explicit
-    ``None`` values preserve the source value or backend/import default.
+    only by the Default backend and are ignored by Newton. Unset values
+    preserve USD intent; URDF and procedural imports resolve to a fixed root
+    without self-collision.
     """
 
-    fixed_base: bool | None = True
+    fixed_base: bool | None = None
     """Whether the articulation root is rigidly fixed to the world frame.
 
     Set to ``None`` to preserve the source value or backend/import default.
     """
 
-    self_collision_enabled: bool | None = False
+    self_collision_enabled: bool | None = None
     """Whether non-filtered link pairs in the articulation may self-collide.
 
     Newton may still apply source-authored or Spawn-owned filtering to adjacent
@@ -401,8 +401,16 @@ class ArticulationCfg(ObjectBaseCfg):
     source: UsdSourceCfg | None = field(default=None, kw_only=True)
     """USD source asset; mutually exclusive with :attr:`fpath`."""
 
-    body_scale: tuple | list = (1.0, 1.0, 1.0)
+    body_scale: tuple | list | None = None
     """Scale of the articulation in the simulation world frame."""
+
+    def __post_init__(self) -> None:
+        path = self.source.file_path if self.source is not None else self.fpath
+        if path is None or not str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
+            if self.body_scale is None:
+                self.body_scale = (1.0, 1.0, 1.0)
 
     compute_uv: bool = False
     """Whether to compute the UV mapping for the articulation link.
@@ -438,9 +446,8 @@ class ArticulationCfg(ObjectBaseCfg):
 
     Fixed-base and self-collision intent is portable. Root sleep and solver
     iterations are Default-only fields and are ignored by Newton. The portable
-    fields default to a fixed base with self-collision disabled. Set either
-    field to ``None`` to preserve an authored USD/backend value; URDF imports
-    then use the established fixed-base, self-collision-off defaults.
+    fields default to ``None`` so USD imports retain their authored values.
+    URDF imports retain the fixed-base, self-collision-off defaults.
     """
 
     joint_drive_props: JointDrivePropertiesCfg | None = None
@@ -533,5 +540,14 @@ class ArticulationCfg(ObjectBaseCfg):
             cfg.init_rot = tuple(
                 R.from_matrix(cfg.init_local_pose[:3, :3]).as_euler("xyz", degrees=True)
             )
+
+        path = cfg.source.file_path if cfg.source is not None else cfg.fpath
+        if path is not None and str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
+            if "body_scale" not in init_dict:
+                cfg.body_scale = None
+            if not {"init_pos", "init_rot", "init_local_pose"}.intersection(init_dict):
+                cfg.init_local_pose = None
 
         return cfg

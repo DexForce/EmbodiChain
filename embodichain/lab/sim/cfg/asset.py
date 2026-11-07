@@ -59,6 +59,9 @@ class ObjectBaseCfg:
     init_local_pose: np.ndarray | None = None
     """4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot."""
 
+    source_pose_mode: Literal["auto", "config", "preserve", "offset"] = "auto"
+    """USD placement: retain an unset pose, replace it, preserve it, or offset it."""
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> ObjectBaseCfg:
         """Initialize the configuration from a dictionary."""
@@ -109,4 +112,18 @@ class ObjectBaseCfg:
             cfg.init_pos = tuple(T[:3, 3])
             cfg.init_rot = tuple(R.from_matrix(T[:3, :3]).as_euler("xyz", degrees=True))
 
+        source = getattr(cfg, "source", None)
+        path = (
+            getattr(source, "file_path", None)
+            if source is not None
+            else getattr(
+                getattr(cfg, "shape", None), "fpath", getattr(cfg, "fpath", None)
+            )
+        )
+        if (
+            path is not None
+            and str(path).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
+            and not {"init_pos", "init_rot", "init_local_pose"}.intersection(init_dict)
+        ):
+            cfg.init_local_pose = None
         return cfg
