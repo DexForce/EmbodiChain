@@ -850,6 +850,19 @@ def test_object_near_target_validates_rows_independently() -> None:
     assert metadata["accepted_mask"] == [True, False]
 
 
+def test_near_target_validator_preserves_inclusive_boundary_and_invalid_pose() -> None:
+    segment = _compiled_segment()
+    boundary = torch.tensor(0.05)
+    above = torch.nextafter(boundary, torch.tensor(float("inf")))
+    port, obj, _ = _port(torch.tensor([[boundary, 0.0, 0.0], [above, 0.0, 0.0]]))
+    validator = segment.validators[0]
+
+    assert port.validate(validator, segment=segment).tolist() == [True, False]
+    obj._pose[1, 0, 3] = float("nan")
+    with pytest.raises(ValueError, match="pose must be finite"):
+        port.validate(validator, segment=segment)
+
+
 def test_object_near_relative_target_observes_both_rows_independently() -> None:
     """The validator derives each target from the current reference pose."""
     segment = _compiled_relative_segment()

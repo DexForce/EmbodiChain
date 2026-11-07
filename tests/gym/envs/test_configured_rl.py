@@ -120,6 +120,26 @@ def test_geometry_independent_axes_boundary_height_and_invalid_rows():
     ).satisfied.tolist() == [True, False]
 
 
+def test_near_target_functor_preserves_strict_boundary_and_invalid_rows():
+    env = _env()
+    boundary = torch.tensor(0.1)
+    below = torch.nextafter(boundary, torch.tensor(0.0))
+    env.pose[:, 0, 3] = torch.stack((boundary, below))
+    env.termination_manager.compute()
+    result = env.termination_manager.snapshot()["conditions"]["success.goal"]
+    assert result["satisfied"].tolist() == [False, True]
+    torch.testing.assert_close(
+        result["metrics"]["distance"], torch.stack((boundary, below)), rtol=0, atol=0
+    )
+
+    # Even on excluded axes, nonfinite physical measurements invalidate the row.
+    env.pose[1, 2, 3] = float("nan")
+    env.termination_manager.compute()
+    result = env.termination_manager.snapshot()["conditions"]["success.goal"]
+    assert result["valid"].tolist() == [True, False]
+    assert result["satisfied"].tolist() == [False, False]
+
+
 def test_outcome_queries_partial_reset_and_invalid_failure():
     env = _env()
     assert env.is_task_success().tolist() == [False, False]
