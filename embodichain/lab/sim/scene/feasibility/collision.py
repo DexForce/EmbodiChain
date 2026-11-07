@@ -49,6 +49,10 @@ _MIXED_CLEARANCE_LIMITATION = (
     "Newton mixed mesh/primitive clearance has no complete certificate; "
     "native contact or canonical AABB separation is required."
 )
+_MESH_CLEARANCE_LIMITATION = (
+    "Newton mesh/mesh reported no native contacts; canonical AABB separation "
+    "is required because containment is not certified."
+)
 
 
 class UnsupportedFeasibilityError(RuntimeError):
@@ -537,6 +541,11 @@ class NewtonCollisionChecker:
             and j in self._native_lookup
             and ((self.bodies[i].kind == "mesh") != (self.bodies[j].kind == "mesh"))
         )
+        self._mesh_pairs = frozenset(
+            (i, j)
+            for i, j in self._pairs
+            if self.bodies[i].kind == "mesh" and self.bodies[j].kind == "mesh"
+        )
         native_pairs = [
             (self._native_lookup[i], self._native_lookup[j])
             for i, j in self._pairs
@@ -591,6 +600,7 @@ class NewtonCollisionChecker:
                     "native-triangle-surfaces/v1",
                     max_triangle_pairs,
                     "mixed-clearance-canonical-aabb/v1",
+                    "mesh-no-contact-canonical-aabb/v1",
                 ),
             )
         self.verification_id = digest(identity)
@@ -630,6 +640,7 @@ class NewtonCollisionChecker:
                 triangle_mesh_scope="native_triangle_surface",
                 mixed_mesh_primitive_pairs=len(self._mixed_pairs),
                 mixed_clearance_policy=_MIXED_CLEARANCE_LIMITATION,
+                mesh_clearance_policy=_MESH_CLEARANCE_LIMITATION,
             )
         return metadata
 
@@ -885,7 +896,7 @@ class NewtonCollisionChecker:
         )
         return center_separation + float(support)
 
-    def _mixed_pair_lower_bound(
+    def _pair_lower_bound(
         self,
         i: int,
         j: int,
@@ -994,9 +1005,14 @@ class NewtonCollisionChecker:
             sum(row.native_contact_count for row in rows),
             _pairs=rows,
             clearance_unavailable_reason=(
-                _MIXED_CLEARANCE_LIMITATION
-                if any(row.clearance_unavailable_reason for row in rows)
-                else None
+                "; ".join(
+                    dict.fromkeys(
+                        row.clearance_unavailable_reason
+                        for row in rows
+                        if row.clearance_unavailable_reason
+                    )
+                )
+                or None
             ),
         )
 
@@ -1083,11 +1099,11 @@ class NewtonCollisionChecker:
         mask, planes, has_native = self._mask(
             allowed_contacts, moving_objects, all_pairs
         )
-        mixed_safety = any(
+        mesh_safety = any(
             mask[self._native_lookup[i] * len(self._native) + self._native_lookup[j]]
-            for i, j in self._mixed_pairs
+            for i, j in self._mixed_pairs | self._mesh_pairs
         )
-        collect_pairs = _collect or mixed_safety
+        collect_pairs = _collect or mesh_safety
         clearance = math.inf
         upper_clearance = math.inf
         for i, j in planes:
@@ -1204,9 +1220,11 @@ class NewtonCollisionChecker:
                             "Invalid native pair evidence."
                         )
                     mixed = (i, j) in self._mixed_pairs
+                    mesh_no_contact = (i, j) in self._mesh_pairs and counts[pair] == 0
+                    needs_certificate = mixed or mesh_no_contact
                     lower = (
-                        self._mixed_pair_lower_bound(i, j, poses, relative, tolerance)
-                        if mixed
+                        self._pair_lower_bound(i, j, poses, relative, tolerance)
+                        if needs_certificate
                         else float(
                             max(0.0, min(self.detection_gap_m, signed) - tolerance)
                         )
@@ -1216,7 +1234,7 @@ class NewtonCollisionChecker:
                         raise UnsupportedFeasibilityError(
                             "Native contact disagrees with the canonical separation bound."
                         )
-                    if mixed:
+                    if needs_certificate:
                         clearance = min(clearance, lower)
                     row = NativeContactResult(
                         lower,
@@ -1227,11 +1245,13 @@ class NewtonCollisionChecker:
                         int(counts[pair]),
                         (self.bodies[i].collision_id, self.bodies[j].collision_id),
                         clearance_unavailable_reason=(
-                            _MIXED_CLEARANCE_LIMITATION if mixed else None
+                            _MIXED_CLEARANCE_LIMITATION
+                            if mixed
+                            else _MESH_CLEARANCE_LIMITATION if mesh_no_contact else None
                         ),
                     )
                     rows.append(row)
-                    if mixed and not _collect:
+                    if needs_certificate and not _collect:
                         row.below(self.clearance_m)
             if math.isfinite(summary[1]):
                 self.last_clearance_interval = (clearance, upper_clearance)

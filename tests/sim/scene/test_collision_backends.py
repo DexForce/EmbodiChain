@@ -253,8 +253,14 @@ def test_explicit_triangle_mesh_surface_keeps_concavity_and_pair_ids():
         NewtonCollisionChecker((collapsed,), allow_triangle_meshes=True)
     checker = NewtonCollisionChecker(bodies, allow_triangle_meshes=True)
     try:
-        # A hull would bridge this explicitly empty gap.
-        assert checker.contact_pairs({"surface": np.eye(4), "probe": np.eye(4)}) == ()
+        # A hull would bridge this explicitly empty gap. The native surface
+        # result has no contacts, but overlapping AABBs cannot certify volume
+        # clearance, so this unchanged input remains unavailable.
+        frames = {"surface": np.eye(4), "probe": np.eye(4)}
+        result = checker.contact_query(frames)
+        assert result.native_contact_count == 0
+        with pytest.raises(UnsupportedFeasibilityError, match="containment"):
+            checker.contact_pairs(frames)
         pose = np.eye(4)
         pose[0, 3] = 1.25
         assert checker.contact_pairs({"surface": np.eye(4), "probe": pose}) == (
@@ -492,5 +498,53 @@ def test_mixed_mesh_box_overlap_cannot_be_reported_as_clear_without_native_evide
             checker.check(frames, allowed_contacts=(("pad", "scene"),))[0].status
             == "passed"
         )
+    finally:
+        checker.close()
+
+
+def test_closed_mesh_containment_without_native_contacts_is_unavailable():
+    import json
+    import numpy as np
+    import trimesh
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+        UnsupportedFeasibilityError,
+    )
+
+    bodies = []
+    for name, extent in (("inner", 1.0), ("outer", 100.0)):
+        mesh = trimesh.creation.box((extent,) * 3)
+        assert mesh.is_watertight and mesh.is_volume
+        bodies.append(
+            CollisionBody(
+                name,
+                name,
+                "mesh",
+                vertices=tuple(map(tuple, mesh.vertices)),
+                triangles=tuple(map(tuple, mesh.faces)),
+                robot=True,
+            )
+        )
+    checker = NewtonCollisionChecker(bodies, allow_triangle_meshes=True)
+    frames = {name: np.eye(4) for name in ("inner", "outer")}
+    try:
+        result = checker.contact_query(frames)
+        # Native BVH signed queries are bounded per edge; no nearby surface hit
+        # is not proof that the smaller solid is outside the larger one.
+        assert result.native_contact_count == 0
+        for operation in (
+            lambda: result.below(0.0),
+            lambda: checker.contact_pairs(frames),
+            lambda: checker.check(frames),
+        ):
+            with pytest.raises(UnsupportedFeasibilityError, match="containment"):
+                operation()
+        assert result.lower == 0.0
+        assert result.clearance_unavailable_reason is not None
+        json.dumps(result.metadata(), allow_nan=False)
+        frames["inner"][0, 3] = 100.0
+        assert checker.contact_pairs(frames) == ()
+        assert checker.check(frames)[0].status == "passed"
     finally:
         checker.close()
