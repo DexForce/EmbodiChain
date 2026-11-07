@@ -38,16 +38,15 @@ pytestmark = pytest.mark.no_sim
         ("background", "dynamic", False),
     ],
 )
-def test_role_uses_resolved_usd_actor(monkeypatch, role, resolved_type, valid):
+def test_role_uses_resolved_usd_actor(role, resolved_type, valid):
     cfg = RigidObjectCfg(uid="usd", source=UsdSourceCfg(file_path="scene.usda"))
     assert cfg.body_type is None
-    errors = Mock()
-    monkeypatch.setattr(
-        "embodichain.lab.gym.envs.embodied_env.logger.log_error", errors
-    )
+    registered = []
 
-    def declare(*, cfg):
+    def declare(*, cfg, validate_resolved):
         cfg.body_type = resolved_type
+        validate_resolved(cfg)
+        registered.append(cfg)
 
     env = SimpleNamespace(
         cfg=SimpleNamespace(
@@ -60,7 +59,48 @@ def test_role_uses_resolved_usd_actor(monkeypatch, role, resolved_type, valid):
         sim=SimpleNamespace(add_rigid_object=declare),
     )
     if role == "interactive":
-        EmbodiedEnv._setup_interactive_objects(env)
+        setup = EmbodiedEnv._setup_interactive_objects
     else:
-        EmbodiedEnv._setup_background(env)
-    assert errors.called is not valid
+        setup = EmbodiedEnv._setup_background
+    if valid:
+        setup(env)
+        assert registered == [cfg]
+    else:
+        with pytest.raises(RuntimeError, match="rigid object"):
+            setup(env)
+        assert registered == []
+
+
+def test_resolved_role_failure_does_not_declare_a_rigid_object(monkeypatch):
+    import torch
+    from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.spawn.scene import SpawnScene
+
+    cfg = RigidObjectCfg(uid="usd", source=UsdSourceCfg(file_path="scene.usda"))
+    sim = object.__new__(SimulationManager)
+    sim.device = torch.device("cpu")
+    sim.physics = SimpleNamespace(name="default")
+    sim._rigid_objects = {}
+    scene = object.__new__(SpawnScene)
+    scene.builder = SimpleNamespace(is_finalized=False, result=None)
+    scene.declare = Mock()
+    sim._spawn_scene = scene
+    sim.notify_visualization_topology_changed = Mock()
+
+    def resolve(cfg, **kwargs):
+        cfg.body_type = "kinematic"
+        return object(), {}
+
+    resolver = Mock(side_effect=resolve)
+    monkeypatch.setattr("embodichain.lab.sim.sim_manager.rigid_desc_from_usd", resolver)
+
+    def require_dynamic(resolved):
+        if resolved.body_type != "dynamic":
+            raise ValueError("expected dynamic actor")
+
+    with pytest.raises(ValueError, match="dynamic"):
+        sim.add_rigid_object(cfg, validate_resolved=require_dynamic)
+    assert sim._rigid_objects == {}
+    scene.declare.assert_not_called()
+    sim.notify_visualization_topology_changed.assert_not_called()
+    resolver.assert_called_once()

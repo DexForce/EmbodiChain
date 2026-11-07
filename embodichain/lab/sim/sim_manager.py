@@ -2881,16 +2881,22 @@ class SimulationManager:
     def add_rigid_object(
         self,
         cfg: RigidObjectCfg,
+        *,
+        validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> RigidObject:
         """Add a rigid object to the scene.
 
         Args:
             cfg (RigidObjectCfg): Configuration for the rigid object.
+            validate_resolved: Optional check of the source-resolved config,
+                run before declaring the object in Spawn.
 
         Returns:
             RigidObject: The added rigid object instance handle.
         """
-        return self._declare_rigid_object(cfg, replace=False)
+        return self._declare_rigid_object(
+            cfg, replace=False, validate_resolved=validate_resolved
+        )
 
     def replace_rigid_object(self, cfg: RigidObjectCfg) -> RigidObject:
         """Replace a rigid object with the same UID in one preparation.
@@ -2940,12 +2946,22 @@ class SimulationManager:
         return self._declare_rigid_objects(cfgs, replace=True)
 
     def _declare_rigid_object(
-        self, cfg: RigidObjectCfg, *, replace: bool
+        self,
+        cfg: RigidObjectCfg,
+        *,
+        replace: bool,
+        validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> RigidObject:
-        return self._declare_rigid_objects([cfg], replace=replace)[0]
+        return self._declare_rigid_objects(
+            [cfg], replace=replace, validate_resolved=validate_resolved
+        )[0]
 
     def _declare_rigid_objects(
-        self, cfgs: Sequence[RigidObjectCfg], *, replace: bool
+        self,
+        cfgs: Sequence[RigidObjectCfg],
+        *,
+        replace: bool,
+        validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> list[RigidObject]:
         """Translate the complete batch before changing the scene."""
         cfgs = list(cfgs)
@@ -2979,6 +2995,8 @@ class SimulationManager:
                     per_env=True,
                     newton_solver_type=self._active_newton_solver_type,
                 )
+            if validate_resolved is not None:
+                validate_resolved(cfg)
             rigid_obj = RigidObject(cfg=cfg, device=self.device)
             declarations.append((cfg.uid, descriptor, materials, rigid_obj))
 
