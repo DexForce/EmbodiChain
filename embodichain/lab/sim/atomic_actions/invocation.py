@@ -42,6 +42,22 @@ class ActionOptions:
     this object.
     """
 
+    def validate_motion_policy(self, policy: MotionPolicy) -> None:
+        """Validate declaration-only option/policy compatibility without planning.
+
+        Args:
+            policy: Policy selected for this exact invocation or semantic preset.
+
+        Raises:
+            TypeError: The policy has an unsupported type.
+            ValueError: A concrete skill's declared combination is unsupported.
+
+        This hook may inspect only immutable options and policy values. Runtime
+        batch, geometry and native-resource checks remain with the skill.
+        """
+        if not isinstance(policy, MotionPolicy):
+            raise TypeError("policy must be a MotionPolicy.")
+
 
 OptionsT = TypeVar("OptionsT", bound=ActionOptions)
 

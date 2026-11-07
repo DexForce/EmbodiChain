@@ -75,7 +75,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 
 TcpSymmetry = Literal["none", "z_roll_180"]
 
-from embodichain.lab.sim.atomic_actions.policies import PlanningRecovery
+from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, PlanningRecovery
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -179,6 +179,21 @@ class PlaceOptions(ActionOptions):
         if type(self.preserve_current_object_orientation) is not bool:
             raise TypeError("preserve_current_object_orientation must be a bool.")
 
+    def validate_motion_policy(self, policy: MotionPolicy) -> None:
+        """Reject unsupported Cartesian recovery choices without live state.
+
+        Args:
+            policy: Motion policy selected for this placement.
+        """
+        ActionOptions.validate_motion_policy(self, policy)
+        if (
+            policy.segment_sample_count_retries or policy.segment_continuous_ik_recovery
+        ) and (not self.linear_segments or policy.dynamic_collision_mode != "off"):
+            raise ValueError(
+                "Place segment recovery requires explicit Cartesian segments "
+                "and dynamic-collision off."
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class PlacePlanningRecovery(PlanningRecovery):
@@ -249,12 +264,8 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         return tuple(sorted(dependencies))
 
     def _validate_segment_motion_recovery(self, request, context) -> None:
-        if (
-            context.batch_size != 1
-            or context.env_ids.tolist() != [0]
-            or not request.skill_options.linear_segments
-            or request.motion_policy.dynamic_collision_mode != "off"
-        ):
+        request.skill_options.validate_motion_policy(request.motion_policy)
+        if context.batch_size != 1 or context.env_ids.tolist() != [0]:
             raise ValueError(
                 "Place segment recovery requires B1/env0, explicit Cartesian segments and dynamic-collision off."
             )

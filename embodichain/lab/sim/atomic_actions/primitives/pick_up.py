@@ -334,6 +334,26 @@ class PickUpOptions(ActionOptions):
                 self, "obj_upright_direction", self.obj_upright_direction.clone()
             )
 
+    def validate_motion_policy(self, policy: MotionPolicy) -> None:
+        """Reject unsupported Cartesian recovery choices before acquisition.
+
+        Args:
+            policy: Motion policy selected for this pickup.
+        """
+        ActionOptions.validate_motion_policy(self, policy)
+        if (
+            policy.segment_sample_count_retries or policy.segment_continuous_ik_recovery
+        ) and (
+            not self.linear_segments
+            or policy.strategy != "ik_interp"
+            or policy.dynamic_collision_mode != "off"
+            or policy.segment_continuous_ik_recovery
+        ):
+            raise ValueError(
+                "Pick Cartesian density recovery requires linear ik_interp/off "
+                "without per-segment continuity."
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class PickPlanningRecovery(PlanningRecovery):
@@ -377,14 +397,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
     )
 
     def _validate_segment_motion_recovery(self, request, context) -> None:
-        if (
-            context.batch_size != 1
-            or context.env_ids.tolist() != [0]
-            or not request.skill_options.linear_segments
-            or request.motion_policy.strategy != "ik_interp"
-            or request.motion_policy.dynamic_collision_mode != "off"
-            or request.motion_policy.segment_continuous_ik_recovery
-        ):
+        request.skill_options.validate_motion_policy(request.motion_policy)
+        if context.batch_size != 1 or context.env_ids.tolist() != [0]:
             raise ValueError(
                 "Pick Cartesian density recovery requires B1/env0 linear ik_interp/off without per-segment continuity."
             )

@@ -85,6 +85,12 @@ advertise a handler. Semantic preflight rejects unsupported segment policy
 before acquisition; the default false field is omitted from canonical descriptor
 metadata, while true capabilities participate in the effective fingerprint.
 
+`ActionOptions.validate_motion_policy()` performs pure option/policy checks for
+the actually selected preset before state acquisition. Pick/Place reuse their
+Cartesian-mode restrictions there; runtime retains environment-row, batch and
+geometry validation. Semantic linking and direct Atomic requests call the same
+hook, which allocates no solver or skill and adds no canonical data field.
+
 `MotionPolicy` separates whole-action sample retries, segment recovery and a
 final full-robot speed gate. The complete builder retains exact request/engine
 identity, applies scoped transforms and performs rejection-only qualification.
