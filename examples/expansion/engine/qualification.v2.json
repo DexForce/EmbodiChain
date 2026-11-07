@@ -1,0 +1,162 @@
+{
+  "scope": "Shared-engine revision; native probes are selected qualification evidence, not a complete matrix.",
+  "hardware": "NVIDIA RTX PRO 5000 72GB Blackwell",
+  "native_probes": [
+    {
+      "backend": "default",
+      "motion_source": "native",
+      "batch_size": 2,
+      "committed": 2,
+      "mode": "state"
+    },
+    {
+      "backend": "default",
+      "motion_source": "prototype",
+      "batch_size": 2,
+      "committed": 2,
+      "mode": "state",
+      "resume_batch_size": 8,
+      "new_attempts_on_completed_resume": 0
+    },
+    {
+      "backend": "newton",
+      "motion_source": "native",
+      "batch_size": 2,
+      "committed": 2,
+      "mode": "state"
+    },
+    {
+      "backend": "default",
+      "motion_source": "native",
+      "batch_size": 2,
+      "committed": 2,
+      "visual_children": 4,
+      "mode": "rgbd",
+      "exported_episodes": 6,
+      "exported_frames": 2382
+    }
+  ],
+  "relocated_export": {
+    "dataset_validation": {
+      "ok": true,
+      "root": "/tmp/expansion-v2-relocated-dataset",
+      "episodes": 6,
+      "frames": 2382,
+      "errors": 0,
+      "warnings": 0,
+      "issues": []
+    },
+    "physical_parents": 2,
+    "visual_children": 4,
+    "exact_action_state_and_endpoint_rgb_checks": 6
+  },
+  "calibration_readout": [
+    {
+      "batch_size": 1,
+      "device": "cpu",
+      "setup_seconds": 8.954769175965339,
+      "iterations": 30,
+      "warmup": 3,
+      "exact_calibration_match": true,
+      "physics_steps": 0,
+      "scope": "native calibration getters, packing and transfer; not task throughput",
+      "results": {
+        "per_row_reference": {
+          "mean_seconds": 2.545740765829881e-05,
+          "minimum_seconds": 2.3916829377412796e-05,
+          "maximum_seconds": 4.042079672217369e-05,
+          "native_getter_calls": {
+            "intrinsics": 30,
+            "poses": 30
+          }
+        },
+        "batched": {
+          "mean_seconds": 2.6504571239153543e-05,
+          "minimum_seconds": 2.5558751076459885e-05,
+          "maximum_seconds": 3.7346966564655304e-05,
+          "native_getter_calls": {
+            "intrinsics": 30,
+            "poses": 30
+          }
+        }
+      },
+      "python": "3.11.14 (main, Oct 21 2025, 18:31:21) [GCC 11.2.0]",
+      "platform": "Linux-5.15.0-119-generic-x86_64-with-glibc2.35",
+      "torch_threads": 1,
+      "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell"
+    },
+    {
+      "batch_size": 8,
+      "device": "cpu",
+      "setup_seconds": 9.690486168954521,
+      "iterations": 30,
+      "warmup": 3,
+      "exact_calibration_match": true,
+      "physics_steps": 0,
+      "scope": "native calibration getters, packing and transfer; not task throughput",
+      "results": {
+        "per_row_reference": {
+          "mean_seconds": 0.0009256954304873944,
+          "minimum_seconds": 0.0009119361639022827,
+          "maximum_seconds": 0.0009465091861784458,
+          "native_getter_calls": {
+            "intrinsics": 240,
+            "poses": 240
+          }
+        },
+        "batched": {
+          "mean_seconds": 0.0001449285230288903,
+          "minimum_seconds": 0.0001413058489561081,
+          "maximum_seconds": 0.00016148807480931282,
+          "native_getter_calls": {
+            "intrinsics": 30,
+            "poses": 30
+          }
+        }
+      },
+      "python": "3.11.14 (main, Oct 21 2025, 18:31:21) [GCC 11.2.0]",
+      "platform": "Linux-5.15.0-119-generic-x86_64-with-glibc2.35",
+      "torch_threads": 1,
+      "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell"
+    },
+    {
+      "batch_size": 32,
+      "device": "cpu",
+      "setup_seconds": 9.76032565580681,
+      "iterations": 30,
+      "warmup": 3,
+      "exact_calibration_match": true,
+      "physics_steps": 0,
+      "scope": "native calibration getters, packing and transfer; not task throughput",
+      "results": {
+        "per_row_reference": {
+          "mean_seconds": 0.010573415194327633,
+          "minimum_seconds": 0.010535688139498234,
+          "maximum_seconds": 0.010629212949424982,
+          "native_getter_calls": {
+            "intrinsics": 960,
+            "poses": 960
+          }
+        },
+        "batched": {
+          "mean_seconds": 0.00045593809336423873,
+          "minimum_seconds": 0.0004507000558078289,
+          "maximum_seconds": 0.0004766099154949188,
+          "native_getter_calls": {
+            "intrinsics": 30,
+            "poses": 30
+          }
+        }
+      },
+      "python": "3.11.14 (main, Oct 21 2025, 18:31:21) [GCC 11.2.0]",
+      "platform": "Linux-5.15.0-119-generic-x86_64-with-glibc2.35",
+      "torch_threads": 1,
+      "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell"
+    }
+  ],
+  "limitations": [
+    "Newton prototype carton task remains unqualified; physical-effect/segment rejection thresholds unchanged.",
+    "Calibration timings cover getters/packing/transfer with CPU observation tensors, not end-to-end throughput.",
+    "Full artifact verification may materialize one stored bounded chunk; the export frame reader streams selected frames."
+  ]
+}

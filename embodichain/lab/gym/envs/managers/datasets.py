@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.data_pipeline.recording.schema import RecordedCamera
+
 import copy
 import json
 import math
@@ -991,6 +993,32 @@ class LeRobotRecorder(Functor):
         if not hasattr(self, "_partial_fragment_commits"):
             self._partial_fragment_commits = {}
 
+    def persist_episode_payload(
+        self,
+        env_id: int,
+        obs_list: Sequence[Mapping[str, Any]],
+        action_list: torch.Tensor | Sequence[torch.Tensor],
+        annotations: Mapping[str, Any] | None = None,
+        episode_metadata: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Persist recorded evidence through the canonical writer lifecycle.
+
+        Args:
+            env_id: Recorder environment row whose schema is used.
+            obs_list: Indexable observations; streaming views may load one frame
+                at a time. The writer consumes the pre-action observations.
+            action_list: Actual submitted controller commands in recorded order.
+            annotations: Optional segment annotations aligned to the episode.
+            episode_metadata: Frozen provenance and stable episode identity.
+
+        Returns:
+            Whether an episode was committed. Repeated completed fragments use
+            the existing journal deduplication; ambiguous commits remain errors.
+        """
+        return self._persist_episode_payload(
+            env_id, obs_list, action_list, annotations, episode_metadata
+        )
+
     def _persist_episode_payload(
         self,
         env_id: int,
@@ -1858,7 +1886,7 @@ class LeRobotRecorder(Functor):
             for sensor_name, value in sensor_obs_space.items():
                 sensor = self._env.get_sensor(sensor_name)
 
-                if isinstance(sensor, Camera):
+                if isinstance(sensor, (Camera, RecordedCamera)):
                     for frame_name, space in value.items():
                         if frame_name in CAMERA_IMAGE_FRAMES:
                             feature_key = self._camera_feature_key(
@@ -2194,7 +2222,7 @@ class LeRobotRecorder(Functor):
             for sensor_name, value in sensor_obs_space.items():
                 sensor = self._env.get_sensor(sensor_name)
 
-                if isinstance(sensor, Camera):
+                if isinstance(sensor, (Camera, RecordedCamera)):
                     for frame_name in value:
                         if (
                             frame_name not in CAMERA_IMAGE_FRAMES
