@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, Literal
 
 import torch
@@ -74,6 +74,8 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 )
 
 TcpSymmetry = Literal["none", "z_roll_180"]
+
+from embodichain.lab.sim.atomic_actions.policies import PlanningRecovery
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -131,6 +133,13 @@ class AssembleGoal:
 class PlaceOptions(ActionOptions):
     """Per-invocation placement behavior."""
 
+    linear_segments: bool = field(default=False, kw_only=True)
+    """Use explicit Cartesian keyframes under the selected motion policy."""
+    qualify_required_waypoints: bool = field(default=False, kw_only=True)
+    """Require independent release/retract IK/FK before complete planning."""
+    monitor_scene_until_approach: bool = field(default=False, kw_only=True)
+    """Stop goal motion invalidation at the selected approach boundary."""
+
     hand_interp_steps: int = 5
     """Number of waypoints for the gripper-open interpolation segment."""
 
@@ -150,6 +159,15 @@ class PlaceOptions(ActionOptions):
     """Keep the held object's observed world orientation at the place target."""
 
     def __post_init__(self) -> None:
+        if any(
+            type(getattr(self, name)) is not bool
+            for name in (
+                "linear_segments",
+                "qualify_required_waypoints",
+                "monitor_scene_until_approach",
+            )
+        ):
+            raise TypeError("Place geometry requirements must be booleans.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if type(self.release_settle_steps) is not int or self.release_settle_steps < 0:
@@ -160,6 +178,20 @@ class PlaceOptions(ActionOptions):
             raise ValueError("cartesian_waypoint_count must be at least 1.")
         if type(self.preserve_current_object_orientation) is not bool:
             raise TypeError("preserve_current_object_orientation must be a bool.")
+
+
+@dataclass(frozen=True, slots=True)
+class PlacePlanningRecovery(PlanningRecovery):
+    """Bounded ordinary waypoint recovery within one complete Place attempt."""
+
+    kind: str = field(default="place_bounded", init=False)
+    skill_id: str = field(default="place", init=False)
+    revision: int = field(default=1, init=False)
+    variant: str = field(default="waypoint", init=False)
+    waypoint_attempts_per_batch: int = field(default=3, init=False)
+    max_waypoint_batches: int = field(default=2, init=False)
+    clearance_routes: tuple[float, ...] = field(default=(0.05, 0.10), init=False)
+    max_complete_plans: int = field(default=10, init=False)
 
 
 class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
@@ -186,6 +218,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         AssembleGoal,
     )
     OptionsType: ClassVar[type] = PlaceOptions
+    PlanningRecoveryType: ClassVar[type] = PlacePlanningRecovery
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             make_manipulation_slot(
@@ -215,10 +248,118 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             dependencies.add(target.base_pose.entity_id)
         return tuple(sorted(dependencies))
 
+    def _validate_segment_motion_recovery(self, request, context) -> None:
+        if (
+            context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or not request.skill_options.linear_segments
+            or request.motion_policy.dynamic_collision_mode != "off"
+        ):
+            raise ValueError(
+                "Place segment recovery requires B1/env0, explicit Cartesian segments and dynamic-collision off."
+            )
+
     def _plan(
         self,
         request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
         context: PlanningContext,
+    ) -> ActionPlan:
+        """Qualify requested geometry before the shared release-phase builder."""
+        options = request.skill_options
+        if options.linear_segments and (
+            request.motion_policy.strategy != "ik_interp"
+            or request.motion_policy.interpolation_mode != "fixed_grid"
+            or request.motion_policy.ik_seed_mode != "sequential"
+        ):
+            raise ValueError(
+                "Linear Place segments require explicit fixed-grid sequential IK."
+            )
+        inputs = None
+        if request.recovery_policy.planning_recovery is not None:
+            from embodichain.lab.sim.atomic_actions.primitives._place_recovery import (
+                prepare_recovery_inputs,
+            )
+
+            inputs = prepare_recovery_inputs(self, request, context)
+        preflight = None
+        if options.qualify_required_waypoints:
+            from embodichain.lab.sim.atomic_actions.primitives._place_qualification import (
+                qualify_required_waypoints,
+            )
+
+            preflight = qualify_required_waypoints(self, request, context)
+            if not preflight["valid"]:
+                plan = self.failed_plan(
+                    request,
+                    context,
+                    message="Required Place waypoints were not IK-qualified.",
+                    failure_code="place_keyframes_unqualified",
+                    retryable=False,
+                )
+                return replace(
+                    plan,
+                    diagnostics=replace(
+                        plan.diagnostics,
+                        metadata={
+                            **plan.diagnostics.metadata,
+                            "place_keyframe_preflight": preflight,
+                        },
+                    ),
+                )
+        from embodichain.lab.sim.atomic_actions.primitives._place_recovery import (
+            PlaceBuildTrace,
+            enforce_continuous_velocity,
+        )
+
+        if inputs is None:
+            trace = PlaceBuildTrace()
+            plan = self._plan_place(request, context, planning_trace=trace)
+            plan = enforce_continuous_velocity(
+                self, request, context, plan, trace.used_continuity
+            )
+        else:
+            from ._place_recovery import recover_place
+
+            plan = recover_place(self, request, context, inputs)
+        if options.monitor_scene_until_approach and plan.scene_dependencies:
+            approach = next(
+                (segment for segment in plan.segments if segment.name == "approach"),
+                None,
+            )
+            if approach is not None:
+                plan = replace(
+                    plan,
+                    scene_dependency_monitor_until={
+                        identity: min(
+                            approach.stop,
+                            plan.scene_dependency_monitor_until.get(
+                                identity, approach.stop
+                            ),
+                        )
+                        for identity in plan.scene_dependencies
+                    },
+                )
+        if preflight is not None:
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "place_keyframe_preflight": preflight,
+                    },
+                ),
+            )
+        return plan
+
+    def _plan_place(
+        self,
+        request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+        context: PlanningContext,
+        *,
+        waypoint_recovery: bool = False,
+        defer_segment_recovery: bool = False,
+        planning_trace=None,
     ) -> ActionPlan:
         """Plan approach, release, and retract without committing detachment."""
         target = request.goal
@@ -296,21 +437,63 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         back_xpos = self._translation_keyframes(
             place_xpos[:, -1], retract_xpos.unsqueeze(1), options
         )
-        motion_options = request.motion_policy.to_motion_gen_options(
+        segment_policy = (
+            replace(
+                request.motion_policy,
+                segment_sample_count_retries=(),
+                segment_continuous_ik_recovery=False,
+            )
+            if waypoint_recovery
+            else request.motion_policy
+        )
+        motion_options = segment_policy.to_motion_gen_options(
             start_qpos=start_arm_qpos,
             control_part=control_part,
             sample_count=n_down + n_back,
             interpolation_dt=context.control_dt,
+            cartesian_keyframes=options.linear_segments and not waypoint_recovery,
         )
         if request.motion_policy.strategy == "motion_gen":
             # Keep the native combined path for the pose-based split. The
             # motion generator resolves backend defaults when no explicit
             # planner options were supplied.
             motion_options.sample_count = None
-        motion_result = self.motion_generator.generate(
-            build_pose_plan_states(torch.cat([down_xpos, back_xpos], dim=1)),
-            options=motion_options,
-        )
+        targets = build_pose_plan_states(torch.cat([down_xpos, back_xpos], dim=1))
+        segment_result = None
+        if options.linear_segments and not waypoint_recovery:
+            motion_result = self.motion_generator.generate(
+                targets,
+                options=motion_options,
+                defer_recovery=defer_segment_recovery,
+            )
+            segment_result = motion_result.recovery
+        else:
+            if waypoint_recovery:
+                motion_options = replace(
+                    motion_options,
+                    segment_sample_count_retries=(),
+                    segment_continuous_ik_recovery=False,
+                )
+            motion_result = self.motion_generator.generate(
+                targets, options=motion_options
+            )
+        if planning_trace is not None:
+            planning_trace.used_continuity = (
+                segment_result is not None and segment_result.used_continuity
+            )
+            before_velocity = getattr(
+                motion_result, "generation_success_before_velocity", None
+            )
+            if before_velocity is not None:
+                planning_trace.kinematic_mask = before_velocity.detach().clone()
+            else:
+                planning_trace.kinematic_mask = (
+                    torch.as_tensor(motion_result.success).detach().clone()
+                )
+                if getattr(motion_result, "rejected_candidate", None) is not None:
+                    planning_trace.kinematic_mask |= (
+                        motion_result.rejected_candidate.env_mask
+                    )
         assert isinstance(motion_result.success, torch.Tensor)
         assert motion_result.positions is not None
         assert motion_result.dt is not None
@@ -372,7 +555,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         full[:, back_start:, arm_joint_ids] = back_arm
         full[:, back_start:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
-        return self._assemble_place_plan(
+        plan = self._assemble_place_plan(
             request,
             context,
             success=success,
@@ -391,6 +574,29 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             provenance=None,
         )
 
+        if segment_result is not None and (
+            request.motion_policy.segment_sample_count_retries
+            or request.motion_policy.segment_continuous_ik_recovery
+        ):
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "segment_sampling": {
+                            "scope": "within_one_motion_request",
+                            "attempted_sample_counts": list(
+                                segment_result.attempted_counts
+                            ),
+                            "used_continuity": segment_result.used_continuity,
+                            "physical_evidence": False,
+                        },
+                    },
+                ),
+            )
+        return plan
+
     def _plan_from_nominal(
         self,
         request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
@@ -398,6 +604,16 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         nominal_source: NominalMotionSource,
     ) -> ActionPlan:
         """Assemble external placement without replanning the source path."""
+        options = request.skill_options
+        if (
+            options.linear_segments
+            or options.qualify_required_waypoints
+            or options.monitor_scene_until_approach
+            or request.recovery_policy.planning_recovery is not None
+        ):
+            raise ValueError(
+                "External Place cannot bypass generated geometry qualification or recovery."
+            )
         target = self.require_goal(request)
         if not isinstance(target, PlaceGoal):
             raise ValueError("external placement currently requires a direct PlaceGoal")
@@ -747,4 +963,10 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         ]
 
 
-__all__ = ["AssembleGoal", "Place", "PlaceGoal", "PlaceOptions"]
+__all__ = [
+    "AssembleGoal",
+    "Place",
+    "PlaceGoal",
+    "PlaceOptions",
+    "PlacePlanningRecovery",
+]
