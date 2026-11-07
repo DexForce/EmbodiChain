@@ -19,6 +19,7 @@
 from __future__ import annotations
 from pathlib import Path
 import json
+import numpy as np
 import pytest
 from embodichain.compute.geometry.source_targets import (
     upright_source_quaternion,
@@ -32,10 +33,17 @@ REFERENCE = json.loads(
 
 @pytest.mark.parametrize("case", REFERENCE["cases"])
 def test_quaternion_target_matches_independent_complete_b0_reference(case):
-    assert (
+    actual = np.asarray(
         upright_source_quaternion(case["euler"], case["axis"], world_yaw=case["yaw"])
-        == case["quaternion"]
     )
+    expected = np.asarray(case["quaternion"])
+    # Match the source-geometry contract: q/-q encode the same pose, and
+    # backend float32 rounding can choose either sign near equivalent rotations.
+    if actual @ expected < 0:
+        expected = -expected
+    tolerance = float(4 * np.finfo(np.float32).eps)
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=tolerance)
+    assert np.linalg.norm(actual) == pytest.approx(1, rel=0, abs=tolerance)
 
 
 @pytest.mark.parametrize(
