@@ -288,8 +288,9 @@ def test_static_deployment_roundtrip_without_live_resources(tmp_path, monkeypatc
     assert config.task_program.program_id == "rubiks_cube_pick_place"
 
 
+@pytest.mark.parametrize("custom_component", [False, True])
 def test_relative_physical_resource_retains_its_owner_after_publication(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, custom_component
 ):
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.objects import Robot
@@ -319,7 +320,22 @@ def test_relative_physical_resource_retains_its_owner_after_publication(
     component["simulation"]["urdf_cfg"]["components"][0][
         "urdf_path"
     ] = "../../assets/robot.urdf"
-    files["components/embodiment.yaml"] = yaml.safe_dump(component).encode()
+    component_name = (
+        "components/custom_robot.yaml"
+        if custom_component
+        else "components/embodiment.yaml"
+    )
+    files[component_name] = yaml.safe_dump(component).encode()
+    if custom_component:
+        deployment = yaml.safe_load(files["task_program_deployment.yaml"])
+        deployment["embodiment"]["component"] = component_name
+        files["task_program_deployment.yaml"] = yaml.safe_dump(deployment).encode()
+        # Unselected declarations must not acquire dependencies during sealing.
+        unused = yaml.safe_load(files["components/embodiment.yaml"])
+        unused["simulation"]["urdf_cfg"]["components"][0][
+            "urdf_path"
+        ] = "./missing-unselected.urdf"
+        files["components/embodiment.yaml"] = yaml.safe_dump(unused).encode()
     original = deepcopy(files)
     inputs = {str(asset): hashlib.sha256(asset.read_bytes()).hexdigest()}
     revisions = {"application": "test"}
@@ -330,10 +346,15 @@ def test_relative_physical_resource_retains_its_owner_after_publication(
         implementation_revisions=revisions,
     )
     assert files == original
-    materialized = yaml.safe_load(snapshot.files["components/embodiment.yaml"])
+    materialized = yaml.safe_load(snapshot.files[component_name])
     assert materialized["simulation"]["urdf_cfg"]["components"][0]["urdf_path"] == str(
         asset
     )
+    if custom_component:
+        assert (
+            snapshot.files["components/embodiment.yaml"]
+            == original["components/embodiment.yaml"]
+        )
     root = write_bundle_atomic(tmp_path / "published/bundle", snapshot)
     owner.rename(tmp_path / "moved-source")
     loaded = load_configured_bundle(

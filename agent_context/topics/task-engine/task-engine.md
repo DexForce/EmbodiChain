@@ -84,9 +84,13 @@ Already-authored deployment declarations can be sealed through
 `bundle_io.write_bundle_atomic`, then loaded with
 `bundle_deployment.load_configured_bundle`. Preparation applies the shared
 [explicit local resource rule](../env-framework/configuration.md#explicit-local-resource-paths)
-to detached physical deployment, scene and embodiment declarations before
-preflight. Their resolved bytes enter the snapshot identity without changing
-the caller's source bytes or historical bundles. Resources stay at their
+to the detached physical deployment and consumes Lab's public
+`ResolvedGymComponents.materialized_component_sources` for all actually selected
+environment, scene and embodiment owner paths, including custom component names.
+Lab retains component selection; TE materialization preserves semantic profile
+values and unselected component bytes. The resolved bytes enter the snapshot
+identity without changing the caller's source bytes or historical bundles.
+Resources stay at their
 declared external locations; publication does not copy assets or discover
 dependencies, and absolute references do not provide cross-machine packaging.
 Input hashes and implementation revisions remain explicit caller-owned

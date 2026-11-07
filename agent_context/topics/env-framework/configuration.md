@@ -72,6 +72,13 @@ Both `resolve_gym_components` and `config_to_cfg` accept optional
 owned declarations. Snapshot mode reads no component files and rejects missing
 or duplicate resolved selections; relative asset paths retain their component
 owner. Callers verify snapshot provenance and external assets separately.
+
+The result's `materialized_component_sources` maps the actual selected absolute
+owner paths to detached resource-resolved component declarations. It preserves
+component structure and semantic profile values; bundle builders consume this
+public result for snapshot materialization, leaving selection rules with Lab.
+Unselected components are not materialized.
+
 `ResolvedGymComponents.validate_scene_bindings` checks semantic native roots
 against the expanded physical scene without runtime construction.
 

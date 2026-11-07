@@ -272,29 +272,28 @@ def _verify_identity(
 
 
 def _materialize_physical_resources(files: dict[str, bytes], *, base_dir: Path) -> None:
-    """Bind physical resource paths to their original declaration owners."""
-    for name in (
-        "task_program_deployment.yaml",
-        "components/scene.yaml",
-        "components/embodiment.yaml",
-    ):
-        if name not in files:
-            continue
-        declaration = _decode(files[name], name)
-        owner = (base_dir / name).parent
-        if name == "components/embodiment.yaml":
-            # The embodiment's skill profile has its own semantic decoder;
-            # physical component resolution owns only robot and sensor paths.
-            materialized = deepcopy(declaration)
-            for field_name in ("simulation", "sensor"):
-                if field_name in declaration:
-                    materialized[field_name] = resolve_local_resource_paths(
-                        declaration[field_name], base_dir=owner
-                    )
-        else:
-            materialized = resolve_local_resource_paths(declaration, base_dir=owner)
-        if materialized != declaration:
-            files[name] = yaml.safe_dump(materialized, sort_keys=False).encode()
+    """Seal the public physical owner's selected, materialized declarations."""
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    sources = {
+        name: _decode(data, name)
+        for name, data in files.items()
+        if name.endswith((".yaml", ".yml"))
+    }
+    deployment_name = "task_program_deployment.yaml"
+    deployment = resolve_local_resource_paths(
+        sources[deployment_name], base_dir=base_dir
+    )
+    physical = resolve_gym_components(
+        deployment, base_dir=base_dir, component_sources=sources
+    )
+    materialized = {deployment_name: deployment}
+    for path, component in physical.materialized_component_sources.items():
+        name = path.relative_to(base_dir).as_posix()
+        materialized[name] = component
+    for name, declaration in materialized.items():
+        if declaration != sources[name]:
+            files[name] = yaml.safe_dump(declaration, sort_keys=False).encode()
 
 
 def prepare_configured_bundle(

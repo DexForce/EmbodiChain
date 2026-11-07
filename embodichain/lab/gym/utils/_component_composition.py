@@ -153,6 +153,7 @@ def _resolve_environment_component(
     base_dir: Path,
     selected_backend: str | None = None,
     sources: Mapping[Path, Mapping[str, object]] | None = None,
+    materialized_component_sources: dict[Path, dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Expand one selected reusable physical environment component.
 
@@ -237,6 +238,15 @@ def _resolve_environment_component(
     environment_values = resolve_local_resource_paths(
         environment_values, base_dir=component_path.parent
     )
+    if materialized_component_sources is not None:
+        materialized = deepcopy(dict(component))
+        materialized["simulation"] = {
+            key: deepcopy(environment_values[key]) for key in simulation
+        }
+        for key in component:
+            if key not in {"environment_id", "simulation"}:
+                materialized[key] = deepcopy(environment_values[key])
+        materialized_component_sources[component_path] = materialized
 
     deployment_physics_fields = sorted(
         {"physics", "physics_config"}.intersection(resolved)
@@ -272,6 +282,7 @@ def _resolve_embodiment_component(
     *,
     base_dir: Path,
     sources: Mapping[Path, Mapping[str, object]] | None = None,
+    materialized_component_sources: dict[Path, dict[str, object]] | None = None,
 ) -> tuple[dict[str, object], list[object], dict[str, object] | None]:
     """Resolve robot, sensors, and an optional Task Program skill profile."""
     declaration = _mapping(
@@ -314,6 +325,16 @@ def _resolve_embodiment_component(
         simulation, base_dir=component_path.parent
     )
     sensors = resolve_local_resource_paths(sensors, base_dir=component_path.parent)
+    if materialized_component_sources is not None:
+        materialized = deepcopy(dict(component))
+        # Current overrides are uid/init_pos/init_rot/init_qpos, never a URI.
+        # Preserve them at their deployment owner instead of baking their values
+        # into the selected component's original declaration.
+        for key in component["simulation"]:
+            if key not in overrides:
+                materialized["simulation"][key] = deepcopy(simulation[key])
+        materialized["sensor"] = deepcopy(sensors)
+        materialized_component_sources[component_path] = materialized
     skill_profile = None
     if "skill_profile" in component:
         skill_profile = _owned_mapping(
@@ -328,6 +349,7 @@ def _resolve_scene_component(
     *,
     base_dir: Path,
     sources: Mapping[Path, Mapping[str, object]] | None = None,
+    materialized_component_sources: dict[Path, dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Resolve physical scene simulation fields."""
     declaration = _mapping(
@@ -357,6 +379,10 @@ def _resolve_scene_component(
     )
     resolved = deepcopy(dict(simulation))
     resolved = resolve_local_resource_paths(resolved, base_dir=component_path.parent)
+    if materialized_component_sources is not None:
+        materialized = deepcopy(dict(component))
+        materialized["simulation"] = deepcopy(resolved)
+        materialized_component_sources[component_path] = materialized
     return resolved
 
 
@@ -461,12 +487,14 @@ def _resolve_gym_components(
             "task.component has been removed; use environment.component and "
             "declare task_program in the runnable task deployment."
         )
+    materialized_component_sources: dict[Path, dict[str, object]] = {}
     environment_selected = "environment" in resolved
     if environment_selected:
         resolved = _resolve_environment_component(
             resolved,
             base_dir=selected_base_dir,
             sources=sources,
+            materialized_component_sources=materialized_component_sources,
         )
 
     embodiment_selected = "embodiment" in resolved
@@ -484,6 +512,7 @@ def _resolve_gym_components(
             resolved.pop("embodiment"),
             base_dir=selected_base_dir,
             sources=sources,
+            materialized_component_sources=materialized_component_sources,
         )
         resolved["robot"] = robot
         resolved["sensor"] = sensors
@@ -495,6 +524,7 @@ def _resolve_gym_components(
             resolved.pop("scene"),
             base_dir=selected_base_dir,
             sources=sources,
+            materialized_component_sources=materialized_component_sources,
         )
         duplicate_fields = sorted(set(scene_config).intersection(resolved))
         if duplicate_fields:
@@ -520,4 +550,5 @@ def _resolve_gym_components(
         or scene_config is not None,
         embodiment_skill_profile=embodiment_skill_profile,
         scene_config=scene_config,
+        materialized_component_sources=materialized_component_sources,
     )

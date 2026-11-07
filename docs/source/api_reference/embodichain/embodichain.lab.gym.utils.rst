@@ -89,6 +89,12 @@ declarations remain independent of caller mutations. Asset paths retain each
 component's owner directory. Callers retain responsibility for verifying the
 snapshot's provenance and external asset identity.
 
+The result's ``materialized_component_sources`` maps actual selected absolute
+owner paths to detached component declarations with physical resources resolved.
+It retains component structure and semantic profile values. Bundle builders
+consume these snapshots directly, including custom component filenames;
+unselected component declarations are not materialized.
+
 ``ResolvedGymComponents.validate_scene_bindings`` checks named semantic native
 roots against its resolved physical scene without constructing simulation.
 

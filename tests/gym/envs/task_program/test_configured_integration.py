@@ -3537,6 +3537,8 @@ def test_physical_component_snapshot_matches_files_without_component_reads(
         selected[owner] = {"component": str(component)}
         if "overrides" in declaration:
             selected[owner]["overrides"] = deepcopy(declaration["overrides"])
+    unused_component = path.parent / "unused.yaml"
+    sources[str(unused_component)] = {"fpath": "./missing-unselected.usda"}
     original = deepcopy(sources)
     physical_only = deepcopy(selected)
     physical_only.pop("task_program")
@@ -3551,6 +3553,9 @@ def test_physical_component_snapshot_matches_files_without_component_reads(
         selected, base_dir=path.parent, component_sources=sources
     )
     assert actual == expected
+    assert set(actual.materialized_component_sources) == {
+        Path(name) for name in original if Path(name) != unused_component
+    }
     actual_cfg = config_to_cfg(
         physical_only, source_path=path, component_sources=sources
     )
@@ -3565,6 +3570,11 @@ def test_physical_component_snapshot_matches_files_without_component_reads(
     assert sources == original
     sources[next(iter(sources))].clear()
     assert actual == expected
+    expected_sources = deepcopy(expected.materialized_component_sources)
+    actual.materialized_component_sources[
+        next(iter(actual.materialized_component_sources))
+    ].clear()
+    assert expected.materialized_component_sources == expected_sources
     missing = dict(original)
     missing.pop(next(iter(missing)))
     with pytest.raises(ValueError, match="absent from"):
