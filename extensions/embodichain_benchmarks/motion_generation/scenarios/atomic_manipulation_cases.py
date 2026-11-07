@@ -310,7 +310,7 @@ class PickUpCases(AtomicSkillCaseProvider):
                 "pickup_grasp",
                 close.start,
                 close.stop,
-                frozenset({"gripper_qpos"}),
+                frozenset({"gripper_contact", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "pickup_lift",
@@ -322,7 +322,9 @@ class PickUpCases(AtomicSkillCaseProvider):
                 "pickup_settle",
                 waypoint_count,
                 waypoint_count,
-                frozenset({"object_pose", "tcp_pose", "gripper_qpos"}),
+                frozenset(
+                    {"gripper_contact", "object_pose", "tcp_pose", "gripper_qpos"}
+                ),
                 include_settle=True,
             ),
         )
@@ -636,7 +638,7 @@ class MoveHeldObjectCases(HeldObjectCases):
                 "held_object_settle",
                 waypoint_count,
                 waypoint_count,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
                 include_settle=True,
             ),
         )

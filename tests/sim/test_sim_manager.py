@@ -651,7 +651,9 @@ def test_sim_update_owns_physics_and_visualization_time(step: int) -> None:
     assert events == ["control", "physics", "capture"] * step
     assert sim._world.physics_updates == [physics_dt] * step
     assert sim._visualization_sim_step == step
+    assert sim.physics_step_index == step
     assert sim._visualization_sim_time == pytest.approx(step * physics_dt)
+    assert sim.simulation_time == pytest.approx(step * physics_dt)
 
 
 def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> None:
@@ -667,6 +669,7 @@ def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> N
     assert sim._world.physics_updates == []
     assert sim._visualization_sim_step == 0
     assert sim._visualization_sim_time == 0.0
+    assert sim.simulation_time == 0.0
     assert runtime.capture_calls[-1]["sim_step"] == 0
     assert runtime.capture_calls[-1]["sim_time"] == 0.0
 
@@ -1590,6 +1593,49 @@ def test_final_substep_consumers_share_publication(camera, record, viser):
     assert rendered == ([30] if camera else [])
     assert recorded == ([1, 2, 30] if record else [])
     assert len(runtime.capture_calls) == (3 if viser else 0)
+
+
+def test_embodied_substep_actions_preserve_intermediate_window_frames():
+    """Action refresh keeps physics-rate recording without extra camera captures."""
+    from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.envs.managers import ActionManager
+
+    sim, _, state, publications, rendered = _make_render_frame_sim()
+    sim._window_record_state = _WindowRecordState(
+        time_step=0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    recorded = []
+    refreshed = []
+    sim._capture_window_record_frame = lambda _: recorded.append(state["published"])
+    env = EmbodiedEnv.__new__(EmbodiedEnv)
+    env.cfg = SimpleNamespace(sim_steps_per_control=3)
+    env.sim_cfg = SimpleNamespace(physics_dt=0.01)
+    env.sim = sim
+    env.sensors = {}
+    env._step_uses_action_manager = True
+    manager = ActionManager.__new__(ActionManager)
+    manager._substep_terms = (
+        SimpleNamespace(
+            update_substep=lambda: refreshed.append(state["value"]),
+            apply_actions=lambda: None,
+        ),
+    )
+    manager._substep_active_mask = None
+    env.action_manager = manager
+
+    env._advance_physics()
+    with sim.render_frame():
+        sim.render_camera_group([3])
+
+    assert recorded == [1, 2, 3]
+    assert publications == [1, 2, 3]
+    assert rendered == [3]
+    assert refreshed == [1, 2]
 
 
 def test_render_frames_and_independent_reads_refresh_direct_state_writes():
@@ -3024,6 +3070,7 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
     sim._rigid_object_groups = {}
     sim._lights = {}
     sim._sensors = {}
+    sim._visualization_sim_time = 1.25
     sim._deformable_objects = {
         "soft": MagicMock(),
         "cloth": MagicMock(),
@@ -3033,6 +3080,7 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
 
     sim._deformable_objects["soft"].reset.assert_called_once_with([1])
     sim._deformable_objects["cloth"].reset.assert_called_once_with([1])
+    assert sim.simulation_time == 1.25
 
 
 @pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
@@ -3289,15 +3337,20 @@ def test_after_substep_observer_preserves_manager_and_camera_boundaries(
     sim.update(
         0.01,
         steps,
-        after_substep=lambda dt: observed.append((dt, len(sim._world.physics_updates))),
+        after_substep=lambda dt: observed.append(
+            (dt, len(sim._world.physics_updates), sim.simulation_time)
+        ),
     )
     assert len(prepare_calls) == 1
-    assert observed == [(0.01, i + 1) for i in range(steps)]
+    assert observed == [
+        (0.01, i + 1, pytest.approx((i + 1) * 0.01)) for i in range(steps)
+    ]
     assert [item["capture_camera_images"] for item in runtime.capture_calls] == [
         False
     ] * max(0, steps - 1) + ([True] if steps else [])
     sim.update(0.01, 1)
     assert len(observed) == steps  # The observer is not retained for later calls.
+    assert sim.simulation_time == pytest.approx((steps + 1) * 0.01)
 
 
 @pytest.mark.parametrize("process_renderer", ["no-render", "hybrid", "fast-rt", "rt"])

@@ -2024,6 +2024,9 @@ def make_top_down_eef_pose(position: torch.Tensor) -> torch.Tensor:
         device=position.device,
     )
     pose[:3, 3] = position
+    # Restore orthonormality lost by the authored four-decimal rotation.
+    u, _, vh = torch.linalg.svd(pose[:3, :3])
+    pose[:3, :3] = u @ vh
     return pose
 
 

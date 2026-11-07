@@ -1226,22 +1226,23 @@
     },
     {
       "id": "augmentation",
-      "label": "Trajectory augmentation",
+      "label": "Expansion session",
       "kind": "class",
       "topic_ids": [
+        "expansion-engine",
         "motion-planning"
       ],
-      "summary": "Tracks trajectory candidates, expansion budgets, coverage, and commit receipts.",
-      "details": "The expansion package provides candidate contracts, residual and retiming operators, coverage metrics, and bounded session bookkeeping. Host integrations supply rollout execution, initial-state restoration, physical validation, and durable recording.",
+      "summary": "Owns bounded candidate lifecycles, collection budgets and final commit receipts.",
+      "details": "The canonical lab.expansion session has no simulation or trajectory dependency. Motion configurations project shared limits and supply a trajectory-owned coverage adapter. Native hosts own World preparation, execution and recorded evidence; sinks own persistence.",
       "boundaries": [
         "ExpansionSession does not step or reset environments and does not write datasets."
       ],
       "evidence": [
         {
-          "path": "embodichain/lab/sim/motion/expansion/session.py",
+          "path": "embodichain/lab/expansion/session.py",
           "symbol": "ExpansionSession",
-          "start_line": 108,
-          "end_line": 108,
+          "start_line": 121,
+          "end_line": 121,
           "excerpt": "class ExpansionSession:"
         }
       ],
@@ -2001,7 +2002,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 17,
@@ -2010,7 +2011,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -2783,7 +2784,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/parser/base.py",
+          "path": "embodichain/gen_sim/asset_engine/parser/base.py",
           "symbol": "ParserManager",
           "start_line": 46,
           "end_line": 46,
@@ -2792,7 +2793,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -3033,8 +3034,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator",
-          "start_line": 172,
-          "end_line": 172,
+          "start_line": 282,
+          "end_line": 282,
           "excerpt": "class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):"
         }
       ],
@@ -3059,8 +3060,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend",
-          "start_line": 56,
-          "end_line": 56,
+          "start_line": 70,
+          "end_line": 70,
           "excerpt": "class _AntipodalMeshBackend:"
         }
       ],
@@ -3492,6 +3493,69 @@
           "label": "RWM principles and usage"
         }
       ]
+    },
+    {
+      "id": "task-spec",
+      "label": "TaskSpec",
+      "kind": "module",
+      "topic_ids": [
+        "task-spec"
+      ],
+      "summary": "Defines simulator-independent task requirements, milestones, semantic identity and evidence evaluation.",
+      "details": "TaskSpec describes required outcomes independently of an action sequence, robot or simulator. It validates normative declarations, caches them by semantic hash and evaluates supplied observations; runtime acquisition and execution belong to integrations.",
+      "boundaries": [
+        "TaskSpec owns normative task semantics and evaluation, not simulation state acquisition, motion planning or program execution."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_spec/spec.py",
+          "symbol": "TaskSpec",
+          "start_line": 335,
+          "end_line": 335,
+          "excerpt": "class TaskSpec:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/public_api",
+          "label": "TaskSpec protocol API"
+        }
+      ]
+    },
+    {
+      "id": "task-engine",
+      "label": "Task Engine",
+      "kind": "module",
+      "topic_ids": [
+        "task-engine"
+      ],
+      "summary": "Interprets task intentions and validates candidates, TaskSpec projections and semantic graph coverage.",
+      "details": "Task Engine converts explicit instruction intent into candidate declarations and independent TaskSpec requirements. Canonical graph and role/lineage coverage describe intended Semantic Calls; execution, physical evidence and acceptance remain with their owning systems.",
+      "boundaries": [
+        "This semantic front end does not implement Atomic Skills, motion planning or physics observation. Declaration coverage is not a physical-success certificate."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_engine/agent.py",
+          "symbol": "TaskAgent",
+          "start_line": 69,
+          "end_line": 69,
+          "excerpt": "class TaskAgent:"
+        },
+        {
+          "path": "embodichain/gen_sim/task_engine/task_spec.py",
+          "symbol": "task_spec_from_candidate",
+          "start_line": 186,
+          "end_line": 186,
+          "excerpt": "    template = TaskSpec("
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.gen_sim.task_engine",
+          "label": "Task Engine semantic contracts"
+        }
+      ]
     }
   ],
   "edges": [
@@ -3604,9 +3668,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory.create_atomic_action_engine",
-          "start_line": 647,
-          "end_line": 651,
-          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,\n            control_profiles=profile.action_control_profiles(),\n            grasp_pose_generators=self._grasp_pose_generators,\n        )"
+          "start_line": 926,
+          "end_line": 927,
+          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,"
         }
       ]
     },
@@ -3622,9 +3686,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory._create_motion_generator",
-          "start_line": 788,
-          "end_line": 788,
-          "excerpt": "            generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))"
+          "start_line": 1094,
+          "end_line": 1095,
+          "excerpt": "            generator = MotionGenerator(\n                MotionGenCfg(planner_cfg=planner_cfg), **selection_kwargs"
         }
       ]
     },
@@ -3658,8 +3722,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 666,
-          "end_line": 666,
+          "start_line": 704,
+          "end_line": 704,
           "excerpt": "        clock = EnvironmentStepClock(self._step_dt)"
         }
       ]
@@ -3676,8 +3740,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 736,
-          "end_line": 736,
+          "start_line": 775,
+          "end_line": 775,
           "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
         }
       ]
@@ -3694,9 +3758,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 777,
-          "end_line": 786,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n            nominal_source_factory=nominal_source_factory,\n        )"
+          "start_line": 779,
+          "end_line": 780,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
     },
@@ -3712,9 +3776,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
-          "start_line": 811,
-          "end_line": 816,
-          "excerpt": "        return TaskProgramDemoBridge(\n            program,\n            assembly.runtime,\n            assembly.command_sink,\n            assembly.clock,\n            post_policy_port=self._post_policy_port,"
+          "start_line": 1019,
+          "end_line": 1024,
+          "excerpt": "        bridge = TaskProgramDemoBridge(\n            program,\n            assembly.runtime,\n            assembly.command_sink,\n            assembly.clock,\n            post_policy_port=self._post_policy_port,"
         }
       ]
     },
@@ -3816,9 +3880,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
-          "start_line": 811,
-          "end_line": 813,
-          "excerpt": "        return TaskProgramDemoBridge(\n            program,\n            assembly.runtime,"
+          "start_line": 1019,
+          "end_line": 1021,
+          "excerpt": "        bridge = TaskProgramDemoBridge(\n            program,\n            assembly.runtime,"
         }
       ]
     },
@@ -3841,8 +3905,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 740,
-          "end_line": 741,
+          "start_line": 779,
+          "end_line": 780,
           "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
@@ -3938,8 +4002,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 736,
-          "end_line": 736,
+          "start_line": 775,
+          "end_line": 775,
           "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
         }
       ]
@@ -4406,7 +4470,7 @@
           "symbol": "<module>",
           "start_line": 48,
           "end_line": 48,
-          "excerpt": "        target=\"embodichain.gen_sim.simready_pipeline.cli.start:main\","
+          "excerpt": "        target=\"embodichain.gen_sim.asset_engine.cli.start:main\","
         }
       ]
     },
@@ -5273,7 +5337,7 @@
       "scope": "Caller supplies the ParserManager instance.",
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "ingest_one_asset",
           "start_line": 178,
           "end_line": 178,
@@ -5455,8 +5519,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 303,
-          "end_line": 303,
+          "start_line": 386,
+          "end_line": 386,
           "excerpt": "        backend = _AntipodalMeshBackend("
         }
       ]
@@ -5473,8 +5537,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 299,
-          "end_line": 299,
+          "start_line": 382,
+          "end_line": 382,
           "excerpt": "        model = self._gripper_model"
         }
       ]
@@ -5509,8 +5573,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend.__init__",
-          "start_line": 118,
-          "end_line": 118,
+          "start_line": 152,
+          "end_line": 152,
           "excerpt": "        self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)"
         }
       ]
@@ -5520,16 +5584,16 @@
       "source": "grasp-backend",
       "target": "grasp-collision",
       "relation": "constructs",
-      "description": "Creates the mesh-specific sampling or collision service.",
+      "description": "Constructs the fixed-hand collision service for validated queries; explicit proposals omit it.",
       "provenance": "source-reviewed",
-      "scope": "Private mesh backend composition behind the public generator.",
+      "scope": "Private mesh backend composition behind the public generator, guarded by the validated-query mode.",
       "evidence": [
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend.__init__",
-          "start_line": 105,
-          "end_line": 105,
-          "excerpt": "        self._collision_checker = GripperCollisionChecker("
+          "start_line": 135,
+          "end_line": 136,
+          "excerpt": "        if check_collision:\n            self._collision_checker = GripperCollisionChecker("
         }
       ]
     },
@@ -5895,6 +5959,24 @@
           "excerpt": "    return SupervisedTrainer("
         }
       ]
+    },
+    {
+      "id": "task-engine-constructs-task-spec",
+      "source": "task-engine",
+      "target": "task-spec",
+      "relation": "constructs",
+      "description": "Projects validated task candidates into normative TaskSpec declarations.",
+      "provenance": "source-reviewed",
+      "scope": "TaskSpec construction from semantic intent; independent identity validation and evidence evaluation stay with TaskSpec.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_engine/task_spec.py",
+          "symbol": "task_spec_from_candidate",
+          "start_line": 186,
+          "end_line": 186,
+          "excerpt": "    template = TaskSpec("
+        }
+      ]
     }
   ],
   "views": [
@@ -5992,7 +6074,9 @@
         "neural-dynamics",
         "supervised-learning",
         "nerd-showcase",
-        "robot-world-model"
+        "robot-world-model",
+        "task-spec",
+        "task-engine"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -6081,7 +6165,8 @@
         "motion-benchmarks-constructs-simulation",
         "nerd-recipe-constructs-sl-learner",
         "nerd-showcase-calls-sl-workflow",
-        "rwm-recipe-constructs-sl-trainer"
+        "rwm-recipe-constructs-sl-trainer",
+        "task-engine-constructs-task-spec"
       ],
       "groups": [
         {
@@ -6188,7 +6273,9 @@
             "scene-export",
             "simready",
             "asset-parsers",
-            "gen-sim-sessions"
+            "gen-sim-sessions",
+            "task-spec",
+            "task-engine"
           ]
         },
         {
@@ -6696,7 +6783,9 @@
         "workspace-analyzer",
         "scene-services",
         "compute",
-        "scene-expansion"
+        "scene-expansion",
+        "task-spec",
+        "task-engine"
       ],
       "edge_ids": [
         "simulation-constructs-robot",
@@ -6719,7 +6808,8 @@
         "scene-services-calls-compute-layout",
         "scene-services-declares-manager-entities",
         "scene-services-references-manager",
-        "scene-recipes-import-expansion-contracts"
+        "scene-recipes-import-expansion-contracts",
+        "task-engine-constructs-task-spec"
       ],
       "groups": [
         {
@@ -6786,6 +6876,14 @@
             "scene-services",
             "compute",
             "scene-expansion"
+          ]
+        },
+        {
+          "id": "task-specification",
+          "label": "Normative task specification",
+          "node_ids": [
+            "task-spec",
+            "task-engine"
           ]
         }
       ]

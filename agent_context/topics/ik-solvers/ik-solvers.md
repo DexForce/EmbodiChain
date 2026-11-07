@@ -11,6 +11,7 @@
 | Seed generation and retrieval | `embodichain/lab/sim/motion/solvers/qpos_seed_sampler.py`, `qpos_seed_sel_sampler.py` in that directory |
 | Pink posture integration | `embodichain/lab/sim/motion/solvers/null_space_posture_task.py` |
 | Analytical kernels | `embodichain/compute/kinematics/_warp/` |
+| Bounded B=1 waypoint branch search with solver callbacks | `embodichain/compute/kinematics/ik_path.py`; stateful adapter in `lab/sim/motion/ik.py` |
 
 `SolverCfg.from_dict()` resolves a configured type; `init_solver()` creates its
 stateful instance. Robot binds solvers to control parts and synchronizes robot

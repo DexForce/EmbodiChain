@@ -242,7 +242,7 @@ def test_create_sensor_tutorial_preserves_attached_camera_view() -> None:
 
 @pytest.mark.parametrize(
     ("sim_device", "renderer"),
-    [("cpu", "hybrid"), ("cpu", "fast-rt"), ("cuda", "fast-rt")],
+    [("cpu", "hybrid"), ("cpu", "fast-rt"), ("cuda", "fast-rt"), ("cuda", "rt")],
 )
 def test_camera_backend_smoke(sim_device, renderer):
     """Check that each remaining backend/device pair renders a color frame."""

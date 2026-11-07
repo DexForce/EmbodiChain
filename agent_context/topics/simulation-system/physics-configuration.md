@@ -101,8 +101,11 @@ preserve mode, without replacing explicit zero, margins or materials. Inspect
 `spawn/descriptors.py` for these application defaults rather than altering
 DexSim global defaults.
 
-Newton `condim` belongs in collision descriptors before preparation; friction
-coefficients belong in material properties. Use per-link overlays for contact
+Newton `condim`, `contype` and `conaffinity` belong in collision descriptors
+before preparation; friction coefficients and raw MuJoCo `solref`/`solimp`/`solmix`
+belong in material properties. Explicit `solref` retains native positive or
+non-positive semantics and overrides stiffness/damping conversion. Unsupported
+solvers reject explicit raw parameters. Use per-link overlays for contact
 intent, not finalized solver-array mutations. `has_particle_collision` is
 per-shape participation; Arena isolation remains scene-owned.
 

@@ -206,7 +206,7 @@ def test_dexuni_pure_mujoco_contact_sensor_reports_impulse(solver_path: str) -> 
         else:
             assert not sensor.contact_capabilities.impulse
             assert (data["is_valid"] & ~data["impulse_valid"]).any()
-            raw = sensor._query.fetch()
+            raw = sensor._query.fetch_solver_report()
             for field in ("impulse_valid", "friction_valid"):
                 assert data[field].sum() == getattr(raw, field)[: raw.count].sum()
         assert valid.any()

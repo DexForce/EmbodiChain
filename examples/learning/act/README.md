@@ -1,66 +1,69 @@
-# Visual PushCube imitation learning with ACT
+# Visual PushCube imitation learning with official LeRobot ACT
 
-This example collects scripted Franka demonstrations, trains a visual Action
-Chunking with Transformers (ACT) policy offline, and evaluates the policy in a
-fresh simulator. It uses the project task, action manager, LeRobot recorder,
-causal data sources, and supervised trainer. The policy sees one RGB camera and
-robot joint positions; object/goal geometry is available only to the expert and
-the evaluator.
+This example uses EmbodiChain to collect Franka demonstrations and evaluate a
+policy in GPU simulation. LeRobot 0.6.1 owns the ACT network, dataset loader,
+normalization, loss, temporal ensemble, optimizer updates and native checkpoints.
+The example invokes `lerobot.scripts.lerobot_train` directly. The shared
+EmbodiChain SL trainer remains available for the dynamics model workflows.
 
-The physical task is inspired by ManiSkill's PushCube and the model follows
-[ACT](https://tonyzhaozh.github.io/aloha/) and the
-[ManiSkill baseline](https://github.com/mani-skill/ManiSkill/tree/main/examples/baselines/act).
-This is a separate EmbodiChain task, not a numerical reproduction of ManiSkill.
+## Environment and control contract
 
-The default task uses a 4 cm cube, a green 10 cm radius target and randomized
-cube XY within ±10 cm. The target is 20 cm in +X from the initial cube. An
-episode succeeds when the cube is on the table and its XY distance to the
-target is below 10 cm. Simulation/control run at 240/30 Hz; actions are seven
-absolute arm joint targets and a normalized parallel-gripper command.
+Use Python 3.12 with `lerobot[training]==0.6.1`, DexSim 0.5.1rc1 and the native
+camera renderer. The current Python 3.12 dependency profile uses torch 2.11.0+cu128,
+torchvision 0.26.0+cu128, TorchCodec 0.11.1 and TensorDict 0.15.3. Install the
+main package through the normal resolver using the project's private DexSim index.
+For an existing Python 3.12 checkout environment, select matching CUDA wheels:
 
-The RL and visual deployments share `extensions.success_threshold` and the
-`distance_to_goal` metric. Expert geometry and segment lengths are declared in
-`env.visual.yaml`; the task does not supply a second set of expert defaults.
+```bash
+uv venv --python 3.12 /tmp/embodichain-act
+source /tmp/embodichain-act/bin/activate
+uv pip install --torch-backend cu128 -e . \
+  'torch==2.11.0+cu128' 'torchvision==0.26.0+cu128' \
+  'torchcodec==0.11.1' 'tensordict==0.15.3' \
+  --index-strategy unsafe-best-match \
+  --extra-index-url http://pyp.open3dv.site:2345/simple/
+export CUDA_VISIBLE_DEVICES=0
+export OMP_NUM_THREADS=2
+export MKL_NUM_THREADS=2
+```
 
-## Requirements
+Use `cuda:0` after selecting a physical GPU. Each training or evaluation process
+uses one GPU. The first full training downloads the pinned torchvision
+ResNet-18 ImageNet weights into the Torch cache. Videos require imageio and
+imageio-ffmpeg. Reports identify the actual GPU and software; lower-memory
+hardware needs its own qualification.
 
-Run from a source checkout with EmbodiChain's matching DexSim runtime, Franka
-assets, PyTorch/torchvision, CUDA, LeRobot 0.4.x, and a native camera renderer.
-The default recipe uses one GPU with 24 GB or more. Select a physical GPU
-before starting Python, for example `export CUDA_VISIBLE_DEVICES=0`; use
-`cuda:0` in the commands below. The first full training run downloads the
-torchvision ImageNet ResNet-18 weights into the Torch cache. `imageio` and
-`imageio-ffmpeg` are needed for videos.
+The existing task uses a 4 cm cube, randomized XY within ±10 cm, and a green
+10 cm radius target 20 cm in +X from the initial cube. Success requires the cube
+to remain on the table and enter that target. Physics/control run at 240/30 Hz.
+The policy sees a current 224×224 RGB frame and nine measured joint positions;
+its eight commands are seven absolute arm joint targets plus a normalized
+parallel-gripper command. Geometry and goal poses are expert/evaluator inputs.
 
-Commands use separate fresh output directories. Recorder datasets live inside
-their collection output, and `report.json` records the actual dataset path,
-ordered schema, attempts, seeds and task identity. Keep reports with datasets.
+## 1. Qualify and collect
 
-## 1. Qualify and collect the expert
+Use fresh output directories. Qualification must succeed on at least 95 of
+100 independent attempts and match the current task identity. Collection saves
+only successful full episodes with raw policy-request action semantics, with
+at most four attempts per requested episode. It stores RGB as image features.
 
 ```bash
 python -m examples.learning.act.collect qualify \
   --episodes 100 --seed-base 500000 --output /tmp/act-qualification
-
 python -m examples.learning.act.collect collect \
   --episodes 100 --seed-base 100000 \
   --qualification /tmp/act-qualification/report.json --output /tmp/act-train
-
 python -m examples.learning.act.collect collect \
   --episodes 20 --seed-base 200000 \
   --qualification /tmp/act-qualification/report.json --output /tmp/act-validation
 ```
 
-The qualification report must match the current task sources and show at
-least 95% success across at least 100 independent attempts. Collection rejects
-qualification seed overlap, records only successful full episodes, and stops
-after at most four attempts per requested episode. RGB is stored as PNG.
+Keep each `report.json` with its finalized dataset. Reports record successful
+and failed attempts, seeds, schema, task identity and runtime. For an engineering
+check, `collect --smoke --episodes 4` marks an unqualified corpus; full training
+rejects smoke reports.
 
-For an engineering-only check use `collect --smoke --episodes 4` with a fresh
-output. A smoke run bypasses expert qualification and must not be used as a
-learning acceptance result.
-
-## 2. Train
+## 2. Train with the upstream workflow
 
 ```bash
 python -m examples.learning.act.train \
@@ -69,83 +72,96 @@ python -m examples.learning.act.train \
   --seed 19001 --output /tmp/act-seed19001
 ```
 
-Repeat with seeds 19002 and 19003 and fresh output directories. Defaults are
-30,000 updates, batch size 32, and a saved checkpoint and offline validation
-every 2,000 updates. The model predicts 30 actions with ResNet-18, Transformer
-and a CVAE; training minimizes masked action L1 plus `10 × KL`. Only training
-frames determine state/action normalization. The checkpoint captures model,
-optimizer, RNG, action schema, task identity and dataset identity.
+Repeat for seeds 19002 and 19003 with fresh outputs. Defaults are 30,000 updates,
+batch 32, and a checkpoint every 2,000 updates. The model uses the official
+ResNet-18/Transformer/CVAE architecture, a 30-step chunk, and `10 × KL` plus the
+SDK's masked L1. AdamW uses learning rates 1e-4 and 1e-5 for the main network
+and backbone, weight decay 1e-4, and the upstream preset's gradient clipping.
+Training is FP32 with four DataLoader workers; `--num-workers` changes that count.
 
-`--smoke --updates 20 --batch-size 2 --eval-every 10` uses an uninitialized
-backbone to check the engineering loop without downloading weights. Resume is
-available with `--resume CHECKPOINT` and the original arguments/output recipe.
-The SDK dataset and image files must remain unchanged for exact resume.
+Only the training dataset is passed to LeRobot. Numeric statistics come from
+its training-only metadata; RGB uses ImageNet statistics. Validation is a separate
+dataset and never contributes training statistics. After training, the wrapper
+records deterministic prior-prediction L1 for each checkpoint in
+`offline_validation.json`, using frozen training processors and up to 128 anchors.
+Physical development scenes select the final policy.
 
-## 3. Select and evaluate
+The wrapper saves `recipe.json`, the exact `lerobot_config.json`, dataset content
+fingerprints and `training_report.json`. Native artifacts live under
+`lerobot/checkpoints/002000/pretrained_model/` and corresponding update folders.
+They contain `config.json`, `model.safetensors`, both processor JSON files and
+normalization safetensors, plus an `embodichain_act.json` task/action manifest.
+The sibling `training_state/` is owned by LeRobot and supports native recovery.
 
-Development selection evaluates every periodic checkpoint on the same 50
-scenes. It chooses highest success rate, then lowest mean final goal distance,
-then the earlier checkpoint. Only development scenes select a model.
+For a short engineering run, use `--smoke --updates 20 --batch-size 2
+--eval-every 10`. This selects a small uninitialized model and zero workers.
+Resume from the latest checkpoint with `--resume /path/to/checkpoint/pretrained_model`, the same output and
+recipe arguments. The wrapper checks source contents, checkpoint ownership and native configuration, and permits a larger update
+budget; the native trainer restores its optimizer, scheduler, RNG and sampler.
+
+The default is four DataLoader workers. Choose a worker count appropriate for
+the host CPU and memory; it is recorded in the recipe and must match on resume.
+
+For a learning diagnostic, collect four qualified scenes, train the full model
+for 4,000 updates, and evaluate those same four scenes using `--panel overfit`.
+At least 3/4 should succeed before spending the full three-seed training budget.
+
+## 3. Select and evaluate in GPU simulation
 
 ```bash
 python -m examples.learning.act.evaluate --run /tmp/act-seed19001 \
   --panel development --episodes 50 --seed-base 300000 --output /tmp/act-dev19001
-
-python -m examples.learning.act.evaluate --checkpoint /tmp/act-dev19001/best.pt \
+python -m examples.learning.act.evaluate --checkpoint /tmp/act-dev19001/best \
   --panel test --episodes 100 --seed-base 400000 --video --output /tmp/act-test19001
 ```
 
-Repeat for the other seeds using the **same** development and test scenes.
-Selection output contains `best.pt`; evaluation reports each scene, success
-rate, Wilson interval, goal distance and policy inference time. Videos include
-up to three successes and three failures when available. The reported strict
-3 cm result is measured at the ordinary 10 cm termination point; this is a
-diagnostic of entry accuracy, not a separately extended rollout.
+Development evaluates all native checkpoints on the same 50 scenes, ranking by
+success rate, then mean final goal distance, then earlier update. Its `best/`
+directory is a portable native policy with processors and provenance. `--policy-dir`
+is an alias for `--checkpoint`; paths now refer to directories, not `.pt` files.
+`play --checkpoint /path/to/best --seed 300000 --output /tmp/act-play` renders one
+MP4 and JSON diagnostic without claiming learning acceptance.
 
-Compare the same held-out panel with two baselines:
+The loader calls LeRobot's native model/processor APIs. RGB is scaled to [0,1]
+once; the official preprocessors normalize it and state, `select_action` applies
+the official temporal ensemble, and the official postprocessor unnormalizes
+actions on the simulation GPU. Every reset clears policy history. Environment
+action bounds are applied before stepping, and live schema/task identities must
+match the recorded contract. The prior latent is zero during evaluation.
+
+Run the same held-out test panel for all three seeds and both baselines:
 
 ```bash
 python -m examples.learning.act.evaluate --baseline fixed --panel test \
   --episodes 100 --seed-base 400000 --output /tmp/act-fixed
-python -m examples.learning.act.evaluate --baseline untrained --panel test \
+python -m examples.learning.act.evaluate --baseline untrained \
+  --reference-checkpoint /tmp/act-dev19001/best --panel test \
   --episodes 100 --seed-base 400000 --output /tmp/act-untrained
 ```
 
-The learning acceptance target is ≥90% mean test success across the three
-training seeds, ≥80% for every seed, and at least 30 percentage points above the
-better baseline. A four-scene training-reset diagnostic should reach at least
-3/4 before launching full training. `--panel overfit --episodes 4 --seed-base
-<training seed>` runs that diagnostic. Test results must not be used for
-checkpoint selection or tuning.
+The untrained baseline reinitializes ACT with its original backbone initializer
+and the same training statistics; it does not load trained weights. The target
+is ≥90% mean test success across three training seeds, ≥80% for every seed, and
+at least 30 percentage points above the better baseline. Test scenes never
+select checkpoints or hyperparameters. Task identity and scene-overlap checks
+remain active; `overfit` is the explicit training-scene diagnostic.
 
-The retained [qualification reports](results/README.md) show the measured
-results and their scope for one completed run.
+Reports contain per-scene outcomes, Wilson intervals, distances and mean/median/
+P95 policy latency. Videos retain up to three successes and failures each.
+The strict 3 cm metric is measured when the normal 10 cm termination fires.
+A development-only `--shuffle-images-report` retains the existing visual ablation.
 
-For a development-only visual diagnostic, add `--shuffle-images-report
-/tmp/act-validation/report.json` to a single-checkpoint development evaluation.
-It replaces each live frame with the corresponding-time frame from a different
-recorded validation episode while keeping the live joint state. Compare against
-the same checkpoint and development seeds without the flag; this is an ablation,
-not a held-out test result.
+## Compatibility
 
-Evaluation checks the task identity and rejects train/validation or recorded
-development seed overlap. Load only trusted checkpoints, since PyTorch training
-checkpoints include optimizer and RNG state.
+The previous EmbodiChain ACT network, SL recipe and custom temporal ensemble
+have been replaced. Historical `.pt` checkpoints require retraining; use Git
+history to reproduce those models. Keep generated datasets, checkpoints,
+evaluation reports and videos in a local output directory outside the checkout.
 
-To render a single rollout for inspection (including a training scene), use
-`python -m examples.learning.act.play --checkpoint /tmp/act-dev19001/best.pt
---seed 300000 --output /tmp/act-play`. The output contains an MP4 and a JSON
-record; single-rollout playback is not an acceptance evaluation.
+Core trainer/dataset/robot support on Python 3.10/3.11 remains independent of
+this Python 3.12 ACT workflow. The focused production tests exercise real SDK
+configuration, native training/resume, portable policy reload, normalization,
+reset and content checks without starting a simulator. GPU collection and
+learning acceptance require actual rendered rollouts.
 
-## Data and resource boundaries
-
-Each sampled training item uses the RGB and joint state at time `t` and up to
-30 actions starting at `t`. Episode-end padding is excluded from the posterior
-attention and loss. Numeric data is resident in bounded CPU memory; the image
-reader decodes only anchor frames and has a 512 MiB CPU cache by default.
-Inference uses the CVAE prior mean (`z=0`) and temporally ensembles overlapping
-chunks, clearing its history on every reset.
-
-Report peak GPU memory and wall time on the target machine. Acceptance is based
-on physical rollouts rather than loss alone. On a physical 24 GB GPU, run the
-full recipe there to qualify that hardware independently.
+See the [LeRobot integration guide](../../../docs/source/guides/lerobot.md) for dependency profiles and the [framework comparison](../../../docs/source/guides/training_frameworks.md) for native training and RLinf alternatives.

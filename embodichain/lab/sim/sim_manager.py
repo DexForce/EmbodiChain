@@ -923,6 +923,19 @@ class SimulationManager:
         return spawn_scene.builder.result
 
     @property
+    def physics_step_index(self) -> int:
+        """Number of physics substeps completed through :meth:`update`.
+
+        The counter advances before the substep observer, with or without
+        rendering. Observation reads, topology rebuilds and selected resets
+        leave it unchanged; it is independent of the backend's resettable clock.
+
+        Returns:
+            Monotonic completed-substep count for this manager's lifetime.
+        """
+        return self._visualization_sim_step
+
+    @property
     def is_use_gpu_physics(self) -> bool:
         """Whether the active physics backend is running on GPU."""
         return self.device.type == "cuda"
@@ -1966,7 +1979,15 @@ class SimulationManager:
         Args:
             enable (bool): whether to enable physics simulation.
         """
+        if type(enable) is not bool:
+            raise TypeError("enable must be a bool")
         self._world.enable_physics(enable)
+        self._physics_enabled = enable
+
+    @property
+    def physics_enabled(self) -> bool:
+        """Whether physics is enabled through this manager's owned runtime API."""
+        return getattr(self, "_physics_enabled", True)
 
     def init_gpu_physics(self) -> None:
         """Prepare the Spawn-owned physics runtime.
@@ -2055,6 +2076,22 @@ class SimulationManager:
 
             if step > 0:
                 self._log_scene_summary()
+
+    @property
+    def simulation_time(self) -> float:
+        """Return elapsed time advanced through this manager's ``update`` calls.
+
+        The sum starts at manager construction and includes explicit warmup
+        updates. It is published after each successful physics substep, before
+        ``after_substep`` observers. Preparation and zero-duration render-state
+        synchronization do not advance it; object/environment resets do not
+        rewind it. Direct low-level backend/world calls are outside this clock.
+
+        This manager-relative timeline can have an offset from a Task Program's
+        episode-relative EnvironmentStepClock; consumers must map the domains
+        explicitly instead of comparing their timestamps directly.
+        """
+        return self._visualization_sim_time
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.

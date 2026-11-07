@@ -34,6 +34,7 @@ from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
         ("tianji_marvin_gripper", "left", "left_hand_base_link", 0.0, 3),
         ("tianji_marvin_gripper", "right", "right_hand_base_link", 0.0, 3),
         ("robotiq_2f85", None, "robotiq_arg2f_base_link", 0.0, 11),
+        ("robotiq_arg2f_140", None, "robotiq_arg2f_base_link", 0.0, 11),
     ],
 )
 def test_registered_real_hand_assets_are_complete_and_open(
@@ -91,3 +92,28 @@ def test_native_panda_tcp_uses_y_closing_once_and_retains_contact_origin():
 def test_geometry_registry_never_guesses_unknown_hand_or_side(model, side):
     with pytest.raises(ValueError):
         get_parallel_jaw_collision_geometry(model, side=side)
+
+
+def test_contact_frame_override_preserves_root_surfaces_and_runtime_tcp():
+    default = get_parallel_jaw_collision_geometry("robotiq_arg2f_140")
+    contact = np.array(
+        [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]], dtype=float
+    )
+    calibrated = get_parallel_jaw_collision_geometry(
+        "robotiq_arg2f_140",
+        root_from_tcp=contact,
+        root_from_contact_frame=contact,
+    )
+    # Moving the contact origin by +1cm re-expresses the same mesh at Z-1cm.
+    torch.testing.assert_close(
+        calibrated.points,
+        default.points - torch.tensor([0, 0, 0.01]),
+        rtol=0,
+        atol=1e-7,
+    )
+    candidates = torch.eye(4).repeat(2, 1, 1)
+    candidates[1, :3, 3] = torch.tensor([0.3, -0.2, 0.4])
+    torch.testing.assert_close(
+        calibrated.canonical_to_tcp_poses(candidates), candidates
+    )
+    assert calibrated.provenance["files_sha256"] == default.provenance["files_sha256"]

@@ -236,7 +236,7 @@ jobs:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
     container: &container_template
-      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311
+      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312
       volumes:
         - "/cache:/cache"
         - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d"
@@ -387,7 +387,7 @@ jobs:
             --extra-index-url https://download.blender.org/pypi/
           if [[ "${NEEDS_CUROBO}" == "true" ]]; then
             pip install \
-              "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
+              "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.9.0" \
               --index-url https://pypi.org/simple \
               --extra-index-url http://pyp.open3dv.site:2345/simple/ \
               --trusted-host pyp.open3dv.site \
@@ -564,7 +564,7 @@ jobs:
           dist_info = f"embodichain-{version}.dist-info/"
           required = {
               "embodichain/VERSION",
-              "embodichain/gen_sim/simready_pipeline/configs/gen_config.json",
+              "embodichain/gen_sim/asset_engine/configs/gen_config.json",
               "embodichain_tasks/__init__.py",
               "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
               "embodichain_robots/__init__.py",

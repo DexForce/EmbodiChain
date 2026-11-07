@@ -254,7 +254,7 @@ def _check_runtime(curobo_gpu_id: int) -> None:
             "cuRobo V2 is not installed. Install NVIDIA's source package "
             "matching the CUDA environment: "
             "`uv pip install 'nvidia-curobo[cu12] @ "
-            "git+https://github.com/NVlabs/curobo.git@v0.8.0'` for CUDA 12.x "
+            "git+https://github.com/NVlabs/curobo.git@v0.9.0'` for CUDA 12.x "
             "or replace `cu12` with `cu13` for CUDA 13.x "
             f"(see {CUROBO_INSTALL_URL})."
         ) from exc

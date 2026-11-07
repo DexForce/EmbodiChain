@@ -178,3 +178,55 @@ def test_articulation_link_collision_reads_newton_named_physical_mesh():
     vertices[:] = 99
     assert shapes[0].vertices[1, 0] == 1
     assert shapes[0].triangles.tolist() == [[0, 1, 2]]
+
+
+def test_newton_link_keeps_convex_pieces_and_triangle_types():
+    import torch
+    from types import SimpleNamespace
+    import numpy as np
+    import newton
+    from embodichain.lab.sim.objects.backends.collision import (
+        collision_shapes_from_articulation_link,
+    )
+
+    mesh = SimpleNamespace(
+        vertices=np.array(
+            [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32
+        ),
+        indices=np.array([0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2]),
+    )
+    model = SimpleNamespace(
+        shape_flags=np.array(
+            [
+                int(newton.ShapeFlags.COLLIDE_SHAPES),
+                int(newton.ShapeFlags.COLLIDE_SHAPES),
+            ]
+        ),
+        shape_type=np.array(
+            [int(newton.GeoType.CONVEX_MESH), int(newton.GeoType.MESH)]
+        ),
+        shape_scale=np.array([[2, 3, 4], [1, 1, 1]], dtype=np.float32),
+        shape_transform=np.array(
+            [[0, 0, 0, 0, 0, 0, 1], [1, 2, 3, 0, 0, 0, 1]], dtype=np.float32
+        ),
+        shape_source=[mesh, mesh],
+    )
+    binding = SimpleNamespace(
+        _runtime=SimpleNamespace(model=model),
+        _links=[SimpleNamespace(name="arm", shape_ids=(0, 1))],
+    )
+    shapes = collision_shapes_from_articulation_link(
+        SimpleNamespace(_physics_binding=binding), "arm", object_uid="robot"
+    )
+    assert len(shapes) == 2
+    assert shapes[0].shape_type.name == "CONVEX" and shapes[1].shape_type.name == "MESH"
+    torch.testing.assert_close(shapes[0].vertices[1], torch.tensor([2.0, 0.0, 0.0]))
+    torch.testing.assert_close(
+        shapes[1].local_pose[:3, 3], torch.tensor([1.0, 2.0, 3.0])
+    )
+
+    model.shape_flags[1] = 0
+    enabled = collision_shapes_from_articulation_link(
+        SimpleNamespace(_physics_binding=binding), "arm", object_uid="robot"
+    )
+    assert len(enabled) == 1 and enabled[0].shape_type.name == "CONVEX"

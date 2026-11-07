@@ -599,6 +599,7 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "convert_to_heightfield",
         "heightfield_resolution",
         "preserve_mesh_transform",
+        "max_hull_vertices",  # Mesh cooking is outside rigid-body physics.
     }
     assert (
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields

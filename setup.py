@@ -214,7 +214,14 @@ def main():
             "embodichain_robots.anybotics.anymal_c": ["profile.json"],
             "embodichain_robots.pollen_robotics.microduck": ["profile.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
-            "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
+            "embodichain.gen_sim.asset_engine.configs": ["*.json"],
+            "embodichain.gen_sim.task_engine": [
+                "_semantic_graph_viewer.html",
+                "_graph_react.css",
+                "_graph_react.js",
+                "_graph_react.LICENSE.txt",
+                "_graph_assets/*",
+            ],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",

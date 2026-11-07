@@ -40,7 +40,13 @@ observation while lift displacement stays gravity-aligned. Place aligns the
 source release anchor to the current semantic target and records the correction.
 An optional planner collision check is reported separately from task acceptance.
 The tabletop host requires source robot, object and target geometry hashes to
-match live physical assets. Older source bundles without hashes remain valid
+match live physical assets. Robot identity uses named joint/kinematic and
+collision descriptions plus mesh contents, excluding assembly timestamps,
+cache paths and visuals. `data_pipeline.real2sim._geometry` owns the versioned
+digest and independently pinned legacy-reference aliases; aliases must never
+be inferred from the live model or written into immutable source bundles.
+Other legacy robot digests still require exact original URDF/mesh bytes.
+Older source bundles without hashes remain valid
 for explicit diagnostics but cannot use the qualified tabletop owner. In EEF
 phases, numerical IK jitter can be smoothed only if the TCP error tube and
 motion limits remain satisfied. Contact
@@ -170,3 +176,14 @@ Focused coverage: `tests/data_pipeline/test_real2sim_normalize.py`,
 `tests/sim/motion/expansion/test_mapped_timing.py`, and matching Atomic Action
 and Task Program source-binding tests. Synthetic fixtures establish software
 contracts, not real-data physical qualification.
+
+## Batched offline collection
+
+The original qualified tabletop owner retains its B=1/no-sensor contract.
+[Expansion Engine](../expansion-engine/expansion-engine.md) provides a separate
+World owner that binds each source runtime to one physical row and merges actual
+commands into one batched step. It reuses the same source preparation and measured
+qualification through `Real2SimTabletopSource` and explicit measured
+`Real2SimTabletopEpisodeEvidence`; the original owner adapts into the same interface.
+It adds bounded native camera media, frozen artifacts
+and LeRobot export. Source permissions and contact protections are unchanged.
