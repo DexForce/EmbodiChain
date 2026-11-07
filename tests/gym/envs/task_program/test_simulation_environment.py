@@ -2649,17 +2649,17 @@ def test_closed_service_composition_preserves_none_and_seals_active_configuratio
     base = SimulationTaskProgramRegistration(
         SimulationSceneBinding(registry_id="scene"), _profile_binding()
     )
-    assert "planning_services" not in base.fingerprint_payload
+    assert "planning_services" not in base.fingerprint_payload()
     assert (
-        replace(base, planning_services=None).fingerprint_payload
-        == base.fingerprint_payload
+        replace(base, planning_services=None).fingerprint_payload()
+        == base.fingerprint_payload()
     )
     raw = _declaration()
     merged = _merge_runtime_services({"planning_services": raw}, {})
     cfg = _decode_runtime_services(merged).planning_services
     active = replace(base, planning_services=cfg)
     assert active.fingerprint != base.fingerprint
-    payload = active.fingerprint_payload["planning_services"]
+    payload = active.fingerprint_payload()["planning_services"]
     # This is the complete declared policy, not SDK or callable reconstruction.
     observed = payload["fields"]["observed_curobo"]["fields"]
     assert {
