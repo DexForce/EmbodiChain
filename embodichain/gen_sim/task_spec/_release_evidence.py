@@ -14,13 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Pure snapshot checks for measured release identity and physical receipts."""
+"""Normalized release facts used by normative placement and Pour predicates."""
 
 from __future__ import annotations
-
 from collections.abc import Mapping
-import math
 from typing import Any
+from .canonicalization import canonical_hash
 
 __all__: list[str] = []
 
@@ -34,141 +33,22 @@ def measured_release(
     invocation_id: str,
     num_envs: int,
 ) -> tuple[list[bool], list[bool], Mapping[str, Any], Mapping[str, Any]]:
-    """Recheck a selected invocation's terminal release and boundary held state.
-
-    Inputs are already-owned JSON snapshots. Selection of workflow nodes and
-    role bindings belongs to the caller; invocation/receipt identities are
-    checked here before publishing an observation to TaskSpec.
-    """
-    import torch
-    from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
-
-    runtime = release_runtime
-    identities = runtime["env_ids"]
+    facts = release_runtime["normalized_release"]
     if (
-        not isinstance(identities, list)
-        or any(type(v) is not int for v in identities)
-        or identities != list(range(num_envs))
+        facts.get("normalization_hash")
+        != canonical_hash({k: v for k, v in facts.items() if k != "normalization_hash"})
+        or facts.get("object_id") != object_uid
+        or facts.get("resource_id") != resource
+        or facts.get("invocation_id") != invocation_id
+        or facts.get("env_ids") != list(range(num_envs))
     ):
-        raise ValueError(
-            "Placement release evidence has unsupported environment identity."
-        )
-    result = [False] * num_envs
-    available = [False] * num_envs
-    found = False
-    verified_receipt = verified_call = None
-    for call in runtime.get("calls", []):
+        raise ValueError("Release facts have another declared semantic identity.")
+    for name in ("released", "available"):
+        values = facts[name]
         if (
-            call.get("status") != "completed"
-            or call.get("invocation_id") != invocation_id
+            not isinstance(values, list)
+            or len(values) != num_envs
+            or any(type(x) is not bool for x in values)
         ):
-            continue
-        if (
-            type(call.get("invocation_revision")) is not int
-            or call["invocation_revision"] < 0
-        ):
-            continue
-        for receipt in call.get("effects", []):
-            spec = receipt["effect_spec"]
-            if (
-                receipt.get("boundary", {}).get("kind") != "terminal"
-                or type(receipt.get("timestamp")) not in (int, float)
-                or not math.isfinite(receipt["timestamp"])
-                or receipt["timestamp"] < 0
-                or type(receipt.get("observation_revision")) is not int
-                or receipt["observation_revision"] < 0
-                or spec.get("effect_kind") != "release"
-                or spec.get("invocation_id") != call["invocation_id"]
-                or spec.get("invocation_revision") != call.get("invocation_revision")
-                or spec.get("env_ids") != identities
-            ):
-                continue
-            expectations = [
-                v
-                for v in spec["state_expectations"]
-                if v.get("object_id") == object_uid
-                and v.get("resource_id") == resource
-                and v.get("relation") == "detached"
-            ]
-            if len(expectations) != 1:
-                continue
-            clauses = [
-                v
-                for v in spec["clauses"]
-                if v["expectation_id"] == expectations[0]["expectation_id"]
-            ]
-            constraint = next(
-                (
-                    v
-                    for v in clauses
-                    if v.get("evidence_kind") == "constraint"
-                    and v.get("expected") is False
-                ),
-                None,
-            )
-            pose_clause = next(
-                (v for v in clauses if v.get("expectation") == "separated"), None
-            )
-            if constraint is None or pose_clause is None:
-                continue
-            samples = [
-                receipt["evidence"][v["clause_id"]] for v in (constraint, pose_clause)
-            ]
-            success = receipt["decision"]["success_mask"]
-            if (
-                len(success) != num_envs
-                or any(type(v) is not bool for v in success)
-                or any(
-                    s.get("env_ids") != identities
-                    or s.get("timestamp") != receipt["timestamp"]
-                    or s.get("observation_revision") != receipt["observation_revision"]
-                    or len(s.get("valid_mask", [])) != num_envs
-                    or any(type(v) is not bool for v in s["valid_mask"])
-                    for s in samples
-                )
-                or len(samples[0].get("values", [])) != num_envs
-                or any(type(v) is not bool for v in samples[0]["values"])
-            ):
-                continue
-            relative = torch.tensor(samples[1]["object_to_endpoint"])
-            validate_rigid_pose_batch(relative, num_envs)
-            found = True
-            verified_receipt, verified_call = receipt, call
-            available = [
-                first and second
-                for first, second in zip(
-                    samples[0]["valid_mask"], samples[1]["valid_mask"], strict=True
-                )
-            ]
-            result = [
-                ok and a and b and value is False
-                for ok, a, b, value in zip(
-                    success,
-                    samples[0]["valid_mask"],
-                    samples[1]["valid_mask"],
-                    samples[0]["values"],
-                    strict=True,
-                )
-            ]
-    if not found:
-        raise ValueError("No exact measured terminal release receipt is available.")
-    current = boundary_runtime
-    state = current["task_state"]
-    if (
-        current["env_ids"] != identities
-        or any(type(v) is not int for v in current["env_ids"])
-        or type(state["batch_size"]) is not int
-        or state["batch_size"] != num_envs
-    ):
-        raise ValueError(
-            "Placement held-state evidence has different environment identity."
-        )
-    for held in [*state["held_objects"], *state["coordinated_held_objects"]]:
-        if held["object_id"] != object_uid:
-            continue
-        mask = held["active_mask"]
-        if len(mask) != num_envs or any(type(v) is not bool for v in mask):
-            raise ValueError("Placement held-state mask is invalid.")
-        result = [ok and not active for ok, active in zip(result, mask, strict=True)]
-    assert verified_receipt is not None and verified_call is not None
-    return result, available, verified_receipt, verified_call
+            raise ValueError("Normalized release measurement rows are malformed.")
+    return facts["released"], facts["available"], facts["receipt"], facts["call"]

@@ -353,6 +353,7 @@ class ToppraPlanner(BasePlanner):
             control_part=options.control_part,
             dof=dofs,
             batch_size=b,
+            env_ids=getattr(self, "_planning_env_ids", None),
         )
 
         waypoints_tensor = torch.stack([s.qpos for s in target_states], dim=1).to(
