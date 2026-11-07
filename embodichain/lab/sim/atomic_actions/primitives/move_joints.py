@@ -20,7 +20,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from typing import ClassVar
-from ..articulation_continuation import ArticulationParkPlanningRecovery
+from embodichain.lab.sim.atomic_actions.articulation_continuation import (
+    ArticulationParkPlanningRecovery,
+)
 from embodichain.lab.sim.atomic_actions.released_continuation import (
     ReleasedHandParkRecovery,
 )
