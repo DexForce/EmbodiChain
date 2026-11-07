@@ -491,7 +491,6 @@ path as an unnamed goal. Omitting the field preserves the existing effectless
 ``MoveHeldObject`` behavior. Task Program's routed transport uses named goals
 and additionally selects a verified input-hold guard for its transport segment.
 
-
 Scoped grasp preparation
 ------------------------
 
@@ -532,11 +531,11 @@ poses and metadata stay owned and bound to one preparation scope.
    :members:
 
 ``source_native_contact`` maps the explicitly selected preserved source revision
-to GraspKit's existing typed ``ClosingContactPolicy`` and the requested FCL
-service. Closing, opening and rigid-clearance algorithms remain solely in
+to GraspKit's existing typed ``ClosingContactPolicy`` and the shared Newton collision
+pipeline. Closing, opening and rigid-clearance algorithms remain solely in
 GraspKit. Source builders consume the existing Default/B1 native capture API,
-retain the explicit hand sampling grid and original distances, and never step
-physics or infer a Task Program policy. Missing FCL fails explicitly; this is
+retain the explicit hand sampling grid and original contact thresholds, and never step
+physics or infer a Task Program policy. Missing Newton fails explicitly; this is
 geometric qualification, not physical acquisition/release evidence.
 
 Close each query with its context manager or a ``finally`` block. It releases
@@ -546,6 +545,35 @@ only owned query resources, never borrowed simulation entities. Ordinary
 .. automodule:: embodichain.lab.sim.atomic_actions.source_native_contact
    :members:
 
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Explicit Press planning recovery
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``PressPlanningRecovery`` selects the existing Press skill's failure-only B1
+recovery. Nominal planning and at most one declared contact-roll alternative share
+the original two-complete-plan budget and RNG progression. Failed Cartesian
+phases may retry through the shared unchanged-target, unchanged-time IK resolver.
+The final emitted full-robot trajectory retains velocity qualification after
+resampling and transforms. Missing motion or excessive velocity remains failure.
+Default ``PressOptions`` enables no contact-roll alternatives or recovery.
+
+``validate_press_extra_distance`` accepts only an optional finite addition in
+``[0, 0.010]`` metres. It does not alter the authored stroke or determine physical
+contact, release or task success. Configured recovery accepts only
+``{kind: press_bounded, revision: 1}``; budgets and callbacks cannot be supplied
+through that declaration.
+
+.. autosummary::
+   :nosignatures:
+
+   PressPlanningRecovery
+   validate_press_extra_distance
+
+.. autoclass:: PressPlanningRecovery
+   :members:
+
+.. autofunction:: validate_press_extra_distance
 
 Explicit Pick and Place planning
 --------------------------------
@@ -712,7 +740,6 @@ Numeric downstream-pour operands constrain Pick grasp sampling without exposing 
 .. autoclass:: PourGraspProjectionInputs
    :members:
 
-
 Held transport, Pour, Idle and released-hand plans
 --------------------------------------------------
 
@@ -808,7 +835,6 @@ Released continuation authority
 
 .. autoclass:: ReleasedHandContinuationProvider
    :members:
-
 
 Prismatic articulation and drawer planning
 ------------------------------------------

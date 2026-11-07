@@ -281,7 +281,17 @@ The manager owns the raw field schema, source aliases and acquisition context.
 host rollout writer fills raw fields and temporal metadata directly;
 ``bind_rollout_storage`` grants the manager read access to those tensors.
 ``read_history`` returns owned indexed snapshots and ``snapshot_history`` serves
-the export adapter. There is no history instance, allocation engine or separate
+the export adapter. ``read_history_window`` copies explicit inclusive start/end
+slots per selected environment, preserving their order and individual lengths.
+It returns the same raw fields with validity, acquisition errors, revisions,
+timestamps and timestamp validity; aliases use the existing schema. Values and
+masks are independently owned on the requested device. Invalid samples remain
+invalid, and unrecorded slots or changed episodes/closed owners reject the read.
+This bounded slice performs no physical acquisition and avoids repeated
+single-slot calls. ``read_history_step_counts`` returns qualified completed
+state-slot boundaries only, without copying field values; zero denotes recorded
+initialization. Both APIs check episode and owner lifetime before and after reads.
+There is no history instance, allocation engine or separate
 bind/seed/append API. Evidence adapters bind roles through ``schema``; numeric
 buffer operations perform no entity/quantity lookup.
 

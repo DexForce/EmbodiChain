@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from functools import wraps
+
 from dataclasses import replace
 from copy import deepcopy
 from types import MappingProxyType
@@ -79,6 +82,20 @@ PlanTransform = Callable[
 ]
 
 
+def _profile_planning(method):
+    @wraps(method)
+    def measured(self, *args, **kwargs):
+        profiler = getattr(self, "_profiler", None)
+        with (
+            profiler.section("atomic_planning", is_root=True)
+            if profiler is not None
+            else nullcontext()
+        ):
+            return method(self, *args, **kwargs)
+
+    return measured
+
+
 class AtomicActionEngine:
     """Own planning resources and coordinate side-effect-free atomic actions."""
 
@@ -107,6 +124,8 @@ class AtomicActionEngine:
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
+        env_ids: tuple[int, ...] | None = None,
+        profiler: object | None = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -146,14 +165,20 @@ class AtomicActionEngine:
             scene_provider: Optional default scene-observation source used by
                 :meth:`initial_context` when the caller does not supply an
                 explicit scene snapshot. The provider is borrowed by reference.
+            env_ids: Optional environment subset bound to planning services.
+            profiler: Optional owner-provided profiler exposing ``section``.
+                Planning is recorded under ``atomic_planning`` without taking
+                ownership of the profiler or looking up a simulation World.
         """
         if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
             raise TypeError("scene_provider must implement SceneProvider.")
+        self._profiler = profiler
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
             tracking_runtime=tracking_runtime,
             grasp_pose_generators=grasp_pose_generators,
+            env_ids=env_ids,
             hand_geometry_cfgs=hand_geometry_cfgs,
             free_motion_query=free_motion_query,
             pour_grasp_projection_provider=pour_grasp_projection_provider,
@@ -457,6 +482,7 @@ class AtomicActionEngine:
             )
         return action.resolve_request(invocation)
 
+    @_profile_planning
     def _plan_request(
         self,
         request: ResolvedActionRequest,
@@ -1140,8 +1166,14 @@ class AtomicActionEngine:
             if isinstance(candidate, torch.Tensor):
                 qvel_value = candidate.to(self.device)
         qvel = torch.zeros_like(qpos) if qvel_value is None else qvel_value
+        selection = self._planning_services.env_ids
+        env_ids = (
+            torch.arange(qpos.shape[0], dtype=torch.long, device=self.device)
+            if selection is None
+            else torch.tensor(selection, dtype=torch.long, device=self.device)
+        )
+        qpos, qvel = qpos.index_select(0, env_ids), qvel.index_select(0, env_ids)
         batch_size = int(qpos.shape[0])
-        env_ids = torch.arange(batch_size, dtype=torch.long, device=self.device)
         if task is None:
             task = TaskState.empty(batch_size=batch_size, device=self.device)
         if scene is None:
@@ -1305,7 +1337,13 @@ class AtomicActionEngine:
                 f"got {context.robot.robot_dof} and {self.robot.dof}."
             )
         robot_qpos = self.robot.get_qpos()
-        if context.batch_size != int(robot_qpos.shape[0]):
+        selection = self._planning_services.env_ids
+        expected_count = (
+            int(robot_qpos.shape[0]) if selection is None else len(selection)
+        )
+        if selection is not None and tuple(context.env_ids.tolist()) != selection:
+            raise ValueError("PlanningContext env_ids must match the engine selection")
+        if context.batch_size != expected_count:
             raise ValueError(
                 "PlanningContext batch size must match the engine robot, "
                 f"got {context.batch_size} and {robot_qpos.shape[0]}."

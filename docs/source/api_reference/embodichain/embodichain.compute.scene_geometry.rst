@@ -1,5 +1,6 @@
 Geometry arrays and tensor kernels
 ==================================
+
 ``embodichain.compute.geometry`` provides reusable Torch operations on dense
 float32/float64 tensors. Inputs share dtype and device; outputs stay on that
 CPU or CUDA device. The kernels do not accept entity UIDs, asset paths, mesh
@@ -384,10 +385,6 @@ uses explicit TCP/root geometry to produce the ordered outward translations;
 rejected geometry or bounds remain unavailable proposals. Robot kinematics,
 collision queries and execution policy are outside these numeric operations.
 
-The FK and sampled-path residual helpers preserve their distinct source
-precision and rounding margins. They compare numeric transforms only; solver
-limits and observed Robot state are supplied by the Motion owner.
-
 .. automodule:: embodichain.compute.geometry.pose_checks
    :members:
 
@@ -405,6 +402,43 @@ uses it without importing Lab or acquiring physical state.
 
 .. autofunction:: embodichain.compute.geometry.contact_support.contact_support_heights
 
+Declared alignment targets
+--------------------------
+
+These functions consume already observed numerical poses and object-local axes.
+``alignment_target_axis`` selects an upright vertical direction or the nearest
+vertical pole when direction is free. ``held_alignment_targets`` preserves the
+source heading/lift order, optional explicit destination, and supplied arm-root
+and object-to-end-effector transforms. It returns owned target poses without IK,
+scene queries, collision checks or physical acceptance. Callers own acquisition,
+resource identity and motion/recovery policy.
+
+.. currentmodule:: embodichain.compute.geometry.alignment
+
+.. autosummary::
+
+   alignment_target_axis
+   held_alignment_targets
+
+.. autofunction:: alignment_target_axis
+
+.. autofunction:: held_alignment_targets
+
+Recorded rigid Pour measurements
+--------------------------------
+
+These pure numeric functions measure a recorded rigid tilt/restore window and
+receiver projection. They take explicit source vertices and poses, preserve
+input precision and first-maximum order, and set no acceptance thresholds or
+fluid-transfer conclusions.
+
+.. currentmodule:: embodichain.compute.geometry.pouring
+
+.. autofunction:: measure_pour_tilt
+   :no-index:
+
+.. autofunction:: measure_pour_receiver
+   :no-index:
 
 Drawer proposal and containment arithmetic
 ------------------------------------------
