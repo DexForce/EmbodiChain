@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Discrete FCL clearance of conservative input-mesh solids."""
+"""Discrete native clearance of explicitly declared input convex envelopes."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ import math
 from typing import Any
 import torch
 from embodichain.compute.geometry.mesh_bounds import maximum_halfspace_violation
-from ._collision_backends import _require_fcl
+from ._newton_queries import _ConvexCollection
 
 __all__ = ["convex_input_clearance"]
 
@@ -49,10 +49,14 @@ def convex_input_clearance(
         numerical_allowance_m: Explicit nonnegative numerical allowance in metres.
 
     Returns:
-        Clearance receipt with first rejection, minimum distance and actual
+        Clearance receipt with first rejection, a minimum-distance lower bound and actual
         checked-frame count. Convex solids reject full containment, unlike
         triangle-surface distance alone. This is an input-envelope query, not
         a native-cooked, continuous-collision or physical-contact certificate.
+        Newton reports a bounded distance interval; a query whose precision
+        cannot decide the unchanged clearance plus numerical allowance raises
+        as unavailable. The allowance is a consumer input, never a backend
+        tolerance chosen to force a decision.
     """
     if (
         not math.isfinite(clearance_m)
@@ -76,8 +80,6 @@ def convex_input_clearance(
         raise ValueError(
             "Input convex clearance requires B1 poses and ordered valid frame indices."
         )
-    _require_fcl()
-    import fcl
     import numpy as np
     import trimesh
 
@@ -98,8 +100,7 @@ def convex_input_clearance(
         offsets = np.einsum("ij,ij->i", hull.face_normals, hull.triangles[:, 0])
         if maximum_halfspace_violation(points, hull.face_normals, offsets) > 1e-8:
             raise ValueError("Convex cover does not contain every source vertex.")
-        faces = np.column_stack((np.full(len(hull.faces), 3), hull.faces)).ravel()
-        return fcl.Convex(hull.vertices, len(hull.faces), faces)
+        return hull
 
     def transform(pose: torch.Tensor) -> Any:
         pose = pose.detach().cpu().double().numpy()
@@ -111,33 +112,51 @@ def convex_input_clearance(
             or not np.isclose(np.linalg.det(pose[:3, :3]), 1.0, atol=2e-5)
         ):
             raise ValueError("Convex clearance requires rigid observed poses.")
-        return fcl.Transform(pose[:3, :3], pose[:3, 3])
+        return pose
 
-    payload = solid(vertices)
-    obstacle = fcl.CollisionObject(solid(other_vertices), transform(other_pose[0]))
+    # This public API explicitly declares a convex envelope over each input
+    # point cloud. The hull is that declared query object, never a substitute
+    # for a native physical mesh used by the hand/rest scene adapters.
+    payload, obstacle_solid = solid(vertices), solid(other_vertices)
+    obstacle_pose = transform(other_pose[0])
     result: dict[str, Any] = {
         "valid": True,
         "scope": "discrete_source_convex_solids_not_native_contact",
         "required_clearance_m": clearance_m,
         "numerical_allowance_m": numerical_allowance_m,
         "minimum_distance_m": None,
+        "reported_distance_semantics": "conservative_clearance_lower_bound",
         "checked_frames": 0,
+        **_ConvexCollection.metadata(),
+        "geometry_representation": "declared_input_convex_envelope",
     }
-    for frame in frames.tolist():
-        moving = fcl.CollisionObject(payload, transform(poses[0, frame]))
-        # Convex solids, unlike triangle soups, also reject complete containment.
-        distance = (
-            0.0
-            if fcl.collide(moving, obstacle)
-            else float(fcl.distance(moving, obstacle))
-        )
-        if not math.isfinite(distance):
-            raise ValueError("Convex solid distance is unavailable.")
-        previous = result["minimum_distance_m"]
-        result["minimum_distance_m"] = (
-            distance if previous is None else min(previous, distance)
-        )
-        result["checked_frames"] += 1
-        if distance <= clearance_m + numerical_allowance_m:
-            return {**result, "valid": False, "frame": frame}
-    return result
+    moving = _ConvexCollection()
+    obstacle = None
+    try:
+        obstacle = _ConvexCollection()
+        moving.add_object("moving", payload)
+        obstacle.add_object("obstacle", obstacle_solid, transform=obstacle_pose)
+        for frame in frames.tolist():
+            moving.set_transform("moving", transform(poses[0, frame]))
+            interval = moving.contact_query(
+                obstacle, clearance_m + numerical_allowance_m
+            )
+            rejected = interval.below(clearance_m + numerical_allowance_m)
+            distance = interval.lower
+            previous = result["minimum_distance_m"]
+            result["minimum_distance_m"] = (
+                distance if previous is None else min(previous, distance)
+            )
+            result["last_distance_interval_m"] = [
+                interval.lower,
+                interval.upper if math.isfinite(interval.upper) else None,
+            ]
+            result["native_contact_result"] = interval.metadata()
+            result["checked_frames"] += 1
+            if rejected:
+                return {**result, "valid": False, "frame": frame}
+        return result
+    finally:
+        moving.close()
+        if obstacle is not None:
+            obstacle.close()

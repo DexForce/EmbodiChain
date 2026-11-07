@@ -41,9 +41,9 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from motion._mesh_collision_fixture import mesh_query_fixture
 
-_requires_fcl = pytest.mark.skipif(
-    importlib.util.find_spec("fcl") is None,
-    reason="actual FCL comparisons require planning-geometry; skipped coverage is unqualified",
+_requires_newton = pytest.mark.skipif(
+    importlib.util.find_spec("newton") is None,
+    reason="actual collision queries require Newton; skipped coverage is unqualified",
 )
 _IDLE_REFERENCE = json.loads(
     (Path(__file__).parent / "data/idle_motion_source_reference.json").read_text()
@@ -85,7 +85,7 @@ def _idle_invocation(engine, target, *, qualify=True):
 @pytest.mark.parametrize(
     "case", _IDLE_REFERENCE["cases"], ids=lambda case: case["name"]
 )
-@_requires_fcl
+@_requires_newton
 def test_builtin_move_joints_matches_source_engine_and_real_motion_query(case):
     engine = _idle_engine()
     context = engine.initial_context(control_dt=0.04)
@@ -134,7 +134,7 @@ def test_idle_free_motion_rejects_an_already_held_resource():
     assert all(not frame.active_mask.any() for frame in failed.commands.frames)
 
 
-@_requires_fcl
+@_requires_newton
 def test_transformed_idle_path_is_rechecked_and_masked_before_dispatch():
     engine = _idle_engine()
     context = engine.initial_context(control_dt=0.04)
@@ -162,7 +162,7 @@ def test_transformed_idle_path_is_rechecked_and_masked_before_dispatch():
     assert all(not frame.active_mask.any() for frame in plan.commands.frames)
 
 
-@_requires_fcl
+@_requires_newton
 def test_relative_idle_goal_keeps_bound_joints_and_authored_limits():
     engine = _idle_engine()
     context = engine.initial_context(control_dt=0.04)

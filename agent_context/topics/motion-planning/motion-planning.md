@@ -64,6 +64,15 @@ capped intervals under the query precision policy. A threshold inside an interva
 remains unavailable, never a fabricated contact or free path. CPU comparisons
 remain separate from GPU and physical-task qualification.
 
+`mesh_collision` owns an isolated native Newton mesh query for each captured
+URDF/world scope. It retains authored triangles, calibrated FK, structural pair
+exclusions and scene/other-arm/self rejection priority. It uses one public
+`contact_pairs` call per sample, never FCL or a convex hull substituted for an
+unsupported mesh. Complete free-motion queries release their temporary models;
+robot/articulation snapshots and nested robot scopes close owned models at scope
+exit. Reports name the backend; unavailable precision or native-buffer capacity
+does not become a clear path.
+
 `ik_branches.CpuIKBranchSearch` owns the explicit B1 CPU endpoint/continuation
 search, with fixed seed order, separated branch selection and original residual
 rules. `capture` reads the configured root once; a supplied-root constructor

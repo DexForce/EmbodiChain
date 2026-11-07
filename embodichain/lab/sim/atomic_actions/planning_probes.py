@@ -255,7 +255,7 @@ class PickRigidSceneProvider(PickClosingQueryProvider, Protocol):
         Returns:
             The exact owned scene attached to query.rigid_scene_screen. Capture
             stays lazy, after input-mesh precontact checks pass. Closing the
-            query releases owned FCL resources, never borrowed native entities.
+            query releases owned native query resources, never borrowed entities.
         """
         ...
 

@@ -52,7 +52,7 @@ class HandOverEnvironmentScreen:
     """Validate Atomic identity/commands and screen its original receive pool.
 
     The caller owns the Scene query lifetime. Scene owns native capture, named
-    link FK and FCL buffers; this adapter owns command/phase and pool identity.
+    link FK and native query buffers; this adapter owns command/phase and pool identity.
     """
 
     def __init__(
@@ -412,7 +412,7 @@ class HandOverEnvironmentScreen:
             "clearance_policy": "sum_of_unchanged_native_contact_offsets",
             "planning_timestamp": self.context.robot.timestamp,
             "minimum_checked_distance_m": None,
-            "fcl_queries": 0,
+            "native_queries": 0,
             "plane_queries": 0,
             "minimum_plane_signed_distance_m": None,
         }

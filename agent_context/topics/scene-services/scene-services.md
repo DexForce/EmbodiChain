@@ -90,8 +90,9 @@ belongs to [GraspKit](../motion-planning/motion-planning.md); query composition 
 cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
 Captured shapes and nominal queries do not establish physical acquisition/release.
 
-`native_hand_scene.py` and `native_motion_scene.py` expose opt-in FCL queries
-on the same physical observation. Hand capture retains collision-only links,
+`native_hand_scene.py` and `native_motion_scene.py` use shared Newton collision
+queries on the same physical observation. Captured physical meshes retain their
+triangle topology rather than being converted to convex proxies. Hand capture retains collision-only links,
 planes and native contact/rest offsets; motion capture retains ordered rigid and
 articulation obstacles, arm parts and named-joint FK. Both preserve the original
 Default/B1/env0 coverage and reject stale or replaced owners rather than refresh.
@@ -100,6 +101,17 @@ discrete geometric checks, not continuous-path or physical-effect evidence.
 `convex_clearance.py` checks conservative input-mesh solids at explicit frame
 indices, preserving order and first rejection; it also catches full containment.
 It takes explicit margins and never substitutes for a native contact witness.
+Its vertex API declares an input convex envelope, so hull construction belongs
+to that explicit representation; it is not used for native hand/rest meshes.
+Queries preserve the original comparison thresholds. Unsupported native routes,
+contact-buffer exhaustion and unresolved precision remain unavailable; neither
+an alternate backend nor a numerical allowance is chosen to force acceptance.
+Distance scalars in these receipts are conservative lower bounds with interval
+metadata. Float64 broadphase separation is not a native precision certificate;
+near-threshold queries must reach the shared native comparison. Far-pair culling
+uses only the shared canonical conversion lower bound, strictly above the original
+threshold; zero or unavailable bounds are never clearance. Native and culled-pair
+counts are reported independently.
 
 Drawer source adapters follow enabled fixed-joint descendants of the selected
 prismatic body, independently of USD parent paths. Structural meshes exclude the
