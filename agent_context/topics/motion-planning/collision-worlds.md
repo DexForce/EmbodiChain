@@ -136,7 +136,7 @@ covers the backend integration. Registry/provider contracts are exercised under
 `tests/lab/task_program/semantics/`. Include logical-ID/compound-shape and
 shared/per-env cases when changing geometry or dynamic binding.
 
-## Explicit B1 source-compatible query scopes
+## Explicit B1 native query scopes
 
 `ObservedCuroboQueryFactory` owns one fresh static-world backend and verifies the
 explicit generated-URDF root identity. Its geometry reader keeps the complete
@@ -149,5 +149,8 @@ The existing batched no-payload snapshot path remains separate and unchanged.
 scopes. Precontact reports explicitly identify their excluded rigid owner.
 `robot_collision_query_scope` reuses only the exact current robot/model identity
 and restores nested scopes. These APIs retain B1 limits and source pair order.
-The optional `planning-geometry` extra supplies qualified FCL; unavailable FCL
-raises before robot/scene reads and does not select another backend.
+These queries use the shared isolated Newton collision pipeline with explicit
+triangle-surface representations for authored meshes. Native geometry support
+and precision evidence remain part of the result: unsupported or indeterminate
+queries are unavailable, with the declared thresholds and offsets unchanged.
+Native runtime availability is required; these APIs select no fallback backend.
