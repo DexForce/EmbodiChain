@@ -26,30 +26,30 @@ Newton-native solver details, use the
 | Cable | Unsupported in the current version |
 
 Use DexUni for tasks in which Articulated Objects manipulate cloth, garments,
-cushions, or other supported deformable assets. If a scene has only deformables
-or only rigid bodies, let AutoSolver select the simpler matching solver unless
-the task needs an explicit choice.
+cushions, or other supported deformable assets. The same default configuration
+also handles rigid-only and deformable-only scenes through its internal
+scene-based MuJoCo/VBD dispatch.
 
 The current version does not support fluid or cable simulation.
 
 ## Minimal configuration
 
-AutoSolver selects DexUni when the complete scene contains both an articulation
-and a supported deformable. To keep the choice explicit:
+`NewtonPhysicsCfg()` retains the native DexUni defaults: automatic ownership
+selection and `contact_mode="auto"`. To keep the policy explicit:
 
 ```python
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 
 physics_cfg = NewtonPhysicsCfg(
     device="cuda:0",
-    solver_cfg={"solver_type": "dexuni"},
+    solver_cfg={"solver_type": "dexuni", "contact_mode": "auto"},
     collision_cfg=None,
 )
 ```
 
 Add all Articulated Objects and deformables before
-{meth}`SimulationManager.prepare`. DexUni requires GPU execution and
-`requires_grad=False`. Set `collision_cfg=None` because this solver owns the
+{meth}`SimulationManager.prepare`. Deformable scenes require CUDA execution and
+`requires_grad=False`. Set `collision_cfg=None` because DexUni owns the
 robot/deformable contact path it uses.
 
 For prescribed motion, register the complete joint trajectory before
@@ -68,16 +68,20 @@ public joint order.
 ## Current limitations
 
 ```{warning}
-The current DexUni path does not solve or publish rigid-rigid or rigid-ground
-contacts. `ContactSensor` is therefore unsupported on this path.
+Rigid-contact quantities depend on DexUni's selected path. Pure MuJoCo can
+publish measured impulses on CUDA; VBD-owned rows can provide geometry only,
+and mixed reports can contain both. Honor `is_valid`, `impulse_valid` and
+`friction_valid` per row. CPU MuJoCo force-reporting paths do not support
+`ContactSensor`.
 ```
 
-Full capability coverage, including fluid, cable, and the rigid-contact
-limitations above, will be completed in the next release.
+Fluid and cable asset APIs are not exposed by this EmbodiChain integration.
 
 Qualify any task that mixes deformables with loose rigid objects against its
 required contact pairs. See {doc}`runtime_qualification` for the complete
-solver/device matrix and validation workflow.
+solver/device matrix and validation workflow. The outer solver type remains
+`"dexuni"`; use `sim.spawn_result.get_solver_diagnostics()` after preparation
+to inspect native dispatch.
 
 ## Examples and further reading
 

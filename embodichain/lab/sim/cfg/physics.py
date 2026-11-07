@@ -375,10 +375,12 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     ``solver_type`` or ``class_type`` to select the solver, then add any
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
     preserves DexSim's ``DexUniSolverCfg`` default and its scene-based dispatch.
+    Unset ownership selectors retain automatic scene partitioning;
+    ``contact_mode='auto'`` independently selects the native contact path.
     For ``solver_type='dexuni'``, the current DexSim contract keeps expert
     options under ``vbd_options``, ``mujoco_options`` and
-    ``collision_options``; use ``joint_mode`` and ``contact_mode`` for the
-    coupled dispatch policy. ``coupling='two_way'`` enables contact reactions
+    ``collision_options``. ``joint_mode`` controls joint integration.
+    ``coupling='two_way'`` enables contact reactions
     on dynamically integrated articulations. Optional ``coupling_options``
     accepts ``mass_scale``, ``proxy_relaxation`` and ``iterations``. Two-way
     coupling requires ``joint_mode='dynamic'``. Current DexSim supports

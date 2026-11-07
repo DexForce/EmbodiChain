@@ -472,12 +472,11 @@ def test_newton_physics_cfg_preserves_automatic_dexuni_defaults(solver_mapping) 
 @pytest.mark.parametrize(
     "solver_mapping",
     [
-        {"solver_type": "auto"},
-        {"class_type": "AutoSolverCfg"},
-        {"solver_type": "auto_solver"},
+        {"solver_type": "unknown_solver"},
+        {"class_type": "UnknownSolverCfg"},
     ],
 )
-def test_newton_physics_cfg_rejects_removed_auto_solver_names(solver_mapping) -> None:
+def test_newton_physics_cfg_rejects_unknown_solver_names(solver_mapping) -> None:
     with pytest.raises(RuntimeError, match="Unsupported Newton solver type"):
         NewtonPhysicsCfg(solver_cfg=solver_mapping).to_dexsim_cfg(gpu_id=0)
 
@@ -508,6 +507,7 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
         solver_cfg={
             config_key: solver_name,
             "joint_mode": "kinematic",
+            "contact_mode": "auto",
             "vbd_options": {"iterations": 12},
         }
     )
@@ -517,6 +517,8 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
     assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
     assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
     assert dexsim_cfg.solver_cfg.joint_mode == "kinematic"
+    assert dexsim_cfg.solver_cfg.contact_mode == "auto"
+    assert dexsim_cfg.solver_cfg.mujoco_articulations is None
     assert dexsim_cfg.solver_cfg.vbd_options["iterations"] == 12
 
 

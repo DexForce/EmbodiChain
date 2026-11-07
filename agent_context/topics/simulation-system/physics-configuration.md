@@ -21,7 +21,8 @@ device, not a separate environment tensor device.
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
 
-Newton `solver_cfg=None` preserves DexSim's `DexUniSolverCfg` default.
+Newton `solver_cfg=None` or an empty mapping preserves DexSim's `DexUniSolverCfg`
+defaults. Unset ownership selectors retain native scene-based selection.
 DexUni owns scene-based partitioning between MuJoCo, VBD and supported particle
 paths; `NewtonPhysicsBackend.solver_type` remains `dexuni`. Explicit solver
 selection uses `dexuni`; `contact_mode="auto"` remains DexUni's native
