@@ -5339,9 +5339,9 @@
         {
           "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "ingest_one_asset",
-          "start_line": 178,
-          "end_line": 178,
-          "excerpt": "    manager.parse(asset, asset_root)"
+          "start_line": 186,
+          "end_line": 186,
+          "excerpt": "    manager.parse(asset, asset_root, services=services)"
         }
       ]
     },
