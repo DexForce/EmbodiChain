@@ -79,6 +79,13 @@ surface route with the supplied faces, without hull conversion or a solid
 containment certificate. Native midphase and contact buffers are bounded and
 checked for overflow.
 
+The shared mesh-group adapter can cull a far pair using a frozen AABB separation
+lower bound after the same geometry/pose conversion allowance. It allocates no
+native model and does not collide. Only a lower bound strictly above the original
+threshold may skip the native predicate; a zero or unavailable bound cannot
+decide contact. Unsafe coordinates and unsupported shape/precision budgets do
+not become clear broad-phase results.
+
 CPU is the default query device. ``collision_device`` selects CPU/CUDA,
 independently of the environment-owned physical backend and proposal device;
 ``collision_use_cuda_graph`` controls CUDA replay. Reported clearance is a
