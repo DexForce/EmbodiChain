@@ -233,6 +233,164 @@ def _integration_payload(task_name: str) -> dict[str, object]:
     )
 
 
+@pytest.mark.parametrize("revision", [1, 2])
+def test_configured_native_grip_is_closed_owned_and_fingerprinted(
+    monkeypatch: pytest.MonkeyPatch, revision: int
+) -> None:
+    """Configuration selects the public native factory without acquiring evidence."""
+    from embodichain.lab.task_program.integrations.simulation.grip_evidence import (
+        NativeGripEvidenceFactory,
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Decoding must not create a native evidence provider")
+
+    monkeypatch.setattr(NativeGripEvidenceFactory, "create", forbidden)
+    original = _integration_payload("rubiks_cube_pick_place")
+    assert (
+        _decode_configured_task_program_integration(
+            original
+        ).registration.control_part_evidence_factory
+        is None
+    )
+    declaration = {
+        "kind": "native_grip",
+        "sensor_uid": "configured_contacts",
+        "object_bindings": [["rubiks_cube", "rubiks_cube"]],
+        "pad_bindings": [["eef", ["first_pad", "second_pad"]]],
+    }
+    if revision == 2:
+        declaration.update(
+            algorithm_revision=2,
+            opening_bindings=[
+                {
+                    "control_part": "eef",
+                    "joint_names": ["driving_joint", "compliant_joint"],
+                    "driver_indices": [0],
+                    "open_qpos": [0.0, 0.0],
+                    "tolerance": 0.01,
+                }
+            ],
+        )
+    payload = deepcopy(original)
+    payload.setdefault("runtime_services", {})["control_part_evidence"] = declaration
+    configured = _decode_configured_task_program_integration(payload)
+    factory = configured.registration.control_part_evidence_factory
+    assert type(factory) is NativeGripEvidenceFactory
+    assert factory.object_bindings == (("rubiks_cube", "rubiks_cube"),)
+    assert factory.pad_bindings == (("eef", ("first_pad", "second_pad")),)
+    assert factory.algorithm_revision == revision
+    assert factory.max_contacts_per_env == 1024 and factory.trace_capacity == 4096
+    assert len(factory.opening_bindings) == (1 if revision == 2 else 0)
+    if revision == 2:
+        assert factory.opening_bindings[0].driver_indices == (0,)
+        assert factory.opening_bindings[0].joint_names == (
+            "driving_joint",
+            "compliant_joint",
+        )
+    before = configured.registration.fingerprint_payload()
+    changed = deepcopy(payload)
+    changed["runtime_services"]["control_part_evidence"]["max_contacts_per_env"] = 1025
+    assert _decode_configured_task_program_integration(
+        changed
+    ).integration_fingerprint != (configured.integration_fingerprint)
+    invalid = deepcopy(payload)
+    invalid["runtime_services"]["control_part_evidence"]["private_observer"] = "hidden"
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _decode_configured_task_program_integration(invalid)
+    invalid = deepcopy(payload)
+    invalid["runtime_services"]["control_part_evidence"]["object_bindings"] = [
+        ["rubiks_cube"]
+    ]
+    with pytest.raises(ValueError, match="identity/UID pair"):
+        _decode_configured_task_program_integration(invalid)
+    if revision == 2:
+        invalid = deepcopy(payload)
+        invalid["runtime_services"]["control_part_evidence"].pop("opening_bindings")
+        with pytest.raises(ValueError, match="opening bindings"):
+            _decode_configured_task_program_integration(invalid)
+        invalid = deepcopy(payload)
+        invalid["runtime_services"]["control_part_evidence"]["opening_bindings"][0][
+            "guessed_driver"
+        ] = True
+        with pytest.raises(ValueError, match="unsupported fields"):
+            _decode_configured_task_program_integration(invalid)
+    declaration["object_bindings"][0][1] = "changed_after_decode"
+    declaration["pad_bindings"][0][1][0] = "changed_after_decode"
+    assert configured.registration.fingerprint_payload() == before
+
+    joint = deepcopy(original)
+    joint.setdefault("runtime_services", {})["control_part_evidence"] = {
+        "kind": "joint_position_constraint",
+        "control_parts": ["eef"],
+        "open_qpos": [0.0],
+        "minimum_displacement": 0.01,
+    }
+    joint_factory = _decode_configured_task_program_integration(
+        joint
+    ).registration.control_part_evidence_factory
+    assert joint_factory.control_parts == ("eef",)
+    assert joint_factory.open_qpos == (0.0,)
+    assert joint_factory.minimum_displacement == 0.01
+
+
+def test_configured_release_gate_evidence_defaults_and_active_identity() -> None:
+    """The default keeps the full declaration; an explicit verified choice is sealed."""
+    from embodichain.lab.task_program.semantics import ReleaseGateEvidence
+
+    payload = _integration_payload("hand_over")
+    omitted = _decode_configured_task_program_integration(payload)
+    explicit = deepcopy(payload)
+    explicit["robot_profile"]["presets"][0][
+        "release_gate_evidence"
+    ] = "terminal_clauses"
+    default = _decode_configured_task_program_integration(explicit)
+    assert default.registration.fingerprint_payload() == (
+        omitted.registration.fingerprint_payload()
+    )
+    assert default.integration_fingerprint == omitted.integration_fingerprint
+    active = deepcopy(payload)
+    active["robot_profile"]["presets"][0]["release_gate_evidence"] = "non_pose_clauses"
+    selected = _decode_configured_task_program_integration(active)
+    assert (
+        selected.registration.robot_profile_binding.presets[0].release_gate_evidence
+        is ReleaseGateEvidence.NON_POSE_CLAUSES
+    )
+    assert selected.integration_fingerprint != omitted.integration_fingerprint
+    invalid = deepcopy(active)
+    invalid["robot_profile"]["presets"][0]["release_gate_evidence"] = "unknown"
+    with pytest.raises(ValueError, match="release_gate_evidence"):
+        _decode_configured_task_program_integration(invalid)
+    projected = _integration_payload("rubiks_cube_pick_place")
+    projected["robot_profile"]["presets"][0][
+        "release_gate_evidence"
+    ] = "non_pose_clauses"
+    with pytest.raises(ValueError, match="verified assurance"):
+        _decode_configured_task_program_integration(projected)
+
+    # The component-owned scalar must reach the same typed preset through the
+    # public deployment composition path, rather than only the payload decoder.
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    physical = _physical_components(path, config)
+    references = deepcopy(physical.config["task_program"])
+    _, _, policy = _resolve_task_program_components(references, base_dir=path.parent)
+    policy["release_gate_evidence"] = "non_pose_clauses"
+    references["execution_policy"] = {"inline": policy}
+    deployment = load_configured_task_program_deployment(
+        task_program=references,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    assert (
+        deployment.integration.registration.robot_profile_binding.presets[
+            0
+        ].release_gate_evidence
+        is ReleaseGateEvidence.NON_POSE_CLAUSES
+    )
+    deployment.load_program()
+
+
 def _deployment_from_path(path: Path) -> ConfiguredTaskProgramDeployment:
     """Return one fully composed production deployment."""
     config = load_config(path)

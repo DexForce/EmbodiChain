@@ -1996,6 +1996,18 @@ bindings and control-part/pad-link declarations. NativeGripEvidenceFactory uses
 the public control-part provider injection API and preserves its provider ID and
 revision. Each provider owns its observer and bounded raw-query trace.
 
+Configured deployments select this factory with
+``runtime_services.control_part_evidence.kind: native_grip``. The closed
+declaration requires ``sensor_uid``, ``object_bindings`` pairs of semantic and
+native object IDs, and ``pad_bindings`` pairs of control parts and two exact pad
+links. Optional ``algorithm_revision``, ``opening_bindings``,
+``max_contacts_per_env`` and ``trace_capacity`` retain the configuration defaults
+when omitted. Each opening binding declares ``control_part``, ``joint_names``,
+``driver_indices``, ``open_qpos`` and ``tolerance``; revision 2 requires this
+calibration for every declared hand. One skill profile or task integration owns
+the provider. Existing ``joint_position_constraint`` declarations keep their
+original behavior. Decoding creates no sensors or live evidence provider.
+
 ``capture_grip_observation`` performs one requested bilateral observation and
 returns an owned batch plus the exact query snapshot. The standard simulation
 factory forwards this capability through its lifetime and explicit runtime-scope
@@ -3407,6 +3419,7 @@ embodichain.lab.task_program.semantics.profiles
    EffectAssurance
    EndpointResolution
    ProfileValidationError
+   ReleaseGateEvidence
    ResourceEndpoint
    ResourceEndpointAdapter
    ResolvedRobotResource

@@ -89,7 +89,10 @@ from embodichain.lab.task_program.semantics.integration import (
     SemanticDiagnostic,
     SemanticValidationError,
 )
-from embodichain.lab.task_program.semantics.profiles import EffectAssurance
+from embodichain.lab.task_program.semantics.profiles import (
+    EffectAssurance,
+    ReleaseGateEvidence,
+)
 from embodichain.lab.task_program.semantics.scene import (
     ContainerAffordance,
     PLACEMENT_TARGET_AFFORDANCE_REVISION,
@@ -2342,6 +2345,7 @@ class SemanticCallCompiler:
                 effect_spec,
                 expectation_id=expectation_id,
                 relation=relation,
+                release_gate_evidence=analyzed.bound.preset.release_gate_evidence,
             )
             try:
                 monitor = self._effect_monitor_registry.create(
@@ -2371,6 +2375,7 @@ class SemanticCallCompiler:
         *,
         expectation_id: str,
         relation: HeldObjectRelation,
+        release_gate_evidence: ReleaseGateEvidence = ReleaseGateEvidence.TERMINAL_CLAUSES,
     ) -> SemanticEffectSpec:
         """Project one terminal held relation into an independent gate spec."""
         expectation = terminal_spec.state_expectation(expectation_id)
@@ -2393,6 +2398,17 @@ class SemanticCallCompiler:
             for clause in terminal_spec.clauses
             if clause.expectation_id == expectation_id
         )
+        if (
+            relation is HeldObjectRelation.DETACHED
+            and release_gate_evidence is ReleaseGateEvidence.NON_POSE_CLAUSES
+        ):
+            # Retraction creates separation after this boundary. Preserve every
+            # other evidence clause here and the complete terminal spec later.
+            clauses = tuple(
+                clause
+                for clause in clauses
+                if not isinstance(clause, PoseRelationClause)
+            )
         if not clauses:
             raise ValueError(
                 f"Held-object expectation {expectation_id!r} has no physical clauses."

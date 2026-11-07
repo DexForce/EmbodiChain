@@ -95,6 +95,15 @@ registration fingerprint; ``to_condition_dict()`` keeps only normative values.
 Support conditions include an explicit sensor UID/capacity declaration. The
 scene binding supplies native pair UIDs, and the full definition is fingerprinted.
 
+`runtime_services.control_part_evidence` has exactly one owner: the embodiment
+skill profile or task integration. Its closed `native_grip` form decodes explicit
+sensor, semantic/native object and control-part/pad bindings into the existing
+`NativeGripEvidenceCfg` and `NativeGripEvidenceFactory`; it neither infers hand
+geometry nor constructs sensors during configuration. Optional opening bindings
+use the robot/profile owner's full joint order and driver calibration. The
+existing `joint_position_constraint` form remains unchanged. Physical sampling
+and revision semantics belong to the [execution boundary](execution.md#effect-assurance-and-acceptance).
+
 Configured environments use runnable `task.<embodiment>.yaml` deployments with
 three typed selections: `environment.component`,
 `task_program.{program,integration,execution_policy}`, and
@@ -149,6 +158,13 @@ assurance remain component-owned. Paths in either form resolve from the runnable
 deployment. Reuse the base policy and declare tuning in the selector instead of
 copying a policy for each robot or sampling rate; the supported fields and
 example are in the [task package usage](../../../extensions/embodichain_tasks/README.md).
+
+The execution-policy component may set `release_gate_evidence`; configured skill
+presets accept the same closed scalar. Omission selects `terminal_clauses`.
+Explicit `non_pose_clauses` is a verified-execution choice described at the
+[effect boundary](execution.md#effect-assurance-and-acceptance), not a motion or
+tracking override. The typed default is omitted from catalog canonical data to
+preserve existing fingerprints; an active non-default choice is sealed.
 
 Configured `motion` policies accept optional finite, strictly positive
 `velocity_limit` and `acceleration_limit` values. Configured Pour action options

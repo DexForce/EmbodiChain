@@ -12,8 +12,9 @@ embodichain.lab.task_program.semantics
       ResourceEndpointAdapter, EndpointResolution, ControlPartEndpoint,
       ControlPartEndpointAdapter, ResourceBinding, ResolvedResourceEndpoint,
       ResolvedRobotResource, ResolvedSkillBinding, ResourceClaim, SkillPolicyPreset,
-      EffectAssurance, ProfileValidationError, UnsupportedSkillError,
-      AmbiguousSkillBindingError, SemanticEffectSpec, EffectMonitorRef, EffectMonitor,
+      EffectAssurance, ReleaseGateEvidence, ProfileValidationError,
+      UnsupportedSkillError, AmbiguousSkillBindingError, SemanticEffectSpec,
+      EffectMonitorRef, EffectMonitor,
       EffectEvidenceCollector, SceneRegistry, RegistrySceneProvider,
       SceneEntityRegistration, SceneEntityMetadata, SceneEntityStateProvider,
       SceneGeometryProvider, SceneEntityRef, SceneObjectRef, SceneArticulationRef,
@@ -99,6 +100,7 @@ embodichain.lab.task_program.semantics
       ResourceClaim
       SkillPolicyPreset
       EffectAssurance
+      ReleaseGateEvidence
       ProfileValidationError
       UnsupportedSkillError
       AmbiguousSkillBindingError
@@ -208,6 +210,16 @@ Robot resources and profiles
 
 .. autoclass:: EffectAssurance
    :members:
+
+.. autoclass:: ReleaseGateEvidence
+   :members:
+
+``SkillPolicyPreset.release_gate_evidence`` defaults to ``terminal_clauses``.
+Explicit ``non_pose_clauses`` removes only ``PoseRelationClause`` values from
+an existing detached phase gate, retaining binary and scalar clauses. Attached
+gates and the complete terminal effect remain unchanged; the selection creates
+no new gate and changes no monitor threshold or timing. A projected preset
+cannot request the non-default selection.
 
 Profile errors
 --------------

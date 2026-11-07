@@ -58,6 +58,7 @@ from embodichain.lab.task_program.semantics import (
     BoundRobotSkillProfile,
     EffectEvidenceProvider,
     Place,
+    ReleaseGateEvidence,
     RobotSkillProfile,
     RegisteredSemanticCall,
     ResourceEndpoint,
@@ -70,6 +71,7 @@ from embodichain.lab.task_program.semantics import (
     SceneRegistry,
     SemanticCallCatalog,
     SemanticIntegrationManifest,
+    SkillPolicyPreset,
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.task_program.compiler.lowering import (
@@ -222,6 +224,11 @@ def _canonical_value(value: object) -> object:
             metadata.pop("final_velocity_rejection")
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
+        if (
+            type(value) is SkillPolicyPreset
+            and value.release_gate_evidence is ReleaseGateEvidence.TERMINAL_CLAUSES
+        ):
+            metadata.pop("release_gate_evidence")
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "

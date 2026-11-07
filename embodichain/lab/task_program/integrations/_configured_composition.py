@@ -343,7 +343,9 @@ def _resolve_execution_policy(
                     "effect_assurance",
                 }
             ),
-            optional=frozenset({"required_planner", "planner"}),
+            optional=frozenset(
+                {"required_planner", "planner", "release_gate_evidence"}
+            ),
         )
     )
     _identifier(policy["policy_id"], path="execution policy.policy_id")
@@ -563,6 +565,8 @@ def _compose_integration_payload(
         "effect_assurance": deepcopy(policy["effect_assurance"]),
         "effect_monitors": deepcopy(profile["effect_monitors"]),
     }
+    if "release_gate_evidence" in policy:
+        preset["release_gate_evidence"] = deepcopy(policy["release_gate_evidence"])
     if "planner" in policy:
         preset["required_planner"] = deepcopy(policy["planner"]["type"])
     elif "required_planner" in policy:

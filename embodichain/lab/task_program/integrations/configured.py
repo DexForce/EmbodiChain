@@ -114,6 +114,7 @@ from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
 from embodichain.lab.task_program.semantics import (
     EffectAssurance,
     EffectMonitorRef,
+    ReleaseGateEvidence,
     RegisteredSemanticCall,
     SceneCollisionRole,
     SceneCollisionWorldMode,
@@ -130,6 +131,7 @@ from embodichain.toolkits.graspkit import (
 
 if TYPE_CHECKING:
     from .environment import TaskProgramEnvironmentAdapter
+    from .simulation.grip_evidence import NativeGripEvidenceFactory
 
 __all__: list[str] = []
 
@@ -2019,7 +2021,7 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
                 "effect_monitors",
             }
         ),
-        optional=frozenset({"required_planner"}),
+        optional=frozenset({"required_planner", "release_gate_evidence"}),
     )
     action_options_value = config["action_options"]
     if not isinstance(action_options_value, Mapping):
@@ -2055,6 +2057,13 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
             config["effect_assurance"],
             EffectAssurance,
             path=f"{path}.effect_assurance",
+        ),
+        release_gate_evidence=_enum(
+            config.get(
+                "release_gate_evidence", ReleaseGateEvidence.TERMINAL_CLAUSES.value
+            ),
+            ReleaseGateEvidence,
+            path=f"{path}.release_gate_evidence",
         ),
         motion_policy=motion_policy,
         tracking_policy=_decode_tracking_policy(
@@ -2791,8 +2800,138 @@ def _decode_control_part_evidence(
     value: object,
     *,
     path: str,
-) -> _JointPositionConstraintEvidenceProviderFactory:
+) -> _JointPositionConstraintEvidenceProviderFactory | NativeGripEvidenceFactory:
     """Decode one allowlisted control-part evidence provider factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "native_grip":
+        from embodichain.lab.sim.atomic_actions.grip_evidence import (
+            DriverOpeningBinding,
+        )
+        from .simulation.grip_evidence import (
+            NativeGripEvidenceCfg,
+            NativeGripEvidenceFactory,
+        )
+
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset(
+                {"kind", "sensor_uid", "object_bindings", "pad_bindings"}
+            ),
+            optional=frozenset(
+                {
+                    "algorithm_revision",
+                    "opening_bindings",
+                    "max_contacts_per_env",
+                    "trace_capacity",
+                }
+            ),
+        )
+        _identifier(config["kind"], path=f"{path}.kind")
+        objects = []
+        for index, item in enumerate(
+            _sequence(config["object_bindings"], path=f"{path}.object_bindings")
+        ):
+            item_path = f"{path}.object_bindings[{index}]"
+            pair = _sequence(item, path=item_path)
+            if len(pair) != 2:
+                raise ValueError(f"{item_path} requires one object identity/UID pair.")
+            objects.append(
+                (
+                    _identifier(pair[0], path=f"{item_path}[0]"),
+                    _identifier(pair[1], path=f"{item_path}[1]"),
+                )
+            )
+        pads = []
+        for index, item in enumerate(
+            _sequence(config["pad_bindings"], path=f"{path}.pad_bindings")
+        ):
+            item_path = f"{path}.pad_bindings[{index}]"
+            pair = _sequence(item, path=item_path)
+            if len(pair) != 2:
+                raise ValueError(f"{item_path} requires one control-part/pad pair.")
+            names = _identifier_tuple(pair[1], path=f"{item_path}[1]")
+            if len(names) != 2:
+                raise ValueError(f"{item_path} requires two explicit pad links.")
+            pads.append(
+                (_identifier(pair[0], path=f"{item_path}[0]"), (names[0], names[1]))
+            )
+        opening = []
+        for index, item in enumerate(
+            _sequence(
+                config.get("opening_bindings", ()), path=f"{path}.opening_bindings"
+            )
+        ):
+            item_path = f"{path}.opening_bindings[{index}]"
+            declaration = _mapping(
+                item,
+                path=item_path,
+                required=frozenset(
+                    {
+                        "control_part",
+                        "joint_names",
+                        "driver_indices",
+                        "open_qpos",
+                        "tolerance",
+                    }
+                ),
+            )
+            names = _identifier_tuple(
+                declaration["joint_names"], path=f"{item_path}.joint_names"
+            )
+            opening.append(
+                DriverOpeningBinding(
+                    control_part=_identifier(
+                        declaration["control_part"], path=f"{item_path}.control_part"
+                    ),
+                    joint_names=names,
+                    driver_indices=tuple(
+                        _integer(
+                            driver, path=f"{item_path}.driver_indices[{i}]", minimum=0
+                        )
+                        for i, driver in enumerate(
+                            _sequence(
+                                declaration["driver_indices"],
+                                path=f"{item_path}.driver_indices",
+                            )
+                        )
+                    ),
+                    open_qpos=_finite_tuple(
+                        declaration["open_qpos"],
+                        path=f"{item_path}.open_qpos",
+                        expected_length=len(names),
+                    ),
+                    tolerance=_real(
+                        declaration["tolerance"],
+                        path=f"{item_path}.tolerance",
+                        minimum=0.0,
+                        strict_minimum=True,
+                    ),
+                )
+            )
+        return NativeGripEvidenceFactory(
+            NativeGripEvidenceCfg(
+                sensor_uid=_identifier(config["sensor_uid"], path=f"{path}.sensor_uid"),
+                object_bindings=tuple(objects),
+                pad_bindings=tuple(pads),
+                algorithm_revision=_integer(
+                    config.get("algorithm_revision", 1),
+                    path=f"{path}.algorithm_revision",
+                    minimum=1,
+                    maximum=2,
+                ),
+                opening_bindings=tuple(opening),
+                max_contacts_per_env=_integer(
+                    config.get("max_contacts_per_env", 1024),
+                    path=f"{path}.max_contacts_per_env",
+                    minimum=1,
+                ),
+                trace_capacity=_integer(
+                    config.get("trace_capacity", 4096),
+                    path=f"{path}.trace_capacity",
+                    minimum=1,
+                ),
+            )
+        )
     config = _mapping(
         value,
         path=path,
@@ -2810,7 +2949,7 @@ def _decode_control_part_evidence(
     if kind != "joint_position_constraint":
         raise ValueError(
             f"Unsupported {path}.kind {kind!r}; supported kinds are "
-            "['joint_position_constraint']."
+            "['joint_position_constraint', 'native_grip']."
         )
     return _JointPositionConstraintEvidenceProviderFactory(
         control_parts=_identifier_tuple(
@@ -2856,7 +2995,11 @@ class _DecodedRuntimeServices:
         | _RelativePlaceLowererFactory,
         ...,
     ] = ()
-    control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
+    control_part_evidence: (
+        _JointPositionConstraintEvidenceProviderFactory
+        | NativeGripEvidenceFactory
+        | None
+    ) = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
     settle_presets: (
         tuple[

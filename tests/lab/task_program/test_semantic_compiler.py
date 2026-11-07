@@ -99,6 +99,9 @@ from embodichain.lab.task_program.semantics.effects import (
     HeldObjectStateExpectation,
     PoseRelationClause,
     PoseRelationExpectation,
+    ScalarEffectClause,
+    ScalarEvidenceKind,
+    ScalarExpectation,
     SemanticEffectKind,
     SemanticEffectSpec,
     SymbolicStateKey,
@@ -112,6 +115,7 @@ from embodichain.lab.task_program.semantics.integration import (
 from embodichain.lab.task_program.semantics.profiles import (
     ControlPartEndpoint,
     EffectAssurance,
+    ReleaseGateEvidence,
     ResourceBinding,
     RobotResource,
     RobotSkillProfile,
@@ -1057,9 +1061,24 @@ def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding(
     assert repeated.effect_gates[0].effect_monitor is not gate.effect_monitor
 
 
-def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
+@pytest.mark.parametrize("release_gate_evidence", list(ReleaseGateEvidence))
+def test_place_effect_spec_binds_source_and_verified_detach_baseline(
+    release_gate_evidence: ReleaseGateEvidence,
+) -> None:
     registry, _ = _scene_registry()
-    compiler, _ = _compiler(registry)
+    profile = _profile()
+    compiler, _ = _compiler(
+        registry,
+        profile=replace(
+            profile,
+            presets={
+                **profile.presets,
+                "release": _preset(
+                    "release", release_gate_evidence=release_gate_evidence
+                ),
+            },
+        ),
+    )
     pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
     pick = compiler.ground(pick_workflow, 0, _context(registry))
     semantics = pick.invocation.goal.semantics
@@ -1075,13 +1094,16 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
                     (0.0, 0.0, 0.0, 1.0),
                 ),
             ),
-        )
+        ),
+        preset_ids=("release",),
     )
 
     assert workflow.calls[0].symbolic_writes == frozenset(
         {SymbolicStateKey.held_object("manipulator")}
     )
     grounded = compiler.ground(workflow, 0, context)
+    assert grounded.analyzed.bound.preset.preset_id == "release"
+    assert grounded.analyzed.bound.preset.release_gate_evidence is release_gate_evidence
 
     spec = grounded.effect_spec
     assert spec is not None
@@ -1130,14 +1152,106 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
     assert isinstance(gate_relation, HeldObjectStateExpectation)
     assert gate_relation.expectation_id == "source"
     assert gate_relation.relation is HeldObjectRelation.DETACHED
-    assert len(gate.effect_spec.clauses) == 2
-    gate_pose, gate_constraint = gate.effect_spec.clauses
-    assert isinstance(gate_pose, PoseRelationClause)
-    assert gate_pose.expectation is PoseRelationExpectation.SEPARATED
-    torch.testing.assert_close(gate_pose.baseline_object_to_endpoint, object_to_eef)
+    if release_gate_evidence is ReleaseGateEvidence.TERMINAL_CLAUSES:
+        gate_pose, gate_constraint = gate.effect_spec.clauses
+        assert isinstance(gate_pose, PoseRelationClause)
+        assert gate_pose.expectation is PoseRelationExpectation.SEPARATED
+        torch.testing.assert_close(gate_pose.baseline_object_to_endpoint, object_to_eef)
+    else:
+        (gate_constraint,) = gate.effect_spec.clauses
     assert isinstance(gate_constraint, BinaryEffectClause)
     assert gate_constraint.expected is False
+    assert gate.effect_spec.to_metadata()["clauses"][-1] == (
+        spec.to_metadata()["clauses"][-1]
+    )
     assert grounded.invocation.phase_effect_gates == (gate.requirement,)
+
+
+@pytest.mark.parametrize("with_non_pose_evidence", [True, False])
+def test_non_pose_release_gate_preserves_scalar_evidence_and_rejects_empty_projection(
+    monkeypatch: pytest.MonkeyPatch, with_non_pose_evidence: bool
+) -> None:
+    """Ground a complete typed spec; the phase projection only removes pose."""
+    registry, _ = _scene_registry()
+    compiler, _ = _compiler(
+        registry,
+        profile=_profile(
+            preset=_preset(
+                "safe", release_gate_evidence=ReleaseGateEvidence.NON_POSE_CLAUSES
+            )
+        ),
+    )
+    pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    pick = compiler.ground(pick_workflow, 0, _context(registry))
+    context = _held_context(
+        registry, pick.invocation.goal.semantics, torch.eye(4).repeat(2, 1, 1)
+    )
+    workflow = compiler.analyze(
+        (
+            Place(
+                object=SceneObjectRef("cube"),
+                at=SemanticPose((0.5, -0.2, 0.4), (0.0, 0.0, 0.0, 1.0)),
+            ),
+        )
+    )
+    original_spec = compiler._ground_effect_spec
+
+    def complete_spec(*args: object, **kwargs: object) -> SemanticEffectSpec:
+        spec = original_spec(*args, **kwargs)
+        assert spec is not None
+        pose, constraint = spec.clauses
+        if not with_non_pose_evidence:
+            return replace(spec, clauses=(pose,))
+        force = ScalarEffectClause(
+            clause_id="source.force",
+            expectation_id="source",
+            source=replace(
+                constraint.source, address=ControlPartEvidenceAddress("hand", "force")
+            ),
+            evidence_kind=ScalarEvidenceKind.FORCE,
+            expectation=ScalarExpectation.ABSENT,
+        )
+        return replace(spec, clauses=(*spec.clauses, force))
+
+    # Supply the existing typed effect contract, then exercise public grounding
+    # and its real monitor/guard construction rather than only the projector.
+    monkeypatch.setattr(compiler, "_ground_effect_spec", complete_spec)
+    if not with_non_pose_evidence:
+        with pytest.raises(ValueError, match="has no physical clauses"):
+            compiler.ground(workflow, 0, context)
+        return
+
+    grounded = compiler.ground(workflow, 0, context)
+    assert grounded.effect_spec is not None
+    assert [type(clause) for clause in grounded.effect_spec.clauses] == [
+        PoseRelationClause,
+        BinaryEffectClause,
+        ScalarEffectClause,
+    ]
+    gate = grounded.effect_gates[0]
+    assert gate.segment_name == "retract"
+    assert [type(clause) for clause in gate.effect_spec.clauses] == [
+        BinaryEffectClause,
+        ScalarEffectClause,
+    ]
+    assert gate.effect_spec.to_metadata()["clauses"] == (
+        grounded.effect_spec.to_metadata()["clauses"][1:]
+    )
+    assert isinstance(
+        grounded.effect_guards[0].effect_spec.clauses[0], PoseRelationClause
+    )
+
+
+def test_release_gate_evidence_requires_typed_verified_policy() -> None:
+    with pytest.raises(TypeError, match="release_gate_evidence"):
+        _preset("safe", release_gate_evidence="non_pose_clauses")
+    with pytest.raises(ValueError, match="verified assurance"):
+        _preset(
+            "safe",
+            effect_assurance=EffectAssurance.PROJECTED,
+            effect_monitors={},
+            release_gate_evidence=ReleaseGateEvidence.NON_POSE_CLAUSES,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1581,9 +1695,11 @@ def test_registered_acquisition_rejects_string_and_multiple_phase_guards() -> No
         )
 
 
+@pytest.mark.parametrize("release_gate_evidence", list(ReleaseGateEvidence))
 @pytest.mark.parametrize("phase_checks", [False, True])
 def test_registered_release_requires_object_held_in_every_eligible_row(
     phase_checks: bool,
+    release_gate_evidence: ReleaseGateEvidence,
 ) -> None:
     """Registered release calls cannot consume inactive held-state rows."""
     registry, _ = _scene_registry()
@@ -1594,6 +1710,7 @@ def test_registered_release_requires_object_held_in_every_eligible_row(
             "safe",
             registered=True,
             action_option_templates=templates,
+            release_gate_evidence=release_gate_evidence,
             effect_monitors={
                 "vendor.inspect": EffectMonitorRef(
                     COMPOSITE_EFFECT_MONITOR_ID,
@@ -1634,6 +1751,11 @@ def test_registered_release_requires_object_held_in_every_eligible_row(
         eligible_mask=torch.tensor([True, False]),
     )
     assert grounded.eligible_mask.tolist() == [True, False]
+    assert grounded.effect_spec is not None
+    assert [type(clause) for clause in grounded.effect_spec.clauses] == [
+        PoseRelationClause,
+        BinaryEffectClause,
+    ]
 
     if phase_checks:
         gate, guard = grounded.effect_gates[0], grounded.effect_guards[0]
@@ -1646,6 +1768,11 @@ def test_registered_release_requires_object_held_in_every_eligible_row(
         assert guard.active_segments == ("approach",)
         assert guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE
         assert not guard.retry_action
+        assert [type(clause) for clause in gate.effect_spec.clauses] == (
+            [PoseRelationClause, BinaryEffectClause]
+            if release_gate_evidence is ReleaseGateEvidence.TERMINAL_CLAUSES
+            else [BinaryEffectClause]
+        )
         assert (
             guard.effect_spec.state_expectations[0].relation
             is HeldObjectRelation.ATTACHED
