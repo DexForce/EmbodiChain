@@ -412,6 +412,7 @@ def split_joint_trajectory_at_pose(
     control_dt: float | None = None,
     arrival_indices: torch.Tensor | None = None,
     split_target_index: int | None = None,
+    env_ids: tuple[int, ...] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Split at a declared target visit, or the closest pose when none is supplied.
 
@@ -444,6 +445,7 @@ def split_joint_trajectory_at_pose(
         qpos=trajectory,
         name=control_part,
         to_matrix=True,
+        **({"env_ids": env_ids} if env_ids is not None else {}),
     )
     position_error = torch.linalg.vector_norm(
         trajectory_xpos[..., :3, 3] - split_pose[:, None, :3, 3],
