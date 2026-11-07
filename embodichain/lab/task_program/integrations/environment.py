@@ -949,7 +949,15 @@ class TaskProgramEnvironmentAdapter:
         select = getattr(self._factory, "for_env_ids", None)
         if not callable(select):
             raise ValueError("environment factory does not support row selection")
-        adapter = select(env_ids).create_adapter()
+        adapter = select(env_ids).create_adapter(
+            **(
+                {
+                    "invocation_policy_bindings": self._configured_invocation_policy_bindings
+                }
+                if self._configured_invocation_policy_bindings
+                else {}
+            )
+        )
         adapter._set_configured_nominal_sources(self._configured_nominal_sources)
         return adapter
 

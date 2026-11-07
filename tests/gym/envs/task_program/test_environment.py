@@ -1233,13 +1233,26 @@ def test_invocation_policy_preserves_repeat_identity_in_cached_analysis(
         adapter = TaskProgramEnvironmentAdapter(
             factory, step_dt=_STEP_DT, invocation_policy_bindings=(binding,)
         )
-        host = SimpleNamespace(_checked_task_program_adapter=lambda: adapter)
-        bridge = EmbodiedEnv.create_task_program_bridge(host, compiled)
         conflicting = InvocationPolicyBinding(
             binding.program_fingerprint, binding.invocation_id, "projected"
         )
         with pytest.raises(ValueError, match="configured invocation"):
             adapter.create_bridge(compiled, invocation_policy_bindings=(conflicting,))
+        # Row selection creates a fresh adapter, while retaining the same
+        # sealed occurrence choices through the ordinary Gym bridge path.
+        monkeypatch.setattr(
+            factory,
+            "for_env_ids",
+            lambda env_ids: SimpleNamespace(
+                create_adapter=lambda **kwargs: TaskProgramEnvironmentAdapter(
+                    factory, step_dt=_STEP_DT, **kwargs
+                )
+            ),
+            raising=False,
+        )
+        adapter = adapter.for_env_ids((0, 1))
+        host = SimpleNamespace(_checked_task_program_adapter=lambda: adapter)
+        bridge = EmbodiedEnv.create_task_program_bridge(host, compiled)
     else:
         bridge = adapter.create_bridge(compiled, invocation_policy_bindings=(binding,))
     assert factory.observation_samples == 0
