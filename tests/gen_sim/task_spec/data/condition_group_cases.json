@@ -1,0 +1,4784 @@
+{
+  "upright": {
+    "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+    "spec": {
+      "schema_version": "task_spec/v0.1",
+      "canonicalization_version": "task_spec_c14n/v1",
+      "roles": [
+        {
+          "id": "role_001",
+          "kind": "object",
+          "cardinality": "count",
+          "affordances": ["graspable", "orientable"],
+          "properties": {},
+          "count": 2,
+          "source_structure": "rigid_object"
+        }
+      ],
+      "init": [],
+      "goal": [
+        {
+          "id": "goal_001",
+          "predicate": "object_upright",
+          "operator": "eq",
+          "expected": true,
+          "subject": "role_001",
+          "arguments": {"orientation_goal": "upright", "task_type": "E2"}
+        }
+      ],
+      "invariants": [],
+      "temporal": [],
+      "milestones": [
+        {
+          "id": "step_01",
+          "achieve": [
+            {
+              "id": "milestone:step_01:0",
+              "predicate": "object_upright",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "arguments": {"orientation_goal": "upright", "task_type": "E2"}
+            }
+          ]
+        }
+      ],
+      "requirements": [
+        {
+          "consumer": "asset",
+          "key": "role_001",
+          "value": {
+            "affordances": ["graspable", "orientable"],
+            "attributes": {},
+            "source_structure": "rigid_object"
+          }
+        },
+        {"consumer": "expansion", "key": "lineage_key", "value": "task_spec.semantic_hash"},
+        {"consumer": "scene", "key": "role_001", "value": {"initial_state": {}, "kind": "object"}},
+        {"consumer": "task_program", "key": "goal_predicates", "value": ["object_upright"]}
+      ],
+      "task_id": "finite_count",
+      "instruction": "Stand two cans",
+      "metadata": {
+        "candidate_id": "candidate_01",
+        "generator": "embodichain.gen_sim.task_engine",
+        "goal_sources": {"goal_001": ["step_01"]},
+        "instruction_coverage": "validated_draft_only",
+        "legacy_semantic_hash": "e519a7ebac71b5aa458a6614f9c7c14179bdd584bcf090f3ffcf4702b56d6ff6",
+        "milestone_sources": {"step_01": "step_01"},
+        "role_references": {"role_001": ["step_01.object"]},
+        "step_roles": {"step_01": {"object": "role_001"}},
+        "task_candidate_schema": "action_engine_task_draft_v1",
+        "terminal_goal_policy": "explicit_state_slots/v1"
+      },
+      "semantic_hash": "84c635db63f455b20d3f44c5f2184c1e451829a10078f973744da38333568f5d"
+    },
+    "program": {
+      "program_id": "count-oracle",
+      "program": {
+        "kind": "sequence",
+        "items": [
+          {
+            "kind": "segment",
+            "name": "step_01__01__call_01",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.pick",
+                "arguments": {"object": "a", "target": "step_01__01_upright_target"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__01__call_02",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.align_held",
+                "arguments": {
+                  "object": "a",
+                  "target": "step_01__01_upright_staging_target",
+                  "preserve_yaw": false
+                },
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__01__call_03",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.align_held",
+                "arguments": {"object": "a", "target": "step_01__01_upright_target", "preserve_yaw": false},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__01__call_04",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.place_relative",
+                "arguments": {"object": "a", "reference": "table", "relation": "on"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__01__call_05",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.clear_released",
+                "arguments": {"object": "a", "target": "step_01__01_upright_staging_target"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__01__call_06",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.park",
+                "arguments": {},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": [
+              {
+                "kind": "wait_stable",
+                "entity": "a",
+                "preset": "gen_sim.step_01__01__call_06.stable"
+              }
+            ]
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__call_01",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.pick",
+                "arguments": {"object": "b", "target": "step_01_upright_target"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__call_02",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.align_held",
+                "arguments": {"object": "b", "target": "step_01_upright_staging_target", "preserve_yaw": false},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__call_03",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.align_held",
+                "arguments": {"object": "b", "target": "step_01_upright_target", "preserve_yaw": false},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__call_04",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.place_relative",
+                "arguments": {"object": "b", "reference": "table", "relation": "on"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__call_05",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.clear_released",
+                "arguments": {"object": "b", "target": "step_01_upright_staging_target"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": []
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__call_06",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.park",
+                "arguments": {},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": [{"kind": "wait_stable", "entity": "b", "preset": "gen_sim.step_01__call_06.stable"}]
+          }
+        ]
+      },
+      "targets": {
+        "step_01__01_upright_target": {
+          "kind": "cyclic_pose",
+          "values": [{"position": [0.1, -0.2, 0.85], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}]
+        },
+        "step_01__01_upright_staging_target": {
+          "kind": "cyclic_pose",
+          "values": [{"position": [0.1, -0.2, 0.85], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}]
+        },
+        "step_01_upright_target": {
+          "kind": "cyclic_pose",
+          "values": [{"position": [0.1, -0.2, 0.85], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}]
+        },
+        "step_01_upright_staging_target": {
+          "kind": "cyclic_pose",
+          "values": [{"position": [0.1, -0.2, 0.85], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}]
+        }
+      }
+    },
+    "graph": {
+      "nodes": [
+        {"id": "step_01__01__call_01", "call": {"kind": "registered"}},
+        {"id": "step_01__01__call_02", "call": {"kind": "registered"}},
+        {"id": "step_01__01__call_03", "call": {"kind": "registered"}},
+        {"id": "step_01__01__call_04", "call": {"kind": "registered"}},
+        {"id": "step_01__01__call_05", "call": {"kind": "registered"}},
+        {"id": "step_01__01__call_06", "call": {"kind": "registered"}},
+        {"id": "step_01__call_01", "call": {"kind": "registered"}},
+        {"id": "step_01__call_02", "call": {"kind": "registered"}},
+        {"id": "step_01__call_03", "call": {"kind": "registered"}},
+        {"id": "step_01__call_04", "call": {"kind": "registered"}},
+        {"id": "step_01__call_05", "call": {"kind": "registered"}},
+        {"id": "step_01__call_06", "call": {"kind": "registered"}}
+      ],
+      "task_groups": [
+        {
+          "id": "step_01__01",
+          "task_type": "E2",
+          "node_ids": [
+            "step_01__01__call_01",
+            "step_01__01__call_02",
+            "step_01__01__call_03",
+            "step_01__01__call_04",
+            "step_01__01__call_05",
+            "step_01__01__call_06"
+          ],
+          "depends_on": [],
+          "success": {"kind": "semantic_task_term", "step_id": "step_01__01", "type": "object_upright"}
+        },
+        {
+          "id": "step_01",
+          "task_type": "E2",
+          "node_ids": [
+            "step_01__call_01",
+            "step_01__call_02",
+            "step_01__call_03",
+            "step_01__call_04",
+            "step_01__call_05",
+            "step_01__call_06"
+          ],
+          "depends_on": ["step_01__01"],
+          "success": {"kind": "semantic_task_term", "step_id": "step_01", "type": "object_upright"}
+        }
+      ]
+    },
+    "validation": {
+      "coverage": {
+        "lineage": {
+          "step_01": [
+            {"group_id": "step_01__01", "object_uid": "a", "object_part_id": null},
+            {"group_id": "step_01", "object_uid": "b", "object_part_id": null}
+          ]
+        }
+      }
+    },
+    "constraints": {
+      "presets": {
+        "gen_sim.step_01__01__call_06.stable": {
+          "entity": "a",
+          "kind": "upright",
+          "local_axis": [0.0, 0.0, 1.0],
+          "minimum_alignment": 0.8660254037844386,
+          "axis_direction_free": false,
+          "duration": 1.0,
+          "timeout": 5.0
+        },
+        "gen_sim.step_01__call_06.stable": {
+          "entity": "b",
+          "kind": "upright",
+          "local_axis": [0.0, 0.0, 1.0],
+          "minimum_alignment": 0.8660254037844386,
+          "axis_direction_free": false,
+          "duration": 1.0,
+          "timeout": 5.0
+        }
+      }
+    },
+    "existing_single_binding": {
+      "source_commit": "b0bd3c20161720331e9205f3a6571f62de45075a",
+      "source_module_sha256": "a1f318db80b58377382c0d617e88c94c1484a30476258dbf580a9f82c1b52136",
+      "binding": {
+        "schema_version": "task_spec.condition_evidence_binding/v1",
+        "task_spec_digest": "ec3e355cc8af81b6e75bf021aad0cad677dfa29a10bfee691eafbf7d83a81028",
+        "program_digest": "4b56ceccc57d7709c85b66c9d75bac815327a6561216eaa724ea9f13be0b61c6",
+        "predicate_id": "state",
+        "entity_id": "object",
+        "native_uid": "native_object",
+        "evidence_kind": "orientation",
+        "observation_kind": "final",
+        "condition": {
+          "axis_direction_free": false,
+          "entity": "object",
+          "kind": "upright",
+          "local_axis": [0.0, 0.0, 1.0],
+          "minimum_alignment": 0.8660254037844386
+        },
+        "evidence_format": "raw_snapshot",
+        "boundary_segment_id": null,
+        "boundary_source_path": [],
+        "policy_segment_id": null,
+        "policy_source_path": [],
+        "stability_preset": null,
+        "required_execution": [],
+        "env_ids": [0, 1],
+        "episode_ids": [2, 3],
+        "binding_hash": "864734ff8d262ad54ea2c2195b7c849416f9fa06e102f948abf270a3eb8ed6b8"
+      }
+    },
+    "cases": [
+      {
+        "name": "upright",
+        "poses": {
+          "a": [[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]],
+          "b": [[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]]
+        },
+        "expected": {
+          "goal": ["satisfied"],
+          "milestones": ["satisfied"],
+          "status": "satisfied",
+          "certificate_ready": true
+        }
+      },
+      {
+        "name": "one_negative",
+        "poses": {
+          "a": [[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]],
+          "b": [
+            [
+              [1.0, 0.0, 0.0, 0.0],
+              [0.0, 0.0, -1.0, 0.0],
+              [0.0, 1.0, 0.0, 0.0],
+              [0.0, 0.0, 0.0, 1.0]
+            ]
+          ]
+        },
+        "expected": {
+          "goal": ["failed"],
+          "milestones": ["satisfied"],
+          "status": "failed",
+          "certificate_ready": false
+        }
+      },
+      {
+        "name": "one_missing",
+        "poses": {
+          "a": [[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]]
+        },
+        "expected": {
+          "goal": ["unavailable"],
+          "milestones": ["satisfied"],
+          "status": "unavailable",
+          "certificate_ready": false
+        }
+      },
+      {
+        "name": "last_group_failed",
+        "poses": {
+          "a": [[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]],
+          "b": [[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]]
+        },
+        "runtime": {
+          "segments": [
+            {
+              "name": "step_01__01__call_01",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [0],
+              "end_steps": [10],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 0],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_02",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [10],
+              "end_steps": [20],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 1],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_03",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [20],
+              "end_steps": [30],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 2],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_04",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [30],
+              "end_steps": [40],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 3],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_05",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [40],
+              "end_steps": [50],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 4],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_06",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [50],
+              "end_steps": [60],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 5],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 0,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__01__call_06.stable",
+                    "source_path": ["program", "items", 5, "post", 0],
+                    "result": {
+                      "kind": "upright",
+                      "preset": "gen_sim.step_01__01__call_06.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "step_01__call_01",
+              "active": [true],
+              "successes": [false],
+              "success": false,
+              "start_steps": [60],
+              "end_steps": [70],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 6],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_02",
+              "active": [true],
+              "successes": [false],
+              "success": false,
+              "start_steps": [70],
+              "end_steps": [80],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 7],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_03",
+              "active": [true],
+              "successes": [false],
+              "success": false,
+              "start_steps": [80],
+              "end_steps": [90],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 8],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_04",
+              "active": [true],
+              "successes": [false],
+              "success": false,
+              "start_steps": [90],
+              "end_steps": [100],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 9],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_05",
+              "active": [true],
+              "successes": [false],
+              "success": false,
+              "start_steps": [100],
+              "end_steps": [110],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 10],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_06",
+              "active": [true],
+              "successes": [false],
+              "success": false,
+              "start_steps": [110],
+              "end_steps": [120],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 11],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 0,
+                    "result_mask": [false],
+                    "preset": "gen_sim.step_01__call_06.stable",
+                    "source_path": ["program", "items", 11, "post", 0],
+                    "result": {
+                      "kind": "upright",
+                      "preset": "gen_sim.step_01__call_06.stable",
+                      "accepted_mask": [false],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "expected": {
+          "goal": ["satisfied"],
+          "milestones": ["unavailable"],
+          "status": "unavailable",
+          "certificate_ready": false
+        }
+      },
+      {
+        "name": "last_group_missing",
+        "poses": {
+          "a": [[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]],
+          "b": [[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]]
+        },
+        "runtime": {
+          "segments": [
+            {
+              "name": "step_01__01__call_01",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [0],
+              "end_steps": [10],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 0],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_02",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [10],
+              "end_steps": [20],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 1],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_03",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [20],
+              "end_steps": [30],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 2],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_04",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [30],
+              "end_steps": [40],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 3],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_05",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [40],
+              "end_steps": [50],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 4],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_06",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [50],
+              "end_steps": [60],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 5],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 0,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__01__call_06.stable",
+                    "source_path": ["program", "items", 5, "post", 0],
+                    "result": {
+                      "kind": "upright",
+                      "preset": "gen_sim.step_01__01__call_06.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "expected": {
+          "goal": ["satisfied"],
+          "milestones": ["unavailable"],
+          "status": "unavailable",
+          "certificate_ready": false
+        }
+      }
+    ],
+    "all_universe_source": {
+      "spec": {
+        "schema_version": "task_spec/v0.1",
+        "canonicalization_version": "task_spec_c14n/v1",
+        "roles": [
+          {
+            "id": "role_001",
+            "kind": "object",
+            "cardinality": "all",
+            "affordances": ["graspable", "orientable"],
+            "properties": {},
+            "source_structure": "rigid_object"
+          }
+        ],
+        "init": [],
+        "goal": [
+          {
+            "id": "goal_001",
+            "predicate": "object_upright",
+            "operator": "eq",
+            "expected": true,
+            "subject": "role_001",
+            "arguments": {"orientation_goal": "upright", "task_type": "E2"}
+          }
+        ],
+        "invariants": [],
+        "temporal": [],
+        "milestones": [
+          {
+            "id": "step_01",
+            "achieve": [
+              {
+                "id": "milestone:step_01:0",
+                "predicate": "object_upright",
+                "operator": "eq",
+                "expected": true,
+                "subject": "role_001",
+                "arguments": {"orientation_goal": "upright", "task_type": "E2"}
+              }
+            ]
+          }
+        ],
+        "requirements": [
+          {
+            "consumer": "asset",
+            "key": "role_001",
+            "value": {
+              "affordances": ["graspable", "orientable"],
+              "attributes": {},
+              "source_structure": "rigid_object"
+            }
+          },
+          {"consumer": "expansion", "key": "lineage_key", "value": "task_spec.semantic_hash"},
+          {"consumer": "scene", "key": "role_001", "value": {"initial_state": {}, "kind": "object"}},
+          {"consumer": "task_program", "key": "goal_predicates", "value": ["object_upright"]}
+        ],
+        "task_id": "finite_count",
+        "instruction": "Stand two cans",
+        "metadata": {
+          "candidate_id": "candidate_01",
+          "generator": "embodichain.gen_sim.task_engine",
+          "goal_sources": {"goal_001": ["step_01"]},
+          "instruction_coverage": "validated_draft_only",
+          "legacy_semantic_hash": "5ce53dd61084e3eb7465cc131062a84325a337dacf17305064082fd5e27c2981",
+          "milestone_sources": {"step_01": "step_01"},
+          "role_references": {"role_001": ["step_01.object"]},
+          "step_roles": {"step_01": {"object": "role_001"}},
+          "task_candidate_schema": "action_engine_task_draft_v1",
+          "terminal_goal_policy": "explicit_state_slots/v1"
+        },
+        "semantic_hash": "9cc251db3dd17beb6dd2ca09ca541a88e5171959e12c0a96c3969362f9d2713d"
+      },
+      "expected": {
+        "goal": ["unavailable"],
+        "milestones": ["unavailable"],
+        "status": "unavailable",
+        "certificate_ready": false
+      }
+    },
+    "runtime": {
+      "segments": [
+        {
+          "name": "step_01__01__call_01",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [0],
+          "end_steps": [10],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 0],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__01__call_02",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [10],
+          "end_steps": [20],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 1],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__01__call_03",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [20],
+          "end_steps": [30],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 2],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__01__call_04",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [30],
+          "end_steps": [40],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 3],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__01__call_05",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [40],
+          "end_steps": [50],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 4],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__01__call_06",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [50],
+          "end_steps": [60],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 5],
+            "runtime": {"env_ids": [0]},
+            "post_policies": [
+              {
+                "kind": "wait_stable",
+                "policy_index": 0,
+                "result_mask": [true],
+                "preset": "gen_sim.step_01__01__call_06.stable",
+                "source_path": ["program", "items", 5, "post", 0],
+                "result": {
+                  "kind": "upright",
+                  "preset": "gen_sim.step_01__01__call_06.stable",
+                  "accepted_mask": [true],
+                  "measurements": {"alignment": [1.0]}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "step_01__call_01",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [60],
+          "end_steps": [70],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 6],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__call_02",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [70],
+          "end_steps": [80],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 7],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__call_03",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [80],
+          "end_steps": [90],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 8],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__call_04",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [90],
+          "end_steps": [100],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 9],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__call_05",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [100],
+          "end_steps": [110],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 10],
+            "runtime": {"env_ids": [0]},
+            "post_policies": []
+          }
+        },
+        {
+          "name": "step_01__call_06",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [110],
+          "end_steps": [120],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 11],
+            "runtime": {"env_ids": [0]},
+            "post_policies": [
+              {
+                "kind": "wait_stable",
+                "policy_index": 0,
+                "result_mask": [true],
+                "preset": "gen_sim.step_01__call_06.stable",
+                "source_path": ["program", "items", 11, "post", 0],
+                "result": {
+                  "kind": "upright",
+                  "preset": "gen_sim.step_01__call_06.stable",
+                  "accepted_mask": [true],
+                  "measurements": {"alignment": [1.0]}
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "joint_parts": {
+    "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+    "spec": {
+      "schema_version": "task_spec/v0.1",
+      "canonicalization_version": "task_spec_c14n/v1",
+      "roles": [
+        {
+          "id": "role_001",
+          "kind": "articulation",
+          "cardinality": "count",
+          "affordances": ["articulated", "slideable"],
+          "properties": {},
+          "count": 2,
+          "source_structure": "articulation"
+        }
+      ],
+      "init": [],
+      "goal": [
+        {
+          "id": "goal_001",
+          "predicate": "articulation_joint_near",
+          "operator": "eq",
+          "expected": true,
+          "subject": "role_001",
+          "arguments": {"target_state": "open", "task_type": "E6"}
+        }
+      ],
+      "invariants": [],
+      "temporal": [],
+      "milestones": [
+        {
+          "id": "step_01",
+          "achieve": [
+            {
+              "id": "milestone:step_01:0",
+              "predicate": "articulation_joint_near",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "arguments": {"target_state": "open", "task_type": "E6"}
+            }
+          ]
+        }
+      ],
+      "requirements": [
+        {
+          "consumer": "asset",
+          "key": "role_001",
+          "value": {
+            "affordances": ["articulated", "slideable"],
+            "attributes": {},
+            "source_structure": "articulation"
+          }
+        },
+        {"consumer": "expansion", "key": "lineage_key", "value": "task_spec.semantic_hash"},
+        {
+          "consumer": "scene",
+          "key": "role_001",
+          "value": {"initial_state": {}, "kind": "articulation"}
+        },
+        {"consumer": "task_program", "key": "goal_predicates", "value": ["articulation_joint_near"]}
+      ],
+      "task_id": "e6_count_actual",
+      "instruction": "Open two original drawer parts",
+      "metadata": {
+        "candidate_id": "candidate_01",
+        "generator": "embodichain.gen_sim.task_engine",
+        "goal_sources": {"goal_001": ["step_01"]},
+        "instruction_coverage": "validated_draft_only",
+        "legacy_semantic_hash": "6ba2c45314cbff9ed45934b60a9ec1c8cd2d60083ed9f177487981bad7fdb067",
+        "milestone_sources": {"step_01": "step_01"},
+        "role_references": {"role_001": ["step_01.object"]},
+        "step_roles": {"step_01": {"object": "role_001"}},
+        "task_candidate_schema": "action_engine_task_draft_v1",
+        "terminal_goal_policy": "explicit_state_slots/v1"
+      },
+      "semantic_hash": "d28168b1b020bf80dade572834dbfa0529ac5a7f7d46db8d57c43c402fdc6900"
+    },
+    "program": {
+      "program_id": "gen_sim_e6_count_actual",
+      "targets": {},
+      "program": {
+        "kind": "sequence",
+        "items": [
+          {
+            "kind": "segment",
+            "name": "step_01__01__call_01",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.articulation_slide",
+                "arguments": {"object": "drawer", "state": "open", "part": "part_4704710f61e30560"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": [
+              {
+                "kind": "wait_stable",
+                "entity": "drawer",
+                "preset": "gen_sim.articulation.drawer.part_4704710f61e30560.open"
+              }
+            ],
+            "validators": [
+              {
+                "kind": "articulation_joint_position",
+                "articulation": "drawer",
+                "joint": "top_slide",
+                "minimum_position": -0.28999999046325686,
+                "maximum_position": -0.22999999046325684
+              }
+            ]
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__01__call_02",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.articulation_withdraw",
+                "arguments": {"object": "drawer", "state": "open", "part": "part_4704710f61e30560"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": [
+              {
+                "kind": "wait_stable",
+                "entity": "drawer",
+                "preset": "gen_sim.articulation.drawer.part_4704710f61e30560.open"
+              }
+            ],
+            "validators": [
+              {
+                "kind": "articulation_joint_position",
+                "articulation": "drawer",
+                "joint": "top_slide",
+                "minimum_position": -0.28999999046325686,
+                "maximum_position": -0.22999999046325684
+              }
+            ]
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__01__call_03",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.articulation_park",
+                "arguments": {},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": [
+              {
+                "kind": "wait_stable",
+                "entity": "drawer",
+                "preset": "gen_sim.articulation.drawer.part_4704710f61e30560.open"
+              }
+            ],
+            "validators": [
+              {
+                "kind": "articulation_joint_position",
+                "articulation": "drawer",
+                "joint": "top_slide",
+                "minimum_position": -0.28999999046325686,
+                "maximum_position": -0.22999999046325684
+              }
+            ]
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__call_01",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.articulation_slide",
+                "arguments": {"object": "drawer", "state": "open", "part": "part_8dfcd0b508916419"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": [
+              {
+                "kind": "wait_stable",
+                "entity": "drawer",
+                "preset": "gen_sim.articulation.drawer.part_8dfcd0b508916419.open"
+              }
+            ],
+            "validators": [
+              {
+                "kind": "articulation_joint_position",
+                "articulation": "drawer",
+                "joint": "middle_slide",
+                "minimum_position": -0.28999999046325686,
+                "maximum_position": -0.22999999046325684
+              }
+            ]
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__call_02",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.articulation_withdraw",
+                "arguments": {"object": "drawer", "state": "open", "part": "part_8dfcd0b508916419"},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": [
+              {
+                "kind": "wait_stable",
+                "entity": "drawer",
+                "preset": "gen_sim.articulation.drawer.part_8dfcd0b508916419.open"
+              }
+            ],
+            "validators": [
+              {
+                "kind": "articulation_joint_position",
+                "articulation": "drawer",
+                "joint": "middle_slide",
+                "minimum_position": -0.28999999046325686,
+                "maximum_position": -0.22999999046325684
+              }
+            ]
+          },
+          {
+            "kind": "segment",
+            "name": "step_01__call_03",
+            "steps": {
+              "kind": "invoke",
+              "call": {
+                "kind": "registered",
+                "call_id": "gen_sim.articulation_park",
+                "arguments": {},
+                "resources": {"primary": "left"}
+              }
+            },
+            "post": [
+              {
+                "kind": "wait_stable",
+                "entity": "drawer",
+                "preset": "gen_sim.articulation.drawer.part_8dfcd0b508916419.open"
+              }
+            ],
+            "validators": [
+              {
+                "kind": "articulation_joint_position",
+                "articulation": "drawer",
+                "joint": "middle_slide",
+                "minimum_position": -0.28999999046325686,
+                "maximum_position": -0.22999999046325684
+              },
+              {
+                "kind": "articulation_joint_position",
+                "articulation": "drawer",
+                "joint": "top_slide",
+                "minimum_position": -0.28999999046325686,
+                "maximum_position": -0.22999999046325684
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "graph": {
+      "nodes": [
+        {"id": "step_01__01__call_01", "call": {"kind": "registered"}},
+        {"id": "step_01__01__call_02", "call": {"kind": "registered"}},
+        {"id": "step_01__01__call_03", "call": {"kind": "registered"}},
+        {"id": "step_01__call_01", "call": {"kind": "registered"}},
+        {"id": "step_01__call_02", "call": {"kind": "registered"}},
+        {"id": "step_01__call_03", "call": {"kind": "registered"}}
+      ],
+      "task_groups": [
+        {
+          "id": "step_01__01",
+          "task_type": "E6",
+          "node_ids": ["step_01__01__call_01", "step_01__01__call_02", "step_01__01__call_03"],
+          "depends_on": [],
+          "success": {
+            "kind": "semantic_task_term",
+            "step_id": "step_01__01",
+            "type": "articulation_joint_near"
+          }
+        },
+        {
+          "id": "step_01",
+          "task_type": "E6",
+          "node_ids": ["step_01__call_01", "step_01__call_02", "step_01__call_03"],
+          "depends_on": ["step_01__01"],
+          "success": {"kind": "semantic_task_term", "step_id": "step_01", "type": "articulation_joint_near"}
+        }
+      ]
+    },
+    "validation": {
+      "coverage": {
+        "lineage": {
+          "step_01": [
+            {
+              "group_id": "step_01__01",
+              "object_uid": "drawer",
+              "object_part_id": "part_4704710f61e30560"
+            },
+            {
+              "group_id": "step_01",
+              "object_uid": "drawer",
+              "object_part_id": "part_8dfcd0b508916419"
+            }
+          ]
+        }
+      }
+    },
+    "constraints": {
+      "schema_version": "gen_sim_task_constraints/v1",
+      "presets": {},
+      "adaptive_pick": false,
+      "pick_purposes": {},
+      "motion_samples": {
+        "step_01__01__call_01": 260,
+        "step_01__01__call_02": 260,
+        "step_01__01__call_03": 260,
+        "step_01__call_01": 260,
+        "step_01__call_02": 260,
+        "step_01__call_03": 260
+      },
+      "motion_contract": "gen_sim.sampled_velocity/v1",
+      "cartesian_calls": [
+        "step_01__01__call_01",
+        "step_01__01__call_02",
+        "step_01__01__call_03",
+        "step_01__call_01",
+        "step_01__call_02",
+        "step_01__call_03"
+      ],
+      "pour_receivers": {},
+      "staging_calls": [],
+      "staging_retention_sources": [],
+      "runtime_profile": "default"
+    },
+    "native_uid": "drawer",
+    "resolved_conditions": {
+      "gen_sim.articulation.drawer.part_4704710f61e30560.open": {
+        "entity": "drawer",
+        "joint": "top_slide",
+        "target_state": "open",
+        "target": -0.25999999046325684,
+        "tolerance": 0.03,
+        "duration": 1.0,
+        "timeout": 5.0,
+        "position_drift": 0.001,
+        "part_id": "part_4704710f61e30560"
+      },
+      "gen_sim.articulation.drawer.part_8dfcd0b508916419.open": {
+        "entity": "drawer",
+        "joint": "middle_slide",
+        "target_state": "open",
+        "target": -0.25999999046325684,
+        "tolerance": 0.03,
+        "duration": 1.0,
+        "timeout": 5.0,
+        "position_drift": 0.001,
+        "part_id": "part_8dfcd0b508916419"
+      }
+    },
+    "terminal_validator_counts": [1, 2],
+    "cases": [
+      {
+        "name": "open",
+        "joint_names": ["top_slide", "middle_slide"],
+        "joint_values": [-0.25999999046325684, -0.25999999046325684],
+        "expected": {
+          "goal": ["satisfied"],
+          "milestones": ["unavailable"],
+          "status": "unavailable",
+          "certificate_ready": false
+        }
+      },
+      {
+        "name": "one_negative",
+        "joint_names": ["top_slide", "middle_slide"],
+        "joint_values": [-0.25999999046325684, 0.0],
+        "expected": {
+          "goal": ["failed"],
+          "milestones": ["unavailable"],
+          "status": "failed",
+          "certificate_ready": false
+        }
+      },
+      {
+        "name": "one_missing",
+        "joint_names": ["top_slide"],
+        "joint_values": [-0.25999999046325684],
+        "expected": {
+          "goal": ["unavailable"],
+          "milestones": ["unavailable"],
+          "status": "unavailable",
+          "certificate_ready": false
+        }
+      }
+    ],
+    "runtime": {
+      "segments": [
+        {
+          "name": "step_01__01__call_01",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [0],
+          "end_steps": [30],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 0],
+            "runtime": {"env_ids": [0]},
+            "post_policies": [
+              {
+                "kind": "wait_stable",
+                "policy_index": 0,
+                "source_path": ["program", "items", 0, "post", 0],
+                "result_mask": [true],
+                "result": {
+                  "joint": "top_slide",
+                  "evidence": "joint_position_and_stability",
+                  "stable_seconds": 1.0,
+                  "target": -0.25999999046325684,
+                  "tolerance": 0.03,
+                  "observed": [-0.25999999046325684],
+                  "accepted": [true],
+                  "joint_observation": {
+                    "evidence_id": "articulation.joint_position",
+                    "values": [-0.25999999046325684],
+                    "valid": [true],
+                    "acquisition_errors": [null],
+                    "timestamp": 1.2,
+                    "env_ids": [0],
+                    "observation_revision": 26,
+                    "revision_scope": "policy_window_qpos_acquisition_sequence",
+                    "clock": "environment_step",
+                    "start_step": 5,
+                    "end_step": 30,
+                    "started_at": 0.2,
+                    "step_dt": 0.04
+                  }
+                }
+              }
+            ],
+            "validation": {
+              "env_ids": [0],
+              "accepted_mask": [true],
+              "validators": [
+                {
+                  "validator_index": 0,
+                  "kind": "articulation_joint_position",
+                  "source_path": ["program", "items", 0, "validators", 0],
+                  "result_mask": [true],
+                  "result": {
+                    "kind": "articulation_joint_position",
+                    "articulation_id": "drawer",
+                    "joint": "top_slide",
+                    "source_path": ["program", "items", 0, "validators", 0],
+                    "env_ids": [0],
+                    "accepted_mask": [true],
+                    "joint_position": [-0.25999999046325684],
+                    "minimum_position": -0.28999999046325686,
+                    "maximum_position": -0.22999999046325684
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__01__call_02",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [30],
+          "end_steps": [60],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 1],
+            "runtime": {"env_ids": [0]},
+            "post_policies": [
+              {
+                "kind": "wait_stable",
+                "policy_index": 0,
+                "source_path": ["program", "items", 1, "post", 0],
+                "result_mask": [true],
+                "result": {
+                  "joint": "top_slide",
+                  "evidence": "joint_position_and_stability",
+                  "stable_seconds": 1.0,
+                  "target": -0.25999999046325684,
+                  "tolerance": 0.03,
+                  "observed": [-0.25999999046325684],
+                  "accepted": [true],
+                  "joint_observation": {
+                    "evidence_id": "articulation.joint_position",
+                    "values": [-0.25999999046325684],
+                    "valid": [true],
+                    "acquisition_errors": [null],
+                    "timestamp": 2.4,
+                    "env_ids": [0],
+                    "observation_revision": 26,
+                    "revision_scope": "policy_window_qpos_acquisition_sequence",
+                    "clock": "environment_step",
+                    "start_step": 35,
+                    "end_step": 60,
+                    "started_at": 1.4000000000000001,
+                    "step_dt": 0.04
+                  }
+                }
+              }
+            ],
+            "validation": {
+              "env_ids": [0],
+              "accepted_mask": [true],
+              "validators": [
+                {
+                  "validator_index": 0,
+                  "kind": "articulation_joint_position",
+                  "source_path": ["program", "items", 1, "validators", 0],
+                  "result_mask": [true],
+                  "result": {
+                    "kind": "articulation_joint_position",
+                    "articulation_id": "drawer",
+                    "joint": "top_slide",
+                    "source_path": ["program", "items", 1, "validators", 0],
+                    "env_ids": [0],
+                    "accepted_mask": [true],
+                    "joint_position": [-0.25999999046325684],
+                    "minimum_position": -0.28999999046325686,
+                    "maximum_position": -0.22999999046325684
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__01__call_03",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [60],
+          "end_steps": [90],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 2],
+            "runtime": {"env_ids": [0]},
+            "post_policies": [
+              {
+                "kind": "wait_stable",
+                "policy_index": 0,
+                "source_path": ["program", "items", 2, "post", 0],
+                "result_mask": [true],
+                "result": {
+                  "joint": "top_slide",
+                  "evidence": "joint_position_and_stability",
+                  "stable_seconds": 1.0,
+                  "target": -0.25999999046325684,
+                  "tolerance": 0.03,
+                  "observed": [-0.25999999046325684],
+                  "accepted": [true],
+                  "joint_observation": {
+                    "evidence_id": "articulation.joint_position",
+                    "values": [-0.25999999046325684],
+                    "valid": [true],
+                    "acquisition_errors": [null],
+                    "timestamp": 3.6,
+                    "env_ids": [0],
+                    "observation_revision": 26,
+                    "revision_scope": "policy_window_qpos_acquisition_sequence",
+                    "clock": "environment_step",
+                    "start_step": 65,
+                    "end_step": 90,
+                    "started_at": 2.6,
+                    "step_dt": 0.04
+                  }
+                }
+              }
+            ],
+            "validation": {
+              "env_ids": [0],
+              "accepted_mask": [true],
+              "validators": [
+                {
+                  "validator_index": 0,
+                  "kind": "articulation_joint_position",
+                  "source_path": ["program", "items", 2, "validators", 0],
+                  "result_mask": [true],
+                  "result": {
+                    "kind": "articulation_joint_position",
+                    "articulation_id": "drawer",
+                    "joint": "top_slide",
+                    "source_path": ["program", "items", 2, "validators", 0],
+                    "env_ids": [0],
+                    "accepted_mask": [true],
+                    "joint_position": [-0.25999999046325684],
+                    "minimum_position": -0.28999999046325686,
+                    "maximum_position": -0.22999999046325684
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__call_01",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [90],
+          "end_steps": [120],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 3],
+            "runtime": {"env_ids": [0]},
+            "post_policies": [
+              {
+                "kind": "wait_stable",
+                "policy_index": 0,
+                "source_path": ["program", "items", 3, "post", 0],
+                "result_mask": [true],
+                "result": {
+                  "joint": "middle_slide",
+                  "evidence": "joint_position_and_stability",
+                  "stable_seconds": 1.0,
+                  "target": -0.25999999046325684,
+                  "tolerance": 0.03,
+                  "observed": [-0.25999999046325684],
+                  "accepted": [true],
+                  "joint_observation": {
+                    "evidence_id": "articulation.joint_position",
+                    "values": [-0.25999999046325684],
+                    "valid": [true],
+                    "acquisition_errors": [null],
+                    "timestamp": 4.8,
+                    "env_ids": [0],
+                    "observation_revision": 26,
+                    "revision_scope": "policy_window_qpos_acquisition_sequence",
+                    "clock": "environment_step",
+                    "start_step": 95,
+                    "end_step": 120,
+                    "started_at": 3.8000000000000003,
+                    "step_dt": 0.04
+                  }
+                }
+              }
+            ],
+            "validation": {
+              "env_ids": [0],
+              "accepted_mask": [true],
+              "validators": [
+                {
+                  "validator_index": 0,
+                  "kind": "articulation_joint_position",
+                  "source_path": ["program", "items", 3, "validators", 0],
+                  "result_mask": [true],
+                  "result": {
+                    "kind": "articulation_joint_position",
+                    "articulation_id": "drawer",
+                    "joint": "middle_slide",
+                    "source_path": ["program", "items", 3, "validators", 0],
+                    "env_ids": [0],
+                    "accepted_mask": [true],
+                    "joint_position": [-0.25999999046325684],
+                    "minimum_position": -0.28999999046325686,
+                    "maximum_position": -0.22999999046325684
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__call_02",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [120],
+          "end_steps": [150],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 4],
+            "runtime": {"env_ids": [0]},
+            "post_policies": [
+              {
+                "kind": "wait_stable",
+                "policy_index": 0,
+                "source_path": ["program", "items", 4, "post", 0],
+                "result_mask": [true],
+                "result": {
+                  "joint": "middle_slide",
+                  "evidence": "joint_position_and_stability",
+                  "stable_seconds": 1.0,
+                  "target": -0.25999999046325684,
+                  "tolerance": 0.03,
+                  "observed": [-0.25999999046325684],
+                  "accepted": [true],
+                  "joint_observation": {
+                    "evidence_id": "articulation.joint_position",
+                    "values": [-0.25999999046325684],
+                    "valid": [true],
+                    "acquisition_errors": [null],
+                    "timestamp": 6.0,
+                    "env_ids": [0],
+                    "observation_revision": 26,
+                    "revision_scope": "policy_window_qpos_acquisition_sequence",
+                    "clock": "environment_step",
+                    "start_step": 125,
+                    "end_step": 150,
+                    "started_at": 5.0,
+                    "step_dt": 0.04
+                  }
+                }
+              }
+            ],
+            "validation": {
+              "env_ids": [0],
+              "accepted_mask": [true],
+              "validators": [
+                {
+                  "validator_index": 0,
+                  "kind": "articulation_joint_position",
+                  "source_path": ["program", "items", 4, "validators", 0],
+                  "result_mask": [true],
+                  "result": {
+                    "kind": "articulation_joint_position",
+                    "articulation_id": "drawer",
+                    "joint": "middle_slide",
+                    "source_path": ["program", "items", 4, "validators", 0],
+                    "env_ids": [0],
+                    "accepted_mask": [true],
+                    "joint_position": [-0.25999999046325684],
+                    "minimum_position": -0.28999999046325686,
+                    "maximum_position": -0.22999999046325684
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__call_03",
+          "active": [true],
+          "successes": [true],
+          "success": true,
+          "start_steps": [150],
+          "end_steps": [180],
+          "metadata": {
+            "program_segment_source_path": ["program", "items", 5],
+            "runtime": {"env_ids": [0]},
+            "post_policies": [
+              {
+                "kind": "wait_stable",
+                "policy_index": 0,
+                "source_path": ["program", "items", 5, "post", 0],
+                "result_mask": [true],
+                "result": {
+                  "joint": "middle_slide",
+                  "evidence": "joint_position_and_stability",
+                  "stable_seconds": 1.0,
+                  "target": -0.25999999046325684,
+                  "tolerance": 0.03,
+                  "observed": [-0.25999999046325684],
+                  "accepted": [true],
+                  "joint_observation": {
+                    "evidence_id": "articulation.joint_position",
+                    "values": [-0.25999999046325684],
+                    "valid": [true],
+                    "acquisition_errors": [null],
+                    "timestamp": 7.2,
+                    "env_ids": [0],
+                    "observation_revision": 26,
+                    "revision_scope": "policy_window_qpos_acquisition_sequence",
+                    "clock": "environment_step",
+                    "start_step": 155,
+                    "end_step": 180,
+                    "started_at": 6.2,
+                    "step_dt": 0.04
+                  }
+                }
+              }
+            ],
+            "validation": {
+              "env_ids": [0],
+              "accepted_mask": [true],
+              "validators": [
+                {
+                  "validator_index": 0,
+                  "kind": "articulation_joint_position",
+                  "source_path": ["program", "items", 5, "validators", 0],
+                  "result_mask": [true],
+                  "result": {
+                    "kind": "articulation_joint_position",
+                    "articulation_id": "drawer",
+                    "joint": "middle_slide",
+                    "source_path": ["program", "items", 5, "validators", 0],
+                    "env_ids": [0],
+                    "accepted_mask": [true],
+                    "joint_position": [-0.25999999046325684],
+                    "minimum_position": -0.28999999046325686,
+                    "maximum_position": -0.22999999046325684
+                  }
+                },
+                {
+                  "validator_index": 1,
+                  "kind": "articulation_joint_position",
+                  "source_path": ["program", "items", 5, "validators", 1],
+                  "result_mask": [true],
+                  "result": {
+                    "kind": "articulation_joint_position",
+                    "articulation_id": "drawer",
+                    "joint": "top_slide",
+                    "source_path": ["program", "items", 5, "validators", 1],
+                    "env_ids": [0],
+                    "accepted_mask": [true],
+                    "joint_position": [-0.25999999046325684],
+                    "minimum_position": -0.28999999046325686,
+                    "maximum_position": -0.22999999046325684
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "orientations": {
+    "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+    "declarations": [
+      {
+        "spec": {
+          "schema_version": "task_spec/v0.1",
+          "canonicalization_version": "task_spec_c14n/v1",
+          "roles": [
+            {
+              "id": "role_001",
+              "kind": "object",
+              "cardinality": "count",
+              "affordances": ["graspable", "placeable"],
+              "properties": {},
+              "count": 2,
+              "source_structure": "rigid_object"
+            },
+            {
+              "id": "role_002",
+              "kind": "surface",
+              "cardinality": "one",
+              "affordances": [],
+              "properties": {},
+              "source_structure": "physical_entity"
+            }
+          ],
+          "init": [],
+          "goal": [
+            {
+              "id": "goal_002",
+              "predicate": "object_upright",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "arguments": {"orientation_goal": "upright", "task_type": "E1"}
+            },
+            {
+              "id": "goal_001",
+              "predicate": "semantic_goal",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "reference": "role_002",
+              "relation": "on",
+              "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+            }
+          ],
+          "invariants": [],
+          "temporal": [],
+          "milestones": [
+            {
+              "id": "step_01",
+              "achieve": [
+                {
+                  "id": "milestone:step_01:0",
+                  "predicate": "semantic_goal",
+                  "operator": "eq",
+                  "expected": true,
+                  "subject": "role_001",
+                  "reference": "role_002",
+                  "relation": "on",
+                  "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+                },
+                {
+                  "id": "milestone:step_01:1",
+                  "predicate": "object_upright",
+                  "operator": "eq",
+                  "expected": true,
+                  "subject": "role_001",
+                  "arguments": {"orientation_goal": "upright", "task_type": "E1"}
+                }
+              ]
+            }
+          ],
+          "requirements": [
+            {
+              "consumer": "asset",
+              "key": "role_001",
+              "value": {
+                "affordances": ["graspable", "placeable"],
+                "attributes": {},
+                "source_structure": "rigid_object"
+              }
+            },
+            {
+              "consumer": "asset",
+              "key": "role_002",
+              "value": {"affordances": [], "attributes": {}, "source_structure": "physical_entity"}
+            },
+            {"consumer": "embodiment", "key": "required_arms", "value": ["left_arm"]},
+            {"consumer": "expansion", "key": "lineage_key", "value": "task_spec.semantic_hash"},
+            {
+              "consumer": "scene",
+              "key": "role_001",
+              "value": {"initial_state": {}, "kind": "object"}
+            },
+            {
+              "consumer": "scene",
+              "key": "role_002",
+              "value": {"initial_state": {}, "kind": "surface"}
+            },
+            {
+              "consumer": "task_program",
+              "key": "goal_predicates",
+              "value": ["object_upright", "semantic_goal"]
+            }
+          ],
+          "task_id": "e1_upright_2_actual",
+          "instruction": "Place selected items on table with declared orientation",
+          "metadata": {
+            "candidate_id": "candidate_01",
+            "generator": "embodichain.gen_sim.task_engine",
+            "goal_sources": {"goal_001": ["step_01"], "goal_002": ["step_01"]},
+            "instruction_coverage": "validated_draft_only",
+            "legacy_semantic_hash": "dd25cad884345228ef4e55fa349303aa0fd08bf7b51345fbefac78194c2a0d1b",
+            "milestone_sources": {"step_01": "step_01"},
+            "role_references": {"role_001": ["step_01.object"], "role_002": ["step_01.target"]},
+            "step_roles": {"step_01": {"object": "role_001", "target": "role_002"}},
+            "task_candidate_schema": "action_engine_task_draft_v1",
+            "terminal_goal_policy": "explicit_state_slots/v1"
+          },
+          "semantic_hash": "e71f6a67cca28f3d1f6bc98ca0c415a60de3503ddea552051100a60ff2af1be9"
+        },
+        "program": {
+          "program_id": "gen_sim_e1_upright_2_actual",
+          "targets": {
+            "step_01__01_upright_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.025032948307, 0.24982032488, 1.0644991493225098],
+                  "quaternion_xyzw": [
+                    1.9570750353636868e-08,
+                    4.5257362302209e-09,
+                    0.30687645077705383,
+                    0.9517494440078735
+                  ]
+                }
+              ]
+            },
+            "step_01__01_upright_staging_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.025032948307, 0.24982032488, 1.2644991493225097],
+                  "quaternion_xyzw": [
+                    1.9570750353636868e-08,
+                    4.5257362302209e-09,
+                    0.30687645077705383,
+                    0.9517494440078735
+                  ]
+                }
+              ]
+            },
+            "step_01_upright_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.044291094545, -0.145416438243, 1.0644991493225098],
+                  "quaternion_xyzw": [
+                    -7.28302396169056e-09,
+                    4.213769955185853e-08,
+                    0.968684196472168,
+                    0.2482960969209671
+                  ]
+                }
+              ]
+            },
+            "step_01_upright_staging_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.044291094545, -0.145416438243, 1.2644991493225097],
+                  "quaternion_xyzw": [
+                    -7.28302396169056e-09,
+                    4.213769955185853e-08,
+                    0.968684196472168,
+                    0.2482960969209671
+                  ]
+                }
+              ]
+            }
+          },
+          "program": {
+            "kind": "sequence",
+            "items": [
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_01",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.pick.step_01__01",
+                    "arguments": {"object": "interact_purple_soda_can", "target": "step_01__01_upright_target"},
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_02",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_purple_soda_can",
+                      "target": "step_01__01_upright_staging_target",
+                      "preserve_yaw": false
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_03",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_purple_soda_can",
+                      "target": "current_object_pose",
+                      "preserve_yaw": true
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_04",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.place_relative",
+                    "arguments": {"object": "interact_purple_soda_can", "reference": "table", "relation": "on"},
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_05",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.clear_released",
+                    "arguments": {
+                      "object": "interact_purple_soda_can",
+                      "target": "step_01__01_upright_staging_target"
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_06",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.park",
+                    "arguments": {},
+                    "resources": {"primary": "left"}
+                  }
+                },
+                "post": [
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_purple_soda_can",
+                    "preset": "rigid_object"
+                  },
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_purple_soda_can",
+                    "preset": "gen_sim.step_01__01__call_04.stable"
+                  }
+                ],
+                "validators": [
+                  {
+                    "kind": "object_near_relative_target",
+                    "object": "interact_purple_soda_can",
+                    "reference": "table",
+                    "displacement": [-0.025032948307, 0.24982032488, 1.0644991493225098],
+                    "position_tolerance": 0.1
+                  }
+                ]
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_01",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.pick.step_01",
+                    "arguments": {"object": "interact_orange_soda_can", "target": "step_01_upright_target"},
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_02",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_orange_soda_can",
+                      "target": "step_01_upright_staging_target",
+                      "preserve_yaw": false
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_03",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_orange_soda_can",
+                      "target": "current_object_pose",
+                      "preserve_yaw": true
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_04",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.place_relative",
+                    "arguments": {"object": "interact_orange_soda_can", "reference": "table", "relation": "on"},
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_05",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.clear_released",
+                    "arguments": {
+                      "object": "interact_orange_soda_can",
+                      "target": "step_01_upright_staging_target"
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_06",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.park",
+                    "arguments": {},
+                    "resources": {"primary": "left"}
+                  }
+                },
+                "post": [
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_orange_soda_can",
+                    "preset": "rigid_object"
+                  },
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_orange_soda_can",
+                    "preset": "gen_sim.step_01__call_04.stable"
+                  }
+                ],
+                "validators": [
+                  {
+                    "kind": "object_near_relative_target",
+                    "object": "interact_orange_soda_can",
+                    "reference": "table",
+                    "displacement": [-0.044291094545, -0.145416438243, 1.0644991493225098],
+                    "position_tolerance": 0.1
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "graph": {
+          "nodes": [
+            {"id": "step_01__01__call_01", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_02", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_03", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_04", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_05", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_06", "call": {"kind": "registered"}},
+            {"id": "step_01__call_01", "call": {"kind": "registered"}},
+            {"id": "step_01__call_02", "call": {"kind": "registered"}},
+            {"id": "step_01__call_03", "call": {"kind": "registered"}},
+            {"id": "step_01__call_04", "call": {"kind": "registered"}},
+            {"id": "step_01__call_05", "call": {"kind": "registered"}},
+            {"id": "step_01__call_06", "call": {"kind": "registered"}}
+          ],
+          "task_groups": [
+            {
+              "id": "step_01__01",
+              "task_type": "E1",
+              "node_ids": [
+                "step_01__01__call_01",
+                "step_01__01__call_02",
+                "step_01__01__call_03",
+                "step_01__01__call_04",
+                "step_01__01__call_05",
+                "step_01__01__call_06"
+              ],
+              "depends_on": [],
+              "success": {"kind": "semantic_task_term", "step_id": "step_01__01", "type": "semantic_goal"}
+            },
+            {
+              "id": "step_01",
+              "task_type": "E1",
+              "node_ids": [
+                "step_01__call_01",
+                "step_01__call_02",
+                "step_01__call_03",
+                "step_01__call_04",
+                "step_01__call_05",
+                "step_01__call_06"
+              ],
+              "depends_on": ["step_01__01"],
+              "success": {"kind": "semantic_task_term", "step_id": "step_01", "type": "semantic_goal"}
+            }
+          ]
+        },
+        "validation": {
+          "coverage": {
+            "lineage": {
+              "step_01": [
+                {
+                  "group_id": "step_01__01",
+                  "object_uid": "interact_purple_soda_can",
+                  "object_part_id": null
+                },
+                {
+                  "group_id": "step_01",
+                  "object_uid": "interact_orange_soda_can",
+                  "object_part_id": null
+                }
+              ]
+            }
+          }
+        },
+        "constraints": {
+          "schema_version": "gen_sim_task_constraints/v1",
+          "presets": {
+            "gen_sim.step_01__01__call_04.stable": {
+              "kind": "upright",
+              "entity": "interact_purple_soda_can",
+              "local_axis": [0.0, -0.0, 1.0],
+              "reference": "table",
+              "displacement": [-0.025032948307, 0.24982032488, 1.0644991493225098],
+              "position_tolerance": 0.05
+            },
+            "gen_sim.step_01__call_04.stable": {
+              "kind": "upright",
+              "entity": "interact_orange_soda_can",
+              "local_axis": [0.0, -0.0, 1.0],
+              "reference": "table",
+              "displacement": [-0.044291094545, -0.145416438243, 1.0644991493225098],
+              "position_tolerance": 0.05
+            }
+          },
+          "adaptive_pick": false,
+          "pick_purposes": {},
+          "motion_samples": {
+            "step_01__01__call_01": 140,
+            "step_01__01__call_02": 140,
+            "step_01__01__call_03": 140,
+            "step_01__01__call_04": 140,
+            "step_01__01__call_05": 140,
+            "step_01__01__call_06": 140,
+            "step_01__call_01": 140,
+            "step_01__call_02": 140,
+            "step_01__call_03": 140,
+            "step_01__call_04": 140,
+            "step_01__call_05": 140,
+            "step_01__call_06": 140
+          },
+          "motion_contract": "gen_sim.sampled_velocity/v1",
+          "cartesian_calls": [
+            "step_01__01__call_01",
+            "step_01__01__call_02",
+            "step_01__01__call_03",
+            "step_01__01__call_04",
+            "step_01__01__call_05",
+            "step_01__01__call_06",
+            "step_01__call_01",
+            "step_01__call_02",
+            "step_01__call_03",
+            "step_01__call_04",
+            "step_01__call_05",
+            "step_01__call_06"
+          ],
+          "pour_receivers": {},
+          "staging_calls": [
+            "gen_sim_e1_upright_2_actual/gen_sim_e1_upright_2_actual:segment:$.program.items[1]:0",
+            "gen_sim_e1_upright_2_actual/gen_sim_e1_upright_2_actual:segment:$.program.items[7]:0"
+          ],
+          "staging_retention_sources": [
+            [
+              "gen_sim_e1_upright_2_actual/gen_sim_e1_upright_2_actual:segment:$.program.items[1]:0",
+              "gen_sim_e1_upright_2_actual/gen_sim_e1_upright_2_actual:segment:$.program.items[0]:0",
+              "gen_sim.pick.step_01__01",
+              "interact_purple_soda_can",
+              "left"
+            ],
+            [
+              "gen_sim_e1_upright_2_actual/gen_sim_e1_upright_2_actual:segment:$.program.items[7]:0",
+              "gen_sim_e1_upright_2_actual/gen_sim_e1_upright_2_actual:segment:$.program.items[6]:0",
+              "gen_sim.pick.step_01",
+              "interact_orange_soda_can",
+              "left"
+            ]
+          ],
+          "runtime_profile": "default"
+        },
+        "orientation": "upright",
+        "count": 2,
+        "native_uids": {
+          "interact_orange_soda_can": "interact_orange_soda_can",
+          "interact_purple_soda_can": "interact_purple_soda_can",
+          "interact_spiral_notebook": "interact_spiral_notebook",
+          "table": "table"
+        },
+        "cases": [
+          {
+            "name": "aligned",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_purple_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "expected": {
+              "goal": ["satisfied", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "unavailable",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{}, {"milestone:step_01:1": true}]
+          },
+          {
+            "name": "one_reversed",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_purple_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, -1.0, 0.0, 0.0],
+                  [0.0, 0.0, -1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "expected": {
+              "goal": ["failed", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "failed",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{}, {"milestone:step_01:1": true}]
+          },
+          {
+            "name": "one_sideways",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_purple_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 0.0, -1.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "expected": {
+              "goal": ["failed", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "failed",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{}, {"milestone:step_01:1": true}]
+          },
+          {
+            "name": "one_current_missing",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "expected": {
+              "goal": ["unavailable", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "unavailable",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{}, {"milestone:step_01:1": true}]
+          }
+        ],
+        "runtime": {
+          "segments": [
+            {
+              "name": "step_01__01__call_01",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [0],
+              "end_steps": [10],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 0],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_02",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [10],
+              "end_steps": [20],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 1],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_03",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [20],
+              "end_steps": [30],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 2],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_04",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [30],
+              "end_steps": [40],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 3],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_05",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [40],
+              "end_steps": [50],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 4],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_06",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [50],
+              "end_steps": [60],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 5],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 1,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__01__call_04.stable",
+                    "source_path": ["program", "items", 5, "post", 1],
+                    "result": {
+                      "kind": "upright",
+                      "preset": "gen_sim.step_01__01__call_04.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "step_01__call_01",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [60],
+              "end_steps": [70],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 6],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_02",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [70],
+              "end_steps": [80],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 7],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_03",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [80],
+              "end_steps": [90],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 8],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_04",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [90],
+              "end_steps": [100],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 9],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_05",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [100],
+              "end_steps": [110],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 10],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_06",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [110],
+              "end_steps": [120],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 11],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 1,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__call_04.stable",
+                    "source_path": ["program", "items", 11, "post", 1],
+                    "result": {
+                      "kind": "upright",
+                      "preset": "gen_sim.step_01__call_04.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "spec": {
+          "schema_version": "task_spec/v0.1",
+          "canonicalization_version": "task_spec_c14n/v1",
+          "roles": [
+            {
+              "id": "role_001",
+              "kind": "object",
+              "cardinality": "count",
+              "affordances": ["graspable", "placeable"],
+              "properties": {},
+              "count": 2,
+              "source_structure": "rigid_object"
+            },
+            {
+              "id": "role_002",
+              "kind": "surface",
+              "cardinality": "one",
+              "affordances": [],
+              "properties": {},
+              "source_structure": "physical_entity"
+            }
+          ],
+          "init": [],
+          "goal": [
+            {
+              "id": "goal_002",
+              "predicate": "orientation",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "arguments": {"orientation_goal": "vertical", "task_type": "E1"}
+            },
+            {
+              "id": "goal_001",
+              "predicate": "semantic_goal",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "reference": "role_002",
+              "relation": "on",
+              "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+            }
+          ],
+          "invariants": [],
+          "temporal": [],
+          "milestones": [
+            {
+              "id": "step_01",
+              "achieve": [
+                {
+                  "id": "milestone:step_01:0",
+                  "predicate": "semantic_goal",
+                  "operator": "eq",
+                  "expected": true,
+                  "subject": "role_001",
+                  "reference": "role_002",
+                  "relation": "on",
+                  "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+                },
+                {
+                  "id": "milestone:step_01:1",
+                  "predicate": "orientation",
+                  "operator": "eq",
+                  "expected": true,
+                  "subject": "role_001",
+                  "arguments": {"orientation_goal": "vertical", "task_type": "E1"}
+                }
+              ]
+            }
+          ],
+          "requirements": [
+            {
+              "consumer": "asset",
+              "key": "role_001",
+              "value": {
+                "affordances": ["graspable", "placeable"],
+                "attributes": {},
+                "source_structure": "rigid_object"
+              }
+            },
+            {
+              "consumer": "asset",
+              "key": "role_002",
+              "value": {"affordances": [], "attributes": {}, "source_structure": "physical_entity"}
+            },
+            {"consumer": "embodiment", "key": "required_arms", "value": ["left_arm"]},
+            {"consumer": "expansion", "key": "lineage_key", "value": "task_spec.semantic_hash"},
+            {
+              "consumer": "scene",
+              "key": "role_001",
+              "value": {"initial_state": {}, "kind": "object"}
+            },
+            {
+              "consumer": "scene",
+              "key": "role_002",
+              "value": {"initial_state": {}, "kind": "surface"}
+            },
+            {
+              "consumer": "task_program",
+              "key": "goal_predicates",
+              "value": ["orientation", "semantic_goal"]
+            }
+          ],
+          "task_id": "e1_vertical_2_actual",
+          "instruction": "Place selected items on table with declared orientation",
+          "metadata": {
+            "candidate_id": "candidate_01",
+            "generator": "embodichain.gen_sim.task_engine",
+            "goal_sources": {"goal_001": ["step_01"], "goal_002": ["step_01"]},
+            "instruction_coverage": "validated_draft_only",
+            "legacy_semantic_hash": "09faddfcbc473fd306bacf7df53d7aedd4b179326c2465aeb4cc359435542d61",
+            "milestone_sources": {"step_01": "step_01"},
+            "role_references": {"role_001": ["step_01.object"], "role_002": ["step_01.target"]},
+            "step_roles": {"step_01": {"object": "role_001", "target": "role_002"}},
+            "task_candidate_schema": "action_engine_task_draft_v1",
+            "terminal_goal_policy": "explicit_state_slots/v1"
+          },
+          "semantic_hash": "b13103729a0dae1cf2a694388da886444304d0229734a7c3fc8c37a05809c1d8"
+        },
+        "program": {
+          "program_id": "gen_sim_e1_vertical_2_actual",
+          "targets": {
+            "step_01__01_upright_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.025032948307, 0.24982032488, 1.0644991493225098],
+                  "quaternion_xyzw": [
+                    1.9570750353636868e-08,
+                    4.5257362302209e-09,
+                    0.30687645077705383,
+                    0.9517494440078735
+                  ]
+                }
+              ]
+            },
+            "step_01__01_upright_staging_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.025032948307, 0.24982032488, 1.2644991493225097],
+                  "quaternion_xyzw": [
+                    1.9570750353636868e-08,
+                    4.5257362302209e-09,
+                    0.30687645077705383,
+                    0.9517494440078735
+                  ]
+                }
+              ]
+            },
+            "step_01_upright_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.044291094545, -0.145416438243, 1.0644991493225098],
+                  "quaternion_xyzw": [
+                    -7.28302396169056e-09,
+                    4.213769955185853e-08,
+                    0.968684196472168,
+                    0.2482960969209671
+                  ]
+                }
+              ]
+            },
+            "step_01_upright_staging_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.044291094545, -0.145416438243, 1.2644991493225097],
+                  "quaternion_xyzw": [
+                    -7.28302396169056e-09,
+                    4.213769955185853e-08,
+                    0.968684196472168,
+                    0.2482960969209671
+                  ]
+                }
+              ]
+            }
+          },
+          "program": {
+            "kind": "sequence",
+            "items": [
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_01",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "pick",
+                    "object": "interact_purple_soda_can",
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_02",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_purple_soda_can",
+                      "target": "step_01__01_upright_staging_target",
+                      "preserve_yaw": false,
+                      "axis_direction_free": true
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_03",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_purple_soda_can",
+                      "target": "current_object_pose",
+                      "preserve_yaw": true,
+                      "axis_direction_free": true
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_04",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.place_relative",
+                    "arguments": {"object": "interact_purple_soda_can", "reference": "table", "relation": "on"},
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_05",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.clear_released",
+                    "arguments": {
+                      "object": "interact_purple_soda_can",
+                      "target": "step_01__01_upright_staging_target"
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_06",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.park",
+                    "arguments": {},
+                    "resources": {"primary": "left"}
+                  }
+                },
+                "post": [
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_purple_soda_can",
+                    "preset": "rigid_object"
+                  },
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_purple_soda_can",
+                    "preset": "gen_sim.step_01__01__call_04.stable"
+                  }
+                ],
+                "validators": [
+                  {
+                    "kind": "object_near_relative_target",
+                    "object": "interact_purple_soda_can",
+                    "reference": "table",
+                    "displacement": [-0.025032948307, 0.24982032488, 1.0644991493225098],
+                    "position_tolerance": 0.1
+                  }
+                ]
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_01",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "pick",
+                    "object": "interact_orange_soda_can",
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_02",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_orange_soda_can",
+                      "target": "step_01_upright_staging_target",
+                      "preserve_yaw": false,
+                      "axis_direction_free": true
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_03",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_orange_soda_can",
+                      "target": "current_object_pose",
+                      "preserve_yaw": true,
+                      "axis_direction_free": true
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_04",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.place_relative",
+                    "arguments": {"object": "interact_orange_soda_can", "reference": "table", "relation": "on"},
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_05",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.clear_released",
+                    "arguments": {
+                      "object": "interact_orange_soda_can",
+                      "target": "step_01_upright_staging_target"
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_06",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.park",
+                    "arguments": {},
+                    "resources": {"primary": "left"}
+                  }
+                },
+                "post": [
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_orange_soda_can",
+                    "preset": "rigid_object"
+                  },
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_orange_soda_can",
+                    "preset": "gen_sim.step_01__call_04.stable"
+                  }
+                ],
+                "validators": [
+                  {
+                    "kind": "object_near_relative_target",
+                    "object": "interact_orange_soda_can",
+                    "reference": "table",
+                    "displacement": [-0.044291094545, -0.145416438243, 1.0644991493225098],
+                    "position_tolerance": 0.1
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "graph": {
+          "nodes": [
+            {"id": "step_01__01__call_01", "call": {"kind": "pick"}},
+            {"id": "step_01__01__call_02", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_03", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_04", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_05", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_06", "call": {"kind": "registered"}},
+            {"id": "step_01__call_01", "call": {"kind": "pick"}},
+            {"id": "step_01__call_02", "call": {"kind": "registered"}},
+            {"id": "step_01__call_03", "call": {"kind": "registered"}},
+            {"id": "step_01__call_04", "call": {"kind": "registered"}},
+            {"id": "step_01__call_05", "call": {"kind": "registered"}},
+            {"id": "step_01__call_06", "call": {"kind": "registered"}}
+          ],
+          "task_groups": [
+            {
+              "id": "step_01__01",
+              "task_type": "E1",
+              "node_ids": [
+                "step_01__01__call_01",
+                "step_01__01__call_02",
+                "step_01__01__call_03",
+                "step_01__01__call_04",
+                "step_01__01__call_05",
+                "step_01__01__call_06"
+              ],
+              "depends_on": [],
+              "success": {"kind": "semantic_task_term", "step_id": "step_01__01", "type": "semantic_goal"}
+            },
+            {
+              "id": "step_01",
+              "task_type": "E1",
+              "node_ids": [
+                "step_01__call_01",
+                "step_01__call_02",
+                "step_01__call_03",
+                "step_01__call_04",
+                "step_01__call_05",
+                "step_01__call_06"
+              ],
+              "depends_on": ["step_01__01"],
+              "success": {"kind": "semantic_task_term", "step_id": "step_01", "type": "semantic_goal"}
+            }
+          ]
+        },
+        "validation": {
+          "coverage": {
+            "lineage": {
+              "step_01": [
+                {
+                  "group_id": "step_01__01",
+                  "object_uid": "interact_purple_soda_can",
+                  "object_part_id": null
+                },
+                {
+                  "group_id": "step_01",
+                  "object_uid": "interact_orange_soda_can",
+                  "object_part_id": null
+                }
+              ]
+            }
+          }
+        },
+        "constraints": {
+          "schema_version": "gen_sim_task_constraints/v1",
+          "presets": {
+            "gen_sim.step_01__01__call_04.stable": {
+              "kind": "upright",
+              "entity": "interact_purple_soda_can",
+              "local_axis": [0.0, -0.0, 1.0],
+              "reference": "table",
+              "displacement": [-0.025032948307, 0.24982032488, 1.0644991493225098],
+              "position_tolerance": 0.05,
+              "axis_direction_free": true
+            },
+            "gen_sim.step_01__call_04.stable": {
+              "kind": "upright",
+              "entity": "interact_orange_soda_can",
+              "local_axis": [0.0, -0.0, 1.0],
+              "reference": "table",
+              "displacement": [-0.044291094545, -0.145416438243, 1.0644991493225098],
+              "position_tolerance": 0.05,
+              "axis_direction_free": true
+            }
+          },
+          "adaptive_pick": true,
+          "pick_purposes": {"step_01__01__call_01": "ordinary", "step_01__call_01": "ordinary"},
+          "motion_samples": {
+            "step_01__01__call_01": 140,
+            "step_01__01__call_02": 140,
+            "step_01__01__call_03": 140,
+            "step_01__01__call_04": 140,
+            "step_01__01__call_05": 140,
+            "step_01__01__call_06": 140,
+            "step_01__call_01": 140,
+            "step_01__call_02": 140,
+            "step_01__call_03": 140,
+            "step_01__call_04": 140,
+            "step_01__call_05": 140,
+            "step_01__call_06": 140
+          },
+          "motion_contract": "gen_sim.sampled_velocity/v1",
+          "cartesian_calls": [
+            "step_01__01__call_01",
+            "step_01__01__call_02",
+            "step_01__01__call_03",
+            "step_01__01__call_04",
+            "step_01__01__call_05",
+            "step_01__01__call_06",
+            "step_01__call_01",
+            "step_01__call_02",
+            "step_01__call_03",
+            "step_01__call_04",
+            "step_01__call_05",
+            "step_01__call_06"
+          ],
+          "pour_receivers": {},
+          "staging_calls": [
+            "gen_sim_e1_vertical_2_actual/gen_sim_e1_vertical_2_actual:segment:$.program.items[1]:0",
+            "gen_sim_e1_vertical_2_actual/gen_sim_e1_vertical_2_actual:segment:$.program.items[7]:0"
+          ],
+          "staging_retention_sources": [
+            [
+              "gen_sim_e1_vertical_2_actual/gen_sim_e1_vertical_2_actual:segment:$.program.items[1]:0",
+              "gen_sim_e1_vertical_2_actual/gen_sim_e1_vertical_2_actual:segment:$.program.items[0]:0",
+              "pick",
+              "interact_purple_soda_can",
+              "left"
+            ],
+            [
+              "gen_sim_e1_vertical_2_actual/gen_sim_e1_vertical_2_actual:segment:$.program.items[7]:0",
+              "gen_sim_e1_vertical_2_actual/gen_sim_e1_vertical_2_actual:segment:$.program.items[6]:0",
+              "pick",
+              "interact_orange_soda_can",
+              "left"
+            ]
+          ],
+          "runtime_profile": "default"
+        },
+        "orientation": "vertical",
+        "count": 2,
+        "native_uids": {
+          "interact_orange_soda_can": "interact_orange_soda_can",
+          "interact_purple_soda_can": "interact_purple_soda_can",
+          "interact_spiral_notebook": "interact_spiral_notebook",
+          "table": "table"
+        },
+        "cases": [
+          {
+            "name": "aligned",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_purple_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "expected": {
+              "goal": ["satisfied", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "unavailable",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{}, {}]
+          },
+          {
+            "name": "one_reversed",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_purple_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, -1.0, 0.0, 0.0],
+                  [0.0, 0.0, -1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "expected": {
+              "goal": ["satisfied", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "unavailable",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{}, {}]
+          },
+          {
+            "name": "one_sideways",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_purple_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 0.0, -1.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "expected": {
+              "goal": ["failed", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "failed",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{}, {}]
+          }
+        ],
+        "runtime": {
+          "segments": [
+            {
+              "name": "step_01__01__call_01",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [0],
+              "end_steps": [10],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 0],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_02",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [10],
+              "end_steps": [20],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 1],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_03",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [20],
+              "end_steps": [30],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 2],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_04",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [30],
+              "end_steps": [40],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 3],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_05",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [40],
+              "end_steps": [50],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 4],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_06",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [50],
+              "end_steps": [60],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 5],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 1,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__01__call_04.stable",
+                    "source_path": ["program", "items", 5, "post", 1],
+                    "result": {
+                      "kind": "upright",
+                      "preset": "gen_sim.step_01__01__call_04.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "step_01__call_01",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [60],
+              "end_steps": [70],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 6],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_02",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [70],
+              "end_steps": [80],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 7],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_03",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [80],
+              "end_steps": [90],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 8],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_04",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [90],
+              "end_steps": [100],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 9],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_05",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [100],
+              "end_steps": [110],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 10],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_06",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [110],
+              "end_steps": [120],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 11],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 1,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__call_04.stable",
+                    "source_path": ["program", "items", 11, "post", 1],
+                    "result": {
+                      "kind": "upright",
+                      "preset": "gen_sim.step_01__call_04.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "spec": {
+          "schema_version": "task_spec/v0.1",
+          "canonicalization_version": "task_spec_c14n/v1",
+          "roles": [
+            {
+              "id": "role_001",
+              "kind": "object",
+              "cardinality": "count",
+              "affordances": ["graspable", "placeable"],
+              "properties": {},
+              "count": 2,
+              "source_structure": "rigid_object"
+            },
+            {
+              "id": "role_002",
+              "kind": "surface",
+              "cardinality": "one",
+              "affordances": [],
+              "properties": {},
+              "source_structure": "physical_entity"
+            }
+          ],
+          "init": [],
+          "goal": [
+            {
+              "id": "goal_002",
+              "predicate": "orientation",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "arguments": {"orientation_goal": "preserve", "task_type": "E1"}
+            },
+            {
+              "id": "goal_001",
+              "predicate": "semantic_goal",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "reference": "role_002",
+              "relation": "on",
+              "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+            }
+          ],
+          "invariants": [],
+          "temporal": [],
+          "milestones": [
+            {
+              "id": "step_01",
+              "achieve": [
+                {
+                  "id": "milestone:step_01:0",
+                  "predicate": "semantic_goal",
+                  "operator": "eq",
+                  "expected": true,
+                  "subject": "role_001",
+                  "reference": "role_002",
+                  "relation": "on",
+                  "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+                },
+                {
+                  "id": "milestone:step_01:1",
+                  "predicate": "orientation",
+                  "operator": "eq",
+                  "expected": true,
+                  "subject": "role_001",
+                  "arguments": {"orientation_goal": "preserve", "task_type": "E1"}
+                }
+              ]
+            }
+          ],
+          "requirements": [
+            {
+              "consumer": "asset",
+              "key": "role_001",
+              "value": {
+                "affordances": ["graspable", "placeable"],
+                "attributes": {},
+                "source_structure": "rigid_object"
+              }
+            },
+            {
+              "consumer": "asset",
+              "key": "role_002",
+              "value": {"affordances": [], "attributes": {}, "source_structure": "physical_entity"}
+            },
+            {"consumer": "embodiment", "key": "required_arms", "value": ["left_arm"]},
+            {"consumer": "expansion", "key": "lineage_key", "value": "task_spec.semantic_hash"},
+            {
+              "consumer": "scene",
+              "key": "role_001",
+              "value": {"initial_state": {}, "kind": "object"}
+            },
+            {
+              "consumer": "scene",
+              "key": "role_002",
+              "value": {"initial_state": {}, "kind": "surface"}
+            },
+            {
+              "consumer": "task_program",
+              "key": "goal_predicates",
+              "value": ["orientation", "semantic_goal"]
+            }
+          ],
+          "task_id": "e1_preserve_2_actual",
+          "instruction": "Place selected items on table with declared orientation",
+          "metadata": {
+            "candidate_id": "candidate_01",
+            "generator": "embodichain.gen_sim.task_engine",
+            "goal_sources": {"goal_001": ["step_01"], "goal_002": ["step_01"]},
+            "instruction_coverage": "validated_draft_only",
+            "legacy_semantic_hash": "cb4bf4968995963682df425a19d4e60adf1cf2db8b2425264e2da51840c4b947",
+            "milestone_sources": {"step_01": "step_01"},
+            "role_references": {"role_001": ["step_01.object"], "role_002": ["step_01.target"]},
+            "step_roles": {"step_01": {"object": "role_001", "target": "role_002"}},
+            "task_candidate_schema": "action_engine_task_draft_v1",
+            "terminal_goal_policy": "explicit_state_slots/v1"
+          },
+          "semantic_hash": "cb2168f15887a234cc38ec5a399d47894b818fa5e23c9b41772f736dd827a69f"
+        },
+        "program": {
+          "program_id": "gen_sim_e1_preserve_2_actual",
+          "targets": {},
+          "program": {
+            "kind": "sequence",
+            "items": [
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_01",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "pick",
+                    "object": "interact_purple_soda_can",
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_02",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.place_relative",
+                    "arguments": {"object": "interact_purple_soda_can", "reference": "table", "relation": "on"},
+                    "resources": {"primary": "left"}
+                  }
+                },
+                "post": [
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_purple_soda_can",
+                    "preset": "rigid_object"
+                  },
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_purple_soda_can",
+                    "preset": "gen_sim.step_01__01__call_02.stable"
+                  }
+                ]
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__01__call_03",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.park",
+                    "arguments": {},
+                    "resources": {"primary": "left"}
+                  }
+                },
+                "post": [
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_purple_soda_can",
+                    "preset": "gen_sim.step_01__01__call_02.stable"
+                  }
+                ],
+                "validators": []
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_01",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "pick",
+                    "object": "interact_orange_soda_can",
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_02",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.place_relative",
+                    "arguments": {"object": "interact_orange_soda_can", "reference": "table", "relation": "on"},
+                    "resources": {"primary": "left"}
+                  }
+                },
+                "post": [
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_orange_soda_can",
+                    "preset": "rigid_object"
+                  },
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_orange_soda_can",
+                    "preset": "gen_sim.step_01__call_02.stable"
+                  }
+                ]
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_03",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.park",
+                    "arguments": {},
+                    "resources": {"primary": "left"}
+                  }
+                },
+                "post": [
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_orange_soda_can",
+                    "preset": "gen_sim.step_01__call_02.stable"
+                  }
+                ],
+                "validators": []
+              }
+            ]
+          }
+        },
+        "graph": {
+          "nodes": [
+            {"id": "step_01__01__call_01", "call": {"kind": "pick"}},
+            {"id": "step_01__01__call_02", "call": {"kind": "registered"}},
+            {"id": "step_01__01__call_03", "call": {"kind": "registered"}},
+            {"id": "step_01__call_01", "call": {"kind": "pick"}},
+            {"id": "step_01__call_02", "call": {"kind": "registered"}},
+            {"id": "step_01__call_03", "call": {"kind": "registered"}}
+          ],
+          "task_groups": [
+            {
+              "id": "step_01__01",
+              "task_type": "E1",
+              "node_ids": ["step_01__01__call_01", "step_01__01__call_02", "step_01__01__call_03"],
+              "depends_on": [],
+              "success": {"kind": "semantic_task_term", "step_id": "step_01__01", "type": "semantic_goal"}
+            },
+            {
+              "id": "step_01",
+              "task_type": "E1",
+              "node_ids": ["step_01__call_01", "step_01__call_02", "step_01__call_03"],
+              "depends_on": ["step_01__01"],
+              "success": {"kind": "semantic_task_term", "step_id": "step_01", "type": "semantic_goal"}
+            }
+          ]
+        },
+        "validation": {
+          "coverage": {
+            "lineage": {
+              "step_01": [
+                {
+                  "group_id": "step_01__01",
+                  "object_uid": "interact_purple_soda_can",
+                  "object_part_id": null
+                },
+                {
+                  "group_id": "step_01",
+                  "object_uid": "interact_orange_soda_can",
+                  "object_part_id": null
+                }
+              ]
+            }
+          }
+        },
+        "constraints": {
+          "schema_version": "gen_sim_task_constraints/v1",
+          "presets": {
+            "gen_sim.step_01__01__call_02.stable": {"kind": "supported_region", "entity": "interact_purple_soda_can", "reference": "table"},
+            "gen_sim.step_01__call_02.stable": {"kind": "supported_region", "entity": "interact_orange_soda_can", "reference": "table"}
+          },
+          "adaptive_pick": true,
+          "pick_purposes": {"step_01__01__call_01": "ordinary", "step_01__call_01": "ordinary"},
+          "motion_samples": {
+            "step_01__01__call_01": 140,
+            "step_01__01__call_02": 140,
+            "step_01__01__call_03": 140,
+            "step_01__call_01": 140,
+            "step_01__call_02": 140,
+            "step_01__call_03": 140
+          },
+          "motion_contract": "gen_sim.sampled_velocity/v1",
+          "cartesian_calls": [],
+          "pour_receivers": {},
+          "staging_calls": [],
+          "staging_retention_sources": [],
+          "runtime_profile": "default"
+        },
+        "orientation": "preserve",
+        "count": 2,
+        "native_uids": {
+          "interact_orange_soda_can": "interact_orange_soda_can",
+          "interact_purple_soda_can": "interact_purple_soda_can",
+          "interact_spiral_notebook": "interact_spiral_notebook",
+          "table": "table"
+        },
+        "cases": [
+          {
+            "name": "aligned",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_purple_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "expected": {
+              "goal": ["unavailable", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "unavailable",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{}, {}]
+          }
+        ],
+        "runtime": {
+          "segments": [
+            {
+              "name": "step_01__01__call_01",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [0],
+              "end_steps": [10],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 0],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__01__call_02",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [10],
+              "end_steps": [20],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 1],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 1,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__01__call_02.stable",
+                    "source_path": ["program", "items", 1, "post", 1],
+                    "result": {
+                      "kind": "supported_region",
+                      "preset": "gen_sim.step_01__01__call_02.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "step_01__01__call_03",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [20],
+              "end_steps": [30],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 2],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 0,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__01__call_02.stable",
+                    "source_path": ["program", "items", 2, "post", 0],
+                    "result": {
+                      "kind": "supported_region",
+                      "preset": "gen_sim.step_01__01__call_02.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "step_01__call_01",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [30],
+              "end_steps": [40],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 3],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_02",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [40],
+              "end_steps": [50],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 4],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 1,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__call_02.stable",
+                    "source_path": ["program", "items", 4, "post", 1],
+                    "result": {
+                      "kind": "supported_region",
+                      "preset": "gen_sim.step_01__call_02.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "step_01__call_03",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [50],
+              "end_steps": [60],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 5],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 0,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__call_02.stable",
+                    "source_path": ["program", "items", 5, "post", 0],
+                    "result": {
+                      "kind": "supported_region",
+                      "preset": "gen_sim.step_01__call_02.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "spec": {
+          "schema_version": "task_spec/v0.1",
+          "canonicalization_version": "task_spec_c14n/v1",
+          "roles": [
+            {
+              "id": "role_001",
+              "kind": "object",
+              "cardinality": "count",
+              "affordances": ["graspable", "placeable"],
+              "properties": {},
+              "count": 1,
+              "source_structure": "rigid_object"
+            },
+            {
+              "id": "role_002",
+              "kind": "surface",
+              "cardinality": "one",
+              "affordances": [],
+              "properties": {},
+              "source_structure": "physical_entity"
+            }
+          ],
+          "init": [],
+          "goal": [
+            {
+              "id": "goal_002",
+              "predicate": "object_upright",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "arguments": {"orientation_goal": "upright", "task_type": "E1"}
+            },
+            {
+              "id": "goal_001",
+              "predicate": "semantic_goal",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "reference": "role_002",
+              "relation": "on",
+              "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+            }
+          ],
+          "invariants": [],
+          "temporal": [],
+          "milestones": [
+            {
+              "id": "step_01",
+              "achieve": [
+                {
+                  "id": "milestone:step_01:0",
+                  "predicate": "semantic_goal",
+                  "operator": "eq",
+                  "expected": true,
+                  "subject": "role_001",
+                  "reference": "role_002",
+                  "relation": "on",
+                  "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+                },
+                {
+                  "id": "milestone:step_01:1",
+                  "predicate": "object_upright",
+                  "operator": "eq",
+                  "expected": true,
+                  "subject": "role_001",
+                  "arguments": {"orientation_goal": "upright", "task_type": "E1"}
+                }
+              ]
+            }
+          ],
+          "requirements": [
+            {
+              "consumer": "asset",
+              "key": "role_001",
+              "value": {
+                "affordances": ["graspable", "placeable"],
+                "attributes": {},
+                "source_structure": "rigid_object"
+              }
+            },
+            {
+              "consumer": "asset",
+              "key": "role_002",
+              "value": {"affordances": [], "attributes": {}, "source_structure": "physical_entity"}
+            },
+            {"consumer": "embodiment", "key": "required_arms", "value": ["left_arm"]},
+            {"consumer": "expansion", "key": "lineage_key", "value": "task_spec.semantic_hash"},
+            {
+              "consumer": "scene",
+              "key": "role_001",
+              "value": {"initial_state": {}, "kind": "object"}
+            },
+            {
+              "consumer": "scene",
+              "key": "role_002",
+              "value": {"initial_state": {}, "kind": "surface"}
+            },
+            {
+              "consumer": "task_program",
+              "key": "goal_predicates",
+              "value": ["object_upright", "semantic_goal"]
+            }
+          ],
+          "task_id": "e1_upright_1_actual",
+          "instruction": "Place selected items on table with declared orientation",
+          "metadata": {
+            "candidate_id": "candidate_01",
+            "generator": "embodichain.gen_sim.task_engine",
+            "goal_sources": {"goal_001": ["step_01"], "goal_002": ["step_01"]},
+            "instruction_coverage": "validated_draft_only",
+            "legacy_semantic_hash": "11bd49a6f538f3e7c810c04079d123db910d9d3bc295357ec091c75210a32521",
+            "milestone_sources": {"step_01": "step_01"},
+            "role_references": {"role_001": ["step_01.object"], "role_002": ["step_01.target"]},
+            "step_roles": {"step_01": {"object": "role_001", "target": "role_002"}},
+            "task_candidate_schema": "action_engine_task_draft_v1",
+            "terminal_goal_policy": "explicit_state_slots/v1"
+          },
+          "semantic_hash": "5c049a9220fbea9450dec20401138901e9b05a5a98460d1905664858e81b44e6"
+        },
+        "program": {
+          "program_id": "gen_sim_e1_upright_1_actual",
+          "targets": {
+            "step_01_upright_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.025032948307, 0.24982032488, 1.0644991493225098],
+                  "quaternion_xyzw": [
+                    1.9570750353636868e-08,
+                    4.5257362302209e-09,
+                    0.30687645077705383,
+                    0.9517494440078735
+                  ]
+                }
+              ]
+            },
+            "step_01_upright_staging_target": {
+              "kind": "cyclic_pose",
+              "values": [
+                {
+                  "position": [-0.025032948307, 0.24982032488, 1.2644991493225097],
+                  "quaternion_xyzw": [
+                    1.9570750353636868e-08,
+                    4.5257362302209e-09,
+                    0.30687645077705383,
+                    0.9517494440078735
+                  ]
+                }
+              ]
+            }
+          },
+          "program": {
+            "kind": "sequence",
+            "items": [
+              {
+                "kind": "segment",
+                "name": "step_01__call_01",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.pick.step_01",
+                    "arguments": {"object": "interact_purple_soda_can", "target": "step_01_upright_target"},
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_02",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_purple_soda_can",
+                      "target": "step_01_upright_staging_target",
+                      "preserve_yaw": false
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_03",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                      "object": "interact_purple_soda_can",
+                      "target": "current_object_pose",
+                      "preserve_yaw": true
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_04",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.place_relative",
+                    "arguments": {"object": "interact_purple_soda_can", "reference": "table", "relation": "on"},
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_05",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.clear_released",
+                    "arguments": {
+                      "object": "interact_purple_soda_can",
+                      "target": "step_01_upright_staging_target"
+                    },
+                    "resources": {"primary": "left"}
+                  }
+                }
+              },
+              {
+                "kind": "segment",
+                "name": "step_01__call_06",
+                "steps": {
+                  "kind": "invoke",
+                  "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.park",
+                    "arguments": {},
+                    "resources": {"primary": "left"}
+                  }
+                },
+                "post": [
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_purple_soda_can",
+                    "preset": "rigid_object"
+                  },
+                  {
+                    "kind": "wait_stable",
+                    "entity": "interact_purple_soda_can",
+                    "preset": "gen_sim.step_01__call_04.stable"
+                  }
+                ],
+                "validators": [
+                  {
+                    "kind": "object_near_relative_target",
+                    "object": "interact_purple_soda_can",
+                    "reference": "table",
+                    "displacement": [-0.025032948307, 0.24982032488, 1.0644991493225098],
+                    "position_tolerance": 0.1
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "graph": {
+          "nodes": [
+            {"id": "step_01__call_01", "call": {"kind": "registered"}},
+            {"id": "step_01__call_02", "call": {"kind": "registered"}},
+            {"id": "step_01__call_03", "call": {"kind": "registered"}},
+            {"id": "step_01__call_04", "call": {"kind": "registered"}},
+            {"id": "step_01__call_05", "call": {"kind": "registered"}},
+            {"id": "step_01__call_06", "call": {"kind": "registered"}}
+          ],
+          "task_groups": [
+            {
+              "id": "step_01",
+              "task_type": "E1",
+              "node_ids": [
+                "step_01__call_01",
+                "step_01__call_02",
+                "step_01__call_03",
+                "step_01__call_04",
+                "step_01__call_05",
+                "step_01__call_06"
+              ],
+              "depends_on": [],
+              "success": {"kind": "semantic_task_term", "step_id": "step_01", "type": "semantic_goal"}
+            }
+          ]
+        },
+        "validation": {
+          "coverage": {
+            "lineage": {
+              "step_01": [
+                {
+                  "group_id": "step_01",
+                  "object_uid": "interact_purple_soda_can",
+                  "object_part_id": null
+                }
+              ]
+            }
+          }
+        },
+        "constraints": {
+          "schema_version": "gen_sim_task_constraints/v1",
+          "presets": {
+            "gen_sim.step_01__call_04.stable": {
+              "kind": "upright",
+              "entity": "interact_purple_soda_can",
+              "local_axis": [0.0, -0.0, 1.0],
+              "reference": "table",
+              "displacement": [-0.025032948307, 0.24982032488, 1.0644991493225098],
+              "position_tolerance": 0.05
+            }
+          },
+          "adaptive_pick": false,
+          "pick_purposes": {},
+          "motion_samples": {
+            "step_01__call_01": 140,
+            "step_01__call_02": 140,
+            "step_01__call_03": 140,
+            "step_01__call_04": 140,
+            "step_01__call_05": 140,
+            "step_01__call_06": 140
+          },
+          "motion_contract": "gen_sim.sampled_velocity/v1",
+          "cartesian_calls": [
+            "step_01__call_01",
+            "step_01__call_02",
+            "step_01__call_03",
+            "step_01__call_04",
+            "step_01__call_05",
+            "step_01__call_06"
+          ],
+          "pour_receivers": {},
+          "staging_calls": ["gen_sim_e1_upright_1_actual/gen_sim_e1_upright_1_actual:segment:$.program.items[1]:0"],
+          "staging_retention_sources": [
+            [
+              "gen_sim_e1_upright_1_actual/gen_sim_e1_upright_1_actual:segment:$.program.items[1]:0",
+              "gen_sim_e1_upright_1_actual/gen_sim_e1_upright_1_actual:segment:$.program.items[0]:0",
+              "gen_sim.pick.step_01",
+              "interact_purple_soda_can",
+              "left"
+            ]
+          ],
+          "runtime_profile": "default"
+        },
+        "orientation": "upright",
+        "count": 1,
+        "native_uids": {
+          "interact_orange_soda_can": "interact_orange_soda_can",
+          "interact_purple_soda_can": "interact_purple_soda_can",
+          "interact_spiral_notebook": "interact_spiral_notebook",
+          "table": "table"
+        },
+        "cases": [
+          {
+            "name": "aligned",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_purple_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "expected": {
+              "goal": ["satisfied", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "unavailable",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{"milestone:step_01:1": true}]
+          },
+          {
+            "name": "one_reversed",
+            "poses": {
+              "interact_orange_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_purple_soda_can": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, -1.0, 0.0, 0.0],
+                  [0.0, 0.0, -1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "interact_spiral_notebook": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ],
+              "table": [
+                [
+                  [1.0, 0.0, 0.0, 0.0],
+                  [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 1.0]
+                ]
+              ]
+            },
+            "runtime": {
+              "segments": [
+                {
+                  "name": "step_01__call_01",
+                  "active": [true],
+                  "successes": [false],
+                  "success": false,
+                  "start_steps": [0],
+                  "end_steps": [10],
+                  "metadata": {
+                    "program_segment_source_path": ["program", "items", 0],
+                    "runtime": {"env_ids": [0]},
+                    "post_policies": []
+                  }
+                },
+                {
+                  "name": "step_01__call_02",
+                  "active": [true],
+                  "successes": [false],
+                  "success": false,
+                  "start_steps": [10],
+                  "end_steps": [20],
+                  "metadata": {
+                    "program_segment_source_path": ["program", "items", 1],
+                    "runtime": {"env_ids": [0]},
+                    "post_policies": []
+                  }
+                },
+                {
+                  "name": "step_01__call_03",
+                  "active": [true],
+                  "successes": [false],
+                  "success": false,
+                  "start_steps": [20],
+                  "end_steps": [30],
+                  "metadata": {
+                    "program_segment_source_path": ["program", "items", 2],
+                    "runtime": {"env_ids": [0]},
+                    "post_policies": []
+                  }
+                },
+                {
+                  "name": "step_01__call_04",
+                  "active": [true],
+                  "successes": [false],
+                  "success": false,
+                  "start_steps": [30],
+                  "end_steps": [40],
+                  "metadata": {
+                    "program_segment_source_path": ["program", "items", 3],
+                    "runtime": {"env_ids": [0]},
+                    "post_policies": []
+                  }
+                },
+                {
+                  "name": "step_01__call_05",
+                  "active": [true],
+                  "successes": [false],
+                  "success": false,
+                  "start_steps": [40],
+                  "end_steps": [50],
+                  "metadata": {
+                    "program_segment_source_path": ["program", "items", 4],
+                    "runtime": {"env_ids": [0]},
+                    "post_policies": []
+                  }
+                },
+                {
+                  "name": "step_01__call_06",
+                  "active": [true],
+                  "successes": [false],
+                  "success": false,
+                  "start_steps": [50],
+                  "end_steps": [60],
+                  "metadata": {
+                    "program_segment_source_path": ["program", "items", 5],
+                    "runtime": {"env_ids": [0]},
+                    "post_policies": [
+                      {
+                        "kind": "wait_stable",
+                        "policy_index": 1,
+                        "result_mask": [false],
+                        "preset": "gen_sim.step_01__call_04.stable",
+                        "source_path": ["program", "items", 5, "post", 1],
+                        "result": {
+                          "kind": "upright",
+                          "preset": "gen_sim.step_01__call_04.stable",
+                          "accepted_mask": [false],
+                          "measurements": {"alignment": [1.0]}
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "expected": {
+              "goal": ["failed", "unavailable"],
+              "milestones": ["unavailable"],
+              "status": "failed",
+              "certificate_ready": false
+            },
+            "normative_trajectory": [{}]
+          }
+        ],
+        "runtime": {
+          "segments": [
+            {
+              "name": "step_01__call_01",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [0],
+              "end_steps": [10],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 0],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_02",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [10],
+              "end_steps": [20],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 1],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_03",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [20],
+              "end_steps": [30],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 2],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_04",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [30],
+              "end_steps": [40],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 3],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_05",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [40],
+              "end_steps": [50],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 4],
+                "runtime": {"env_ids": [0]},
+                "post_policies": []
+              }
+            },
+            {
+              "name": "step_01__call_06",
+              "active": [true],
+              "successes": [true],
+              "success": true,
+              "start_steps": [50],
+              "end_steps": [60],
+              "metadata": {
+                "program_segment_source_path": ["program", "items", 5],
+                "runtime": {"env_ids": [0]},
+                "post_policies": [
+                  {
+                    "kind": "wait_stable",
+                    "policy_index": 1,
+                    "result_mask": [true],
+                    "preset": "gen_sim.step_01__call_04.stable",
+                    "source_path": ["program", "items", 5, "post", 1],
+                    "result": {
+                      "kind": "upright",
+                      "preset": "gen_sim.step_01__call_04.stable",
+                      "accepted_mask": [true],
+                      "measurements": {"alignment": [1.0]}
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

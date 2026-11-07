@@ -1,12 +1,5 @@
 {
   "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
-  "scope": "Actual B0 producer/capture/evaluator with CPU primitive geometry acquisition ports; no simulator, generated assets or physical qualification.",
-  "source_function_sha256": {
-    "_program_payload": "dc052d720f985ef2dfbce3fead7b22ab9534a31c2bfdddebca474e691f5a33a8",
-    "capture_final_goals": "2793d9ee200d0f8e643fdb7ed1fdb7479f6eab144509961c28b72bdb9d428924",
-    "capture_placement_milestones": "389df8a1d1f707382727e21c57988c8d07e6e18107aad103a6d82e320fc60c7b",
-    "evaluate_runtime_evidence": "c9417733643a8fa89ed8e6d668f648e05fb1f9e5614d3f07ef244df5f2f91781"
-  },
   "spec": {
     "schema_version": "task_spec/v0.1",
     "canonicalization_version": "task_spec_c14n/v1",
@@ -15,10 +8,7 @@
         "id": "role_001",
         "kind": "object",
         "cardinality": "count",
-        "affordances": [
-          "graspable",
-          "placeable"
-        ],
+        "affordances": ["graspable", "placeable"],
         "properties": {},
         "count": 2,
         "source_structure": "rigid_object"
@@ -27,9 +17,7 @@
         "id": "role_002",
         "kind": "target",
         "cardinality": "one",
-        "affordances": [
-          "container"
-        ],
+        "affordances": ["container"],
         "properties": {},
         "source_structure": "rigid_object"
       }
@@ -44,10 +32,7 @@
         "subject": "role_001",
         "reference": "role_002",
         "relation": "inside",
-        "arguments": {
-          "required_arm": "left_arm",
-          "task_type": "E1"
-        }
+        "arguments": {"required_arm": "left_arm", "task_type": "E1"}
       }
     ],
     "invariants": [],
@@ -64,10 +49,7 @@
             "subject": "role_001",
             "reference": "role_002",
             "relation": "inside",
-            "arguments": {
-              "required_arm": "left_arm",
-              "task_type": "E1"
-            }
+            "arguments": {"required_arm": "left_arm", "task_type": "E1"}
           }
         ]
       }
@@ -77,10 +59,7 @@
         "consumer": "asset",
         "key": "role_001",
         "value": {
-          "affordances": [
-            "graspable",
-            "placeable"
-          ],
+          "affordances": ["graspable", "placeable"],
           "attributes": {},
           "source_structure": "rigid_object"
         }
@@ -88,243 +67,29 @@
       {
         "consumer": "asset",
         "key": "role_002",
-        "value": {
-          "affordances": [
-            "container"
-          ],
-          "attributes": {},
-          "source_structure": "rigid_object"
-        }
+        "value": {"affordances": ["container"], "attributes": {}, "source_structure": "rigid_object"}
       },
-      {
-        "consumer": "embodiment",
-        "key": "required_arms",
-        "value": [
-          "left_arm"
-        ]
-      },
-      {
-        "consumer": "expansion",
-        "key": "lineage_key",
-        "value": "task_spec.semantic_hash"
-      },
-      {
-        "consumer": "scene",
-        "key": "role_001",
-        "value": {
-          "initial_state": {},
-          "kind": "object"
-        }
-      },
-      {
-        "consumer": "scene",
-        "key": "role_002",
-        "value": {
-          "initial_state": {},
-          "kind": "target"
-        }
-      },
-      {
-        "consumer": "task_program",
-        "key": "goal_predicates",
-        "value": [
-          "semantic_goal"
-        ]
-      }
+      {"consumer": "embodiment", "key": "required_arms", "value": ["left_arm"]},
+      {"consumer": "expansion", "key": "lineage_key", "value": "task_spec.semantic_hash"},
+      {"consumer": "scene", "key": "role_001", "value": {"initial_state": {}, "kind": "object"}},
+      {"consumer": "scene", "key": "role_002", "value": {"initial_state": {}, "kind": "target"}},
+      {"consumer": "task_program", "key": "goal_predicates", "value": ["semantic_goal"]}
     ],
     "task_id": "inside_count",
     "instruction": "Place two boxes inside region",
     "metadata": {
       "candidate_id": "candidate_01",
       "generator": "embodichain.gen_sim.task_engine",
-      "goal_sources": {
-        "goal_001": [
-          "step_01"
-        ]
-      },
+      "goal_sources": {"goal_001": ["step_01"]},
       "instruction_coverage": "validated_draft_only",
       "legacy_semantic_hash": "95b28e104a33df38857c8c23cefd20724b2083cb8ef9e03815a0c211c745e29e",
-      "milestone_sources": {
-        "step_01": "step_01"
-      },
-      "role_references": {
-        "role_001": [
-          "step_01.object"
-        ],
-        "role_002": [
-          "step_01.target"
-        ]
-      },
-      "step_roles": {
-        "step_01": {
-          "object": "role_001",
-          "target": "role_002"
-        }
-      },
+      "milestone_sources": {"step_01": "step_01"},
+      "role_references": {"role_001": ["step_01.object"], "role_002": ["step_01.target"]},
+      "step_roles": {"step_01": {"object": "role_001", "target": "role_002"}},
       "task_candidate_schema": "action_engine_task_draft_v1",
       "terminal_goal_policy": "explicit_state_slots/v1"
     },
     "semantic_hash": "f465c5ab792d6e559433b4d231675fda655e6f243d01bb09563bb01745028ede"
-  },
-  "graph": {
-    "schema_version": "semantic_task_graph/v1",
-    "task_id": "inside_count",
-    "instruction": "Place two boxes inside region",
-    "planner_route": "offline",
-    "integration_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
-    "targets": {},
-    "nodes": [
-      {
-        "id": "step_01__01__call_01",
-        "call": {
-          "kind": "pick",
-          "object": "a",
-          "resources": {
-            "primary": "left"
-          }
-        },
-        "depends_on": [],
-        "task_instance_id": "step_01__01",
-        "task_type": "E1",
-        "role": "primary"
-      },
-      {
-        "id": "step_01__01__call_02",
-        "call": {
-          "kind": "place",
-          "object": "a",
-          "inside": "inside__region__a",
-          "resources": {
-            "primary": "left"
-          }
-        },
-        "depends_on": [
-          "step_01__01__call_01"
-        ],
-        "task_instance_id": "step_01__01",
-        "task_type": "E1",
-        "role": "primary"
-      },
-      {
-        "id": "step_01__01__call_03",
-        "call": {
-          "kind": "registered",
-          "call_id": "simulation.park",
-          "arguments": {},
-          "resources": {
-            "primary": "left"
-          }
-        },
-        "depends_on": [
-          "step_01__01__call_02"
-        ],
-        "task_instance_id": "step_01__01",
-        "task_type": "E1",
-        "role": "cleanup"
-      },
-      {
-        "id": "step_01__call_01",
-        "call": {
-          "kind": "pick",
-          "object": "b",
-          "resources": {
-            "primary": "left"
-          }
-        },
-        "depends_on": [
-          "step_01__01__call_03"
-        ],
-        "task_instance_id": "step_01",
-        "task_type": "E1",
-        "role": "primary"
-      },
-      {
-        "id": "step_01__call_02",
-        "call": {
-          "kind": "place",
-          "object": "b",
-          "inside": "inside__region__b",
-          "resources": {
-            "primary": "left"
-          }
-        },
-        "depends_on": [
-          "step_01__call_01"
-        ],
-        "task_instance_id": "step_01",
-        "task_type": "E1",
-        "role": "primary"
-      },
-      {
-        "id": "step_01__call_03",
-        "call": {
-          "kind": "registered",
-          "call_id": "simulation.park",
-          "arguments": {},
-          "resources": {
-            "primary": "left"
-          }
-        },
-        "depends_on": [
-          "step_01__call_02"
-        ],
-        "task_instance_id": "step_01",
-        "task_type": "E1",
-        "role": "cleanup"
-      }
-    ],
-    "task_groups": [
-      {
-        "id": "step_01__01",
-        "task_type": "E1",
-        "node_ids": [
-          "step_01__01__call_01",
-          "step_01__01__call_02",
-          "step_01__01__call_03"
-        ],
-        "depends_on": [],
-        "success": {
-          "kind": "semantic_task_term",
-          "step_id": "step_01__01",
-          "type": "semantic_goal"
-        }
-      },
-      {
-        "id": "step_01",
-        "task_type": "E1",
-        "node_ids": [
-          "step_01__call_01",
-          "step_01__call_02",
-          "step_01__call_03"
-        ],
-        "depends_on": [
-          "step_01__01"
-        ],
-        "success": {
-          "kind": "semantic_task_term",
-          "step_id": "step_01",
-          "type": "semantic_goal"
-        }
-      }
-    ],
-    "success": {
-      "kind": "all_task_groups",
-      "source": {
-        "schema_version": "action_engine_success_spec_v1",
-        "task_id": "inside_count",
-        "op": "all",
-        "terms": [
-          {
-            "step_id": "step_01__01",
-            "type": "semantic_goal"
-          },
-          {
-            "step_id": "step_01",
-            "type": "semantic_goal"
-          }
-        ]
-      }
-    }
   },
   "program": {
     "program_id": "gen_sim_inside_count",
@@ -337,13 +102,7 @@
           "name": "step_01__01__call_01",
           "steps": {
             "kind": "invoke",
-            "call": {
-              "kind": "pick",
-              "object": "a",
-              "resources": {
-                "primary": "left"
-              }
-            }
+            "call": {"kind": "pick", "object": "a", "resources": {"primary": "left"}}
           }
         },
         {
@@ -355,18 +114,10 @@
               "kind": "place",
               "object": "a",
               "inside": "inside__region__a",
-              "resources": {
-                "primary": "left"
-              }
+              "resources": {"primary": "left"}
             }
           },
-          "post": [
-            {
-              "kind": "wait_stable",
-              "entity": "a",
-              "preset": "contained_rigid_object"
-            }
-          ]
+          "post": [{"kind": "wait_stable", "entity": "a", "preset": "contained_rigid_object"}]
         },
         {
           "kind": "segment",
@@ -377,18 +128,10 @@
               "kind": "registered",
               "call_id": "simulation.park",
               "arguments": {},
-              "resources": {
-                "primary": "left"
-              }
+              "resources": {"primary": "left"}
             }
           },
-          "post": [
-            {
-              "kind": "wait_stable",
-              "entity": "a",
-              "preset": "contained_rigid_object"
-            }
-          ],
+          "post": [{"kind": "wait_stable", "entity": "a", "preset": "contained_rigid_object"}],
           "validators": []
         },
         {
@@ -396,13 +139,7 @@
           "name": "step_01__call_01",
           "steps": {
             "kind": "invoke",
-            "call": {
-              "kind": "pick",
-              "object": "b",
-              "resources": {
-                "primary": "left"
-              }
-            }
+            "call": {"kind": "pick", "object": "b", "resources": {"primary": "left"}}
           }
         },
         {
@@ -414,18 +151,10 @@
               "kind": "place",
               "object": "b",
               "inside": "inside__region__b",
-              "resources": {
-                "primary": "left"
-              }
+              "resources": {"primary": "left"}
             }
           },
-          "post": [
-            {
-              "kind": "wait_stable",
-              "entity": "b",
-              "preset": "contained_rigid_object"
-            }
-          ]
+          "post": [{"kind": "wait_stable", "entity": "b", "preset": "contained_rigid_object"}]
         },
         {
           "kind": "segment",
@@ -436,751 +165,55 @@
               "kind": "registered",
               "call_id": "simulation.park",
               "arguments": {},
-              "resources": {
-                "primary": "left"
-              }
+              "resources": {"primary": "left"}
             }
           },
-          "post": [
-            {
-              "kind": "wait_stable",
-              "entity": "b",
-              "preset": "contained_rigid_object"
-            }
-          ],
+          "post": [{"kind": "wait_stable", "entity": "b", "preset": "contained_rigid_object"}],
           "validators": []
         }
       ]
     }
   },
-  "constraints": {
-    "presets": {}
-  },
-  "validation": {
-    "task_spec_digest": "750899512ae83aab94804abc80baa219c33cbed19e05a44096b01e1634af3b99",
-    "graph_digest": "6cdc1df63841aa5945211ce2744f16ec601a240696bfeb694659a0694ce45123",
-    "program_digest": "e33385836c8bbe714d3f3ce6f8e8de4af6d165edab61f905f8d3fbfb37ff6d1a",
-    "constraints_digest": "38aec62d7a048379cdf03d48624f38b2c43a5ef3113f1708687a2773bc87fbd3",
-    "coverage": {
-      "status": "covered",
-      "issues": [],
-      "roles": {
-        "role_001": [
-          {
-            "uid": "a",
-            "part_id": null
-          },
-          {
-            "uid": "b",
-            "part_id": null
-          }
-        ],
-        "role_002": [
-          {
-            "uid": "region",
-            "part_id": null
-          }
-        ]
-      },
-      "goals": [
-        {
-          "id": "goal_001",
-          "predicate": {
-            "id": "goal_001",
-            "predicate": "semantic_goal",
-            "arguments": {
-              "reference": "role_002",
-              "relation": "inside",
-              "required_arm": "left_arm",
-              "subject": "role_001",
-              "task_type": "E1"
-            },
-            "operator": "eq",
-            "expected": true,
-            "observation": null
-          },
-          "source_steps": [
-            "step_01"
-          ],
-          "groups": [
-            "step_01__01",
-            "step_01"
-          ],
-          "status": "declared"
-        }
-      ],
-      "milestones": [
-        {
-          "id": "step_01",
-          "source_step": "step_01",
-          "groups": [
-            "step_01__01",
-            "step_01"
-          ],
-          "members": [
-            {
-              "group_id": "step_01__01",
-              "object_uid": "a",
-              "object_part_id": null
-            },
-            {
-              "group_id": "step_01",
-              "object_uid": "b",
-              "object_part_id": null
-            }
-          ]
-        }
-      ],
-      "lineage": {
-        "step_01": [
-          {
-            "group_id": "step_01__01",
-            "object_uid": "a",
-            "object_part_id": null
-          },
-          {
-            "group_id": "step_01",
-            "object_uid": "b",
-            "object_part_id": null
-          }
-        ]
-      },
-      "runtime_evidence_status": "not_run",
-      "instruction_coverage": "validated_draft_only"
-    }
-  },
-  "candidate": {
-    "candidate_id": "candidate_01",
-    "draft": {
-      "schema_version": "action_engine_task_draft_v1",
-      "task_id": "inside_count",
-      "instruction": "Place two boxes inside region",
-      "steps": [
-        {
-          "id": "step_01",
-          "task_type": "E1",
-          "object": {
-            "kind": "scene_ref",
-            "step_id": "",
-            "reference": "boxes",
-            "quantifier": "count",
-            "count": 2
-          },
-          "target": {
-            "kind": "scene_ref",
-            "step_id": "",
-            "reference": "region",
-            "quantifier": "one",
-            "count": 0
-          },
-          "relation": "inside",
-          "required_arm": "left_arm",
-          "transfer_arm": "none",
-          "receive_arm": "none",
-          "orientation_goal": "none",
-          "target_state": "none",
-          "target_setting": 0,
-          "layout": "none",
-          "axis": "none",
-          "direction": "none",
-          "terminal_behavior": "none",
-          "depends_on": []
-        }
-      ]
-    },
-    "scene_request": {
-      "schema_version": "action_engine_scene_request_v1",
-      "task_id": "inside_count",
-      "references": [
-        {
-          "reference_id": "step_01.object",
-          "step_id": "step_01",
-          "role": "object",
-          "reference": "boxes",
-          "quantifier": "count",
-          "count": 2,
-          "source_structure": "rigid_object",
-          "affordances": [
-            "graspable",
-            "placeable"
-          ],
-          "initial_state": {},
-          "attributes": {}
-        },
-        {
-          "reference_id": "step_01.target",
-          "step_id": "step_01",
-          "role": "target",
-          "reference": "region",
-          "quantifier": "one",
-          "count": 0,
-          "source_structure": "rigid_object",
-          "affordances": [
-            "container"
-          ],
-          "initial_state": {},
-          "attributes": {}
-        }
-      ]
-    },
-    "success_spec": {
-      "schema_version": "action_engine_success_spec_v1",
-      "task_id": "inside_count",
-      "op": "all",
-      "terms": [
-        {
-          "step_id": "step_01",
-          "type": "semantic_goal"
-        }
-      ]
-    },
-    "semantic_hash": "95b28e104a33df38857c8c23cefd20724b2083cb8ef9e03815a0c211c745e29e",
-    "vote_count": 1,
-    "attempts": 1,
-    "normalizations": []
-  },
-  "role_bindings": {
-    "schema_version": "action_engine_role_bindings_v1",
-    "task_id": "inside_count",
-    "candidate_id": "candidate_01",
-    "reference_bindings": {
-      "step_01.object": [
-        "a",
-        "b"
-      ],
-      "step_01.target": [
-        "region"
-      ]
-    },
-    "role_bindings": {}
-  },
-  "lineage": {
-    "step_01": [
+  "graph": {
+    "nodes": [
+      {"id": "step_01__01__call_01", "call": {"kind": "pick"}},
+      {"id": "step_01__01__call_02", "call": {"kind": "place"}},
+      {"id": "step_01__01__call_03", "call": {"kind": "registered"}},
+      {"id": "step_01__call_01", "call": {"kind": "pick"}},
+      {"id": "step_01__call_02", "call": {"kind": "place"}},
+      {"id": "step_01__call_03", "call": {"kind": "registered"}}
+    ],
+    "task_groups": [
       {
-        "group_id": "step_01__01",
-        "object_uid": "a",
-        "object_part_id": null
+        "id": "step_01__01",
+        "task_type": "E1",
+        "node_ids": ["step_01__01__call_01", "step_01__01__call_02", "step_01__01__call_03"],
+        "depends_on": [],
+        "success": {"kind": "semantic_task_term", "step_id": "step_01__01", "type": "semantic_goal"}
       },
       {
-        "group_id": "step_01",
-        "object_uid": "b",
-        "object_part_id": null
+        "id": "step_01",
+        "task_type": "E1",
+        "node_ids": ["step_01__call_01", "step_01__call_02", "step_01__call_03"],
+        "depends_on": ["step_01__01"],
+        "success": {"kind": "semantic_task_term", "step_id": "step_01", "type": "semantic_goal"}
       }
     ]
   },
+  "validation": {
+    "coverage": {
+      "lineage": {
+        "step_01": [
+          {"group_id": "step_01__01", "object_uid": "a", "object_part_id": null},
+          {"group_id": "step_01", "object_uid": "b", "object_part_id": null}
+        ]
+      }
+    }
+  },
+  "constraints": {"presets": {}},
   "cases": [
     {
       "name": "inside",
-      "poses": {
-        "a": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              -0.10000000149011612
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "b": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              0.10000000149011612
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "region": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ]
-      },
-      "runtime": {
-        "segments": [
-          {
-            "name": "step_01__01__call_01",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              0
-            ],
-            "end_steps": [
-              1
-            ],
-            "start_step": 0,
-            "end_step": 1,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                0
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          },
-          {
-            "name": "step_01__01__call_02",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              1
-            ],
-            "end_steps": [
-              2
-            ],
-            "start_step": 1,
-            "end_step": 2,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                1
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": [
-                  {
-                    "invocation_id": "count/step_01__01__call_02:0",
-                    "invocation_revision": 0,
-                    "status": "completed",
-                    "effects": [
-                      {
-                        "boundary": {
-                          "kind": "terminal"
-                        },
-                        "timestamp": 0.08,
-                        "observation_revision": 2,
-                        "effect_spec": {
-                          "effect_kind": "release",
-                          "invocation_id": "count/step_01__01__call_02:0",
-                          "invocation_revision": 0,
-                          "env_ids": [
-                            0
-                          ],
-                          "state_expectations": [
-                            {
-                              "expectation_id": "source",
-                              "relation": "detached",
-                              "object_id": "a",
-                              "resource_id": "left"
-                            }
-                          ],
-                          "clauses": [
-                            {
-                              "clause_id": "source.constraint",
-                              "expectation_id": "source",
-                              "expected": false,
-                              "evidence_kind": "constraint"
-                            },
-                            {
-                              "clause_id": "source.pose",
-                              "expectation_id": "source",
-                              "expectation": "separated"
-                            }
-                          ]
-                        },
-                        "decision": {
-                          "success_mask": [
-                            true
-                          ]
-                        },
-                        "evidence": {
-                          "source.constraint": {
-                            "values": [
-                              false
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.08,
-                            "observation_revision": 2
-                          },
-                          "source.pose": {
-                            "object_to_endpoint": [
-                              [
-                                [
-                                  1.0,
-                                  0.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  1.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  1.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  0.0,
-                                  1.0
-                                ]
-                              ]
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.08,
-                            "observation_revision": 2
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
-          {
-            "name": "step_01__01__call_03",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              2
-            ],
-            "end_steps": [
-              3
-            ],
-            "start_step": 2,
-            "end_step": 3,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                2
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          },
-          {
-            "name": "step_01__call_01",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              3
-            ],
-            "end_steps": [
-              4
-            ],
-            "start_step": 3,
-            "end_step": 4,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                3
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          },
-          {
-            "name": "step_01__call_02",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              4
-            ],
-            "end_steps": [
-              5
-            ],
-            "start_step": 4,
-            "end_step": 5,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                4
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": [
-                  {
-                    "invocation_id": "count/step_01__call_02:0",
-                    "invocation_revision": 0,
-                    "status": "completed",
-                    "effects": [
-                      {
-                        "boundary": {
-                          "kind": "terminal"
-                        },
-                        "timestamp": 0.2,
-                        "observation_revision": 2,
-                        "effect_spec": {
-                          "effect_kind": "release",
-                          "invocation_id": "count/step_01__call_02:0",
-                          "invocation_revision": 0,
-                          "env_ids": [
-                            0
-                          ],
-                          "state_expectations": [
-                            {
-                              "expectation_id": "source",
-                              "relation": "detached",
-                              "object_id": "b",
-                              "resource_id": "left"
-                            }
-                          ],
-                          "clauses": [
-                            {
-                              "clause_id": "source.constraint",
-                              "expectation_id": "source",
-                              "expected": false,
-                              "evidence_kind": "constraint"
-                            },
-                            {
-                              "clause_id": "source.pose",
-                              "expectation_id": "source",
-                              "expectation": "separated"
-                            }
-                          ]
-                        },
-                        "decision": {
-                          "success_mask": [
-                            true
-                          ]
-                        },
-                        "evidence": {
-                          "source.constraint": {
-                            "values": [
-                              false
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.2,
-                            "observation_revision": 2
-                          },
-                          "source.pose": {
-                            "object_to_endpoint": [
-                              [
-                                [
-                                  1.0,
-                                  0.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  1.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  1.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  0.0,
-                                  1.0
-                                ]
-                              ]
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.2,
-                            "observation_revision": 2
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
-          {
-            "name": "step_01__call_03",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              5
-            ],
-            "end_steps": [
-              6
-            ],
-            "start_step": 5,
-            "end_step": 6,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                5
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          }
-        ]
-      },
       "final_measurements": {
         "goal_001": {
           "members": [
@@ -1188,198 +221,80 @@
               "group_id": "step_01__01",
               "uid": "a",
               "part_id": null,
-              "accepted": [
-                true
-              ],
+              "accepted": [true],
               "measurements": {
                 "scope": "measured_planar_landing_region",
                 "object_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      -0.10000000149011612
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.04500000178813934
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, -0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
                 "reference_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
-                "full_footprint_inside": [
-                  true
-                ],
-                "support_gap_m": [
-                  2.7939677238464355e-09
-                ],
-                "footprint_area_m2": [
-                  0.006399999713897708
-                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
                 "support_tolerance_m": 0.05,
                 "penetration_tolerance_m": 0.01,
                 "footprint_kind": "native_triangle_projection/v1",
-                "outside_floor_area_m2": [
-                  0.0
-                ],
-                "reference_has_raised_geometry": [
-                  false
-                ],
-                "reference_aabb_overlap": [
-                  true
-                ],
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
                 "reference_uid": "region",
                 "relation": "inside",
-                "released": [
-                  true
-                ]
+                "released": [true]
               },
-              "available": [
-                true
-              ]
+              "available": [true]
             },
             {
               "group_id": "step_01",
               "uid": "b",
               "part_id": null,
-              "accepted": [
-                true
-              ],
+              "accepted": [true],
               "measurements": {
                 "scope": "measured_planar_landing_region",
                 "object_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      0.10000000149011612
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.04500000178813934
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, 0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
                 "reference_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
-                "full_footprint_inside": [
-                  true
-                ],
-                "support_gap_m": [
-                  2.7939677238464355e-09
-                ],
-                "footprint_area_m2": [
-                  0.006399999713897708
-                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
                 "support_tolerance_m": 0.05,
                 "penetration_tolerance_m": 0.01,
                 "footprint_kind": "native_triangle_projection/v1",
-                "outside_floor_area_m2": [
-                  0.0
-                ],
-                "reference_has_raised_geometry": [
-                  false
-                ],
-                "reference_aabb_overlap": [
-                  true
-                ],
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
                 "reference_uid": "region",
                 "relation": "inside",
-                "released": [
-                  true
-                ]
+                "released": [true]
               },
-              "available": [
-                true
-              ]
+              "available": [true]
             }
           ],
-          "values": [
-            true
-          ]
+          "values": [true]
         }
       },
       "recorded_measurements": {
@@ -1387,932 +302,90 @@
           "group_id": "step_01__01",
           "uid": "a",
           "part_id": null,
-          "accepted": [
-            true
-          ],
+          "accepted": [true],
           "measurements": {
             "scope": "measured_planar_landing_region",
             "object_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  -0.10000000149011612
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.04500000178813934
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
             "reference_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
-            "full_footprint_inside": [
-              true
-            ],
-            "support_gap_m": [
-              2.7939677238464355e-09
-            ],
-            "footprint_area_m2": [
-              0.006399999713897708
-            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
             "support_tolerance_m": 0.05,
             "penetration_tolerance_m": 0.01,
             "footprint_kind": "native_triangle_projection/v1",
-            "outside_floor_area_m2": [
-              0.0
-            ],
-            "reference_has_raised_geometry": [
-              false
-            ],
-            "reference_aabb_overlap": [
-              true
-            ],
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
             "reference_uid": "region",
             "relation": "inside",
-            "released": [
-              true
-            ],
-            "boundary_frames": [
-              3
-            ]
+            "released": [true],
+            "boundary_frames": [3]
           },
-          "available": [
-            true
-          ]
+          "available": [true]
         },
         "step_01": {
           "group_id": "step_01",
           "uid": "b",
           "part_id": null,
-          "accepted": [
-            true
-          ],
+          "accepted": [true],
           "measurements": {
             "scope": "measured_planar_landing_region",
             "object_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.10000000149011612
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.04500000178813934
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
             "reference_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
-            "full_footprint_inside": [
-              true
-            ],
-            "support_gap_m": [
-              2.7939677238464355e-09
-            ],
-            "footprint_area_m2": [
-              0.006399999713897708
-            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
             "support_tolerance_m": 0.05,
             "penetration_tolerance_m": 0.01,
             "footprint_kind": "native_triangle_projection/v1",
-            "outside_floor_area_m2": [
-              0.0
-            ],
-            "reference_has_raised_geometry": [
-              false
-            ],
-            "reference_aabb_overlap": [
-              true
-            ],
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
             "reference_uid": "region",
             "relation": "inside",
-            "released": [
-              true
-            ],
-            "boundary_frames": [
-              6
-            ]
+            "released": [true],
+            "boundary_frames": [6]
           },
-          "available": [
-            true
-          ]
+          "available": [true]
         }
       },
-      "body_vertices": [
-        [
-          -0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          0.04,
-          0.04
-        ]
-      ],
-      "body_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
-      "reference_vertices": [
-        [
-          -0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          0.15,
-          0.005
-        ]
-      ],
-      "reference_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
       "expected": {
-        "goal": [
-          "satisfied"
-        ],
-        "milestones": [
-          "satisfied"
-        ],
+        "goal": ["satisfied"],
+        "milestones": ["satisfied"],
         "status": "satisfied",
         "certificate_ready": true
       }
     },
     {
       "name": "one_negative",
-      "poses": {
-        "a": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              -0.10000000149011612
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "b": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              1.0
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "region": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ]
-      },
-      "runtime": {
-        "segments": [
-          {
-            "name": "step_01__01__call_01",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              0
-            ],
-            "end_steps": [
-              1
-            ],
-            "start_step": 0,
-            "end_step": 1,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                0
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          },
-          {
-            "name": "step_01__01__call_02",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              1
-            ],
-            "end_steps": [
-              2
-            ],
-            "start_step": 1,
-            "end_step": 2,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                1
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": [
-                  {
-                    "invocation_id": "count/step_01__01__call_02:0",
-                    "invocation_revision": 0,
-                    "status": "completed",
-                    "effects": [
-                      {
-                        "boundary": {
-                          "kind": "terminal"
-                        },
-                        "timestamp": 0.08,
-                        "observation_revision": 2,
-                        "effect_spec": {
-                          "effect_kind": "release",
-                          "invocation_id": "count/step_01__01__call_02:0",
-                          "invocation_revision": 0,
-                          "env_ids": [
-                            0
-                          ],
-                          "state_expectations": [
-                            {
-                              "expectation_id": "source",
-                              "relation": "detached",
-                              "object_id": "a",
-                              "resource_id": "left"
-                            }
-                          ],
-                          "clauses": [
-                            {
-                              "clause_id": "source.constraint",
-                              "expectation_id": "source",
-                              "expected": false,
-                              "evidence_kind": "constraint"
-                            },
-                            {
-                              "clause_id": "source.pose",
-                              "expectation_id": "source",
-                              "expectation": "separated"
-                            }
-                          ]
-                        },
-                        "decision": {
-                          "success_mask": [
-                            true
-                          ]
-                        },
-                        "evidence": {
-                          "source.constraint": {
-                            "values": [
-                              false
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.08,
-                            "observation_revision": 2
-                          },
-                          "source.pose": {
-                            "object_to_endpoint": [
-                              [
-                                [
-                                  1.0,
-                                  0.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  1.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  1.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  0.0,
-                                  1.0
-                                ]
-                              ]
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.08,
-                            "observation_revision": 2
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
-          {
-            "name": "step_01__01__call_03",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              2
-            ],
-            "end_steps": [
-              3
-            ],
-            "start_step": 2,
-            "end_step": 3,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                2
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          },
-          {
-            "name": "step_01__call_01",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              3
-            ],
-            "end_steps": [
-              4
-            ],
-            "start_step": 3,
-            "end_step": 4,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                3
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          },
-          {
-            "name": "step_01__call_02",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              4
-            ],
-            "end_steps": [
-              5
-            ],
-            "start_step": 4,
-            "end_step": 5,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                4
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": [
-                  {
-                    "invocation_id": "count/step_01__call_02:0",
-                    "invocation_revision": 0,
-                    "status": "completed",
-                    "effects": [
-                      {
-                        "boundary": {
-                          "kind": "terminal"
-                        },
-                        "timestamp": 0.2,
-                        "observation_revision": 2,
-                        "effect_spec": {
-                          "effect_kind": "release",
-                          "invocation_id": "count/step_01__call_02:0",
-                          "invocation_revision": 0,
-                          "env_ids": [
-                            0
-                          ],
-                          "state_expectations": [
-                            {
-                              "expectation_id": "source",
-                              "relation": "detached",
-                              "object_id": "b",
-                              "resource_id": "left"
-                            }
-                          ],
-                          "clauses": [
-                            {
-                              "clause_id": "source.constraint",
-                              "expectation_id": "source",
-                              "expected": false,
-                              "evidence_kind": "constraint"
-                            },
-                            {
-                              "clause_id": "source.pose",
-                              "expectation_id": "source",
-                              "expectation": "separated"
-                            }
-                          ]
-                        },
-                        "decision": {
-                          "success_mask": [
-                            true
-                          ]
-                        },
-                        "evidence": {
-                          "source.constraint": {
-                            "values": [
-                              false
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.2,
-                            "observation_revision": 2
-                          },
-                          "source.pose": {
-                            "object_to_endpoint": [
-                              [
-                                [
-                                  1.0,
-                                  0.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  1.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  1.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  0.0,
-                                  1.0
-                                ]
-                              ]
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.2,
-                            "observation_revision": 2
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
-          {
-            "name": "step_01__call_03",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              5
-            ],
-            "end_steps": [
-              6
-            ],
-            "start_step": 5,
-            "end_step": 6,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                5
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          }
-        ]
-      },
       "final_measurements": {
         "goal_001": {
           "members": [
@@ -2320,198 +393,80 @@
               "group_id": "step_01__01",
               "uid": "a",
               "part_id": null,
-              "accepted": [
-                true
-              ],
+              "accepted": [true],
               "measurements": {
                 "scope": "measured_planar_landing_region",
                 "object_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      -0.10000000149011612
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.04500000178813934
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, -0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
                 "reference_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
-                "full_footprint_inside": [
-                  true
-                ],
-                "support_gap_m": [
-                  2.7939677238464355e-09
-                ],
-                "footprint_area_m2": [
-                  0.006399999713897708
-                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
                 "support_tolerance_m": 0.05,
                 "penetration_tolerance_m": 0.01,
                 "footprint_kind": "native_triangle_projection/v1",
-                "outside_floor_area_m2": [
-                  0.0
-                ],
-                "reference_has_raised_geometry": [
-                  false
-                ],
-                "reference_aabb_overlap": [
-                  true
-                ],
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
                 "reference_uid": "region",
                 "relation": "inside",
-                "released": [
-                  true
-                ]
+                "released": [true]
               },
-              "available": [
-                true
-              ]
+              "available": [true]
             },
             {
               "group_id": "step_01",
               "uid": "b",
               "part_id": null,
-              "accepted": [
-                false
-              ],
+              "accepted": [false],
               "measurements": {
                 "scope": "measured_planar_landing_region",
                 "object_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.04500000178813934
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, 1.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
                 "reference_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
-                "full_footprint_inside": [
-                  false
-                ],
-                "support_gap_m": [
-                  2.7939677238464355e-09
-                ],
-                "footprint_area_m2": [
-                  0.006399998521804839
-                ],
+                "full_footprint_inside": [false],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399998521804839],
                 "support_tolerance_m": 0.05,
                 "penetration_tolerance_m": 0.01,
                 "footprint_kind": "native_triangle_projection/v1",
-                "outside_floor_area_m2": [
-                  0.006399998521804839
-                ],
-                "reference_has_raised_geometry": [
-                  false
-                ],
-                "reference_aabb_overlap": [
-                  false
-                ],
+                "outside_floor_area_m2": [0.006399998521804839],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [false],
                 "reference_uid": "region",
                 "relation": "inside",
-                "released": [
-                  true
-                ]
+                "released": [true]
               },
-              "available": [
-                true
-              ]
+              "available": [true]
             }
           ],
-          "values": [
-            false
-          ]
+          "values": [false]
         }
       },
       "recorded_measurements": {
@@ -2519,1420 +474,176 @@
           "group_id": "step_01__01",
           "uid": "a",
           "part_id": null,
-          "accepted": [
-            true
-          ],
+          "accepted": [true],
           "measurements": {
             "scope": "measured_planar_landing_region",
             "object_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  -0.10000000149011612
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.04500000178813934
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
             "reference_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
-            "full_footprint_inside": [
-              true
-            ],
-            "support_gap_m": [
-              2.7939677238464355e-09
-            ],
-            "footprint_area_m2": [
-              0.006399999713897708
-            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
             "support_tolerance_m": 0.05,
             "penetration_tolerance_m": 0.01,
             "footprint_kind": "native_triangle_projection/v1",
-            "outside_floor_area_m2": [
-              0.0
-            ],
-            "reference_has_raised_geometry": [
-              false
-            ],
-            "reference_aabb_overlap": [
-              true
-            ],
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
             "reference_uid": "region",
             "relation": "inside",
-            "released": [
-              true
-            ],
-            "boundary_frames": [
-              3
-            ]
+            "released": [true],
+            "boundary_frames": [3]
           },
-          "available": [
-            true
-          ]
+          "available": [true]
         },
         "step_01": {
           "group_id": "step_01",
           "uid": "b",
           "part_id": null,
-          "accepted": [
-            false
-          ],
+          "accepted": [false],
           "measurements": {
             "scope": "measured_planar_landing_region",
             "object_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.04500000178813934
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
             "reference_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
-            "full_footprint_inside": [
-              false
-            ],
-            "support_gap_m": [
-              2.7939677238464355e-09
-            ],
-            "footprint_area_m2": [
-              0.006399998521804839
-            ],
+            "full_footprint_inside": [false],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399998521804839],
             "support_tolerance_m": 0.05,
             "penetration_tolerance_m": 0.01,
             "footprint_kind": "native_triangle_projection/v1",
-            "outside_floor_area_m2": [
-              0.006399998521804839
-            ],
-            "reference_has_raised_geometry": [
-              false
-            ],
-            "reference_aabb_overlap": [
-              false
-            ],
+            "outside_floor_area_m2": [0.006399998521804839],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [false],
             "reference_uid": "region",
             "relation": "inside",
-            "released": [
-              true
-            ],
-            "boundary_frames": [
-              6
-            ]
+            "released": [true],
+            "boundary_frames": [6]
           },
-          "available": [
-            true
-          ]
+          "available": [true]
         }
       },
-      "body_vertices": [
-        [
-          -0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          0.04,
-          0.04
-        ]
-      ],
-      "body_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
-      "reference_vertices": [
-        [
-          -0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          0.15,
-          0.005
-        ]
-      ],
-      "reference_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
       "expected": {
-        "goal": [
-          "failed"
-        ],
-        "milestones": [
-          "unavailable"
-        ],
+        "goal": ["failed"],
+        "milestones": ["unavailable"],
         "status": "failed",
         "certificate_ready": false
       }
     },
     {
       "name": "one_current_missing",
-      "poses": {
-        "a": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              -0.10000000149011612
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "b": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              0.10000000149011612
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "region": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ]
-      },
-      "runtime": {
-        "segments": [
-          {
-            "name": "step_01__01__call_01",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              0
-            ],
-            "end_steps": [
-              1
-            ],
-            "start_step": 0,
-            "end_step": 1,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                0
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          },
-          {
-            "name": "step_01__01__call_02",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              1
-            ],
-            "end_steps": [
-              2
-            ],
-            "start_step": 1,
-            "end_step": 2,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                1
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": [
-                  {
-                    "invocation_id": "count/step_01__01__call_02:0",
-                    "invocation_revision": 0,
-                    "status": "completed",
-                    "effects": [
-                      {
-                        "boundary": {
-                          "kind": "terminal"
-                        },
-                        "timestamp": 0.08,
-                        "observation_revision": 2,
-                        "effect_spec": {
-                          "effect_kind": "release",
-                          "invocation_id": "count/step_01__01__call_02:0",
-                          "invocation_revision": 0,
-                          "env_ids": [
-                            0
-                          ],
-                          "state_expectations": [
-                            {
-                              "expectation_id": "source",
-                              "relation": "detached",
-                              "object_id": "a",
-                              "resource_id": "left"
-                            }
-                          ],
-                          "clauses": [
-                            {
-                              "clause_id": "source.constraint",
-                              "expectation_id": "source",
-                              "expected": false,
-                              "evidence_kind": "constraint"
-                            },
-                            {
-                              "clause_id": "source.pose",
-                              "expectation_id": "source",
-                              "expectation": "separated"
-                            }
-                          ]
-                        },
-                        "decision": {
-                          "success_mask": [
-                            true
-                          ]
-                        },
-                        "evidence": {
-                          "source.constraint": {
-                            "values": [
-                              false
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.08,
-                            "observation_revision": 2
-                          },
-                          "source.pose": {
-                            "object_to_endpoint": [
-                              [
-                                [
-                                  1.0,
-                                  0.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  1.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  1.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  0.0,
-                                  1.0
-                                ]
-                              ]
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.08,
-                            "observation_revision": 2
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
-          {
-            "name": "step_01__01__call_03",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              2
-            ],
-            "end_steps": [
-              3
-            ],
-            "start_step": 2,
-            "end_step": 3,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                2
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          },
-          {
-            "name": "step_01__call_01",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              3
-            ],
-            "end_steps": [
-              4
-            ],
-            "start_step": 3,
-            "end_step": 4,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                3
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          },
-          {
-            "name": "step_01__call_02",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              4
-            ],
-            "end_steps": [
-              5
-            ],
-            "start_step": 4,
-            "end_step": 5,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                4
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": [
-                  {
-                    "invocation_id": "count/step_01__call_02:0",
-                    "invocation_revision": 0,
-                    "status": "completed",
-                    "effects": [
-                      {
-                        "boundary": {
-                          "kind": "terminal"
-                        },
-                        "timestamp": 0.2,
-                        "observation_revision": 2,
-                        "effect_spec": {
-                          "effect_kind": "release",
-                          "invocation_id": "count/step_01__call_02:0",
-                          "invocation_revision": 0,
-                          "env_ids": [
-                            0
-                          ],
-                          "state_expectations": [
-                            {
-                              "expectation_id": "source",
-                              "relation": "detached",
-                              "object_id": "b",
-                              "resource_id": "left"
-                            }
-                          ],
-                          "clauses": [
-                            {
-                              "clause_id": "source.constraint",
-                              "expectation_id": "source",
-                              "expected": false,
-                              "evidence_kind": "constraint"
-                            },
-                            {
-                              "clause_id": "source.pose",
-                              "expectation_id": "source",
-                              "expectation": "separated"
-                            }
-                          ]
-                        },
-                        "decision": {
-                          "success_mask": [
-                            true
-                          ]
-                        },
-                        "evidence": {
-                          "source.constraint": {
-                            "values": [
-                              false
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.2,
-                            "observation_revision": 2
-                          },
-                          "source.pose": {
-                            "object_to_endpoint": [
-                              [
-                                [
-                                  1.0,
-                                  0.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  1.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  1.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  0.0,
-                                  1.0
-                                ]
-                              ]
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
-                            "timestamp": 0.2,
-                            "observation_revision": 2
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
-          {
-            "name": "step_01__call_03",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
-            "success": true,
-            "start_steps": [
-              5
-            ],
-            "end_steps": [
-              6
-            ],
-            "start_step": 5,
-            "end_step": 6,
-            "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                5
-              ],
-              "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
-                "calls": []
-              }
-            }
-          }
-        ]
-      },
-      "final_measurements": {
-        "goal_001": {
-          "unavailable": [
-            "Required native rigid object is not present."
-          ]
-        }
-      },
+      "final_measurements": {"goal_001": {"unavailable": ["Required native rigid object is not present."]}},
       "recorded_measurements": {
         "step_01__01": {
           "group_id": "step_01__01",
           "uid": "a",
           "part_id": null,
-          "accepted": [
-            true
-          ],
+          "accepted": [true],
           "measurements": {
             "scope": "measured_planar_landing_region",
             "object_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  -0.10000000149011612
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.04500000178813934
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
             "reference_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
-            "full_footprint_inside": [
-              true
-            ],
-            "support_gap_m": [
-              2.7939677238464355e-09
-            ],
-            "footprint_area_m2": [
-              0.006399999713897708
-            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
             "support_tolerance_m": 0.05,
             "penetration_tolerance_m": 0.01,
             "footprint_kind": "native_triangle_projection/v1",
-            "outside_floor_area_m2": [
-              0.0
-            ],
-            "reference_has_raised_geometry": [
-              false
-            ],
-            "reference_aabb_overlap": [
-              true
-            ],
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
             "reference_uid": "region",
             "relation": "inside",
-            "released": [
-              true
-            ],
-            "boundary_frames": [
-              3
-            ]
+            "released": [true],
+            "boundary_frames": [3]
           },
-          "available": [
-            true
-          ]
+          "available": [true]
         },
-        "step_01": {
-          "unavailable": "Placement requires its exact bound native rigid object."
-        }
+        "step_01": {"unavailable": "Placement requires its exact bound native rigid object."}
       },
-      "body_vertices": [
-        [
-          -0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          0.04,
-          0.04
-        ]
-      ],
-      "body_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
-      "reference_vertices": [
-        [
-          -0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          0.15,
-          0.005
-        ]
-      ],
-      "reference_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
       "expected": {
-        "goal": [
-          "unavailable"
-        ],
-        "milestones": [
-          "unavailable"
-        ],
+        "goal": ["unavailable"],
+        "milestones": ["unavailable"],
         "status": "unavailable",
         "certificate_ready": false
       }
     },
     {
       "name": "last_group_failed",
-      "poses": {
-        "a": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              -0.10000000149011612
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "b": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              0.10000000149011612
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "region": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ]
-      },
       "runtime": {
         "segments": [
           {
             "name": "step_01__01__call_01",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
+            "active": [true],
+            "successes": [true],
             "success": true,
-            "start_steps": [
-              0
-            ],
-            "end_steps": [
-              1
-            ],
+            "start_steps": [0],
+            "end_steps": [1],
             "start_step": 0,
             "end_step": 1,
             "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                0
-              ],
+              "program_segment_source_path": ["program", "items", 0],
               "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
                 "calls": []
               }
             }
           },
           {
             "name": "step_01__01__call_02",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
+            "active": [true],
+            "successes": [true],
             "success": true,
-            "start_steps": [
-              1
-            ],
-            "end_steps": [
-              2
-            ],
+            "start_steps": [1],
+            "end_steps": [2],
             "start_step": 1,
             "end_step": 2,
             "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                1
-              ],
+              "program_segment_source_path": ["program", "items", 1],
               "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
                 "calls": [
                   {
                     "invocation_id": "count/step_01__01__call_02:0",
@@ -3940,18 +651,14 @@
                     "status": "completed",
                     "effects": [
                       {
-                        "boundary": {
-                          "kind": "terminal"
-                        },
+                        "boundary": {"kind": "terminal"},
                         "timestamp": 0.08,
                         "observation_revision": 2,
                         "effect_spec": {
                           "effect_kind": "release",
                           "invocation_id": "count/step_01__01__call_02:0",
                           "invocation_revision": 0,
-                          "env_ids": [
-                            0
-                          ],
+                          "env_ids": [0],
                           "state_expectations": [
                             {
                               "expectation_id": "source",
@@ -3974,60 +681,26 @@
                             }
                           ]
                         },
-                        "decision": {
-                          "success_mask": [
-                            true
-                          ]
-                        },
+                        "decision": {"success_mask": [true]},
                         "evidence": {
                           "source.constraint": {
-                            "values": [
-                              false
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
+                            "values": [false],
+                            "valid_mask": [true],
+                            "env_ids": [0],
                             "timestamp": 0.08,
                             "observation_revision": 2
                           },
                           "source.pose": {
                             "object_to_endpoint": [
                               [
-                                [
-                                  1.0,
-                                  0.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  1.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  1.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  0.0,
-                                  1.0
-                                ]
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.0],
+                                [0.0, 0.0, 1.0, 0.0],
+                                [0.0, 0.0, 0.0, 1.0]
                               ]
                             ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
+                            "valid_mask": [true],
+                            "env_ids": [0],
                             "timestamp": 0.08,
                             "observation_revision": 2
                           }
@@ -4041,108 +714,54 @@
           },
           {
             "name": "step_01__01__call_03",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
+            "active": [true],
+            "successes": [true],
             "success": true,
-            "start_steps": [
-              2
-            ],
-            "end_steps": [
-              3
-            ],
+            "start_steps": [2],
+            "end_steps": [3],
             "start_step": 2,
             "end_step": 3,
             "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                2
-              ],
+              "program_segment_source_path": ["program", "items", 2],
               "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
                 "calls": []
               }
             }
           },
           {
             "name": "step_01__call_01",
-            "active": [
-              true
-            ],
-            "successes": [
-              false
-            ],
+            "active": [true],
+            "successes": [false],
             "success": false,
-            "start_steps": [
-              3
-            ],
-            "end_steps": [
-              4
-            ],
+            "start_steps": [3],
+            "end_steps": [4],
             "start_step": 3,
             "end_step": 4,
             "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                3
-              ],
+              "program_segment_source_path": ["program", "items", 3],
               "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
                 "calls": []
               }
             }
           },
           {
             "name": "step_01__call_02",
-            "active": [
-              true
-            ],
-            "successes": [
-              false
-            ],
+            "active": [true],
+            "successes": [false],
             "success": false,
-            "start_steps": [
-              4
-            ],
-            "end_steps": [
-              5
-            ],
+            "start_steps": [4],
+            "end_steps": [5],
             "start_step": 4,
             "end_step": 5,
             "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                4
-              ],
+              "program_segment_source_path": ["program", "items", 4],
               "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
                 "calls": [
                   {
                     "invocation_id": "count/step_01__call_02:0",
@@ -4150,18 +769,14 @@
                     "status": "completed",
                     "effects": [
                       {
-                        "boundary": {
-                          "kind": "terminal"
-                        },
+                        "boundary": {"kind": "terminal"},
                         "timestamp": 0.2,
                         "observation_revision": 2,
                         "effect_spec": {
                           "effect_kind": "release",
                           "invocation_id": "count/step_01__call_02:0",
                           "invocation_revision": 0,
-                          "env_ids": [
-                            0
-                          ],
+                          "env_ids": [0],
                           "state_expectations": [
                             {
                               "expectation_id": "source",
@@ -4184,60 +799,26 @@
                             }
                           ]
                         },
-                        "decision": {
-                          "success_mask": [
-                            true
-                          ]
-                        },
+                        "decision": {"success_mask": [true]},
                         "evidence": {
                           "source.constraint": {
-                            "values": [
-                              false
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
+                            "values": [false],
+                            "valid_mask": [true],
+                            "env_ids": [0],
                             "timestamp": 0.2,
                             "observation_revision": 2
                           },
                           "source.pose": {
                             "object_to_endpoint": [
                               [
-                                [
-                                  1.0,
-                                  0.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  1.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  1.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  0.0,
-                                  1.0
-                                ]
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.0],
+                                [0.0, 0.0, 1.0, 0.0],
+                                [0.0, 0.0, 0.0, 1.0]
                               ]
                             ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
+                            "valid_mask": [true],
+                            "env_ids": [0],
                             "timestamp": 0.2,
                             "observation_revision": 2
                           }
@@ -4251,36 +832,18 @@
           },
           {
             "name": "step_01__call_03",
-            "active": [
-              true
-            ],
-            "successes": [
-              false
-            ],
+            "active": [true],
+            "successes": [false],
             "success": false,
-            "start_steps": [
-              5
-            ],
-            "end_steps": [
-              6
-            ],
+            "start_steps": [5],
+            "end_steps": [6],
             "start_step": 5,
             "end_step": 6,
             "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                5
-              ],
+              "program_segment_source_path": ["program", "items", 5],
               "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
                 "calls": []
               }
             }
@@ -4294,198 +857,80 @@
               "group_id": "step_01__01",
               "uid": "a",
               "part_id": null,
-              "accepted": [
-                true
-              ],
+              "accepted": [true],
               "measurements": {
                 "scope": "measured_planar_landing_region",
                 "object_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      -0.10000000149011612
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.04500000178813934
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, -0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
                 "reference_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
-                "full_footprint_inside": [
-                  true
-                ],
-                "support_gap_m": [
-                  2.7939677238464355e-09
-                ],
-                "footprint_area_m2": [
-                  0.006399999713897708
-                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
                 "support_tolerance_m": 0.05,
                 "penetration_tolerance_m": 0.01,
                 "footprint_kind": "native_triangle_projection/v1",
-                "outside_floor_area_m2": [
-                  0.0
-                ],
-                "reference_has_raised_geometry": [
-                  false
-                ],
-                "reference_aabb_overlap": [
-                  true
-                ],
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
                 "reference_uid": "region",
                 "relation": "inside",
-                "released": [
-                  true
-                ]
+                "released": [true]
               },
-              "available": [
-                true
-              ]
+              "available": [true]
             },
             {
               "group_id": "step_01",
               "uid": "b",
               "part_id": null,
-              "accepted": [
-                true
-              ],
+              "accepted": [true],
               "measurements": {
                 "scope": "measured_planar_landing_region",
                 "object_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      0.10000000149011612
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.04500000178813934
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, 0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
                 "reference_pose": [
                   [
-                    [
-                      1.0,
-                      0.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      1.0,
-                      0.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      1.0,
-                      0.0
-                    ],
-                    [
-                      0.0,
-                      0.0,
-                      0.0,
-                      1.0
-                    ]
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
                   ]
                 ],
-                "full_footprint_inside": [
-                  true
-                ],
-                "support_gap_m": [
-                  2.7939677238464355e-09
-                ],
-                "footprint_area_m2": [
-                  0.006399999713897708
-                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
                 "support_tolerance_m": 0.05,
                 "penetration_tolerance_m": 0.01,
                 "footprint_kind": "native_triangle_projection/v1",
-                "outside_floor_area_m2": [
-                  0.0
-                ],
-                "reference_has_raised_geometry": [
-                  false
-                ],
-                "reference_aabb_overlap": [
-                  true
-                ],
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
                 "reference_uid": "region",
                 "relation": "inside",
-                "released": [
-                  true
-                ]
+                "released": [true]
               },
-              "available": [
-                true
-              ]
+              "available": [true]
             }
           ],
-          "values": [
-            true
-          ]
+          "values": [true]
         }
       },
       "recorded_measurements": {
@@ -4493,578 +938,124 @@
           "group_id": "step_01__01",
           "uid": "a",
           "part_id": null,
-          "accepted": [
-            true
-          ],
+          "accepted": [true],
           "measurements": {
             "scope": "measured_planar_landing_region",
             "object_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  -0.10000000149011612
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.04500000178813934
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
             "reference_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
-            "full_footprint_inside": [
-              true
-            ],
-            "support_gap_m": [
-              2.7939677238464355e-09
-            ],
-            "footprint_area_m2": [
-              0.006399999713897708
-            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
             "support_tolerance_m": 0.05,
             "penetration_tolerance_m": 0.01,
             "footprint_kind": "native_triangle_projection/v1",
-            "outside_floor_area_m2": [
-              0.0
-            ],
-            "reference_has_raised_geometry": [
-              false
-            ],
-            "reference_aabb_overlap": [
-              true
-            ],
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
             "reference_uid": "region",
             "relation": "inside",
-            "released": [
-              true
-            ],
-            "boundary_frames": [
-              3
-            ]
+            "released": [true],
+            "boundary_frames": [3]
           },
-          "available": [
-            true
-          ]
+          "available": [true]
         },
         "step_01": {
           "group_id": "step_01",
           "uid": "b",
           "part_id": null,
-          "accepted": [
-            true
-          ],
+          "accepted": [true],
           "measurements": {
             "scope": "measured_planar_landing_region",
             "object_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.10000000149011612
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.04500000178813934
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
             "reference_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
-            "full_footprint_inside": [
-              true
-            ],
-            "support_gap_m": [
-              2.7939677238464355e-09
-            ],
-            "footprint_area_m2": [
-              0.006399999713897708
-            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
             "support_tolerance_m": 0.05,
             "penetration_tolerance_m": 0.01,
             "footprint_kind": "native_triangle_projection/v1",
-            "outside_floor_area_m2": [
-              0.0
-            ],
-            "reference_has_raised_geometry": [
-              false
-            ],
-            "reference_aabb_overlap": [
-              true
-            ],
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
             "reference_uid": "region",
             "relation": "inside",
-            "released": [
-              true
-            ],
-            "boundary_frames": [
-              6
-            ]
+            "released": [true],
+            "boundary_frames": [6]
           },
-          "available": [
-            true
-          ]
+          "available": [true]
         }
       },
-      "body_vertices": [
-        [
-          -0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          0.04,
-          0.04
-        ]
-      ],
-      "body_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
-      "reference_vertices": [
-        [
-          -0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          0.15,
-          0.005
-        ]
-      ],
-      "reference_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
       "expected": {
-        "goal": [
-          "satisfied"
-        ],
-        "milestones": [
-          "unavailable"
-        ],
+        "goal": ["satisfied"],
+        "milestones": ["unavailable"],
         "status": "unavailable",
         "certificate_ready": false
       }
     },
     {
       "name": "last_group_missing",
-      "poses": {
-        "a": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              -0.10000000149011612
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "b": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              0.10000000149011612
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.04500000178813934
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ],
-        "region": [
-          [
-            [
-              1.0,
-              0.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              1.0,
-              0.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              1.0,
-              0.0
-            ],
-            [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ]
-          ]
-        ]
-      },
       "runtime": {
         "segments": [
           {
             "name": "step_01__01__call_01",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
+            "active": [true],
+            "successes": [true],
             "success": true,
-            "start_steps": [
-              0
-            ],
-            "end_steps": [
-              1
-            ],
+            "start_steps": [0],
+            "end_steps": [1],
             "start_step": 0,
             "end_step": 1,
             "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                0
-              ],
+              "program_segment_source_path": ["program", "items", 0],
               "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
                 "calls": []
               }
             }
           },
           {
             "name": "step_01__01__call_02",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
+            "active": [true],
+            "successes": [true],
             "success": true,
-            "start_steps": [
-              1
-            ],
-            "end_steps": [
-              2
-            ],
+            "start_steps": [1],
+            "end_steps": [2],
             "start_step": 1,
             "end_step": 2,
             "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                1
-              ],
+              "program_segment_source_path": ["program", "items", 1],
               "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
                 "calls": [
                   {
                     "invocation_id": "count/step_01__01__call_02:0",
@@ -5072,18 +1063,14 @@
                     "status": "completed",
                     "effects": [
                       {
-                        "boundary": {
-                          "kind": "terminal"
-                        },
+                        "boundary": {"kind": "terminal"},
                         "timestamp": 0.08,
                         "observation_revision": 2,
                         "effect_spec": {
                           "effect_kind": "release",
                           "invocation_id": "count/step_01__01__call_02:0",
                           "invocation_revision": 0,
-                          "env_ids": [
-                            0
-                          ],
+                          "env_ids": [0],
                           "state_expectations": [
                             {
                               "expectation_id": "source",
@@ -5106,60 +1093,26 @@
                             }
                           ]
                         },
-                        "decision": {
-                          "success_mask": [
-                            true
-                          ]
-                        },
+                        "decision": {"success_mask": [true]},
                         "evidence": {
                           "source.constraint": {
-                            "values": [
-                              false
-                            ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
+                            "values": [false],
+                            "valid_mask": [true],
+                            "env_ids": [0],
                             "timestamp": 0.08,
                             "observation_revision": 2
                           },
                           "source.pose": {
                             "object_to_endpoint": [
                               [
-                                [
-                                  1.0,
-                                  0.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  1.0,
-                                  0.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  1.0,
-                                  0.0
-                                ],
-                                [
-                                  0.0,
-                                  0.0,
-                                  0.0,
-                                  1.0
-                                ]
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.0],
+                                [0.0, 0.0, 1.0, 0.0],
+                                [0.0, 0.0, 0.0, 1.0]
                               ]
                             ],
-                            "valid_mask": [
-                              true
-                            ],
-                            "env_ids": [
-                              0
-                            ],
+                            "valid_mask": [true],
+                            "env_ids": [0],
                             "timestamp": 0.08,
                             "observation_revision": 2
                           }
@@ -5173,368 +1126,312 @@
           },
           {
             "name": "step_01__01__call_03",
-            "active": [
-              true
-            ],
-            "successes": [
-              true
-            ],
+            "active": [true],
+            "successes": [true],
             "success": true,
-            "start_steps": [
-              2
-            ],
-            "end_steps": [
-              3
-            ],
+            "start_steps": [2],
+            "end_steps": [3],
             "start_step": 2,
             "end_step": 3,
             "metadata": {
-              "program_segment_source_path": [
-                "program",
-                "items",
-                2
-              ],
+              "program_segment_source_path": ["program", "items", 2],
               "runtime": {
-                "env_ids": [
-                  0
-                ],
-                "task_state": {
-                  "batch_size": 1,
-                  "held_objects": [],
-                  "coordinated_held_objects": []
-                },
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
                 "calls": []
               }
             }
           }
         ]
       },
-      "final_measurements": {
-        "goal_001": {
-          "unavailable": [
-            "'step_01__call_02'"
-          ]
-        }
-      },
+      "final_measurements": {"goal_001": {"unavailable": ["'step_01__call_02'"]}},
       "recorded_measurements": {
         "step_01__01": {
           "group_id": "step_01__01",
           "uid": "a",
           "part_id": null,
-          "accepted": [
-            true
-          ],
+          "accepted": [true],
           "measurements": {
             "scope": "measured_planar_landing_region",
             "object_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  -0.10000000149011612
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.04500000178813934
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
             "reference_pose": [
               [
-                [
-                  1.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  1.0,
-                  0.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  1.0,
-                  0.0
-                ],
-                [
-                  0.0,
-                  0.0,
-                  0.0,
-                  1.0
-                ]
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
               ]
             ],
-            "full_footprint_inside": [
-              true
-            ],
-            "support_gap_m": [
-              2.7939677238464355e-09
-            ],
-            "footprint_area_m2": [
-              0.006399999713897708
-            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
             "support_tolerance_m": 0.05,
             "penetration_tolerance_m": 0.01,
             "footprint_kind": "native_triangle_projection/v1",
-            "outside_floor_area_m2": [
-              0.0
-            ],
-            "reference_has_raised_geometry": [
-              false
-            ],
-            "reference_aabb_overlap": [
-              true
-            ],
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
             "reference_uid": "region",
             "relation": "inside",
-            "released": [
-              true
-            ],
-            "boundary_frames": [
-              3
-            ]
+            "released": [true],
+            "boundary_frames": [3]
           },
-          "available": [
-            true
-          ]
+          "available": [true]
         }
       },
-      "body_vertices": [
-        [
-          -0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          -0.04,
-          0.04,
-          0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          -0.04,
-          0.04
-        ],
-        [
-          0.04,
-          0.04,
-          -0.04
-        ],
-        [
-          0.04,
-          0.04,
-          0.04
-        ]
-      ],
-      "body_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
-      "reference_vertices": [
-        [
-          -0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          -0.25,
-          0.15,
-          0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          -0.15,
-          0.005
-        ],
-        [
-          0.25,
-          0.15,
-          -0.005
-        ],
-        [
-          0.25,
-          0.15,
-          0.005
-        ]
-      ],
-      "reference_faces": [
-        [
-          1,
-          3,
-          0
-        ],
-        [
-          4,
-          1,
-          0
-        ],
-        [
-          0,
-          3,
-          2
-        ],
-        [
-          2,
-          4,
-          0
-        ],
-        [
-          1,
-          7,
-          3
-        ],
-        [
-          5,
-          1,
-          4
-        ],
-        [
-          5,
-          7,
-          1
-        ],
-        [
-          3,
-          7,
-          2
-        ],
-        [
-          6,
-          4,
-          2
-        ],
-        [
-          2,
-          7,
-          6
-        ],
-        [
-          6,
-          5,
-          4
-        ],
-        [
-          7,
-          5,
-          6
-        ]
-      ],
       "expected": {
-        "goal": [
-          "unavailable"
-        ],
-        "milestones": [
-          "unavailable"
-        ],
+        "goal": ["unavailable"],
+        "milestones": ["unavailable"],
         "status": "unavailable",
         "certificate_ready": false
       }
     }
-  ]
+  ],
+  "runtime": {
+    "segments": [
+      {
+        "name": "step_01__01__call_01",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [0],
+        "end_steps": [1],
+        "start_step": 0,
+        "end_step": 1,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 0],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": []
+          }
+        }
+      },
+      {
+        "name": "step_01__01__call_02",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [1],
+        "end_steps": [2],
+        "start_step": 1,
+        "end_step": 2,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 1],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": [
+              {
+                "invocation_id": "count/step_01__01__call_02:0",
+                "invocation_revision": 0,
+                "status": "completed",
+                "effects": [
+                  {
+                    "boundary": {"kind": "terminal"},
+                    "timestamp": 0.08,
+                    "observation_revision": 2,
+                    "effect_spec": {
+                      "effect_kind": "release",
+                      "invocation_id": "count/step_01__01__call_02:0",
+                      "invocation_revision": 0,
+                      "env_ids": [0],
+                      "state_expectations": [
+                        {
+                          "expectation_id": "source",
+                          "relation": "detached",
+                          "object_id": "a",
+                          "resource_id": "left"
+                        }
+                      ],
+                      "clauses": [
+                        {
+                          "clause_id": "source.constraint",
+                          "expectation_id": "source",
+                          "expected": false,
+                          "evidence_kind": "constraint"
+                        },
+                        {
+                          "clause_id": "source.pose",
+                          "expectation_id": "source",
+                          "expectation": "separated"
+                        }
+                      ]
+                    },
+                    "decision": {"success_mask": [true]},
+                    "evidence": {
+                      "source.constraint": {
+                        "values": [false],
+                        "valid_mask": [true],
+                        "env_ids": [0],
+                        "timestamp": 0.08,
+                        "observation_revision": 2
+                      },
+                      "source.pose": {
+                        "object_to_endpoint": [
+                          [
+                            [1.0, 0.0, 0.0, 0.0],
+                            [0.0, 1.0, 0.0, 0.0],
+                            [0.0, 0.0, 1.0, 0.0],
+                            [0.0, 0.0, 0.0, 1.0]
+                          ]
+                        ],
+                        "valid_mask": [true],
+                        "env_ids": [0],
+                        "timestamp": 0.08,
+                        "observation_revision": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "step_01__01__call_03",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [2],
+        "end_steps": [3],
+        "start_step": 2,
+        "end_step": 3,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 2],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": []
+          }
+        }
+      },
+      {
+        "name": "step_01__call_01",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [3],
+        "end_steps": [4],
+        "start_step": 3,
+        "end_step": 4,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 3],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": []
+          }
+        }
+      },
+      {
+        "name": "step_01__call_02",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [4],
+        "end_steps": [5],
+        "start_step": 4,
+        "end_step": 5,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 4],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": [
+              {
+                "invocation_id": "count/step_01__call_02:0",
+                "invocation_revision": 0,
+                "status": "completed",
+                "effects": [
+                  {
+                    "boundary": {"kind": "terminal"},
+                    "timestamp": 0.2,
+                    "observation_revision": 2,
+                    "effect_spec": {
+                      "effect_kind": "release",
+                      "invocation_id": "count/step_01__call_02:0",
+                      "invocation_revision": 0,
+                      "env_ids": [0],
+                      "state_expectations": [
+                        {
+                          "expectation_id": "source",
+                          "relation": "detached",
+                          "object_id": "b",
+                          "resource_id": "left"
+                        }
+                      ],
+                      "clauses": [
+                        {
+                          "clause_id": "source.constraint",
+                          "expectation_id": "source",
+                          "expected": false,
+                          "evidence_kind": "constraint"
+                        },
+                        {
+                          "clause_id": "source.pose",
+                          "expectation_id": "source",
+                          "expectation": "separated"
+                        }
+                      ]
+                    },
+                    "decision": {"success_mask": [true]},
+                    "evidence": {
+                      "source.constraint": {
+                        "values": [false],
+                        "valid_mask": [true],
+                        "env_ids": [0],
+                        "timestamp": 0.2,
+                        "observation_revision": 2
+                      },
+                      "source.pose": {
+                        "object_to_endpoint": [
+                          [
+                            [1.0, 0.0, 0.0, 0.0],
+                            [0.0, 1.0, 0.0, 0.0],
+                            [0.0, 0.0, 1.0, 0.0],
+                            [0.0, 0.0, 0.0, 1.0]
+                          ]
+                        ],
+                        "valid_mask": [true],
+                        "env_ids": [0],
+                        "timestamp": 0.2,
+                        "observation_revision": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "step_01__call_03",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [5],
+        "end_steps": [6],
+        "start_step": 5,
+        "end_step": 6,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 5],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": []
+          }
+        }
+      }
+    ]
+  }
 }

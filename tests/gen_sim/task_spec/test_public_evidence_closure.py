@@ -24,9 +24,20 @@ import sys
 
 import embodichain
 
+from .test_condition_group_evidence import _declaration
+from .test_raw_control_evidence import raw_case
+
 
 def test_complete_evidence_surface_is_available_without_physical_or_numeric_imports():
     root = Path(embodichain.__file__).resolve().parents[1]
+    normalizations = (
+        (
+            "condition_group_evidence",
+            "ConditionEvidenceGroupBinding",
+            _declaration(recorded=False).to_dict(),
+        ),
+        ("control_evidence", "ControlEvidenceBinding", raw_case()[1].to_dict()),
+    )
     script = f"""
 import importlib, importlib.abc, pkgutil, sys
 sys.path.insert(0, {str(root)!r})
@@ -46,6 +57,9 @@ from embodichain.gen_sim.task_spec.manipulation_evidence import (
 from embodichain.gen_sim.task_spec.evidence_report import evaluate_physical_evidence_report
 assert all(callable(value) for value in (HoldAcceptanceCriteria, ManipulationEvidenceBinding,
     evaluate_manipulation_evidence, evaluate_physical_evidence_report))
+for module_name, class_name, payload in {normalizations!r}:
+    module = importlib.import_module('embodichain.gen_sim.task_spec.' + module_name)
+    assert getattr(module, class_name).from_dict(payload).to_dict() == payload
 """
     result = subprocess.run(
         [sys.executable, "-I", "-c", script],

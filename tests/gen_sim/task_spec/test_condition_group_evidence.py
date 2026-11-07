@@ -33,9 +33,17 @@ from embodichain.gen_sim.task_spec.evidence_report import (
 )
 from embodichain.gen_sim.task_spec.condition_evidence import ConditionEvidenceBinding
 
-REFERENCE = json.loads(
-    (Path(__file__).parent / "data/e2_count_source_reference.json").read_text()
+_CASES = json.loads(
+    (Path(__file__).parent / "data/condition_group_cases.json").read_text()
 )
+for _group in (
+    _CASES["upright"],
+    _CASES["joint_parts"],
+    *_CASES["orientations"]["declarations"],
+):
+    for _case in _group["cases"]:
+        _case.setdefault("runtime", deepcopy(_group["runtime"]))
+REFERENCE = _CASES["upright"]
 
 
 def _declaration(*, recorded, data=REFERENCE, predicate_name=None):
@@ -339,21 +347,6 @@ def test_existing_single_binding_keeps_its_original_legal_payload_and_hash():
     )
 
 
-def test_group_snapshot_decode_has_no_simulation_or_numeric_import_dependency():
-    import subprocess
-    import sys
-
-    import embodichain
-
-    root = Path(embodichain.__file__).resolve().parent.parent
-    data = _declaration(recorded=False).to_dict()
-    script = f"import sys;sys.path.insert(0,{str(root)!r});from embodichain.gen_sim.task_spec.condition_group_evidence import ConditionEvidenceGroupBinding;ConditionEvidenceGroupBinding.from_dict({data!r});assert not any(name=='torch' or name=='numpy' or name.startswith('embodichain.lab') or name.startswith('embodichain.gen_sim.task_engine') for name in sys.modules)"
-    result = subprocess.run(
-        [sys.executable, "-I", "-c", script], capture_output=True, text=True, timeout=30
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
 def _joint_packet(binding, case):
     packets = {}
     segments = {value["name"]: value for value in case["runtime"]["segments"]}
@@ -415,9 +408,7 @@ def _joint_packet(binding, case):
     return packet
 
 
-PARTS = json.loads(
-    (Path(__file__).parent / "data/e6_count_parts_source_reference.json").read_text()
-)
+PARTS = _CASES["joint_parts"]
 
 
 @pytest.mark.parametrize("case", PARTS["cases"], ids=lambda value: value["name"])
@@ -456,9 +447,7 @@ def test_articulation_count_cannot_duplicate_a_joint_under_different_part_names(
         replace(group, members=(first, aliased), binding_hash="")
 
 
-E1_REFERENCE = json.loads(
-    (Path(__file__).parent / "data/e1_orientation_source_reference.json").read_text()
-)
+E1_REFERENCE = _CASES["orientations"]
 
 
 @pytest.mark.parametrize(
