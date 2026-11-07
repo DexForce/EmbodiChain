@@ -5166,3 +5166,30 @@ One Atomic Skill executes a pinned demonstration asset through the ordinary plan
 
 .. autoclass:: ExecuteDemoSkill
    :members:
+
+Image semantic planning
+-----------------------
+
+The image frontend interprets visible objects and task intent, then emits a
+validated pick/place graph and declaration coverage without starting simulation.
+Visual IDs still require a runtime scene and robot integration before execution.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.image_planning
+
+.. autosummary::
+
+   generate_semantic_task_graph_from_image
+
+.. autofunction:: generate_semantic_task_graph_from_image
+
+The command ``embodichain task-engine --image IMAGE --instruction TEXT
+--output DIRECTORY`` writes the declarations and
+current standalone HTML viewer to a fresh directory.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.cli
+
+.. autosummary::
+
+   main
+
+.. autofunction:: main
