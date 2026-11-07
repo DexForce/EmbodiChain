@@ -1653,7 +1653,7 @@
   ],
   "checks": {
     "focused_behavioral_tests": {
-      "passed": 343
+      "passed": 344
     },
     "gen_sim_usd_tests": {
       "passed": 11

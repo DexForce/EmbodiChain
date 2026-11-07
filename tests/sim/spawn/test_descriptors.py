@@ -87,6 +87,13 @@ from embodichain.lab.sim.spawn.usd import (
 
 pytestmark = pytest.mark.no_sim
 
+
+def test_packaged_usd_requires_typed_source_translation() -> None:
+    cfg = RigidObjectCfg(uid="packaged", shape=MeshCfg(fpath="source.usdz"))
+    with pytest.raises(NotImplementedError, match="typed scenes"):
+        rigid_desc_from_cfg(cfg)
+
+
 RESTITUTION = 0.25
 DEFORMABLE_MESH_PATH = "/assets/deformable.obj"
 
