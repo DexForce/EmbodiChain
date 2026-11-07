@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="expansion",
+        target="embodichain.cli.expansion:main",
+        help="Preflight, collect, resume and inspect expert expansion jobs.",
+    ),
+    Command(
         name="train-sl",
         target="embodichain.learning.sl.workflow:cli",
         help="Train a supervised policy or dynamics recipe from YAML or JSON.",

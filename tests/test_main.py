@@ -40,6 +40,7 @@ EXPECTED_COMMANDS = {
     "dataset",
     "decompose-urdf",
     "eval-policy",
+    "expansion",
     "list-robot",
     "list-task",
     "show-task",
