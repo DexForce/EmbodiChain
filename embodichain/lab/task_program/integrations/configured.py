@@ -100,6 +100,8 @@ from embodichain.lab.sim.atomic_actions import (
     PickUpOptions,
     PlaceOptions,
     PourOptions,
+    PressOptions,
+    PressPlanningRecovery,
     PushObjectOptions,
     PushObjectToolCalibration,
     RecoveryPolicy,
@@ -991,6 +993,9 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "preserve_current_object_orientation",
                 "direction",
                 "approach_distance",
+                "press_distance",
+                "press_position",
+                "contact_roll_alternatives",
                 "translation_distance",
                 "preshape_fraction",
                 "approach_along_grasp_axis",
@@ -1034,11 +1039,17 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "rotate_upright",
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
+                    *(("approach_along_grasp_axis",) if kind == "pick_up" else ()),
                     *(("target_axis",) if kind == "axis_align" else ()),
                 }
             ),
         )
         kwargs: dict[str, object] = {}
+        if "approach_along_grasp_axis" in config:
+            kwargs["approach_along_grasp_axis"] = _boolean(
+                config["approach_along_grasp_axis"],
+                path=f"{path}.approach_along_grasp_axis",
+            )
         if "hand_interp_steps" in config:
             kwargs["hand_interp_steps"] = _integer(
                 config["hand_interp_steps"],
@@ -1432,6 +1443,61 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 )
             kwargs["tool_calibrations"] = tuple(calibrations)
         return PushObjectOptions(**kwargs)
+    if kind == "press":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "hand_interp_steps",
+                    "approach_distance",
+                    "press_distance",
+                    "press_position",
+                    "contact_roll_alternatives",
+                }
+            ),
+        )
+        kwargs = {}
+        if "hand_interp_steps" in config:
+            kwargs["hand_interp_steps"] = _integer(
+                config["hand_interp_steps"], path=f"{path}.hand_interp_steps", minimum=1
+            )
+        for name in ("approach_distance", "press_distance"):
+            if name in config:
+                kwargs[name] = _real(
+                    config[name],
+                    path=f"{path}.{name}",
+                    minimum=0.0,
+                    strict_minimum=name == "press_distance",
+                )
+        if "press_position" in config:
+            kwargs["press_position"] = (
+                None
+                if config["press_position"] is None
+                else _finite_tuple(
+                    config["press_position"],
+                    path=f"{path}.press_position",
+                    expected_length=3,
+                )
+            )
+        if "contact_roll_alternatives" in config:
+            kwargs["contact_roll_alternatives"] = tuple(
+                _real(
+                    item,
+                    path=f"{path}.contact_roll_alternatives[{index}]",
+                    minimum=-math.pi,
+                    maximum=math.pi,
+                )
+                for index, item in enumerate(
+                    _sequence(
+                        config["contact_roll_alternatives"],
+                        path=f"{path}.contact_roll_alternatives",
+                    )
+                )
+            )
+        return PressOptions(**kwargs)
+
     if kind == "slide":
         config = _mapping(
             value,
@@ -1567,6 +1633,11 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "plan_opts",
                 "interpolation_mode",
                 "ik_seed_mode",
+                "sample_count_retries",
+                "segment_sample_count_retries",
+                "segment_continuous_ik_recovery",
+                "require_final_velocity",
+                "final_velocity_rejection",
             }
         ),
     )
@@ -1583,6 +1654,38 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
             path=f"{path}.velocity_targets",
         ),
         "sample_count": sample_count,
+        "final_velocity_rejection": _identifier(
+            config.get("final_velocity_rejection", "hold"),
+            path=f"{path}.final_velocity_rejection",
+        ),
+        "require_final_velocity": _boolean(
+            config.get("require_final_velocity", False),
+            path=f"{path}.require_final_velocity",
+        ),
+        "sample_count_retries": tuple(
+            _integer(item, path=f"{path}.sample_count_retries[{index}]", minimum=2)
+            for index, item in enumerate(
+                _sequence(
+                    config.get("sample_count_retries", ()),
+                    path=f"{path}.sample_count_retries",
+                )
+            )
+        ),
+        "segment_sample_count_retries": tuple(
+            _integer(
+                item, path=f"{path}.segment_sample_count_retries[{index}]", minimum=2
+            )
+            for index, item in enumerate(
+                _sequence(
+                    config.get("segment_sample_count_retries", ()),
+                    path=f"{path}.segment_sample_count_retries",
+                )
+            )
+        ),
+        "segment_continuous_ik_recovery": _boolean(
+            config.get("segment_continuous_ik_recovery", False),
+            path=f"{path}.segment_continuous_ik_recovery",
+        ),
         "interpolation_mode": _identifier(
             config.get("interpolation_mode", "adaptive"),
             path=f"{path}.interpolation_mode",
@@ -1752,6 +1855,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 "action_timeout",
                 "planning_budget",
                 "retry_all_failed_plans",
+                "planning_recovery",
             }
         ),
     )
@@ -1806,6 +1910,25 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
                 )
             )
         )
+    if config.get("planning_recovery") is not None:
+        declaration_path = f"{path}.planning_recovery"
+        declaration = _mapping(
+            config["planning_recovery"],
+            path=declaration_path,
+            required=frozenset({"kind", "revision"}),
+            optional=frozenset(),
+        )
+        kind = _identifier(declaration["kind"], path=f"{declaration_path}.kind")
+        if kind != "press_bounded":
+            raise ValueError(f"Unsupported {declaration_path}.kind {kind!r}.")
+        if (
+            _integer(
+                declaration["revision"], path=f"{declaration_path}.revision", minimum=1
+            )
+            != 1
+        ):
+            raise ValueError(f"Unsupported {declaration_path}.revision.")
+        kwargs["planning_recovery"] = PressPlanningRecovery()
     return RecoveryPolicy(**kwargs)
 
 

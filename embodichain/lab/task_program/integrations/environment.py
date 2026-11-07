@@ -25,7 +25,7 @@ shared semantic compiler, runtime, and Gym bridge.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 import math
@@ -203,6 +203,7 @@ class TaskProgramEnvironmentFactory(Protocol):
         scene_registry: SceneRegistry,
         engine: AtomicActionEngine,
         clock: EnvironmentStepClock,
+        runtime_scope_guard: Callable[[], None] | None = None,
     ) -> PlanningObservationPort:
         """Create fresh planning observations and aligned full-qpos reads.
 
@@ -210,6 +211,7 @@ class TaskProgramEnvironmentFactory(Protocol):
             scene_registry: Exact registry selected for this runtime.
             engine: Exact atomic engine selected for this runtime.
             clock: Shared environment-step execution clock.
+            runtime_scope_guard: Optional host epoch/lifetime validation callback.
 
         Returns:
             Combined planning-observation and qpos provider.
@@ -598,17 +600,24 @@ class TaskProgramEnvironmentAdapter:
     def assemble_runtime(
         self,
         integration: TaskProgramIntegrationCfg,
+        *,
+        runtime_scope_guard: Callable[[], None] | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Create a fresh fully connected semantic runtime.
 
         Args:
             integration: Exact scene, profile, and runtime-preset selection.
+            runtime_scope_guard: Optional host-owned runtime epoch validator.
 
         Returns:
             Owned assembly containing every validated runtime boundary.
         """
+        if runtime_scope_guard is not None and not callable(runtime_scope_guard):
+            raise TypeError("runtime_scope_guard must be callable or None.")
         semantic = self._assemble_semantic_components(integration)
-        return self._assemble_execution_runtime(semantic)
+        return self._assemble_execution_runtime(
+            semantic, runtime_scope_guard=runtime_scope_guard
+        )
 
     def _assemble_semantic_components(
         self,
@@ -699,6 +708,7 @@ class TaskProgramEnvironmentAdapter:
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+        runtime_scope_guard: Callable[[], None] | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
         self._require_open()
@@ -727,6 +737,11 @@ class TaskProgramEnvironmentAdapter:
             scene_registry=semantic.scene_registry,
             engine=semantic.engine,
             clock=clock,
+            **(
+                {"runtime_scope_guard": runtime_scope_guard}
+                if runtime_scope_guard is not None
+                else {}
+            ),
         )
         self._validate_registration_ownership()
         if not isinstance(observation_provider, PlanningObservationPort):
@@ -802,6 +817,11 @@ class TaskProgramEnvironmentAdapter:
             observation_provider,
             command_sink,
             evidence_collector,
+            task_state=(
+                self._factory.create_initial_task_state()
+                if callable(getattr(self._factory, "create_initial_task_state", None))
+                else None
+            ),
             clock=clock,
             runner_cfg=deepcopy(selected_runner_cfg),
             plan_transform_factory=plan_transform_factory,
@@ -895,6 +915,21 @@ class TaskProgramEnvironmentAdapter:
         )
         return TracingTaskProgramNominalSources(program, delegate)
 
+    def for_env_ids(self, env_ids: tuple[int, ...]) -> TaskProgramEnvironmentAdapter:
+        """Create a fresh registered adapter for selected physical rows.
+
+        Args:
+            env_ids: Explicit ordered world indices.
+        Returns:
+            Adapter with independent runtime state and preserved source bindings.
+        """
+        select = getattr(self._factory, "for_env_ids", None)
+        if not callable(select):
+            raise ValueError("environment factory does not support row selection")
+        adapter = select(env_ids).create_adapter()
+        adapter._set_configured_nominal_sources(self._configured_nominal_sources)
+        return adapter
+
     def create_bridge(
         self,
         program: CompiledTaskProgram,
@@ -904,12 +939,15 @@ class TaskProgramEnvironmentAdapter:
         recipe_indices: tuple[int, ...] | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        isolate_policy_sessions: bool = False,
         invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+        runtime_scope_guard: Callable[[], None] | None = None,
     ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
 
         Args:
             program: Program compiled for this adapter's exact integration IDs.
+            runtime_scope_guard: Optional host scope validator bound to this bridge.
             invocation_policy_bindings: Named preset selections for exact sequential
                 occurrences, sealed to this compiled program's fingerprint.
 
@@ -917,6 +955,8 @@ class TaskProgramEnvironmentAdapter:
             Lazy bridge sharing one newly assembled runtime, clock, and sink.
         """
         self._require_open()
+        if runtime_scope_guard is not None and not callable(runtime_scope_guard):
+            raise TypeError("runtime_scope_guard must be callable or None.")
         if type(program) is not CompiledTaskProgram:
             raise TypeError("program must be exactly CompiledTaskProgram.")
         if type(invocation_policy_bindings) is not tuple:
@@ -1015,6 +1055,7 @@ class TaskProgramEnvironmentAdapter:
             ),
             expansion_trace_provider=expansion,
             nominal_source_factory=nominal_source_factory,
+            runtime_scope_guard=runtime_scope_guard,
         )
         bridge = TaskProgramDemoBridge(
             program,

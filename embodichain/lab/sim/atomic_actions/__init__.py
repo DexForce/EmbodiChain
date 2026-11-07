@@ -66,7 +66,7 @@ from .control import (
     OPEN_COMMAND,
     PARK_COMMAND,
 )
-from .core import AtomicAction, ObjectSemantics, SkillDescriptor
+from .core import AtomicAction, CompletePlanBuilder, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
 from .evidence import (
     PhysicalEvidenceBatch,
@@ -227,6 +227,8 @@ from .primitives import (
     Press,
     PressGoal,
     PressOptions,
+    PressPlanningRecovery,
+    validate_press_extra_distance,
     PushObject,
     PushObjectGoal,
     PushObjectOptions,
@@ -307,6 +309,7 @@ __all__ = [
     "AxisAlignGoal",
     "AxisAlignOptions",
     "AtomicAction",
+    "CompletePlanBuilder",
     "AtomicActionEngine",
     "PlanTransform",
     "NominalMotionSource",
@@ -435,6 +438,8 @@ __all__ = [
     "PressAffordance",
     "PressGoal",
     "PressOptions",
+    "PressPlanningRecovery",
+    "validate_press_extra_distance",
     "PushObject",
     "PushObjectGoal",
     "PushObjectOptions",

@@ -1730,3 +1730,24 @@ def test_planning_recovery_rejects_nested_mutable_or_callable_data():
     for payload in ([1], (lambda: None,), (float("nan"),)):
         with pytest.raises(TypeError, match="immutable finite"):
             Mutable("unit", "unit", 1, payload)
+
+
+def test_cartesian_policy_distinguishes_unsampled_keyframes_from_exact_samples():
+    policy = MotionPolicy(
+        interpolation_mode="fixed_grid",
+        ik_seed_mode="sequential",
+        acceleration_limit=None,
+    )
+    inputs = dict(
+        start_qpos=torch.zeros(1, 6), control_part="arm", interpolation_dt=0.04
+    )
+    samples = policy.to_motion_gen_options(**inputs, cartesian_linear=True)
+    keyframes = policy.to_motion_gen_options(**inputs, cartesian_keyframes=True)
+    assert samples.is_linear and samples.preserve_cartesian_samples
+    assert keyframes.is_linear and not keyframes.preserve_cartesian_samples
+    with pytest.raises(ValueError, match="both samples and keyframes"):
+        policy.to_motion_gen_options(
+            **inputs, cartesian_linear=True, cartesian_keyframes=True
+        )
+    with pytest.raises(TypeError, match="cartesian_keyframes"):
+        policy.to_motion_gen_options(**inputs, cartesian_keyframes=1)
