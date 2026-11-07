@@ -135,6 +135,7 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
 from embodichain.lab.task_program.semantics.profiles import (
     EffectAssurance,
     ResourceClaim,
+    SkillPolicyPreset,
     WorkflowRecoveryPolicy,
 )
 from embodichain.lab.task_program.semantics.scene import SceneObjectRef, SceneRegistry
@@ -2233,6 +2234,11 @@ def test_registered_acquisition_scheduler_stops_within_action_retry_budget(
                 "call": call,
                 "effect_monitor_ref": EffectMonitorRef("test.monitor", "1"),
             }
+        )
+        analyzed.bound.preset = SkillPolicyPreset(
+            **vars(analyzed.bound.preset),
+            action_option_templates={},
+            effect_assurance=analyzed.effect_assurance,
         )
         declaration = RegisteredSemanticEffect(
             SemanticEffectKind.ATTACH,
