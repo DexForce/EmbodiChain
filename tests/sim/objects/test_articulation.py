@@ -61,6 +61,53 @@ def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tens
     return rotation @ torch.diag_embed(inertia) @ rotation.transpose(-1, -2)
 
 
+@pytest.mark.requires_sim
+def test_newton_initial_hold_targets_for_multiple_articulations(tmp_path: Path) -> None:
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+    asset = tmp_path / "initial_slider.urdf"
+    asset.write_text("""<robot name="initial_slider">
+      <link name="base"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <link name="slider"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <joint name="slide" type="prismatic"><parent link="base"/><child link="slider"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="100" velocity="10"/></joint>
+    </robot>""")
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            enable_entity_gizmo=False,
+            physics_cfg=NewtonPhysicsCfg(
+                device="cpu",
+                gravity=(0, 0, 0),
+                collision_cfg=None,
+                solver_cfg={"solver_type": "semi_implicit"},
+            ),
+        ),
+        requires_native_renderer=False,
+    )
+    articulations = []
+    art = None
+    try:
+        initial_positions = (0.2, -0.3)
+        for index, position in enumerate(initial_positions):
+            articulations.append(
+                sim.add_articulation(
+                    ArticulationCfg(
+                        uid=f"slider_{index}", fpath=str(asset), init_qpos=[position]
+                    )
+                )
+            )
+        sim.prepare()
+        for art, position in zip(articulations, initial_positions, strict=True):
+            expected = torch.tensor([[position]])
+            torch.testing.assert_close(art.get_qpos(), expected)
+            torch.testing.assert_close(art.get_qpos(target=True), expected)
+    finally:
+        art = None
+        articulations.clear()
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
 @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
 @pytest.mark.parametrize("env_ids", [None, [0]], ids=["all", "selected"])
 @pytest.mark.parametrize("operation", ["reset", "root_pose", "qpos"])
