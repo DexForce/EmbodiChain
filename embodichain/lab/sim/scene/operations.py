@@ -24,7 +24,12 @@ import torch
 from .query import SceneView, _backend_tensor
 from ._validation import _rigid_pose
 
-__all__ = ["SceneChangeSet", "SceneChangeResult", "apply_changes"]
+__all__ = [
+    "SceneChangeSet",
+    "SceneChangeResult",
+    "apply_changes",
+    "apply_changes_batch",
+]
 
 
 @dataclass(frozen=True)
@@ -82,7 +87,9 @@ def _preflight_changes(
             raise ValueError(f"Entity {uid!r} does not support pose changes")
         selected[uid] = (
             entity,
-            _backend_tensor(changes.poses[uid], device=view.sim.device),
+            _backend_tensor(changes.poses[uid], device=view.sim.device)
+            .expand(len(view.env_ids), -1, -1)
+            .contiguous(),
         )
     return selected
 
@@ -91,7 +98,7 @@ def apply_changes(view: SceneView, changes: SceneChangeSet) -> SceneChangeResult
     """Apply allowed poses and clear dynamics, without advancing physics.
 
     Args:
-        view: Fixed-topology B=1 scene selection.
+        view: Explicit scene selection; each selected row receives the declared poses.
         changes: Fully specified arena-local poses and movable permissions.
     Returns:
         Changed UIDs and required host cache invalidations; render state is synced.
@@ -111,3 +118,48 @@ def apply_changes(view: SceneView, changes: SceneChangeSet) -> SceneChangeResult
             "Scene change failed during native writes; earlier writes may remain applied"
         ) from exc
     return SceneChangeResult(tuple(changes.poses))
+
+
+def apply_changes_batch(
+    view: SceneView, changes: Mapping[int, SceneChangeSet]
+) -> SceneChangeResult:
+    """Apply distinct per-arena changes after preflighting the entire selection.
+
+    Args:
+        view: Ordered set of physical rows to prepare.
+        changes: Exactly one change set for every selected environment index.
+    Returns:
+        Union of changed entities and required host cache invalidations.
+    Raises:
+        ValueError: For invalid selections or any invalid row, before writes.
+        RuntimeError: For native failures; partial writes require host recovery.
+    """
+    view.check_topology()
+    if any(type(index) is not int for index in changes) or set(changes) != set(
+        view.env_ids
+    ):
+        raise ValueError("Changes must exactly match selected env_ids")
+    grouped: dict[str, tuple[object, list[int], list[torch.Tensor]]] = {}
+    for env_id in view.env_ids:
+        row_view = SceneView(view.sim, env_ids=(env_id,))
+        for uid, (entity, pose) in _preflight_changes(
+            row_view, changes[env_id]
+        ).items():
+            group = grouped.setdefault(uid, (entity, [], []))
+            group[1].append(env_id)
+            group[2].append(pose)
+    prepared = [
+        (entity, ids, torch.cat(poses, dim=0))
+        for entity, ids, poses in grouped.values()
+    ]
+    try:
+        for entity, ids, poses in prepared:
+            entity.clear_dynamics(env_ids=ids)
+            entity.set_local_pose(poses, env_ids=ids)
+        if prepared:
+            view.sync_render_state()
+    except Exception as exc:
+        raise RuntimeError(
+            "Batch scene change failed; world may be partially modified"
+        ) from exc
+    return SceneChangeResult(tuple(grouped))

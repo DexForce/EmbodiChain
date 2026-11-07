@@ -66,7 +66,12 @@ class MeasuredTaskMonitor:
         self,
         final_checks: Sequence[Mapping[str, object]],
         events: Sequence[Mapping[str, object]],
+        *,
+        env_id: int = 0,
     ) -> None:
+        if type(env_id) is not int or env_id < 0:
+            raise ValueError("env_id must be a nonnegative physical row")
+        self.env_id = env_id
         self.final_checks = tuple(self._validate(c) for c in final_checks)
         if not self.final_checks:
             raise ValueError("Measured task acceptance requires terminal checks")
@@ -153,7 +158,7 @@ class MeasuredTaskMonitor:
     def reset(self, env: Any) -> None:
         """Seed measured initial heights and reset ordered event history."""
         self.initial_heights = {
-            uid: float(env.sim.get_rigid_object(uid).get_local_pose()[0, 2])
+            uid: float(env.sim.get_rigid_object(uid).get_local_pose()[self.env_id, 2])
             for uid in env.sim.get_rigid_object_uid_list()
         }
         self._index = self._steps = 0
@@ -166,7 +171,7 @@ class MeasuredTaskMonitor:
         """Read one explicitly declared condition from current physical state.
 
         Args:
-            env: Current B=1 environment.
+            env: Current environment; reads use the explicit physical row.
             condition: A validated predicate mapping.
         Returns:
             Physical truth value; unknown entities/joints are configuration errors.
@@ -174,13 +179,15 @@ class MeasuredTaskMonitor:
         kind = condition["kind"]
         if kind == "joint_range":
             index = env.robot.joint_names.index(condition["joint"])
-            value = float(env.robot.get_qpos()[0, index])
+            value = float(env.robot.get_qpos()[self.env_id, index])
             passed = condition["lower"] <= value <= condition["upper"]
         else:
             obj = env.sim.get_rigid_object(condition["entity"])
             if obj is None:
                 raise ValueError("Predicate entity is absent from the physical scene")
-            position = obj.get_local_pose()[0, :3].detach().cpu().double().numpy()
+            position = (
+                obj.get_local_pose()[self.env_id, :3].detach().cpu().double().numpy()
+            )
             if kind == "pose_near":
                 passed = (
                     np.linalg.norm(position - condition["position"])
@@ -192,7 +199,7 @@ class MeasuredTaskMonitor:
                     >= condition["height_m"]
                 )
             elif kind == "speed_below":
-                state = obj.body_state[0]
+                state = obj.body_state[self.env_id]
                 # RigidBodyState follows pose(7), linear(3), angular(3).
                 passed = (
                     float(state[7:10].norm()) <= condition["linear_m_s"]
@@ -201,7 +208,7 @@ class MeasuredTaskMonitor:
             elif kind == "axis_relation":
                 other = (
                     env.sim.get_rigid_object(condition["other"])
-                    .get_local_pose()[0, :3]
+                    .get_local_pose()[self.env_id, :3]
                     .detach()
                     .cpu()
                     .numpy()
@@ -213,13 +220,15 @@ class MeasuredTaskMonitor:
                 # conservative boxes also reject unsupported overhangs.
                 corners = []
                 root = (
-                    obj.get_local_pose(to_matrix=True)[0]
+                    obj.get_local_pose(to_matrix=True)[self.env_id]
                     .detach()
                     .cpu()
                     .double()
                     .numpy()
                 )
-                for shape in obj.get_collision_shapes():
+                for shape in obj.get_collision_shapes(
+                    **({"env_id": self.env_id} if self.env_id else {})
+                ):
                     if shape.vertices is not None and shape.vertices.numel():
                         points = shape.vertices.cpu().numpy()
                     elif shape.half_extents is not None:

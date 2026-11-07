@@ -54,6 +54,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa:
     CuroboPlanner,
     CuroboPlannerCfg,
     CuroboWorldCfg,
+    _torch_cuda_graph_capture_mode,
 )
 
 ROBOT_UID = "curobo_franka"
@@ -66,10 +67,11 @@ DEMO_BLOCK_POS = [0.45, 0.0, 0.18]
 JOINT_1_TARGET_DELTA_RAD = 0.12
 
 
-def _make_sim_robot(num_envs: int = 1):
-    sim = SimulationManager(
-        SimulationManagerCfg(headless=True, sim_device="cuda", num_envs=num_envs)
-    )
+def _make_sim_robot(num_envs: int = 1, gravity: list[float] | None = None):
+    sim_cfg = SimulationManagerCfg(headless=True, sim_device="cuda", num_envs=num_envs)
+    if gravity is not None:
+        sim_cfg.physics_cfg.gravity = gravity
+    sim = SimulationManager(sim_cfg)
     robot = sim.add_robot(
         cfg=FrankaPandaCfg.from_dict({"uid": ROBOT_UID, "robot_type": "panda"})
     )
@@ -181,9 +183,10 @@ def test_curobo_v2_plans_around_rigid_object_voxel_world():
         SimulationManager.flush_cleanup_queue()
 
 
-def test_curobo_v2_plans_a_joint_space_move():
+@pytest.mark.parametrize("gravity", [[0.0, 0.0, -9.81], [0.0, 0.0, 0.0]])
+def test_curobo_v2_plans_a_joint_space_move(gravity):
     """Route a ``JOINT_MOVE`` through V2 ``plan_cspace`` on CUDA."""
-    sim, robot, block = _make_sim_robot()
+    sim, robot, block = _make_sim_robot(gravity=gravity)
     try:
         cfg = CuroboPlannerCfg(
             robot_uid=ROBOT_UID,
@@ -211,14 +214,21 @@ def test_curobo_v2_plans_a_joint_space_move():
         assert torch.allclose(result.positions[0, 0], start_qpos[0], atol=1e-3)
         assert torch.allclose(result.positions[0, -1], target_qpos[0], atol=1e-3)
         assert float(result.duration[0]) > 0.0
+        backend = next(iter(mg.planner._backend_cache.values()))
+        # Check the gravity actually consumed by native TimeOpt, not just the
+        # adapter's request. Earth gravity must never leak into a zero-g solve.
+        assert (
+            backend.planner.trajopt_solver._timeopt.optimizer.config.gravity
+            == pytest.approx(gravity)
+        )
     finally:
         sim.destroy()
         SimulationManager.flush_cleanup_queue()
 
 
 @pytest.mark.slow
-def test_curobo_v2_plans_batched_joint_space_moves_direct_first():
-    """Keep easy shared-world joint plans from receiving partial PRM seeds."""
+def test_curobo_v2_plans_batched_joint_space_moves_direct_first(monkeypatch):
+    """Preserve direct-first planning and exercise the configured RRT fallback."""
     sim, robot, _ = _make_sim_robot(num_envs=8)
     try:
         cfg = CuroboPlannerCfg(
@@ -268,6 +278,27 @@ def test_curobo_v2_plans_batched_joint_space_moves_direct_first():
         assert torch.isfinite(result.positions).all()
         assert torch.allclose(result.positions[:, 0], start_qpos, atol=1e-3)
         assert torch.allclose(result.positions[:, -1], target_qpos, atol=1e-3)
+
+        # Force the fallback once: easy direct-first queries otherwise need not
+        # touch RRT's lane buffers or its separate collision rollout at all.
+        planner = mg.planner
+        backend = next(iter(planner._backend_cache.values()))
+
+        def no_new_capture(*args, **kwargs):
+            raise AssertionError("RRT fallback attempted capture after preparation")
+
+        monkeypatch.setattr(torch.cuda, "graph", no_new_capture)
+        with _torch_cuda_graph_capture_mode(cfg.cuda_graph_capture_error_mode):
+            native = backend.planner.plan_cspace(
+                planner._to_curobo_joint_goal(target_qpos, backend),
+                planner._to_curobo_joint_state(start_qpos, backend),
+                max_attempts=1,
+                enable_graph_attempt=0,
+            )
+        assert native is not None
+        assert native.success.reshape(-1).tolist() == [True] * 8
+        _, positions, _, _, _ = planner._extract_segment(native, backend)
+        assert torch.allclose(positions[:, -1], target_qpos, atol=1e-3)
     finally:
         sim.destroy()
         SimulationManager.flush_cleanup_queue()
@@ -485,7 +516,7 @@ def test_observed_payload_buffers_and_query_lifetimes(
 
 
 @pytest.mark.parametrize("batch_size", [2, 4])
-def test_observed_shared_world_native_batch(batch_size: int) -> None:
+def test_observed_shared_world_native_batch(batch_size: int, monkeypatch) -> None:
     """Exercise native batch planning, explicit row frames and owned results."""
     import gc
     import weakref
@@ -530,6 +561,11 @@ def test_observed_shared_world_native_batch(batch_size: int) -> None:
             world=CuroboWorldCfg(rigid_objects=world),
         )
         snapshot = CuroboQuerySnapshot(full_qpos=full, world_to_base=frames)
+
+        def no_capture(*args, **kwargs):
+            raise AssertionError("A non-graph backend attempted CUDA graph capture")
+
+        monkeypatch.setattr(torch.cuda, "graph", no_capture)
         for kind in (MoveType.JOINT_MOVE, MoveType.EEF_MOVE):
             with curobo_motion_generator(cfg, query_snapshot=snapshot) as mg:
                 meta = mg.planner.prepare_backend(
@@ -540,6 +576,8 @@ def test_observed_shared_world_native_batch(batch_size: int) -> None:
                     backend.planner, mg.planner._bindings.BatchMotionPlanner
                 )
                 assert meta["batch_size"] == batch_size
+                assert meta["use_cuda_graph"] is False
+                assert meta["graph_planner_algorithm"] == "rrt"
                 buffer_ref = weakref.ref(
                     backend.planner.kinematics.config.kinematics_config.link_spheres
                 )
