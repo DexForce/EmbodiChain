@@ -244,9 +244,10 @@ def _combined_profile_with_spatial(
     return CombinedExpansionProfile.from_mapping(payload)
 
 
-def test_mapped_retime_factory_respects_source_permissions_and_collision_evidence() -> (
-    None
-):
+@pytest.mark.parametrize("physical_row", [0, 7])
+def test_mapped_retime_factory_respects_source_permissions_and_collision_evidence(
+    physical_row,
+) -> None:
     class LongPlace(_ThreePhasePlaceAction):
         binding_contract = _ThreePhasePlaceAction.binding_contract
 
@@ -272,6 +273,11 @@ def test_mapped_retime_factory_respects_source_permissions_and_collision_evidenc
         motion_policy=MotionPolicy(sample_count=7, acceleration_limit=1000.0),
     )
     context = engine.initial_context(control_dt=CONTROL_DT)
+    if physical_row:
+        context = replace(context, env_ids=torch.tensor([physical_row]))
+        limits = torch.tensor([[[-0.01, 0.01]] * 3] * 8)
+        limits[physical_row] = torch.tensor([[-2.0, 2.0]] * 3)
+        engine.robot.body_data.qpos_limits = limits
     plan = engine.plan(invocation, context)
     request = action.resolve_request(invocation)
     source = {
@@ -1023,11 +1029,17 @@ def test_same_logical_recipe_has_identical_geometry_on_different_physical_rows()
     assert [record.env_id for record in factory.records] == [7, 3]
 
 
-def test_each_row_uses_its_own_joint_limits_for_normalized_residuals() -> None:
+@pytest.mark.parametrize("physical_rows", [(0, 1), (1, 0), (7, 3)])
+def test_each_row_uses_its_own_joint_limits_for_normalized_residuals(
+    physical_rows,
+) -> None:
     engine, invocation, resolved, context, plan = _planned_place_batch(batch_size=2)
-    engine.robot.body_data.qpos_limits = torch.tensor(
-        [[[-2.0, 2.0]] * 3, [[-4.0, 4.0]] * 3]
-    )
+    context = replace(context, env_ids=torch.tensor(physical_rows))
+    plan = engine.plan(invocation, context)
+    limits = torch.tensor([[[-1.0, 1.0]] * 3] * (max(physical_rows) + 1))
+    limits[physical_rows[0]] = torch.tensor([[-2.0, 2.0]] * 3)
+    limits[physical_rows[1]] = torch.tensor([[-4.0, 4.0]] * 3)
+    engine.robot.body_data.qpos_limits = limits
     payload = _combined_profile_with_spatial(scale=0.005, tolerance=0.002).to_dict()
     payload["trajectory"]["spatial"]["operators"] = ["joint_residual"]
     factory = CombinedTaskProgramExpansionFactory(

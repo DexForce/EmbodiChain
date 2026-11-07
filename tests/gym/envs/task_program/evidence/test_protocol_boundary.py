@@ -25,6 +25,7 @@ import sys
 
 import pytest
 import torch
+import pytest
 
 
 def test_offline_protocol_api_imports_without_frontends_or_numeric_runtime():
@@ -86,3 +87,95 @@ def test_shared_evidence_json_preserves_row_validity_and_owns_values(
         torch.tensor([[1.0], [unavailable_value]]),
         equal_nan=True,
     )
+
+
+@pytest.mark.parametrize("family", ["handover", "coordinated"])
+def test_historical_milestone_boundary_must_match_verified_record(family):
+    from .test_handover_evidence import _case as handover
+    from .test_coordinated_evidence import _case as coordinated
+    from ._evaluation import normalized
+    from embodichain.gen_sim.task_spec.manipulation_evidence import (
+        evaluate_manipulation_evidence,
+    )
+
+    spec, binding, evidence, program = (
+        handover(1) if family == "handover" else coordinated(final=False)
+    )
+    evidence["boundary_frames"] = [
+        evidence["record"]["measurements"]["boundary_frames"][0] + 100
+    ]
+    acceptance, packet = normalized(binding, evidence, program, spec)
+    outcome = evaluate_manipulation_evidence(spec, acceptance, packet, program=program)[
+        0
+    ]
+    assert outcome.status.value == "unavailable"
+
+
+@pytest.mark.parametrize("family", ["handover", "coordinated"])
+@pytest.mark.parametrize("frames", [None, [], [-1], [True], ["invalid"], [0, 1]])
+def test_incomplete_captures_return_unavailable_without_failing_report(family, frames):
+    from .test_handover_evidence import _case as handover
+    from .test_coordinated_evidence import _case as coordinated
+    from ._evaluation import normalized
+    from embodichain.gen_sim.task_spec.manipulation_evidence import (
+        evaluate_manipulation_evidence,
+    )
+
+    spec, binding, evidence, program = (
+        handover(3, raw=True) if family == "handover" else coordinated(raw=True)
+    )
+    evidence["boundary_frames"] = frames
+    acceptance, packet = normalized(binding, evidence, program, spec)
+    result = evaluate_manipulation_evidence(spec, acceptance, packet, program=program)[
+        0
+    ]
+    assert result.status.value == "unavailable"
+
+
+@pytest.mark.parametrize("family", ["handover", "coordinated"])
+@pytest.mark.parametrize(
+    "damage", ["collection_time", "source_step", "missing_source_time"]
+)
+def test_held_pose_channels_need_the_selected_history_step_and_original_time(
+    family, damage
+):
+    from .test_handover_evidence import _case as handover
+    from .test_coordinated_evidence import _case as coordinated
+    from ._evaluation import normalized
+    from embodichain.gen_sim.task_spec.manipulation_evidence import (
+        evaluate_manipulation_evidence,
+    )
+
+    spec, binding, evidence, program = (
+        handover(3, raw=True) if family == "handover" else coordinated(raw=True)
+    )
+    poses = evidence["held_poses"]
+    if damage == "collection_time":
+        poses["pose_frame"]["timestamp"] += 0.04
+        for batch in poses["pose_frame"]["batches"].values():
+            batch["timestamp"] += 0.04
+    elif damage == "source_step":
+        poses["recorded_acquisition"]["frame_indices"][0] += 1
+    else:
+        poses["recorded_acquisition"]["timestamps"] = [None]
+    acceptance, packet = normalized(binding, evidence, program, spec)
+    assert (
+        evaluate_manipulation_evidence(spec, acceptance, packet, program=program)[
+            0
+        ].status.value
+        == "unavailable"
+    )
+
+
+def test_recorded_pose_keeps_native_time_separate_from_episode_steps():
+    from .test_handover_evidence import _case
+    from ._evaluation import evaluate_handover_evidence
+
+    spec, binding, evidence, program = _case(1, raw=True)
+    poses = evidence["held_poses"]
+    # Native simulation time may include warmup; collection may happen later.
+    poses["pose_frame"]["timestamp"] += 2.0
+    for batch in poses["pose_frame"]["batches"].values():
+        batch["timestamp"] += 2.0
+    outcome = evaluate_handover_evidence(spec, binding, evidence, program=program)[0]
+    assert outcome.status.value == "satisfied", outcome.reason

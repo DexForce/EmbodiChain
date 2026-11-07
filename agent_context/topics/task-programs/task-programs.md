@@ -54,6 +54,9 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
 | Offline receipt/query/actor normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
 | SDK-independent shared physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
+
+| Offline held-object protocol normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
+| Shared SDK-independent physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
 | Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
@@ -71,6 +74,16 @@ physical frame/batch contract. It imports neither TaskSpec nor Task Engine and
 decides no task predicate. Held observation requests select exact parts and fresh
 query revisions here. Normative criteria are supplied separately by the consumer;
 mutable runtime receipts never define task acceptance thresholds.
+
+import Gym. Provider-specific dependencies are confined to `integrations`. Public package
+exports resolve lazily while retaining their existing names and objects, so an
+offline evidence adapter can import without initializing a simulator.
+
+The held-object adapter validates receipt, actor, query and time identities and
+cross-checks world-position/orientation measurements against the original policy.
+It imports neither TaskSpec nor Task Engine and makes no normative task judgment.
+Declared task bounds belong to the separately supplied normative criteria. Invalid
+capture boundaries return unavailable evidence instead of failing report assembly.
 Gym retains only lifecycle coupling; it does not own schemas, compilers,
 catalogs, lowerers, or simulation assembly.
 

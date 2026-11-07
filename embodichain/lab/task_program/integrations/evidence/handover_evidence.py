@@ -329,7 +329,7 @@ def normalize_handover_evidence(
                     dt=selected.step_dt,
                     count=count,
                 )
-        if raw and (
+        if (raw or "boundary_frames" in snapshot) and (
             snapshot.get("boundary_frames")
             != expected["measurements"]["boundary_frames"]
             or any((type(value) is not int for value in snapshot["boundary_frames"]))
