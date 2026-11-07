@@ -152,6 +152,17 @@ PickUp, MoveHeldObject and Place can also assemble a pre-planning nominal motion
 source. The source does not own semantic effects or environment lifecycle; see
 [Real2Sim motion](../data-pipeline/real2sim.md) for source and replay limits.
 
+`CoordinatedPickGoal.resume_held` continues a same-object two-hand hold using
+both existing attachment transforms and current robot FK. It skips grasp
+sampling, approach and lift, supports ordered object waypoints, and can retain
+or release both hands. Missing, inconsistent or conflicting holders fail per
+row without falling back to pickup. Default pickup requires free participants.
+When pickup retains the object, an active different-object hold on either
+participant rejects the batch: TaskState cannot store two object identities on
+one resource across rows. Pickup with final release keeps row-local eligibility.
+The single-holder guards in MoveHeldObject and CoordinatedPlacement remain
+separate contracts.
+
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
 remaining distance from same-timestamp joint/robot observations per planning row;
