@@ -37,6 +37,8 @@ from embodichain.lab.gym.utils.gym_utils import (
     fetch_data_from_dict,
     assign_data_to_dict,
     _read_raw_rollout,
+    _read_raw_rollout_window,
+    _read_raw_rollout_step_counts,
     _raw_rollout_state,
 )
 from .observation_types import (
@@ -309,6 +311,86 @@ class ObservationManager(ManagerBase):
                 name: result.acquisition_errors[key] for name, key in ids.items()
             },
         )
+
+    def read_history_step_counts(
+        self,
+        *,
+        episode_ids: Sequence[int],
+        env_ids: Sequence[int] | None = None,
+    ) -> tuple[int, ...]:
+        """Return exact completed state boundaries without copying field history.
+
+        Args:
+            episode_ids: Expected initialized episodes in the selected row order.
+            env_ids: Unique original environment rows, or all rows when omitted.
+
+        Returns:
+            Last recorded state slot per selected row. Zero denotes a recorded
+            initialization boundary, not a completed command. This query acquires
+            no physical data and reads no pose, joint or action history values.
+
+        Raises:
+            RuntimeError: Raw history is absent or closed.
+            ValueError: The source episode or latest boundary is unavailable.
+        """
+        if not self.has_history:
+            raise RuntimeError("Observation history is unavailable.")
+        return _read_raw_rollout_step_counts(
+            self._rollout_storage,
+            self._env.episode_context,
+            episode_ids=episode_ids,
+            env_ids=env_ids,
+        )
+
+    def read_history_window(
+        self,
+        start_frames: Sequence[int],
+        end_frames: Sequence[int],
+        *,
+        fields: Sequence[str],
+        episode_ids: Sequence[int],
+        env_ids: Sequence[int] | None = None,
+        device: str | torch.device = "cpu",
+    ) -> dict[str, Any]:
+        """Copy exact inclusive windows using the existing observation schema.
+
+        Args:
+            start_frames: First recorded state slot per selected native row.
+            end_frames: Last recorded slot per row, inclusive.
+            fields: Bound observation field IDs or aliases.
+            episode_ids: Exact initialized source episode identities.
+            env_ids: Unique original rows in query order, or all rows.
+            device: Destination for independently owned values and masks.
+
+        Returns:
+            Window identities and original revisions/timestamps with per-field
+            tuples of values, validity and acquisition errors. Each tensor has
+            its row's exact interval length; no padding or second schema is
+            introduced. Reads neither acquire physical state nor mutate storage.
+
+        Raises:
+            RuntimeError: Recording is absent or closed.
+            ValueError: A row, episode, interval or recorded boundary is invalid.
+            KeyError: A field was not declared in this owner's bound schema.
+        """
+        if not self.has_history:
+            raise RuntimeError("Observation history is unavailable.")
+        names = tuple(fields)
+        if not names or len(set(names)) != len(names):
+            raise ValueError("History queries require unique nonempty field IDs.")
+        ids = {name: self._field_ids[name] for name in names}
+        result = _read_raw_rollout_window(
+            self._rollout_storage,
+            self._env.episode_context,
+            start_frames,
+            end_frames,
+            fields=tuple(dict.fromkeys(ids.values())),
+            episode_ids=episode_ids,
+            env_ids=env_ids,
+            device=device,
+        )
+        result["fields"] = {name: result["fields"][key] for name, key in ids.items()}
+        return result
 
     def compute(
         self,

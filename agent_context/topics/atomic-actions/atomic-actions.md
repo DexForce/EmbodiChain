@@ -51,6 +51,20 @@ values contain only immutable finite data and name their skill/revision.
 tuple; unsupported declarations fail before skill preparation. These contracts
 add no alternate built-in skill implementation or source-specific decoder.
 
+Press keeps its default open-loop path. Explicit `PressPlanningRecovery` permits
+at most two complete B1 plans, including nominal, and consumes the declared
+contact-roll alternative only after failure. Failed phases use Motion's existing
+continuous IK on the same targets and time grid: `lab/sim/motion/ik.py` adapts the
+robot while `compute/kinematics/ik_path.py` owns bounded seed search. Press owns
+only the failed-phase trigger and contact-roll alternative. Robot's
+`compute_batch_ik(continuous=True)` selects solver candidate branches; it does
+not implement this recovery's velocity window, perturbation order or RNG scope
+and is not an interchangeable recovery backend. Final emitted full-robot velocity
+qualification remains rejection-only; no transformed plan triggers another search.
+The configured decoder accepts only the fixed `press_bounded` revision-one
+declaration. `validate_press_extra_distance` validates declaration-owned extra
+travel without changing skill defaults or deciding measured Press success.
+
 `SkillDescriptor.supports_segment_motion_recovery` is read-only and derived
 from the actual Atomic validation override. A copied class marker does not
 advertise a handler. Semantic preflight rejects unsupported segment policy
@@ -139,7 +153,10 @@ Historical revision mapping belongs only to the frozen regression fixture.
 
 `PickUpOptions.approach_direction` accepts one world vector or one vector per
 planning row. PickUp and AxisAlign normalize each row independently and use the
-same direction for candidate eligibility and pre-grasp translation. A benchmark
+same direction for candidate eligibility and pre-grasp translation. Calibrated
+fixed grasps can explicitly select `approach_along_grasp_axis` so native
+pre-grasp translation follows each realized TCP +Z after object rotation.
+The default retains the world-vector contract. A benchmark
 that freezes per-row grasp realisations must forward their directions to the
 actual action; replacing them with one shared vector changes the request.
 
@@ -170,6 +187,17 @@ already-satisfied rows hold, invalid observations fail, and mixed active directi
 are rejected. Omitting the target preserves fixed-distance `SlideOptions` and the
 original Slide tutorial. Slide remains open-loop; this extension does not certify
 contact or physical goal satisfaction.
+
+`source_native_contact` composes preserved explicit source policies with the
+shared Newton collision pipeline over the same GraspKit closing/opening/rest
+algorithms. Contact decisions retain the query owner's conservative interval
+semantics; threshold ambiguity remains unavailable. Scene keeps
+native geometry capture, including the caller-selected sampling grid. The source
+adapter owns only policy mapping, provenance and query cleanup; ordinary
+`ActionPlanningServices.prepare_grasp_query` retains Newton and shared defaults.
+`grasp_geometry.GraspOpeningTarget` is the single value definition, re-exported
+with the same identity from the existing Atomic/runtime imports. No concrete
+skill or alternate registry is installed by these query builders.
 
 ## Package map
 

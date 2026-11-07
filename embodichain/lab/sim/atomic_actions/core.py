@@ -411,7 +411,20 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     @cached_property
     def num_envs(self) -> int:
         """Number of environments owned by the bound robot."""
-        return int(self.robot.get_qpos().shape[0])
+        selection = self.planning_services.env_ids
+        return (
+            int(
+                self.robot.get_qpos(
+                    **(
+                        {"env_ids": self.planning_services.env_ids}
+                        if self.planning_services.env_ids is not None
+                        else {}
+                    )
+                ).shape[0]
+            )
+            if selection is None
+            else len(selection)
+        )
 
     @cached_property
     def robot_dof(self) -> int:
@@ -783,6 +796,11 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         arm_ids = list(arm.joint_ids)
         limits = self.robot.get_qpos_limits(name=arm.control_part)
         speeds = self.robot.get_qvel_limits(name=arm.control_part)
+        if self.planning_services.env_ids is not None:
+            if isinstance(limits, torch.Tensor) and limits.ndim == 3:
+                limits = limits.index_select(0, context.env_ids.to(limits.device))
+            if isinstance(speeds, torch.Tensor) and speeds.ndim == 2:
+                speeds = speeds.index_select(0, context.env_ids.to(speeds.device))
         if (
             not isinstance(limits, torch.Tensor)
             or limits.shape != (1, len(arm_ids), 2)
@@ -854,7 +872,14 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             raise ValueError("external motion anchor index is out of range")
         qpos = trajectory.positions[:, index, list(endpoint.joint_ids)]
         actual = self.robot.compute_fk(
-            qpos=qpos, name=endpoint.control_part, to_matrix=True
+            qpos=qpos,
+            name=endpoint.control_part,
+            to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
         )
         if (
             not isinstance(actual, torch.Tensor)

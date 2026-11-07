@@ -18,6 +18,7 @@ of those owners.
 | Placement binding, physical proof checks and certificate assembly | `evidence.py` |
 | Orientation/joint state and milestone qualification | `condition_evidence.py` |
 | Common per-environment physical reports | `evidence_report.py` |
+| Explicit held-object acceptance over normalized facts | `manipulation_evidence.py`; `handover_evidence.py`, `coordinated_evidence.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
 | JSON snapshots and semantic hashing | `canonicalization.py` |
@@ -66,6 +67,21 @@ observation manager owns their semantic schema.
 Env dispatches capture/reset boundaries;
 no Lab module imports TaskSpec or Task Engine.
 
+HandOver and coordinated holding separate protocol validation from task acceptance.
+Lab's `task_program/integrations/evidence/` owns raw receipt/actor/query/clock
+validation and observation requests. Its offline normalizers emit source-bound
+physical frame/batch JSON without importing TaskSpec or Task Engine.
+`ManipulationEvidenceBinding` seals explicit `HoldAcceptanceCriteria`, predicate,
+program, episode and final/recorded scope. TaskSpec compares attachment drift,
+grips, target position, orientation and observed duration against those criteria;
+it never derives acceptance limits from a runtime monitor's resolved parameters.
+Valid measured negatives fail; missing or contradictory acquisition stays
+unavailable. Historical boundary overrides must match the verified record. Raw held poses
+retain the canonical history row/episode/step identities and original native
+acquisition times; final observations match source time, while recorded reads
+may be collected later without equating native time to episode step count.
+Existing placement/state/control/Pour APIs keep their current contracts.
+
 Current goals cannot borrow recorded milestone success. The legacy instantaneous
 final-support scope requires its exact measured release and actual final runtime
 boundary, but not an unexecuted later wait/park policy. Failed post-policy execution
@@ -99,6 +115,14 @@ unavailable per environment. Lab state collectors use the same canonical
 ObservationManager history as support collection, preserving raw validity,
 acquisition errors and temporal identities without a second acquisition path.
 The Task Engine projection supplies declarations only and selects no thresholds.
+
+`pour_evidence.py` qualifies a recorded rigid tilt/restore occurrence using sealed
+source/receiver, episode, program, release and cadence identities. The original
+30-degree tilt, 15-degree restore and receiver-projection bounds are unchanged;
+this does not qualify fluid transfer. Missing acquisition remains unavailable.
+Lab reads recorded values through the canonical ObservationManager schema/raw
+history, never live poses or a second trajectory buffer. Historical control
+receipts remain qualified by the separate `control_evidence.py` owner.
 
 Historical Press/Twist control proof lives in `control_evidence.py`. Bindings
 seal explicit predicate/joint/direction/resource and compiled occurrence identity.

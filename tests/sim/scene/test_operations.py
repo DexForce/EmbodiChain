@@ -17,6 +17,7 @@
 from __future__ import annotations
 import numpy as np
 import pytest
+import torch
 from embodichain.lab.sim.scene.query import SceneView
 from embodichain.lab.sim.scene.operations import SceneChangeSet, apply_changes
 from ._runtime_ports import Sim
@@ -78,3 +79,28 @@ def test_backend_overflow_preflight_preserves_every_entity():
         apply_changes(SceneView(sim), changes)
     assert all(body.writes == 0 for body in sim.rigid.values())
     assert sim.syncs == 0
+
+
+def test_distinct_batch_changes_preflight_every_row_and_preserve_neighbors():
+    from embodichain.lab.sim.scene.operations import apply_changes_batch
+
+    sim = Sim(4)
+    view = SceneView(sim, env_ids=(3, 1))
+    a, b = torch.eye(4), torch.eye(4)
+    a[0, 3], b[0, 3] = 0.7, 0.9
+    changes = {
+        3: SceneChangeSet({"cube": a.tolist()}, ("cube",)),
+        1: SceneChangeSet({"missing": b.tolist()}, ("missing",)),
+    }
+    with pytest.raises(ValueError, match="existing rigid"):
+        apply_changes_batch(view, changes)
+    assert sim.rigid["cube"].writes == 0
+    before = sim.rigid["cube"].value[[0, 2]].clone()
+    changes[1] = SceneChangeSet({"cube": b.tolist()}, ("cube",))
+    result = apply_changes_batch(view, changes)
+    assert result.changed_uids == ("cube",)
+    torch.testing.assert_close(
+        sim.rigid["cube"].value[[3, 1], 0], torch.tensor([0.7, 0.9])
+    )
+    torch.testing.assert_close(sim.rigid["cube"].value[[0, 2]], before, atol=0, rtol=0)
+    assert sim.steps == 0 and sim.syncs == 1

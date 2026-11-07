@@ -48,14 +48,15 @@ from scene._native_capture_fixture import (
     setup_case,
     parts_record,
 )
-from ._source_native_grasp_fixture import recording_manager, stable_report
+from ._source_native_grasp_fixture import decisions, recording_manager, stable_report
+from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 
 
 @pytest.fixture
 def ports(tmp_path, monkeypatch):
     pytest.importorskip(
-        "fcl",
-        reason="Native capture geometry is unqualified without planning-geometry/python-fcl.",
+        "newton",
+        reason="Native capture geometry is unqualified without the Newton runtime.",
     )
     monkeypatch.setattr(capture, "BoxGeometry", Box)
     monkeypatch.setattr(capture, "ConvexMeshGeometry", Convex)
@@ -77,7 +78,7 @@ def _arguments(ports):
     )
 
 
-def test_cooked_capture_full_stroke_and_actual_fcl_match_pinned_source(
+def test_cooked_capture_full_stroke_and_newton_decisions_match_pinned_source(
     ports, monkeypatch
 ):
     expected = json.loads(
@@ -88,15 +89,21 @@ def test_cooked_capture_full_stroke_and_actual_fcl_match_pinned_source(
     )
     robot, simulation, cfg, opened, closed = ports
     before = (robot.qpos.clone(), opened.clone(), closed.clone(), cfg.copy())
-    manager, trace = recording_manager(trimesh.collision.CollisionManager)
-    monkeypatch.setattr(trimesh.collision, "CollisionManager", manager)
+    manager, trace = recording_manager(_ConvexCollection)
+    from embodichain.lab.sim.atomic_actions import source_native_contact
+
+    monkeypatch.setattr(source_native_contact, "_ConvexCollection", manager)
     with build_native_closing_query(robot, simulation, **_arguments(ports)) as query:
         assert parts_record(query) == expected["parts"]
         assert robot.calls == expected["fk_calls"]
         assert query.identity == expected["identity"]
-        assert stable_report(query.inspect(np.eye(4))) == expected["result"]
-        assert stable_report(query.report()) == expected["report"]
-        assert trace == expected["trace"]
+        assert query.report()["collision_backend"] == "newton.CollisionPipeline"
+        assert query.report()["distance_semantics"] == "capped_conversion_interval/v1"
+        assert decisions(stable_report(query.inspect(np.eye(4)))) == decisions(
+            expected["result"]
+        )
+        assert decisions(stable_report(query.report())) == decisions(expected["report"])
+        assert decisions(trace) == decisions(expected["trace"])
         assert robot.reads == 0 and expected["source_state_reads"] == 1
     torch.testing.assert_close(robot.qpos, before[0])
     torch.testing.assert_close(opened, before[1])
@@ -177,14 +184,12 @@ def test_unsupported_native_inputs_fail_before_fk(ports, change):
     assert robot.calls == []
 
 
-def test_missing_fcl_is_preflighted_before_native_capture(monkeypatch):
-    failure = Mock(
-        side_effect=ImportError("embodichain[planning-geometry] unavailable")
-    )
+def test_missing_newton_is_preflighted_before_native_capture(monkeypatch):
+    failure = Mock(side_effect=ImportError("Newton collision pipeline unavailable"))
     from embodichain.lab.sim.atomic_actions import source_native_contact
 
-    monkeypatch.setattr(source_native_contact, "_require_fcl", failure)
-    with pytest.raises(ImportError, match="planning-geometry"):
+    monkeypatch.setattr(source_native_contact, "_require_newton", failure)
+    with pytest.raises(ImportError, match="Newton collision pipeline"):
         build_native_closing_query(
             None,
             None,
