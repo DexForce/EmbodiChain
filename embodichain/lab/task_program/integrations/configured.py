@@ -98,7 +98,9 @@ from embodichain.lab.sim.atomic_actions import (
     MoveHeldObjectOptions,
     MoveJointsOptions,
     PickUpOptions,
+    PickPlanningRecovery,
     PlaceOptions,
+    PlacePlanningRecovery,
     PourOptions,
     PressOptions,
     PressPlanningRecovery,
@@ -1021,6 +1023,13 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "contact_frame_to_eef",
                 "tool_calibrations",
                 "target_axis",
+                "adaptive_grasp",
+                "linear_segments",
+                "full_opening_clearance",
+                "require_qualified_approach",
+                "qualify_downstream_targets",
+                "qualify_required_waypoints",
+                "monitor_scene_until_approach",
             }
         ),
     )
@@ -1045,11 +1054,37 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
                     *(("approach_along_grasp_axis",) if kind == "pick_up" else ()),
+                    *(
+                        (
+                            "adaptive_grasp",
+                            "linear_segments",
+                            "full_opening_clearance",
+                            "require_qualified_approach",
+                            "qualify_downstream_targets",
+                        )
+                        if kind == "pick_up"
+                        else ()
+                    ),
                     *(("target_axis",) if kind == "axis_align" else ()),
                 }
             ),
         )
         kwargs: dict[str, object] = {}
+        if kind == "pick_up":
+            if "adaptive_grasp" in config:
+                kwargs["adaptive_grasp"] = _identifier(
+                    config["adaptive_grasp"], path=f"{path}.adaptive_grasp"
+                )
+            for field_name in (
+                "linear_segments",
+                "full_opening_clearance",
+                "require_qualified_approach",
+                "qualify_downstream_targets",
+            ):
+                if field_name in config:
+                    kwargs[field_name] = _boolean(
+                        config[field_name], path=f"{path}.{field_name}"
+                    )
         if "approach_along_grasp_axis" in config:
             kwargs["approach_along_grasp_axis"] = _boolean(
                 config["approach_along_grasp_axis"],
@@ -1169,10 +1204,22 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
                     "preserve_current_object_orientation",
+                    "linear_segments",
+                    "qualify_required_waypoints",
+                    "monitor_scene_until_approach",
                 }
             ),
         )
         kwargs = {}
+        for field_name in (
+            "linear_segments",
+            "qualify_required_waypoints",
+            "monitor_scene_until_approach",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _boolean(
+                    config[field_name], path=f"{path}.{field_name}"
+                )
         if "hand_interp_steps" in config:
             kwargs["hand_interp_steps"] = _integer(
                 config["hand_interp_steps"],
@@ -1643,6 +1690,7 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "segment_continuous_ik_recovery",
                 "require_final_velocity",
                 "final_velocity_rejection",
+                "mask_generation_overspeed",
             }
         ),
     )
@@ -1666,6 +1714,10 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         "require_final_velocity": _boolean(
             config.get("require_final_velocity", False),
             path=f"{path}.require_final_velocity",
+        ),
+        "mask_generation_overspeed": _boolean(
+            config.get("mask_generation_overspeed", False),
+            path=f"{path}.mask_generation_overspeed",
         ),
         "sample_count_retries": tuple(
             _integer(item, path=f"{path}.sample_count_retries[{index}]", minimum=2)
@@ -1924,7 +1976,12 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
             optional=frozenset(),
         )
         kind = _identifier(declaration["kind"], path=f"{declaration_path}.kind")
-        if kind != "press_bounded":
+        recovery_types = {
+            "press_bounded": PressPlanningRecovery,
+            "pick_bounded": PickPlanningRecovery,
+            "place_bounded": PlacePlanningRecovery,
+        }
+        if kind not in recovery_types:
             raise ValueError(f"Unsupported {declaration_path}.kind {kind!r}.")
         if (
             _integer(
@@ -1933,7 +1990,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
             != 1
         ):
             raise ValueError(f"Unsupported {declaration_path}.revision.")
-        kwargs["planning_recovery"] = PressPlanningRecovery()
+        kwargs["planning_recovery"] = recovery_types[kind]()
     return RecoveryPolicy(**kwargs)
 
 

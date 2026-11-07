@@ -61,9 +61,23 @@ only the failed-phase trigger and contact-roll alternative. Robot's
 not implement this recovery's velocity window, perturbation order or RNG scope
 and is not an interchangeable recovery backend. Final emitted full-robot velocity
 qualification remains rejection-only; no transformed plan triggers another search.
-The configured decoder accepts only the fixed `press_bounded` revision-one
-declaration. `validate_press_extra_distance` validates declaration-owned extra
+The configured decoder accepts fixed revision-one `press_bounded`,
+`pick_bounded` and `place_bounded` declarations; each remains bound to its exact
+skill. `validate_press_extra_distance` validates declaration-owned extra
 travel without changing skill defaults or deciding measured Press success.
+
+Ordinary Pick/Place migration behavior is explicit. `PickUpOptions` selects
+ordinary adaptive sampling, Cartesian segments, full-object opening clearance
+and qualified approach requirements; inactive values retain the existing path.
+The opening view delegates to GraspKit after ranking instead of replacing its
+sampler. `PickPlanningRecovery` retains four candidate paths and two contact
+refinements with joint-prefix then cuRobo fallback. `PlaceOptions` selects
+required-waypoint checks and approach-only scene monitoring;
+`PlacePlanningRecovery` retains its fixed waypoint/clearance budget. Missing
+selected ports and unsupported batch/option combinations reject. These options
+are not implemented by AxisAlign, which rejects nondefault inherited choices.
+Motion owns the opt-in post-normalization velocity mask and its independent
+pre-mask kinematic-success snapshot; neither is a physical effect certificate.
 
 `SkillDescriptor.supports_segment_motion_recovery` is read-only and derived
 from the actual Atomic validation override. A copied class marker does not

@@ -9394,6 +9394,13 @@ def test_axis_align_rejects_invalid_frozen_twists(twist) -> None:
         AxisAlignOptions(alignment_twist_rad=twist)
 
 
+def test_axis_align_rejects_inherited_ordinary_pick_requirements() -> None:
+    """Axis alignment must not silently accept a Pick-only planning guarantee."""
+    AxisAlignOptions()
+    with pytest.raises(ValueError, match="ordinary Pick planning options"):
+        AxisAlignOptions(require_qualified_approach=True)
+
+
 @pytest.mark.parametrize(
     "offset",
     [torch.zeros(2), torch.zeros(2, 2), torch.tensor([float("nan"), 0.0, 0.0])],

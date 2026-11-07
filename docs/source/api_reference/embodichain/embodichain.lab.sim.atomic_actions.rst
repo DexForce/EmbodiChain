@@ -232,6 +232,14 @@ Standard capability identifiers
 Planning and state
 ------------------
 
+Ordinary manipulation can explicitly select adaptive Pick sampling, complete
+opening-envelope filtering and qualified Cartesian approaches through typed
+options. ``PickPlanningRecovery`` and ``PlacePlanningRecovery`` use the existing
+complete-request budget and original bounded alternative order. Inactive options
+preserve shared defaults; an unsupported selected service or option combination
+is rejected. The planning services return geometric evidence, while execution
+and physical-effect validation retain their separate contracts.
+
 .. autoclass:: ActionBinding
    :members:
 

@@ -3493,6 +3493,65 @@ def test_generic_planning_budget_decodes_without_source_recovery_factories():
         )
 
 
+def test_ordinary_planning_declarations_are_explicit_closed_and_keep_fixed_budgets():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_action_options,
+        _decode_recovery_policy,
+    )
+    from embodichain.lab.sim.atomic_actions import (
+        PickPlanningRecovery,
+        PlacePlanningRecovery,
+    )
+
+    pick = _decode_action_options(
+        {
+            "kind": "pick_up",
+            "adaptive_grasp": "ordinary",
+            "full_opening_clearance": True,
+        },
+        path="pick",
+    )
+    assert pick.adaptive_grasp == "ordinary" and pick.full_opening_clearance
+    place = _decode_action_options(
+        {"kind": "place", "linear_segments": True, "qualify_required_waypoints": True},
+        path="place",
+    )
+    assert place.linear_segments and place.qualify_required_waypoints
+    for kind, expected in (
+        ("pick_bounded", PickPlanningRecovery()),
+        ("place_bounded", PlacePlanningRecovery()),
+    ):
+        policy = _decode_recovery_policy(
+            {
+                "max_replans": 0,
+                "max_action_retries": 0,
+                "planning_recovery": {"kind": kind, "revision": 1},
+            },
+            path="recovery",
+        )
+        assert policy.planning_recovery == expected
+    assert PickPlanningRecovery().max_candidate_paths == 4
+    assert PickPlanningRecovery().max_contact_refinements == 2
+    assert PlacePlanningRecovery().max_complete_plans == 10
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _decode_recovery_policy(
+            {
+                "max_replans": 0,
+                "max_action_retries": 0,
+                "planning_recovery": {
+                    "kind": "pick_bounded",
+                    "revision": 1,
+                    "max_candidate_paths": 5,
+                },
+            },
+            path="recovery",
+        )
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _decode_action_options(
+            {"kind": "axis_align", "adaptive_grasp": "ordinary"}, path="axis"
+        )
+
+
 def test_configured_joint_stability_owns_target_and_requires_articulation():
     from embodichain.lab.task_program.integrations.simulation.stability import (
         SimulationJointStabilityConditionCfg,
@@ -3650,21 +3709,29 @@ def test_final_velocity_rejection_representation_is_explicit_and_default_identit
     from embodichain.lab.sim.atomic_actions import MotionPolicy
 
     assert "final_velocity_rejection" not in _canonical_value(MotionPolicy())["fields"]
+    assert "mask_generation_overspeed" not in _canonical_value(MotionPolicy())["fields"]
     selected = _decode_motion_policy(
         {
             "sample_count": 50,
             "require_final_velocity": True,
             "final_velocity_rejection": "mask_only",
+            "mask_generation_overspeed": True,
         },
         path="motion",
     )
     assert (
         selected.final_velocity_rejection == "mask_only"
         and selected.require_final_velocity
+        and selected.mask_generation_overspeed
     )
     assert (
         _canonical_value(selected)["fields"]["final_velocity_rejection"] == "mask_only"
     )
+    assert _canonical_value(selected)["fields"]["mask_generation_overspeed"] is True
+    with pytest.raises(TypeError, match="mask_generation_overspeed"):
+        _decode_motion_policy(
+            {"sample_count": 50, "mask_generation_overspeed": "true"}, path="motion"
+        )
     with pytest.raises((TypeError, ValueError)):
         _decode_motion_policy(
             {"sample_count": 50, "final_velocity_rejection": "unknown"}, path="motion"

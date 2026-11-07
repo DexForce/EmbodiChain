@@ -212,6 +212,11 @@ def _canonical_value(value: object) -> object:
             )
         }
         from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+        from embodichain.lab.sim.atomic_actions.primitives.axis_align import (
+            AxisAlignOptions,
+        )
+        from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
+        from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
 
         from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
 
@@ -222,6 +227,29 @@ def _canonical_value(value: object) -> object:
             metadata.pop("supports_segment_motion_recovery")
         if type(value) is MotionPolicy and value.final_velocity_rejection == "hold":
             metadata.pop("final_velocity_rejection")
+        if type(value) is MotionPolicy and value.mask_generation_overspeed is False:
+            metadata.pop("mask_generation_overspeed")
+        if type(value) in (PickUpOptions, AxisAlignOptions):
+            for name, default in (
+                ("adaptive_grasp", "none"),
+                ("linear_segments", False),
+                ("full_opening_clearance", False),
+                ("require_qualified_approach", False),
+                ("qualify_downstream_targets", True),
+            ):
+                if (
+                    type(getattr(value, name)) is type(default)
+                    and getattr(value, name) == default
+                ):
+                    metadata.pop(name)
+        if type(value) is PlaceOptions:
+            for name in (
+                "linear_segments",
+                "qualify_required_waypoints",
+                "monitor_scene_until_approach",
+            ):
+                if getattr(value, name) is False:
+                    metadata.pop(name)
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
         if (
