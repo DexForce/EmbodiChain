@@ -28,7 +28,7 @@ from embodichain.lab.sim.atomic_actions.source_native_contact import (
     NativeContactPart,
     NativeQueryScope,
 )
-from embodichain.lab.sim.scene._fcl_queries import _FclCollection
+from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
 from embodichain.lab.sim.atomic_actions import RecoveryPolicy, TimedTrajectory
 from .test_ordinary_pick import _inputs
@@ -78,8 +78,8 @@ def native_inputs(
     generator=None,
 ):
     pytest.importorskip(
-        "fcl",
-        reason="Native closing source qualification needs planning-geometry/python-fcl.",
+        "newton",
+        reason="Native closing coverage requires the supported Newton collision runtime.",
     )
     cfg = RobotHandGeometryCfg(
         motion_part="arm",
@@ -488,7 +488,7 @@ class RigidQueryProvider(QueryProvider):
 
         assert query.rigid_scene_screen is None
         scene = NativeRigidRestScene(
-            query.parts, [], scope=query.scope, collision_factory=_FclCollection
+            query.parts, [], scope=query.scope, collision_factory=_ConvexCollection
         )
         query.rigid_scene_screen = scene
         self.scenes.append(scene)
@@ -519,8 +519,8 @@ def normalize_source_scope(value):
 @pytest.mark.parametrize(
     "revision,purpose,mode",
     [
-        (8, "ordinary", "accept"),
-        (9, "ordinary", "accept"),
+        pytest.param(8, "ordinary", "accept", marks=pytest.mark.gpu),
+        pytest.param(9, "ordinary", "accept", marks=pytest.mark.gpu),
         (8, "handover_source", "accept"),
         (8, "handover_source", "raw"),
         (8, "handover_source", "raw_success"),
@@ -668,6 +668,7 @@ def test_native_proposals_preserve_cap_chunks_lazy_expansion_rng_and_rest_querie
     )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("failure", ["raise", "wrong_scope"])
 def test_native_rigid_scene_partial_failure_closes_only_owned_queries(
     tmp_path, monkeypatch, failure
@@ -708,7 +709,7 @@ def test_native_rigid_scene_partial_failure_closes_only_owned_queries(
         scene = NativeRigidRestScene(
             query.parts,
             [],
-            collision_factory=_FclCollection,
+            collision_factory=_ConvexCollection,
             scope=NativeQueryScope(
                 "other", query.scope.observation_timestamp, query.scope.scene_version
             ),

@@ -234,8 +234,8 @@ def test_retained_goal_owns_geometry_and_return_target_before_invocation(tmp_pat
 def test_retained_pour_retries_rejected_candidate_not_the_executable_hold(
     tmp_path, monkeypatch, outcome
 ):
-    if outcome == "accepted" and importlib.util.find_spec("fcl") is None:
-        pytest.skip("actual robot-proxy qualification requires planning-geometry")
+    if outcome == "accepted" and importlib.util.find_spec("newton") is None:
+        pytest.skip("actual robot-proxy qualification requires Newton")
     from embodichain.lab.sim.atomic_actions.primitives import _pour_arc
 
     case = _REFERENCE["cases"][-1]
@@ -267,7 +267,7 @@ def test_retained_pour_retries_rejected_candidate_not_the_executable_hold(
         random.random()
         np.random.random()
         torch.rand(1)
-        raise ImportError("planning-geometry is unavailable")
+        raise ImportError("Newton collision queries are unavailable")
 
     engine.motion_generator._generate_once = failed_generate
     monkeypatch.setattr(_pour_arc, "resolve_continuous_ik_path", recover)

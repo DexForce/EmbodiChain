@@ -47,7 +47,7 @@ def test_transformed_pick_rechecks_actual_path_and_preserves_original_candidate(
     tmp_path, monkeypatch, case
 ):
     pytest.importorskip(
-        "fcl", reason="Robot-query wrapper coverage requires planning-geometry."
+        "newton", reason="Robot-query coverage requires the Newton collision runtime."
     )
     mode, variant = case["mode"], case["variant"]
     engine, invocation, context, action, calls, ik, events, state, provider = (

@@ -315,9 +315,12 @@ def test_native_rest_query_closes_all_owned_groups_when_precision_is_unavailable
     assert all(group.closed for group in Groups.owned)
 
 
-def test_native_rest_mesh_keeps_a_gap_between_disconnected_closed_surfaces():
-    # Convexifying this declared mesh would fill the gap and reject the moving
-    # cube. The actual two triangle components are0.75m away from that cube.
+def test_native_rest_mesh_gap_without_volume_evidence_remains_unavailable():
+    # Preserve both original triangle components and their 0.75m geometric gap.
+    # No native contact inside the 0.03m band does not exclude deep containment
+    # when their group AABBs overlap, so this cannot certify solid clearance.
+    from embodichain.lab.sim.scene.feasibility import UnsupportedFeasibilityError
+
     left = trimesh.creation.box((0.25, 0.25, 0.25))
     right = left.copy()
     left.apply_translation((-1.0, 0.0, 0.0))
@@ -335,7 +338,9 @@ def test_native_rest_mesh_keeps_a_gap_between_disconnected_closed_surfaces():
         scope=NativeQueryScope("mesh-gap", 0.0, 0),
         validate_observation=lambda: None,
     ) as query:
-        result = query.inspect((part,), np.eye(4)[None, None], "not-excluded")
-    assert result["valid"] and result["queries"] == 1
-    assert result["geometry_representation"] == "captured_native_triangle_surfaces"
+        with pytest.raises(
+            UnsupportedFeasibilityError, match="canonical AABB separation"
+        ):
+            query.inspect((part,), np.eye(4)[None, None], "not-excluded")
+        assert not query.bodies[0].part.meshes[0].is_convex
     assert query.closed
