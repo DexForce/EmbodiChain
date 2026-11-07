@@ -1632,7 +1632,7 @@ class _DexUniRobotPresetCfg(RobotPresetCfg):
 )
 @pytest.mark.parametrize(
     "solver_mapping",
-    [None, {}, {"solver_type": "auto"}, {"solver_type": "dexuni"}],
+    [None, {}, {"solver_type": "dexuni"}],
 )
 def test_dexuni_preset_priority_and_isolation(
     missing, expected, solver_mapping

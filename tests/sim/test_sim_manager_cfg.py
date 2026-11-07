@@ -454,9 +454,9 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
 @pytest.mark.no_sim
 @pytest.mark.parametrize(
     "solver_mapping",
-    [{}, {"solver_type": "auto"}, {"class_type": "AutoSolverCfg"}],
+    [None, {}],
 )
-def test_newton_physics_cfg_accepts_automatic_dexuni_mapping(solver_mapping) -> None:
+def test_newton_physics_cfg_preserves_automatic_dexuni_defaults(solver_mapping) -> None:
     from dexsim.engine.newton_physics import DexUniSolverCfg
 
     cfg = NewtonPhysicsCfg(solver_cfg=solver_mapping)
@@ -464,6 +464,33 @@ def test_newton_physics_cfg_accepts_automatic_dexuni_mapping(solver_mapping) -> 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
     assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
+    assert dexsim_cfg.solver_cfg.contact_mode == "auto"
+    assert dexsim_cfg.solver_cfg.mujoco_articulations is None
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "solver_mapping",
+    [
+        {"solver_type": "auto"},
+        {"class_type": "AutoSolverCfg"},
+        {"solver_type": "auto_solver"},
+    ],
+)
+def test_newton_physics_cfg_rejects_removed_auto_solver_names(solver_mapping) -> None:
+    with pytest.raises(RuntimeError, match="Unsupported Newton solver type"):
+        NewtonPhysicsCfg(solver_cfg=solver_mapping).to_dexsim_cfg(gpu_id=0)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "field,value", [("iterations", 8), ("step_rigid_bodies", False)]
+)
+def test_dexuni_rejects_legacy_flat_options(field, value) -> None:
+    with pytest.raises(TypeError, match=field):
+        NewtonPhysicsCfg(
+            solver_cfg={"solver_type": "dexuni", field: value}
+        ).to_dexsim_cfg(gpu_id=0)
 
 
 @pytest.mark.no_sim

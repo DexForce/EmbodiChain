@@ -1314,7 +1314,7 @@ def test_passive_damping_rejects_native_merges_that_discard_it(monkeypatch) -> N
         configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni", "mujoco_warp"])
 @pytest.mark.parametrize("mode", ["preserve", "overlay"])
 @pytest.mark.parametrize("source_gap", [None, 0.0, 0.025])
 def test_imported_articulation_gap_default_is_owned_by_embodichain(
@@ -1332,7 +1332,7 @@ def test_imported_articulation_gap_default_is_owned_by_embodichain(
     assert collision.newton.margin == 0.012
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni", "mujoco_warp"])
 @pytest.mark.parametrize("has_geometry", [True, False, None])
 def test_urdf_native_shapes_receive_gap_without_synthetic_geometry(
     solver_type: str | None, has_geometry: bool | None
@@ -1357,7 +1357,7 @@ def test_urdf_native_shapes_receive_gap_without_synthetic_geometry(
     assert link.collisions[0].newton.ke is None
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni", "mujoco_warp"])
 @pytest.mark.parametrize("mode", ["preserve", "overlay"])
 @pytest.mark.parametrize("source_gap", [None, 0.0, 0.025])
 def test_imported_rigid_gap_default_is_owned_by_embodichain(
@@ -1636,7 +1636,7 @@ def test_non_mode_aware_newton_position_fallback_is_explicit() -> None:
         configure_articulation_desc(descriptor, cfg, newton_solver_type="xpbd")
 
 
-def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
+def test_dexuni_solver_preserves_position_mode_without_compatibility_warning() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
@@ -1651,7 +1651,7 @@ def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        configure_articulation_desc(descriptor, cfg, newton_solver_type="auto")
+        configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
 
     assert not caught
 
@@ -1810,7 +1810,7 @@ def test_articulation_array_qpos_limits_compile_before_backend_build() -> None:
     assert joint.upper_limit == pytest.approx(0.75)
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni"])
 @pytest.mark.parametrize("authored_velocity", [0.05, None])
 def test_robot_default_drive_preserves_authored_velocity_limit(
     solver_type: str | None,
@@ -1828,7 +1828,7 @@ def test_robot_default_drive_preserves_authored_velocity_limit(
     assert joint.dexsim.max_velocity == authored_velocity
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni"])
 def test_explicit_zero_speed_override_is_preserved(solver_type: str | None) -> None:
     descriptor = _resolved_articulation_desc()
     joint = descriptor.get_joint_desc("arm_joint")

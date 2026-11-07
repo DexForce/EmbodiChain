@@ -1422,7 +1422,6 @@ def _compile_joint_properties(
     )
     if normalized_solver not in {
         None,
-        "auto",
         "mujoco_warp",
         "mjwarp",
         "dexuni",

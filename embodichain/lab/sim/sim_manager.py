@@ -2987,11 +2987,11 @@ class SimulationManager:
                 "Newton deformable particle sets currently require a CUDA device."
             )
         solver_type = self._active_newton_solver_type
-        supported_solvers = {"auto", "dexuni", "xpbd", "semi_implicit", "vbd"}
+        supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
         if solver_type not in supported_solvers:
             raise NotImplementedError(
                 f"Newton solver {solver_type!r} does not support deformable "
-                "particle sets; select one of 'auto', 'dexuni', 'xpbd', "
+                "particle sets; select one of 'dexuni', 'xpbd', "
                 "'semi_implicit', or 'vbd'."
             )
         physics_cfg = self.sim_config.physics_cfg
@@ -5045,7 +5045,6 @@ class SimulationManager:
         solver_type = getattr(self.physics, "solver_type", None)
         requires_complete_world_clear = solver_type in {
             None,
-            "auto",
             "mujoco_warp",
             "dexuni",
         }

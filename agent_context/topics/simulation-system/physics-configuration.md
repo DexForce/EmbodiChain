@@ -23,8 +23,11 @@ and the latter at the top level through `config_to_cfg()`.
 
 Newton `solver_cfg=None` preserves DexSim's `DexUniSolverCfg` default.
 DexUni owns scene-based partitioning between MuJoCo, VBD and supported particle
-paths; `NewtonPhysicsBackend.solver_type` remains `dexuni`. Legacy `auto` and
-`AutoSolverCfg` mappings select DexUni. Robot presets select `newton_dexuni`
+paths; `NewtonPhysicsBackend.solver_type` remains `dexuni`. Explicit solver
+selection uses `dexuni`; `contact_mode="auto"` remains DexUni's native
+contact-path policy. Expert settings use the native option groups
+(`vbd_options`, `mujoco_options`, `collision_options`); unknown solver names
+and flat DexUni options are rejected. Robot presets select `newton_dexuni`
 before the MuJoCo aliases and portable fallbacks. Gradient mode requires an explicit
 `semi_implicit` solver. Read exact solver options/defaults in
 `cfg/physics.py` and the installed DexSim config types; do not substitute a
