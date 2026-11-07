@@ -1205,6 +1205,220 @@ def _mock_generator(
     return generator
 
 
+@pytest.mark.parametrize(
+    ("strategy", "interpolation_mode"),
+    [
+        ("motion_gen", "adaptive"),
+        ("ik_interp", "adaptive"),
+        ("ik_interp", "fixed_grid"),
+    ],
+)
+@pytest.mark.parametrize("enabled", [False, True])
+def test_generation_velocity_mask_retains_normalized_proposal(
+    tmp_path: Path, strategy: str, interpolation_mode: str, enabled: bool
+) -> None:
+    """The opt-in mask checks named caps after normalizing existing failures."""
+    path = _write_velocity_urdf(tmp_path, {"first": 0.2, "second": 0.1})
+    # Controlled order is second, first. Row 0 is within the 1e-5 tolerance;
+    # rows 1/2 exceed the authored/runtime intersections respectively.
+    edges = torch.tensor(
+        [[0.010005, 0.003005], [0.01002, 0.003], [0.01, 0.00302], [0.02, 0.02]],
+        dtype=torch.float64,
+    )
+    positions = torch.stack((torch.zeros_like(edges), edges, 2 * edges), dim=1)
+    raw = _timed_result(
+        positions.clone(), success=torch.tensor([True, True, True, False]), step_dt=0.1
+    )
+    generator = _mock_generator(batch_size=4, controlled_dof=2, result=raw)
+    generator.robot.cfg = SimpleNamespace(fpath=path)
+    generator.robot.joint_names = ["first", "second"]
+    generator.robot.mimic_ids = ()
+    generator.robot.mimic_parents = ()
+    generator.robot.mimic_multipliers = ()
+    generator.robot.get_joint_ids.return_value = [1, 0]
+    generator.robot.get_qvel_limits.return_value = torch.tensor(
+        [[0.2, 0.03]], dtype=positions.dtype
+    ).expand(4, -1)
+    if strategy == "ik_interp":
+        generator._generate_ik_interpolation = Mock(return_value=raw)
+    options = MotionGenOptions(
+        strategy=strategy,
+        sample_count=3,
+        start_qpos=torch.zeros(4, 2, dtype=positions.dtype),
+        control_part="arm",
+        interpolation_mode=interpolation_mode,
+        mask_generation_overspeed=enabled,
+    )
+
+    from embodichain.lab.sim.motion.limits import authored_joint_velocity_limits
+
+    with patch(
+        "embodichain.lab.sim.motion.motion_generator.authored_joint_velocity_limits",
+        wraps=authored_joint_velocity_limits,
+    ) as limits:
+        result = generator.generate([PlanState.from_qpos(positions[:, -1])], options)
+
+    assert result.success.tolist() == (
+        [True, False, False, False]
+        if enabled or interpolation_mode == "fixed_grid"
+        else [True, True, True, False]
+    )
+    expected = positions.clone()
+    expected[-1] = 0  # The pre-existing failed row is normalized to its start.
+    if interpolation_mode == "fixed_grid" and not enabled:
+        expected[1:3] = 0  # Existing fixed-grid rejection keeps its hold behavior.
+    assert torch.equal(result.positions, expected)
+    assert torch.equal(result.dt, raw.dt)
+    assert torch.equal(raw.positions, positions)
+    assert (result.rejected_candidate is not None) == (
+        interpolation_mode == "fixed_grid" and not enabled
+    )
+    assert limits.call_count == int(enabled or interpolation_mode == "fixed_grid")
+    if enabled:
+        before_velocity = torch.tensor([True, True, True, False])
+        assert torch.equal(result.generation_success_before_velocity, before_velocity)
+        raw.success.zero_()
+        assert torch.equal(result.generation_success_before_velocity, before_velocity)
+    else:
+        assert getattr(result, "generation_success_before_velocity", None) is None
+
+
+def test_generation_velocity_mask_checks_resampled_backend_result(
+    tmp_path: Path,
+) -> None:
+    """A discarded native spike cannot fail the normalized two-point output."""
+    path = _write_velocity_urdf(tmp_path, {"joint": 0.1})
+    raw = _timed_result(torch.tensor([[[0.0], [1.0], [0.0]]]), step_dt=1.0)
+    generator = _mock_generator(batch_size=1, controlled_dof=1, result=raw)
+    generator.robot.cfg = SimpleNamespace(fpath=path)
+    generator.robot.joint_names = ["joint"]
+    generator.robot.mimic_ids = ()
+    generator.robot.mimic_parents = ()
+    generator.robot.mimic_multipliers = ()
+    generator.robot.get_joint_ids.return_value = [0]
+    generator.robot.get_qvel_limits.return_value = torch.tensor([[0.2]])
+
+    result = generator.generate(
+        [PlanState.from_qpos(torch.zeros(1, 1))],
+        MotionGenOptions(
+            sample_count=2,
+            start_qpos=torch.zeros(1, 1),
+            control_part="arm",
+            mask_generation_overspeed=True,
+        ),
+    )
+
+    assert result.success.tolist() == [True]
+    assert torch.equal(result.positions, torch.zeros(1, 2, 1))
+    assert torch.equal(result.dt, torch.tensor([[0.0, 2.0]]))
+    assert torch.equal(raw.positions, torch.tensor([[[0.0], [1.0], [0.0]]]))
+
+
+@pytest.mark.parametrize("preserve_samples", [False, True])
+def test_generation_velocity_mask_keeps_fixed_grid_ik_proposal(
+    tmp_path: Path, preserve_samples: bool
+) -> None:
+    """Real sampled/keyframe IK reaches the post-mask with its original grid."""
+    path = _write_velocity_urdf(tmp_path, {"joint": 0.1})
+    generator = _mock_generator(batch_size=1, controlled_dof=1)
+    generator.robot.cfg = SimpleNamespace(fpath=path)
+    generator.robot.joint_names = ["joint"]
+    generator.robot.get_joint_ids.return_value = [0]
+    generator.robot.get_qvel_limits.return_value = torch.tensor([[0.2]])
+    generator.robot.compute_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[0], dtype=torch.bool),
+        pose[:, 0, 3:4],
+    )
+    poses = torch.eye(4).repeat(2, 1, 1)
+    poses[:, 0, 3] = torch.tensor([0.1, 0.2])
+
+    result = generator.generate(
+        [PlanState.from_xpos(pose[None]) for pose in poses],
+        MotionGenOptions(
+            strategy="ik_interp",
+            interpolation_mode="fixed_grid",
+            ik_seed_mode="sequential",
+            start_qpos=torch.zeros(1, 1),
+            control_part="arm",
+            sample_count=3,
+            interpolation_dt=0.04,
+            preserve_cartesian_samples=preserve_samples,
+            mask_generation_overspeed=True,
+        ),
+    )
+
+    assert result.success.tolist() == [False]
+    assert torch.equal(result.positions, torch.tensor([[[0.0], [0.1], [0.2]]]))
+    assert torch.equal(result.dt, torch.tensor([[0.0, 0.04, 0.04]]))
+    assert result.rejected_candidate is None
+
+
+def test_generation_velocity_mask_selects_scoped_environment_limits(
+    tmp_path: Path,
+) -> None:
+    """A partial environment batch keeps its original row order and time grid."""
+    path = _write_velocity_urdf(tmp_path, {"joint": 0.1})
+    positions = torch.tensor([[[0.0], [0.008]], [[0.0], [0.008]]])
+    raw = _timed_result(positions.clone(), step_dt=0.1)
+    generator = _mock_generator(batch_size=2, controlled_dof=1, result=raw)
+    generator._env_ids = (2, 0)
+    generator.robot.cfg = SimpleNamespace(fpath=path)
+    generator.robot.joint_names = ["joint"]
+    generator.robot.get_joint_ids.return_value = [0]
+    generator.robot.get_qvel_limits.return_value = torch.tensor([[0.03], [0.2], [0.1]])
+
+    result = generator.generate(
+        [PlanState.from_qpos(positions[:, -1])],
+        MotionGenOptions(
+            start_qpos=positions[:, 0],
+            control_part="arm",
+            mask_generation_overspeed=True,
+        ),
+    )
+
+    assert result.success.tolist() == [True, False]
+    assert result.generation_success_before_velocity.tolist() == [True, True]
+    assert torch.equal(result.positions, positions)
+    assert torch.equal(result.dt, raw.dt)
+
+
+def test_plan_result_owns_optional_generation_success_snapshot() -> None:
+    """Unavailable pre-mask evidence stays None; supplied evidence is detached."""
+    raw_success = torch.tensor([True, False])
+    positions = torch.zeros(2, 3, 1)
+    dt = torch.tensor([[0.0, 0.1, 0.1]]).expand(2, -1)
+    result = PlanResult(
+        success=False,
+        positions=positions,
+        dt=dt,
+        generation_success_before_velocity=raw_success,
+    )
+    raw_success.zero_()
+    assert result.generation_success_before_velocity.tolist() == [True, False]
+    assert PlanResult().generation_success_before_velocity is None
+    for invalid in (torch.tensor([True]), torch.tensor([float("nan"), 0.0])):
+        with pytest.raises(ValueError, match="generation_success_before_velocity"):
+            PlanResult(
+                positions=positions,
+                dt=dt,
+                generation_success_before_velocity=invalid,
+            )
+
+
+def test_motion_policy_generation_velocity_mask_is_explicit_and_typed() -> None:
+    from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+
+    assert MotionPolicy().mask_generation_overspeed is False
+    policy = MotionPolicy(mask_generation_overspeed=True)
+    options = policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 1), control_part="arm", interpolation_dt=0.04
+    )
+    assert options.mask_generation_overspeed is True
+    for cfg in (MotionPolicy, MotionGenOptions):
+        with pytest.raises(TypeError, match="mask_generation_overspeed"):
+            cfg(mask_generation_overspeed=1)
+
+
 class TestGenerateBatched:
     def test_generate_passes_batched_states_to_planner(self):
         planner = _mock_planner()

@@ -88,9 +88,17 @@ intersects runtime speeds with every controlled joint's authored URDF cap, and
 rejects overspeed rows without retiming. `ik_seed_mode="sequential"` preserves
 previous-valid-posture seeds, callback order and RNG consumption; batched IK and
 adaptive timing remain defaults. Non-default modes require `ik_interp`.
-Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
+Ordinary failed execution rows hold their start. `PlanResult.rejected_candidate` retains
 owned original positions, intervals and rejected-row identities for retries and
 audit; checking the zero-speed hold is not evidence that the candidate passed.
+
+Explicit `mask_generation_overspeed` on `MotionGenOptions` or `MotionPolicy`
+checks normalized controlled-part samples using the same ordered authored/runtime
+caps and interval tolerance. It only masks success, retaining new rejected
+proposals and timing. `PlanResult.generation_success_before_velocity` owns the
+pre-mask normalized success; `None` is unavailable, not an independent IK result.
+The default is disabled and the separate complete-action velocity gate remains
+unchanged.
 
 `compute.trajectory.interpolation.interpolate_velocity_grid` allocates fixed
 B=1 joint-edge intervals from explicit speed caps. It preserves ordered mandatory
