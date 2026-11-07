@@ -6,6 +6,7 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 
 | Request | Owner under `gen_sim/task_engine/` |
 |---|---|
+| Image + instruction → unbound pick/place graph | `image_planning.py`; `cli.py` through `embodichain task-engine` |
 | Instruction intent and explicit model-caller boundary | `interpretation.py` |
 | Supported task intentions and relations | `ontology.py` |
 | Candidates, drafts, scene requests and success declarations | `contracts.py`, `agent.py` |
@@ -14,6 +15,12 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Pure program projection and explicit segment acceptance bindings | `program_declarations.py` |
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
+
+Model calls use role-bound capabilities in `gen_sim/services/`; interpretation,
+image grounding and display translation have separate bindings. An injected
+caller takes precedence and requires no default transport credentials. TaskAgent
+shares the supplied run across its joined candidate workers; provider-specific
+options and protocol handling stay in adapters. See the [service guide](../../../embodichain/gen_sim/services/README.md).
 
 TaskSpec identity and predicate evaluation belong to
 [Task specification](../task-spec/task-spec.md). Both mappings and instances must
@@ -29,6 +36,23 @@ Fixed candidate/graph inputs can be checked without invoking a model. Run
 `tests/gen_sim/task_engine/` for candidate/spec, coverage and import/ownership
 boundaries. Public API descriptions are in the
 [Task Engine reference](../../../docs/source/api_reference/embodichain/embodichain.gen_sim.task_engine.rst).
+
+## Image semantic planning entry
+
+`embodichain task-engine --image IMAGE --instruction TEXT --output DIRECTORY
+--stop-after semantic-graph` interprets the task and binds its references to
+visible image objects through the configured VLM. This separate frontend
+supports E1 single-object `on`/`inside` pick/place steps without orientation or
+layout goals; missing or ambiguous visual matches and unsupported intentions
+reject. It does not generate a Scene Engine scene or invoke generation services.
+
+The fresh output directory contains candidates, TaskSpec, normalized image
+boxes, visual role bindings, the canonical graph, recomputable static coverage
+and the current standalone HTML viewer. Visual object identities are not runtime
+entity bindings. `image_semantic_unbound`, an all-zero integration fingerprint,
+and `execution_ready: false` mark this as a semantic preview, not a runnable
+deployment or evidence of physical success. Runtime integration must be prepared
+separately. Use `tests/gen_sim/task_engine/test_image_planning.py` for this boundary.
 
 ## Read-only graph display
 

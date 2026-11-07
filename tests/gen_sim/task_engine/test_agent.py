@@ -96,3 +96,49 @@ def test_task_candidate_rejects_scene_constraints_not_derived_from_draft():
 
     with pytest.raises(ValueError, match="derived exactly"):
         validate_task_candidate(candidate)
+
+
+def test_default_instruction_transport_uses_supported_chat_parameters(monkeypatch):
+    import json
+    from embodichain.gen_sim.services.adapters import chat
+    from embodichain.gen_sim.services import legacy
+    from embodichain.gen_sim.task_engine import interpretation
+
+    expected = {"steps": [_step()]}
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def read(self):
+            return json.dumps(
+                {"choices": [{"message": {"content": json.dumps(expected)}}]}
+            ).encode()
+
+    def request(value, *, timeout):
+        captured.update(json.loads(value.data))
+        return Response()
+
+    monkeypatch.setattr(
+        legacy,
+        "_load_llm_settings",
+        lambda **_: {
+            "api_key": "test-key",
+            "model": "test-model",
+            "base_url": "http://test/v1",
+            "default_query": {},
+        },
+    )
+    monkeypatch.setattr(chat, "urlopen", request)
+    result = interpretation._default_instruction_caller(
+        prompt="interpret", schema={}, model=None
+    )
+    assert result == expected
+    assert captured["model"] == "test-model"
+    assert captured["temperature"] == 0
+    assert captured["response_format"] == {"type": "json_object"}
+    assert "http_socket_options" not in captured

@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
+
+
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -129,15 +132,6 @@ _FORBIDDEN_FIELDS = frozenset(
         "waypoints",
     }
 )
-# MiMo's OpenAI-compatible endpoint can spend the whole completion budget in
-# hidden reasoning when the request leaves thinking enabled.  A sparse final
-# JSON object then looks like a schema failure to the deterministic verifier.
-# Keep the budget bounded and turn reasoning off for the text interpretation
-# call; the parser must return an auditable object rather than a thought trace.
-_MIMO_MAX_COMPLETION_TOKENS = 4096
-_GEN_SIM_DIR = Path(__file__).resolve().parents[1]
-_GEN_SIM_ENV_PATH = _GEN_SIM_DIR / ".env"
-_GEN_CONFIG_PATH = _GEN_SIM_DIR / "asset_engine" / "configs" / "gen_config.json"
 
 
 class _MissingRequiredTargetError(ValueError):
@@ -244,25 +238,26 @@ _INTENT_OUTPUT_SCHEMA = {
 INSTRUCTION_INTENT_SCHEMA = deepcopy(_INTENT_OUTPUT_SCHEMA)
 
 
+@service_entry
 def interpret_instruction_draft(
     instruction: str,
     *,
     model: str | None = None,
     caller: InstructionCaller | None = None,
+    services: GenSimServices | None = None,
 ) -> InstructionDraftResult:
     """Interpret one instruction without reading or grounding a scene."""
     instruction_text = str(instruction).strip()
     if not instruction_text:
         raise ValueError("instruction must be non-empty.")
     prompt = _instruction_prompt(instruction_text)
-    invoke = caller or _default_instruction_caller
-    # An injected caller owns its transport and does not need provider config.
-    selected_model = model if caller is not None else _instruction_model(model)
-    if caller is None and selected_model is None:
-        raise ValueError(
-            "A text LLM model is required through --llm-model, "
-            "ACTION_ENGINE_LLM_MODEL, or OPENAI_MODEL."
-        )
+    from functools import partial
+
+    invoke = caller or partial(_default_instruction_caller, services=services)
+    # An injected caller owns both its transport and model selection.
+    selected_model = (
+        model if caller is not None else services.model("task_interpretation", model)
+    )
     started = perf_counter()
     first_error: Exception | None = None
     for attempt in range(2):
@@ -1181,229 +1176,17 @@ def _default_instruction_caller(
     prompt: str,
     schema: Mapping[str, Any],
     model: str | None,
+    services: GenSimServices | None = None,
 ) -> Mapping[str, Any]:
-    from langchain_core.messages import HumanMessage, SystemMessage
-    from langchain_openai import ChatOpenAI
+    from embodichain.gen_sim.services.compat import structured_call
 
-    settings = _load_llm_settings(model=model)
-    kwargs: dict[str, Any] = {
-        "api_key": settings["api_key"],
-        "model": settings["model"],
-        "temperature": 0,
-        "http_socket_options": (),
-    }
-    for key in ("base_url", "default_query"):
-        if settings[key]:
-            kwargs[key] = settings[key]
-    if _is_mimo_compatible(settings):
-        # MiMo documents ``thinking`` as a provider extension carried in the
-        # OpenAI client's extra body.  Disabling it is important here: hidden
-        # reasoning can consume the completion and leave only id/object/type.
-        kwargs.update(
-            {
-                "max_completion_tokens": _MIMO_MAX_COMPLETION_TOKENS,
-                "extra_body": {"thinking": {"type": "disabled"}},
-            }
-        )
-    client = ChatOpenAI(**kwargs)
-    # The full schema remains in the prompt and the local validator is still
-    # authoritative even when the provider only offers JSON mode.
-    structured = _structured_output_runnable(
-        client,
-        schema,
-        settings=settings,
-    )
-    schema_prompt = (
-        f"{prompt}\n\nReturn one JSON object conforming exactly to this JSON "
-        f"Schema:\n{json.dumps(schema, ensure_ascii=False, sort_keys=True)}"
-    )
-    response = structured.invoke(
-        [
-            SystemMessage(
-                content=(
-                    "Return only the requested structured JSON response. Never "
-                    "return reasoning, coordinates, or AtomicAction nodes."
-                )
-            ),
-            HumanMessage(content=schema_prompt),
-        ]
-    )
-    return _coerce_instruction_response(response)
+    return structured_call(prompt=prompt, schema=schema, model=model, services=services)
 
 
 def _instruction_model(explicit: str | None) -> str | None:
-    # Resolve the same model as the transport without requiring credentials here.
-    return _model_name(explicit, _load_local_env(), _load_llm_config())
+    from embodichain.gen_sim.services.legacy import instruction_model
 
-
-def _load_llm_config() -> dict[str, Any]:
-    if _GEN_CONFIG_PATH.is_file():
-        raw = json.loads(_GEN_CONFIG_PATH.read_text(encoding="utf-8"))
-        if isinstance(raw, Mapping):
-            llm = raw.get("llm", {})
-            if isinstance(llm, Mapping):
-                configured = llm.get("openai_compatible", {})
-                if isinstance(configured, Mapping):
-                    return dict(configured)
-    return {}
-
-
-def _model_name(
-    explicit: str | None, local_env: Mapping[str, str], config: Mapping[str, Any]
-) -> str | None:
-    return (
-        (explicit.strip() if isinstance(explicit, str) else "")
-        or _first_env_value(
-            local_env,
-            "TASK_ENGINE_LLM_MODEL",
-            "ACTION_ENGINE_LLM_MODEL",
-            "OPENAI_MODEL",
-            "LLM_MODEL",
-        )
-        or str(config.get("model", "")).strip()
-        or None
-    )
-
-
-def _load_local_env() -> dict[str, str]:
-    """Read Task Engine model configuration without mutating the environment."""
-    return _load_env_file(_GEN_SIM_ENV_PATH)
-
-
-def _is_mimo_compatible(settings: Mapping[str, Any]) -> bool:
-    model = str(settings.get("model", "")).casefold()
-    base_url = str(settings.get("base_url", "")).casefold()
-    return "mimo" in model or "xiaomimimo.com" in base_url
-
-
-def _structured_output_runnable(
-    client: Any,
-    schema: Mapping[str, Any],
-    *,
-    settings: Mapping[str, Any],
-) -> Any:
-    if not hasattr(client, "with_structured_output"):
-        return client
-    method = "json_mode"
-    try:
-        return client.with_structured_output(schema, method=method)
-    except (TypeError, ValueError):
-        if method == "json_mode" and hasattr(client, "bind"):
-            from langchain_core.output_parsers import JsonOutputParser
-
-            return (
-                client.bind(response_format={"type": "json_object"})
-                | JsonOutputParser()
-            )
-        return client.with_structured_output(schema)
-
-
-def _load_llm_settings(*, model: str | None) -> dict[str, Any]:
-    local_env = _load_local_env()
-    config = _load_llm_config()
-    api_key, base_url = _resolve_transport_settings(local_env, config)
-    selected_model = _model_name(model, local_env, config)
-    default_query = config.get("default_query", {}) or {}
-    if not api_key:
-        raise ValueError(
-            "OPENAI_API_KEY is required for Task Engine interpretation. Set it "
-            f"in the process environment or {_GEN_SIM_ENV_PATH}."
-        )
-    if not selected_model:
-        raise ValueError(
-            "A text LLM model is required through model=, TASK_ENGINE_LLM_MODEL, "
-            f"OPENAI_MODEL, or {_GEN_CONFIG_PATH}."
-        )
-    if not isinstance(default_query, Mapping):
-        raise ValueError("LLM default_query must be a mapping.")
-    return {
-        "api_key": api_key,
-        "model": selected_model,
-        "base_url": base_url,
-        "default_query": dict(default_query),
-    }
-
-
-def _resolve_transport_settings(
-    local_env: Mapping[str, str],
-    config: Mapping[str, Any],
-) -> tuple[str, str]:
-    """Resolve an API key and endpoint from one configuration source."""
-    transports = (
-        (
-            _mapping_value(os.environ, "OPENAI_API_KEY"),
-            _mapping_value(
-                os.environ,
-                "OPENAI_BASE_URL",
-                "OPENAI_API_BASE",
-                "LLM_URL",
-            ),
-        ),
-        (
-            _mapping_value(local_env, "OPENAI_API_KEY"),
-            _mapping_value(
-                local_env,
-                "OPENAI_BASE_URL",
-                "OPENAI_API_BASE",
-                "LLM_URL",
-            ),
-        ),
-        (
-            _mapping_value(config, "api_key"),
-            _mapping_value(config, "base_url"),
-        ),
-    )
-    for api_key, base_url in transports:
-        if api_key and base_url:
-            return api_key, base_url.rstrip("/")
-    for api_key, base_url in transports:
-        if api_key:
-            return api_key, base_url.rstrip("/")
-    return "", ""
-
-
-def _mapping_value(source: Mapping[str, Any], *names: str) -> str:
-    for name in names:
-        value = source.get(name)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
-
-
-def _load_env_file(path: Path) -> dict[str, str]:
-    if not path.is_file():
-        return {}
-    values: dict[str, str] = {}
-    for line_number, raw_line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].lstrip()
-        if "=" not in line:
-            continue
-        key, raw_value = line.split("=", 1)
-        key = key.strip()
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
-            raise ValueError(f"Invalid dotenv key at {path}:{line_number}.")
-        value = raw_value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        elif " #" in value:
-            value = value.split(" #", 1)[0].rstrip()
-        values[key] = value
-    return values
-
-
-def _first_env_value(local_env: Mapping[str, str], *names: str) -> str | None:
-    for source in (os.environ, local_env):
-        for name in names:
-            value = source.get(name)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return None
+    return instruction_model(explicit)
 
 
 def _choice(value: Any, allowed: set[str] | frozenset[str], context: str) -> str:

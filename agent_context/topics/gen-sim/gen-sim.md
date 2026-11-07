@@ -10,6 +10,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
+| Model service contracts, registry, run ownership and legacy settings | `services/`; see [service configuration and adapters](../../../embodichain/gen_sim/services/README.md) |
 | Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `simready` |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
@@ -27,8 +28,9 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Frozen placement declaration → normative evidence binding | `task_engine/evidence.py` → [TaskSpec evidence boundary](../task-spec/task-spec.md#physical-evidence-boundary) |
 
 Generate: validate input → VLM understanding → geometry/articulation generation
-→ placement refinement → export. Segmentation, geometry and articulation
-clients are closed in `finally` blocks; VLM lifetime is separate.
+→ placement refinement → export. Model capabilities resolve lazily through one run-scoped `GenSimServices`.
+Owned transports close when the run exits; explicit legacy clients and supplied
+service runs remain caller-owned. Chat requests own their stateless transport.
 Edit: import export → validate graph/typed edit plan → generate additions
 → change layout → overwrite export. Combined image/edit mode generates first.
 

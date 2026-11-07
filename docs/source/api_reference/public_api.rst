@@ -623,6 +623,35 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.asset_engine.parser.base
+--------------------------------------------
+
+Parser capability dispatch and optional run-scoped model-service injection.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.parser.base
+
+.. autosummary::
+
+   AssetParser
+   ParserManager
+
+.. autoclass:: AssetParser
+
+.. autoclass:: ParserManager
+
+embodichain.gen_sim.asset_engine.pipeline.ingest
+------------------------------------------------
+
+Asset ingestion with optional borrowed model services and unchanged parser ownership.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.ingest
+
+.. autosummary::
+
+   ingest_one_asset
+
+.. autofunction:: ingest_one_asset
+
 embodichain.gen_sim.scene_engine.asset_normalization
 -----------------------------------------------------
 
@@ -658,6 +687,22 @@ baseline and saves successful candidates with a completion manifest.
 .. autosummary::
 
    main
+
+embodichain.gen_sim.scene_engine.cli.start
+------------------------------------------
+
+Scene generation and editing command dispatch sharing one model-service run.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.cli.start
+
+.. autosummary::
+
+   cli_scene_engine
+   main
+
+.. autofunction:: cli_scene_engine
+
+.. autofunction:: main
 
 embodichain.gen_sim.scene_engine.configs.environment
 ----------------------------------------------------
@@ -913,6 +958,111 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 .. autosummary::
 
    save_layouts
+
+embodichain.gen_sim.services
+----------------------------
+
+Run-scoped, replaceable model capabilities, explicit role configuration,
+provider-independent artifacts and classified failures. Contracts import lazily;
+semantic and physical validation remain with the consuming owners.
+
+.. currentmodule:: embodichain.gen_sim.services
+
+.. autosummary::
+
+   GenSimServicesCfg
+   load_services_config
+   GenSimServices
+   ServiceRegistry
+   TextPart
+   ImagePart
+   ChatMessage
+   ChatRequest
+   ChatResponse
+   ImageGenerationRequest
+   ImageArtifact
+   SegmentationRequest
+   SegmentationResult
+   GeometryRequest
+   ReconstructedObject
+   GeometryResult
+   ArticulationRequest
+   ArticulationResult
+   ChatService
+   ImageGenerationService
+   SegmentationService
+   GeometryReconstructionService
+   ArticulationService
+   ArticulationJobService
+   ServiceError
+   ServiceConfigurationError
+   CapabilityError
+   ServiceTimeout
+   ServiceTransportError
+   ServiceResponseError
+   SubmissionUnknown
+
+.. autoclass:: GenSimServicesCfg
+
+.. autofunction:: load_services_config
+
+.. autoclass:: GenSimServices
+
+.. autoclass:: ServiceRegistry
+
+.. autoclass:: TextPart
+
+.. autoclass:: ImagePart
+
+.. autoclass:: ChatMessage
+
+.. autoclass:: ChatRequest
+
+.. autoclass:: ChatResponse
+
+.. autoclass:: ImageGenerationRequest
+
+.. autoclass:: ImageArtifact
+
+.. autoclass:: SegmentationRequest
+
+.. autoclass:: SegmentationResult
+
+.. autoclass:: GeometryRequest
+
+.. autoclass:: ReconstructedObject
+
+.. autoclass:: GeometryResult
+
+.. autoclass:: ArticulationRequest
+
+.. autoclass:: ArticulationResult
+
+.. autoclass:: ChatService
+
+.. autoclass:: ImageGenerationService
+
+.. autoclass:: SegmentationService
+
+.. autoclass:: GeometryReconstructionService
+
+.. autoclass:: ArticulationService
+
+.. autoclass:: ArticulationJobService
+
+.. autoclass:: ServiceError
+
+.. autoclass:: ServiceConfigurationError
+
+.. autoclass:: CapabilityError
+
+.. autoclass:: ServiceTimeout
+
+.. autoclass:: ServiceTransportError
+
+.. autoclass:: ServiceResponseError
+
+.. autoclass:: SubmissionUnknown
 
 embodichain.gen_sim.task_engine.evidence
 ----------------------------------------
@@ -5166,3 +5316,30 @@ One Atomic Skill executes a pinned demonstration asset through the ordinary plan
 
 .. autoclass:: ExecuteDemoSkill
    :members:
+
+Image semantic planning
+-----------------------
+
+The image frontend interprets visible objects and task intent, then emits a
+validated pick/place graph and declaration coverage without starting simulation.
+Visual IDs still require a runtime scene and robot integration before execution.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.image_planning
+
+.. autosummary::
+
+   generate_semantic_task_graph_from_image
+
+.. autofunction:: generate_semantic_task_graph_from_image
+
+The command ``embodichain task-engine --image IMAGE --instruction TEXT
+--output DIRECTORY --stop-after semantic-graph`` writes the declarations and
+current standalone HTML viewer to a fresh directory.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.cli
+
+.. autosummary::
+
+   main
+
+.. autofunction:: main
