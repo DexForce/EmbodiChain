@@ -205,6 +205,26 @@ def test_curobo_atomic_policy_preserves_prepared_backend_budget() -> None:
     assert invocation.motion_policy.acceleration_limit == 0.5
 
 
+def test_curobo_benchmark_forwards_fast_settings(monkeypatch) -> None:
+    """A/B suite settings must reach the production planner configuration."""
+    from embodichain_benchmarks.motion_generation.planners import curobo
+
+    generator = Mock()
+    monkeypatch.setattr(curobo, "MotionGenerator", generator)
+    adapter = _adapter(
+        CuroboAdapter,
+        velocity=2.0,
+        config={
+            "graph_planner_algorithm": "prm",
+            "enable_timeopt": False,
+        },
+    )
+    adapter.build()
+    cfg = generator.call_args.args[0].planner_cfg
+    assert cfg.graph_planner_algorithm == "prm"
+    assert cfg.enable_timeopt is False
+
+
 def test_joint_interpolation_uses_frozen_targets_without_ik() -> None:
     """The joint baseline consumes the same manifest targets as other planners."""
     adapter = _adapter(IkInterpolateAdapter, config={"interpolation_dt": 0.1})

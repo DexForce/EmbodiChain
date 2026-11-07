@@ -161,7 +161,7 @@ nvidia-cudnn-cu12==9.7.1.26
 nvidia-cufft-cu12==11.3.3.41
 nvidia-cufile-cu12==1.13.0.11
 nvidia-curand-cu12==10.3.9.55
-nvidia-curobo @ git+https://github.com/NVlabs/curobo.git@4ea77366ca48ee453e7df139e39fa6532af49f3b
+nvidia-curobo @ git+https://github.com/NVlabs/curobo.git@42498cf4e7d0d6fbd4ef9fbcec1243c00c888a83
 nvidia-cusolver-cu12==11.7.2.55
 nvidia-cusparse-cu12==12.5.7.53
 nvidia-cusparselt-cu12==0.6.3
