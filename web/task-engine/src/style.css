@@ -1110,3 +1110,21 @@ svg {
   height: 100%;
   object-fit: contain;
 }
+
+.semantic-plan-status {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  background: var(--panel);
+  color: var(--text);
+}
+.semantic-plan-status details {
+  width: 100%;
+}
+.semantic-plan-status details[open] {
+  max-height: 280px;
+  overflow: auto;
+}

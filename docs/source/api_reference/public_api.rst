@@ -5193,3 +5193,31 @@ current standalone HTML viewer to a fresh directory.
    main
 
 .. autofunction:: main
+
+Deferred image semantic planning
+--------------------------------
+
+Image plans retain the complete task and explicitly distinguish visual evidence,
+instruction-declared objects and runtime binding requirements. Semantic validity
+is independent of physical acceptance or runtime readiness. Failed generation
+retains attempts in :class:`~embodichain.gen_sim.task_engine.image_planning.SemanticPlanningError`.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.image_planning
+
+.. autoclass:: SemanticPlanningError
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_plan_validation
+
+.. autofunction:: validate_semantic_plan
+
+.. autofunction:: semantic_plan_rules
+
+The following declarations are JSON-only and import without a simulator. They
+are shared by the image planner and configured Semantic Call lowerers; live
+lowering still validates calibrated scene and route bindings.
+
+.. currentmodule:: embodichain.lab.task_program.language.semantic_contracts
+
+.. autofunction:: semantic_planning_catalog
+
+.. autofunction:: validate_semantic_call_payload

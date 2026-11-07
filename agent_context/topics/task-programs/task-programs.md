@@ -27,6 +27,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 |---|---|
 | Stable public language API | `embodichain/lab/task_program/__init__.py` |
 | Schema and AST values | `embodichain/lab/task_program/language/schema.py` |
+| Offline planning call contracts shared with configured lowerers | `embodichain/lab/task_program/language/semantic_contracts.py` |
 | Strict decoding and reference validation | `embodichain/lab/task_program/language/decoder.py` |
 | JSON/YAML loading and input bounds | `embodichain/lab/task_program/language/loader.py` |
 | Compiled program model and AST expansion | `embodichain/lab/task_program/compiler/program.py` |

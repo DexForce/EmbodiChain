@@ -34,21 +34,46 @@ boundaries. Public API descriptions are in the
 ## Image semantic planning entry
 
 `embodichain task-engine --image IMAGE --instruction TEXT --output DIRECTORY`
-interprets the task and binds its references to
-visible image objects through the configured VLM. This separate frontend
-supports E1 single-object `on`/`inside` pick/place steps without orientation or
-layout goals; missing or ambiguous visual matches and unsupported intentions
-reject. It does not generate a Scene Engine scene or invoke generation services.
-It always ends at the semantic graph. The CLI uses the existing GenSim `.env`
-model configuration without model or stage-selection flags.
+uses the configured GenSim model to interpret the complete instruction, ground
+logical image references and plan canonical calls from the data-only Task Program
+catalog. It always ends at the unbound semantic graph; there are no model or
+stage-selection flags. `image_planning.py` retains raw provider attempts and
+allows one diagnostic repair per grounding/planning stage. It contains no
+per-task graph construction templates.
 
-The fresh output directory contains candidates, TaskSpec, normalized image
-boxes, visual role bindings, the canonical graph, recomputable static coverage
-and the current standalone HTML viewer. Visual object identities are not runtime
-entity bindings. `image_semantic_unbound`, an all-zero integration fingerprint,
-and `execution_ready: false` mark this as a semantic preview, not a runnable
-deployment or evidence of physical success. Runtime integration must be prepared
-separately. Use `tests/gen_sim/task_engine/test_image_planning.py` for this boundary.
+`lab/task_program/language/semantic_contracts.py` owns provider-free call argument,
+resource, precondition/effect and runtime-binding declarations. Configured live
+lowerers consume those same argument contracts and retain their stricter scene
+and route checks. The catalog must import without `lab.sim`, Gym or DexSim.
+`semantic_plan_validation.py` checks task producers, source identity, topology,
+held-object/arm state, quoted instruction obligations and deferred binding needs.
+Task producer obligations derive from the existing task affordances and catalog
+capabilities rather than per-E-type construction branches. Explicit part parents
+retain drawer/handle identity; step-result selectors inherit earlier source IDs.
+This semantic-only checker does not weaken historical grounded coverage checks.
+
+Image entities distinguish `observed`, `instruction_declared` and
+`runtime_required`; only observed entities carry normalized boxes. Ambiguous references retain
+observed candidate IDs rather than selecting one implicitly. Hidden or
+ambiguous references retain a logical identity, description and pending runtime
+binding rather than an invented visual match. Original poses are binding needs
+of the source object, not fictitious observed scene objects. Runtime geometry and
+policies remain outside canonical call arguments.
+
+Fresh output directories contain source-image provenance, candidates, TaskSpec,
+image evidence, the catalog snapshot, calls, source-clause traceability, pending
+bindings and a standalone viewer. Failed runs save uniquely named sibling audit
+JSON before temporary publication is cleaned up. `semantic_plan_validation/v1`
+reports separate semantic/visual states and always sets `execution_ready: false`
+and execution `not_run`; the viewer recomputes the report and displays pending
+bindings. Legacy graph/report reading remains unchanged. The all-zero integration
+fingerprint denotes no runtime integration, not an executable deployment.
+
+Use `tests/gen_sim/task_engine/test_image_planning.py` for offline E1–E9 and
+negative cases, and `data/image_task_expectations.json` with
+`image_case_acceptance.py` in that test directory for independently authored
+clauses of the pinned task1171–task1190 cohort. These checks supplement manual
+semantic review and never qualify physical execution.
 
 ## Read-only graph display
 
