@@ -770,8 +770,13 @@ def test_query_rejects_a_base_name_different_from_the_materialized_urdf(monkeypa
     planner.close()
 
 
-def test_query_snapshot_keeps_existing_positional_row_order_and_optional_root():
-    snapshot = CuroboQuerySnapshot(torch.zeros(1, 2), torch.eye(4)[None], None, (0,))
+def test_query_snapshot_keeps_keyword_only_row_order_and_optional_root():
+    snapshot = CuroboQuerySnapshot(
+        full_qpos=torch.zeros(1, 2),
+        world_to_base=torch.eye(4)[None],
+        payload=None,
+        env_ids=(0,),
+    )
     assert snapshot.env_ids == (0,) and snapshot.base_link_name is None
     assert replace(snapshot, base_link_name="root").base_link_name == "root"
     with pytest.raises(ValueError, match="base_link_name"):
