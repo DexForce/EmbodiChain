@@ -113,6 +113,8 @@ def test_numeric_placement_extents_keep_alignment_and_articulation_root_edges():
         ((0.02, 0.02, 0.06), 0.0, True),
         ((0.02, 0.02, 0.059), 0.0, False),
         ((0.02, 0.02, 0.06), 0.5, False),
+        ((0.02, 0.02, 0.06), np.nextafter(0.5, 0.0), True),
+        ((0.02, 0.02, 0.06), np.nextafter(0.5, 1.0), False),
         ((0.02, 0.02, 0.06), 0.499, True),
         ((0.0, 0.0, 0.06), 0.0, False),
     ],
@@ -125,12 +127,13 @@ def test_horizontal_full_mesh_selector_retains_source_boundary(
     )
 
     vertices = np.asarray([[0.0, 0.0, 0.0], extent])
-    angle = np.arccos(vertical)
+    # Keep the tested component exact: cos(arccos(0.5)) can round below 0.5.
+    horizontal = np.sqrt(1 - vertical**2)
     rotation = np.asarray(
         [
-            [np.cos(angle), 0.0, np.sin(angle)],
+            [vertical, 0.0, horizontal],
             [0.0, 1.0, 0.0],
-            [-np.sin(angle), 0.0, np.cos(angle)],
+            [-horizontal, 0.0, vertical],
         ]
     )
     assert horizontal_slender_axis(vertices, rotation) is expected

@@ -69,7 +69,7 @@ task_program:
     component: extensions/embodichain_tasks/configs/components/execution_policies/motion_gen_verified.yaml
     overrides:
       motion:
-        velocity_limit: 0.5
+        velocity_limit: 0.2
 embodiment:
   component: extensions/embodichain_tasks/configs/components/embodiments/dual_ur5_dh_pgi_140_80.yaml
   overrides:

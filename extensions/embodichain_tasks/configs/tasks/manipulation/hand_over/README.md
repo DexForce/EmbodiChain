@@ -14,7 +14,10 @@ embodiment, Task Program integration and verified motion policy.
 The elongated can lies across a narrow pickup stand in the arms' shared
 workspace. The stand leaves room below the finger pads, and both arms start
 in the shared compact ready pose with lowered elbows. The left arm picks up the can,
-and the right arm receives it and delivers it to the other side of the table. Both grippers must
+and the right arm receives it and delivers it to the other side of the table.
+The receiver approaches from its side, the sender withdraws after releasing,
+and the receiver retracts after opening at delivery. Slower hand interpolation
+and an explicit receiving hold reduce contact impulses during transfer. Both grippers must
 provide measured acquisition/release evidence. After the can settles, the
 program checks that its position is within 50 mm of the resting target. A
 separate release pose leaves room for the fingers while opening above the table.
