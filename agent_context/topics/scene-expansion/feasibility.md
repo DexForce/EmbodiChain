@@ -65,12 +65,13 @@ native SDK can omit such contacts for intersecting inputs. `check`,
 `contact_query` and `contact_pairs` require native contact evidence or a canonical
 AABB separation proof; otherwise they retain unavailable clearance with an
 explicit reason. Convex-only defaults retain their original semantics.
-For mesh/mesh zero-contact pairs, the SDK's bounded signed queries also cannot
-certify solid clearance or exclude deep containment. A canonical AABB
-separation proof is required; otherwise all three checker entries retain
-unavailable evidence. Native positive contact facts remain usable. Concave
-empty gaps with overlapping AABBs can therefore remain unavailable rather than
-become an implicit solid-clear certificate.
+All mesh/mesh negative decisions require canonical AABB separation. Bounded
+native searches can omit deeply contained components even while reporting
+positive halo contacts for another component. Missing contacts or a positive
+reported minimum are not complete solid-clearance certificates. All three
+checker entries retain unavailable evidence without that proof. Native contact
+facts can still decide positively. Near separated pairs and empty concave gaps
+with overlapping AABBs can remain unavailable without changing their inputs.
 
 Query transforms are rebased before composing local offsets; precision budgets
 cover conversion, scale and nonfinite failures before no-contact acceptance.

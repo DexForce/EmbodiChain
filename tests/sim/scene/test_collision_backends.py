@@ -98,6 +98,7 @@ def test_native_strict_surfaces_decide_binary_touch_penetration_and_separation(
     from embodichain.lab.sim.scene.feasibility import (
         CollisionBody,
         NewtonCollisionChecker,
+        UnsupportedFeasibilityError,
     )
 
     if kind == "mesh":
@@ -122,8 +123,18 @@ def test_native_strict_surfaces_decide_binary_touch_penetration_and_separation(
     before = {key: value.copy() for key, value in frames.items()}
     try:
         result = checker.contact_query(frames)
-        assert result.below(0.0) is expected
-        assert checker.contact_pairs(frames) == ((("a", "b"),) if expected else ())
+        if kind == "mesh" and offset == 2**-20:
+            # Analytically separated, but a positive mesh halo is not a complete
+            # solid-clearance proof, and the canonical bound spans zero here.
+            for operation in (
+                lambda: result.below(0.0),
+                lambda: checker.contact_pairs(frames),
+            ):
+                with pytest.raises(UnsupportedFeasibilityError, match="canonical AABB"):
+                    operation()
+        else:
+            assert result.below(0.0) is expected
+            assert checker.contact_pairs(frames) == ((("a", "b"),) if expected else ())
         json.dumps(result.metadata(), allow_nan=False)
         assert all(np.array_equal(value, before[key]) for key, value in frames.items())
         if offset == 0:
@@ -317,7 +328,7 @@ def test_collection_clearance_bound_preserves_native_precision_and_near_contacts
             if x == 1.0:
                 assert result.below(0.0) is True
             else:
-                with pytest.raises(UnsupportedFeasibilityError, match="cannot decide"):
+                with pytest.raises(UnsupportedFeasibilityError, match="canonical AABB"):
                     result.below(0.0)
     finally:
         left.close()
@@ -546,5 +557,57 @@ def test_closed_mesh_containment_without_native_contacts_is_unavailable():
         frames["inner"][0, 3] = 100.0
         assert checker.contact_pairs(frames) == ()
         assert checker.check(frames)[0].status == "passed"
+    finally:
+        checker.close()
+
+
+def test_positive_mesh_halo_does_not_hide_a_deeply_contained_component():
+    import json
+    import numpy as np
+    import trimesh
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+        UnsupportedFeasibilityError,
+    )
+
+    inner = trimesh.creation.box((1.0, 1.0, 1.0))
+    halo = inner.copy()
+    halo.apply_translation((50.5078125, 0.0, 0.0))
+    compound = trimesh.util.concatenate((inner, halo))
+    outer = trimesh.creation.box((100.0, 100.0, 100.0))
+    assert compound.is_watertight and outer.is_watertight
+    checker = NewtonCollisionChecker(
+        tuple(
+            CollisionBody(
+                name,
+                name,
+                "mesh",
+                vertices=tuple(map(tuple, mesh.vertices)),
+                triangles=tuple(map(tuple, mesh.faces)),
+                robot=True,
+            )
+            for name, mesh in (("compound", compound), ("outer", outer))
+        ),
+        allow_triangle_meshes=True,
+    )
+    frames = {name: np.eye(4) for name in ("compound", "outer")}
+    try:
+        result = checker.contact_query(frames)
+        # The outer component yields positive contacts while the bounded native
+        # search omits the inner component. A positive minimum over reported
+        # contacts therefore cannot prove the complete pair is clear.
+        assert result.native_contact_count > 0
+        assert result.signed_surface_separation_m > 0
+        for operation in (
+            lambda: result.below(0.0),
+            lambda: checker.contact_pairs(frames),
+            lambda: checker.check(frames),
+        ):
+            with pytest.raises(UnsupportedFeasibilityError, match="canonical AABB"):
+                operation()
+        assert result.lower == 0.0
+        assert result.clearance_unavailable_reason is not None
+        json.dumps(result.metadata(), allow_nan=False)
     finally:
         checker.close()

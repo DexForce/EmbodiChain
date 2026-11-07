@@ -50,8 +50,8 @@ _MIXED_CLEARANCE_LIMITATION = (
     "native contact or canonical AABB separation is required."
 )
 _MESH_CLEARANCE_LIMITATION = (
-    "Newton mesh/mesh reported no native contacts; canonical AABB separation "
-    "is required because containment is not certified."
+    "Newton mesh/mesh contacts do not certify complete clearance, including "
+    "containment; canonical AABB separation is required to certify clear."
 )
 
 
@@ -600,7 +600,7 @@ class NewtonCollisionChecker:
                     "native-triangle-surfaces/v1",
                     max_triangle_pairs,
                     "mixed-clearance-canonical-aabb/v1",
-                    "mesh-no-contact-canonical-aabb/v1",
+                    "mesh-clearance-canonical-aabb/v1",
                 ),
             )
         self.verification_id = digest(identity)
@@ -1220,8 +1220,8 @@ class NewtonCollisionChecker:
                             "Invalid native pair evidence."
                         )
                     mixed = (i, j) in self._mixed_pairs
-                    mesh_no_contact = (i, j) in self._mesh_pairs and counts[pair] == 0
-                    needs_certificate = mixed or mesh_no_contact
+                    mesh_pair = (i, j) in self._mesh_pairs
+                    needs_certificate = mixed or mesh_pair
                     lower = (
                         self._pair_lower_bound(i, j, poses, relative, tolerance)
                         if needs_certificate
@@ -1247,7 +1247,7 @@ class NewtonCollisionChecker:
                         clearance_unavailable_reason=(
                             _MIXED_CLEARANCE_LIMITATION
                             if mixed
-                            else _MESH_CLEARANCE_LIMITATION if mesh_no_contact else None
+                            else _MESH_CLEARANCE_LIMITATION if mesh_pair else None
                         ),
                     )
                     rows.append(row)
