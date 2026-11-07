@@ -26,7 +26,7 @@ import numpy as np
 import pytest
 import torch
 
-from _press_plan_fixture import press_fixture, press_record
+from ._press_plan_fixture import press_fixture, press_record
 
 _SOURCE = json.loads(
     (Path(__file__).parent / "data/press_plans_source_reference.json").read_text()
