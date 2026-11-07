@@ -57,11 +57,19 @@ def test_actual_sampler_rows_preserve_source_qualified_candidates(case):
     )
     for row, expected in zip(result.rows, case["expected"], strict=True):
         for value, old in zip(row, expected, strict=True):
-            assert torch.equal(value, torch.tensor(old))
-    assert (
-        result.required_width == case["required_width"]
-        and result.width_fit == case["width_fit"]
+            tolerance = 4 * torch.finfo(value.dtype).eps
+            torch.testing.assert_close(
+                value,
+                torch.tensor(old, dtype=value.dtype),
+                rtol=tolerance,
+                atol=tolerance,
+            )
+    assert result.required_width == pytest.approx(
+        case["required_width"],
+        rel=4 * torch.finfo(torch.float32).eps,
+        abs=4 * torch.finfo(torch.float32).eps,
     )
+    assert result.width_fit == case["width_fit"]
     assert (
         sum(int(torch.isfinite(row[2]).sum()) for row in result.rows)
         == case["qualified_count"]

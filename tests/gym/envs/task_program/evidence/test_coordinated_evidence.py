@@ -139,6 +139,15 @@ def _case(final=True, raw=False):
             step_dt=0.04,
             object_pose=metrics["object_pose"],
             tcp_poses=metrics["tcp_poses"],
+            recorded_acquisition=dict(
+                field_ids={"pose": "frozen.rigid.pose", "qpos": "frozen.robot.qpos"},
+                env_ids=[0],
+                episode_ids=[7],
+                frame_indices=list(metrics["boundary_frames"]),
+                observation_revisions=[1],
+                timestamps=[12.0],
+                clock_domain="simulation_time",
+            ),
             pose_frame=frame,
         )
         evidence["fresh_grips"] = deepcopy(metrics["fresh_grips"])
@@ -300,3 +309,50 @@ def test_coordinated_hold_retains_original_single_member_qualification(
         )[0].status.value
         == expected
     )
+
+
+@pytest.mark.parametrize(
+    "reported_alignment,expected",
+    [(1.0, "unavailable"), (0.0, "failed"), (None, "unavailable")],
+)
+def test_rotating_both_hands_with_object_cannot_bypass_declared_axis(
+    reported_alignment, expected
+):
+    import torch
+
+    spec, binding, evidence, program = _case(raw=True)
+    held = evidence["held_poses"]
+    # A 90-degree world X rotation keeps both relative attachments and the target.
+    rotation = torch.tensor(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=torch.float64,
+    )
+    held["object_pose"] = (
+        rotation @ torch.tensor(held["object_pose"], dtype=torch.float64)
+    ).tolist()
+    held["tcp_poses"] = {
+        part: (rotation @ torch.tensor(pose, dtype=torch.float64)).tolist()
+        for part, pose in held["tcp_poses"].items()
+    }
+    for name, batch in held["pose_frame"]["batches"].items():
+        batch["values"] = (
+            held["object_pose"]
+            if name == "rigid.pose"
+            else held["tcp_poses"][name.split(":", 1)[1]]
+        )
+    measurements = evidence["segments"][0]["metadata"]["post_policies"][0]["result"][
+        "measurements"
+    ]
+    if reported_alignment is None:
+        measurements.pop("alignment")
+    else:
+        measurements["alignment"] = [reported_alignment]
+    outcome = evaluate_coordinated_hold_evidence(
+        spec, binding, evidence, program=program
+    )[0]
+    assert outcome.status.value == expected, outcome.reason

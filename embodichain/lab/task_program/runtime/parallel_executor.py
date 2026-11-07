@@ -963,6 +963,60 @@ class ParallelSemanticExecutor:
             self._abort_coordinator("Parallel coordinator step failed", exc)
         return self.result
 
+    def deactivate_rows(
+        self, env_mask: torch.Tensor, *, reason: str
+    ) -> ParallelSemanticExecutionResult:
+        """Reject selected rows across all lanes while their peers continue.
+
+        Args:
+            env_mask: Boolean mask matching this coordinator's batch and device.
+            reason: Measured rejection reason forwarded to each active lane.
+
+        Returns:
+            Updated barrier result. Deferred commands also exclude rejected rows.
+        """
+        if (
+            not isinstance(env_mask, torch.Tensor)
+            or env_mask.dtype != torch.bool
+            or env_mask.shape != self._pending.shape
+            or env_mask.device != self._pending.device
+        ):
+            raise ValueError("env_mask must match the parallel batch and device")
+        if type(reason) is not str or not reason:
+            raise ValueError("reason must be a non-empty string")
+        if self._status is not SemanticExecutionStatus.RUNNING:
+            return self.result
+        changed = env_mask & self._pending
+        if not changed.any():
+            return self.result
+        self._failure |= changed
+        self._success &= ~changed
+        self._pending &= ~changed
+        self._message = reason
+        self._force_mask_dispatch = True
+        try:
+            for branch in self._branches:
+                if not branch.executor.result.terminal:
+                    branch.executor.deactivate_rows(changed, reason=reason)
+            if self._deferred_frame is not None:
+                self._deferred_frame = self._deferred_frame.with_active_mask(
+                    self._deferred_frame.active_mask & ~changed
+                )
+                self._deferred_lane_frames = {
+                    key: frame.with_active_mask(frame.active_mask & ~changed)
+                    for key, frame in self._deferred_lane_frames.items()
+                }
+                if not self._deferred_frame.active_mask.any():
+                    self._deferred_frame = None
+                    self._deferred_lane_frames.clear()
+                    self._terminal_hold_pending = False
+            self._update_barrier()
+            self._finish_if_complete()
+        except Exception as exc:
+            self._abort_coordinator("Parallel row rejection failed", exc)
+            raise
+        return self.result
+
     def _timeout_pending_rows(self) -> None:
         """Fail and safe-stop deadline-expired rows before another command."""
         timed_out = self._pending.clone()
