@@ -1282,6 +1282,37 @@ spellings are aliases of the TaskSpec functions.
    validate_task_spec
    validate_task_template
 
+embodichain.lab.evaluation
+--------------------------
+
+.. currentmodule:: embodichain.lab.evaluation
+
+Evaluate distance to a target and track the first consecutive hold within a
+bounded control-step window. A session keeps its original environment and
+episode order. The latest physical result and the historical hold can differ
+after the object moves. Read an owned result with ``snapshot()``.
+
+.. autosummary::
+
+   NearTargetHoldSpec
+   EvaluationStatus
+   EvaluationResult
+   EvaluationSession
+
+embodichain.lab.evaluation.observations
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.evaluation.observations
+
+Feed a live raw arena-pose capture with its exact episode owner, or replay
+the same aligned slots from the observation manager's recorded fields.
+Replay reads bounded chunks and preserves the original witness revisions.
+
+.. autosummary::
+
+   advance_observation
+   evaluate_recording
+
 embodichain.lab.expansion
 ------------------------
 

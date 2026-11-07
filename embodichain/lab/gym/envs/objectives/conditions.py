@@ -24,6 +24,12 @@ from collections.abc import Mapping, Sequence
 
 import torch
 
+from embodichain.compute.geometry._distance import (
+    _measure_near_target,
+    _positions,
+    _validate_near_target,
+)
+
 __all__ = ["ConditionResult", "evaluate_near_target", "evaluate_below_height"]
 
 
@@ -62,13 +68,6 @@ class ConditionResult:
         object.__setattr__(self, "metrics", owned)
 
 
-def _positions(value: torch.Tensor) -> None:
-    if not isinstance(value, torch.Tensor) or value.ndim != 2 or value.shape[1] != 3:
-        raise ValueError("Positions must have shape (num_envs, 3).")
-    if not value.is_floating_point():
-        raise TypeError("Positions must be floating tensors.")
-
-
 def evaluate_near_target(
     position: torch.Tensor,
     target: torch.Tensor,
@@ -90,31 +89,13 @@ def evaluate_near_target(
         Physical truth, validity and the measured ``distance`` vector.
     """
     _positions(position)
-    axes = tuple(axes)
-    if (
-        not axes
-        or any(type(axis) is not int or axis not in (0, 1, 2) for axis in axes)
-        or len(set(axes)) != len(axes)
-    ):
-        raise ValueError("axes must select distinct indices from 0, 1, 2.")
-    if (
-        isinstance(tolerance, bool)
-        or not isinstance(tolerance, (int, float))
-        or not math.isfinite(tolerance)
-        or tolerance <= 0
-    ):
-        raise ValueError("tolerance must be positive and finite.")
-    if type(inclusive) is not bool:
-        raise TypeError("inclusive must be a bool.")
-    target = target.to(device=position.device, dtype=position.dtype)
-    if target.shape == (3,):
-        target = target.unsqueeze(0).expand_as(position)
-    _positions(target)
-    if target.shape != position.shape:
-        raise ValueError("Target batch must match object positions.")
-    valid = torch.isfinite(position).all(dim=-1) & torch.isfinite(target).all(dim=-1)
-    distance = torch.linalg.vector_norm((position - target)[:, axes], dim=-1)
-    satisfied = distance <= tolerance if inclusive else distance < tolerance
+    satisfied, valid, distance = _measure_near_target(
+        position,
+        target,
+        tolerance,
+        _validate_near_target(tolerance, axes, inclusive),
+        inclusive,
+    )
     return ConditionResult(satisfied, valid, {"distance": distance})
 
 

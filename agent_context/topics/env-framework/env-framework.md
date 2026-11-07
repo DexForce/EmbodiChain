@@ -138,6 +138,12 @@ metadata before/after copying. It never queries
 live state or substitutes a previous frame. Results own values, validity,
 reasons and temporal identities, without another descriptor model.
 
+`lab/evaluation/observations.py` binds two existing raw arena-pose fields to
+one bounded near-target hold. Feed live captures at explicit control slots
+with `advance_observation`. Use `evaluate_recording` to replay the same
+aligned slots through the history owner in bounded chunks. Each session owns
+one occurrence and separates the latest predicate from its first hold witness.
+
 `export_observation_history` projects the manager's schema onto one owned numeric
 snapshot. Legacy trajectory state views and raw history share that snapshot's
 storage. The default snapshot is CPU; file export can retain its device for
