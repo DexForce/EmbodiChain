@@ -220,7 +220,8 @@ def _preflight(
     )
     physical.validate_scene_bindings(deployment.scene_binding)
     program = deployment.integration.registration.catalog.preflight(
-        deployment.load_program()
+        deployment.load_program(),
+        invocation_policy_bindings=deployment.invocation_policy_bindings,
     )
     spec = decode_bundle_task_spec(parsed["task_spec.json"])
     graph = validate_semantic_task_graph(parsed["semantic_task_graph.json"])
