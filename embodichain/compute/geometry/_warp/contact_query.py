@@ -49,6 +49,9 @@ def _contact_summary(
     manifold_count: wp.array(dtype=wp.int32),
     manifold_capacity: int,
     output: wp.array(dtype=float),
+    collect_pairs: bool,
+    pair_separation: wp.array(dtype=float),
+    pair_count: wp.array(dtype=wp.int32),
 ):
     index = wp.tid()
     if index == 0:
@@ -78,7 +81,21 @@ def _contact_summary(
                 wp.atomic_min(output, 3, 0.0)
             else:
                 wp.atomic_min(output, 0, distance)
+                if collect_pairs:
+                    pair = wp.min(a, b) * shapes + wp.max(a, b)
+                    wp.atomic_min(pair_separation, pair, distance)
+                    wp.atomic_add(pair_count, pair, 1)
                 if distance <= required + tolerance[0]:
                     wp.atomic_min(
                         output, 1, float(wp.min(a, b) * shapes + wp.max(a, b))
                     )
+
+
+@wp.kernel(enable_backward=False)
+def _check_contact_capacity(
+    count: wp.array(dtype=wp.int32),
+    capacity: int,
+    output: wp.array(dtype=float),
+):
+    if count[0] < 0 or count[0] > capacity:
+        wp.atomic_min(output, 3, 0.0)

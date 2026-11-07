@@ -46,6 +46,16 @@ filters, and the query never advances the simulation clock. Shape/pair/contact
 storage is bounded; saturation and nonfinite results remain unverified.
 The host closes the owned query arrays/graphs after every attempt.
 
+The checker separately exposes `contact_query` native signed-surface facts and
+`contact_pairs` for all active strict-contact physical-ID pairs from one collide.
+The tolerance-aware `check` and capped interval retain their existing semantics.
+Exactly represented native touching can decide zero rest offset; conversion
+uncertainty spanning a threshold remains unavailable. Triangle meshes require
+explicit `allow_triangle_meshes=True`; this uses actual native triangle surfaces,
+never hull substitution or a containment certificate. The default physical
+extractor continues to reject unsupported geometry. Mesh midphase/contact
+overflow is unavailable, and returned native facts own their data.
+
 Query transforms are rebased before composing local offsets; precision budgets
 cover conversion, scale and nonfinite failures before no-contact acceptance.
 The owned tolerance array is refreshed before graph replay. Checker calls are

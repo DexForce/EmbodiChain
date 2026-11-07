@@ -293,7 +293,10 @@ sampling and physical contact evidence remain Lab responsibilities.
 `pg_grasp.native_contact` owns discrete convex closing/opening and rigid-clearance
 qualification through an injected `ConvexMeshQuery` factory; it imports no Lab
 runtime. `ClosingContactPolicy` declares geometric rules without experiment
-revision dispatch. This exact-shape route retains native pair offsets and contact
+revision dispatch. Its injected `contact_query` port supplies native surface
+predicates and separate conservative distance bounds; conversion-ambiguous
+thresholds remain unavailable. The factory and cache stay fixed per query
+instance, and opening uses its original closing cache. This exact-shape route retains native pair offsets and contact
 ordering; it does not replace the surface-based checker. Scene captures physical
 geometry, and `ActionPlanningServices` bind an explicitly supplied geometric
 policy to the existing Newton backend. Queries own only isolated collision resources and preserve unavailable

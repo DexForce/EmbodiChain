@@ -276,7 +276,7 @@ def test_unavailable_native_clearance_cannot_qualify(
     def unavailable(*args):
         raise UnsupportedFeasibilityError(reason)
 
-    monkeypatch.setattr(_ConvexCollection, "distance_interval", unavailable)
+    monkeypatch.setattr(_ConvexCollection, "contact_query", unavailable)
     with NativeClosingQuery(parts, meshes, 0.0, scope=_scope(), **options) as query:
         with pytest.raises(UnsupportedFeasibilityError, match=reason):
             query.inspect(np.eye(4))
@@ -311,7 +311,67 @@ def test_exact_contact_at_precision_boundary_remains_unavailable(newton_availabl
         poses[0, 0, 3] = sign * 0.11
         touching.append(replace(part, tcp_poses=poses))
     with NativeClosingQuery(touching, target, 0.0, scope=_scope(), **options) as query:
-        with pytest.raises(
-            UnsupportedFeasibilityError, match="precision interval crosses"
-        ):
+        with pytest.raises(UnsupportedFeasibilityError, match="cannot decide"):
             query.inspect(np.eye(4))
+
+
+def test_binary_native_contact_closing_opening_and_rigid_rest_share_strict_predicate(
+    newton_available,
+):
+    parts = []
+    for sign in (-1, 1):
+        poses = np.repeat(np.eye(4)[None], 3, axis=0)
+        poses[:, 0, 3] = sign * np.asarray([0.875, 0.625, 0.5])
+        parts.append(
+            NativeContactPart(
+                str(sign),
+                (trimesh.creation.box((0.25, 0.25, 0.25)),),
+                poses,
+                0.0,
+                True,
+                0.0,
+            )
+        )
+    target = (trimesh.creation.box((1.0, 1.0, 1.0)),)
+    closing = NativeClosingQuery(
+        parts, target, 0.0, scope=_scope(), revision=4, target_contact_offset=0.0
+    )
+    opening = rest = None
+    try:
+        record = closing.inspect(np.eye(4))
+        assert record["valid"] is True
+        foreign = NativeClosingQuery(parts, target, 0.0, scope=_scope(), revision=1)
+        try:
+            assert closing.cache is not foreign.cache
+        finally:
+            foreign.close()
+        support_pose = np.eye(4)
+        support_pose[2, 3] = -2.0
+        opening = NativeOpeningQuery(
+            closing,
+            target,
+            support_pose,
+            np.eye(4),
+            0.0,
+            0.0,
+            identity={"support": "binary"},
+            scope=closing.scope,
+        )
+        assert opening.inspect(np.eye(4), record)["valid"] is True
+        with pytest.raises(ValueError, match="bound query"):
+            opening.inspect(np.eye(4), {**record, "foreign": True})
+        rest = NativeRigidRestScene(
+            parts,
+            (NativeRigidObstacle("obstacle", 0.0, target, np.eye(4)),),
+            scope=_scope(),
+            collision_factory=_ConvexCollection,
+        )
+        rest_record = rest.inspect(np.eye(4), 2)
+        assert rest_record["valid"] is False
+        assert rest_record["sample_index"] == 1
+    finally:
+        if opening is not None:
+            opening.close()
+        if rest is not None:
+            rest.close()
+        closing.close()

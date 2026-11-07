@@ -84,3 +84,164 @@ def test_newton_distance_band_keeps_threshold_uncertainty_and_closes_owned_state
     right.close()
     with pytest.raises(RuntimeError, match="closed"):
         left.distance_interval(right, 0.002001)
+
+
+@pytest.mark.parametrize(
+    "offset, expected", [(0.0, True), (-(2**-20), True), (2**-20, False), (1.0, False)]
+)
+@pytest.mark.parametrize("kind", ["box", "mesh"])
+def test_native_strict_surfaces_decide_binary_touch_penetration_and_separation(
+    kind, offset, expected
+):
+    import json
+    import numpy as np
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+    )
+
+    if kind == "mesh":
+        import trimesh
+
+        mesh = trimesh.creation.box((1.0, 1.0, 1.0))
+        shape = dict(
+            vertices=tuple(map(tuple, mesh.vertices)),
+            triangles=tuple(map(tuple, mesh.faces)),
+        )
+    else:
+        shape = dict(dimensions=(1.0, 1.0, 1.0))
+    checker = NewtonCollisionChecker(
+        tuple(
+            CollisionBody(name, name, kind, robot=True, **shape) for name in ("a", "b")
+        ),
+        allow_triangle_meshes=kind == "mesh",
+    )
+    pose = np.eye(4)
+    pose[0, 3] = 1.0 + offset
+    frames = {"a": np.eye(4), "b": pose}
+    before = {key: value.copy() for key, value in frames.items()}
+    try:
+        result = checker.contact_query(frames)
+        assert result.below(0.0) is expected
+        assert checker.contact_pairs(frames) == ((("a", "b"),) if expected else ())
+        json.dumps(result.metadata(), allow_nan=False)
+        assert all(np.array_equal(value, before[key]) for key, value in frames.items())
+        if offset == 0:
+            # Strict native surface information does not turn the old
+            # conversion interval into an exact distance oracle.
+            checker.check(frames)
+            assert checker.last_clearance_interval[1] > 0.0
+    finally:
+        checker.close()
+
+
+def test_native_strict_contact_preserves_conversion_unknown_and_overflow():
+    import numpy as np
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+        UnsupportedFeasibilityError,
+    )
+
+    bodies = (
+        CollisionBody("a", "a", "box", (1.0, 1.0, 1.0), robot=True),
+        CollisionBody("b", "b", "box", (1.0, 1.0, 1.0)),
+    )
+    pose = np.eye(4)
+    pose[0, 3] = 1.0 + 2**-26
+    checker = NewtonCollisionChecker(bodies)
+    try:
+        result = checker.contact_query({"a": np.eye(4), "b": pose})
+        assert result.representation_error_m > 0
+        with pytest.raises(UnsupportedFeasibilityError, match="cannot decide"):
+            result.below(0.0)
+        with pytest.raises(UnsupportedFeasibilityError, match="cannot decide"):
+            checker.contact_pairs({"a": np.eye(4), "b": pose})
+    finally:
+        checker.close()
+    checker = NewtonCollisionChecker(bodies, max_contacts=1)
+    try:
+        with pytest.raises(UnsupportedFeasibilityError, match="overflowed"):
+            checker.contact_pairs({"a": np.eye(4), "b": np.eye(4)})
+    finally:
+        checker.close()
+
+
+def test_native_batch_reports_all_pairs_once_and_owned_results_survive_reuse(
+    monkeypatch,
+):
+    import numpy as np
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+    )
+
+    checker = NewtonCollisionChecker(
+        tuple(
+            CollisionBody(name, name, "sphere", (0.5,), robot=True)
+            for name in ("a", "b", "c")
+        )
+    )
+    calls = []
+    native = checker._pipeline.collide
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return native(*args, **kwargs)
+
+    monkeypatch.setattr(checker._pipeline, "collide", counted)
+    frames = {name: np.eye(4) for name in ("a", "b", "c")}
+    frames["b"][0, 3], frames["c"][0, 3] = 0.5, 1.0
+    try:
+        assert checker.contact_pairs(frames) == (("a", "b"), ("a", "c"), ("b", "c"))
+        assert len(calls) == 1
+        result = checker.contact_query(frames)
+        assert checker.contact_pairs(
+            frames, allowed_contacts=(("a", "b"), ("b", "c"))
+        ) == (("a", "c"),)
+        frames["b"][0, 3], frames["c"][0, 3] = 3.0, 6.0
+        assert checker.contact_pairs(frames) == ()
+        assert result.below(0.0) is True
+    finally:
+        checker.close()
+    assert result.below(0.0) is True
+
+
+def test_explicit_triangle_mesh_surface_keeps_concavity_and_mixed_pair_ids():
+    import numpy as np
+    import trimesh
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+        UnsupportedFeasibilityError,
+    )
+
+    first, second = trimesh.creation.box((0.5, 0.5, 0.5)), trimesh.creation.box(
+        (0.5, 0.5, 0.5)
+    )
+    first.apply_translation((-1.0, 0.0, 0.0))
+    second.apply_translation((1.0, 0.0, 0.0))
+    mesh = trimesh.util.concatenate((first, second))
+    bodies = (
+        CollisionBody(
+            "surface",
+            "surface",
+            "mesh",
+            vertices=tuple(map(tuple, mesh.vertices)),
+            triangles=tuple(map(tuple, mesh.faces)),
+        ),
+        CollisionBody("probe", "probe", "sphere", (0.125,), robot=True),
+    )
+    with pytest.raises(UnsupportedFeasibilityError, match="explicit collision adapter"):
+        NewtonCollisionChecker(bodies)
+    checker = NewtonCollisionChecker(bodies, allow_triangle_meshes=True)
+    try:
+        # A hull would bridge this explicitly empty gap.
+        assert checker.contact_pairs({"surface": np.eye(4), "probe": np.eye(4)}) == ()
+        pose = np.eye(4)
+        pose[0, 3] = 1.25
+        assert checker.contact_pairs({"surface": np.eye(4), "probe": pose}) == (
+            ("surface", "probe"),
+        )
+    finally:
+        checker.close()

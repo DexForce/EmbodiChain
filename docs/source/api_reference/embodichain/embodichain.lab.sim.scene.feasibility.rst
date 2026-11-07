@@ -65,6 +65,20 @@ permissions. Shape/pair/contact budgets are bounded, and overflow or nonfinite
 results cannot accept a candidate. Query arrays and graphs are released by the
 host after each attempt.
 
+``contact_query`` separates the native signed-surface predicate from the
+conservative distance interval. Exactly represented touching/penetrating native
+surfaces can be classified at the original zero rest offset; conversion
+uncertainty spanning a threshold remains unavailable. ``contact_pairs`` returns
+all active touching/penetrating physical-ID pairs from one pipeline call, or
+raises if any pair is undecidable. Returned facts are detached from subsequent
+query updates and provide finite/null metadata.
+
+The checker retains triangle-mesh rejection by default. Explicit
+``allow_triangle_meshes=True`` uses Newton's actual mesh/mesh and mesh/convex
+surface route with the supplied faces, without hull conversion or a solid
+containment certificate. Native midphase and contact buffers are bounded and
+checked for overflow.
+
 CPU is the default query device. ``collision_device`` selects CPU/CUDA,
 independently of the environment-owned physical backend and proposal device;
 ``collision_use_cuda_graph`` controls CUDA replay. Reported clearance is a
@@ -169,6 +183,7 @@ Implementation modules
 .. autosummary::
 
    CollisionBody
+   NativeContactResult
    NewtonCollisionChecker
    UnsupportedFeasibilityError
 

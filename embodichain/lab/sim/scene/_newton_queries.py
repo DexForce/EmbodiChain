@@ -20,10 +20,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib.metadata import version
 import math
+from typing import Literal
 import numpy as np
 import trimesh
 from .feasibility.collision import (
     CollisionBody,
+    NativeContactResult,
     NewtonCollisionChecker,
     UnsupportedFeasibilityError,
 )
@@ -48,14 +50,21 @@ class _ClearanceInterval:
 
 
 class _ConvexCollection:
-    """Keep authored convex geometry and transforms separate from live simulation."""
+    """Keep declared query geometry separate from live simulation.
 
-    def __init__(self) -> None:
+    The default accepts qualified convex solids. Explicit ``mesh`` groups retain
+    triangle surfaces, without hull substitution or a containment certificate.
+    """
+
+    def __init__(self, *, geometry_kind: Literal["convex", "mesh"] = "convex") -> None:
         self._objects = {}
         self._queries = {}
         self._frozen = False
         self._closed = False
         self._identity = object()
+        if geometry_kind not in {"convex", "mesh"}:
+            raise ValueError("geometry_kind must be convex or mesh.")
+        self._geometry_kind = geometry_kind
         _require_newton()
 
     @staticmethod
@@ -72,10 +81,18 @@ class _ConvexCollection:
             raise RuntimeError("Query geometry is closed or already bound.")
         if name in self._objects:
             raise ValueError("Duplicate collision shape identity.")
+        if not isinstance(mesh, trimesh.Trimesh):
+            raise TypeError("Collision geometry must be an explicit Trimesh.")
         if (
-            not mesh.is_convex
-            or not mesh.is_volume
-            or not np.isfinite(mesh.vertices).all()
+            not np.isfinite(mesh.vertices).all()
+            or not len(mesh.vertices)
+            or not len(mesh.faces)
+        ):
+            raise UnsupportedFeasibilityError(
+                "Collision mesh must have finite vertices and explicit faces."
+            )
+        if self._geometry_kind == "convex" and (
+            not mesh.is_convex or not mesh.is_volume
         ):
             raise UnsupportedFeasibilityError(
                 "Native query requires qualified convex solids; triangle surfaces are not convexified."
@@ -94,6 +111,26 @@ class _ConvexCollection:
     def distance_interval(
         self, other: _ConvexCollection, limit: float
     ) -> _ClearanceInterval:
+        query, poses = self._query(other, limit)
+        query.check(poses, all_pairs=True)
+        if query.last_clearance_interval is None:
+            raise UnsupportedFeasibilityError(
+                "Newton did not publish a clearance interval."
+            )
+        return _ClearanceInterval(
+            *(float(value) for value in query.last_clearance_interval)
+        )
+
+    def contact_query(
+        self, other: _ConvexCollection, limit: float
+    ) -> NativeContactResult:
+        """Return owned native surface facts, preserving undecidable thresholds."""
+        query, poses = self._query(other, limit)
+        return query.contact_query(poses, all_pairs=True)
+
+    def _query(
+        self, other: _ConvexCollection, limit: float
+    ) -> tuple[NewtonCollisionChecker, dict[str, np.ndarray]]:
         if self._closed or other._closed:
             raise RuntimeError("Collision query is closed.")
         if (
@@ -119,7 +156,7 @@ class _ConvexCollection:
                         CollisionBody(
                             identity,
                             identity,
-                            "convex",
+                            source._geometry_kind,
                             vertices=tuple(map(tuple, mesh.vertices)),
                             triangles=tuple(map(tuple, mesh.faces)),
                         )
@@ -132,6 +169,9 @@ class _ConvexCollection:
                 clearance_m=0.0,
                 device="cpu",
                 use_cuda_graph=False,
+                allow_triangle_meshes=(
+                    self._geometry_kind == "mesh" or other._geometry_kind == "mesh"
+                ),
             )
             self._queries[key] = query
         poses = {
@@ -139,14 +179,7 @@ class _ConvexCollection:
             for prefix, source in (("a", self), ("b", other))
             for name, (_, pose) in source._objects.items()
         }
-        query.check(poses, all_pairs=True)
-        if query.last_clearance_interval is None:
-            raise UnsupportedFeasibilityError(
-                "Newton did not publish a clearance interval."
-            )
-        return _ClearanceInterval(
-            *(float(value) for value in query.last_clearance_interval)
-        )
+        return query, poses
 
     def close(self) -> None:
         for query in self._queries.values():
