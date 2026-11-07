@@ -389,6 +389,11 @@ class SemanticCallExecutor:
         return self._observation_provider
 
     @property
+    def evidence_collector(self) -> EffectEvidenceCollectorPort:
+        """Return the evidence port owned by this execution runtime."""
+        return self._evidence_collector
+
+    @property
     def clock(self) -> ExecutionClock:
         """Return the shared execution clock used by this runtime.
 

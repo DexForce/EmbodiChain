@@ -131,7 +131,8 @@ test('reading view keeps text legible and local focus survives navigation', asyn
   await expect(
     page.getByRole('button', { name: 'Direct neighbours only', exact: true }),
   ).toBeDisabled();
-  await page.getByRole('button', { name: 'Select Trajectory augmentation', exact: true }).click();
+  const session = snapshot.nodes.find((node) => node.id === 'augmentation')!;
+  await page.getByRole('button', { name: `Select ${session.label}`, exact: true }).click();
   await expect(page.getByText('Relationships not yet mapped in this view.')).toBeVisible();
 });
 
