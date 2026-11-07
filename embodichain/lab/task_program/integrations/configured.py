@@ -977,6 +977,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "pick_object_part",
                 "lift_height",
                 "pre_grasp_distance",
+                "initial_lift_height",
                 "grasp_commit_fraction",
                 "approach_direction",
                 "left_to_right_arm_direction",
@@ -996,6 +997,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "preshape_fraction",
                 "approach_along_grasp_axis",
                 "release_retreat_distance",
+                "push_approach_offset",
                 "rotate_angle",
                 "dwell_duration",
                 "mouth_height",
@@ -1028,6 +1030,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "pick_object_part",
                     "lift_height",
                     "pre_grasp_distance",
+                    "initial_lift_height",
                     "grasp_commit_fraction",
                     "approach_direction",
                     "approach_alignment_max_angle",
@@ -1057,7 +1060,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 config["pick_object_part"],
                 path=f"{path}.pick_object_part",
             )
-        for field_name in ("lift_height", "pre_grasp_distance"):
+        for field_name in ("lift_height", "pre_grasp_distance", "initial_lift_height"):
             if field_name in config:
                 kwargs[field_name] = _real(
                     config[field_name],
@@ -1447,6 +1450,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "preshape_fraction",
                     "approach_along_grasp_axis",
                     "release_retreat_distance",
+                    "push_approach_offset",
                 }
             ),
         )
@@ -1482,6 +1486,12 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             kwargs["approach_along_grasp_axis"] = _boolean(
                 config["approach_along_grasp_axis"],
                 path=f"{path}.approach_along_grasp_axis",
+            )
+        if "push_approach_offset" in config:
+            kwargs["push_approach_offset"] = _finite_tuple(
+                config["push_approach_offset"],
+                path=f"{path}.push_approach_offset",
+                expected_length=3,
             )
         return SlideOptions(**kwargs)
     if kind == "hand_over":

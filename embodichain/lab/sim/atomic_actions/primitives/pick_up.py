@@ -213,7 +213,17 @@ class PickUpOptions(ActionOptions):
     grasps and ``fixed_object_to_eef`` bypass this sampled-grasp selection.
     """
 
+    initial_lift_height: float = 0.0
+    """Initial world-Z clearance (m) from the current TCP pose before approach."""
+
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.initial_lift_height, bool)
+            or not isinstance(self.initial_lift_height, (int, float))
+            or not math.isfinite(self.initial_lift_height)
+            or self.initial_lift_height < 0.0
+        ):
+            raise ValueError("initial_lift_height must be finite and non-negative.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if type(self.grasp_settle_steps) is not int or self.grasp_settle_steps < 0:
@@ -380,10 +390,19 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             # motion generator resolves backend defaults when no explicit
             # planner options were supplied.
             motion_options.sample_count = None
+        waypoints = [pre_grasp_xpos, grasp_xpos, lift_xpos]
+        if options.initial_lift_height > 0.0:
+            start_xpos = self.robot.compute_fk(
+                qpos=start_arm_qpos, name=manipulator.control_part, to_matrix=True
+            )
+            initial_lift = translate_pose_world(
+                start_xpos,
+                start_xpos.new_tensor([0.0, 0.0, options.initial_lift_height]),
+            )
+            waypoints.insert(0, initial_lift)
+
         motion_result = self.motion_generator.generate(
-            build_pose_plan_states(
-                torch.stack([pre_grasp_xpos, grasp_xpos, lift_xpos], dim=1)
-            ),
+            build_pose_plan_states(torch.stack(waypoints, dim=1)),
             options=motion_options,
         )
         assert isinstance(motion_result.success, torch.Tensor)
@@ -399,7 +418,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             dt=motion_result.dt,
             control_dt=interpolation_dt,
             arrival_indices=motion_result.waypoint_indices,
-            split_target_index=1,
+            split_target_index=len(waypoints) - 2,
         )
         n_approach = approach_arm.shape[1]
         n_lift = lift_arm.shape[1]

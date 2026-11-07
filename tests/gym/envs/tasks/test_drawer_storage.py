@@ -136,3 +136,117 @@ def test_configured_deployment_preserves_its_explicit_acceptance_class():
     assert resolve_collection_plan(Namespace(), raw).max_attempts == 1
     assert cfg.task_program is not None
     assert get_env_spec(raw["id"]).cls is DrawerStorageEnv
+
+
+def _run_franka_contact_episode() -> None:
+    """Check intended contact pairs against native impulse records by segment."""
+    from pathlib import Path
+
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.lab.gym.utils.registration import make
+    from embodichain.utils.utility import load_config
+
+    source = (
+        Path(__file__).resolve().parents[4]
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage/task.franka.yaml"
+    )
+    payload = load_config(source)
+    payload.update(
+        headless=True, device="cpu", renderer="no-render", enable_sensor=False, seed=0
+    )
+    cfg = config_to_cfg(payload, source_path=source)
+    cfg.filter_dataset_saving = True
+
+    fingers = ("fr3_leftfinger", "fr3_rightfinger")
+    allowed = {
+        "open_drawer": [
+            ("cube", "pickup_table"),
+            *((f, "large_handle_bar") for f in fingers),
+        ],
+        "pick_cube": [("cube", "pickup_table"), *((f, "cube") for f in fingers)],
+        "store_cube": [("cube", "drawer_bottom"), *((f, "cube") for f in fingers)],
+        "close_drawer": [
+            ("cube", "drawer_bottom"),
+            *((f, "large_handle_bar") for f in fingers),
+        ],
+    }
+    allowed = {
+        stage: {frozenset(pair) for pair in pairs} for stage, pairs in allowed.items()
+    }
+    env = make(payload["id"], cfg=cfg)
+    try:
+        env.reset(seed=0, options={"save_data": False})
+        spawn = env.sim.spawn_result
+        targets = [
+            path for path in spawn.handles if path.endswith(("/FrankaPanda", "/cube"))
+        ]
+        assert len(targets) == 2
+        query = spawn.create_contact_query(
+            targets, match="any", capacity=4096, device="cpu"
+        )
+        names = {
+            actor.actor_id: actor.link_name or actor.path.rsplit("/", 1)[-1]
+            for actor in query.actors
+        }
+        observed = {stage: set() for stage in allowed}
+        stage = None
+        sample_count = 0
+        begin = env._begin_demo_segment_recording
+
+        def begin_segment(segment_id, segment):
+            nonlocal stage
+            stage = segment.name
+            return begin(segment_id, segment)
+
+        def sample_substep(_dt):
+            nonlocal sample_count
+            sample_count += 1
+            buffer = query.fetch()
+            assert not buffer.dropped_count
+            # Column 9 contains the normal contact impulse.
+            impulses = buffer.data[: buffer.count, 9]
+            for left, right in buffer.actor_ids[: buffer.count][impulses > 0].tolist():
+                observed[stage].add(frozenset((names[left], names[right])))
+
+        env._begin_demo_segment_recording = begin_segment
+        env._advance_physics = lambda: env.sim.update(
+            env.physics_dt,
+            env.cfg.sim_steps_per_control,
+            after_substep=sample_substep,
+            render_final_step=False,
+        )
+        result = execute_demo_episode(env)
+        assert result.completed and result.all_success, result.to_metadata()
+        assert sample_count == result.length * env.cfg.sim_steps_per_control
+        for stage, pairs in observed.items():
+            assert pairs <= allowed[stage], (stage, pairs - allowed[stage])
+            assert any(pair.intersection(fingers) for pair in pairs), stage
+    finally:
+        env.close(exit_process=False)
+
+
+@pytest.mark.requires_sim
+@pytest.mark.subprocess_sim
+@pytest.mark.slow
+def test_franka_drawer_storage_contact_pairs() -> None:
+    """Reject a successful episode that hits unintended scene geometry in transit."""
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    path = Path(__file__).resolve()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy, sys; runpy.run_path(sys.argv[1])['_run_franka_contact_episode']()",
+            str(path),
+        ],
+        cwd=path.parents[4],
+        text=True,
+        capture_output=True,
+        timeout=180,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr

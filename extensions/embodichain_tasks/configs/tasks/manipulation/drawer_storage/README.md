@@ -17,7 +17,9 @@ python -m embodichain run-task --gym-config "$config" \
 
 The deployments select their own base pose, gripper profile and motion
 calibration. The top-down grasp is calibrated to the selected tool frame.
-The cube must clear the drawer front during transfer.
+The cube must clear the drawer front during transfer. Franka lifts the
+open hand before turning toward the pickup table and approaches the drawer
+handle from a clearance waypoint before closing.
 
 The execution policy projects commanded effects. The open rail and lifted
 cube have measured segment validators, with measured stability windows after
@@ -33,14 +35,16 @@ interior bounds include 1 mm of contact tolerance.
 Default physics on CPU with `dexsim-engine 0.5.1rc1`, NoRender and sensors
 disabled. Each seed ran in a fresh process on the fixed scene with one attempt.
 
-| Seeds | Open | Pick | Place and release | Close | Final acceptance |
-| --- | --- | --- | --- | --- | --- |
-| 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 |
+| Seeds | Open | Pick | Place and release | Close | Final acceptance | Unintended contacts |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0–9 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 0 |
 
-All ten runs measured 266.12 mm at the opening validator, 177.51 mm of cube
-lift and 0.24 mm of final rail travel from closed. The final Panda finger
-positions were 40.00 and 38.98 mm, with finger-to-cube distances of 469.95
-and 476.15 mm. All eight cube corners passed the drawer-frame bounds.
+The audit checked native positive contact impulses at all 14,380 physics
+substeps per seed for every pair involving the robot or cube. Each stage
+reported only the expected contacts between fingers and the handle or cube,
+and between the cube and its support surface.
 
-During calibration, the rail moved from about 268 mm to 217 mm during the
-transition to pickup. It remained open for placement.
+All ten runs measured 266.12 mm at the opening validator, 177.70 mm of cube
+lift and 3.56 mm of final rail travel from closed. All eight cube corners
+passed the drawer-frame bounds. Both Panda fingers opened within tolerance
+and remained more than 533 mm from the cube.
