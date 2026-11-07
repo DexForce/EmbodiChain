@@ -45,6 +45,7 @@ from .plans import (
 )
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
+from .planning_probes import JointPrefixPlanner, PlaceSceneProvider
 from .scene import SceneProvider
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 from .tracking import TrackingPolicy, TrackingRuntime
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+    from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
     from embodichain.toolkits.graspkit import GraspPoseGenerator
     from embodichain.lab.sim.motion.expansion import (
         MappedRetimeResult,
@@ -92,6 +94,9 @@ class AtomicActionEngine:
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
+        free_motion_query: FreeMotionQuery | None = None,
+        joint_prefix_planner: JointPrefixPlanner | None = None,
+        place_scene_provider: PlaceSceneProvider | None = None,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
@@ -108,6 +113,9 @@ class AtomicActionEngine:
                 control-part name.
             hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint
                 target ID. Settings are copied; construction performs no hand FK.
+            free_motion_query: Optional borrowed same-robot collision service.
+            joint_prefix_planner: Optional observed-state joint-prefix adapter.
+            place_scene_provider: Optional provider of owned placement envelopes.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             tracking_runtime: Optional exact-version feedback, projector, and
@@ -131,6 +139,9 @@ class AtomicActionEngine:
             grasp_pose_generators=grasp_pose_generators,
             env_ids=env_ids,
             hand_geometry_cfgs=hand_geometry_cfgs,
+            free_motion_query=free_motion_query,
+            joint_prefix_planner=joint_prefix_planner,
+            place_scene_provider=place_scene_provider,
         )
         self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}

@@ -23,6 +23,9 @@ embodichain.lab.sim.atomic_actions
       ActionOptions
       MotionPolicy
       RecoveryPolicy
+      JointPrefixPlanner
+      PlaceSceneInputs
+      PlaceSceneProvider
       RobotObservation
       TaskState
       SceneSnapshot
@@ -331,6 +334,18 @@ Engine and execution
    :members:
 
 .. autoclass:: AtomicActionEngine
+   :members:
+
+Explicit planning services
+--------------------------
+
+``AtomicActionEngine`` can borrow a same-robot free-motion query and joint-prefix
+planner, plus a placement-geometry provider. Constructing the engine does not
+execute these services. Skills must reject a selected capability when its port
+is missing. ``PlaceSceneInputs`` owns its geometry and explicit floor/support
+roles; these envelopes are planning inputs rather than physical contact evidence.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.planning_probes
    :members:
 
 .. autodata:: PlanTransform

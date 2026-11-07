@@ -114,6 +114,13 @@ commands with the current resolved endpoint commands, including invocation
 overrides. [Robot geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
 defines the capture boundary. Task Program declarations do not enter Atomic APIs.
 
+The engine can borrow explicit `free_motion_query`, `joint_prefix_planner` and
+`place_scene_provider` ports through `ActionPlanningServices`. Query and prefix
+services must own its exact robot; construction does not call them. The skill
+rejects a missing selected capability. `planning_probes.PlaceSceneInputs` owns
+copied envelopes and declared floor/support roles; neither it nor a planning
+clearance result is physical effect evidence.
+
 `ActionPlanningServices.prepare_grasp_query()` resolves the declared hand
 calibration by target ID and binds Scene capture to GraspKit's typed geometric
 policy and the existing isolated Newton backend. The opt-in context manager

@@ -43,6 +43,7 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
 from .bindings import ActionBinding, EndpointBinding, JointPositionTarget
 from .control import ActionControlOverrides, ControlPartCommandProfile
 from .core import resolve_runtime_device
+from .planning_probes import JointPrefixPlanner, PlaceSceneProvider
 from .requirements import (
     DisjointResourceSlots,
     DisjointSlotEndpoints,
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+    from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
 
 
 from .grasp_geometry import GraspOpeningTarget
@@ -93,6 +95,9 @@ class ActionPlanningServices:
         env_ids: tuple[int, ...] | None = None,
         *,
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
+        free_motion_query: FreeMotionQuery | None = None,
+        joint_prefix_planner: JointPrefixPlanner | None = None,
+        place_scene_provider: PlaceSceneProvider | None = None,
     ) -> None:
         """Retain shared services and snapshot caller-owned calibration data.
 
@@ -104,6 +109,9 @@ class ActionPlanningServices:
             env_ids: Optional ordered physical simulation rows used by planning.
             hand_geometry_cfgs: Explicit Lab hand settings by grasp target ID;
                 copied independently without capturing geometry or reading state.
+            free_motion_query: Optional same-robot discrete collision service.
+            joint_prefix_planner: Optional observed-state joint-prefix adapter.
+            place_scene_provider: Optional owned placement geometry and roles.
         """
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
@@ -119,6 +127,31 @@ class ActionPlanningServices:
                 raise ValueError("env_ids must be unique physical row indices")
         self.env_ids = env_ids
         self._binding_owner_id = uuid4().hex
+        if free_motion_query is not None:
+            from embodichain.lab.sim.motion.mesh_collision import FreeMotionQuery
+
+            if not isinstance(free_motion_query, FreeMotionQuery):
+                raise TypeError("free_motion_query must implement its planning port.")
+            if free_motion_query.robot is not self._robot:
+                raise ValueError(
+                    "free_motion_query must own this engine's exact robot."
+                )
+        self._free_motion_query = free_motion_query
+        if joint_prefix_planner is not None:
+            if not isinstance(joint_prefix_planner, JointPrefixPlanner):
+                raise TypeError(
+                    "joint_prefix_planner must implement its planning port."
+                )
+            if joint_prefix_planner.robot is not self._robot:
+                raise ValueError(
+                    "joint_prefix_planner must own this engine's exact robot."
+                )
+        self._joint_prefix_planner = joint_prefix_planner
+        if place_scene_provider is not None and not isinstance(
+            place_scene_provider, PlaceSceneProvider
+        ):
+            raise TypeError("place_scene_provider must implement its planning port.")
+        self._place_scene_provider = place_scene_provider
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,
             TrackingRuntime,
@@ -139,6 +172,21 @@ class ActionPlanningServices:
     def motion_generator(self) -> MotionGenerator:
         """Return the single motion generator owned by the engine."""
         return self._motion_generator
+
+    @property
+    def free_motion_query(self) -> FreeMotionQuery | None:
+        """Return the borrowed same-robot discrete qualification service."""
+        return self._free_motion_query
+
+    @property
+    def joint_prefix_planner(self) -> JointPrefixPlanner | None:
+        """Return the optional locked-state prefix backend adapter."""
+        return self._joint_prefix_planner
+
+    @property
+    def place_scene_provider(self) -> PlaceSceneProvider | None:
+        """Return the optional provider of owned placement input envelopes."""
+        return self._place_scene_provider
 
     @property
     def robot(self) -> Robot:

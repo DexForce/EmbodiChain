@@ -138,6 +138,7 @@ from .requirements import (
     SkillResourceSlot,
 )
 from .runtime import ActionPlanningServices, GraspOpeningTarget
+from .planning_probes import JointPrefixPlanner, PlaceSceneInputs, PlaceSceneProvider
 from .runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
@@ -299,6 +300,9 @@ __all__ = [
     "ActionPlan",
     "ActionPlanningServices",
     "GraspOpeningTarget",
+    "JointPrefixPlanner",
+    "PlaceSceneInputs",
+    "PlaceSceneProvider",
     "Affordance",
     "AffordancePoseCandidates",
     "AffordanceSample",
