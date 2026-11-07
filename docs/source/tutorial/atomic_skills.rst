@@ -7,7 +7,7 @@ the embodiment supplies kinematics, tool geometry, TCPs and command meanings.
 Reuse requires a physically feasible task: reachable poses, joint limits,
 collision clearance, sufficient jaw opening and stable contact.
 
-Atomic actions are typed, side-effect-free motion planners. The engine resolves
+Atomic Skills are typed, side-effect-free motion planners. The engine resolves
 a grounded :class:`~embodichain.lab.sim.atomic_skills.SkillInvocation` into a
 :class:`~embodichain.lab.sim.atomic_skills.ResolvedSkillRequest`; an action
 combines that snapshot with the latest

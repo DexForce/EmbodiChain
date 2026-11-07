@@ -215,7 +215,7 @@ def ensure_torch():
         import torch
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "Atomic action benchmark requires the EmbodiChain simulation runtime "
+            "Atomic Skill benchmark requires the EmbodiChain simulation runtime "
             f"and PyTorch. Missing module: {exc.name}."
         ) from exc
     return torch

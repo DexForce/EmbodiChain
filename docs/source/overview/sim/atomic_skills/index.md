@@ -1,7 +1,7 @@
 (atomic-skills)=
 (atomic-actions)=
 
-# Atomic actions
+# Atomic Skills
 
 ```{toctree}
 :hidden:
@@ -13,7 +13,7 @@ affordance_sampling
 ```{currentmodule} embodichain.lab.sim.atomic_skills
 ```
 
-Atomic actions are the typed planning and execution boundary between a semantic
+Atomic Skills are the typed planning and execution boundary between a semantic
 task request and runtime endpoint commands. A caller describes **what** should
 happen with an action-owned goal, selects resources for the skill's participant
 slots, and supplies the latest measured context. The action returns a
@@ -83,7 +83,7 @@ The boundary is deliberate:
 | Task intent and sequencing | Task Program or user-authored application | Selects skills, goals, and execution order |
 | Invocation construction | Task Program adapter or direct Python caller | Produces the same typed `SkillInvocation`; the engine has no agent-only interface |
 | Perception and grounding | `SceneRegistry` on the canonical path; adapter or user application on the advanced path | Normalizes aliases to canonical typed references and publishes snapshots, or supplies already-grounded values directly |
-| Deterministic motion planning | Atomic action module | Produces an `SkillPlan` from an invocation and context |
+| Deterministic motion planning | Atomic Skill module | Produces a `SkillPlan` from an invocation and context |
 | Motion-generation resources | `AtomicSkillEngine` | Owns one robot, motion generator, planner backend, device, trajectory builder, and control-part command profiles |
 | Recovery state | `ExecutionSession` | Consumes fresh contexts, emits at most one `RuntimeCommandFrame` per tick, and owns bounded recovery/revision state |
 | Scene observation | Registry-derived `SceneProvider` | Captures canonical ordered entities plus monotonic global or per-environment collision-world revisions |
@@ -168,7 +168,7 @@ observe a new `PlanningContext`, and plan or compile the next stage. Use
 `ExecutionSession`.
 
 `compile()` is intentionally an offline **joint-trajectory** projection API. It
-rejects an `SkillPlan` whose optional `joint_trajectory` is absent. Generic
+rejects a `SkillPlan` whose optional `joint_trajectory` is absent. Generic
 non-joint command plans remain valid for `plan()` and `start()`; composing their
 hypothetical state requires a future endpoint-specific projection contract.
 
@@ -443,7 +443,7 @@ an older custom action by renaming its implementation to `_plan()`.
 | API | Intended caller | Behavior |
 |---|---|---|
 | `AtomicSkill.plan(request, context)` | `AtomicSkillEngine` | Binds the current collision scene into a copied policy, then delegates to `_plan()` |
-| `AtomicSkill._plan(request, context)` | Atomic-action implementer | Consumes the prepared immutable `ResolvedSkillRequest` and returns an `SkillPlan` |
+| `AtomicSkill._plan(request, context)` | Atomic-action implementer | Consumes the prepared immutable `ResolvedSkillRequest` and returns a `SkillPlan` |
 | `engine.plan_action(action, invocation, context)` | Extension or isolated test | Temporarily binds and plans an unregistered action instance; built-in parameter variants should use invocation `skill_options` instead |
 | `engine.start(invocations, context, eligible_mask=...)` | Runtime orchestrator | Starts a session whose owned row cohort can only shrink across action barriers and recovery |
 | `session.revise_current(invocation)` | Manually ticked runtime orchestrator | Replaces the active logical call with a newer same-destination revision and replans from the latest observed context |

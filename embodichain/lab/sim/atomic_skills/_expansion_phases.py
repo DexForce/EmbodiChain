@@ -79,7 +79,7 @@ def _canonical_samples(
             if not torch.allclose(
                 positions[index], positions[index - 1], atol=1e-5, rtol=0
             ):
-                raise ValueError("Atomic action has a position change in zero time")
+                raise ValueError("Atomic Skill has a position change in zero time")
             keep[index] = False
     counts = torch.cumsum(keep.long(), 0)
     boundaries = torch.cat((torch.zeros(1, dtype=torch.long), counts))

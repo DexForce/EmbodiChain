@@ -146,6 +146,6 @@ Gym episode lifecycle, retry policy, commit behavior, and dataset recording are
 deferred until those hosts have an explicit expansion policy.
 
 ```{seealso}
-{doc}`Atomic actions <index>` and
+{doc}`Atomic Skills <index>` and
 {doc}`Built-in actions <builtin_skills>`.
 ```

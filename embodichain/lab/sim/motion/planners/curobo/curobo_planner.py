@@ -2833,7 +2833,7 @@ class CuroboPlanner(BasePlanner):
 
         # cuRobo interpolation can round its first sample by a few float32
         # ulps. Preserve the requested boundary exactly at that precision:
-        # Atomic action concatenation gives a repeated start zero arrival time,
+        # Atomic Skill concatenation gives a repeated start zero arrival time,
         # so even one ulp otherwise appears to be an instantaneous joint jump.
         # Keep larger mismatches visible to callers and external validation.
         roundoff = 4 * torch.finfo(positions.dtype).eps * start.abs().clamp_min(1)

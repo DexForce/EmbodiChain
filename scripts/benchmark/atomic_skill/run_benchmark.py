@@ -58,7 +58,7 @@ def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
         nargs="+",
         choices=(*SKILL_MODULES.keys(), "all"),
         default=["move_end_effector"],
-        help="Atomic action benchmark(s) to run. Use 'all' for every action.",
+        help="Atomic Skill benchmark(s) to run. Use 'all' for every action.",
     )
     parser.add_argument(
         "--smoke",

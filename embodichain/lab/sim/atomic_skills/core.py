@@ -388,7 +388,7 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
         """
         if self._planning_services is None:
             raise RuntimeError(
-                f"Atomic action {self.skill_id!r} is not bound to an "
+                f"Atomic Skill {self.skill_id!r} is not bound to an "
                 "AtomicSkillEngine. Register it with engine.register()."
             )
         return self._planning_services
@@ -437,7 +437,7 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
             return
         if self._planning_services is not None:
             raise ValueError(
-                f"Atomic action {self.skill_id!r} is already bound to another "
+                f"Atomic Skill {self.skill_id!r} is already bound to another "
                 "AtomicSkillEngine."
             )
         self._planning_services = services

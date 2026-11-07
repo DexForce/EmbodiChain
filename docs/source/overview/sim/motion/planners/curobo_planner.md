@@ -364,7 +364,7 @@ representations read back from those caches, call
 transformed by the simulator's live link poses. The interactive cuRobo example
 calls this once after planner initialization; close the Open3D window to continue.
 
-## Atomic actions and supported scope
+## Atomic Skills and supported scope
 
 Single-arm MoveEndEffector is supported through the normal
 `strategy="motion_gen"` route. MoveJoints can opt in to collision-aware
