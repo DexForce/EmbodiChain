@@ -138,6 +138,19 @@ API embeds committed build outputs, so installed offline rendering has no Node
 runtime requirement. Vector SVG export serializes the current task layout and
 retains the original evidence status rather than generating a new verdict.
 
+Pure program declarations
+-------------------------
+
+Project a validated Semantic Call graph into the existing program format using
+explicit per-segment acceptance bindings. Calls, targets, stage identities and
+ordering remain tied to the graph. Optional acceptance deferral must retain every
+original post-policy and validator at the terminal boundary. This builder does
+not read a bundle, compose runtime services, plan motion or create a simulator;
+callers still perform complete configured deployment preflight.
+
+.. automodule:: embodichain.gen_sim.task_engine.program_declarations
+   :members:
+
 Workflow configuration and replayable state
 -------------------------------------------
 
