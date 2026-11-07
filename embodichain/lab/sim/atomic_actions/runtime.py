@@ -21,7 +21,6 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 import time
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -65,41 +64,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class GraspOpeningTarget:
-    """Already-grounded support and object poses from the closing observation.
-
-    Args:
-        support_uid: Exact native rigid support UID selected by the caller.
-        reference_pose: Support-to-world pose, shape (4, 4), copied to CPU float64.
-        object_target_pose: Final placed-object-to-world pose, shape (4, 4), copied
-            to CPU float64. Tensor inputs are detached without changing the input.
-        scope: Must equal the closing query's fresh preparation scope.
-        identity: Optional neutral diagnostic IDs; never runtime or program objects.
-    """
-
-    support_uid: str
-    reference_pose: np.ndarray | torch.Tensor
-    object_target_pose: np.ndarray | torch.Tensor
-    scope: NativeQueryScope
-    identity: Mapping[str, object] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if (
-            type(self.support_uid) is not str
-            or not self.support_uid
-            or self.support_uid != self.support_uid.strip()
-        ):
-            raise ValueError("Opening requires an explicit native support UID.")
-        if not isinstance(self.scope, NativeQueryScope):
-            raise TypeError("Opening scope must be NativeQueryScope.")
-        for name in ("reference_pose", "object_target_pose"):
-            pose = _rigid_pose(getattr(self, name))
-            pose.setflags(write=False)
-            object.__setattr__(self, name, pose)
-        object.__setattr__(
-            self, "identity", MappingProxyType(_neutral_identity(self.identity))
-        )
+from .grasp_geometry import GraspOpeningTarget
 
 
 def _physical_identity(
@@ -125,6 +90,7 @@ class ActionPlanningServices:
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
         tracking_runtime: TrackingRuntime | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
+        env_ids: tuple[int, ...] | None = None,
         *,
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
     ) -> None:
@@ -135,12 +101,23 @@ class ActionPlanningServices:
             control_profiles: Direct-core command profiles by control part.
             tracking_runtime: Optional shared endpoint tracking services.
             grasp_pose_generators: Existing grasp services by endpoint target ID.
+            env_ids: Optional ordered physical simulation rows used by planning.
             hand_geometry_cfgs: Explicit Lab hand settings by grasp target ID;
                 copied independently without capturing geometry or reading state.
         """
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
+        if env_ids is not None:
+            env_ids = tuple(env_ids)
+            count = self._robot.get_qpos().shape[0]
+            if (
+                not env_ids
+                or len(set(env_ids)) != len(env_ids)
+                or any(type(i) is not int or not 0 <= i < count for i in env_ids)
+            ):
+                raise ValueError("env_ids must be unique physical row indices")
+        self.env_ids = env_ids
         self._binding_owner_id = uuid4().hex
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,

@@ -7,4 +7,4 @@ tensordict==0.15.3
 numpy>=2,<2.3
 gradio==6.17.3
 onnxruntime-gpu==1.26.0
-nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@4ea77366ca48ee453e7df139e39fa6532af49f3b
+nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@42498cf4e7d0d6fbd4ef9fbcec1243c00c888a83

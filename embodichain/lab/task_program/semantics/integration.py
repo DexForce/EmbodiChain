@@ -751,6 +751,19 @@ class SemanticIntegrationManifest:
                         str(error),
                     )
                 ) from error
+        if descriptor.target_descriptor is not None:
+            try:
+                descriptor.target_descriptor.validate_motion_policy(
+                    preset.motion_policy
+                )
+            except (TypeError, ValueError) as error:
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "incompatible_motion_policy",
+                        (*path, "preset", "motion"),
+                        str(error),
+                    )
+                ) from error
         if descriptor.call_id not in preset.action_option_templates:
             option_path = (
                 "integration",
