@@ -234,6 +234,15 @@ def test_explicit_triangle_mesh_surface_keeps_concavity_and_mixed_pair_ids():
     )
     with pytest.raises(UnsupportedFeasibilityError, match="explicit collision adapter"):
         NewtonCollisionChecker(bodies)
+    collapsed = CollisionBody(
+        "bad",
+        "bad",
+        "mesh",
+        vertices=((1.0, 0.0, 0.0), (1.0 + 2**-30, 0.0, 0.0), (1.0, 1.0, 0.0)),
+        triangles=((0, 1, 2),),
+    )
+    with pytest.raises(UnsupportedFeasibilityError, match="collapsed faces"):
+        NewtonCollisionChecker((collapsed,), allow_triangle_meshes=True)
     checker = NewtonCollisionChecker(bodies, allow_triangle_meshes=True)
     try:
         # A hull would bridge this explicitly empty gap.
@@ -245,3 +254,117 @@ def test_explicit_triangle_mesh_surface_keeps_concavity_and_mixed_pair_ids():
         )
     finally:
         checker.close()
+
+
+@pytest.mark.parametrize("x", [1.0, 1.0 + 2**-26, 2.0, 1.5e6])
+def test_collection_clearance_bound_preserves_native_precision_and_near_contacts(
+    monkeypatch, x
+):
+    import numpy as np
+    import trimesh
+    from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
+    from embodichain.lab.sim.scene.feasibility import (
+        NewtonCollisionChecker,
+        UnsupportedFeasibilityError,
+    )
+
+    left, right = _ConvexCollection(geometry_kind="mesh"), _ConvexCollection(
+        geometry_kind="mesh"
+    )
+    mesh = trimesh.creation.box((1.0, 1.0, 1.0))
+    pose = np.eye(4)
+    pose[0, 3] = x
+    left.add_object("a", mesh)
+    right.add_object("b", mesh, pose)
+    builds = []
+    original = NewtonCollisionChecker._build_query
+
+    def counted(*args, **kwargs):
+        builds.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(NewtonCollisionChecker, "_build_query", counted)
+    try:
+        lower = left.clearance_lower_bound(right)
+        assert not builds
+        if x > 1e6:
+            assert lower is None
+            with pytest.raises(UnsupportedFeasibilityError, match="precision range"):
+                left.contact_query(right, 0.0)
+        elif x > 1.5:
+            assert 0 < lower <= x - 1.0
+            assert left.contact_query(right, 0.0).below(0.0) is False
+        else:
+            assert lower == 0.0
+            result = left.contact_query(right, 0.0)
+            if x == 1.0:
+                assert result.below(0.0) is True
+            else:
+                with pytest.raises(UnsupportedFeasibilityError, match="cannot decide"):
+                    result.below(0.0)
+    finally:
+        left.close()
+        right.close()
+
+
+def test_collection_far_bound_culls_without_native_queries_or_model_rebuild(
+    monkeypatch,
+):
+    import json
+    import time
+    import numpy as np
+    import trimesh
+    from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
+
+    left, right = _ConvexCollection(), _ConvexCollection()
+    mesh = trimesh.creation.box((1.0, 1.0, 1.0))
+    left.add_object("a", mesh)
+    pose = np.eye(4)
+    pose[0, 3] = 2.0
+    right.add_object("b", mesh, pose)
+    try:
+        start = time.perf_counter_ns()
+        assert left.contact_query(right, 0.0).below(0.0) is False
+        first_ns = time.perf_counter_ns() - start
+        query = next(iter(left._queries.values()))
+        original, calls = query._pipeline.collide, []
+
+        def counted(*args, **kwargs):
+            calls.append(1)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(query._pipeline, "collide", counted)
+        positions = [2.0 + index / 8 for index in range(32)]
+        direct_ns, bound_ns = [], []
+        for x in positions:
+            pose[0, 3] = x
+            right.set_transform("b", pose)
+            start = time.perf_counter_ns()
+            assert left.contact_query(right, 0.0).below(0.0) is False
+            direct_ns.append(time.perf_counter_ns() - start)
+        assert len(calls) == len(positions)
+        calls.clear()
+        for x in positions:
+            pose[0, 3] = x
+            right.set_transform("b", pose)
+            start = time.perf_counter_ns()
+            lower = left.clearance_lower_bound(right)
+            assert 0 < lower <= x - 1.0
+            bound_ns.append(time.perf_counter_ns() - start)
+        assert not calls
+        assert len(left._queries) == 1
+        print(
+            json.dumps(
+                {
+                    "workload": "32 frozen unit-box far pairs/CPU",
+                    "first_native_ns": first_ns,
+                    "native_calls": 32,
+                    "bound_native_calls": 0,
+                    "direct_ns": direct_ns,
+                    "bound_ns": bound_ns,
+                }
+            )
+        )
+    finally:
+        left.close()
+        right.close()

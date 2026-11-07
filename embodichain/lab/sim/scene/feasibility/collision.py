@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from importlib.metadata import version
 import math
 from numbers import Integral
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -31,12 +32,19 @@ from .._validation import _identifier, _rigid_pose
 from ._values import count, digest, finite, names
 from .contracts import FeasibilityCheck
 
+if TYPE_CHECKING:
+    from scipy.spatial.transform import Rotation
+
 __all__ = [
     "CollisionBody",
     "NativeContactResult",
     "NewtonCollisionChecker",
     "UnsupportedFeasibilityError",
 ]
+
+_DEFAULT_DETECTION_GAP_M = 0.03
+_DEFAULT_NUMERIC_TOLERANCE_M = 1e-6
+_DEFAULT_MAX_SHAPES = 256
 
 
 class UnsupportedFeasibilityError(RuntimeError):
@@ -159,6 +167,92 @@ def _query_float32(values: object, label: str) -> np.ndarray:
     return converted
 
 
+def _geometry_precision(kind: str, values: object) -> tuple[float, float]:
+    """Use one geometry conversion budget for native and broad-phase queries."""
+    original = np.asarray(values)
+    converted = _query_float32(
+        original,
+        (
+            "Convex vertices"
+            if kind in {"convex", "mesh"}
+            else "Physical shape dimensions"
+        ),
+    )
+    if kind in {"convex", "mesh"}:
+        radius = float(np.linalg.norm(original, axis=1).max())
+        error = float(np.linalg.norm(original - converted, axis=1).max())
+    else:
+        if np.any(converted <= 0):
+            raise UnsupportedFeasibilityError(
+                "Physical shape dimensions collapsed in query precision"
+            )
+        radius = float(np.linalg.norm(original))
+        error = float(np.abs(original - converted).sum())
+    return radius, error
+
+
+def _pack_query_poses(
+    matrices: np.ndarray,
+    geometry_radius: float,
+    geometry_error: float,
+    numeric_tolerance_m: float,
+) -> tuple[np.ndarray, float, np.ndarray, Rotation]:
+    """Share the existing relative-pose conversion and scale allowance exactly."""
+    from scipy.spatial.transform import Rotation
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        relative = matrices[:, :3, 3] - matrices[0, :3, 3]
+    rotations = Rotation.from_matrix(matrices[:, :3, :3])
+    packed = _query_float32(
+        np.column_stack((relative, rotations.as_quat())),
+        "Packed physical collision pose",
+    )
+    rotation_loss = (
+        float(
+            np.linalg.norm(
+                rotations.as_matrix() - matrices[:, :3, :3], axis=(1, 2)
+            ).max()
+        )
+        * geometry_radius
+    )
+    scale = float(np.abs(relative).max()) + geometry_radius
+    tolerance = (
+        numeric_tolerance_m
+        + 2 * (geometry_error + rotation_loss)
+        + 32 * np.finfo(np.float32).eps * scale
+    )
+    return packed, tolerance, relative, rotations
+
+
+def _validate_triangle_faces(vertices: object, faces: object) -> None:
+    """Reject invalid surfaces, including faces collapsed by native conversion."""
+    original = np.asarray(vertices, dtype=np.float64)
+    converted = _query_float32(original, "Triangle vertices").astype(np.float64)
+    indices = np.asarray(faces)
+    if (
+        indices.ndim != 2
+        or indices.shape[1] != 3
+        or not np.issubdtype(indices.dtype, np.integer)
+        or np.any(indices < 0)
+        or np.any(indices >= len(original))
+    ):
+        raise UnsupportedFeasibilityError(
+            "Triangle mesh needs valid explicit face indices."
+        )
+    for points in (original, converted):
+        triangles = points[indices]
+        areas = np.linalg.norm(
+            np.cross(
+                triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+            ),
+            axis=1,
+        )
+        if not np.isfinite(areas).all() or np.any(areas == 0):
+            raise UnsupportedFeasibilityError(
+                "Triangle mesh has degenerate or collapsed faces."
+            )
+
+
 @dataclass(frozen=True)
 class CollisionBody:
     """One physical shape in an explicitly named link/entity frame.
@@ -278,10 +372,10 @@ class NewtonCollisionChecker:
         ignored_pairs: Sequence[tuple[str, str]] = (),
         clearance_m: float = 0.0,
         device: str = "cpu",
-        detection_gap_m: float = 0.03,
-        numeric_tolerance_m: float = 1e-6,
+        detection_gap_m: float = _DEFAULT_DETECTION_GAP_M,
+        numeric_tolerance_m: float = _DEFAULT_NUMERIC_TOLERANCE_M,
         use_cuda_graph: bool = True,
-        max_shapes: int = 256,
+        max_shapes: int = _DEFAULT_MAX_SHAPES,
         max_contacts: int = 1048576,
         allow_triangle_meshes: bool = False,
         max_triangle_pairs: int = 1000000,
@@ -349,20 +443,12 @@ class NewtonCollisionChecker:
         for index, body in enumerate(self.bodies):
             if body.kind == "halfspace":
                 continue
-            if body.kind in {"convex", "mesh"}:
-                original = np.asarray(body.vertices)
-                converted = _query_float32(original, "Convex vertices")
-                radius = float(np.linalg.norm(original, axis=1).max())
-                error = float(np.linalg.norm(original - converted, axis=1).max())
-            else:
-                original = np.asarray(body.dimensions)
-                converted = _query_float32(original, "Physical shape dimensions")
-                if np.any(converted <= 0):
-                    raise UnsupportedFeasibilityError(
-                        "Physical shape dimensions collapsed in query precision"
-                    )
-                radius = float(np.linalg.norm(original))
-                error = float(np.abs(original - converted).sum())
+            radius, error = _geometry_precision(
+                body.kind,
+                body.vertices if body.kind in {"convex", "mesh"} else body.dimensions,
+            )
+            if body.kind == "mesh":
+                _validate_triangle_faces(body.vertices, body.triangles)
             self._geometry_radius = max(self._geometry_radius, radius)
             self._geometry_error = max(self._geometry_error, error)
             self._body_geometry_error[index] = error
@@ -932,29 +1018,12 @@ class NewtonCollisionChecker:
                 if not _collect:
                     return self._failure(i, j), max(0.0, distance)
         if has_native:
-            from scipy.spatial.transform import Rotation
-
             matrices = np.asarray([poses[i] for i in self._native])
-            with np.errstate(over="ignore", invalid="ignore"):
-                relative = matrices[:, :3, 3] - matrices[0, :3, 3]
-            rotations = Rotation.from_matrix(matrices[:, :3, :3])
-            packed = _query_float32(
-                np.column_stack((relative, rotations.as_quat())),
-                "Packed physical collision pose",
-            )
-            rotation_loss = (
-                float(
-                    np.linalg.norm(
-                        rotations.as_matrix() - matrices[:, :3, :3], axis=(1, 2)
-                    ).max()
-                )
-                * self._geometry_radius
-            )
-            scale = float(np.abs(relative).max()) + self._geometry_radius
-            tolerance = (
-                self.numeric_tolerance_m
-                + 2 * (self._geometry_error + rotation_loss)
-                + 32 * np.finfo(np.float32).eps * scale
+            packed, tolerance, relative, rotations = _pack_query_poses(
+                matrices,
+                self._geometry_radius,
+                self._geometry_error,
+                self.numeric_tolerance_m,
             )
             if (
                 not math.isfinite(tolerance)

@@ -28,8 +28,15 @@ from .feasibility.collision import (
     NativeContactResult,
     NewtonCollisionChecker,
     UnsupportedFeasibilityError,
+    _DEFAULT_DETECTION_GAP_M,
+    _DEFAULT_MAX_SHAPES,
+    _DEFAULT_NUMERIC_TOLERANCE_M,
+    _geometry_precision,
+    _pack_query_poses,
+    _validate_triangle_faces,
 )
 from ._collision_backends import _require_newton
+from ._validation import _rigid_pose
 
 __all__: list[str] = []
 
@@ -59,6 +66,8 @@ class _ConvexCollection:
     def __init__(self, *, geometry_kind: Literal["convex", "mesh"] = "convex") -> None:
         self._objects = {}
         self._queries = {}
+        self._bounds = {}
+        self._precision = {}
         self._frozen = False
         self._closed = False
         self._identity = object()
@@ -97,9 +106,22 @@ class _ConvexCollection:
             raise UnsupportedFeasibilityError(
                 "Native query requires qualified convex solids; triangle surfaces are not convexified."
             )
+        precision = _geometry_precision(self._geometry_kind, mesh.vertices)
+        if self._geometry_kind == "mesh":
+            _validate_triangle_faces(mesh.vertices, mesh.faces)
         self._objects[name] = (
             mesh.copy(),
             np.eye(4) if transform is None else np.array(transform, copy=True),
+        )
+        self._precision[name] = precision
+        low, high = mesh.bounds
+        self._bounds[name] = np.asarray(
+            [
+                (x, y, z)
+                for x in (low[0], high[0])
+                for y in (low[1], high[1])
+                for z in (low[2], high[2])
+            ]
         )
 
     def set_transform(self, name: str, transform: np.ndarray) -> None:
@@ -127,6 +149,59 @@ class _ConvexCollection:
         """Return owned native surface facts, preserving undecidable thresholds."""
         query, poses = self._query(other, limit)
         return query.contact_query(poses, all_pairs=True)
+
+    def clearance_lower_bound(self, other: _ConvexCollection) -> float | None:
+        """Bound separation before allocating/querying native collision models.
+
+        Args:
+            other: Compatible group whose frozen geometry is being compared.
+
+        Returns:
+            Nonnegative AABB separation lower bound after the checker's canonical
+            geometry/pose conversion allowance, or None when the query precision
+            cannot be bounded. Only a value strictly above the original contact
+            threshold permits culling. Zero never decides touching or overlap.
+        """
+        if self._closed or other._closed:
+            raise RuntimeError("Collision query is closed.")
+        if not self._objects or not other._objects:
+            raise ValueError("A clearance bound needs nonempty query groups.")
+        self._frozen = other._frozen = True
+        groups = (self, other)
+        entries = [
+            (source, name, pose)
+            for source in groups
+            for name, (_, pose) in source._objects.items()
+        ]
+        if len(entries) > _DEFAULT_MAX_SHAPES:
+            return None
+        poses = np.asarray([_rigid_pose(pose) for _, _, pose in entries])
+        radius = max(source._precision[name][0] for source, name, _ in entries)
+        error = max(source._precision[name][1] for source, name, _ in entries)
+        try:
+            _, tolerance, relative, _ = _pack_query_poses(
+                poses, radius, error, _DEFAULT_NUMERIC_TOLERANCE_M
+            )
+        except UnsupportedFeasibilityError:
+            return None
+        # Match the smallest collection query band; larger consumer limits may
+        # enlarge that band but must not weaken this conservative culling gate.
+        if not math.isfinite(tolerance) or tolerance >= _DEFAULT_DETECTION_GAP_M:
+            return None
+        boxes = {id(source): [] for source in groups}
+        for index, (source, name, _) in enumerate(entries):
+            corners = source._bounds[name] @ poses[index, :3, :3].T + relative[index]
+            boxes[id(source)].append((corners.min(axis=0), corners.max(axis=0)))
+        a, b = [
+            (
+                np.min([v[0] for v in boxes[id(source)]], axis=0),
+                np.max([v[1] for v in boxes[id(source)]], axis=0),
+            )
+            for source in groups
+        ]
+        gap = np.maximum(0.0, np.maximum(a[0] - b[1], b[0] - a[1]))
+        bound = float(np.linalg.norm(gap)) - tolerance
+        return max(0.0, bound) if math.isfinite(bound) else None
 
     def _query(
         self, other: _ConvexCollection, limit: float
@@ -165,7 +240,7 @@ class _ConvexCollection:
             query = NewtonCollisionChecker(
                 bodies,
                 ignored_pairs=ignored,
-                detection_gap_m=max(0.03, limit + 0.01),
+                detection_gap_m=max(_DEFAULT_DETECTION_GAP_M, limit + 0.01),
                 clearance_m=0.0,
                 device="cpu",
                 use_cuda_graph=False,
@@ -186,6 +261,8 @@ class _ConvexCollection:
             query.close()
         self._queries.clear()
         self._objects.clear()
+        self._bounds.clear()
+        self._precision.clear()
         self._closed = True
 
     def __del__(self):
