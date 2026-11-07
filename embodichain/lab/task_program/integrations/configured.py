@@ -4299,7 +4299,7 @@ def _decode_runtime_services(
                             value,
                             path=f"{path}.planning_services.measured_rigid_bindings[{index}]",
                             required=frozenset({"invocation_id", "object_id"}),
-                            optional=frozenset({"container_id"}),
+                            optional=frozenset({"container_id", "collision_backend"}),
                         )
                     )
                     for index, value in enumerate(
@@ -4485,6 +4485,7 @@ def _decode_runtime_services(
                                 "opening_reference_id",
                                 "opening_object_target",
                                 "opening_place_invocation_id",
+                                "collision_backend",
                             }
                         ),
                     )

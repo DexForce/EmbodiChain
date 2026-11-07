@@ -532,12 +532,21 @@ poses and metadata stay owned and bound to one preparation scope.
    :members:
 
 ``source_native_contact`` maps the explicitly selected preserved source revision
-to GraspKit's existing typed ``ClosingContactPolicy`` and the shared Newton collision
-pipeline. Closing, opening and rigid-clearance algorithms remain solely in
-GraspKit. Source builders consume the existing Default/B1 native capture API,
-retain the explicit hand sampling grid and original contact thresholds, and never step
-physics or infer a Task Program policy. Missing Newton fails explicitly; this is
-geometric qualification, not physical acquisition/release evidence.
+to GraspKit's existing typed ``ClosingContactPolicy``. ``collision_backend``
+defaults to ``"newton"``; explicit ``"fcl"`` retains the source FCL distance and
+contact-threshold semantics and requires the optional ``planning-geometry``
+dependency. Missing dependencies and Newton precision ambiguity fail without
+trying another backend. Closing, opening and rigid-clearance algorithms remain
+solely in GraspKit. Source builders consume the existing Default/B1 native
+capture API, retain the explicit hand sampling grid and original contact
+thresholds, and never step physics or infer a Task Program policy.
+
+``NativeClosingQuery.collision_backend`` is fixed for its lifetime. Opening uses
+that query's collision factory, and the rigid rest builder selects the same
+backend. Each query owns its cache; backend and preparation identity scope the
+existing pose keys without changing their byte representation or sharing cached
+records across queries. A foreign closing record cannot authorize opening.
+These are geometric qualifications, not physical acquisition/release evidence.
 
 Close each query with its context manager or a ``finally`` block. It releases
 only owned query resources, never borrowed simulation entities. Ordinary

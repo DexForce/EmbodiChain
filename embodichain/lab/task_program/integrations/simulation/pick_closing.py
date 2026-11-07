@@ -18,8 +18,8 @@
 
 from __future__ import annotations
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 from weakref import WeakKeyDictionary
 import numpy as np
@@ -70,8 +70,15 @@ class PickClosingBinding:
     opening_reference_id: str | None = None
     opening_object_target: ConfiguredPoseTarget | None = None
     opening_place_invocation_id: str | None = None
+    collision_backend: Literal["newton", "fcl"] = field(default="newton", kw_only=True)
+    """Backend shared by this occurrence's closing, opening and rest screens."""
 
     def __post_init__(self) -> None:
+        if type(self.collision_backend) is not str or self.collision_backend not in {
+            "newton",
+            "fcl",
+        }:
+            raise ValueError("collision_backend must be 'newton' or 'fcl'.")
         for name in (
             "invocation_id",
             "object_id",
@@ -307,6 +314,7 @@ class SimulationPickClosingProvider:
             object_pose=pose,
             scope=scope,
             revision=request.skill_options.native_closing_revision,
+            collision_backend=binding.collision_backend,
             gravity_in_object=gravity,
             opening=opening,
         )

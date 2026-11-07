@@ -219,11 +219,15 @@ original Slide tutorial. Slide remains open-loop; this extension does not certif
 contact or physical goal satisfaction.
 
 `source_native_contact` composes preserved explicit source policies with the
-shared Newton collision pipeline over the same GraspKit closing/opening/rest
-algorithms. Contact decisions retain the query owner's conservative interval
-semantics; threshold ambiguity remains unavailable. Scene keeps
-native geometry capture, including the caller-selected sampling grid. The source
-adapter owns only policy mapping, provenance and query cleanup; ordinary
+same GraspKit closing/opening/rest algorithms. Its explicit collision backend
+defaults to Newton; the optional FCL choice retains the original source distance
+and threshold semantics. Neither missing dependencies nor precision ambiguity
+select another backend. Each query owns its fixed-backend cache and opening
+checks its bound closing record; the rest builder keeps that same backend.
+Scene keeps native geometry capture and the selected sampling grid. Typed
+`PickClosingBinding` and `MeasuredRigidInvocationBinding` declare the choice per
+occurrence; only nondefault choices change registration identity. The source
+adapter owns policy mapping, provenance and query cleanup; ordinary
 `ActionPlanningServices.prepare_grasp_query` retains Newton and shared defaults.
 `grasp_geometry.GraspOpeningTarget` is the single value definition, re-exported
 with the same identity from the existing Atomic/runtime imports. No concrete

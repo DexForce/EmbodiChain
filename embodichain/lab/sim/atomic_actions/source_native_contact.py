@@ -16,7 +16,8 @@
 
 """Explicit source-policy composition of shared native capture and GraspKit queries.
 
-This module selects the preserved experimental policy over the shared Newton backend. Closing,
+This module selects preserved explicit policies over a declared collision backend.
+Newton remains the default; FCL is an explicit source-qualified choice. Closing,
 opening and rigid-clearance algorithms are implemented only in GraspKit.
 """
 
@@ -24,11 +25,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 import numpy as np
 import torch
 import trimesh
-from embodichain.lab.sim.scene._collision_backends import _require_newton
+from embodichain.lab.sim.scene._collision_backends import _require_fcl, _require_newton
+from embodichain.lab.sim.scene._fcl_queries import _FclCollection
 from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
 from embodichain.lab.sim.scene.native_hand import (
     NativeHandGeometry,
@@ -74,6 +76,18 @@ def _source_policy(revision: int) -> ClosingContactPolicy:
     )
 
 
+def _collision_factory(
+    backend: Literal["newton", "fcl"],
+) -> type[_ConvexCollection] | type[_FclCollection]:
+    if type(backend) is not str or backend not in {"newton", "fcl"}:
+        raise ValueError("collision_backend must be 'newton' or 'fcl'.")
+    if backend == "fcl":
+        _require_fcl()
+        return _FclCollection
+    _require_newton()
+    return _ConvexCollection
+
+
 class NativeClosingQuery(_ClosingQuery):
     """Bind the original explicit source policy to the sole GraspKit algorithm.
 
@@ -89,6 +103,7 @@ class NativeClosingQuery(_ClosingQuery):
         *,
         scope: NativeQueryScope,
         revision: int = 1,
+        collision_backend: Literal["newton", "fcl"] = "newton",
         target_contact_offset: float | None = None,
         gravity_in_object: np.ndarray | None = None,
     ) -> None:
@@ -100,10 +115,13 @@ class NativeClosingQuery(_ClosingQuery):
             target_rest_offset: Native target rest offset in metres.
             scope: Explicit preparation and observation identity.
             revision: Explicit preserved source policy, from one through nine.
+            collision_backend: Explicit geometry backend. Missing dependencies
+                and uncertain results fail without selecting another backend.
             target_contact_offset: Native contact offset for policies using halos.
             gravity_in_object: Object-frame gravity for horizontal pad-line checks.
         """
-        _require_newton()
+        factory = _collision_factory(collision_backend)
+        self._collision_backend = collision_backend
         self._source_revision = revision
         self._geometry: NativeHandGeometry | None = None
         super().__init__(
@@ -112,8 +130,8 @@ class NativeClosingQuery(_ClosingQuery):
             target_rest_offset,
             scope=scope,
             policy=_source_policy(revision),
-            collision_factory=_ConvexCollection,
-            collision_metadata=_ConvexCollection.metadata(),
+            collision_factory=factory,
+            collision_metadata=factory.metadata(),
             report_metadata={"revision": revision},
             target_contact_offset=target_contact_offset,
             gravity_in_object=gravity_in_object,
@@ -123,6 +141,11 @@ class NativeClosingQuery(_ClosingQuery):
     def revision(self) -> int:
         """Return the immutable source policy provenance."""
         return self._source_revision
+
+    @property
+    def collision_backend(self) -> Literal["newton", "fcl"]:
+        """Return the backend fixed for this query and its dependent screens."""
+        return self._collision_backend
 
     def close(self) -> None:
         """Release collision resources and the borrowed native ownership token."""
@@ -153,6 +176,7 @@ def build_native_closing_query(
     object_pose: torch.Tensor,
     scope: NativeQueryScope,
     revision: int,
+    collision_backend: Literal["newton", "fcl"] = "newton",
     gravity_in_object: np.ndarray | None = None,
     opening: NativeOpeningTarget | None = None,
     identity: Mapping[str, object] | None = None,
@@ -171,6 +195,8 @@ def build_native_closing_query(
         object_pose: Same-observation object pose, shape ``(1, 4, 4)``.
         scope: Fresh preparation and observation identity.
         revision: Explicit preserved source policy, from one through nine.
+        collision_backend: Explicit geometry backend, fixed before capture.
+            Omitted selects Newton; FCL never acts as an automatic fallback.
         gravity_in_object: Same-observation gravity for horizontal pad qualification.
         opening: Optional same-scope, already-grounded release target.
         identity: Neutral caller provenance; captured physical keys are reserved.
@@ -178,7 +204,7 @@ def build_native_closing_query(
     Returns:
         Fresh owned query. Close it in a context manager or finally block.
     """
-    _require_newton()
+    _collision_factory(collision_backend)
     if not isinstance(scope, NativeQueryScope):
         raise TypeError("scope must be NativeQueryScope.")
     policy = _source_policy(revision)
@@ -208,6 +234,7 @@ def build_native_closing_query(
         geometry.target.rest_offset,
         scope=scope,
         revision=revision,
+        collision_backend=collision_backend,
         target_contact_offset=geometry.target.contact_offset,
         gravity_in_object=gravity_in_object,
     )
@@ -267,11 +294,12 @@ def build_native_rigid_rest_scene(
         raise RuntimeError("The closing query already owns its rigid scene capture.")
     if closing._geometry is None:
         raise ValueError("Rigid rest capture requires the exact native closing owner.")
+    factory = _collision_factory(closing.collision_backend)
     result = NativeRigidRestScene(
         closing.parts,
         capture_native_rigid_obstacles(simulation, closing._geometry),
         scope=closing.scope,
-        collision_factory=_ConvexCollection,
+        collision_factory=factory,
     )
     closing.rigid_scene_screen = result
     return result

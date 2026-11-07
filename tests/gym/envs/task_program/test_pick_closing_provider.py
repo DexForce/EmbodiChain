@@ -30,7 +30,14 @@ from embodichain.lab.task_program.integrations.simulation.targets import (
 )
 
 
-def _setup(monkeypatch, *, revision=8, opening=False, downstream=False):
+def _setup(
+    monkeypatch,
+    *,
+    revision=8,
+    opening=False,
+    downstream=False,
+    collision_backend="newton",
+):
     stamp = PhysicalObservationStamp("owner", "default.contacts", 7, 1.0)
     current = [stamp]
     robot = NS(uid="robot", get_joint_ids=lambda part: (1, 2))
@@ -46,6 +53,7 @@ def _setup(monkeypatch, *, revision=8, opening=False, downstream=False):
         "support" if opening or downstream else None,
         AbsolutePoseTarget((0.1, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0)) if opening else None,
         "program/place:0" if downstream else None,
+        collision_backend=collision_backend,
     )
     provider = owner.SimulationPickClosingProvider(
         robot,
@@ -114,6 +122,7 @@ def test_native_prepare_uses_exact_commands_geometry_roles_and_source_scope(
     second = provider.prepare(request, context, hand_geometry_cfg=object())
     assert first.kw["scope"] != second.kw["scope"]
     assert first.kw["source_uid"] == "native_payload"
+    assert first.kw["collision_backend"] == "newton"
     assert first.kw["observation_qpos"] is context.robot.qpos
     assert torch.equal(first.kw["object_pose"], context.scene.entities["payload"].pose)
     assert torch.equal(first.kw["open_qpos"], torch.tensor([[0.04, 0.04]]))
@@ -139,6 +148,72 @@ def test_native_prepare_uses_exact_commands_geometry_roles_and_source_scope(
     with pytest.raises(ValueError, match="source changed"):
         provider.prepare(request, context, hand_geometry_cfg=object())
     assert len(calls) == 2
+
+
+def test_explicit_fcl_binding_is_forwarded_to_the_same_native_builder(monkeypatch):
+    provider, request, context, _, calls, _ = _setup(
+        monkeypatch, collision_backend="fcl", opening=True
+    )
+    query = provider.prepare(request, context, hand_geometry_cfg=object())
+    assert query.kw["collision_backend"] == "fcl"
+    assert calls == [query.kw]
+
+
+@pytest.mark.parametrize("collision_backend", ["newton", "fcl"])
+def test_measured_binding_uses_its_declared_closing_backend(
+    monkeypatch, collision_backend
+):
+    from embodichain.lab.task_program.integrations.simulation import measured_rigid
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+
+    ordinary, request, context, current, _, sim = _setup(monkeypatch)
+    robot = ordinary.robot
+    context.robot.root_pose = torch.eye(4)[None]
+    robot.get_qpos = lambda: context.robot.qpos
+    robot.get_local_pose = lambda **kw: context.robot.root_pose
+    sim.is_default_backend = True
+    hand = request.binding.endpoint("primary", "grasp")
+    hand_target = hand.require_target(JointPositionTarget)
+    motion = NS(require_target=lambda cls: JointPositionTarget("arm", (0,)))
+    request.binding.endpoint = lambda role, kind: hand if kind == "grasp" else motion
+    cfg = RobotHandGeometryCfg(
+        motion_part="arm",
+        hand_part=hand_target.control_part,
+        hand_root_link="root",
+        pad_link_names=("first", "second"),
+        open_qpos=(0.04, 0.04),
+        closed_qpos=(0.0, 0.0),
+        sample_count=65,
+    )
+    provider = measured_rigid.SimulationMeasuredRigidProvider(
+        robot,
+        sim,
+        bindings=(
+            measured_rigid.MeasuredRigidInvocationBinding(
+                request.invocation_id, "payload", collision_backend=collision_backend
+            ),
+        ),
+        rigid_uids={"payload": "native_payload"},
+        containers=(),
+        hand_geometry_cfgs={hand_target.target_id: cfg},
+        read_source_stamp=lambda: current[0],
+    )
+    captures = []
+
+    def capture(actual_robot, actual_sim, **kwargs):
+        assert actual_robot is robot and actual_sim is sim
+        query = NS(closed=False)
+        query.close = lambda: setattr(query, "closed", True)
+        captures.append((query, kwargs))
+        return query
+
+    monkeypatch.setattr(measured_rigid, "build_native_closing_query", capture)
+    session = provider.prepare(request, context)
+    query = session.closing_query(request, context, NS(entity_id="payload"))
+    assert captures[0][1]["collision_backend"] == collision_backend
+    assert captures[0][1]["observation_qpos"] is context.robot.qpos
+    session.close()
+    assert query.closed
 
 
 def test_query_closes_when_capture_or_rigid_scene_changes_world(monkeypatch):

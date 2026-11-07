@@ -111,10 +111,14 @@ def test_cooked_capture_full_stroke_and_newton_decisions_match_pinned_source(
     assert cfg.open_qpos == before[3].open_qpos == (99, -99)
 
 
-def test_opening_scope_scene_owner_and_query_lifetimes_are_shared(ports):
+@pytest.mark.parametrize("collision_backend", ["newton", "fcl"])
+def test_opening_scope_scene_owner_and_query_lifetimes_are_shared(
+    ports, collision_backend
+):
     robot, simulation, *_ = ports
     args = _arguments(ports)
     args["revision"] = 4
+    args["collision_backend"] = collision_backend
     target_pose = simulation.rigids["source"].pose[0].numpy().copy()
     target_pose[2, 3] = 0.2
     opening = NativeOpeningTarget(
@@ -126,6 +130,7 @@ def test_opening_scope_scene_owner_and_query_lifetimes_are_shared(ports):
     )
     args["opening"] = opening
     with build_native_closing_query(robot, simulation, **args) as query:
+        assert query.collision_backend == collision_backend
         opening_query = query.opening_screen
         assert opening_query is not None and opening_query.scope == query.scope
         rest = build_native_rigid_rest_scene(simulation, query)
@@ -135,6 +140,12 @@ def test_opening_scope_scene_owner_and_query_lifetimes_are_shared(ports):
         assert query.mask(candidates, simulation.rigids["source"].pose).tolist() == [
             [True]
         ]
+        expected_backend = (
+            "newton.CollisionPipeline"
+            if collision_backend == "newton"
+            else "trimesh.collision.CollisionManager/python-fcl"
+        )
+        assert opening_query.report()["collision_backend"] == expected_backend
         with pytest.raises(RuntimeError, match="already owns"):
             build_native_rigid_rest_scene(simulation, query)
     assert rest.closed and opening_query.closed
