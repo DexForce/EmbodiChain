@@ -8,6 +8,7 @@ task_program:
     component: ../../../components/execution_policies/motion_gen_verified.yaml
     overrides:
       motion:
-        velocity_limit: 0.5
+        velocity_limit: 0.2
+        sample_count: 280
 embodiment:
   component: ../../../components/embodiments/tianji_marvin.yaml

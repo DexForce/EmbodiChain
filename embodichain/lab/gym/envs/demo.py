@@ -815,6 +815,8 @@ def execute_demo_episode(
     should_stop: StopPredicate | None = None,
     progress: ProgressWrapper | None = None,
     segments: Iterable[DemoSegment] | None = None,
+    active_env_ids: tuple[int, ...] | None = None,
+    step_observer: Callable[[tuple[bool, ...], Any, Any], None] | None = None,
     **plan_kwargs: Any,
 ) -> DemoEpisodeResult:
     """Plan and execute every segment in one environment episode.
@@ -865,7 +867,17 @@ def execute_demo_episode(
     set_active_mask = _get_env_callable(env, "_set_demo_active_mask")
     success_fn = _get_env_callable(env, "is_task_success")
 
-    active = [True] * num_envs
+    if active_env_ids is not None and (
+        not active_env_ids
+        or len(set(active_env_ids)) != len(active_env_ids)
+        or any(type(i) is not int or not 0 <= i < num_envs for i in active_env_ids)
+    ):
+        raise ValueError("active_env_ids must contain unique physical row indices")
+    if step_observer is not None and not callable(step_observer):
+        raise TypeError("step_observer must be callable")
+    active = [
+        active_env_ids is None or row in active_env_ids for row in range(num_envs)
+    ]
 
     def publish_active_mask() -> None:
         """Publish executor liveness to recording hooks and action masking."""
@@ -999,7 +1011,12 @@ def execute_demo_episode(
 
                 active_before_step = tuple(active)
                 try:
-                    _, _, terminated_value, truncated_value, info = env.step(action)
+                    observation, _, terminated_value, truncated_value, info = env.step(
+                        action
+                    )
+                    last_action_consumed = True
+                    if step_observer is not None:
+                        step_observer(active_before_step, action, observation)
                 except Exception as exc:
                     action_error = exc
                     actions_exhausted = False
@@ -1120,9 +1137,15 @@ def execute_demo_episode(
                                         emergency_action
                                     )
                                 try:
-                                    _, _, _, _, emergency_info = env.step(
-                                        emergency_action
+                                    emergency_observation, _, _, _, emergency_info = (
+                                        env.step(emergency_action)
                                     )
+                                    if step_observer is not None:
+                                        step_observer(
+                                            tuple(participants),
+                                            emergency_action,
+                                            emergency_observation,
+                                        )
                                 except Exception as exc:
                                     raise RuntimeError(
                                         "Emergency demo safe-stop action failed "
