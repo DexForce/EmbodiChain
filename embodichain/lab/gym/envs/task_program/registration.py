@@ -28,6 +28,7 @@ from embodichain.lab.task_program.integrations.configured import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs._final_acceptance import _FinalAcceptance
     from embodichain.lab.gym.utils.registration import EnvSpec
 
 __all__: list[str] = []
@@ -40,6 +41,7 @@ def _register_configured_task_program_integration(
     integration: _ConfiguredTaskProgramIntegration,
     *,
     max_episode_steps: object,
+    final_acceptance: _FinalAcceptance | None = None,
 ) -> EnvSpec:
     """Resolve an explicit registration or register a config-owned ID."""
     selected_env_id = _identifier(env_id, path="id")
@@ -81,9 +83,17 @@ def _register_configured_task_program_integration(
                 selected_env_id,
                 max_episode_steps=selected_max_episode_steps,
                 task_program_adapter_factory=integration.adapter_factory,
+                _final_acceptance=final_acceptance,
             )
             return get_env_spec(selected_env_id)
 
+        if existing._final_acceptance != final_acceptance or (
+            final_acceptance is not None and existing.cls is not EmbodiedEnv
+        ):
+            raise ValueError(
+                f"Configured Task Program environment ID {selected_env_id!r} "
+                "is already registered with a different final acceptance configuration."
+            )
         existing_factory = existing.task_program_adapter_factory
         existing_fingerprint = getattr(
             existing_factory,

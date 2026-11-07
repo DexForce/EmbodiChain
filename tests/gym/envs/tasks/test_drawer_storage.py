@@ -18,23 +18,37 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
+import yaml
 
-from embodichain_tasks.manipulation.drawer_storage import (
-    DrawerStorageEnv,
-    _FrankaDrawerStorageEnv,
+from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.registration import get_env_spec
+from embodichain.utils.utility import load_config
+
+_CONFIG = (
+    Path(__file__).resolve().parents[4]
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage"
 )
 
 
-def _observed_task(
-    env_cls=DrawerStorageEnv,
-    hand_joints=("gripper_finger1_joint_1",),
-    open_hand=(0.0,),
-    finger_links=("gripper_finger1_link_1", "gripper_finger2_link_1"),
-):
+def _load_deployment(embodiment):
+    path = _CONFIG / f"task.{embodiment}.yaml"
+    raw = load_config(path)
+    return config_to_cfg(raw, source_path=path)
+
+
+def _observed_task(embodiment="ur5"):
+    cfg = _load_deployment(embodiment)
+    open_hand, finger_links = {
+        "ur5": ((0.0,), ("gripper_finger1_link_1", "gripper_finger2_link_1")),
+        "franka": ((0.04, 0.04), ("fr3_leftfinger", "fr3_rightfinger")),
+    }[embodiment]
     n = 7
     tray = torch.eye(4).repeat(n, 1, 1)
     tray[:, :3, :3] = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
@@ -60,9 +74,10 @@ def _observed_task(
         get_qpos=lambda **kw: rail,
         get_link_pose=lambda *a, **kw: tray,
     )
-    env = object.__new__(env_cls)
+    env = object.__new__(EmbodiedEnv)
     env._num_envs = n
-    env.cfg = SimpleNamespace(task_program=True)
+    env.cfg = cfg
+    env._final_acceptance = cfg.final_acceptance
     env._active_task_program_bridge = SimpleNamespace(
         program_completed=True, completion_mask=torch.ones(n, dtype=torch.bool)
     )
@@ -71,36 +86,22 @@ def _observed_task(
         get_rigid_object=lambda uid: obj,
         get_articulation=lambda uid: drawer,
     )
+
+    def read_hand(*, name, target):
+        assert name == "eef"
+        assert target is False
+        return hand
+
     env.robot = SimpleNamespace(
-        joint_names=hand_joints,
-        get_qpos=lambda **kw: hand,
+        get_qpos=read_hand,
         get_link_pose=lambda name, **kw: fingers[name],
     )
     return env
 
 
-@pytest.mark.parametrize(
-    ("env_cls", "hand_joints", "open_hand", "finger_links"),
-    [
-        (
-            DrawerStorageEnv,
-            ("gripper_finger1_joint_1",),
-            (0.0,),
-            ("gripper_finger1_link_1", "gripper_finger2_link_1"),
-        ),
-        (
-            _FrankaDrawerStorageEnv,
-            ("fr3_finger_joint1", "fr3_finger_joint2"),
-            (0.04, 0.04),
-            ("fr3_leftfinger", "fr3_rightfinger"),
-        ),
-    ],
-    ids=["ur5", "franka"],
-)
-def test_storage_requires_corners_closed_rail_open_hand_and_clearance(
-    env_cls, hand_joints, open_hand, finger_links
-):
-    env = _observed_task(env_cls, hand_joints, open_hand, finger_links)
+@pytest.mark.parametrize("embodiment", ["ur5", "franka"])
+def test_storage_requires_corners_closed_rail_open_hand_and_clearance(embodiment):
+    env = _observed_task(embodiment)
     assert env.is_task_success().tolist() == [
         True,
         False,
@@ -112,30 +113,100 @@ def test_storage_requires_corners_closed_rail_open_hand_and_clearance(
     ]
 
 
-def test_physical_storage_does_not_bypass_program_failure():
+def test_final_acceptance_remeasures_after_completion():
     env = _observed_task()
-    env._active_task_program_bridge.program_completed = False
+    bridge = env._active_task_program_bridge
+    env._active_task_program_bridge = None
     assert not env.is_task_success().any()
+    env._active_task_program_bridge = bridge
+    bridge.program_completed = False
+    assert not env.is_task_success().any()
+    bridge.program_completed = True
+
+    # The drawer moves after the program completed. A final-segment snapshot
+    # would keep accepting row 0. A newly closed drawer can also recover row 3.
+    assert env.is_task_success()[0]
+    rail = env.sim.get_articulation("drawer").get_qpos(target=False)
+    rail[0] = 0.01001
+    rail[3] = 0.010
+    assert env.is_task_success().tolist() == [
+        False,
+        False,
+        False,
+        True,
+        False,
+        False,
+        False,
+    ]
+    # An episode-level program replacement still cannot bypass the host gate.
+    env.cfg.task_program = None
+    bridge.completion_mask[3] = False
+    assert not env.is_task_success().any()
+    bridge.completion_mask[3] = True
+    rail[3] = -0.001
+    assert env.is_task_success()[3]
+    rail[3] = torch.nan
+    assert not env.is_task_success()[3]
 
 
-def test_configured_deployment_preserves_its_explicit_acceptance_class():
-    from pathlib import Path
-    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
-    from embodichain.lab.gym.utils.registration import get_env_spec
-    from embodichain.utils.utility import load_config
-
-    config = (
-        Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage/task.ur5.yaml"
-    )
-    raw = load_config(config)
-    cfg = config_to_cfg(raw, source_path=config)
+def test_configured_acceptance_is_part_of_registration_and_construction(tmp_path):
     from argparse import Namespace
     from embodichain.lab.scripts.run_task import resolve_collection_plan
 
+    source = _CONFIG / "task.ur5.yaml"
+    raw = load_config(source)
+    cfg = config_to_cfg(raw, source_path=source)
     assert resolve_collection_plan(Namespace(), raw).max_attempts == 1
-    assert cfg.task_program is not None
-    assert get_env_spec(raw["id"]).cls is DrawerStorageEnv
+    spec = get_env_spec(raw["id"])
+    assert spec.cls is EmbodiedEnv
+    assert (
+        cfg.final_acceptance == config_to_cfg(raw, source_path=source).final_acceptance
+    )
+
+    weaker = tmp_path / "acceptance.yaml"
+    declaration = load_config(_CONFIG / "task_program/acceptance.yaml")
+    declaration["articulation_joint"]["max"] = 0.02
+    weaker.write_text(yaml.safe_dump(declaration), encoding="utf-8")
+    with pytest.raises(ValueError, match="different final acceptance"):
+        config_to_cfg(
+            {**raw, "acceptance": {"component": str(weaker)}}, source_path=source
+        )
+    with pytest.raises(ValueError, match="different final acceptance"):
+        config_to_cfg(
+            {key: value for key, value in raw.items() if key != "acceptance"},
+            source_path=source,
+        )
+
+    cfg.final_acceptance = replace(cfg.final_acceptance, joint_max=0.02)
+    with pytest.raises(ValueError, match="registered final acceptance"):
+        spec.make(cfg=cfg)
+    cfg.final_acceptance = None
+    with pytest.raises(ValueError, match="registered final acceptance"):
+        spec.make(cfg=cfg)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error", "message"),
+    [
+        ("tolerence", 0.001, ValueError, "unsupported fields"),
+        ("tolerance", True, TypeError, "finite number"),
+        ("tolerance", float("nan"), ValueError, "must be finite"),
+        ("half_extents", [0.025, 0.025], ValueError, "exactly 3"),
+        ("lower", [0.3, 0.31, 0.05], ValueError, "must not exceed upper"),
+    ],
+)
+def test_acceptance_component_rejects_invalid_predicates(
+    tmp_path, field, value, error, message
+):
+    source = _CONFIG / "task.franka.yaml"
+    raw = load_config(source)
+    component = tmp_path / "acceptance.yaml"
+    payload = load_config(_CONFIG / "task_program/acceptance.yaml")
+    payload["containment"][field] = value
+    component.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    raw["acceptance"]["component"] = str(component)
+    with pytest.raises(error, match=message):
+        config_to_cfg(raw, source_path=source)
 
 
 def _run_franka_contact_episode() -> None:

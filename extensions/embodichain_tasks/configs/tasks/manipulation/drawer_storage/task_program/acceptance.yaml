@@ -1,0 +1,17 @@
+containment:
+  object: cube
+  articulation: drawer
+  frame_link: drawer
+  half_extents: [0.025, 0.025, 0.025]
+  # Interior of Drawer/model_split_links_with_inertials.urdf in the drawer frame.
+  lower: [-0.1965, 0.01, -0.057]
+  upper: [0.1965, 0.309, 0.0425]
+  tolerance: 0.001
+articulation_joint:
+  joint: cabinet_to_drawer
+  min: -0.001
+  max: 0.01
+hand_release:
+  command_preset: parallel_jaw_commands
+  tolerance: 0.002
+  min_finger_distance: 0.08

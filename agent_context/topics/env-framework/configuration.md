@@ -54,6 +54,7 @@ with `background` and `rigid_object`. See the [simulation object boundary](../si
 | `<task>/agents/<algorithm>.{json,yaml}` | Optional RL training configuration | Task identity or Python registration ownership |
 | `<task>/catalog.yaml` | Logical task key, presentation metadata and named deployment references | Gym registration or duplicated runtime settings |
 | Optional `objective.component` | Independent physical evaluation declaration | Program completion, segment acceptance or persistence authority |
+| Optional `acceptance.component` | Final measured conditions for a configured Task Program deployment | Program steps, planner settings or hand joint commands |
 
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.
@@ -189,12 +190,23 @@ ID, it discovers installed task packages before falling back to
 `register_env_function(EmbodiedEnv, config["id"], ...)`.
 
 The ID is selected by the config and may be any free valid Gym ID. Loading the
-same ID with the same integration and episode limit is idempotent. An explicitly
-registered `EmbodiedEnv` subclass may supply task-owned measured acceptance;
+same ID with the same integration, episode limit and final acceptance is
+idempotent. An explicitly registered `EmbodiedEnv` subclass may supply
+task-owned measured acceptance;
 the loader preserves it only when its adapter factory has the same integration
 fingerprint and episode limit. Incompatible classes, integrations and limits
 fail closed. Registration is process-local. Configuration-only IDs become
 available to `gym.make(id)` after loading their Gym config.
+
+A configured deployment may select `acceptance: {component: <yaml>}` to use
+`EmbodiedEnv` with a final physical gate. The strict component declares object
+corner containment in an articulation-link frame, an inclusive measured joint
+interval and measured hand release. Hand release resolves an existing command
+preset and uses the embodiment component's `finger_links` mapping by control
+part. Normalized thresholds and resolved bindings are checked when reloading a
+registered ID and again when constructing it. This is a deployment-owned
+declaration outside `TaskProgramCfg`. See [execution](execution.md) for success
+queries.
 
 The integration has no task-level kind. It composes a typed scene and robot
 profile with optional allowlisted live-service declarations. The built-in service

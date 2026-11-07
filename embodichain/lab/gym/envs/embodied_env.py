@@ -60,6 +60,7 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
+from embodichain.lab.gym.envs._final_acceptance import _FinalAcceptance
 from embodichain.lab.gym.envs._startup_summary import format_functor_summary
 from embodichain.lab.gym.envs.objectives import (
     MeasuredRigidObjectState,
@@ -369,6 +370,9 @@ class EmbodiedEnvCfg(EnvCfg):
     hooks. No live provider, planner, or callable is stored in this config.
     """
 
+    final_acceptance: _FinalAcceptance | None = None
+    """Optional measured acceptance decoded from the deployment's acceptance component."""
+
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
@@ -431,6 +435,19 @@ class EmbodiedEnv(BaseEnv):
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         **kwargs,
     ):
+        final_acceptance = getattr(cfg, "final_acceptance", None)
+        if final_acceptance is not None:
+            if type(final_acceptance) is not _FinalAcceptance:
+                raise TypeError(
+                    "final_acceptance must be decoded from an acceptance component."
+                )
+            if (
+                getattr(cfg, "task_program", None) is None
+                or getattr(cfg, "rl_task", None) is not None
+            ):
+                raise ValueError(
+                    "Final acceptance requires a Task Program environment."
+                )
         rl_task = getattr(cfg, "rl_task", None)
         if rl_task is not None:
             if not isinstance(rl_task, RLTaskCfg):
@@ -471,6 +488,8 @@ class EmbodiedEnv(BaseEnv):
             setattr(cfg, name, value)
             setattr(self, name, value)
 
+        self._final_acceptance = final_acceptance
+
         self.event_manager: EventManager | None = None
         self.observation_manager: ObservationManager | None = None
         self.reward_manager: RewardManager | None = None
@@ -495,6 +514,8 @@ class EmbodiedEnv(BaseEnv):
                     "policy_request rollout recording requires an ActionManager."
                 )
             self._initialize_physical_objective()
+            if self._final_acceptance is not None:
+                self._final_acceptance.validate_scene(self)
             self.expert_action_spec = build_expert_action_spec(
                 joint_names=[
                     self.robot.joint_names[joint_id]
@@ -3344,6 +3365,8 @@ class EmbodiedEnv(BaseEnv):
 
         Task Program success is published only after its bridge has consumed
         every segment lifecycle, including post-policies and validators.
+        An optional final acceptance component measures the current scene and
+        robot state on every query.
 
         Args:
             **kwargs: Compatibility keywords forwarded for tasks without a Task Program.
@@ -3356,27 +3379,24 @@ class EmbodiedEnv(BaseEnv):
             return outcome.task_state()[0]
         bridge = self._active_task_program_bridge
         task_program = getattr(getattr(self, "cfg", None), "task_program", None)
-        if bridge is None:
-            if task_program is None:
-                return super().is_task_success(**kwargs)
-            return torch.zeros(
-                self.num_envs,
-                dtype=torch.bool,
-                device=self.device,
+        acceptance = getattr(self, "_final_acceptance", None)
+        if bridge is None and task_program is None and acceptance is None:
+            return super().is_task_success(**kwargs)
+        if bridge is None or not bridge.program_completed:
+            completion = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
             )
-        if not bridge.program_completed:
-            return torch.zeros(
-                self.num_envs,
-                dtype=torch.bool,
-                device=self.device,
-            )
-        completion = bridge.completion_mask
-        if completion.dtype != torch.bool or completion.shape != (self.num_envs,):
-            raise ValueError(
-                "Task Program completion mask must be bool with one value per "
-                "environment."
-            )
-        return completion.to(device=self.device)
+        else:
+            completion = bridge.completion_mask
+            if completion.dtype != torch.bool or completion.shape != (self.num_envs,):
+                raise ValueError(
+                    "Task Program completion mask must be bool with one value per "
+                    "environment."
+                )
+            completion = completion.to(device=self.device)
+        if acceptance is not None:
+            completion = completion & acceptance.measure(self)
+        return completion
 
     def create_demo_segments(
         self,

@@ -22,7 +22,7 @@ import torch
 
 from .aabb import _bounds_tensor, _float_tensor, _same_type, _valid_bounds
 
-__all__ = ["transform_aabbs"]
+__all__ = ["box_corners_inside_frame_bounds", "transform_aabbs"]
 
 
 def transform_aabbs(bounds: torch.Tensor, transforms: torch.Tensor) -> torch.Tensor:
@@ -59,3 +59,39 @@ def transform_aabbs(bounds: torch.Tensor, transforms: torch.Tensor) -> torch.Ten
     )
     valid = valid & torch.isfinite(result).all(dim=(-2, -1))
     return torch.where(valid[..., None, None], result, float("nan"))
+
+
+def box_corners_inside_frame_bounds(
+    object_pose: torch.Tensor,
+    frame_pose: torch.Tensor,
+    corners: torch.Tensor,
+    lower: torch.Tensor,
+    upper: torch.Tensor,
+    tolerance: float,
+) -> torch.Tensor:
+    """Test whether all corners lie within inclusive bounds in a rigid frame.
+
+    Args:
+        object_pose: Object-to-world transforms, shaped ``(B, 4, 4)``.
+        frame_pose: Bounds-frame-to-world transforms, shaped ``(B, 4, 4)``.
+        corners: Object-local corner coordinates, shaped ``(K, 3)``.
+        lower: Minimum coordinates in the bounds frame, shaped ``(3,)``.
+        upper: Maximum coordinates in the bounds frame, shaped ``(3,)``.
+        tolerance: Nonnegative padding on each face in the bounds frame.
+
+    Returns:
+        A boolean mask of shape ``(B,)``. Nonfinite corner coordinates fail.
+
+    Both poses must use the same world frame, dtype and device. Transform each
+    corner through world space to preserve rounding at the inclusive boundary.
+    """
+    world = (
+        torch.einsum("bij,kj->bki", object_pose[:, :3, :3], corners)
+        + object_pose[:, None, :3, 3]
+    )
+    local = torch.einsum(
+        "bji,bkj->bki", frame_pose[:, :3, :3], world - frame_pose[:, None, :3, 3]
+    )
+    return torch.isfinite(local).all(dim=(1, 2)) & (
+        (local >= lower - tolerance) & (local <= upper + tolerance)
+    ).all(dim=(1, 2))

@@ -37,6 +37,7 @@ class ResolvedGymComponents:
         embodiment_skill_profile: Optional detached profile for the public Task
             Program deployment composer.
         scene_config: Optional physical scene projection for semantic binding checks.
+        embodiment_finger_links: Optional finger link names by robot control part.
 
     Resolver calls own their nested data independently. The mappings remain
     mutable for explicit declaration assembly; this is not a sealed identity.
@@ -47,6 +48,7 @@ class ResolvedGymComponents:
     scene_selected: bool
     embodiment_skill_profile: dict[str, object] | None
     scene_config: dict[str, object] | None
+    embodiment_finger_links: dict[str, tuple[str, ...]] | None = None
 
 
 def resolve_gym_components(

@@ -99,6 +99,10 @@ stable online language IDs. Language intent does not establish physical success.
   iterator completes normally. It then returns the bridge's final row-local
   acceptance mask, which already combines runtime, post-policy, and validator
   results.
+- For a configured deployment with `acceptance.component`, the environment
+  also measures the scene and robot on every success query and intersects
+  that result with the bridge mask. A replacement program still uses the
+  environment's declared final acceptance.
 - `reset()` lets `BaseEnv` read that final mask before clearing the active
   bridge, preventing completed state from leaking into the next episode.
 - `DemoSegmentResult.successes` is the persisted segment acceptance authority.

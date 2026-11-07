@@ -793,6 +793,19 @@ def config_to_cfg(
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
         configured_task_program_path = deployment.program_path
+        if "acceptance" in config:
+            from embodichain.lab.gym.envs._final_acceptance import (
+                _load_final_acceptance,
+            )
+
+            env_cfg.final_acceptance = _load_final_acceptance(
+                config["acceptance"],
+                base_dir=base_dir,
+                command_presets=deployment.integration.registration.robot_profile_binding.command_presets,
+                finger_links=component_resolution.embodiment_finger_links or {},
+            )
+    elif "acceptance" in config:
+        raise ValueError("acceptance requires a configured Task Program deployment.")
     elif "robot" not in config:
         log_error("Missing required config key: robot")
 
@@ -1232,6 +1245,7 @@ def config_to_cfg(
             config["id"],
             configured_task_program_integration,
             max_episode_steps=env_cfg.max_episode_steps,
+            final_acceptance=env_cfg.final_acceptance,
         )
 
     return env_cfg

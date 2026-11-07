@@ -2417,6 +2417,34 @@ def test_invalid_config_does_not_leave_an_integration_registration(
     assert _TEST_ENV_ID not in gym_registry
 
 
+def test_integration_registration_preserves_explicit_environment_discovered_on_load(
+    registered_test_ids: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.lab.gym.utils import registration
+
+    registered_test_ids.append(_TEST_ENV_ID)
+    integration = _decode_configured_task_program_integration(
+        _integration_payload("repeated_pick_place")
+    )
+
+    class ExplicitEnv(EmbodiedEnv):
+        pass
+
+    def discover():
+        registration.register_env_function(
+            ExplicitEnv,
+            _TEST_ENV_ID,
+            max_episode_steps=321,
+            task_program_adapter_factory=integration.adapter_factory,
+        )
+
+    monkeypatch.setattr(registration, "discover_task_packages", discover)
+    spec = _register_configured_task_program_integration(
+        _TEST_ENV_ID, integration, max_episode_steps=321
+    )
+    assert spec.cls is ExplicitEnv
+
+
 def test_integration_registration_rejects_reusing_an_id_for_changed_config(
     registered_test_ids: list[str],
 ) -> None:

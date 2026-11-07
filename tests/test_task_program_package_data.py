@@ -480,7 +480,7 @@ print(json.dumps(decoded_deployments, sort_keys=True))
 
 
 def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
-    """Resolve the wheel's explicit task registration before generic fallback."""
+    """Register both drawer deployments from installed YAML and discover the catalog."""
     source = tmp_path / "source"
     source.mkdir()
     for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
@@ -544,31 +544,29 @@ from embodichain.utils.utility import load_config
 from gymnasium import registry
 
 configs = installed / "embodichain_tasks/configs/tasks/manipulation/drawer_storage"
-ur5_path = configs / "task.ur5.yaml"
-ur5 = load_config(ur5_path)
+assert not (installed / "embodichain_tasks/manipulation/drawer_storage.py").exists()
+assert (configs / "task_program/acceptance.yaml").is_file()
 assert "embodichain_tasks" not in sys.modules
-assert ur5["id"] not in registry
-config_to_cfg(ur5, source_path=ur5_path)
-spec = get_env_spec(ur5["id"])
+
+for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
+    path = configs / f"task.{name}.yaml"
+    raw = load_config(path)
+    assert raw["id"] not in registry
+    cfg = config_to_cfg(raw, source_path=path)
+    assert cfg.final_acceptance.open_positions == open_positions
+    assert len(cfg.final_acceptance.finger_links) == 2
+    assert get_env_spec(raw["id"]).cls is EmbodiedEnv
 
 import embodichain_tasks
-from embodichain_tasks.manipulation.drawer_storage import DrawerStorageEnv
+from embodichain.cli.list_task import _collect_environment_entries
 
 assert Path(embodichain_tasks.__file__).is_relative_to(installed)
-assert spec.cls is DrawerStorageEnv
-assert get_env_spec(ur5["id"]) is spec
+assert "embodichain_tasks.manipulation.drawer_storage" not in sys.modules
+assert {entry.env_id for entry in _collect_environment_entries()} >= {
+    "TaskProgramDrawerStorage-UR5-v1",
+    "TaskProgramDrawerStorage-Franka-v1",
+}
 
-franka_path = configs / "task.franka.yaml"
-franka = load_config(franka_path)
-config_to_cfg(franka, source_path=franka_path)
-franka_cls = get_env_spec(franka["id"]).cls
-assert issubclass(franka_cls, DrawerStorageEnv)
-assert franka_cls is not DrawerStorageEnv
-
-config_only = {**ur5, "id": "TaskProgramDrawerStorage-ConfigOnly-v1"}
-assert config_only["id"] not in registry
-config_to_cfg(config_only, source_path=ur5_path)
-assert get_env_spec(config_only["id"]).cls is EmbodiedEnv
 """,
             str(installed),
         ],
