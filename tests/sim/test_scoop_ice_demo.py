@@ -154,15 +154,26 @@ def test_default_scoops_and_retains_ice(seed: int) -> None:
         demo.SimulationManager.flush_cleanup_queue()
 
 
-def test_ice_spawn_configs_are_separated_before_prepare(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("has_native_renderer", [False, True])
+def test_ice_spawn_configs_are_separated_before_prepare(
+    tmp_path, monkeypatch, has_native_renderer: bool
+) -> None:
     """Newton evaluates initial contacts before runtime randomization can run."""
     (tmp_path / "ice.obj").touch()
     monkeypatch.setattr(demo, "get_data_path", lambda name: str(tmp_path))
     declared = []
+    material_calls = []
 
     def add_group(*, cfg):
         declared.extend(cfg.rigid_objects.values())
-        return SimpleNamespace(set_visual_material=lambda **kwargs: None)
+        return SimpleNamespace(
+            set_visual_material=lambda **kwargs: material_calls.append("assign")
+        )
+
+    def create_visual_material(**kwargs):
+        assert has_native_renderer
+        material_calls.append("create")
+        return object()
 
     def prepare():
         positions = np.array(
@@ -180,11 +191,13 @@ def test_ice_spawn_configs_are_separated_before_prepare(tmp_path, monkeypatch) -
         assert separations.min() >= 0.030
 
     sim = SimpleNamespace(
+        has_native_renderer=has_native_renderer,
         add_rigid_object_group=add_group,
-        create_visual_material=lambda **kwargs: object(),
+        create_visual_material=create_visual_material,
         prepare=prepare,
     )
     demo.create_ice_cubes(sim)
+    assert material_calls == (["create", "assign"] if has_native_renderer else [])
 
 
 def test_newton_uses_cg_for_the_large_free_body_pile(monkeypatch) -> None:
@@ -196,4 +209,11 @@ def test_newton_uses_cg_for_the_large_free_body_pile(monkeypatch) -> None:
 
     monkeypatch.setattr(demo, "SimulationManager", manager)
     demo.initialize_simulation(demo.build_parser().parse_args(["--physics", "newton"]))
-    assert configs[0].physics_cfg.solver_cfg["solver"] == "cg"
+    assert configs[0].physics_cfg.solver_cfg["solver_type"] == "dexuni"
+    assert configs[0].physics_cfg.solver_cfg["mujoco_options"]["solver"] == "cg"
+    assert (
+        configs[0].physics_cfg.solver_cfg["vbd_options"][
+            "rigid_body_contact_buffer_size"
+        ]
+        == 256
+    )

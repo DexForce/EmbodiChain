@@ -74,6 +74,10 @@ CAPABILITY_TO_ADD_METHOD: dict[str, str | None] = {
 }
 
 
+# This module exercises capability guards using mock managers only.
+pytestmark = pytest.mark.no_sim
+
+
 def _make_backend(name: str) -> PhysicsBackend:
     """Construct a backend with a minimal fake owning-manager back-ref."""
     return BACKENDS[name](SimpleNamespace())
@@ -123,7 +127,7 @@ def test_contact_sensor_guard_uses_backend_capability() -> None:
     [
         ("mujoco_warp", "cuda:0", True),
         ("mujoco_warp", "cpu", False),
-        ("dexuni", "cuda:0", False),
+        ("dexuni", "cuda:0", True),
         ("xpbd", "cpu", True),
     ],
 )
@@ -132,9 +136,45 @@ def test_newton_contact_sensor_capability_depends_on_runtime(
     runtime_device: str,
     expected: bool,
 ) -> None:
+    from dexsim.scene import ContactBuffer
+
+    if solver_type == "dexuni" and not hasattr(ContactBuffer, "impulse_valid"):
+        expected = False  # Published wheels predate DexUni ContactQuery.
     backend = NewtonPhysicsBackend(SimpleNamespace())
     backend._configured_solver_type = solver_type
     backend._runtime_device = runtime_device
+
+    assert backend.supports_contact_sensor is expected
+
+
+@pytest.mark.parametrize(
+    ("solver_path", "use_mujoco_cpu", "expected"),
+    [
+        ("pure_mujoco", False, True),
+        ("pure_mujoco", True, False),
+        ("pure_vbd", False, True),
+        ("coupled", False, True),
+        ("dexuni_kinematic_soft", False, True),
+    ],
+)
+@pytest.mark.usefixtures("requires_dexuni_contact_query")
+def test_dexuni_contact_sensor_capability_follows_resolved_path(
+    monkeypatch: pytest.MonkeyPatch,
+    solver_path: str,
+    use_mujoco_cpu: bool,
+    expected: bool,
+) -> None:
+    world = object()
+    native = SimpleNamespace(
+        solver_type="dexuni",
+        solver=SimpleNamespace(features=SimpleNamespace(backend=solver_path)),
+        mujoco_solver=SimpleNamespace(use_mujoco_cpu=use_mujoco_cpu),
+    )
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        lambda candidate: native if candidate is world else None,
+    )
+    backend = NewtonPhysicsBackend(SimpleNamespace(_world=world))
 
     assert backend.supports_contact_sensor is expected
 
@@ -259,3 +299,55 @@ def test_matrix_covers_all_backends() -> None:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_dexuni_contacts_remain_unavailable_without_quantity_validity(monkeypatch):
+    from dexsim.scene import ContactBuffer
+
+    monkeypatch.delattr(ContactBuffer, "impulse_valid", raising=False)
+    backend = NewtonPhysicsBackend(SimpleNamespace())
+    backend._configured_solver_type = "dexuni"
+    backend._runtime_device = "cuda:0"
+    assert not backend.supports_contact_sensor
+
+
+@pytest.mark.parametrize(
+    "solver_type,solver_backend,two_way,expected",
+    [
+        ("mujoco_warp", "pure_mujoco", False, False),
+        ("dexuni", "pure_mujoco", False, False),
+        ("dexuni", "coupled", True, False),
+        ("dexuni", "coupled", False, True),
+    ],
+)
+def test_cpu_mujoco_contact_capability_uses_resolved_solver(
+    monkeypatch,
+    solver_type,
+    solver_backend,
+    two_way,
+    expected,
+):
+    from dexsim.scene import ContactBuffer
+    from dexsim.engine.newton_physics import backend_registry
+
+    if solver_type == "dexuni" and not hasattr(ContactBuffer, "impulse_valid"):
+        pytest.skip("DexUni contacts require the per-row quantity contract.")
+    world = object()
+    native = SimpleNamespace(
+        solver_type=solver_type,
+        mujoco_solver=SimpleNamespace(use_mujoco_cpu=True),
+        solver=SimpleNamespace(
+            features=SimpleNamespace(
+                backend=solver_backend,
+                two_way_coupling_enabled=two_way,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        backend_registry,
+        "get_newton_backend",
+        lambda value: native if value is world else None,
+    )
+    backend = NewtonPhysicsBackend(SimpleNamespace(_world=world))
+    backend._runtime_device = "cuda:0"
+    assert backend.supports_contact_sensor is expected

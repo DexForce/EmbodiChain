@@ -62,36 +62,38 @@ def test_flat_grasp_uses_transformed_center_and_world_top() -> None:
 
 def test_handle_grasp_points_down_and_moves_toward_handle_root() -> None:
     pan = torch.tensor(
-        [[-0.1, -0.1, 0.0], [0.1, 0.1, 0.02], [0.0, 0.3, 0.06], [0.0, 0.5, 0.08]]
+        [[-0.1, -0.1, 0.0], [0.1, 0.03, 0.048], [-0.01, 0.1, 0.04], [0.01, 0.2, 0.05]]
     )
     grasp = build_pan_handle_grasp_pose(torch.eye(4), pan, _CPU)
-    torch.testing.assert_close(grasp[:3, 3], torch.tensor([0.0, 0.365, 0.086]))
+    torch.testing.assert_close(grasp[:3, 3], torch.tensor([0.0, 0.115, 0.056]))
     torch.testing.assert_close(grasp[:3, 2], torch.tensor([0.0, 0.0, -1.0]))
     torch.testing.assert_close(grasp[:3, :3].T @ grasp[:3, :3], torch.eye(3))
     assert torch.linalg.det(grasp[:3, :3]).item() == pytest.approx(1.0)
 
 
-def test_placing_target_clears_basin_and_ignores_tall_handle() -> None:
+def test_placing_target_clears_basin_and_ignores_handle() -> None:
     bread = torch.tensor([[-0.1, -0.05, 0.0], [0.1, 0.05, 0.02]])
-    pan = torch.tensor([[-0.1, -0.1, 0.0], [0.1, 0.1, 0.02], [0.0, 0.5, 0.08]])
+    pan = torch.tensor(
+        [[-0.1, -0.1, 0.0], [0.1, 0.03, 0.048], [0.0, 0.5, 0.08], [0.0, 0.55, 0.01]]
+    )
     initial = torch.eye(4)
     support = build_support_object_target_pose(initial, _CPU)
     placing = build_placing_object_target_pose(initial, bread, pan, support, _CPU)
-    # The basin top is 0.731 m; the bread bottom retains 6 mm clearance.
+    # The basin top is 0.759 m; the bread bottom retains 6 mm clearance.
     torch.testing.assert_close(support[:3, 3], torch.tensor([-0.06, 0.0, 0.711]))
-    torch.testing.assert_close(placing[:3, 3], torch.tensor([-0.06, 0.0, 0.737]))
+    torch.testing.assert_close(placing[:3, 3], torch.tensor([-0.06, -0.035, 0.765]))
     torch.testing.assert_close(initial, torch.eye(4))
 
 
 def test_empty_basin_selection_preserves_full_mesh() -> None:
-    pan = torch.tensor([[0.0, 0.0, 0.1], [0.0, 0.2, 0.2]])
+    pan = torch.tensor([[0.0, 0.1, 0.1], [0.0, 0.2, 0.2]])
     torch.testing.assert_close(get_pan_basin_vertices(pan), pan)
 
 
 def test_placing_target_centers_offset_mesh_footprints_on_the_basin() -> None:
     # The bread's asset origin is displaced 0.3m along X from its mesh center.
     bread = torch.tensor([[0.2, -0.04, 0.0], [0.4, 0.04, 0.02]])
-    pan = torch.tensor([[-0.12, -0.12, 0.0], [0.12, 0.12, 0.02]])
+    pan = torch.tensor([[-0.12, -0.03, 0.0], [0.12, 0.03, 0.02]])
     initial = torch.eye(4)
     initial[:3, 3] = torch.tensor([4.0, 3.0, 2.0])
     support = torch.eye(4)
@@ -107,13 +109,13 @@ def test_placing_target_uses_inner_floor_instead_of_rim_height() -> None:
     # Two floor layers plus a raised rim vertex: the ray must choose the upper
     # floor surface, not the lower exterior or the basin's maximum height.
     floor = torch.tensor(
-        [[-0.1, -0.1, 0.0], [0.1, -0.1, 0.0], [0.1, 0.1, 0.0], [-0.1, 0.1, 0.0]]
+        [[-0.1, -0.03, 0.0], [0.1, -0.03, 0.0], [0.1, 0.03, 0.0], [-0.1, 0.03, 0.0]]
     )
     pan = torch.cat(
         (
             floor,
             floor + torch.tensor([0.0, 0.0, 0.005]),
-            torch.tensor([[0.1, 0.1, 0.04]]),
+            torch.tensor([[0.1, 0.03, 0.04]]),
         )
     )
     faces = torch.tensor([[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]])
@@ -128,7 +130,7 @@ def test_placing_target_uses_inner_floor_instead_of_rim_height() -> None:
 def test_placing_target_rejects_missing_center_support_surface() -> None:
     bread = torch.tensor([[-0.02, -0.02, 0.0], [0.02, 0.02, 0.02]])
     pan = torch.tensor(
-        [[-0.1, -0.1, 0.0], [0.1, -0.1, 0.0], [0.1, -0.09, 0.0], [-0.1, 0.1, 0.0]]
+        [[-0.1, -0.03, 0.0], [0.1, -0.03, 0.0], [0.1, -0.02, 0.0], [-0.1, 0.03, 0.0]]
     )
     with pytest.raises(ValueError, match="no supporting mesh surface"):
         build_placing_object_target_pose(
@@ -160,6 +162,7 @@ def test_frozen_placement_mesh_audit_checks_full_footprint_and_sampled_gaps(cond
     )
     faces = torch.tensor([[0, 1, 2], [0, 2, 3]])
     pan = bread * 5
+    pan[:, 1] *= 0.3  # Keep the basin below the authored positive-Y handle.
     pan_faces = faces.clone()
     placing, support = torch.eye(4)[None], torch.eye(4)[None]
     placing[:, 2, 3] = 0.006
@@ -186,10 +189,11 @@ def test_frozen_placement_mesh_audit_checks_full_footprint_and_sampled_gaps(cond
             ]
         )
     elif condition == "handle":
-        pan = torch.cat((pan, bread + torch.tensor([0.2, 0.0, 0.1])))
+        # A low handle must be excluded by local Y, even below the basin Z limit.
+        pan = torch.cat((pan, bread + torch.tensor([0.0, 0.2, 0.01])))
         pan_faces = torch.cat((faces, faces + 4))
-        placing[:, 0, 3] = 0.2
-        placing[:, 2, 3] = 0.106
+        placing[:, 1, 3] = 0.2
+        placing[:, 2, 3] = 0.016
     original = placing.clone()
     result = _placement_input_geometry(bread, faces, pan, pan_faces, placing, support)
     row = result["rows"][0]
@@ -220,7 +224,9 @@ def test_placement_mesh_audit_retains_each_transformed_target_row():
     support[1, :2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
     placing = support.clone()
     placing[:, 2, 3] += 0.006
-    result = _placement_input_geometry(bread, faces, bread * 5, faces, placing, support)
+    pan = bread * 5
+    pan[:, 1] *= 0.3
+    result = _placement_input_geometry(bread, faces, pan, faces, placing, support)
     assert [row["env_index"] for row in result["rows"]] == [0, 1]
     assert all(row["qualified"] for row in result["rows"])
     assert [
@@ -245,6 +251,7 @@ def test_placement_overlay_covers_an_explicitly_included_support_triangle() -> N
         ],
         dtype=torch.float64,
     )
+    support[:, 1] -= 0.05  # Keep every support triangle on the basin side.
     placing_pose = torch.eye(4, dtype=torch.float64)[None]
     placing_pose[:, 2, 3] = 0.006
     result = _placement_input_geometry(

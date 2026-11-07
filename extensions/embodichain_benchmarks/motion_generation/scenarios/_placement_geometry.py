@@ -42,8 +42,9 @@ TABLE_TOP_Z = 0.65
 PAN_TARGET_CENTER_XY = (-0.06, 0.0)
 PAN_TARGET_Z_LIFT = 0.06
 BREAD_ON_PAN_CLEARANCE = 0.006
-PAN_HANDLE_LOCAL_Z_MIN = 0.04
-PAN_BASIN_LOCAL_Z_MAX = 0.04
+# The authored Z-up pan has its basin at negative Y and handle at positive Y.
+PAN_HANDLE_LOCAL_Y_MIN = 0.06
+PAN_BASIN_LOCAL_Y_MAX = 0.04
 PAN_HANDLE_ROOT_OFFSET = 0.035
 BREAD_TARGET_WORLD_YAW_DEG = 0.0
 
@@ -55,9 +56,9 @@ def get_pan_basin_vertices(pan_vertices: torch.Tensor) -> torch.Tensor:
         pan_vertices: Local pan mesh vertices with shape ``(N, 3)``.
 
     Returns:
-        Vertices whose local z is within the configured basin height.
+        Vertices on the basin side of the handle attachment.
     """
-    basin_vertices = pan_vertices[pan_vertices[:, 2] <= PAN_BASIN_LOCAL_Z_MAX]
+    basin_vertices = pan_vertices[pan_vertices[:, 1] <= PAN_BASIN_LOCAL_Y_MAX]
     if basin_vertices.numel() == 0:
         logger.log_warning("Pan basin vertex mask is empty; falling back to full mesh.")
         return pan_vertices
@@ -143,7 +144,7 @@ def build_pan_handle_grasp_pose(
     Returns:
         A world TCP transform with shape ``(4, 4)``.
     """
-    handle_vertices = pan_vertices[pan_vertices[:, 2] > PAN_HANDLE_LOCAL_Z_MIN]
+    handle_vertices = pan_vertices[pan_vertices[:, 1] >= PAN_HANDLE_LOCAL_Y_MIN]
     if handle_vertices.numel() == 0:
         logger.log_warning(
             "Pan handle vertex mask is empty; falling back to full mesh."

@@ -124,6 +124,8 @@ def test_sparse_rows_use_device_count_and_environment_qualified_actor_ids(device
         counterpart_ids=torch.tensor([[0], [0]], device=device),
     )
     buffer = ContactBuffer.allocate(6, device)
+    if hasattr(buffer, "quantity_valid"):
+        buffer.quantity_valid.fill_(True)
     buffer.data.fill_(float("nan"))
     buffer.data[:4] = torch.tensor(
         [
@@ -146,3 +148,32 @@ def test_sparse_rows_use_device_count_and_environment_qualified_actor_ids(device
     )
     assert history.contact.tolist() == [[True, False], [False, True]]
     assert history.contact_count.tolist() == [1.0, 1.0]
+
+
+@pytest.mark.parametrize("threshold,found", [(0.0, True), (1.0, False)])
+def test_geometry_only_rows_do_not_create_force_or_force_threshold_events(
+    threshold, found
+):
+    history = ContactHistory(torch.tensor([[10]]), force_threshold=threshold)
+    data = sample([[[0, 10]]])
+    data["impulse_valid"] = torch.zeros((1, 1), dtype=torch.bool)
+    data["friction_valid"] = torch.zeros((1, 1), dtype=torch.bool)
+    data["impulse"].fill_(float("nan"))
+    data["friction"].fill_(float("nan"))
+    history.update(data, 0.1)
+    assert not history.force.any()
+    assert history.found.item() == found
+
+
+@pytest.mark.parametrize(
+    "pair,expected", [((10, 0), (5.0, 0.0, -20.0)), ((0, 10), (-5.0, 0.0, 20.0))]
+)
+def test_force_preserves_friction_impulse_on_actor_zero(
+    pair: tuple[int, int], expected: tuple[float, float, float]
+) -> None:
+    history = ContactHistory(torch.tensor([[10]]))
+    data = sample([[pair]])
+    data["impulse"][0, 0] = 2.0
+    data["friction"][0, 0] = torch.tensor([0.5, 0.0, 0.0])
+    history.update(data, 0.1)
+    torch.testing.assert_close(history.force[0, 0], torch.tensor(expected))

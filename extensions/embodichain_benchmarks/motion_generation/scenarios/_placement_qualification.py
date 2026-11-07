@@ -26,7 +26,7 @@ from shapely import intersects_xy, set_precision
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
-from ._placement_geometry import PAN_BASIN_LOCAL_Z_MAX
+from ._placement_geometry import PAN_BASIN_LOCAL_Y_MAX
 
 __all__: list[str] = []
 
@@ -106,7 +106,7 @@ def _placement_input_geometry(
             "triangles_int64_le_sha256": hashlib.sha256(f.tobytes()).hexdigest(),
         }
     (bread, bread_faces), (pan, pan_faces) = arrays
-    basin_faces = pan_faces[(pan[pan_faces, 2] <= PAN_BASIN_LOCAL_Z_MAX).all(axis=1)]
+    basin_faces = pan_faces[(pan[pan_faces, 1] <= PAN_BASIN_LOCAL_Y_MAX).all(axis=1)]
     if not len(basin_faces):
         raise ValueError(
             "Placement input geometry has no triangles within the basin mask."
@@ -178,7 +178,7 @@ def _placement_input_geometry(
         "scope": "complete_xy_footprint_and_sampled_height_only_not_continuous_3d_collision_or_physical_success",
         "frame": "arena",
         "meshes": meshes,
-        "basin_local_z_max_m": PAN_BASIN_LOCAL_Z_MAX,
+        "basin_local_y_max_m": PAN_BASIN_LOCAL_Y_MAX,
         "basin_triangle_count": len(basin_faces),
         "sample_spacing_m": _SAMPLE_SPACING_M,
         "coverage_precision_grid_m": _PROJECTION_GRID_M,

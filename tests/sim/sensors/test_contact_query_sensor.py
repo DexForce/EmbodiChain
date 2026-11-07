@@ -42,6 +42,8 @@ class _FakeQuery:
         self.available = True
         self.buffer = ContactBuffer.allocate(4, "cpu")
         self.buffer.count = 2
+        if hasattr(self.buffer, "quantity_valid"):
+            self.buffer.quantity_valid.fill_(True)
         self.buffer.data[0] = torch.tensor(
             [1.0, 2.0, 3.0, 0.0, 0.0, 1.0, 0.1, 0.2, 0.3, 0.4, -0.01]
         )
@@ -55,7 +57,7 @@ class _FakeQuery:
         self.actor_info_calls += 1
         return self._actors[actor_id]
 
-    def fetch(self) -> ContactBuffer:
+    def fetch_solver_report(self) -> ContactBuffer:
         assert self.available, "SDK contact snapshot is unavailable after reset"
         self.fetch_calls += 1
         return self.buffer
@@ -220,6 +222,104 @@ def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
     assert sensor.dropped_contacts == 0
 
 
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_mixed_contact_quantities_survive_scatter_filter_and_history(device):
+    query = _FakeQuery()
+    if not hasattr(query.buffer, "quantity_valid"):
+        pytest.skip("Per-row contact quantities require DexSim's current dev API.")
+    query.capabilities = ContactQueryCapabilities(True, False, False)
+    query.buffer.quantity_valid[:2] = torch.tensor([[True, False], [False, True]])
+    # Poison unsupported quantities; neither the observation mask nor the
+    # history reducer may promote them to measured forces.
+    query.buffer.data[0, 6:9] = float("nan")
+    query.buffer.data[1, 9] = float("nan")
+    query.buffer.data[1, 6:9] = torch.tensor([0.0, 0.5, 0.0])
+    if device != "cpu":
+        old = query.buffer
+        query.buffer = ContactBuffer.allocate(old.capacity, device)
+        for name in ("data", "actor_ids", "env_ids", "quantity_valid"):
+            getattr(query.buffer, name).copy_(getattr(old, name))
+        query.buffer.count = old.count
+        query.buffer.device_counts[0] = old.count
+        query.fetch_solver_report_async = query.fetch_solver_report
+    handles = (
+        SimpleNamespace(path="arena_0/cube"),
+        SimpleNamespace(path="arena_1/cube"),
+    )
+    owner = SimpleNamespace(
+        num_envs=2,
+        physics_step_index=0,
+        arena_offsets=torch.zeros((2, 3), device=device),
+        _spawn_scene=SimpleNamespace(handles=lambda uid: handles),
+        spawn_result=SimpleNamespace(
+            create_contact_query=lambda *args, **kwargs: query
+        ),
+    )
+    sensor = ContactSensor(
+        ContactSensorCfg(
+            uid="contacts",
+            rigid_uid_list=["cube"],
+            filter_need_both_actor=False,
+            max_contacts_per_env=2,
+        ),
+        torch.device(device),
+        owner=owner,
+    )
+    history = sensor.create_history(
+        "forces", torch.tensor([[4], [7]], device=device), force_threshold=1.0
+    )
+    sensor.update_physics_step(0.1)
+    data = sensor.get_data()
+    assert data["impulse_valid"].cpu().tolist() == [[True, False], [False, False]]
+    assert data["friction_valid"].cpu().tolist() == [[False, False], [True, False]]
+    torch.testing.assert_close(
+        history.force.cpu(), torch.tensor([[[0.0, 0.0, -4.0]], [[0.0, -5.0, 0.0]]])
+    )
+    assert history.contact.all()
+    filtered = sensor.filter_by_user_ids(torch.tensor([4]))
+    assert filtered["impulse_valid"].tolist() == [True]
+    assert filtered["friction_valid"].tolist() == [False]
+    sensor.reset([0])
+    assert not data["impulse_valid"].any()
+    assert data["friction_valid"][1, 0]
+    query.buffer.count = 0
+    query.buffer.device_counts.zero_()
+    sensor.update()
+    assert not data["is_valid"].any()
+    assert not data["friction_valid"].any()
+
+
+def test_legacy_contact_buffer_uses_query_quantity_capabilities():
+    query = _FakeQuery()
+    old = query.buffer
+    query.buffer = SimpleNamespace(
+        data=old.data,
+        actor_ids=old.actor_ids,
+        env_ids=old.env_ids,
+        device_counts=old.device_counts,
+        count_device=old.count_device,
+        dropped_count_device=old.dropped_count_device,
+        capacity=old.capacity,
+        count=old.count,
+        dropped_count=old.dropped_count,
+    )
+    query.capabilities = ContactQueryCapabilities(True, False, False)
+    query.buffer.data[:2, 6:10] = float("nan")
+    sensor = _sensor_for_query(query)
+    history = sensor.create_history(
+        "forces", torch.tensor([[4], [7]]), force_threshold=1.0
+    )
+    sensor.update_physics_step(0.1)
+    data = sensor.get_data()
+    assert data["is_valid"][:, 0].all()
+    assert not data["impulse_valid"].any()
+    assert not data["friction_valid"].any()
+    assert not history.force.any()
+    assert not history.found.any()
+
+
 @pytest.mark.parametrize("with_history", [False, True])
 def test_sampling_observers_are_instance_owned_and_bracket_native_fetch(with_history):
     query = _FakeQuery()
@@ -228,13 +328,13 @@ def test_sampling_observers_are_instance_owned_and_bracket_native_fetch(with_his
         sensor.create_history("existing_history", torch.tensor([[4], [7]]))
     other = _sensor_for_query(_FakeQuery())
     events = []
-    original_fetch = query.fetch
+    original_fetch = query.fetch_solver_report
 
-    def fetch():
-        events.append("fetch")
+    def fetch_solver_report():
+        events.append("fetch_solver_report")
         return original_fetch()
 
-    query.fetch = fetch
+    query.fetch_solver_report = fetch_solver_report
     observer = SimpleNamespace(
         begin_control_step=lambda: events.append("begin"),
         before_sample=lambda: (events.append("before"), "stamp")[1],
@@ -254,7 +354,7 @@ def test_sampling_observers_are_instance_owned_and_bracket_native_fetch(with_his
     assert events == [
         "begin",
         "before",
-        "fetch",
+        "fetch_solver_report",
         ("after", 0.01, "stamp", 2),
         ("reset", [0]),
     ]
@@ -269,7 +369,7 @@ def test_sampling_observers_are_instance_owned_and_bracket_native_fetch(with_his
     events.clear()
     sensor._sim.physics_step_index += 1
     sensor.update_physics_step(0.01)
-    assert events == ["fetch"]
+    assert events == ["fetch_solver_report"]
 
 
 def test_sampling_observers_reject_external_capture_before_callbacks(monkeypatch):
@@ -299,17 +399,17 @@ def test_contact_sampler_normal_update_fetches_once_before_reading_data():
     query = _FakeQuery()
     sensor = _sensor_for_query(query)
     calls = []
-    original = query.fetch
+    original = query.fetch_solver_report
 
-    def fetch():
-        calls.append("fetch")
+    def fetch_solver_report():
+        calls.append("fetch_solver_report")
         return original()
 
-    query.fetch = fetch
+    query.fetch_solver_report = fetch_solver_report
     sample = ContactEvidenceSampler(sensor).sample(
         PhysicalEvidenceRequest(0.0, 0, torch.tensor([1, 0]))
     )
-    assert calls == ["fetch"]
+    assert calls == ["fetch_solver_report"]
     assert sample.frame.get(CONTACT_VALID_MASK).values.sum().item() == 2
     assert all(batch.valid.all() for batch in sample.frame.batches.values())
 
@@ -528,7 +628,7 @@ def test_observer_snapshot_survives_subscription_removal_during_sampling():
 
 @pytest.mark.parametrize("loss", ["none", "query", "scatter"])
 def test_first_standalone_sample_with_observer_preserves_loss_unavailability(loss):
-    """The observer's interval counter has not yet seen this standalone fetch."""
+    """The observer's interval counter has not yet seen this standalone fetch_solver_report."""
     from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
     from embodichain.lab.sim.sensors.contact.sampling import (
         ContactEvidenceSampler,
@@ -554,13 +654,13 @@ def test_first_standalone_sample_with_observer_preserves_loss_unavailability(los
         query.buffer.actor_ids[:3] = torch.tensor([[4, -1], [4, -1], [7, -1]])
         query.buffer.data[2] = query.buffer.data[1]
     fetches = []
-    original_fetch = query.fetch
+    original_fetch = query.fetch_solver_report
 
-    def fetch():
+    def fetch_solver_report():
         fetches.append(True)
         return original_fetch()
 
-    query.fetch = fetch
+    query.fetch_solver_report = fetch_solver_report
     sample = ContactEvidenceSampler(sensor).sample(
         PhysicalEvidenceRequest(1.0, 0, torch.tensor([1, 0]))
     )

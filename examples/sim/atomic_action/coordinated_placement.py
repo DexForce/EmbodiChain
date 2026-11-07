@@ -24,7 +24,9 @@ it while the right hand keeps holding the pan.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -34,8 +36,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 import numpy as np
 import torch
+import trimesh
 from scipy.spatial.transform import Rotation as SciRotation
 
+from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
@@ -60,6 +64,7 @@ from embodichain_benchmarks.motion_generation.scenarios._placement_geometry impo
     build_pan_handle_grasp_pose,
     build_support_object_target_pose,
     build_placing_object_target_pose,
+    get_pan_basin_vertices,
 )
 from examples.sim.atomic_action.scenario import (
     add_dual_tutorial_robot,
@@ -87,10 +92,10 @@ from examples.sim.atomic_action.support import (
     run_tutorial,
 )
 
-DEFAULT_MESH_FRAME_CORRECTION_EULER_DEG = (-90.0, 0.0, 0.0)
-# DexSim imports this pan GLB with gym raw +Z mapped to local -Y.  The +90deg X
-# correction therefore makes the pan opening point upward in world Z.
-PAN_MESH_FRAME_CORRECTION_EULER_DEG = (90.0, 0.0, 0.0)
+# Bake the GLB geometry into the authored Z-up frame before native loading.
+# Preserve the gym table/bread orientation; turn the pan's opening upward.
+DEFAULT_MESH_FRAME_CORRECTION_EULER_DEG = (0.0, 0.0, 0.0)
+PAN_MESH_FRAME_CORRECTION_EULER_DEG = (180.0, 0.0, 0.0)
 PAN_WORLD_YAW_CORRECTION_DEG = 270.0
 
 
@@ -121,12 +126,19 @@ BREAD_MESH_PATH = f"{PLACEMENT_ASSET_ROOT}/bread.glb"
 PAN_MESH_PATH = f"{PLACEMENT_ASSET_ROOT}/pan.glb"
 BREAD_LABEL = "bread"
 PAN_LABEL = "pan"
+# Leave opening clearance inside the PGI fingers' roughly 73 mm contact span.
+BREAD_MESH_SCALE = 1.4
 GRIPPER_TCP_Z = 0.121
 PICK_SAMPLE_INTERVAL = 100
 COORDINATED_SAMPLE_INTERVAL = 120
-ROBOT_INIT_POS = (1.85, 0.0, 0.1)
+BASELINE_ROBOT_INIT_POS = (1.85, 0.0, 0.1)
 BASELINE_TABLE_TOP_Z = 0.3621708124799265
 SCENE_Z_OFFSET = TABLE_TOP_Z - BASELINE_TABLE_TOP_Z
+ROBOT_INIT_POS = (
+    BASELINE_ROBOT_INIT_POS[0],
+    BASELINE_ROBOT_INIT_POS[1],
+    BASELINE_ROBOT_INIT_POS[2] + SCENE_Z_OFFSET,
+)
 BASELINE_TABLE_INIT_POS = (
     0.00014585733079742588,
     0.00023304896730074557,
@@ -174,16 +186,22 @@ PAN_INIT_POS, PAN_INIT_ROT = transform_baseline_pose(
     mesh_frame_correction_euler_deg=PAN_MESH_FRAME_CORRECTION_EULER_DEG,
     world_yaw_correction_deg=PAN_WORLD_YAW_CORRECTION_DEG,
 )
-PAN_INIT_POS = (PAN_INIT_POS[0], PAN_INIT_POS[1], TABLE_TOP_Z + 0.001)
-BREAD_GRASP_Z_CLEARANCE = 0.018
+# The bread is about 37 mm thick at the selected mesh scale.
+# Seat both objects clear of the surface before Newton builds its contacts.
+BREAD_INIT_POS = (BREAD_INIT_POS[0], BREAD_INIT_POS[1], TABLE_TOP_Z + 0.045)
+PAN_INIT_POS = (PAN_INIT_POS[0], PAN_INIT_POS[1], TABLE_TOP_Z + 0.008)
+BREAD_GRASP_Z_CLEARANCE = 0.015
 PAN_GRASP_Z_CLEARANCE = 0.0
+# Use the straight outer handle rather than the rounded basin neck.
+PAN_GRASP_HANDLE_TIP_SHIFT = 0.055
 PAN_HANDLE_CLOSE_QPOS = 0.045
+DEXUNI_PAN_HANDLE_CLOSE_QPOS = 0.033
 PAN_PICK_SAMPLE_INTERVAL = 130
 PAN_PICK_HAND_INTERP_STEPS = 32
-BREAD_TARGET_HEIGHT_OFFSET = 0.1
+BREAD_TARGET_HEIGHT_OFFSET = 0.0
 SUPPORT_TARGET_HEIGHT_OFFSET = 0.0
 PICK_APPROACH_DISTANCE = 0.12
-PLACE_LIFT_HEIGHT = 0.10
+PLACE_LIFT_HEIGHT = 0.05
 TRAJECTORY_SIM_STEPS = 8
 
 
@@ -215,7 +233,35 @@ def create_dual_robot(
         urdf_name=f"dual_{robot_type}_coordinated_placement",
         tcp_z=GRIPPER_TCP_Z,
         init_pos=ROBOT_INIT_POS,
+        newton_gripper_friction=4.0 if sim.is_newton_backend else None,
+        newton_mimic_stabilizer=True if sim.is_newton_backend else None,
     )
+
+
+def _placement_mesh_path(data_path: str) -> str:
+    """Cache a textured OBJ with the same authored Z-up frame in every renderer."""
+    source = Path(resolve_cached_data_path(data_path))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:20]
+    cache_dir = (
+        Path(EMBODICHAIN_DEFAULT_DATA_ROOT)
+        / "derived"
+        / "coordinated_placement_z_up_v1"
+        / digest
+    )
+    target = cache_dir / "mesh.obj"
+    if not target.is_file():
+        cache_dir.parent.mkdir(parents=True, exist_ok=True)
+        # Publish the OBJ, MTL and textures together so concurrent examples
+        # cannot observe a partially exported asset.
+        with tempfile.TemporaryDirectory(dir=cache_dir.parent) as staging:
+            mesh = trimesh.load(str(source), force="mesh", process=False)
+            mesh.export(Path(staging) / target.name)
+            try:
+                Path(staging).rename(cache_dir)
+            except OSError:
+                if not target.is_file():
+                    raise
+    return str(target)
 
 
 def create_table(sim: SimulationManager) -> RigidObject:
@@ -223,14 +269,15 @@ def create_table(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="table",
-            shape=MeshCfg(fpath=resolve_cached_data_path(TABLE_MESH_PATH)),
+            shape=MeshCfg(fpath=_placement_mesh_path(TABLE_MESH_PATH)),
             attrs=create_tutorial_rigid_body_physics(
                 mass=10.0,
                 dynamic_friction=0.9,
                 static_friction=0.95,
                 restitution=0.01,
             ),
-            body_type="kinematic",
+            # This fixture never moves; static shapes also enter DexUni's MuJoCo view.
+            body_type="static",
             init_pos=list(TABLE_INIT_POS),
             init_rot=list(TABLE_INIT_ROT),
         )
@@ -243,7 +290,7 @@ def create_bread(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="bread",
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(BREAD_MESH_PATH),
+                fpath=_placement_mesh_path(BREAD_MESH_PATH),
                 compute_uv=False,
                 collision=MeshCollisionCfg(
                     approximation="convex_decomposition",
@@ -252,6 +299,10 @@ def create_bread(sim: SimulationManager) -> RigidObject:
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
+                dynamic_friction=0.97,
+                static_friction=0.99,
+                angular_damping=2.0,
+                linear_damping=1.0,
                 contact_offset=0.003,
                 rest_offset=0.001,
                 restitution=0.01,
@@ -260,7 +311,7 @@ def create_bread(sim: SimulationManager) -> RigidObject:
                 max_depenetration_velocity=10.0,
                 newton_contact=sim.is_newton_backend,
             ),
-            body_scale=(1.75, 1.75, 1.75),
+            body_scale=(BREAD_MESH_SCALE,) * 3,
             init_pos=list(BREAD_INIT_POS),
             init_rot=list(BREAD_INIT_ROT),
         )
@@ -273,7 +324,7 @@ def create_pan(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="pan",
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(PAN_MESH_PATH),
+                fpath=_placement_mesh_path(PAN_MESH_PATH),
                 compute_uv=False,
                 collision=MeshCollisionCfg(
                     approximation="convex_decomposition",
@@ -401,8 +452,11 @@ def run_coordinated_placement_demo(
     sim.prepare()
     settle_object(sim, bread, step=0)
     settle_object(sim, pan, step=0)
+    sim.update(step=10)
     bread_pose_batch = clone_local_pose_from_first_env(bread)
     pan_pose_batch = clone_local_pose_from_first_env(pan)
+    initial_bread_z = bread_pose_batch[:, 2, 3].clone()
+    initial_pan_z = pan_pose_batch[:, 2, 3].clone()
     bread.clear_dynamics()
     pan.clear_dynamics()
     bread_pose = bread_pose_batch[0].to(device=sim.device, dtype=torch.float32)
@@ -422,7 +476,11 @@ def run_coordinated_placement_demo(
     right_open, right_close = get_hand_open_close_qpos(
         robot,
         hand_control_part="right_eef",
-        close_qpos=PAN_HANDLE_CLOSE_QPOS,
+        close_qpos=(
+            DEXUNI_PAN_HANDLE_CLOSE_QPOS
+            if sim.physics.solver_type == "dexuni"
+            else PAN_HANDLE_CLOSE_QPOS
+        ),
     )
     left_open, left_close = get_hand_open_close_qpos(
         robot,
@@ -483,6 +541,7 @@ def run_coordinated_placement_demo(
         sim.device,
         z_clearance=PAN_GRASP_Z_CLEARANCE,
     )
+    pan_grasp_pose[:3, 3] += PAN_GRASP_HANDLE_TIP_SHIFT * pan_grasp_pose[:3, 1]
     pick_invocations = (
         engine.make_invocation(
             "pick_up",
@@ -517,15 +576,12 @@ def run_coordinated_placement_demo(
         f"Compile both pick-ups cost time: {time.time() - start_time:.2f} seconds"
     )
     if len(pick_compiled.action_plans) != len(pick_invocations):
-        logger.log_warning("Failed to compile both pick-up trajectories.")
-        return
+        raise RuntimeError("Failed to compile both pick-up trajectories.")
     left_pick_result, right_pick_result = pick_compiled.action_plans
     if not left_pick_result.plan_success.all():
-        logger.log_warning("Failed to plan left bread pick-up trajectory.")
-        return
+        raise RuntimeError("Failed to plan left bread pick-up trajectory.")
     if not pick_compiled.plan_success.all():
-        logger.log_warning("Failed to plan right pan pick-up trajectory.")
-        return
+        raise RuntimeError("Failed to plan right pan pick-up trajectory.")
     left_pick_trajectory = left_pick_result.joint_trajectory
     right_pick_trajectory = right_pick_result.joint_trajectory
     if left_pick_trajectory is None or right_pick_trajectory is None:
@@ -566,6 +622,11 @@ def run_coordinated_placement_demo(
             on_trajectory_step=log_trajectory_execution,
             record=False,
         )
+        bread_lift = bread.get_local_pose(to_matrix=True)[:, 2, 3] - initial_bread_z
+        if bool((bread_lift < 0.5 * left_pick_options.lift_height).any()):
+            raise RuntimeError(
+                f"Bread pickup did not lift the object: bread_lift={bread_lift.tolist()}."
+            )
         bread.clear_dynamics()
         replay_trajectory(
             sim,
@@ -582,16 +643,29 @@ def run_coordinated_placement_demo(
         pan.clear_dynamics()
         # Reconcile the projected task state with measurements before compiling
         # placement. This keeps the second stage robust to pick-up execution error.
-        bread_pose_batch = clone_local_pose_from_first_env(bread).to(
-            device=sim.device, dtype=torch.float32
+        bread_pose_batch = (
+            bread.get_local_pose(to_matrix=True)
+            .clone()
+            .to(device=sim.device, dtype=torch.float32)
         )
-        pan_pose_batch = clone_local_pose_from_first_env(pan).to(
-            device=sim.device, dtype=torch.float32
+        pan_pose_batch = (
+            pan.get_local_pose(to_matrix=True)
+            .clone()
+            .to(device=sim.device, dtype=torch.float32)
         )
         bread.clear_dynamics()
         pan.clear_dynamics()
         bread_pose = bread_pose_batch[0]
         pan_pose = pan_pose_batch[0]
+        bread_lift = bread_pose_batch[:, 2, 3] - initial_bread_z
+        pan_lift = pan_pose_batch[:, 2, 3] - initial_pan_z
+        if bool((bread_lift < 0.5 * left_pick_options.lift_height).any()) or bool(
+            (pan_lift < 0.5 * right_pick_options.lift_height).any()
+        ):
+            raise RuntimeError(
+                "Both objects must be lifted before coordinated placement: "
+                f"bread_lift={bread_lift.tolist()}, pan_lift={pan_lift.tolist()}."
+            )
         bread_held_state = compute_actual_held_state(
             robot,
             bread_semantics,
@@ -609,8 +683,14 @@ def run_coordinated_placement_demo(
         held_objects = dict(state.task.held_objects)
         held_objects["left_arm"] = bread_held_state
         held_objects["right_arm"] = pan_held_state
+        # Use measured arm kinematics, but retain the grasp commands. A blocked
+        # jaw's measured position is more open than its commanded preload;
+        # replaying that measurement would relax the grasp during placement.
+        placement_start_qpos = robot.get_qpos().clone()
+        placement_start_qpos[:, robot.get_joint_ids("left_eef")] = left_close
+        placement_start_qpos[:, robot.get_joint_ids("right_eef")] = right_close
         state = state.project(
-            qpos=robot.get_qpos().clone(),
+            qpos=placement_start_qpos,
             task=TaskState(
                 batch_size=state.batch_size,
                 device=state.robot.qpos.device,
@@ -677,8 +757,7 @@ def run_coordinated_placement_demo(
         f"{time.time() - start_time:.2f} seconds"
     )
     if not coordinated_success.all():
-        logger.log_warning("Failed to plan coordinated placement trajectory.")
-        return
+        raise RuntimeError("Failed to plan coordinated placement trajectory.")
     log_action_plan(
         robot,
         "coordinated_placement",
@@ -719,6 +798,40 @@ def run_coordinated_placement_demo(
             (0.0, 0.0, 1.0),
         ),
     )
+    bread_final_pose = bread.get_local_pose(to_matrix=True)
+    pan_final_pose = pan.get_local_pose(to_matrix=True)
+    bread_world = (
+        bread_vertices.unsqueeze(0) @ bread_final_pose[:, :3, :3].transpose(1, 2)
+        + bread_final_pose[:, None, :3, 3]
+    )
+    basin_world = (
+        get_pan_basin_vertices(pan_vertices).unsqueeze(0)
+        @ pan_final_pose[:, :3, :3].transpose(1, 2)
+        + pan_final_pose[:, None, :3, 3]
+    )
+    bread_center_xy = 0.5 * (
+        bread_world[:, :, :2].amin(dim=1) + bread_world[:, :, :2].amax(dim=1)
+    )
+    bread_bottom_z = bread_world[:, :, 2].amin(dim=1)
+    inside_basin = (
+        (bread_center_xy >= basin_world[:, :, :2].amin(dim=1) - 0.015)
+        & (bread_center_xy <= basin_world[:, :, :2].amax(dim=1) + 0.015)
+    ).all(dim=1)
+    raised_pan = pan_final_pose[:, 2, 3] > TABLE_TOP_Z + 0.03
+    raised_bread = bread_bottom_z > TABLE_TOP_Z + 0.02
+    if not bool((inside_basin & raised_pan & raised_bread).all()):
+        raise RuntimeError(
+            "Bread must be released into the raised pan: "
+            f"inside_basin={inside_basin.tolist()}, "
+            f"bread_bottom_z={bread_bottom_z.tolist()}, "
+            f"pan_z={pan_final_pose[:, 2, 3].tolist()}."
+        )
+    logger.log_info(
+        "Measured placement: "
+        f"bread_bottom_z={bread_bottom_z.tolist()}, "
+        f"pan_z={pan_final_pose[:, 2, 3].tolist()}, "
+        f"inside_basin={inside_basin.tolist()}"
+    )
     if wait_for_user:
         input("Press Enter to exit the simulation...")
 
@@ -729,6 +842,22 @@ def main() -> None:
     sim = create_tutorial_simulation(
         args,
         arena_space=3.0,
+        newton_solver_options=(
+            {
+                "coupling": "two_way",
+                # DexSim's native two-way pick/place example uses soft contacts
+                # without rigid contact history and increases the proxy mass.
+                "coupling_options": {"mass_scale": 4.0, "proxy_relaxation": 0.5},
+                "vbd_options": {
+                    "iterations": 12,
+                    "friction_epsilon": 1e-4,
+                    "rigid_contact_hard": False,
+                    "rigid_contact_history": False,
+                },
+            }
+            if args.physics == "newton"
+            else None
+        ),
     )
     robot = create_dual_robot(sim, args.robot)
     run_coordinated_placement_demo(args, sim, robot)

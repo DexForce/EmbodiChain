@@ -37,6 +37,8 @@ class _CudaQuery:
             ContactActorInfo(20, "arena_1/cube", None, "arena_1", 1),
         )
         self.buffer = ContactBuffer.allocate(4, str(device))
+        if hasattr(self.buffer, "quantity_valid"):
+            self.buffer.quantity_valid.fill_(True)
         self.buffer.data.zero_()
         self.buffer.data[:2, 5] = 1.0
         self.buffer.data[:2, 9] = 0.2
@@ -49,7 +51,7 @@ class _CudaQuery:
     def actor_info(self, actor_id: int) -> ContactActorInfo:
         return next(actor for actor in self.actors if actor.actor_id == actor_id)
 
-    def fetch_async(self) -> ContactBuffer:
+    def fetch_solver_report_async(self) -> ContactBuffer:
         return self.buffer
 
 
@@ -164,6 +166,34 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
         assert sensor._sample_graph is recaptured
         assert not history.contact.any()
         assert_air_time(0.3)
+
+        if hasattr(query.buffer, "quantity_valid"):
+            # Replay reads changed masks without recapture and never evaluates
+            # unavailable poisoned force components.
+            query.buffer.quantity_valid.zero_()
+            query.buffer.data[:2, 6:10] = float("nan")
+            sample()
+            assert sensor._sample_graph is recaptured
+            assert not history.force.any()
+            assert not sensor.get_data()["impulse_valid"].any()
+            assert not sensor.get_data()["friction_valid"].any()
+
+            # A topology refresh can replace the native mask storage. The
+            # captured pointer must be refreshed before the next sample.
+            query.buffer.quantity_valid = torch.ones_like(query.buffer.quantity_valid)
+            query.buffer.data[:2, 6:9] = 0.0
+            query.buffer.data[:2, 9] = 0.4
+            sample()
+            assert sensor._sample_graph is None
+            assert history.contact.all()
+            torch.testing.assert_close(
+                history.force,
+                torch.tensor([[[0.0, 0.0, 4.0]], [[0.0, 0.0, 4.0]]], device=device),
+            )
+            sample()
+            assert sensor._sample_graph is not None
+            assert sensor._sample_graph is not recaptured
+            assert history.contact.all()
         # The graph writes query loss even when there are no valid contacts.
         query.buffer.device_counts.zero_()
         query.buffer.device_counts[1] = 3
@@ -244,18 +274,18 @@ def test_cached_sample_is_ready_on_another_cuda_stream(history_sample: bool) -> 
 def test_outer_capture_preserves_sampling_and_eager_refresh(
     history_sample: bool, capture_after_advance: bool, capture_mode: str
 ) -> None:
-    """Warmup must not suppress captured fetch/scatter/history or eager refresh."""
+    """Warmup must not suppress captured fetch_solver_report/scatter/history or eager refresh."""
     wp.init()
     device = torch.device("cuda:0")
     query = _CudaQuery(device)
     source = query.buffer.data.clone()
 
-    def fetch_async() -> ContactBuffer:
+    def fetch_solver_report_async() -> ContactBuffer:
         # Model a backend whose query must copy fresh device data on each replay.
         query.buffer.data.copy_(source)
         return query.buffer
 
-    query.fetch_async = fetch_async
+    query.fetch_solver_report_async = fetch_solver_report_async
     owner = SimpleNamespace(
         num_envs=2,
         physics_step_index=0,
