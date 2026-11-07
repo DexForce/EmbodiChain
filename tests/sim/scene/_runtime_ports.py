@@ -15,7 +15,6 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
-from copy import deepcopy
 from types import SimpleNamespace
 import torch
 from embodichain.utils.math import quat_from_matrix, matrix_from_quat
@@ -24,10 +23,11 @@ from embodichain.utils.math import quat_from_matrix, matrix_from_quat
 class Rigid:
     body_type = "dynamic"
 
-    def __init__(self):
+    def __init__(self, num_envs=1):
         self.value = torch.tensor(
             [[0.2, 0, 0.1, 0, 0, 0, 1, 0.3, 0, 0, 0, 0, 0]], dtype=torch.float32
         )
+        self.value = self.value.expand(num_envs, -1).clone()
         self.writes = 0
 
     @property
@@ -37,32 +37,32 @@ class Rigid:
     def get_local_pose(self, *, to_matrix=True):
         if not to_matrix:
             return self.value[:, :7]
-        matrix = torch.eye(4).unsqueeze(0)
+        matrix = torch.eye(4).repeat(len(self.value), 1, 1)
         matrix[:, :3, :3] = matrix_from_quat(self.value[:, 3:7])
         matrix[:, :3, 3] = self.value[:, :3]
         return matrix
 
     def clear_dynamics(self, *, env_ids):
         self.writes += 1
-        self.value[:, 7:] = 0
+        self.value[env_ids, 7:] = 0
 
     def set_local_pose(self, value, *, env_ids):
         self.writes += 1
-        if value.shape == (1, 4, 4):
-            self.value[:, :3] = value[:, :3, 3]
-            self.value[:, 3:7] = quat_from_matrix(value[:, :3, :3])
+        if value.ndim == 3:
+            self.value[env_ids, :3] = value[:, :3, 3]
+            self.value[env_ids, 3:7] = quat_from_matrix(value[:, :3, :3])
         else:
-            self.value[:, :7] = value
+            self.value[env_ids, :7] = value
 
     def set_velocity(self, *, lin_vel, ang_vel, env_ids):
-        self.value[:, 7:10] = lin_vel
-        self.value[:, 10:] = ang_vel
+        self.value[env_ids, 7:10] = lin_vel
+        self.value[env_ids, 10:] = ang_vel
 
 
 class Articulation:
     joint_names = ("hinge",)
 
-    def __init__(self):
+    def __init__(self, num_envs=1):
         self.state = {
             "root_pose": torch.tensor([[0.0, 0, 0, 0, 0, 0, 1]]),
             "root_lin_vel": torch.zeros(1, 3),
@@ -73,9 +73,12 @@ class Articulation:
             "target_qvel": torch.tensor([[0.4]]),
             "qf": torch.tensor([[0.5]]),
         }
+        self.state = {
+            key: value.expand(num_envs, -1).clone() for key, value in self.state.items()
+        }
         self.body_data = SimpleNamespace(
             fetch_state=lambda: self.state,
-            qpos_limits=torch.tensor([[[-1.0, 1.0]]]),
+            qpos_limits=torch.tensor([[[-1.0, 1.0]]]).expand(num_envs, -1, -1).clone(),
         )
 
     def get_qpos(self, *, target=False):
@@ -88,9 +91,10 @@ class Articulation:
         return self.state["qf"]
 
     def set_state(self, *, env_ids, clear_dynamics, root_velocity, **kwargs):
-        self.state.update(deepcopy(kwargs))
-        self.state["root_lin_vel"] = root_velocity[:, :3].clone()
-        self.state["root_ang_vel"] = root_velocity[:, 3:].clone()
+        for key, value in kwargs.items():
+            self.state[key][env_ids] = value
+        self.state["root_lin_vel"][env_ids] = root_velocity[:, :3]
+        self.state["root_ang_vel"][env_ids] = root_velocity[:, 3:]
 
 
 class Sim:
@@ -98,9 +102,10 @@ class Sim:
     device = torch.device("cpu")
     physics_backend = "default"
 
-    def __init__(self):
-        self.rigid = {"cube": Rigid(), "other": Rigid()}
-        self.articulations = {"drawer": Articulation()}
+    def __init__(self, num_envs=1):
+        self.num_envs = num_envs
+        self.rigid = {"cube": Rigid(num_envs), "other": Rigid(num_envs)}
+        self.articulations = {"drawer": Articulation(num_envs)}
         self.steps = 0
         self.syncs = 0
 

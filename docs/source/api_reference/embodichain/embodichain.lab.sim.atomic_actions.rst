@@ -517,5 +517,61 @@ calibration fails before capture. Diagnostic metadata never selects policy.
 
 .. autoclass:: GraspOpeningTarget
    :members:
+   :no-index:
 
 .. automethod:: ActionPlanningServices.prepare_grasp_query
+
+Explicit source contact-policy composition
+------------------------------------------
+
+The shared ``GraspOpeningTarget`` definition lives in ``grasp_geometry``;
+``atomic_actions`` and ``runtime`` retain the same public class identity. Its
+poses and metadata stay owned and bound to one preparation scope.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.grasp_geometry
+   :members:
+
+``source_native_contact`` maps the explicitly selected preserved source revision
+to GraspKit's existing typed ``ClosingContactPolicy`` and the shared Newton collision
+pipeline. Closing, opening and rigid-clearance algorithms remain solely in
+GraspKit. Source builders consume the existing Default/B1 native capture API,
+retain the explicit hand sampling grid and original contact thresholds, and never step
+physics or infer a Task Program policy. Missing Newton fails explicitly; this is
+geometric qualification, not physical acquisition/release evidence.
+
+Close each query with its context manager or a ``finally`` block. It releases
+only owned query resources, never borrowed simulation entities. Ordinary
+``prepare_grasp_query`` keeps its existing Newton backend and defaults.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.source_native_contact
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Explicit Press planning recovery
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``PressPlanningRecovery`` selects the existing Press skill's failure-only B1
+recovery. Nominal planning and at most one declared contact-roll alternative share
+the original two-complete-plan budget and RNG progression. Failed Cartesian
+phases may retry through the shared unchanged-target, unchanged-time IK resolver.
+The final emitted full-robot trajectory retains velocity qualification after
+resampling and transforms. Missing motion or excessive velocity remains failure.
+Default ``PressOptions`` enables no contact-roll alternatives or recovery.
+
+``validate_press_extra_distance`` accepts only an optional finite addition in
+``[0, 0.010]`` metres. It does not alter the authored stroke or determine physical
+contact, release or task success. Configured recovery accepts only
+``{kind: press_bounded, revision: 1}``; budgets and callbacks cannot be supplied
+through that declaration.
+
+.. autosummary::
+   :nosignatures:
+
+   PressPlanningRecovery
+   validate_press_extra_distance
+
+.. autoclass:: PressPlanningRecovery
+   :members:
+
+.. autofunction:: validate_press_extra_distance
