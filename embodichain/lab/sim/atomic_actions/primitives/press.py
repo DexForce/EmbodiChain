@@ -19,12 +19,19 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from typing import ClassVar
 
 import torch
 
 from embodichain.compute.trajectory import retime_to_control_grid
+from embodichain.compute.trajectory.limits import joint_velocity_validity
+from embodichain.lab.sim.motion.ik import (
+    resolve_continuous_ik_path,
+    sample_cartesian_targets,
+)
+from embodichain.lab.sim.motion.limits import authored_joint_velocity_limits
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
     find_symmetric_nearest_xpos,
@@ -50,9 +57,14 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
     PlannerDiagnostics,
+    PlanQualification,
+    PlanningFailure,
     TimedTrajectory,
 )
-from embodichain.lab.sim.atomic_actions.policies import DynamicCollisionMode
+from embodichain.lab.sim.atomic_actions.policies import (
+    DynamicCollisionMode,
+    PlanningRecovery,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -71,6 +83,28 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 )
 
 
+def validate_press_extra_distance(value: float | None) -> None:
+    """Validate an optional declaration-owned addition to an authored press stroke.
+
+    Args:
+        value: Additional travel in metres, or None to retain the declaration's
+            existing selection. Exact Python integers/floats in ``[0, 0.010]``
+            are accepted; booleans and non-finite values are rejected.
+
+    Raises:
+        ValueError: The value is outside the supported declaration contract.
+
+    This does not change :class:`PressOptions` defaults or certify physical
+    travel. The caller still owns the authored stroke and measured acceptance.
+    """
+    if value is not None and (
+        type(value) not in (int, float)
+        or not math.isfinite(value)
+        or not 0.0 <= value <= 0.010
+    ):
+        raise ValueError("press_extra_distance must be between 0 and 0.010 m or None.")
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class PressGoal(ObjectActionGoal):
     """Target object described by a press affordance."""
@@ -81,6 +115,26 @@ class PressGoal(ObjectActionGoal):
     def __post_init__(self) -> None:
         ObjectActionGoal.__post_init__(self)
         validate_pose_goal(self.target_pose, "target_pose", allow_waypoints=False)
+
+
+@dataclass(frozen=True, slots=True)
+class PressPlanningRecovery(PlanningRecovery):
+    """Failure-only B1 Press planning rules with the fixed source attempt budget.
+
+    The two complete plans include the nominal plan and at most one declared
+    contact-roll alternative. Failed Cartesian phases may use the shared bounded
+    IK continuation on unchanged targets and time. Inner IK search limits remain
+    owned by the motion service. Separate dense-grid engine attempts each get a
+    fresh local scope; this declaration does not change their RNG boundary.
+    """
+
+    kind: str = field(default="press_bounded", init=False)
+    skill_id: str = field(default="press", init=False)
+    revision: int = field(default=1, init=False)
+    max_complete_plans: int = field(default=2, init=False)
+    retry_failed_cartesian_phases: bool = field(default=True, init=False)
+    single_environment_only: bool = field(default=True, init=False)
+    qualify_emitted_velocity: bool = field(default=True, init=False)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -99,7 +153,31 @@ class PressOptions(ActionOptions):
     press_position: tuple[float, float, float] | None = None
     """Optional local-frame position overriding the affordance press position."""
 
+    contact_roll_alternatives: tuple[float, ...] = ()
+    """Allowed extra contact-frame rolls in radians; point and press axis stay fixed.
+
+    Planning these alternatives requires an explicit PressPlanningRecovery.
+    The source-compatible declaration supplies only ``(pi / 2,)``.
+    """
+
     def __post_init__(self) -> None:
+        if not isinstance(self.contact_roll_alternatives, (tuple, list)):
+            raise TypeError("contact_roll_alternatives must be a sequence of radians.")
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or abs(value) > math.pi
+            for value in self.contact_roll_alternatives
+        ):
+            raise ValueError(
+                "contact_roll_alternatives must be finite radians in [-pi, pi]."
+            )
+        object.__setattr__(
+            self,
+            "contact_roll_alternatives",
+            tuple(float(value) for value in self.contact_roll_alternatives),
+        )
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if not math.isfinite(self.approach_distance):
@@ -121,12 +199,39 @@ class PressOptions(ActionOptions):
             )
 
 
+class _RolledPressAffordance(PressAffordance):
+    def __init__(self, source: PressAffordance, roll: float) -> None:
+        super().__init__(
+            object_label=source.object_label,
+            custom_config=deepcopy(source.custom_config),
+            press_axis=source.press_axis,
+            press_position=source.press_position,
+        )
+        self._roll = roll
+
+    def get_press_pose(
+        self,
+        target_pose: torch.Tensor,
+        press_position: tuple[float, float, float] | None = None,
+    ) -> torch.Tensor:
+        pose = super().get_press_pose(target_pose, press_position=press_position)
+        x, y = pose[:, :3, 0].clone(), pose[:, :3, 1].clone()
+        if self._roll == math.pi / 2:
+            pose[:, :3, 0], pose[:, :3, 1] = y, -x
+        else:
+            cosine, sine = math.cos(self._roll), math.sin(self._roll)
+            pose[:, :3, 0] = cosine * x + sine * y
+            pose[:, :3, 1] = -sine * x + cosine * y
+        return pose
+
+
 class Press(AtomicAction[PressGoal, PressOptions]):
     """Open-loop motion primitive that approaches, presses, and retracts."""
 
     skill_id: ClassVar[str] = "press"
     GoalType: ClassVar[type] = PressGoal
     OptionsType: ClassVar[type] = PressOptions
+    PlanningRecoveryType: ClassVar[type[PlanningRecovery]] = PressPlanningRecovery
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -152,6 +257,150 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         self,
         request: ResolvedActionRequest[PressGoal, PressOptions],
         context: PlanningContext,
+    ) -> ActionPlan:
+        self.descriptor().validate_planning_recovery(request.recovery_policy)
+        recovery = request.recovery_policy.planning_recovery
+        alternatives = request.skill_options.contact_roll_alternatives
+        if recovery is None:
+            if alternatives:
+                raise ValueError(
+                    "Press contact-roll alternatives require PressPlanningRecovery."
+                )
+            return self._plan_nominal(request, context)
+        assert isinstance(recovery, PressPlanningRecovery)
+        if context.batch_size != 1:
+            raise ValueError("PressPlanningRecovery supports exactly one environment.")
+        if len(alternatives) + 1 > recovery.max_complete_plans:
+            raise ValueError(
+                "Press recovery permits at most 2 complete plans, including nominal."
+            )
+        original = self._plan_checked(request, context)
+        affordance = request.goal.semantics.affordance
+        if (
+            original.plan_success.all()
+            or type(affordance) is not PressAffordance
+            or not alternatives
+        ):
+            return original
+        roll = alternatives[0]
+        selected = replace(
+            request,
+            goal=replace(
+                request.goal,
+                semantics=replace(
+                    request.goal.semantics,
+                    affordance=_RolledPressAffordance(affordance, roll),
+                ),
+            ),
+        )
+        # The source does not restore RNG between its two complete plans.
+        recovered = self._plan_checked(selected, context)
+        result = recovered if recovered.plan_success.all() else original
+        if result.diagnostics is not None:
+            result = replace(
+                result,
+                diagnostics=replace(
+                    result.diagnostics,
+                    metadata={
+                        **result.diagnostics.metadata,
+                        "press_roll_recovery": {
+                            "maximum_complete_plans": recovery.max_complete_plans,
+                            "complete_plans": 2,
+                            "roll_rad": roll,
+                            "accepted": bool(recovered.plan_success.all()),
+                            "alternate_phases": (
+                                recovered.diagnostics.metadata.get(
+                                    "press_continuous_ik", []
+                                )
+                                if recovered.diagnostics is not None
+                                else []
+                            ),
+                            "scope": "same_contact_point_axis_and_resource_not_physical_evidence",
+                        },
+                    },
+                ),
+            )
+        return result
+
+    def _plan_checked(
+        self,
+        request: ResolvedActionRequest[PressGoal, PressOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        records: list[dict[str, object]] = []
+        plan = self._plan_nominal(request, context, recovery_records=records)
+        if records and plan.diagnostics is not None:
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "press_continuous_ik": records,
+                    },
+                ),
+            )
+        qualified = self._qualify_final_plan(request, context, plan)
+        if qualified is not None and not qualified.valid_mask.all():
+            return self.failed_plan(
+                request,
+                context,
+                message="Press exceeds final resampled joint velocity limits.",
+            )
+        return plan
+
+    def _qualify_final_plan(
+        self,
+        request: ResolvedActionRequest[PressGoal, PressOptions],
+        context: PlanningContext,
+        plan: ActionPlan,
+    ) -> PlanQualification | None:
+        if (
+            request.recovery_policy.planning_recovery is None
+            or not plan.plan_success.any()
+        ):
+            return None
+        trajectory = plan.joint_trajectory
+        if trajectory is None:
+            return PlanQualification(
+                torch.zeros_like(plan.plan_success),
+                PlannerDiagnostics(
+                    backend=self.planning_services.planner_name,
+                    messages=(
+                        "Press planning recovery requires an emitted joint trajectory.",
+                    ),
+                    failure=PlanningFailure(
+                        "press_final_joint_motion_missing", retryable=False
+                    ),
+                ),
+            )
+        limits = authored_joint_velocity_limits(self.robot, None).to(
+            trajectory.positions
+        )
+        valid = joint_velocity_validity(trajectory.positions, trajectory.dt, limits)
+        mask = torch.full_like(plan.plan_success, bool(valid.all()))
+        diagnostics = None
+        if not mask.all():
+            diagnostics = PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                failure=PlanningFailure(
+                    "press_final_velocity_invalid", retryable=False
+                ),
+                metadata={
+                    "press_final_velocity": {
+                        "valid_rows": valid.tolist(),
+                        "scope": "final_emitted_command_grid",
+                    }
+                },
+            )
+        return PlanQualification(mask, diagnostics)
+
+    def _plan_nominal(
+        self,
+        request: ResolvedActionRequest[PressGoal, PressOptions],
+        context: PlanningContext,
+        *,
+        recovery_records: list[dict[str, object]] | None = None,
     ) -> ActionPlan:
         """Plan close, approach, press, and retract without stepping simulation."""
         if request.motion_policy.strategy != "ik_interp":
@@ -217,13 +466,15 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             hand_grasp_qpos,
             n_waypoints=options.hand_interp_steps,
         )
-        approach_success, approach_phase = self._plan_pose_segment(
+        approach_success, approach_phase = self._plan_press_phase(
             approach_xpos,
             start_arm_qpos,
             control_part,
             request,
             n_approach,
             interpolation_dt=interpolation_dt,
+            phase_name="approach",
+            recovery_records=recovery_records,
         )
         approach_arm = approach_phase[0]
         contact_keyframes = axis_translation_keyframes(
@@ -232,7 +483,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             contact_xpos[:, :3, 2],
             n_waypoints=n_contact - 1,
         )
-        contact_success, contact_phase = self._plan_pose_segment(
+        contact_success, contact_phase = self._plan_press_phase(
             contact_keyframes,
             approach_arm[:, -1],
             control_part,
@@ -240,6 +491,8 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             n_contact,
             interpolation_dt=interpolation_dt,
             cartesian_linear=True,
+            phase_name="contact",
+            recovery_records=recovery_records,
         )
         contact_arm = contact_phase[0]
         press_keyframes = axis_translation_keyframes(
@@ -248,7 +501,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             contact_xpos[:, :3, 2],
             n_waypoints=n_press - 1,
         )
-        press_success, press_phase = self._plan_pose_segment(
+        press_success, press_phase = self._plan_press_phase(
             press_keyframes,
             contact_arm[:, -1],
             control_part,
@@ -256,6 +509,8 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             n_press,
             interpolation_dt=interpolation_dt,
             cartesian_linear=True,
+            phase_name="press",
+            recovery_records=recovery_records,
         )
         press_arm = press_phase[0]
         retract_keyframes = axis_translation_keyframes(
@@ -264,7 +519,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             contact_xpos[:, :3, 2],
             n_waypoints=n_retract - 1,
         )
-        retract_success, retract_phase = self._plan_pose_segment(
+        retract_success, retract_phase = self._plan_press_phase(
             retract_keyframes,
             press_arm[:, -1],
             control_part,
@@ -272,6 +527,8 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             n_retract,
             interpolation_dt=interpolation_dt,
             cartesian_linear=True,
+            phase_name="retract",
+            recovery_records=recovery_records,
         )
         success = (
             contact_sample.success
@@ -516,6 +773,67 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         )
         return retimed, intervals
 
+    def _plan_press_phase(
+        self,
+        target_pose: torch.Tensor,
+        start_qpos: torch.Tensor,
+        control_part: str,
+        request: ResolvedActionRequest[PressGoal, PressOptions],
+        sample_count: int,
+        *,
+        interpolation_dt: float,
+        phase_name: str,
+        recovery_records: list[dict[str, object]] | None,
+        cartesian_linear: bool = False,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        original = self._plan_pose_segment(
+            target_pose,
+            start_qpos,
+            control_part,
+            request,
+            sample_count,
+            interpolation_dt=interpolation_dt,
+            cartesian_linear=cartesian_linear,
+        )
+        if (
+            recovery_records is None
+            or original[0].all()
+            or start_qpos.shape[0] != 1
+            or request.motion_policy.strategy != "ik_interp"
+        ):
+            return original
+        start = self.robot.compute_fk(
+            qpos=start_qpos, name=control_part, to_matrix=True
+        )
+        targets = sample_cartesian_targets(
+            start, build_pose_plan_states(target_pose), sample_count
+        )
+        options = request.motion_policy.to_motion_gen_options(
+            start_qpos=start_qpos,
+            control_part=control_part,
+            sample_count=sample_count,
+            interpolation_dt=interpolation_dt,
+            cartesian_linear=True,
+        )
+        recovered = resolve_continuous_ik_path(
+            self.motion_generator, targets, options, operation="Press"
+        )
+        recovery_records.append(
+            {
+                "phase": phase_name,
+                "sample_count": sample_count,
+                "control_dt": interpolation_dt,
+                "accepted": recovered is not None,
+                "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence",
+            }
+        )
+        if recovered is None:
+            return original
+        assert recovered.positions is not None
+        return recovered.success, self._retime_motion_phase(
+            recovered.positions, recovered.dt, sample_count, interpolation_dt
+        )
+
     def _plan_pose_segment(
         self,
         target_pose: torch.Tensor,
@@ -538,10 +856,30 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             ),
         )
         assert isinstance(result.success, torch.Tensor)
-        assert result.positions is not None
+        positions, dt = result.positions, result.dt
+        if (
+            request.recovery_policy.planning_recovery is not None
+            and not result.success.all()
+        ):
+            candidate = result.rejected_candidate
+            if candidate is not None:
+                # Inspect rejected samples only inside bounded replanning. The
+                # original false success mask is retained and never executed.
+                positions, dt = candidate.positions, candidate.dt
+            elif positions is None:
+                positions = start_qpos[:, None].expand(-1, sample_count, -1).clone()
+                dt = positions.new_full(positions.shape[:2], interpolation_dt)
+                dt[:, 0] = 0.0
+        assert positions is not None
         return result.success, self._retime_motion_phase(
-            result.positions, result.dt, sample_count, interpolation_dt
+            positions, dt, sample_count, interpolation_dt
         )
 
 
-__all__ = ["Press", "PressGoal", "PressOptions"]
+__all__ = [
+    "Press",
+    "PressGoal",
+    "PressOptions",
+    "PressPlanningRecovery",
+    "validate_press_extra_distance",
+]

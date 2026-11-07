@@ -18,6 +18,7 @@ of those owners.
 | Placement binding, physical proof checks and certificate assembly | `evidence.py` |
 | Orientation/joint state and milestone qualification | `condition_evidence.py` |
 | Common per-environment physical reports | `evidence_report.py` |
+| Explicit held-object acceptance over normalized facts | `manipulation_evidence.py`; `handover_evidence.py`, `coordinated_evidence.py` |
 | Frozen graph/role/lineage projection | `embodichain/gen_sim/task_engine/evidence.py` |
 | Cache reads, identity checks and atomic writes | `registry.py`: `TaskSpecCache` |
 | JSON snapshots and semantic hashing | `canonicalization.py` |
@@ -65,6 +66,21 @@ supplies historical values with validity and episode/lifetime checks; the
 observation manager owns their semantic schema.
 Env dispatches capture/reset boundaries;
 no Lab module imports TaskSpec or Task Engine.
+
+HandOver and coordinated holding separate protocol validation from task acceptance.
+Lab's `task_program/integrations/evidence/` owns raw receipt/actor/query/clock
+validation and observation requests. Its offline normalizers emit source-bound
+physical frame/batch JSON without importing TaskSpec or Task Engine.
+`ManipulationEvidenceBinding` seals explicit `HoldAcceptanceCriteria`, predicate,
+program, episode and final/recorded scope. TaskSpec compares attachment drift,
+grips, target position, orientation and observed duration against those criteria;
+it never derives acceptance limits from a runtime monitor's resolved parameters.
+Valid measured negatives fail; missing or contradictory acquisition stays
+unavailable. Historical boundary overrides must match the verified record. Raw held poses
+retain the canonical history row/episode/step identities and original native
+acquisition times; final observations match source time, while recorded reads
+may be collected later without equating native time to episode step count.
+Existing placement/state/control/Pour APIs keep their current contracts.
 
 Current goals cannot borrow recorded milestone success. The legacy instantaneous
 final-support scope requires its exact measured release and actual final runtime

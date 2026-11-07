@@ -405,6 +405,28 @@ uses it without importing Lab or acquiring physical state.
 
 .. autofunction:: embodichain.compute.geometry.contact_support.contact_support_heights
 
+Declared alignment targets
+--------------------------
+
+These functions consume already observed numerical poses and object-local axes.
+``alignment_target_axis`` selects an upright vertical direction or the nearest
+vertical pole when direction is free. ``held_alignment_targets`` preserves the
+source heading/lift order, optional explicit destination, and supplied arm-root
+and object-to-end-effector transforms. It returns owned target poses without IK,
+scene queries, collision checks or physical acceptance. Callers own acquisition,
+resource identity and motion/recovery policy.
+
+.. currentmodule:: embodichain.compute.geometry.alignment
+
+.. autosummary::
+
+   alignment_target_axis
+   held_alignment_targets
+
+.. autofunction:: alignment_target_axis
+
+.. autofunction:: held_alignment_targets
+
 Recorded rigid Pour measurements
 --------------------------------
 
