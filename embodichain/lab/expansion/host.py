@@ -52,6 +52,29 @@ from ._gym_execution import GymCohortExecutor
 __all__ = ["GymExpansionHost"]
 
 
+def _configure_sensor_capture(environment_cfg: Any, *, capture_media: bool) -> None:
+    """Select media independently of contact acquisition in the owned config."""
+    if capture_media:
+        environment_cfg.enable_sensor = True
+        if environment_cfg.sim_cfg.render_cfg.renderer == "no-render":
+            environment_cfg.sim_cfg.render_cfg.renderer = "hybrid"
+        return
+    environment_cfg.sensor = [
+        sensor
+        for sensor in environment_cfg.sensor
+        if sensor.sensor_type == "ContactSensor"
+    ]
+    environment_cfg.robot.sensors = [
+        sensor
+        for sensor in getattr(environment_cfg.robot, "sensors", ())
+        if sensor.sensor_type == "ContactSensor"
+    ]
+    environment_cfg.enable_sensor = bool(
+        environment_cfg.sensor or environment_cfg.robot.sensors
+    )
+    environment_cfg.sim_cfg.render_cfg.renderer = "no-render"
+
+
 class GymExpansionHost:
     """Native World owner composing recipe, preparation and measured-evidence components.
 
@@ -99,13 +122,7 @@ class GymExpansionHost:
         environment_cfg.init_rollout_buffer = False
         environment_cfg.record_trajectory = False
         environment_cfg.sim_cfg.headless = True
-        if not cfg.capture_media:
-            environment_cfg.enable_sensor = False
-            environment_cfg.sim_cfg.render_cfg.renderer = "no-render"
-        else:
-            environment_cfg.enable_sensor = True
-            if environment_cfg.sim_cfg.render_cfg.renderer == "no-render":
-                environment_cfg.sim_cfg.render_cfg.renderer = "hybrid"
+        _configure_sensor_capture(environment_cfg, capture_media=cfg.capture_media)
         from embodichain.lab.sim.profiler import ProfilerCfg
 
         environment_cfg.profiler = ProfilerCfg(

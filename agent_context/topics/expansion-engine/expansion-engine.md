@@ -35,7 +35,11 @@ retains the tabletop guard for the selected prototype occurrences, while
 `demo_skill_duration_scale` requires explicit full-joint motion limits and
 asset-owned time permissions. Spatial and mapped timing recipes use separate
 configured jobs. `sampled_rigid_v1` collision profiles independently check all
-physical box/plane scene bodies and task predicates from measured states. Immutable recipes declare
+physical box/plane scene bodies and task predicates from measured states. Their
+robot-base transforms are rebound after each cohort's scene preparation.
+State-only jobs retain independent and robot-mounted ContactSensors while
+omitting cameras; contact acquisition does not require media capture.
+Immutable recipes declare
 source/backend/phase/scope and shared-resource compatibility; the host checks them
 before mutating the World.
 

@@ -179,6 +179,7 @@ def test_specialized_motion_is_one_nonreplannable_atomic_plan_on_selected_row():
         "explicit_failure",
         "explicit_unresolved",
         "explicit_mismatched",
+        "host_late",
     ],
 )
 def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
@@ -187,7 +188,7 @@ def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
     context = _context()
     transform = None
     verifier = None
-    if failure == "semantic" or failure.startswith("explicit_"):
+    if failure in {"semantic", "host_late"} or failure.startswith("explicit_"):
         from embodichain.lab.sim.atomic_actions import (
             StateDelta,
             ArticulationJointState,
@@ -259,7 +260,11 @@ def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
                 retry_mask=torch.zeros_like(pending.env_mask),
             )
         result = runner.step(effect_verifier=verifier, effect_result=supplied)
-        if result.status != RunnerStatus.RUNNING or supplied is not None:
+        if (
+            result.status != RunnerStatus.RUNNING
+            or supplied is not None
+            or (failure == "host_late" and provider.monitor.terminal_passed)
+        ):
             break
         current[0] += max(result.wait_duration, DT)
     expected_status = (
@@ -267,7 +272,7 @@ def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
         if failure in {"none", "explicit_success"}
         else (
             RunnerStatus.RUNNING
-            if failure == "explicit_unresolved"
+            if failure in {"explicit_unresolved", "host_late"}
             else RunnerStatus.FAILED
         )
     )
@@ -281,9 +286,10 @@ def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
         "explicit_failure",
         "explicit_unresolved",
         "explicit_mismatched",
+        "host_late",
     }:
         assert state is None
-    if failure == "explicit_unresolved":
+    if failure in {"explicit_unresolved", "host_late"}:
         current[0] += max(result.wait_duration, DT)
         waiting = runner.step()
         assert waiting.status is RunnerStatus.RUNNING
@@ -293,7 +299,17 @@ def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
         pending = session.pending_effect
         result = runner.step(
             effect_result=replace(
-                supplied,
+                (
+                    supplied
+                    if supplied is not None
+                    else EffectVerificationResult(
+                        verification_id=pending.verification_id,
+                        success_mask=torch.zeros_like(pending.env_mask),
+                        failure_mask=torch.zeros_like(pending.env_mask),
+                        invalidation_mask=torch.zeros_like(pending.env_mask),
+                        retry_mask=torch.zeros_like(pending.env_mask),
+                    )
+                ),
                 verification_id=pending.verification_id,
                 success_mask=pending.env_mask,
             )

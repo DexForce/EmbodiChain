@@ -16,14 +16,17 @@ references have separate ownership. A reference retains raw-frame brackets,
 hard events and a source mask for generated connections; it cannot widen source
 phase permissions. Preparation establishes no physical-success credit. A skill
 requires declared measured terminal predicates, and missing contact evidence
-cannot establish no-contact. Qpos replay freezes scene references within explicit
+cannot establish no-contact. Asset time maps hash their complete typed fields,
+independent of NumPy print options. Prepared assets using the prior printed
+representation require rebuilding and updated pinned integration digests. Qpos replay freezes scene references within explicit
 entry tolerances; XY/yaw transfer requires calibrated TCP poses, unchanged physical
 geometry, compatible authority and declared displacement limits.
 
 `atomic_actions.ExecuteDemoSkill` consumes `DemoSkillMotionProvider` through the
 ordinary nominal-source interface. Its optional per-observation monitor runs
 before the next runner command and owns only evidence, not task-state commits.
-The terminal effect boundary commits verified held-state changes. Free entry
+The terminal effect boundary commits verified held-state changes only after
+host approval; absent host results remain pending even if the source accepts. Free entry
 connections require explicit permission and independent full-plan collision
 validation; contact entry never gains an automatic approach. Source phases and
 events are monitoring/edit boundaries, not independent recovery boundaries.

@@ -254,3 +254,25 @@ def test_adapted_reference_keeps_raw_observation_and_command_evidence_separate(
     (manifest.parent / "reference.npz").write_bytes(b"changed")
     with pytest.raises(ValueError, match="reference digest"):
         load_demo_skill(manifest)
+
+
+@pytest.mark.parametrize("precision,threshold", [(5, 10), (2, 3)])
+def test_asset_identity_and_roundtrip_ignore_numpy_print_options(
+    tmp_path, precision, threshold
+):
+    artifact = _build()
+    with np.printoptions(precision=17, threshold=10000):
+        expected = artifact.content_sha256
+        manifest = save_demo_skill(artifact, tmp_path / "skill")
+    with np.printoptions(precision=precision, threshold=threshold, linewidth=30):
+        assert artifact.content_sha256 == expected
+        assert load_demo_skill(manifest).content_sha256 == expected
+    # Every bracket and event mapping remains part of the content identity.
+    mapping = artifact.report.time_map
+    weights = np.array(mapping.weight)
+    weights[1] = 0.25
+    changed = replace(
+        artifact,
+        report=replace(artifact.report, time_map=replace(mapping, weight=weights)),
+    )
+    assert changed.content_sha256 != expected

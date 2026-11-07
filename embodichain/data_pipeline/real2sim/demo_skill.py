@@ -764,7 +764,18 @@ class DemoSkillArtifact:
                     continue
                 item = getattr(value, field.name)
                 digest.update(field.name.encode())
-                if isinstance(item, np.ndarray):
+                if isinstance(item, TrajectoryTimeMap):
+                    # Dataclass repr embeds arrays using process-global NumPy
+                    # print settings; identity must use their complete bytes.
+                    for part in fields(item):
+                        entry = getattr(item, part.name)
+                        digest.update(part.name.encode())
+                        if isinstance(entry, np.ndarray):
+                            digest.update(str((entry.dtype.str, entry.shape)).encode())
+                            digest.update(entry.tobytes())
+                        else:
+                            digest.update(float(entry).hex().encode())
+                elif isinstance(item, np.ndarray):
                     digest.update(str((item.dtype.str, item.shape)).encode())
                     digest.update(item.tobytes())
                 else:

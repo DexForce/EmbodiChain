@@ -789,9 +789,13 @@ class ExecutionRunner:
                             raise TypeError(
                                 "semantic verifier returned an invalid effect result"
                             )
-                    if semantic is None and self._external_effect_attempt == attempt:
-                        # An explicit unresolved decision must not turn into an
-                        # approval when a later due cycle has no host update.
+                    if semantic is None and (
+                        not pending_effect.expected_effects.is_empty
+                        or self._external_effect_attempt == attempt
+                    ):
+                        # Symbolic effects always require host approval. Once a
+                        # host claims even an effectless boundary, absent updates
+                        # must not silently become source-only approvals.
                         unresolved = torch.zeros_like(pending_effect.env_mask)
                         semantic = EffectVerificationResult(
                             verification_id=pending_effect.verification_id,

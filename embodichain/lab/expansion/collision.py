@@ -187,8 +187,6 @@ class _SampledRigidCollision:
         from .contracts import ValidationCheck, ValidationResult
         from embodichain.lab.sim.motion.expansion.real2sim_collision import (
             BoxCollisionBody,
-            PlaneCollisionBody,
-            SampledRobotCollisionChecker,
         )
 
         self.config = _decode_sampled_rigid_profile(load_config(profile))
@@ -211,24 +209,15 @@ class _SampledRigidCollision:
             raise ValueError(
                 "sampled rigid validation cannot omit unsupported scene entities"
             )
-        self.checkers = tuple(
-            SampledRobotCollisionChecker(
-                env.robot.cfg.fpath,
-                joint_names=env.robot.joint_names,
-                bodies=(*self.bodies, PlaneCollisionBody("ground", np.eye(4))),
-                world_from_base=env.robot.get_local_pose(to_matrix=True)[row]
-                .detach()
-                .cpu()
-                .numpy(),
-            )
-            for row in range(env.num_envs)
-        )
+        self.checkers = ()
         self.initial, self.terminal, self.results = {}, {}, {}
 
     def prepare(self, snapshot=None):
         del snapshot
         from embodichain.lab.sim.motion.expansion.real2sim_collision import (
             BoxCollisionBody,
+            PlaneCollisionBody,
+            SampledRobotCollisionChecker,
         )
 
         self.initial.clear()
@@ -249,6 +238,19 @@ class _SampledRigidCollision:
                 monitor.predicate(self.env, item)
                 for item in self.config["final_checks"]
             )
+
+        self.checkers = tuple(
+            SampledRobotCollisionChecker(
+                self.env.robot.cfg.fpath,
+                joint_names=self.env.robot.joint_names,
+                bodies=(*self.bodies, PlaneCollisionBody("ground", np.eye(4))),
+                world_from_base=self.env.robot.get_local_pose(to_matrix=True)[row]
+                .detach()
+                .cpu()
+                .numpy(),
+            )
+            for row in range(self.env.num_envs)
+        )
 
     def sample(self, ids, action, snapshot=None):
         from embodichain.lab.sim.motion.expansion.real2sim_collision import (
