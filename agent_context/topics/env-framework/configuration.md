@@ -184,7 +184,8 @@ lowers the environment, robot, and sensors into the existing
 `EmbodiedEnvCfg` fields, it checks every semantic root's `simulation_uid`
 against the physical scene. The Task Program layer then checks
 scene/embodiment contracts, composes the immutable catalog, preflights the
-deployment-bound program, and calls
+deployment-bound program, and resolves the requested Gym ID. For a missing
+ID, it discovers installed task packages before falling back to
 `register_env_function(EmbodiedEnv, config["id"], ...)`.
 
 The ID is selected by the config and may be any free valid Gym ID. Loading the
@@ -192,9 +193,8 @@ same ID with the same integration and episode limit is idempotent. An explicitly
 registered `EmbodiedEnv` subclass may supply task-owned measured acceptance;
 the loader preserves it only when its adapter factory has the same integration
 fingerprint and episode limit. Incompatible classes, integrations and limits
-fail closed; the loader does not use `override=True`. Registration is process-local, so callers
-must load the Gym config before calling `gym.make(id)`. Such an ID is not
-present merely because task-package discovery ran.
+fail closed. Registration is process-local. Configuration-only IDs become
+available to `gym.make(id)` after loading their Gym config.
 
 The integration has no task-level kind. It composes a typed scene and robot
 profile with optional allowlisted live-service declarations. The built-in service

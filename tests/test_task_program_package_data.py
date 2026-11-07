@@ -480,7 +480,7 @@ print(json.dumps(decoded_deployments, sort_keys=True))
 
 
 def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
-    """Import the installed task package and register the drawer environment."""
+    """Resolve the wheel's explicit task registration before generic fallback."""
     source = tmp_path / "source"
     source.mkdir()
     for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
@@ -537,15 +537,38 @@ import sys
 
 installed = Path(sys.argv[1])
 sys.path.insert(0, str(installed))
-import embodichain_tasks
+from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import get_env_spec
-from embodichain_tasks.manipulation.drawer_storage import DrawerStorageEnv
+from embodichain.utils.utility import load_config
 from gymnasium import registry
 
+configs = installed / "embodichain_tasks/configs/tasks/manipulation/drawer_storage"
+ur5_path = configs / "task.ur5.yaml"
+ur5 = load_config(ur5_path)
+assert "embodichain_tasks" not in sys.modules
+assert ur5["id"] not in registry
+config_to_cfg(ur5, source_path=ur5_path)
+spec = get_env_spec(ur5["id"])
+
+import embodichain_tasks
+from embodichain_tasks.manipulation.drawer_storage import DrawerStorageEnv
+
 assert Path(embodichain_tasks.__file__).is_relative_to(installed)
-env_id = "TaskProgramDrawerStorage-UR5-v1"
-assert env_id in registry
-assert get_env_spec(env_id).cls is DrawerStorageEnv
+assert spec.cls is DrawerStorageEnv
+assert get_env_spec(ur5["id"]) is spec
+
+franka_path = configs / "task.franka.yaml"
+franka = load_config(franka_path)
+config_to_cfg(franka, source_path=franka_path)
+franka_cls = get_env_spec(franka["id"]).cls
+assert issubclass(franka_cls, DrawerStorageEnv)
+assert franka_cls is not DrawerStorageEnv
+
+config_only = {**ur5, "id": "TaskProgramDrawerStorage-ConfigOnly-v1"}
+assert config_only["id"] not in registry
+config_to_cfg(config_only, source_path=ur5_path)
+assert get_env_spec(config_only["id"]).cls is EmbodiedEnv
 """,
             str(installed),
         ],

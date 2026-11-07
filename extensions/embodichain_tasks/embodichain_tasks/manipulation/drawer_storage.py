@@ -21,7 +21,7 @@ from itertools import product
 import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
-from embodichain.lab.gym.utils.registration import register_env
+from embodichain.lab.gym.utils.registration import register_env_function
 from embodichain.lab.task_program.integrations.composition import (
     load_configured_task_program_deployment,
 )
@@ -32,20 +32,8 @@ __all__ = ["DrawerStorageEnv"]
 
 
 _CONFIG = get_config_path("tasks/manipulation/drawer_storage")
-_DECLARATION = load_config(_CONFIG / "task.ur5.yaml")
-_PROFILE = load_config((_CONFIG / _DECLARATION["embodiment"]["component"]).resolve())[
-    "skill_profile"
-]
-_DEPLOYMENT = load_configured_task_program_deployment(
-    task_program=_DECLARATION["task_program"], skill_profile=_PROFILE, base_dir=_CONFIG
-)
 
 
-@register_env(
-    "TaskProgramDrawerStorage-UR5-v1",
-    max_episode_steps=4800,
-    task_program_adapter_factory=_DEPLOYMENT.integration.adapter_factory,
-)
 class DrawerStorageEnv(EmbodiedEnv):
     """Task Program execution with independent measured storage acceptance.
 
@@ -54,6 +42,10 @@ class DrawerStorageEnv(EmbodiedEnv):
     side inner faces +/-0.1965, front/back 0.01/0.309 and floor/top -0.057/0.0425.
     One millimetre is allowed for contact resolution at the boundary.
     """
+
+    _hand_joints = ("gripper_finger1_joint_1",)
+    _open_hand = (0.0,)
+    _finger_links = ("gripper_finger1_link_1", "gripper_finger2_link_1")
 
     def is_task_success(self, **kwargs: object) -> torch.Tensor:
         """Require all cube corners inside, a closed rail and an empty hand.
@@ -85,11 +77,15 @@ class DrawerStorageEnv(EmbodiedEnv):
         rail = drawer.get_qpos(target=False)[
             :, drawer.joint_names.index("cabinet_to_drawer")
         ]
-        hand = self.robot.get_qpos(target=False)[
-            :, self.robot.joint_names.index("gripper_finger1_joint_1")
+        hand_indices = [
+            self.robot.joint_names.index(name) for name in self._hand_joints
         ]
+        hand = self.robot.get_qpos(target=False)[:, hand_indices]
+        released = torch.isfinite(hand).all(dim=1) & (
+            (hand - hand.new_tensor(self._open_hand)).abs() <= 0.002
+        ).all(dim=1)
         clear = torch.ones_like(contained)
-        for name in ("gripper_finger1_link_1", "gripper_finger2_link_1"):
+        for name in self._finger_links:
             finger = self.robot.get_link_pose(name, to_matrix=True)
             clear &= torch.isfinite(finger[:, :3, 3]).all(dim=1) & (
                 torch.linalg.vector_norm(finger[:, :3, 3] - pose[:, :3, 3], dim=1)
@@ -101,7 +97,35 @@ class DrawerStorageEnv(EmbodiedEnv):
             & torch.isfinite(rail)
             & (rail >= -0.001)
             & (rail <= 0.01)
-            & torch.isfinite(hand)
-            & (hand.abs() <= 0.002)
+            & released
             & clear
         )
+
+
+class _FrankaDrawerStorageEnv(DrawerStorageEnv):
+    _hand_joints = ("fr3_finger_joint1", "fr3_finger_joint2")
+    _open_hand = (0.04, 0.04)
+    _finger_links = ("fr3_leftfinger", "fr3_rightfinger")
+
+
+def _register_deployment(filename: str, env_cls: type[DrawerStorageEnv]) -> None:
+    declaration = load_config(_CONFIG / filename)
+    profile = load_config((_CONFIG / declaration["embodiment"]["component"]).resolve())[
+        "skill_profile"
+    ]
+    deployment = load_configured_task_program_deployment(
+        task_program=declaration["task_program"],
+        skill_profile=profile,
+        base_dir=_CONFIG,
+    )
+    environment = load_config(_CONFIG / declaration["environment"]["component"])
+    register_env_function(
+        env_cls,
+        declaration["id"],
+        max_episode_steps=environment["max_episode_steps"],
+        task_program_adapter_factory=deployment.integration.adapter_factory,
+    )
+
+
+_register_deployment("task.ur5.yaml", DrawerStorageEnv)
+_register_deployment("task.franka.yaml", _FrankaDrawerStorageEnv)

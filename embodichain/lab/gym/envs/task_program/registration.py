@@ -41,7 +41,7 @@ def _register_configured_task_program_integration(
     *,
     max_episode_steps: object,
 ) -> EnvSpec:
-    """Register ``EmbodiedEnv`` under a config-owned ID, idempotently."""
+    """Resolve an explicit registration or register a config-owned ID."""
     selected_env_id = _identifier(env_id, path="id")
     selected_max_episode_steps = _integer(
         max_episode_steps,
@@ -58,9 +58,15 @@ def _register_configured_task_program_integration(
     from embodichain.lab.gym.envs import EmbodiedEnv
     from embodichain.lab.gym.utils.registration import (
         REGISTERED_ENVS,
+        discover_task_packages,
         get_env_spec,
         register_env_function,
     )
+
+    # Explicit task registrations are installed by import. Discover before
+    # taking the lock because a task package may load a configured deployment.
+    if selected_env_id not in REGISTERED_ENVS:
+        discover_task_packages()
 
     with _REGISTER_LOCK:
         existing = REGISTERED_ENVS.get(selected_env_id)

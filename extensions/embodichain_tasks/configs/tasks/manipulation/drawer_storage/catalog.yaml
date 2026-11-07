@@ -9,3 +9,5 @@ default_deployment: ur5
 deployments:
   ur5:
     config: task.ur5.yaml
+  franka:
+    config: task.franka.yaml

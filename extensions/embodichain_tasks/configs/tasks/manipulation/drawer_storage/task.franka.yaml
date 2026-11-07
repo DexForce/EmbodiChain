@@ -1,0 +1,14 @@
+id: TaskProgramDrawerStorage-Franka-v1
+environment:
+  component: env.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.franka.yaml
+  execution_policy: task_program/execution_policy.franka.yaml
+embodiment:
+  component: ../../../components/embodiments/franka_panda.yaml
+  overrides:
+    init_pos: [-0.08, -0.10, 0.2]
+    init_rot: [0.0, 0.0, 30.0]
+collection:
+  max_attempts: 1
