@@ -116,6 +116,14 @@ errors and cursors directly in the existing TensorDict. There is no history
 instance or separate bind/seed/append manager. `ObservationManager` binds read
 access with `bind_rollout_storage`, keeps only the semantic schema and source
 aliases, and serves `read_history`/`snapshot_history` as indexed snapshot reads.
+`read_history_window` copies exact inclusive per-environment intervals from that
+same store, including validity, acquisition errors, revisions and timestamps.
+Intervals retain their native row order and lengths; no padding, new schema,
+physical capture or loop of single-slot queries is introduced. Missing slots,
+closed owners or stale/uninitialized episodes reject the read.
+`read_history_step_counts` returns only qualified completed boundaries from the
+same store, without copying values or invoking acquisition. Aliases resolve
+through the same schema and returned tensors cannot mutate the stored history.
 Evidence adapters bind roles through `manager.schema`. Rollout raw writes and
 indexing helpers live beside the existing buffer utilities in `utils/gym_utils.py`.
 `export_observation_history` projects the same schema for compatible output.
