@@ -1,0 +1,19 @@
+id: TaskProgramRepeatedPickPlace-v1
+environment:
+  component: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/newton.yaml
+embodiment:
+  component: ../../../extensions/embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80_rgbd.yaml
+  overrides:
+    init_qpos:
+    - 0.0
+    - -1.57
+    - 1.57
+    - -1.57
+    - -1.57
+    - 0.0
+    - 0.0
+    - 0.0
+task_program:
+  program: ../scene_robot_feasibility/program.yaml
+  integration: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/integration.yaml
+  execution_policy: ../../../extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml

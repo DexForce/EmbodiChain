@@ -758,10 +758,11 @@ class TaskProgramMappedRetimeFactory:
                 control_dt=context.require_control_dt(),
                 protected_indices=protected,
             )
-            limits = engine.robot.body_data.qpos_limits
-            if not isinstance(limits, torch.Tensor) or limits.ndim not in (2, 3):
-                raise ValueError("robot joint position limits are unavailable")
-            limits = limits[0] if limits.ndim == 3 else limits
+            from embodichain.lab.sim.atomic_actions._plan_expansion import (
+                _context_joint_limits,
+            )
+
+            limits = _context_joint_limits(engine, context)[0]
             velocity = self._velocity_limits.clone()
             acceleration = self._acceleration_limits.clone()
             if resolved.motion_policy.velocity_limit is not None:

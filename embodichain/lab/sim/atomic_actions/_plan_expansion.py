@@ -75,6 +75,28 @@ class _PlanExpansionResult:
     items: tuple[CandidateWorkItem, ...]
 
 
+def _context_joint_limits(
+    engine: AtomicActionEngine, context: PlanningContext
+) -> torch.Tensor:
+    """Select full-layout limits by physical environment IDs, retaining shared limits."""
+    limits = engine.robot.body_data.qpos_limits
+    if not isinstance(limits, torch.Tensor):
+        raise TypeError("robot qpos_limits must be a tensor")
+    if limits.ndim == 2:
+        limits = limits.unsqueeze(0)
+    if (
+        limits.ndim != 3
+        or limits.shape[-2:] != (len(engine.robot.joint_names), 2)
+        or limits.shape[0] < 1
+    ):
+        raise ValueError("robot qpos_limits must match the full joint order and batch")
+    if limits.shape[0] == 1:
+        return limits.expand(context.batch_size, -1, -1)
+    return limits.index_select(
+        0, context.env_ids.to(device=limits.device, dtype=torch.long)
+    )
+
+
 def _expand_plan(
     engine: AtomicActionEngine,
     request: ResolvedActionRequest,
@@ -92,16 +114,7 @@ def _expand_plan(
             "expansion requires one logical request per joint trajectory row"
         )
     joint_names = tuple(engine.robot.joint_names)
-    limits = engine.robot.body_data.qpos_limits
-    if not isinstance(limits, torch.Tensor):
-        raise TypeError("robot qpos_limits must be a tensor")
-    if limits.ndim == 2:
-        limits = limits.unsqueeze(0)
-    if limits.shape[-2:] != (len(joint_names), 2) or limits.shape[0] not in (
-        1,
-        len(specs),
-    ):
-        raise ValueError("robot qpos_limits must match the full joint order and batch")
+    limits = _context_joint_limits(engine, context)
     motion_ids = tuple(
         dict.fromkeys(
             joint_id
