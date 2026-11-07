@@ -488,8 +488,8 @@ def prepare(source_directory: Path, output: Path) -> None:
             }
             and tuple(snapshot["joint_names"][:7])
             == tuple(f"Joint{i}" for i in range(1, 8)),
-            # Frozen v1 source geometry; changing the public class is allowed,
-            # changing its declared physical model requires requalification.
+            # The shared geometry identity supports explicitly pinned legacy
+            # aliases; source and physical calibration still require qualification.
             source_geometry_identity=snapshot["robot_geometry_sha256"]
             == _canonical_robot_geometry_sha256(
                 "6b08aff1b8de77edfd1deab3da3f139d2ecfb20838bd21cf2d6207058c0d4d82"
