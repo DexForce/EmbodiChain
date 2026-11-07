@@ -71,7 +71,7 @@ def test_native_rest_scene_preserves_analytic_box_decisions_and_first_pair(case)
             )
 
             with pytest.raises(
-                UnsupportedFeasibilityError, match="decide the threshold"
+                UnsupportedFeasibilityError, match="canonical AABB separation"
             ):
                 query.inspect(
                     parts,
