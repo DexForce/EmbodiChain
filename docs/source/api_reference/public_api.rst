@@ -1059,31 +1059,26 @@ and semantic hash; it does not qualify a partial binding or physical evidence.
 embodichain.gen_sim.task_spec.control_evidence
 ----------------------------------------------
 
-Control bindings seal a plain source route payload and explicit terminal policy,
-source path and complete execution prefix. Historical Press/Twist replay checks
-the same operation/source-asset/route digest, sampling window, cleanup, clearance
-and declared coarse or calibrated criterion as the original source observer.
-There are no imports of live factories, sensors or Task Engine objects.
+Control bindings seal their normative/program identities and source declaration.
+Versions 1 (``historical_record``) and 2 (``raw_snapshot``) retain their serialized
+fields and hashes. The source declaration is interpreted by the Lab adapter;
+TaskSpec imports no Lab, simulator, native SDK or skill event implementation.
 
-Binding version 1 remains explicitly ``historical_record`` with unchanged
-serialization and hashes. Version 2 explicitly selects ``raw_snapshot`` and seals
-the complete actual control identity and compiled policy occurrences. Old records
-are never upgraded or re-signed automatically, and a raw contract cannot borrow a
-historical accepted claim. Raw binding decode is standard-library-only; numerical
-reevaluation lazily calls the published pure Compute articulation owner.
+First call
+:func:`embodichain.lab.task_program.integrations.evidence.normalize_control_evidence`
+with the serialized binding, original evidence and program. It validates the
+original actor, occurrence, sampling-window and control-event protocol, then
+returns source-bound ``PhysicalEvidenceFrame``/``Batch`` JSON. Supply that packet
+to :func:`evaluate_control_evidence` or the common physical evidence report.
+Direct raw receipts must be normalized before normative evaluation.
 
-The raw verifier rechecks exact B1 rows, episodes, native actor/topology identity,
-original revisions/timestamps, complete windows, hold grids and actual invocation
-selectors. Press retains released onset, contact-backed event, retreat, parent
-release and terminal clearance rules. Twist retains startup/table checks, contact
-path, stable held chunks, retained turn and non-target joint baselines. Missing
-channels, invalid finite data, incomplete shapes/windows and foreign boundaries
-remain unavailable; no Lab, Task Engine or native SDK is imported.
-
-A contact-backed Press event is not device activation, and the coarse Twist
-criterion is not silently upgraded to calibrated-setting success.
-The common physical report assembler accepts these bindings without filling
-missing final goals, past milestones or continuous trajectory requirements.
+The normative evaluator checks the measurement hash, declared source, row and
+episode identities, channel validity and the requested physical-effect fact.
+Valid negative observations fail; unavailable acquisition stays unavailable.
+The Lab adapter retains the original all-active proof requirement, Press event
+threshold and coarse-turn versus calibrated-setting rules. A Press event does
+not establish device activation. Bindings and historical certificates are never
+automatically upgraded or re-signed.
 
 .. currentmodule:: embodichain.gen_sim.task_spec.control_evidence
 
@@ -4882,6 +4877,8 @@ Offline held-object adapters validate exact execution and acquisition identities
    resolve_hold_observation_condition
    sampled_support_window
    directional_observation_axes
+   normalize_control_evidence
+   validate_control_declaration
    normalize_placement_evidence
    normalize_pour_release_evidence
    validate_placement_declaration
@@ -4912,12 +4909,33 @@ Offline held-object adapters validate exact execution and acquisition identities
 
 .. autofunction:: directional_observation_axes
 
+.. autofunction:: normalize_control_evidence
+.. autofunction:: validate_control_declaration
 .. autofunction:: normalize_placement_evidence
 
 .. autofunction:: normalize_pour_release_evidence
 
 .. autofunction:: validate_placement_declaration
 
+
+embodichain.lab.task_program.integrations.evidence.control_evidence
+-----------------------------------------------------------------
+
+Offline control adapters validate sealed source declarations, recheck original
+Press/Twist receipts against their acquired channels and emit normalized physical
+facts. Declaration preflight is standard-library-only and reads no physical state.
+Normalization uses the existing Lab evidence value contract without importing
+TaskSpec, Task Engine or simulator packages.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.control_evidence
+
+.. autosummary::
+
+   normalize_control_evidence
+   validate_control_declaration
+
+.. autofunction:: normalize_control_evidence
+.. autofunction:: validate_control_declaration
 
 embodichain.lab.task_program.integrations.evidence.coordinated_evidence
 -----------------------------------------------------------------------

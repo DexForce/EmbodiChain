@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Numeric interpretation of explicit articulation contact-event parameters."""
+"""Historical Press/Twist event interpretation for control evidence normalization."""
 
 from __future__ import annotations
 from collections.abc import Iterable

@@ -37,11 +37,8 @@ from embodichain.gen_sim.task_spec import (
 )
 from embodichain.gen_sim.task_spec.control_evidence import (
     ControlEvidenceBinding,
-    evaluate_control_evidence,
 )
-from embodichain.gen_sim.task_spec.evidence_report import (
-    evaluate_physical_evidence_report,
-)
+from ._evaluation import evaluate_physical_evidence_report
 from .test_control_evidence import _case
 
 DATA = Path(__file__).parent / "data"
@@ -282,6 +279,22 @@ def test_raw_scope_rejects_undeclared_batch_and_binding_drift_before_evaluation(
     _, binding, _, _ = raw_case()
     with pytest.raises(ValueError, match="B=1"):
         replace(binding, env_ids=(0, 1), episode_ids=(0, 0), binding_hash="")
+    from embodichain.lab.task_program.integrations.evidence import (
+        validate_control_declaration,
+    )
+
+    declaration = binding.to_dict()
+    validate_control_declaration(declaration)
+    actors = declaration["control_identity"]["contact_actors"]
+    actors["parent"] = actors["target"]
+    declaration["binding_hash"] = canonical_hash(
+        {k: v for k, v in declaration.items() if k != "binding_hash"}
+    )
+    with pytest.raises(ValueError, match="disjoint"):
+        validate_control_declaration(declaration)
     binding.control_identity["observer_id"] = "foreign"
     with pytest.raises(ValueError, match="binding_hash"):
         ControlEvidenceBinding.from_dict(binding)
+
+
+from ._evaluation import evaluate_control_evidence

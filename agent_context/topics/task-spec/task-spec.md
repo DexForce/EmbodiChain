@@ -143,11 +143,12 @@ source/receiver, episode, program, release and cadence identities. The original
 this does not qualify fluid transfer. Missing acquisition remains unavailable.
 Lab reads recorded values through the canonical ObservationManager schema/raw
 history, never live poses or a second trajectory buffer. Historical control
-receipts remain qualified by the separate `control_evidence.py` owner.
+receipts are normalized by the Lab control-evidence adapter before normative evaluation.
 
-Historical Press/Twist control proof lives in `control_evidence.py`. Bindings
-seal explicit predicate/joint/direction/resource and compiled occurrence identity.
-TaskSpec replays the original acceptance receipt and complete execution prefix;
-program success alone cannot certify a physical control effect. Missing acquisition
-remains unavailable, and an original measured rejection remains rejected. This
-verifier collects no state and changes no physics or acceptance thresholds.
+`control_evidence.py` seals the original v1/v2 source declarations and evaluates
+normalized control-effect observations. It checks source/measurement identities,
+row/episode association and channel validity without interpreting skill phases,
+contact windows or raw receipts. Valid negative facts fail; invalid acquisition
+remains unavailable. Raw and historical sources first pass through Lab's
+`normalize_control_evidence`; the declaration and program identities remain
+unchanged, while normalization has its own measurement identity.

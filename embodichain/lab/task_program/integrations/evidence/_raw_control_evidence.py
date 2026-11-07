@@ -20,8 +20,8 @@ from collections.abc import Mapping
 import math
 from types import SimpleNamespace
 from typing import Any
-from .canonicalization import canonical_hash
-from .evidence import _identifier, _digest, _path
+from embodichain._json_contract import canonical_hash
+from ._values import _identifier, _digest, _path
 
 __all__: list[str] = []
 _SELECTOR = {
@@ -429,12 +429,12 @@ def verify_raw_control(
     binding: Any, snapshot: Mapping[str, Any], program: Mapping[str, Any]
 ) -> None:
     import torch
-    from embodichain.compute.articulation import (
+    from ._control_events import (
         evaluate_press_event,
         evaluate_twist_event,
         initial_twist_state_stable,
     )
-    from ._control_evidence import one
+    from ._control_records import one
 
     packet = snapshot["control_acquisition"]
     identity = binding.control_identity

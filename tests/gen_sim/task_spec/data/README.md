@@ -12,13 +12,12 @@ Orientation cases cover aligned, reversed, sideways and missing measurements.
 The shared count cases cover failed and missing execution prefixes, so those
 cross-products are not repeated for every orientation. Articulation cases keep
 endpoint success, a measured negative and a missing joint; its two duplicate
-post-execution variants are covered by the generic count-prefix cases. Existing single-binding
-and historical-control snapshots continue to protect their published identities.
+post-execution variants are covered by the generic count-prefix cases. Existing single-binding snapshots protect their published identities. Historical
+control snapshots follow their Lab integration tests.
 
-Raw control archives retain their producer provenance and complete measurements.
-The redundant second oracle of their derived reports is omitted; direct raw
-protocol tests cover outcomes, dispatch, missing/foreign facts and version drift.
-HandOver/coordinated protocol fixtures live with their Lab integration tests.
+Raw control archives and v1 compatibility snapshots live under
+`tests/gym/envs/task_program/evidence/data/` with their protocol tests. TaskSpec
+control tests use normalized facts without importing Lab or replaying skills.
 
-The complete-surface cold-import test also decodes group and raw-control bindings
+The complete-surface cold-import test also decodes group and control bindings
 under the same no-numeric/no-Lab import guard, replacing separate subprocesses.

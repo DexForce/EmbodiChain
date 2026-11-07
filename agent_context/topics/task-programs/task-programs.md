@@ -233,3 +233,17 @@ Public API changes also require the docs checker tests and a Sphinx dummy
 build. Physical qualification requires real environment runs with measured
 evidence, controlled seeds/randomization, explicit validators, and persisted
 completion metadata.
+
+## Control evidence normalization
+
+`integrations/evidence/control_evidence.py` owns offline Press/Twist protocol
+normalization. `validate_control_declaration` checks the sealed actor roster and
+compiled policy selectors without importing Sim or numeric backends.
+`normalize_control_evidence` validates the original raw/historical input contract,
+replays contact-backed events and cleanup, and emits the existing Lab physical
+evidence frame/batch JSON with source hashes and exact episode/boundary identities.
+The measured operation-window timestamp is retained independently of its step
+index. Event rules and legacy receipt adapters remain private to this owner;
+Compute exposes no skill event APIs. TaskSpec consumes the normalized facts and
+separately evaluates its declared predicate. Missing acquisition remains
+unavailable; historical measurements are not re-signed as new physical evidence.

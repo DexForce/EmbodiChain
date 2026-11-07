@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from .control_evidence import normalize_control_evidence, validate_control_declaration
 from .handover_evidence import HandOverEvidenceBinding, normalize_handover_evidence
 from .coordinated_evidence import (
     CoordinatedHoldEvidenceBinding,
@@ -40,6 +41,8 @@ from .placement_evidence import (
 )
 
 __all__ = [
+    "normalize_control_evidence",
+    "validate_control_declaration",
     "HandOverEvidenceBinding",
     "normalize_handover_evidence",
     "CoordinatedHoldEvidenceBinding",

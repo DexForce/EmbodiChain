@@ -25,7 +25,7 @@ import sys
 import embodichain
 
 from .test_condition_group_evidence import _declaration
-from .test_raw_control_evidence import raw_case
+from .test_control_evidence import _case
 
 
 def test_complete_evidence_surface_is_available_without_physical_or_numeric_imports():
@@ -36,7 +36,7 @@ def test_complete_evidence_surface_is_available_without_physical_or_numeric_impo
             "ConditionEvidenceGroupBinding",
             _declaration(recorded=False).to_dict(),
         ),
-        ("control_evidence", "ControlEvidenceBinding", raw_case()[1].to_dict()),
+        ("control_evidence", "ControlEvidenceBinding", _case()[1].to_dict()),
     )
     script = f"""
 import importlib, importlib.abc, pkgutil, sys

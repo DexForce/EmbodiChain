@@ -52,6 +52,22 @@ def normalized(binding, packet, program, spec=None):
         normalize_pour_release_evidence,
     )
 
+    from embodichain.gen_sim.task_spec.control_evidence import ControlEvidenceBinding
+
+    if isinstance(binding, dict) and binding.get("schema_version") in {
+        "task_spec.control_evidence_binding/v1",
+        "task_spec.control_evidence_binding/v2",
+    }:
+        binding = ControlEvidenceBinding.from_dict(binding)
+    if isinstance(binding, ControlEvidenceBinding):
+        from embodichain.lab.task_program.integrations.evidence import (
+            normalize_control_evidence,
+        )
+
+        binding = ControlEvidenceBinding.from_dict(binding)
+        return binding, normalize_control_evidence(
+            binding.to_dict(), packet, program=program
+        )
     if isinstance(binding, SupportedPlacementEvidenceBinding):
         predicate = (
             next(
@@ -163,7 +179,19 @@ evaluate_coordinated_transport_evidence = evaluate
 
 def evaluate_physical_evidence_report(spec, bindings, evidence, *, program, num_envs):
     pairs = [
-        normalized(binding, evidence.get(binding.predicate_id, {}), program, spec)
+        normalized(
+            binding,
+            evidence.get(
+                (
+                    binding["predicate_id"]
+                    if isinstance(binding, dict)
+                    else binding.predicate_id
+                ),
+                {},
+            ),
+            program,
+            spec,
+        )
         for binding in bindings
     ]
     return normative_report(
@@ -200,3 +228,12 @@ def evaluate_pour_evidence(spec, binding, packet, *, program):
 
     bound, normalized_packet = normalized(binding, packet, program, spec)
     return compare(spec, bound, normalized_packet, program=program)
+
+
+def evaluate_control_evidence(spec, binding, packet, *, program):
+    from embodichain.gen_sim.task_spec.control_evidence import (
+        evaluate_control_evidence as compare,
+    )
+
+    norm, sample = normalized(binding, packet, program, spec)
+    return compare(spec, norm, sample, program=program)
