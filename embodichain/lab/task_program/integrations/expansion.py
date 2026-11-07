@@ -27,14 +27,14 @@ from typing import ClassVar
 import torch
 
 from embodichain.data_pipeline.real2sim import TrajectoryTimeMap
-from embodichain.lab.sim.atomic_actions import (
-    ActionPlan,
-    ActionPlanTemplateAdapter,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillPlan,
+    SkillPlanTemplateAdapter,
+    AtomicSkillEngine,
     PlanTransform,
-    ResolvedActionRequest,
+    ResolvedSkillRequest,
 )
-from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+from embodichain.lab.sim.atomic_skills.affordance_sampling import (
     AffordanceSamplingContext,
 )
 from embodichain.lab.sim.motion.expansion import (
@@ -50,7 +50,7 @@ from embodichain.lab.sim.motion.expansion import (
     retime_with_time_map,
     validate_motion_limits,
 )
-from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_skills.state import PlanningContext
 from embodichain.lab.task_program.runtime.expansion import TaskProgramPlanRequest
 
 __all__ = [
@@ -209,12 +209,12 @@ class TaskProgramSameGridExpansionFactory:
         phase_allowlist: Mapping[str, Sequence[str]] | None = None,
         kinematics_factory: (
             Callable[
-                [ResolvedActionRequest, PlanningContext, TrajectoryTemplate], Callable
+                [ResolvedSkillRequest, PlanningContext, TrajectoryTemplate], Callable
             ]
             | None
         ) = None,
         collision_validator: (
-            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], bool] | None
+            Callable[[ResolvedSkillRequest, PlanningContext, SkillPlan], bool] | None
         ) = None,
         diagnostic_unchecked: bool = False,
     ) -> None:
@@ -312,20 +312,20 @@ class TaskProgramSameGridExpansionFactory:
         )
 
     def create_plan_transform(
-        self, request: TaskProgramPlanRequest, *, engine: AtomicActionEngine
+        self, request: TaskProgramPlanRequest, *, engine: AtomicSkillEngine
     ) -> PlanTransform | None:
         """Select the spatial transform for one compiled call occurrence."""
         if not isinstance(request, TaskProgramPlanRequest) or not isinstance(
-            engine, AtomicActionEngine
+            engine, AtomicSkillEngine
         ):
             raise TypeError("request and engine must be Task Program and Atomic values")
         if request.analysis_call_index not in self._call_indices:
             return None
 
         def transform(
-            resolved: ResolvedActionRequest, context: PlanningContext, plan: ActionPlan
-        ) -> ActionPlan:
-            from embodichain.lab.sim.atomic_actions._plan_expansion import (
+            resolved: ResolvedSkillRequest, context: PlanningContext, plan: SkillPlan
+        ) -> SkillPlan:
+            from embodichain.lab.sim.atomic_skills._plan_expansion import (
                 _PlanExpansionSpec,
                 _expand_plan,
             )
@@ -552,7 +552,7 @@ class TaskProgramMappedRetimeFactory:
         call_indices: Sequence[int],
         phase_allowlist: Mapping[str, Sequence[str]] | None = None,
         collision_validator: (
-            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], bool] | None
+            Callable[[ResolvedSkillRequest, PlanningContext, SkillPlan], bool] | None
         ) = None,
         diagnostic_unchecked: bool = False,
     ) -> None:
@@ -629,20 +629,20 @@ class TaskProgramMappedRetimeFactory:
         return tuple(result)
 
     def create_plan_transform(
-        self, request: TaskProgramPlanRequest, *, engine: AtomicActionEngine
+        self, request: TaskProgramPlanRequest, *, engine: AtomicSkillEngine
     ) -> PlanTransform | None:
         """Select a retiming transform by compiled call occurrence."""
         if not isinstance(request, TaskProgramPlanRequest) or not isinstance(
-            engine, AtomicActionEngine
+            engine, AtomicSkillEngine
         ):
             raise TypeError("request and engine must be Task Program and Atomic values")
         if request.analysis_call_index not in self._call_indices:
             return None
 
         def transform(
-            resolved: ResolvedActionRequest, context: PlanningContext, plan: ActionPlan
-        ) -> ActionPlan:
-            from embodichain.lab.sim.atomic_actions._expansion_phases import FREE_PHASES
+            resolved: ResolvedSkillRequest, context: PlanningContext, plan: SkillPlan
+        ) -> SkillPlan:
+            from embodichain.lab.sim.atomic_skills._expansion_phases import FREE_PHASES
 
             if context.batch_size != 1 or plan.joint_trajectory is None:
                 raise ValueError(
@@ -700,7 +700,7 @@ class TaskProgramMappedRetimeFactory:
             )
             if not motion_ids:
                 raise ValueError("retiming requires a bound motion endpoint")
-            adapter = ActionPlanTemplateAdapter(
+            adapter = SkillPlanTemplateAdapter(
                 joint_names=names,
                 phase_permissions={
                     name: (("retime",) if name in selected else ())
@@ -758,7 +758,7 @@ class TaskProgramMappedRetimeFactory:
                 control_dt=context.require_control_dt(),
                 protected_indices=protected,
             )
-            from embodichain.lab.sim.atomic_actions._plan_expansion import (
+            from embodichain.lab.sim.atomic_skills._plan_expansion import (
                 _context_joint_limits,
             )
 
@@ -865,16 +865,16 @@ def _combined_augmentation_payload(
 class TaskProgramSourceAdapter:
     """Expose a Task Program's grounded Atomic plan through SourceAdapter."""
 
-    atomic_adapter: ActionPlanTemplateAdapter
+    atomic_adapter: SkillPlanTemplateAdapter
     kind: ClassVar[str] = "task_program"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.atomic_adapter, ActionPlanTemplateAdapter):
-            raise TypeError("atomic_adapter must be an ActionPlanTemplateAdapter")
+        if not isinstance(self.atomic_adapter, SkillPlanTemplateAdapter):
+            raise TypeError("atomic_adapter must be an SkillPlanTemplateAdapter")
 
     def export_template(
         self,
-        source: ActionPlan,
+        source: SkillPlan,
         *,
         context: SourceContext,
     ) -> TrajectoryTemplate:
@@ -1096,15 +1096,15 @@ class CombinedTaskProgramExpansionFactory:
         request: TaskProgramPlanRequest,
         context: PlanningContext,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> PlanningContext:
         """Attach the selected call's Affordance branch before Atomic planning."""
         if not isinstance(request, TaskProgramPlanRequest):
             raise TypeError("request must be a TaskProgramPlanRequest")
         if not isinstance(context, PlanningContext):
             raise TypeError("context must be a PlanningContext")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine")
         if request.workflow_id.split("/", 1)[0] != self._program_id:
             raise ValueError("workflow ID does not match profile source_id")
         call_index = request.analysis_call_index
@@ -1131,13 +1131,13 @@ class CombinedTaskProgramExpansionFactory:
         self,
         request: TaskProgramPlanRequest,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> PlanTransform | None:
         """Return the transform for calls selected by the episode schedule."""
         if not isinstance(request, TaskProgramPlanRequest):
             raise TypeError("request must be a TaskProgramPlanRequest")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine")
         if request.workflow_id.split("/", 1)[0] != self._program_id:
             raise ValueError("workflow ID does not match profile source_id")
         call_index = request.analysis_call_index
@@ -1145,10 +1145,10 @@ class CombinedTaskProgramExpansionFactory:
             return None
 
         def transform(
-            resolved: ResolvedActionRequest,
+            resolved: ResolvedSkillRequest,
             context: PlanningContext,
-            plan: ActionPlan,
-        ) -> ActionPlan:
+            plan: SkillPlan,
+        ) -> SkillPlan:
             return self._transform(request, engine, resolved, context, plan)
 
         return transform
@@ -1156,13 +1156,13 @@ class CombinedTaskProgramExpansionFactory:
     def _transform(
         self,
         call_request: TaskProgramPlanRequest,
-        engine: AtomicActionEngine,
-        resolved: ResolvedActionRequest,
+        engine: AtomicSkillEngine,
+        resolved: ResolvedSkillRequest,
         context: PlanningContext,
-        plan: ActionPlan,
-    ) -> ActionPlan:
+        plan: SkillPlan,
+    ) -> SkillPlan:
         """Delegate row-local adaptation and rebuilding to the Atomic layer."""
-        from embodichain.lab.sim.atomic_actions._plan_expansion import (
+        from embodichain.lab.sim.atomic_skills._plan_expansion import (
             _PlanExpansionSpec,
             _expand_plan,
         )

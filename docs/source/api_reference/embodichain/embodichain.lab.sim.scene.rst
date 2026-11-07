@@ -408,7 +408,7 @@ subsequent rigid reads reject replaced owners. No query, grasp policy or
 experiment revision is selected here.
 
 GraspKit owns discrete geometric qualification through an injected collision
-backend. ``ActionPlanningServices`` binds an explicitly supplied geometric policy
+backend. ``SkillPlanningServices`` binds an explicitly supplied geometric policy
 and owns query lifetimes. Captured geometry does not establish physical acquisition or release.
 
 .. currentmodule:: embodichain.lab.sim.scene.native_hand

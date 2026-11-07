@@ -43,7 +43,7 @@ from embodichain.lab.gym.envs.managers.real2sim_sink import (
     Real2SimLeRobotEpisodeSink,
     build_real2sim_execution_trace,
 )
-from embodichain.lab.sim.atomic_actions import JointPositionTarget
+from embodichain.lab.sim.atomic_skills import JointPositionTarget
 from embodichain.lab.sim.motion.expansion import (
     CandidateIdentity,
     ValidationCheck,

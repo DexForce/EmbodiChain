@@ -54,7 +54,7 @@ Native grip evidence is an explicit simulation integration in
 `integrations/simulation/grip_evidence.py`. Its factory owns immutable object/pad
 declarations and creates the standard control-part provider through its public
 observer hook. The semantic adapter translates clauses to the physical
-`atomic_actions.grip_evidence.GripContactObserver`; sensors own acquisition/history
+`atomic_skills.grip_evidence.GripContactObserver`; sensors own acquisition/history
 and compute owns bilateral contact arithmetic. It retains provider IDs and physical algorithm revisions; revision
 2's open-hand interpretation requires explicit driver calibration and opt-in.
 No task labels or control-part suffixes select a policy. Sampling/timeline lifecycle
@@ -265,7 +265,7 @@ to the integration and execution thresholds belong to the selected policy.
 The integration resolves those declarations against exact native owners and
 adapts semantic clauses to shared physical requests. Sensor acquisition/history
 lives in `lab.sim.sensors`; physical grip interpretation lives in
-`lab.sim.atomic_actions.grip_evidence`, including `DriverOpeningBinding.bind`
+`lab.sim.atomic_skills.grip_evidence`, including `DriverOpeningBinding.bind`
 for calibrated hand-opening observations. Factories bind those declarations
 before creating sensor resources; release predicates and experiment labels
 remain outside raw acquisition. Contact arithmetic lives in

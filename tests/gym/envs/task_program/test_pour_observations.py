@@ -59,7 +59,7 @@ from embodichain.lab.task_program.integrations.simulation.observations import (
     SimulationStateObservationCollector,
 )
 from embodichain.lab.task_program.semantics import SkillPolicyPreset, EffectAssurance
-from embodichain.lab.sim.atomic_actions import CARTESIAN_POSE_CAPABILITY
+from embodichain.lab.sim.atomic_skills import CARTESIAN_POSE_CAPABILITY
 
 _SOURCE = json.loads(
     (Path(__file__).parent / "data/pour_observation_source_reference.json").read_text()
@@ -120,7 +120,7 @@ def _collector_case(name="nominal", *, count=1):
         presets=(
             SkillPolicyPreset(
                 "default",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
             ),
         ),

@@ -29,12 +29,12 @@ import numpy as np
 
 from embodichain.data_pipeline.real2sim import load_prototype
 from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     InstantiatedSkillMotion,
     NominalMotionSource,
     PrototypeMotionProvider,
-    ResolvedActionRequest,
+    ResolvedSkillRequest,
     PlanningContext,
 )
 from embodichain.lab.task_program.compiler.program import CompiledTaskProgram
@@ -221,7 +221,7 @@ class _ConfiguredTaskProgramNominalSources:
                 raise ValueError("configured prototype requires a target entity")
 
     def create_nominal_source(
-        self, request: TaskProgramPlanRequest, *, engine: AtomicActionEngine
+        self, request: TaskProgramPlanRequest, *, engine: AtomicSkillEngine
     ) -> NominalMotionSource | None:
         """Create a source for the current compiled call occurrence."""
         if not request.workflow_id.startswith(self._program_id + "/"):
@@ -328,10 +328,10 @@ class BoundTaskProgramNominalSources:
         self,
         request: TaskProgramPlanRequest,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> NominalMotionSource | None:
         """Resolve a source by compiled call occurrence, not by skill name."""
-        if not isinstance(engine, AtomicActionEngine) or not isinstance(
+        if not isinstance(engine, AtomicSkillEngine) or not isinstance(
             request, TaskProgramPlanRequest
         ):
             raise TypeError("engine and request must be typed runtime values")
@@ -387,7 +387,7 @@ class TracingTaskProgramNominalSources:
             validator(program)
 
     def create_nominal_source(
-        self, request: TaskProgramPlanRequest, *, engine: AtomicActionEngine
+        self, request: TaskProgramPlanRequest, *, engine: AtomicSkillEngine
     ) -> NominalMotionSource | None:
         """Wrap the selected source and capture its successful instantiation."""
         source = self._delegate.create_nominal_source(request, engine=engine)
@@ -399,7 +399,7 @@ class TracingTaskProgramNominalSources:
 
         class _TraceSource:
             def instantiate(
-                self, resolved: ResolvedActionRequest, context: PlanningContext
+                self, resolved: ResolvedSkillRequest, context: PlanningContext
             ) -> InstantiatedSkillMotion:
                 if index in owner._motions:
                     raise ValueError(

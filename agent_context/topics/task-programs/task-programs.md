@@ -12,7 +12,7 @@ embodichain.lab.task_program
 Use these terms consistently:
 
 - **Atomic Skill**: an executable low-level capability implemented under
-  `embodichain.lab.sim.atomic_actions`.
+  `embodichain.lab.sim.atomic_skills`.
 - **Semantic Call**: a high-level Task Program instruction such as `Pick`,
   `Place`, `HandOver`, or an allowlisted registered call.
 - **Task Program**: a bounded declarative program that orchestrates Semantic
@@ -51,7 +51,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
 | Pure source physical reset/cadence declarations | `embodichain/lab/task_program/integrations/simulation/source_deployment.py` |
 | Physical acquisition, history and support observations | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py`, `support_observation.py` |
-| Physical grip interpretation | `embodichain/lab/sim/atomic_actions/grip_evidence.py` |
+| Physical grip interpretation | `embodichain/lab/sim/atomic_skills/grip_evidence.py` |
 | Offline receipt/query/actor normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
 | SDK-independent shared physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
 
@@ -225,7 +225,7 @@ pytest -q tests/gym/envs/task_program
 pytest -q tests/gym/envs/test_embodied_env_task_program.py
 pytest -q tests/gym/envs/test_demo.py tests/gym/envs/managers
 pytest -q tests/agents/mllm/test_task_program.py
-pytest -q tests/sim/atomic_actions
+pytest -q tests/sim/atomic_skills
 python docs/scripts/check_api_docs.py
 ```
 

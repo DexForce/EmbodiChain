@@ -66,8 +66,8 @@ _FORBIDDEN_KEYS = frozenset(
     {
         "action",
         "action_invocation",
-        "action_options",
-        "atomic_action",
+        "skill_options",
+        "atomic_skill",
         "atomic_goal",
         "command",
         "command_frame",

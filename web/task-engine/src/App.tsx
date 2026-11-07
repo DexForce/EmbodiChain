@@ -467,10 +467,10 @@ function Inspector({
               .events(node!.id)
               .filter((event) =>
                 [
-                  "action_planned",
+                  "skill_planned",
                   "trajectory_segment_entered",
                   "phase_effect_gate_satisfied",
-                  "action_completed",
+                  "skill_completed",
                   "action_failed",
                 ].includes(event.kind),
               )

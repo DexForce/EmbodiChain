@@ -93,7 +93,7 @@ def main() -> None:
             check=True,
         )
         text = (Path(folder) / "text/overview/architecture/index.txt").read_text()
-        assert "AtomicActionEngine" in text and "<iframe" not in text
+        assert "AtomicSkillEngine" in text and "<iframe" not in text
         # Historical checkouts without this extension retain their plain Sphinx build.
         legacy = Path(folder) / "legacy"
         legacy.mkdir()

@@ -997,7 +997,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         SkillPolicyPreset,
         EffectAssurance,
     )
-    from embodichain.lab.sim.atomic_actions import CARTESIAN_POSE_CAPABILITY
+    from embodichain.lab.sim.atomic_skills import CARTESIAN_POSE_CAPABILITY
     from embodichain.lab.task_program.integrations.simulation.observations import (
         SimulationSupportObservationCollector,
     )
@@ -1025,7 +1025,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         presets=(
             SkillPolicyPreset(
                 "default",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
             ),
         ),
