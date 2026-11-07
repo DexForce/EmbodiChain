@@ -54,6 +54,7 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
         "registered_semantic_lowerers",
         "control_part_evidence",
         "settle_presets",
+        "planning_services",
     }
 )
 _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
@@ -250,6 +251,16 @@ def _merge_runtime_services(
         )
         if skill_profile_values or task_values:
             result[field_name] = [*skill_profile_values, *task_values]
+
+    profile_planning = skill_profile.get("planning_services")
+    task_planning = task.get("planning_services")
+    if profile_planning is not None and task_planning is not None:
+        raise ValueError(
+            "planning_services must be owned by exactly one skill profile or task component."
+        )
+    planning = task_planning if task_planning is not None else profile_planning
+    if planning is not None:
+        result["planning_services"] = deepcopy(planning)
 
     skill_profile_evidence = skill_profile.get("control_part_evidence")
     task_evidence = task.get("control_part_evidence")

@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from .simulation.planning_services import SimulationPlanningServicesCfg
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
@@ -1124,9 +1126,10 @@ def _registration_payload(
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
+    planning_services: SimulationPlanningServicesCfg | None = None,
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
-    return {
+    payload = {
         "schema_version": _CATALOG_FINGERPRINT_SCHEMA_VERSION,
         "scene_binding": scene_binding,
         "scene_manifest": scene.entries,
@@ -1235,6 +1238,10 @@ def _registration_payload(
         "validator_kinds": _VALIDATOR_KINDS,
     }
 
+    if planning_services is not None:
+        payload["planning_services"] = planning_services.snapshot()
+    return payload
+
 
 @dataclass(frozen=True, slots=True)
 class SimulationTaskProgramRegistration:
@@ -1260,6 +1267,9 @@ class SimulationTaskProgramRegistration:
     registered_semantic_lowerer_factories: tuple[
         RegisteredSemanticLowererFactory, ...
     ] = ()
+    planning_services: SimulationPlanningServicesCfg | None = field(
+        default=None, kw_only=True
+    )
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1293,6 +1303,14 @@ class SimulationTaskProgramRegistration:
     )
 
     def __post_init__(self) -> None:
+        if self.planning_services is not None:
+            if type(self.planning_services) is not SimulationPlanningServicesCfg:
+                raise TypeError(
+                    "planning_services must be SimulationPlanningServicesCfg or None."
+                )
+            object.__setattr__(
+                self, "planning_services", self.planning_services.snapshot()
+            )
         if type(self.scene_binding) is not SimulationSceneBinding:
             raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
         if type(self.robot_profile_binding) is not SimulationRobotSkillProfileBinding:
@@ -1431,6 +1449,7 @@ class SimulationTaskProgramRegistration:
                 registered_semantic_lowerer_factories=(
                     self.registered_semantic_lowerer_factories
                 ),
+                planning_services=self.planning_services,
             )
         )
         object.__setattr__(
@@ -1536,6 +1555,7 @@ class SimulationTaskProgramRegistration:
                 registered_semantic_lowerer_factories=(
                     self.registered_semantic_lowerer_factories
                 ),
+                planning_services=self.planning_services,
             )
             current = _digest(payload)
         except (TypeError, ValueError) as exc:

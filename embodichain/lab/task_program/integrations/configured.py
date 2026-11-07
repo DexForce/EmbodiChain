@@ -132,6 +132,7 @@ from embodichain.toolkits.graspkit import (
 )
 
 if TYPE_CHECKING:
+    from .simulation.planning_services import SimulationPlanningServicesCfg
     from .environment import TaskProgramEnvironmentAdapter
     from .simulation.grip_evidence import NativeGripEvidenceFactory
 
@@ -3031,6 +3032,155 @@ def _decode_control_part_evidence(
     )
 
 
+def _decode_planning_services(value: object, *, path: str):
+    from .simulation.planning_services import (
+        CollisionSceneRosterCfg,
+        ObservedCuroboServicesCfg,
+        SimulationPlanningServicesCfg,
+    )
+    from .simulation.place_scene import PlaceSceneBinding
+
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"kind"}),
+        optional=frozenset(
+            {
+                "revision",
+                "free_motion_query",
+                "collision_roster",
+                "place_scene_bindings",
+                "observed_curobo",
+                "capture_root_pose",
+                "capture_native_revision",
+                "hold_qpos_source",
+            }
+        ),
+    )
+    roster = None
+    if config.get("collision_roster") is not None:
+        p = f"{path}.collision_roster"
+        raw = _mapping(
+            config["collision_roster"],
+            path=p,
+            required=frozenset(),
+            optional=frozenset({"rigid_objects", "articulation_links"}),
+        )
+        roster = CollisionSceneRosterCfg(
+            **{
+                name: tuple(
+                    tuple(
+                        _identifier(v, path=f"{p}.{name}")
+                        for v in _sequence(row, path=f"{p}.{name}")
+                    )
+                    for row in _sequence(raw.get(name, ()), path=f"{p}.{name}")
+                )
+                for name in ("rigid_objects", "articulation_links")
+            }
+        )
+    bindings = []
+    for index, value in enumerate(
+        _sequence(
+            config.get("place_scene_bindings", ()), path=f"{path}.place_scene_bindings"
+        )
+    ):
+        p = f"{path}.place_scene_bindings[{index}]"
+        raw = _mapping(
+            value,
+            path=p,
+            required=frozenset({"invocation_id", "floor_entity_id"}),
+            optional=frozenset({"support_owner_id"}),
+        )
+        bindings.append(
+            PlaceSceneBinding(
+                invocation_id=_identifier(
+                    raw["invocation_id"], path=f"{p}.invocation_id"
+                ),
+                floor_entity_id=_identifier(
+                    raw["floor_entity_id"], path=f"{p}.floor_entity_id"
+                ),
+                support_owner_id=_optional_identifier(
+                    raw.get("support_owner_id"), path=f"{p}.support_owner_id"
+                ),
+            )
+        )
+    observed = None
+    if config.get("observed_curobo") is not None:
+        p = f"{path}.observed_curobo"
+        raw = _mapping(
+            config["observed_curobo"],
+            path=p,
+            required=frozenset(),
+            optional=frozenset(
+                {
+                    "cuda_device",
+                    "max_voxel_count",
+                    "graph_planner_algorithm",
+                    "enable_timeopt",
+                    "fit_graph_seed_to_bspline",
+                    "use_cuda_graph",
+                    "warmup_iterations",
+                    "preserve_plan_samples",
+                }
+            ),
+        )
+        observed = ObservedCuroboServicesCfg(
+            cuda_device=_optional_identifier(
+                raw.get("cuda_device"), path=f"{p}.cuda_device"
+            ),
+            max_voxel_count=_integer(
+                raw.get("max_voxel_count", 4_000_000),
+                path=f"{p}.max_voxel_count",
+                minimum=1,
+            ),
+            graph_planner_algorithm=_identifier(
+                raw.get("graph_planner_algorithm", "rrt"),
+                path=f"{p}.graph_planner_algorithm",
+            ),
+            enable_timeopt=_boolean(
+                raw.get("enable_timeopt", True), path=f"{p}.enable_timeopt"
+            ),
+            fit_graph_seed_to_bspline=_boolean(
+                raw.get("fit_graph_seed_to_bspline", True),
+                path=f"{p}.fit_graph_seed_to_bspline",
+            ),
+            use_cuda_graph=_boolean(
+                raw.get("use_cuda_graph", False), path=f"{p}.use_cuda_graph"
+            ),
+            warmup_iterations=_integer(
+                raw.get("warmup_iterations", 0),
+                path=f"{p}.warmup_iterations",
+                minimum=0,
+            ),
+            preserve_plan_samples=_boolean(
+                raw.get("preserve_plan_samples", True),
+                path=f"{p}.preserve_plan_samples",
+            ),
+        )
+    return SimulationPlanningServicesCfg(
+        kind=_identifier(config["kind"], path=f"{path}.kind"),
+        revision=_integer(
+            config.get("revision", 1), path=f"{path}.revision", minimum=1
+        ),
+        free_motion_query=_identifier(
+            config.get("free_motion_query", "none"), path=f"{path}.free_motion_query"
+        ),
+        collision_roster=roster,
+        place_scene_bindings=tuple(bindings),
+        observed_curobo=observed,
+        capture_root_pose=_boolean(
+            config.get("capture_root_pose", False), path=f"{path}.capture_root_pose"
+        ),
+        capture_native_revision=_boolean(
+            config.get("capture_native_revision", False),
+            path=f"{path}.capture_native_revision",
+        ),
+        hold_qpos_source=_identifier(
+            config.get("hold_qpos_source", "observed"), path=f"{path}.hold_qpos_source"
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _DecodedRuntimeServices:
     """Typed configured services separated by registration ownership."""
@@ -3057,6 +3207,7 @@ class _DecodedRuntimeServices:
         | NativeGripEvidenceFactory
         | None
     ) = None
+    planning_services: SimulationPlanningServicesCfg | None = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
     settle_presets: (
         tuple[
@@ -3175,6 +3326,7 @@ def _decode_runtime_services(
                 "control_part_evidence",
                 "nominal_motion_sources",
                 "settle_presets",
+                "planning_services",
             }
         ),
     )
@@ -3388,6 +3540,13 @@ def _decode_runtime_services(
     if len({item.call_index for item in nominal}) != len(nominal):
         raise ValueError(f"{path}.nominal_motion_sources has duplicate call indices")
     return _DecodedRuntimeServices(
+        planning_services=(
+            None
+            if config.get("planning_services") is None
+            else _decode_planning_services(
+                config["planning_services"], path=f"{path}.planning_services"
+            )
+        ),
         grasp_pose_generators=generators,
         hand_geometries=hand_geometries,
         handover_pose_providers=handover,
@@ -3463,6 +3622,7 @@ def _decode_configured_task_program_integration(
             )
         )
     registration = SimulationTaskProgramRegistration(
+        planning_services=services.planning_services,
         scene_binding=scene_binding,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
