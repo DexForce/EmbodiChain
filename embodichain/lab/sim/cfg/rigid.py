@@ -237,6 +237,20 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     priority: int | None = None
     """MuJoCo contact-parameter priority; None preserves the source value."""
 
+    solref: Sequence[float] | None = None
+    """Raw MuJoCo contact reference pair, preserving its sign convention.
+
+    Positive values specify time constant and damping ratio; negative values
+    specify direct stiffness and damping. Requires a DexSim build exposing
+    native contact parameters; unsupported builds fail before materialization.
+    """
+
+    solimp: Sequence[float] | None = None
+    """Raw MuJoCo impedance parameters ``(d0, dwidth, width, midpoint, power)``."""
+
+    solmix: float | None = None
+    """Non-negative MuJoCo contact-parameter mixing weight."""
+
     condim: int | None = None
     """MuJoCo contact dimension: 1, 3, 4, or 6.
 
@@ -272,6 +286,38 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     Gaps from both shapes are added.  Broad phase expands each shape by
     ``margin + gap``; increasing the gap detects approaching contact earlier.
     """
+
+    def __post_init__(self) -> None:
+        """Validate authored MuJoCo parameters before lowering to the SDK."""
+        if self.solref is not None:
+            reference = np.asarray(self.solref, dtype=float)
+            if (
+                reference.shape != (2,)
+                or not np.isfinite(reference).all()
+                or not (np.all(reference > 0) or np.all(reference < 0))
+            ):
+                raise ValueError(
+                    "solref must contain two finite values with the same nonzero sign."
+                )
+        if self.solimp is not None:
+            impedance = np.asarray(self.solimp, dtype=float)
+            if impedance.shape != (5,) or not np.isfinite(impedance).all():
+                raise ValueError("solimp must contain five finite values.")
+            d0, dwidth, width, midpoint, power = impedance
+            if not (
+                0 <= d0 <= 1
+                and 0 <= dwidth <= 1
+                and width > 0
+                and 0 <= midpoint <= 1
+                and power >= 1
+            ):
+                raise ValueError(
+                    "solimp requires impedance/midpoint in [0, 1], positive width, and power >= 1."
+                )
+        if self.solmix is not None and (
+            not np.isfinite(self.solmix) or self.solmix < 0
+        ):
+            raise ValueError("solmix must be finite and non-negative.")
 
 
 @configclass

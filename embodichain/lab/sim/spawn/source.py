@@ -29,6 +29,7 @@ from dexsim.spawn import (
     CollisionDesc,
     DexsimCollisionDesc,
     DexsimPhysicsDesc,
+    NewtonJointDesc,
     RigidBodyPhysicsDesc,
 )
 
@@ -121,6 +122,7 @@ def resolve_articulation_source(
             except (KeyError, RuntimeError, TypeError, AttributeError):
                 continue
         _translate_urdf_articulation(skeleton, desc)
+        _retain_urdf_joint_dynamics(desc)
         source_states = _read_urdf_inertial_states(desc.urdf_path)
         _annotate_urdf_source_physics(
             desc,
@@ -463,6 +465,51 @@ def _restore_dexsim_mass_override(rigid_body: Any, link: Any) -> None:
     from dexsim.spawn.adapters.dexsim_adapter import _apply_rigid_body_mass_properties
 
     _apply_rigid_body_mass_properties(rigid_body, physics, apply_inertia=True)
+
+
+def _retain_urdf_joint_dynamics(desc: ArticulationDesc) -> None:
+    """Retain passive URDF dynamics independently of actuator target gains.
+
+    The native Skeleton caches these values, but its current Newton source
+    translator omits them. Resolve them from the same source at preparation
+    time so effort/disabled target modes cannot erase physical dissipation.
+    Existing descriptor values, including explicit zero overrides, win.
+    """
+    if desc.urdf_path is None:
+        return
+    try:
+        root = ElementTree.parse(desc.urdf_path).getroot()
+    except (OSError, ElementTree.ParseError):
+        return
+    joints = {joint.name: joint for joint in desc.joints}
+    for node in root.iter():
+        if _xml_local_name(node.tag) != "joint":
+            continue
+        joint = joints.get(node.attrib.get("name"))
+        if joint is None:
+            continue
+        dynamics = next(
+            (child for child in node if _xml_local_name(child.tag) == "dynamics"),
+            None,
+        )
+        if dynamics is None:
+            continue
+        for name in ("damping", "friction"):
+            if name not in dynamics.attrib:
+                continue
+            value = _parse_float(dynamics.attrib[name])
+            if value is None or not np.isfinite(value):
+                raise ValueError(
+                    f"URDF joint {joint.name!r} has non-finite or invalid {name}."
+                )
+            if joint.newton is None:
+                joint.newton = NewtonJointDesc()
+            if not hasattr(joint.newton, name):
+                raise NotImplementedError(
+                    f"The installed SDK cannot preserve passive joint {name}."
+                )
+            if getattr(joint.newton, name) is None:
+                setattr(joint.newton, name, value)
 
 
 def _read_urdf_inertial_states(

@@ -137,6 +137,8 @@ class SpawnScene:
             value = getattr(descriptor, name, None)
             if value is not None:
                 self._bind_resource_materials(value)
+        for variant in (getattr(descriptor, "env_variants", None) or {}).values():
+            self._bind_resource_materials(variant)
 
     @property
     def arena_names(self) -> tuple[str, ...]:
@@ -158,6 +160,16 @@ class SpawnScene:
         """Add a descriptor and associate it with an EmbodiChain facade."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
+        variants = getattr(descriptor, "env_variants", None) or {}
+        if variants:
+            if getattr(self.builder, "backend", None) != "newton":
+                raise NotImplementedError(
+                    "Per-environment rigid variants require the Newton backend."
+                )
+            if max(variants) >= self._num_envs:
+                raise ValueError(
+                    "env_variants contains an index outside the configured environment count."
+                )
         self._bind_resource_materials(descriptor)
         self._initialize_facade_declaration(facade)
         declaration = _AssetDeclaration(

@@ -70,6 +70,7 @@ class ArticulationRootPropertiesCfg:
     only by the Default backend and are ignored by Newton. By default, the
     articulation root is fixed and self-collision is disabled. Explicit
     ``None`` values preserve the source value or backend/import default.
+    The ``newton_mimic_*`` fields apply only to MuJoCo-Warp equality rows.
     """
 
     fixed_base: bool | None = True
@@ -95,6 +96,22 @@ class ArticulationRootPropertiesCfg:
     min_velocity_iters: int | None = None
     """Default-only minimum root velocity-solver iterations (0 to 255)."""
 
+    newton_mimic_solref: tuple[float, float] | None = None
+    """Optional MuJoCo-Warp equality time constant and damping ratio.
+
+    Applies only to this articulation's mimic constraints. ``None`` retains
+    the existing Default-inspired compliance approximation. Explicit values
+    use MuJoCo's positive, mass-scaled convention; timestep safety remains
+    enforced by the native solver. This does not change URDF mimic ratios.
+    """
+
+    newton_mimic_solimp: tuple[float, float, float, float, float] | None = None
+    """Optional MuJoCo-Warp impedance curve for this articulation's mimics.
+
+    Uses ``(dmin, dmax, width, midpoint, power)``. ``None`` preserves the
+    imported equality impedance. Contact impedance is configured separately.
+    """
+
     def __post_init__(self) -> None:
         """Require the two values consumed by the atomic Default setter."""
         if (self.min_position_iters is None) != (self.min_velocity_iters is None):
@@ -102,6 +119,29 @@ class ArticulationRootPropertiesCfg:
                 "Articulation-root min_position_iters and min_velocity_iters "
                 "must be configured together."
             )
+        if self.newton_mimic_solref is not None:
+            values = np.asarray(self.newton_mimic_solref, dtype=float)
+            if (
+                values.shape != (2,)
+                or not np.isfinite(values).all()
+                or (values <= 0).any()
+            ):
+                raise ValueError(
+                    "newton_mimic_solref requires two finite positive values."
+                )
+        if self.newton_mimic_solimp is not None:
+            values = np.asarray(self.newton_mimic_solimp, dtype=float)
+            if (
+                values.shape != (5,)
+                or not np.isfinite(values).all()
+                or not (0 <= values[0] <= values[1] <= 1)
+                or values[2] <= 0
+                or not (0 <= values[3] <= 1)
+                or values[4] < 1
+            ):
+                raise ValueError(
+                    "newton_mimic_solimp requires a valid five-value impedance curve."
+                )
 
     @classmethod
     def from_dict(
