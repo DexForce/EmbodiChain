@@ -146,9 +146,11 @@ def test_frozen_declarations_preflight_publish_and_load_without_simulation(
         snapshot.identity.to_dict()["program_fingerprint"]
         == "6a40b9fce7c7649be2ee1dc4c27b0e0202867b36d5f7844d29a1542b3c5ffb70"
     )
+    # Main's PickUpOptions.approach_along_grasp_axis=False is part of the
+    # current canonical declaration; the frozen program identity stays above.
     assert (
         snapshot.identity.to_dict()["integration_fingerprint"]
-        == "6ce9aa6db8aad8d9caf6de99526e7c660bb71091446d83730b21d5b28bc5f3c1"
+        == "adcc093b573f0c27821b8a73739c05210ee6b66dffb99858c1f5cb29576de6cc"
     )
     root = write_bundle_atomic(tmp_path / "bundle", snapshot)
     loaded = _load(root)
