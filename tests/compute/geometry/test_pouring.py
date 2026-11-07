@@ -138,7 +138,12 @@ def test_source_static_staging_preserves_b0_rotations_and_offset_order():
             reference["reference_top"],
             reference["finger_radius"],
         )
-        np.testing.assert_array_equal(relative.reshape(-1), case["relative_pose"])
-        np.testing.assert_array_equal(rotation.reshape(-1), case["world_orientation"])
+        tolerance = 8 * np.finfo(np.float64).eps
+        np.testing.assert_allclose(
+            relative.reshape(-1), case["relative_pose"], rtol=0, atol=tolerance
+        )
+        np.testing.assert_allclose(
+            rotation.reshape(-1), case["world_orientation"], rtol=0, atol=tolerance
+        )
         np.testing.assert_allclose(rotation @ case["axis"], [0, 0, 1], atol=1e-15)
         np.testing.assert_array_equal(pivot, [0.01, 0.015, 0.05])

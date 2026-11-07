@@ -883,6 +883,11 @@ class TaskProgramEnvironmentAdapter:
             observation_provider,
             command_sink,
             evidence_collector,
+            task_state=(
+                self._factory.create_initial_task_state()
+                if callable(getattr(self._factory, "create_initial_task_state", None))
+                else None
+            ),
             clock=clock,
             runner_cfg=deepcopy(selected_runner_cfg),
             plan_transform_factory=plan_transform_factory,
@@ -1015,6 +1020,21 @@ class TaskProgramEnvironmentAdapter:
             )
         return create(environment, bridge, observations=observations)
 
+    def for_env_ids(self, env_ids: tuple[int, ...]) -> TaskProgramEnvironmentAdapter:
+        """Create a fresh registered adapter for selected physical rows.
+
+        Args:
+            env_ids: Explicit ordered world indices.
+        Returns:
+            Adapter with independent runtime state and preserved source bindings.
+        """
+        select = getattr(self._factory, "for_env_ids", None)
+        if not callable(select):
+            raise ValueError("environment factory does not support row selection")
+        adapter = select(env_ids).create_adapter()
+        adapter._set_configured_nominal_sources(self._configured_nominal_sources)
+        return adapter
+
     def create_bridge(
         self,
         program: CompiledTaskProgram,
@@ -1024,6 +1044,7 @@ class TaskProgramEnvironmentAdapter:
         recipe_indices: tuple[int, ...] | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        isolate_policy_sessions: bool = False,
         invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
         runtime_scope_guard: Callable[[], None] | None = None,
         initial_plan_observer: Callable[[dict[str, object]], None] | None = None,
@@ -1048,6 +1069,7 @@ class TaskProgramEnvironmentAdapter:
             recipe_indices=recipe_indices,
             nominal_source_factory=nominal_source_factory,
             plan_transform_factory=plan_transform_factory,
+            isolate_policy_sessions=isolate_policy_sessions,
             invocation_policy_bindings=invocation_policy_bindings,
             runtime_scope_guard=runtime_scope_guard,
             **(
@@ -1067,6 +1089,7 @@ class TaskProgramEnvironmentAdapter:
         recipe_indices: tuple[int, ...] | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        isolate_policy_sessions: bool = False,
         invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
         runtime_scope_guard: Callable[[], None] | None = None,
         initial_plan_probe: bool = False,
@@ -1074,6 +1097,8 @@ class TaskProgramEnvironmentAdapter:
     ) -> tuple[TaskProgramDemoBridge, TaskProgramRuntimeAssembly]:
         """Share one guarded assembly path for execution and explicit diagnostics."""
         self._require_open()
+        if type(isolate_policy_sessions) is not bool:
+            raise TypeError("isolate_policy_sessions must be bool.")
         if runtime_scope_guard is not None and not callable(runtime_scope_guard):
             raise TypeError("runtime_scope_guard must be callable or None.")
         if type(program) is not CompiledTaskProgram:
@@ -1300,7 +1325,8 @@ class TaskProgramEnvironmentAdapter:
                 runner_cfg=assembly.runner_cfg,
                 parallel_safety_validator=assembly.parallel_safety_validator,
                 expansion_trace_provider=assembly.expansion_trace_provider,
-                isolate_policy_sessions=control_services is None,
+                isolate_policy_sessions=isolate_policy_sessions
+                or control_services is None,
                 runtime_resource_cleanup=(
                     close_bridge_resources
                     if control_services is not None or callable(close_planning)
