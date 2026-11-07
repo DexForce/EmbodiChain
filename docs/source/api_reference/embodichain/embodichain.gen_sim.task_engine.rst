@@ -137,3 +137,41 @@ the architecture explorer. Shared viewport controls and theme tokens live in
 API embeds committed build outputs, so installed offline rendering has no Node
 runtime requirement. Vector SVG export serializes the current task layout and
 retains the original evidence status rather than generating a new verdict.
+
+Pure program declarations
+-------------------------
+
+Project a validated Semantic Call graph into the existing program format using
+explicit per-segment acceptance bindings. Calls, targets, stage identities and
+ordering remain tied to the graph. Optional acceptance deferral must retain every
+original post-policy and validator at the terminal boundary. This builder does
+not read a bundle, compose runtime services, plan motion or create a simulator;
+callers still perform complete configured deployment preflight.
+
+.. automodule:: embodichain.gen_sim.task_engine.program_declarations
+   :members:
+
+Workflow configuration and replayable state
+-------------------------------------------
+
+Validate the existing workflow/planning/execution configuration and packaged
+defaults independently of runtime assembly. Requests refer to an existing source
+scene and a separate output directory. Typed stage transitions retain an ordered
+event audit that can be replayed without a simulator, planner or bundle loader.
+
+.. automodule:: embodichain.gen_sim.task_engine.config
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.workflow_contracts
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.state_machine
+   :members:
+
+Run-output helpers protect sealed declaration ancestors, preserve cancelled
+sealed histories and publish finite JSON without overwriting historical reports
+when requested. This file owns output persistence only; workflow scheduling,
+execution, report evaluation and bundle publication remain separate consumers.
+
+.. automodule:: embodichain.gen_sim.task_engine.orchestration.workflow_artifacts
+   :members:
