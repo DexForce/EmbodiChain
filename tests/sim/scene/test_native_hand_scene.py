@@ -40,7 +40,7 @@ from ._native_hand_scene_fixture import clearance_case
         "mixed",
     ],
 )
-def test_native_hand_scene_matches_original_ordered_contact_envelopes(mode):
+def test_native_hand_scene_keeps_analytic_contact_order_with_native_backend(mode):
     parts, obstacles, poses = clearance_case(NativeSceneBody, NativeScenePlane, mode)
     with NativeHandSceneQuery(
         scope=NativeQueryScope("case-" + mode, 1.25, 3),
@@ -54,10 +54,18 @@ def test_native_hand_scene_matches_original_ordered_contact_envelopes(mode):
         read_native_revision=lambda: 7,
     ) as query:
         actual = query.inspect(poses)
-    expected = json.loads(
-        (Path(__file__).parent / "data/native_hand_scene_reference.json").read_text()
-    )[mode]
-    assert actual == expected
+    # Boxes/planes and the supplied path give these independent analytic cases;
+    # the archived FCL distances remain historical and are not native goldens.
+    assert actual["valid"] is (mode in {"plane_clear", "mesh_clear"})
+    assert actual["collision_backend"] == "newton.CollisionPipeline"
+    assert "fcl_queries" not in actual
+    if not actual["valid"]:
+        assert actual["frame"] == (1 if mode == "later_frame" else 0)
+        assert actual["receiver_link"] == "finger"
+        if mode == "ordered_obstacles":
+            assert actual["obstacle_name"] == "first"
+    if mode.startswith("plane") or mode == "mixed":
+        assert actual["plane_queries"] == 1
     assert query.closed and query.link_names == ("finger",)
 
 
@@ -150,19 +158,19 @@ def test_native_scene_capture_retains_collision_only_links_planes_and_effective_
     assert query.closed
 
 
-def test_native_scene_capture_checks_revision_after_reads_before_fcl(
+def test_native_scene_capture_checks_revision_after_reads_before_native_queries(
     native_ports, monkeypatch
 ):
-    import trimesh
+    from embodichain.lab.sim.scene import native_hand_scene as module
     from embodichain.lab.sim.scene.native_hand_scene import capture_native_hand_scene
 
     robot, simulation = native_ports
     revisions = iter([7, 8])
 
     def forbidden():
-        raise AssertionError("No FCL resources before snapshot qualification")
+        raise AssertionError("No native resources before snapshot qualification")
 
-    monkeypatch.setattr(trimesh.collision, "CollisionManager", forbidden)
+    monkeypatch.setattr(module, "_ConvexCollection", forbidden)
     with pytest.raises(ValueError, match="revision changed"):
         capture_native_hand_scene(
             robot, simulation, **capture_arguments(robot, lambda: next(revisions))
@@ -190,3 +198,97 @@ def test_native_hand_capture_rejects_same_uid_from_another_robot_owner(native_po
     with pytest.raises(ValueError, match="exact registered robot instance"):
         capture_native_hand_scene(foreign, simulation, **capture_arguments(robot))
     assert robot.reads == 0 and not robot.calls
+
+
+def test_native_hand_constructor_releases_prefix_when_native_geometry_is_unsupported(
+    monkeypatch,
+):
+    from embodichain.lab.sim.scene import native_hand_scene as module
+    from embodichain.lab.sim.scene.feasibility import UnsupportedFeasibilityError
+
+    class Groups:
+        owned = []
+
+        def __init__(self, *, geometry_kind):
+            assert geometry_kind == "mesh"
+            self.closed = False
+            self.owned.append(self)
+
+        def add_object(self, *args, **kwargs):
+            if len(self.owned) == 2:
+                raise UnsupportedFeasibilityError("native topology unavailable")
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(module, "_ConvexCollection", Groups)
+    parts, obstacles, _ = clearance_case(
+        NativeSceneBody, NativeScenePlane, "mesh_envelope"
+    )
+    with pytest.raises(UnsupportedFeasibilityError, match="topology"):
+        NativeHandSceneQuery(
+            scope=NativeQueryScope("failed-capture", 1.0, 0),
+            robot_uid="robot",
+            joint_names=("joint",),
+            root_pose=parts[0].pose,
+            parts=parts,
+            obstacles=obstacles,
+            inventory=[],
+            native_revision=7,
+            read_native_revision=lambda: 7,
+        )
+    assert len(Groups.owned) == 2 and all(group.closed for group in Groups.owned)
+
+
+def test_native_hand_near_threshold_cannot_bypass_conversion_uncertainty(monkeypatch):
+    import numpy as np
+    from embodichain.lab.sim.scene import native_hand_scene as module
+    from embodichain.lab.sim.scene.feasibility import UnsupportedFeasibilityError
+
+    calls = []
+
+    class Groups:
+        def __init__(self, *, geometry_kind):
+            assert geometry_kind == "mesh"
+
+        @staticmethod
+        def metadata():
+            return {"collision_backend": "newton.CollisionPipeline"}
+
+        def add_object(self, *args, **kwargs):
+            pass
+
+        def set_transform(self, *args):
+            pass
+
+        def contact_query(self, other, limit):
+            calls.append(limit)
+            raise UnsupportedFeasibilityError("native conversion spans threshold")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(module, "_ConvexCollection", Groups)
+    parts, obstacles, poses = clearance_case(
+        NativeSceneBody, NativeScenePlane, "mesh_envelope"
+    )
+    threshold = parts[0].contact_offset + obstacles[0].contact_offset
+    # Raw float64 AABBs are separated by threshold+1nm. The0.01m vertex
+    # coordinate is not exactly float32-representable, so this is no proof
+    # that the native query's conversion interval can classify the threshold.
+    assert float(np.float32(0.01)) != 0.01
+    poses[0, 0, 0, 3] = 0.2 - 0.02 - threshold - 1e-9
+    with NativeHandSceneQuery(
+        scope=NativeQueryScope("near-contact", 0.0, 0),
+        robot_uid="robot",
+        joint_names=("joint",),
+        root_pose=parts[0].pose,
+        parts=parts,
+        obstacles=obstacles,
+        inventory=[],
+        native_revision=7,
+        read_native_revision=lambda: 7,
+    ) as query:
+        with pytest.raises(UnsupportedFeasibilityError, match="conversion"):
+            query.inspect(poses)
+    assert calls == [threshold]

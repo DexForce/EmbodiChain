@@ -14,22 +14,19 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Standalone FCL comparisons against the frozen source query."""
+"""Native discrete mesh queries over an independently specified box scene."""
 
 from __future__ import annotations
 
-import json
 import importlib.util
-from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
 
-_requires_fcl = pytest.mark.skipif(
-    importlib.util.find_spec("fcl") is None,
-    reason="actual FCL comparisons require planning-geometry; skipped coverage is unqualified",
+_requires_newton = pytest.mark.skipif(
+    importlib.util.find_spec("newton") is None,
+    reason="native collision queries require the supported Newton collision runtime",
 )
 
 from embodichain.lab.sim.motion.mesh_collision import (
@@ -39,12 +36,18 @@ from embodichain.lab.sim.motion.mesh_collision import (
 )
 from _mesh_collision_fixture import mesh_query_fixture
 
-_REFERENCE = json.loads(
-    (Path(__file__).parent / "data/mesh_motion_source_reference.json").read_text()
-)
+
+@pytest.fixture(autouse=True)
+def forbid_fcl_queries(monkeypatch):
+    import trimesh
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Motion collision queries must use the native pipeline")
+
+    monkeypatch.setattr(trimesh.collision, "CollisionManager", forbidden)
 
 
-def test_missing_fcl_is_reported_before_any_robot_or_scene_capture(monkeypatch):
+def test_missing_newton_is_reported_before_any_robot_or_scene_capture(monkeypatch):
     from embodichain.lab.sim.scene import _collision_backends
 
     def missing(name):
@@ -52,28 +55,61 @@ def test_missing_fcl_is_reported_before_any_robot_or_scene_capture(monkeypatch):
 
     monkeypatch.setattr(_collision_backends, "import_module", missing)
     robot, simulation = mesh_query_fixture()
-    with pytest.raises(ImportError, match=r"embodichain\[planning-geometry\]"):
+    with pytest.raises(ImportError, match="Newton planning queries require"):
         SimulationFreeMotionQuery(robot, simulation)
-    with pytest.raises(ImportError, match=r"embodichain\[planning-geometry\]"):
+    with pytest.raises(ImportError, match="Newton planning queries require"):
         RobotMeshCollisionSnapshot(robot, control_part="arm")
-    with pytest.raises(ImportError, match=r"embodichain\[planning-geometry\]"):
+    with pytest.raises(ImportError, match="Newton planning queries require"):
         RobotArticulationCollisionSnapshot(robot, simulation, control_part="arm")
     robot.get_qpos.assert_not_called()
     robot.get_local_pose.assert_not_called()
 
 
-@pytest.mark.parametrize("case", _REFERENCE["cases"], ids=lambda case: case["name"])
-@_requires_fcl
-def test_sampled_query_matches_source_pair_order_and_exemptions(case):
+@pytest.mark.parametrize(
+    ("stop", "kind", "pairs"),
+    [
+        ((0.125, 0.0), None, ()),
+        (
+            (0.25, 0.0),
+            "scene",
+            tuple((f"geometry_{index}", "obstacle:0") for index in (3, 4, 5)),
+        ),
+        (
+            (0.6875, 0.0),
+            "other_arm",
+            tuple((f"geometry_{index}", "geometry_6") for index in (3, 4, 5)),
+        ),
+        (
+            (0.375, -0.5),
+            "self",
+            tuple(("geometry_1", f"geometry_{index}") for index in (3, 4, 5)),
+        ),
+    ],
+    ids=["clear", "scene", "other_arm", "self"],
+)
+@_requires_newton
+def test_native_query_preserves_pair_scope_order_and_mount_exemptions(
+    stop, kind, pairs
+):
+    # In the authored axis-aligned fixture, tool/pad centres are
+    # .55/.59 + slide + fold, passive x=1.2 and obstacle x=.85.
+    # These poses are away from touching boundaries and overlap precisely
+    # the three listed boxes. The shoulder mounting contact at q=0 is exempt.
     robot, simulation = mesh_query_fixture()
     observed = robot.get_qpos().clone()
     query = SimulationFreeMotionQuery(robot, simulation)
-    report = query.inspect(torch.tensor(case["positions"]), control_part="arm")
-    assert report.metadata() == case["report"]
+    positions = torch.zeros(2, robot.dof)
+    positions[1, :2] = torch.tensor(stop)
+    report = query.inspect(positions, control_part="arm")
+    assert report.backend == "newton.CollisionPipeline"
+    assert report.valid is (kind is None)
+    assert report.kind == kind and report.pairs == pairs
+    assert report.frame == (None if kind is None else 1)
+    assert report.frames == (2 if kind is None else None)
     torch.testing.assert_close(robot.get_qpos(), observed)
 
 
-@_requires_fcl
+@_requires_newton
 def test_free_motion_query_reads_fresh_scene_and_rejects_bad_fk():
     robot, simulation = mesh_query_fixture()
     query = SimulationFreeMotionQuery(robot, simulation)
@@ -91,7 +127,37 @@ def test_free_motion_query_reads_fresh_scene_and_rejects_bad_fk():
         query.inspect(positions, control_part="arm")
 
 
-@_requires_fcl
+@_requires_newton
+def test_native_query_unavailable_is_not_clear_and_releases_its_owned_model(
+    monkeypatch,
+):
+    from embodichain.lab.sim.scene.feasibility import collision as owner
+
+    created = []
+
+    class Unavailable:
+        def __init__(self, bodies, **options):
+            assert options["allow_triangle_meshes"] is True
+            assert any(body.kind == "mesh" for body in bodies)
+            self.closed = False
+            created.append(self)
+
+        def contact_pairs(self, poses, **kwargs):
+            raise owner.UnsupportedFeasibilityError("Controlled native uncertainty")
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(owner, "NewtonCollisionChecker", Unavailable)
+    robot, simulation = mesh_query_fixture()
+    with pytest.raises(owner.UnsupportedFeasibilityError, match="native uncertainty"):
+        SimulationFreeMotionQuery(robot, simulation).inspect(
+            robot.get_qpos(), control_part="arm"
+        )
+    assert len(created) == 1 and created[0].closed
+
+
+@_requires_newton
 def test_robot_articulation_snapshot_excludes_rigids_but_checks_articulations(
     monkeypatch,
 ):
@@ -138,7 +204,7 @@ def test_robot_articulation_snapshot_excludes_rigids_but_checks_articulations(
         assert any("drawer:mesh" in pair for pair in blocked.pairs)
 
 
-@_requires_fcl
+@_requires_newton
 def test_owned_robot_query_scope_reuses_only_current_robot_and_restores_nested_scope(
     monkeypatch,
 ):
@@ -182,7 +248,7 @@ def test_owned_robot_query_scope_reuses_only_current_robot_and_restores_nested_s
     assert len(created) == 5
 
 
-@_requires_fcl
+@_requires_newton
 def test_owned_robot_query_scope_rejects_model_drift_without_refresh(monkeypatch):
     from embodichain.lab.sim.motion import mesh_collision as owner
 
@@ -195,7 +261,7 @@ def test_owned_robot_query_scope_rejects_model_drift_without_refresh(monkeypatch
             owner.inspect_robot_collision(robot, positions, control_part="arm")
 
 
-@_requires_fcl
+@_requires_newton
 def test_precontact_scope_keeps_fixed_arm_and_explicit_exclusion_local():
     robot, simulation = mesh_query_fixture()
     query = SimulationFreeMotionQuery(robot, simulation)

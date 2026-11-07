@@ -55,6 +55,11 @@ explicit `allow_triangle_meshes=True`; this uses actual native triangle surfaces
 never hull substitution or a containment certificate. The default physical
 extractor continues to reject unsupported geometry. Mesh midphase/contact
 overflow is unavailable, and returned native facts own their data.
+The mesh-group adapter's `clearance_lower_bound` reuses the same geometry/pose
+conversion preparation for conservative frozen-AABB culling without a model or
+collide. Only a decided bound strictly above the original threshold can skip a
+native query; near/unsafe inputs remain zero or unavailable. It never supplies
+contact evidence or replaces the native predicate.
 
 Query transforms are rebased before composing local offsets; precision budgets
 cover conversion, scale and nonfinite failures before no-contact acceptance.
