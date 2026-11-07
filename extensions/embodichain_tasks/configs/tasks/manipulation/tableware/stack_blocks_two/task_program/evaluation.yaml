@@ -1,0 +1,12 @@
+conditions:
+  stack_horizontal_alignment:
+    kind: near_target_hold
+    object: block_2
+    target: block_1
+    axes: [0, 1]
+    # Radius of the existing placement validator's 25 mm per-axis bounds.
+    tolerance: 0.03536
+    hold_steps: 1
+    window_steps: 1
+
+final_acceptance: [stack_horizontal_alignment]
