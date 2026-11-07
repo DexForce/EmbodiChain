@@ -585,6 +585,8 @@ available; explicit measured source policies reject incompatible nominal input.
    PlaceInsideLanding
    PlaceSceneProvider
 
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
 Explicit Press planning recovery
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

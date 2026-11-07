@@ -30,11 +30,14 @@ from embodichain.lab.sim.scene.feasibility import (
 __all__ = ["collision_bodies_from_simulation"]
 
 
-def collision_bodies_from_simulation(env: Any) -> tuple[CollisionBody, ...]:
+def collision_bodies_from_simulation(
+    env: Any, *, env_id: int = 0
+) -> tuple[CollisionBody, ...]:
     """Read materialized robot-link and rigid-body physical collision shapes.
 
     Args:
-        env: Prepared B=1 Gym host with full-link Robot kinematics.
+        env: Prepared Gym host with full-link Robot kinematics.
+        env_id: Physical arena whose collision resources are inspected.
     Returns:
         Link-local physical shapes with IDs ``robot_uid/link/index`` and
         ``object_uid/index``. Render geometry is never substituted.
@@ -92,7 +95,9 @@ def collision_bodies_from_simulation(env: Any) -> tuple[CollisionBody, ...]:
     bodies = []
     for link_name in robot.link_names:
         try:
-            shapes = robot.get_link_collision_shapes(link_name)
+            shapes = robot.get_link_collision_shapes(
+                link_name, **({"env_id": env_id} if env_id else {})
+            )
         except RuntimeError as error:
             raise UnsupportedFeasibilityError(str(error)) from error
         frame = f"{robot.uid}/{link_name}"
@@ -108,7 +113,9 @@ def collision_bodies_from_simulation(env: Any) -> tuple[CollisionBody, ...]:
         obj = env.sim.get_rigid_object(uid)
         bodies.extend(
             convert(shape, f"{uid}/{index}", uid)
-            for index, shape in enumerate(obj.get_collision_shapes())
+            for index, shape in enumerate(
+                obj.get_collision_shapes(**({"env_id": env_id} if env_id else {}))
+            )
         )
     if getattr(env.sim, "_default_plane", None) is not None:
         bodies.append(

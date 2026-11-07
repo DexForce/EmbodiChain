@@ -103,8 +103,14 @@ def unavailable_packet(
         acquisition_errors=[str(error) or type(error).__name__] * len(binding.env_ids),
         unavailable=str(error) or type(error).__name__,
     )
-    if "boundary_frames" in source:
-        packet["boundary_frames"] = source["boundary_frames"]
+    boundary = source.get("boundary_frames")
+    if (
+        isinstance(boundary, list)
+        and len(boundary) == len(binding.env_ids)
+        and all(type(frame) is int and 0 <= frame <= 2**53 for frame in boundary)
+        and math.isfinite(max(boundary) * binding.step_dt)
+    ):
+        packet["boundary_frames"] = boundary
     return seal_packet(packet, binding.step_dt)
 
 

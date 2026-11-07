@@ -463,6 +463,22 @@ def hold_records(
             or (attachment > cfg.translation_drift).any()
         ):
             raise ValueError("E4 hold lacks valid native attachment measurements.")
+        if cfg.target_position is not None:
+            position = torch.linalg.vector_norm(
+                object_pose[:, :3, 3] - object_pose.new_tensor(cfg.target_position),
+                dim=-1,
+            )
+            measured_position = torch.as_tensor(
+                reported["position_error"], dtype=position.dtype
+            )
+            if (
+                measured_position.shape != position.shape
+                or not torch.isfinite(measured_position).all()
+                or not torch.allclose(measured_position, position, atol=1e-4, rtol=0)
+            ):
+                raise ValueError(
+                    "HandOver world-target observation differs from its hold boundary."
+                )
         if cfg.local_axis is not None:
             axis = object_pose.new_tensor(cfg.local_axis)
             world = object_pose.new_tensor(cfg.world_axis or (0.0, 0.0, 1.0))
