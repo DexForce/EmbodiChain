@@ -287,7 +287,8 @@ class NativeHandSceneQuery(_QueryLifetime):
             "geometry_representation": "captured_native_triangle_surfaces",
             "minimum_checked_distance_interval_m": None,
             "reported_distance_semantics": "conservative_clearance_lower_bound",
-            "broadphase_scope": "native_pipeline_only_no_float64_shortcut",
+            "broadphase_scope": "canonical_native_conversion_lower_bound",
+            "broadphase_culled_pairs": 0,
             "plane_queries": 0,
             "minimum_plane_signed_distance_m": None,
         }
@@ -343,6 +344,10 @@ class NativeHandSceneQuery(_QueryLifetime):
                                 "reason": "receiver_hand_non_target_plane_contact_envelope",
                             }
                     if other is None:
+                        continue
+                    lower_bound = manager.clearance_lower_bound(other)
+                    if lower_bound is not None and lower_bound > threshold:
+                        report["broadphase_culled_pairs"] += 1
                         continue
                     interval = manager.contact_query(other, threshold)
                     rejected = interval.below(threshold)

@@ -59,6 +59,9 @@ def test_native_hand_scene_keeps_analytic_contact_order_with_native_backend(mode
     assert actual["valid"] is (mode in {"plane_clear", "mesh_clear"})
     assert actual["collision_backend"] == "newton.CollisionPipeline"
     assert "fcl_queries" not in actual
+    if mode == "mesh_clear":
+        assert actual["native_queries"] == 0
+        assert actual["broadphase_culled_pairs"] == 1
     if not actual["valid"]:
         assert actual["frame"] == (1 if mode == "later_frame" else 0)
         assert actual["receiver_link"] == "finger"
@@ -260,6 +263,9 @@ def test_native_hand_near_threshold_cannot_bypass_conversion_uncertainty(monkeyp
 
         def set_transform(self, *args):
             pass
+
+        def clearance_lower_bound(self, other):
+            return 0.0
 
         def contact_query(self, other, limit):
             calls.append(limit)

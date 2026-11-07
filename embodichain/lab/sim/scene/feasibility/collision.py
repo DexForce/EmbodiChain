@@ -45,6 +45,10 @@ __all__ = [
 _DEFAULT_DETECTION_GAP_M = 0.03
 _DEFAULT_NUMERIC_TOLERANCE_M = 1e-6
 _DEFAULT_MAX_SHAPES = 256
+_MIXED_CLEARANCE_LIMITATION = (
+    "Newton mixed mesh/primitive clearance has no complete certificate; "
+    "native contact or canonical AABB separation is required."
+)
 
 
 class UnsupportedFeasibilityError(RuntimeError):
@@ -68,6 +72,8 @@ class NativeContactResult:
         detection_gap_m: Native query band, in metres.
         native_contact_count: Number of reduced native contacts.
         pair_ids: Physical shape IDs for a single pair, if applicable.
+        clearance_unavailable_reason: Why absence of a native contact cannot
+            certify separation; a canonical positive bound may still decide.
     """
 
     lower: float
@@ -77,6 +83,7 @@ class NativeContactResult:
     detection_gap_m: float
     native_contact_count: int
     pair_ids: tuple[str, str] | None = None
+    clearance_unavailable_reason: str | None = field(default=None, kw_only=True)
     _pairs: tuple[NativeContactResult, ...] = field(default=(), repr=False)
 
     def below(self, threshold: float) -> bool:
@@ -117,9 +124,13 @@ class NativeContactResult:
                 self.representation_error_m == 0.0
                 and self.signed_surface_separation_m is not None
             ):
-                return self.signed_surface_separation_m <= threshold
+                if self.signed_surface_separation_m <= threshold:
+                    return True
+                if self.clearance_unavailable_reason is None:
+                    return False
         raise UnsupportedFeasibilityError(
-            "Native contact representation or contact band cannot decide the threshold."
+            self.clearance_unavailable_reason
+            or "Native contact representation or contact band cannot decide the threshold."
         )
 
     def metadata(self) -> dict[str, object]:
@@ -145,6 +156,7 @@ class NativeContactResult:
             ),
             "native_contact_count": self.native_contact_count,
             "pair_ids": None if self.pair_ids is None else list(self.pair_ids),
+            "clearance_unavailable_reason": self.clearance_unavailable_reason,
             "pairs": [pair.metadata() for pair in self._pairs],
             "continuous": False,
             "physical_acquisition": False,
@@ -251,6 +263,26 @@ def _validate_triangle_faces(vertices: object, faces: object) -> None:
             raise UnsupportedFeasibilityError(
                 "Triangle mesh has degenerate or collapsed faces."
             )
+
+
+def _aabb_corners(low: np.ndarray, high: np.ndarray) -> np.ndarray:
+    return np.asarray(
+        [
+            (x, y, z)
+            for x in (low[0], high[0])
+            for y in (low[1], high[1])
+            for z in (low[2], high[2])
+        ]
+    )
+
+
+def _aabb_lower_bound(
+    a: tuple[np.ndarray, np.ndarray],
+    b: tuple[np.ndarray, np.ndarray],
+    tolerance: float,
+) -> float:
+    gap = np.maximum(0.0, np.maximum(a[0] - b[1], b[0] - a[1]))
+    return float(max(0.0, float(np.linalg.norm(gap)) - tolerance))
 
 
 @dataclass(frozen=True)
@@ -482,6 +514,7 @@ class NewtonCollisionChecker:
         self.last_clearance_interval: tuple[float, float] | None = None
         self._pair_separation = self._pair_contacts = None
         self._last_contact_rows = ()
+        self._body_bounds = {}
         self._frame_uids = tuple(dict.fromkeys(b.frame_uid for b in self.bodies))
         self._native = tuple(
             i for i, body in enumerate(self.bodies) if body.kind != "halfspace"
@@ -496,6 +529,13 @@ class NewtonCollisionChecker:
             if self.bodies[i].frame_uid != self.bodies[j].frame_uid
             and frozenset((self.bodies[i].collision_id, self.bodies[j].collision_id))
             not in self.ignored_pairs
+        )
+        self._mixed_pairs = frozenset(
+            (i, j)
+            for i, j in self._pairs
+            if i in self._native_lookup
+            and j in self._native_lookup
+            and ((self.bodies[i].kind == "mesh") != (self.bodies[j].kind == "mesh"))
         )
         native_pairs = [
             (self._native_lookup[i], self._native_lookup[j])
@@ -546,7 +586,13 @@ class NewtonCollisionChecker:
             use_cuda_graph,
         )
         if allow_triangle_meshes:
-            identity += (("native-triangle-surfaces/v1", max_triangle_pairs),)
+            identity += (
+                (
+                    "native-triangle-surfaces/v1",
+                    max_triangle_pairs,
+                    "mixed-clearance-canonical-aabb/v1",
+                ),
+            )
         self.verification_id = digest(identity)
         try:
             if native_pairs:
@@ -558,7 +604,7 @@ class NewtonCollisionChecker:
     @property
     def metadata(self) -> dict[str, str | float | int | bool]:
         """Return owned backend, precision, distance-scope and query identity data."""
-        return {
+        metadata = {
             "backend": "newton.CollisionPipeline",
             "version": self._version,
             "device": self.device,
@@ -579,6 +625,13 @@ class NewtonCollisionChecker:
             "halfspace_check": "analytic_physical_support",
             "continuous": False,
         }
+        if self.allow_triangle_meshes:
+            metadata.update(
+                triangle_mesh_scope="native_triangle_surface",
+                mixed_mesh_primitive_pairs=len(self._mixed_pairs),
+                mixed_clearance_policy=_MIXED_CLEARANCE_LIMITATION,
+            )
+        return metadata
 
     def _build_query(self, pairs: list[tuple[int, int]]) -> None:
         import newton
@@ -832,6 +885,44 @@ class NewtonCollisionChecker:
         )
         return center_separation + float(support)
 
+    def _mixed_pair_lower_bound(
+        self,
+        i: int,
+        j: int,
+        poses: list[np.ndarray],
+        relative: np.ndarray,
+        tolerance: float,
+    ) -> float:
+        bounds = []
+        for index in (i, j):
+            if index not in self._body_bounds:
+                body = self.bodies[index]
+                if body.kind in {"mesh", "convex"}:
+                    vertices = np.asarray(body.vertices)
+                    low, high = vertices.min(axis=0), vertices.max(axis=0)
+                else:
+                    if body.kind == "box":
+                        high = np.asarray(body.dimensions) / 2
+                    elif body.kind == "sphere":
+                        high = np.full(3, body.dimensions[0])
+                    else:
+                        radius, height = body.dimensions
+                        high = np.asarray(
+                            (
+                                radius,
+                                radius,
+                                height / 2 + (radius if body.kind == "capsule" else 0),
+                            )
+                        )
+                    low = -high
+                self._body_bounds[index] = _aabb_corners(low, high)
+            corners = (
+                self._body_bounds[index] @ poses[index][:3, :3].T
+                + relative[self._native_lookup[index]]
+            )
+            bounds.append((corners.min(axis=0), corners.max(axis=0)))
+        return _aabb_lower_bound(bounds[0], bounds[1], tolerance)
+
     def check(
         self,
         frame_poses: Mapping[str, object],
@@ -902,6 +993,11 @@ class NewtonCollisionChecker:
             self.detection_gap_m,
             sum(row.native_contact_count for row in rows),
             _pairs=rows,
+            clearance_unavailable_reason=(
+                _MIXED_CLEARANCE_LIMITATION
+                if any(row.clearance_unavailable_reason for row in rows)
+                else None
+            ),
         )
 
     def contact_pairs(
@@ -987,6 +1083,11 @@ class NewtonCollisionChecker:
         mask, planes, has_native = self._mask(
             allowed_contacts, moving_objects, all_pairs
         )
+        mixed_safety = any(
+            mask[self._native_lookup[i] * len(self._native) + self._native_lookup[j]]
+            for i, j in self._mixed_pairs
+        )
+        collect_pairs = _collect or mixed_safety
         clearance = math.inf
         upper_clearance = math.inf
         for i, j in planes:
@@ -1001,7 +1102,7 @@ class NewtonCollisionChecker:
                 )
             clearance = min(clearance, max(0.0, distance))
             upper_clearance = min(upper_clearance, max(0.0, distance))
-            if _collect:
+            if collect_pairs:
                 rows.append(
                     NativeContactResult(
                         max(0.0, distance),
@@ -1038,7 +1139,7 @@ class NewtonCollisionChecker:
             self._state.body_q.assign(packed)
             self._active.assign(mask)
             self._tolerance.assign(np.array([tolerance], dtype=np.float32))
-            if _collect:
+            if collect_pairs:
                 if self._pair_separation is None:
                     self._pair_separation = self._wp.empty(
                         len(self._native) ** 2, dtype=float, device=self.device
@@ -1077,7 +1178,7 @@ class NewtonCollisionChecker:
                 ),
             )
             upper_clearance = min(upper_clearance, max(0.0, separation + tolerance))
-            if _collect:
+            if collect_pairs:
                 separations = self._pair_separation.numpy().copy()
                 counts = self._pair_contacts.numpy().copy()
                 pose_errors = np.linalg.norm(relative - packed[:, :3], axis=1)
@@ -1102,19 +1203,36 @@ class NewtonCollisionChecker:
                         raise UnsupportedFeasibilityError(
                             "Invalid native pair evidence."
                         )
-                    rows.append(
-                        NativeContactResult(
-                            float(
-                                max(0.0, min(self.detection_gap_m, signed) - tolerance)
-                            ),
-                            float(max(0.0, signed + tolerance)),
-                            signed if math.isfinite(signed) else None,
-                            float(errors[a] + errors[b]),
-                            self.detection_gap_m,
-                            int(counts[pair]),
-                            (self.bodies[i].collision_id, self.bodies[j].collision_id),
+                    mixed = (i, j) in self._mixed_pairs
+                    lower = (
+                        self._mixed_pair_lower_bound(i, j, poses, relative, tolerance)
+                        if mixed
+                        else float(
+                            max(0.0, min(self.detection_gap_m, signed) - tolerance)
                         )
                     )
+                    upper = float(max(0.0, signed + tolerance))
+                    if lower > upper:
+                        raise UnsupportedFeasibilityError(
+                            "Native contact disagrees with the canonical separation bound."
+                        )
+                    if mixed:
+                        clearance = min(clearance, lower)
+                    row = NativeContactResult(
+                        lower,
+                        upper,
+                        signed if math.isfinite(signed) else None,
+                        float(errors[a] + errors[b]),
+                        self.detection_gap_m,
+                        int(counts[pair]),
+                        (self.bodies[i].collision_id, self.bodies[j].collision_id),
+                        clearance_unavailable_reason=(
+                            _MIXED_CLEARANCE_LIMITATION if mixed else None
+                        ),
+                    )
+                    rows.append(row)
+                    if mixed and not _collect:
+                        row.below(self.clearance_m)
             if math.isfinite(summary[1]):
                 self.last_clearance_interval = (clearance, upper_clearance)
                 a, b = divmod(int(summary[1]), len(self._native))
@@ -1146,6 +1264,7 @@ class NewtonCollisionChecker:
         self._tolerance = None
         self._pair_separation = self._pair_contacts = None
         self._last_contact_rows = ()
+        self._body_bounds.clear()
         self._explicit = None
         self._meshes.clear()
         self._mask_cache.clear()

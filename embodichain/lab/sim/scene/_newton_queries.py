@@ -34,6 +34,8 @@ from .feasibility.collision import (
     _geometry_precision,
     _pack_query_poses,
     _validate_triangle_faces,
+    _aabb_corners,
+    _aabb_lower_bound,
 )
 from ._collision_backends import _require_newton
 from ._validation import _rigid_pose
@@ -115,14 +117,7 @@ class _ConvexCollection:
         )
         self._precision[name] = precision
         low, high = mesh.bounds
-        self._bounds[name] = np.asarray(
-            [
-                (x, y, z)
-                for x in (low[0], high[0])
-                for y in (low[1], high[1])
-                for z in (low[2], high[2])
-            ]
-        )
+        self._bounds[name] = _aabb_corners(low, high)
 
     def set_transform(self, name: str, transform: np.ndarray) -> None:
         if self._closed:
@@ -199,9 +194,8 @@ class _ConvexCollection:
             )
             for source in groups
         ]
-        gap = np.maximum(0.0, np.maximum(a[0] - b[1], b[0] - a[1]))
-        bound = float(np.linalg.norm(gap)) - tolerance
-        return max(0.0, bound) if math.isfinite(bound) else None
+        bound = _aabb_lower_bound(a, b, tolerance)
+        return bound if math.isfinite(bound) else None
 
     def _query(
         self, other: _ConvexCollection, limit: float

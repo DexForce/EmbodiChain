@@ -108,7 +108,10 @@ contact-buffer exhaustion and unresolved precision remain unavailable; neither
 an alternate backend nor a numerical allowance is chosen to force acceptance.
 Distance scalars in these receipts are conservative lower bounds with interval
 metadata. Float64 broadphase separation is not a native precision certificate;
-near-threshold queries must reach the shared native comparison.
+near-threshold queries must reach the shared native comparison. Far-pair culling
+uses only the shared canonical conversion lower bound, strictly above the original
+threshold; zero or unavailable bounds are never clearance. Native and culled-pair
+counts are reported independently.
 
 Drawer source adapters follow enabled fixed-joint descendants of the selected
 prismatic body, independently of USD parent paths. Structural meshes exclude the

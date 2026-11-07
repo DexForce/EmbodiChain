@@ -79,6 +79,13 @@ surface route with the supplied faces, without hull conversion or a solid
 containment certificate. Native midphase and contact buffers are bounded and
 checked for overflow.
 
+Mixed mesh/primitive queries have a further SDK limitation: absence of reported
+contacts does not certify separation. They require either an actual native
+contact deciding the original threshold or a canonical AABB separation lower
+bound. Otherwise all three checker entry points retain unavailable evidence.
+``NativeContactResult`` records the mixed-route clearance limitation explicitly;
+the convex-only default and same-representation mesh/mesh path are unchanged.
+
 The shared mesh-group adapter can cull a far pair using a frozen AABB separation
 lower bound after the same geometry/pose conversion allowance. It allocates no
 native model and does not collide. Only a lower bound strictly above the original

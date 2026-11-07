@@ -716,8 +716,10 @@ unchanged contact or rest threshold remain unavailable. Native query resources
 are isolated from the live simulator and closed on normal and exceptional exits.
 Reported minimum-distance scalars are conservative lower bounds, accompanied by
 bounded intervals rather than exact mesh distance claims. A float64 AABB alone
-cannot bypass native conversion uncertainty near a threshold; these queries use
-the native pipeline for classification.
+cannot bypass native conversion uncertainty near a threshold. Far pairs are
+culled only when the shared canonical conversion budget gives a separation lower
+bound strictly above the unchanged threshold. Zero or unavailable bounds continue
+to the native pipeline; query and culled-pair counts remain separate.
 
 .. currentmodule:: embodichain.lab.sim.scene.native_hand_scene
 

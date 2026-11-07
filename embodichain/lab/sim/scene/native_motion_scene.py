@@ -223,6 +223,7 @@ class NativeRestSceneQuery:
                     "Native clearance requires complete finite part poses."
                 )
             queries = 0
+            culled = 0
             for frame in range(len(poses)):
                 for index, part in enumerate(parts):
                     pose = poses[frame, index]
@@ -236,6 +237,10 @@ class NativeRestSceneQuery:
                         ):
                             continue
                         threshold = part.rest_offset + obstacle.part.rest_offset
+                        lower_bound = manager.clearance_lower_bound(other)
+                        if lower_bound is not None and lower_bound > threshold:
+                            culled += 1
+                            continue
                         interval = manager.contact_query(other, threshold)
                         rejected = interval.below(threshold)
                         distance = interval.lower
@@ -249,7 +254,8 @@ class NativeRestSceneQuery:
                                 obstacle=obstacle.part.name,
                                 distance_m=distance,
                                 reported_distance_semantics="conservative_clearance_lower_bound",
-                                broadphase_scope="native_pipeline_only_no_float64_shortcut",
+                                broadphase_scope="canonical_native_conversion_lower_bound",
+                                broadphase_culled_pairs=culled,
                                 required_clearance_m=threshold,
                                 distance_interval_m=[
                                     interval.lower,
@@ -271,7 +277,8 @@ class NativeRestSceneQuery:
                 queries=queries,
                 **_ConvexCollection.metadata(),
                 geometry_representation="captured_native_triangle_surfaces",
-                broadphase_scope="native_pipeline_only_no_float64_shortcut",
+                broadphase_scope="canonical_native_conversion_lower_bound",
+                broadphase_culled_pairs=culled,
                 scope="discrete_native_pair_rest_not_continuous_contact_or_task_success",
             )
         finally:
