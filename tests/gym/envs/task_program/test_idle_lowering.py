@@ -38,7 +38,7 @@ from embodichain.lab.task_program.integrations.configured import (
     _decode_registered_lowerer,
 )
 from embodichain.lab.task_program.semantics import RegisteredSemanticCall
-from motion._mesh_collision_fixture import mesh_query_fixture
+from sim.motion._mesh_collision_fixture import mesh_query_fixture
 
 _REFERENCE = json.loads(
     (

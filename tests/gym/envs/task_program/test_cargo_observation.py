@@ -26,7 +26,7 @@ from embodichain.lab.task_program.integrations.simulation.cargo_observation impo
     SimulationCargoEnvelopeCfg,
     SimulationCargoEnvelopeCollector,
 )
-from _observation_fixture import observation_host
+from ._observation_fixture import observation_host
 
 
 def configure_meshes(host, tmp_path):

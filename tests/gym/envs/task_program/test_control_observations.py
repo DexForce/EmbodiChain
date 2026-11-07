@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import pytest
-from test_simulation_policies import _raw_press_observation
+from .test_simulation_policies import _raw_press_observation
 
 
 def test_completed_control_collector_copies_owned_facts_without_live_acquisition():
