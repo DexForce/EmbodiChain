@@ -347,8 +347,9 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     A mapping is converted to the matching DexSim Newton solver config. Include
     ``solver_type`` or ``class_type`` to select the solver, then add any
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
-    preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
-    exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
+    preserves DexSim's scene-aware default. Explicit ``"auto"`` mappings use
+    that same default configuration type: ``AutoSolverCfg`` on legacy builds
+    and ``DexUniSolverCfg`` on current builds.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
@@ -373,7 +374,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
         from dexsim.engine.newton_physics import (
-            AutoSolverCfg,
             DexUniSolverCfg,
             FeatherstoneSolverCfg,
             MJWarpSolverCfg,
@@ -394,7 +394,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         )
 
         solver_cfg_map: dict[str, type] = {
-            "auto": AutoSolverCfg,
+            "auto": type(NewtonCfg().solver_cfg),
             "dexuni": DexUniSolverCfg,
             "mujoco_warp": MJWarpSolverCfg,
             "xpbd": XPBDSolverCfg,
@@ -412,7 +412,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         ):
             logger.log_error(
                 "Newton gradient mode requires an explicit "
-                "solver_type='semi_implicit'; AutoSolver does not select a "
+                "solver_type='semi_implicit'; the default solver does not select a "
                 "differentiable solver."
             )
 
@@ -526,7 +526,7 @@ def _newton_solver_cfg_to_dexsim(
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
     solver_cfg_type = solver_cfg_map[normalized_solver_type]
-    if normalized_solver_type == "dexuni":
+    if solver_cfg_type is solver_cfg_map["dexuni"]:
         try:
             uses_grouped_options = (
                 "vbd_options" in inspect.signature(solver_cfg_type).parameters

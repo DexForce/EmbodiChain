@@ -596,6 +596,9 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "is_site",
         # Asset-loading adapter option, not a native ShapeConfig parameter.
         "use_native_mesh_loader",
+        "preserve_mesh_transform",
+        "heightfield_resolution",
+        "convert_to_heightfield",
     }
     assert (
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields

@@ -125,14 +125,13 @@ def test_newton_physics_cfg_uses_device() -> None:
 
 @pytest.mark.no_sim
 def test_newton_physics_cfg_preserves_dexsim_auto_solver_default() -> None:
-    from dexsim.engine.newton_physics import AutoSolverCfg
+    from dexsim.engine.newton_physics import NewtonCfg
 
     cfg = NewtonPhysicsCfg()
 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
-    assert isinstance(dexsim_cfg.solver_cfg, AutoSolverCfg)
-    assert dexsim_cfg.solver_cfg.solver_type == "auto"
+    assert dexsim_cfg.solver_cfg == NewtonCfg().solver_cfg
 
 
 @pytest.mark.no_sim
@@ -158,18 +157,16 @@ def test_newton_physics_cfg_forwards_render_sync_policy(
 
 
 @pytest.mark.no_sim
-def test_newton_physics_cfg_requires_dexsim_auto_solver_api(
+def test_newton_physics_cfg_supports_sdk_without_auto_solver_export(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dexsim.engine import newton_physics
 
-    monkeypatch.delattr(newton_physics, "AutoSolverCfg")
+    monkeypatch.delattr(newton_physics, "AutoSolverCfg", raising=False)
 
-    with pytest.raises(
-        ImportError,
-        match="cannot import name 'AutoSolverCfg'",
-    ):
-        NewtonPhysicsCfg().to_dexsim_cfg(gpu_id=0)
+    for solver_cfg in (None, {"solver_type": "auto"}):
+        converted = NewtonPhysicsCfg(solver_cfg=solver_cfg).to_dexsim_cfg(gpu_id=0)
+        assert converted.solver_cfg == newton_physics.NewtonCfg().solver_cfg
 
 
 @pytest.mark.no_sim
@@ -308,7 +305,9 @@ def test_newton_backend_reports_scene_resolved_auto_solver(
 
     backend.configure_world(world_config, sim_config)
 
-    assert world_config.newton_cfg.solver_cfg.solver_type == "auto"
+    from dexsim.engine.newton_physics import NewtonCfg
+
+    assert world_config.newton_cfg.solver_cfg == NewtonCfg().solver_cfg
     assert backend.solver_type == "mujoco_warp"
 
 
@@ -451,13 +450,13 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
 
 @pytest.mark.no_sim
 def test_newton_physics_cfg_accepts_explicit_auto_solver_mapping() -> None:
-    from dexsim.engine.newton_physics import AutoSolverCfg
+    from dexsim.engine.newton_physics import NewtonCfg
 
     cfg = NewtonPhysicsCfg(solver_cfg={"class_type": "AutoSolverCfg"})
 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
-    assert isinstance(dexsim_cfg.solver_cfg, AutoSolverCfg)
+    assert dexsim_cfg.solver_cfg == NewtonCfg().solver_cfg
 
 
 @pytest.mark.no_sim

@@ -29,7 +29,9 @@ import pytest
 
 @pytest.mark.subprocess_sim
 @pytest.mark.gpu
-@pytest.mark.parametrize("backend", ["default", "default-cuda", "newton"])
+@pytest.mark.parametrize(
+    "backend", ["default", "default-cuda", "newton", "newton-auto"]
+)
 def test_no_render_world_steps_and_resets(backend: str, tmp_path: Path) -> None:
     urdf = tmp_path / "slider.urdf"
     urdf.write_text(
@@ -61,7 +63,7 @@ def test_no_render_world_steps_and_resets(backend: str, tmp_path: Path) -> None:
             text=True,
             capture_output=True,
             # Newton compiles kernels for the initial and rebuilt topology.
-            timeout=180 if backend == "newton" else 90,
+            timeout=180 if backend.startswith("newton") else 90,
         )
     except subprocess.TimeoutExpired as error:
         output = b"\n".join((error.stdout or b"", error.stderr or b"")).decode(
@@ -91,13 +93,17 @@ def _run_world(backend: str, urdf_path: str) -> None:
             device="cuda:0",
             num_substeps=1,
             physics_dt=0.005,
-            solver_cfg={
-                "solver_type": "mujoco_warp",
-                "iterations": 20,
-                "ls_iterations": 50,
-            },
+            solver_cfg=(
+                None
+                if backend == "newton-auto"
+                else {
+                    "solver_type": "mujoco_warp",
+                    "iterations": 20,
+                    "ls_iterations": 50,
+                }
+            ),
         )
-        if backend == "newton"
+        if backend.startswith("newton")
         else DefaultPhysicsCfg(
             device="cuda:0" if backend == "default-cuda" else "cpu", physics_dt=0.005
         )
@@ -160,7 +166,7 @@ def _run_world(backend: str, urdf_path: str) -> None:
         torch.testing.assert_close(links_after, expected_links)
         torch.testing.assert_close(body.get_local_pose(), body_before)
         print(f"{backend}: root-only descendant propagation passed", flush=True)
-        if backend == "newton":
+        if backend.startswith("newton"):
             # The published native API must not download command selections.
             with pytest.MonkeyPatch.context() as patch:
 
