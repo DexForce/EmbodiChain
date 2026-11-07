@@ -175,3 +175,28 @@ execution, report evaluation and bundle publication remain separate consumers.
 
 .. automodule:: embodichain.gen_sim.task_engine.orchestration.workflow_artifacts
    :members:
+
+
+Task Program bundles
+--------------------
+
+Prepare already-authored scene, embodiment, program, integration, policy,
+TaskSpec and graph declarations with ``prepare_configured_bundle``. Preparation
+performs static component and program preflight, then seals a detached snapshot.
+``write_bundle_atomic`` publishes it without replacing an existing bundle.
+``load_configured_bundle`` verifies the caller's independently acquired input
+hashes and implementation revisions before returning lazy deployment factories.
+The caller owns asset enumeration and supplies the current revision/input
+contract; these APIs do not generate assets, plan motion or start simulation.
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_deployment
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_identity
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_inputs
+   :members:
+
+.. automodule:: embodichain.gen_sim.task_engine.bundle_io
+   :members:

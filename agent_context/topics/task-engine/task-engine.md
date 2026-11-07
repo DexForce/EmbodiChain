@@ -75,3 +75,17 @@ orchestration/workflow_artifacts.py owns safe run JSON and history persistence.
 It rejects writes below sealed bundle markers, including symbolic-link paths,
 and preserves interrupted histories. Workflow scheduling and bundle/runtime
 integration consume these contracts in their own layer.
+
+
+## Configured bundle snapshots
+
+Already-authored deployment declarations can be sealed through
+`bundle_deployment.prepare_configured_bundle`, atomically published through
+`bundle_io.write_bundle_atomic`, then loaded with
+`bundle_deployment.load_configured_bundle`. Input hashes and implementation
+revisions are explicit caller-owned contracts. `bundle_identity` binds the file
+inventory and semantic identities; `bundle_inputs` validates provenance groups.
+These APIs create no simulation, Robot, skill or planner. Shared Task Program
+composition accepts owned inline components, and the Gym parser consumes the
+sealed component snapshots when configuring an environment. Bundle changes
+require preparing a new identity; historical run outputs remain separate.

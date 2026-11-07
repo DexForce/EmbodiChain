@@ -21,7 +21,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from embodichain.lab.task_program.language.schema import TaskProgramCfg
+    from .catalog import TaskProgramIntegrationCatalog
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
 from embodichain.utils.config_paths import resolve_config_path
@@ -282,12 +286,15 @@ def _resolve_execution_policy(
     value: object,
     *,
     base_dir: Path,
-) -> tuple[Path, dict[str, object]]:
+) -> tuple[Path | None, dict[str, object]]:
     """Load a policy path or component selector with bounded scalar overrides."""
     selection_path = "task_program.execution_policy"
     overrides: Mapping[str, object] = {}
     component_field = selection_path
-    if isinstance(value, str):
+    inline = isinstance(value, Mapping) and "inline" in value
+    if inline:
+        component = None
+    elif isinstance(value, str):
         component = value
     else:
         selection = _mapping(
@@ -304,15 +311,24 @@ def _resolve_execution_policy(
             required=frozenset(),
             optional=frozenset(_EXECUTION_POLICY_OVERRIDE_FIELDS),
         )
-    policy_path = _component_path(
-        component,
-        base_dir=base_dir,
-        path=component_field,
-        suffixes=frozenset({".yaml", ".yml"}),
+    policy_path = (
+        None
+        if inline
+        else _component_path(
+            component,
+            base_dir=base_dir,
+            path=component_field,
+            suffixes=frozenset({".yaml", ".yml"}),
+        )
+    )
+    raw_policy = (
+        _inline_component(value, path=selection_path)
+        if inline
+        else _load_yaml_component(policy_path, field_name="execution policy")
     )
     policy = dict(
         _mapping(
-            _load_yaml_component(policy_path, field_name="execution policy"),
+            raw_policy,
             path="execution policy",
             required=frozenset(
                 {
@@ -366,27 +382,41 @@ def _resolve_task_program_components(
     value: object,
     *,
     base_dir: Path,
-) -> tuple[Path, Mapping[str, object], Mapping[str, object]]:
+) -> tuple[Path | Mapping[str, object], Mapping[str, object], Mapping[str, object]]:
     """Resolve program, task integration, and execution policy selections."""
     declaration = _mapping(
         value,
         path="task_program",
         required=frozenset({"program", "integration", "execution_policy"}),
     )
-    program_path = _component_path(
-        declaration["program"],
-        base_dir=base_dir,
-        path="task_program.program",
-        suffixes=frozenset({".json", ".yaml", ".yml"}),
+    program_path = (
+        _inline_component(declaration["program"], path="task_program.program")
+        if isinstance(declaration["program"], Mapping)
+        else _component_path(
+            declaration["program"],
+            base_dir=base_dir,
+            path="task_program.program",
+            suffixes=frozenset({".json", ".yaml", ".yml"}),
+        )
     )
-    integration_path = _component_path(
-        declaration["integration"],
-        base_dir=base_dir,
-        path="task_program.integration",
-        suffixes=frozenset({".yaml", ".yml"}),
-    )
+    if isinstance(declaration["integration"], Mapping):
+        integration_path = None
+        integration_source = _inline_component(
+            declaration["integration"], path="task_program.integration"
+        )
+    else:
+        integration_path = _component_path(
+            declaration["integration"],
+            base_dir=base_dir,
+            path="task_program.integration",
+            suffixes=frozenset({".yaml", ".yml"}),
+        )
+        integration_source = _load_yaml_component(
+            integration_path, field_name="task integration"
+        )
+    integration_base = base_dir if integration_path is None else integration_path.parent
     integration = _mapping(
-        _load_yaml_component(integration_path, field_name="task integration"),
+        integration_source,
         path="task integration",
         required=frozenset(
             {
@@ -411,7 +441,7 @@ def _resolve_task_program_components(
 
                     lowerer["asset_manifest"] = str(
                         _resolve_data_reference(
-                            lowerer["asset_manifest"], base_dir=integration_path.parent
+                            lowerer["asset_manifest"], base_dir=integration_base
                         )
                     )
         if "nominal_motion_sources" in runtime_services:
@@ -439,11 +469,11 @@ def _resolve_task_program_components(
                         str(
                             _resolve_data_reference(
                                 value[manifest_key],
-                                base_dir=integration_path.parent,
+                                base_dir=integration_base,
                             )
                         ),
-                        base_dir=integration_path.parent,
-                        path=f"integration.runtime_services.nominal_motion_sources[{index}].prototype_manifest",
+                        base_dir=integration_base,
+                        path=f"integration.runtime_services.nominal_motion_sources[{index}].{manifest_key}",
                         suffixes=frozenset({".json"}),
                     )
                 )
@@ -626,26 +656,57 @@ def _load_configured_task_program_deployment(
         ),
     )
     factory = cast(_ConfiguredTaskProgramAdapterFactory, integration.adapter_factory)
-    if factory.nominal_motion_sources:
-        from embodichain.lab.task_program import load_task_program
+    if factory.nominal_motion_sources or isinstance(program_path, Mapping):
         from .nominal import _ConfiguredTaskProgramNominalSources
 
         catalog = integration.registration.catalog
-        program = load_task_program(
-            program_path, integration=selection, validation_context=catalog
+        program = _load_deployment_program(
+            program_path, selection=selection, catalog=catalog
         )
         if program.program_id != program_id:
             raise ValueError(
                 "configured nominal sources require the integration's program_id"
             )
         compiled = catalog.preflight(program)
-        _ConfiguredTaskProgramNominalSources(compiled, factory.nominal_motion_sources)
+        if factory.nominal_motion_sources:
+            _ConfiguredTaskProgramNominalSources(
+                compiled, factory.nominal_motion_sources
+            )
     return _ConfiguredTaskProgramDeployment(
         integration_id=integration_id,
         program_id=program_id,
-        program_path=program_path,
+        program_path=program_path if isinstance(program_path, Path) else None,
+        program_declaration=(
+            deepcopy(dict(program_path)) if isinstance(program_path, Mapping) else None
+        ),
         selection=selection,
         integration=integration,
         scene_binding=deepcopy(dict(scene_binding)),
         planner_config=planner_config,
     )
+
+
+def _inline_component(value: object, *, path: str) -> dict[str, object]:
+    """Own an explicit inline declaration without reading a component file."""
+    selection = _mapping(value, path=path, required=frozenset({"inline"}))
+    return _owned_mapping(selection["inline"], path=f"{path}.inline")
+
+
+def _load_deployment_program(
+    source: Path | Mapping[str, object],
+    *,
+    selection: TaskProgramIntegrationCfg,
+    catalog: TaskProgramIntegrationCatalog,
+) -> TaskProgramCfg:
+    """Use the same strict decoder for inline and file-backed programs."""
+    from embodichain.lab.task_program import decode_task_program, load_task_program
+    from embodichain.lab.task_program.language.loader import (
+        _bind_task_program_integration,
+    )
+
+    if isinstance(source, Mapping):
+        return decode_task_program(
+            _bind_task_program_integration(dict(source), selection),
+            validation_context=catalog,
+        )
+    return load_task_program(source, integration=selection, validation_context=catalog)
