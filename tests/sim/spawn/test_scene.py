@@ -49,6 +49,29 @@ def test_material_resolution_rejects_conflicting_explicit_definitions():
     assert scene.builder.materials["shared"] is original
 
 
+def test_no_render_preserves_authored_alpha_recipe_without_native_alpha_write():
+    scene = object.__new__(SpawnScene)
+    scene.builder = SimpleNamespace(materials={})
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    original = MaterialDesc(
+        name="glass", alpha_mode="BLEND", base_color_map="authored.png"
+    )
+
+    native = scene._resolve_materials({"glass": original})
+
+    assert native["glass"].alpha_mode is None
+    assert native["glass"].base_color_map is None
+    assert original.alpha_mode == "BLEND"
+    assert original.base_color_map == "authored.png"
+    scene.builder.materials.update(native)
+    assert scene._material_definition("glass") is original
+    with pytest.raises(ValueError, match="Conflicting visual material"):
+        scene._resolve_materials(
+            {"glass": MaterialDesc(name="glass", alpha_mode="MASK")}
+        )
+
+
 def _make_scene(handles: dict[str, object]) -> SpawnScene:
     scene = object.__new__(SpawnScene)
     scene._num_envs = 1

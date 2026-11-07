@@ -32,7 +32,13 @@ from dexsim.spawn import (
 )
 from dexsim.types import ActorType
 
-from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg, VisualObjectCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    RigidObjectCfg,
+    VisualObjectCfg,
+    UsdSourceCfg,
+    DeformableObjectCfg,
+)
 from embodichain.lab.sim.cfg.source import _asset_file_path, _source_prim_path
 from embodichain.lab.sim.spawn.descriptors import (
     _apply_newton_gap_default,
@@ -70,10 +76,19 @@ def _require_usd_import_contract() -> None:
 
 
 def _source_pose(
-    cfg: RigidObjectCfg | ArticulationCfg, source_pose: np.ndarray
+    cfg: RigidObjectCfg | ArticulationCfg | DeformableObjectCfg | VisualObjectCfg,
+    source_pose: np.ndarray,
 ) -> np.ndarray:
     source = cfg.source
-    mode = "auto" if source is None else source.pose_mode
+    mode = cfg.source_pose_mode
+    if source is not None and source.pose_mode != "auto":
+        if mode != "auto" and mode != source.pose_mode:
+            raise ValueError(
+                "Conflicting source_pose_mode and legacy source.pose_mode."
+            )
+        mode = source.pose_mode
+    if mode not in {"auto", "config", "preserve", "offset"}:
+        raise ValueError(f"Unsupported source_pose_mode {mode!r}.")
     configured = _pose_from_cfg(cfg)
     if mode == "preserve":
         return source_pose.copy()
@@ -85,6 +100,53 @@ def _source_pose(
         ):
             return source_pose.copy()
     return configured
+
+
+def _deformable_desc_from_usd(cfg: DeformableObjectCfg):
+    if cfg.source is None:
+        raise ValueError("USD deformables require a source configuration.")
+    cfg.source.validate_source()
+    scene, descriptor = _parse_singleton(
+        cfg.source.file_path, "particle_sets", "deformable", source=cfg.source
+    )
+    _configure_deformable_usd(cfg, descriptor)
+    return descriptor, scene.materials
+
+
+def _configure_deformable_usd(cfg: DeformableObjectCfg, descriptor) -> None:
+    from dexsim.spawn import SoftBodyDesc, ClothDesc
+
+    expected = SoftBodyDesc if cfg.deformable_type == "volume" else ClothDesc
+    if not isinstance(descriptor, expected):
+        raise ValueError(f"USD source is not a {cfg.deformable_type} deformable.")
+    if cfg.attrs.to_dict() != type(cfg.attrs)().to_dict():
+        raise ValueError(
+            "USD deformable physics is source-owned; physical config overrides are not supported."
+        )
+    meshing = getattr(cfg, "meshing", None)
+    if meshing is not None and meshing.to_dict() != type(meshing)().to_dict():
+        raise ValueError(
+            "USD deformable simulation topology is source-owned; meshing overrides are not supported."
+        )
+    if getattr(cfg, "visual_shape", None) is not None:
+        raise ValueError("USD deformable source already owns its visual mesh.")
+    if (
+        getattr(cfg.shape, "fpath", None) is not None
+        or getattr(cfg.shape, "vertices", None) is not None
+    ):
+        raise ValueError(
+            "USD deformable source cannot be combined with configured mesh geometry."
+        )
+    descriptor.name = _required_uid(cfg.uid, "Deformable")
+    descriptor.pose = _source_pose(cfg, descriptor.pose)
+    if cfg.validate_mesh:
+        descriptor.validate_mesh = True
+    if cfg.particle_radius is not None:
+        if not np.isfinite(cfg.particle_radius) or cfg.particle_radius <= 0:
+            raise ValueError("particle_radius must be finite and positive.")
+        descriptor.particle_radius = cfg.particle_radius
+    if cfg.particle_flags is not None:
+        descriptor.particle_flags = np.asarray(cfg.particle_flags, dtype=np.int32)
 
 
 def _overlay_optional_properties(
@@ -161,12 +223,13 @@ def visual_desc_from_usd(
         source=cfg.source,
     )
     desc.name = _required_uid(cfg.uid, "Visual object")
-    desc.pose = _pose_from_cfg(cfg)
+    desc.pose = _source_pose(cfg, desc.pose)
     desc.per_env = per_env
     desc.physics = None
     desc.collisions = []
-    scale = _vector3(cfg.body_scale, field_name="body_scale")
-    desc.body_scale = scale
+    if cfg.body_scale is not None:
+        desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
+    cfg.body_scale = tuple(float(value) for value in desc.body_scale)
     materials = _namespace_materials(desc.renders, scene.materials, desc.name)
     material_ref, material_entry = _compile_visual_material(
         desc.name, getattr(cfg.shape, "visual_material", None)
@@ -353,10 +416,9 @@ def _parse_singleton(path: object, collection: str, label: str, *, source=None):
     if path is None:
         raise ValueError(f"A USD path is required for the {label}.")
 
-    from dexsim.kit.usd import parse_usd
-
-    _require_usd_import_contract()
-    scene = parse_usd(str(path), **({} if source is None else source.parse_kwargs()))
+    scene = _parse_usd_source(
+        source or UsdSourceCfg(file_path=str(path)), source_path=str(path)
+    )
     if scene.constraints:
         raise ValueError(
             "A USD source with standalone constraints requires SimulationManager.add_usd()."
@@ -380,6 +442,26 @@ def _parse_singleton(path: object, collection: str, label: str, *, source=None):
             f"{len(candidates)}: {found}."
         )
     return scene, candidates[0]
+
+
+def _parse_usd_source(
+    source: UsdSourceCfg,
+    *,
+    name: str | None = None,
+    namespace: str | None = None,
+    source_path: str | None = None,
+):
+    """Read one fresh DexSim scene for singleton and whole-scene imports."""
+    from dexsim.kit.usd import parse_usd
+
+    _require_usd_import_contract()
+    source.validate_source()
+    options = source.parse_kwargs()
+    if name is not None:
+        options["root_name"] = name
+    if namespace is not None:
+        options["namespace"] = namespace
+    return parse_usd(source_path or source.file_path, **options)
 
 
 def _namespace_materials(

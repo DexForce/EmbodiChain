@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import field
+from typing import Literal
 
 # Resolve inherited ObjectBaseCfg annotations in runtime type inspection.
 import numpy as np
@@ -49,8 +50,44 @@ class VisualObjectCfg(ObjectBaseCfg):
     source: UsdSourceCfg | None = field(default=None, kw_only=True)
     """USD source asset; mutually exclusive with :attr:`shape`."""
 
-    body_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    body_scale: tuple[float, float, float] | None = None
     """Scale applied to the visual geometry, independently of its root pose."""
 
     visible: bool = True
     """Initial visibility restored by reset."""
+
+    def __post_init__(self) -> None:
+        path = (
+            self.source.file_path
+            if self.source is not None
+            else getattr(self.shape, "fpath", None)
+        )
+        if path is None or not str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
+            if self.body_scale is None:
+                self.body_scale = (1.0, 1.0, 1.0)
+
+    @classmethod
+    def from_dict(cls, init_dict: dict) -> VisualObjectCfg:
+        """Decode a visual configuration, retaining omitted USD scale.
+
+        Args:
+            init_dict: Asset configuration fields.
+
+        Returns:
+            Visual configuration with procedural or source defaults.
+        """
+        cfg = super().from_dict(init_dict)
+        path = (
+            cfg.source.file_path
+            if cfg.source is not None
+            else getattr(cfg.shape, "fpath", None)
+        )
+        if (
+            path is not None
+            and str(path).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
+            and "body_scale" not in init_dict
+        ):
+            cfg.body_scale = None
+        return cfg

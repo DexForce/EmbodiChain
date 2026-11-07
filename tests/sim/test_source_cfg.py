@@ -27,6 +27,7 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     RobotCfg,
     UsdSourceCfg,
+    UsdImportCfg,
     VisualObjectCfg,
 )
 from embodichain.lab.sim.cfg.source import _asset_file_path
@@ -34,6 +35,72 @@ from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.spawn.usd import rigid_desc_from_usd, visual_desc_from_usd
 
 ASSET_CONFIGS = (VisualObjectCfg, RigidObjectCfg, ArticulationCfg, RobotCfg)
+pytestmark = pytest.mark.no_sim
+
+
+def test_import_recipe_round_trip_keeps_source_selection_and_sparse_overrides():
+    data = {
+        "name": "cell",
+        "source": {
+            "file_path": "cell.usda",
+            "root_prim_path": "/World/Cell",
+            "variants": {"/World/Cell": {"tool": "gripper"}},
+        },
+        "namespace": "cell_1",
+        "asset_cfgs": {"/World/Cell/Box": {"uid": "payload"}},
+    }
+    cfg = UsdImportCfg.from_dict(data)
+    cfg.validate_import()
+    restored = UsdImportCfg.from_dict(cfg.to_dict())
+    restored.validate_import()
+    assert restored.source.parse_kwargs() == {
+        "prim_path": "/World/Cell",
+        "variants": {"/World/Cell": {"tool": "gripper"}},
+    }
+    assert restored.asset_cfgs == data["asset_cfgs"]
+    assert restored.namespace == "cell_1"
+
+
+def test_import_recipe_round_trip_retains_typed_robot_override():
+    cfg = UsdImportCfg(
+        name="scene",
+        source=UsdSourceCfg(file_path="scene.usda"),
+        asset_cfgs={
+            "/Robot": RobotCfg(
+                uid="robot", control_parts={"arm": ["joint"]}, build_pk_chain=False
+            )
+        },
+    )
+
+    restored = UsdImportCfg.from_dict(cfg.to_dict())
+
+    assert isinstance(restored.asset_cfgs["/Robot"], RobotCfg)
+    assert restored.asset_cfgs["/Robot"].control_parts == {"arm": ["joint"]}
+    assert restored.asset_cfgs["/Robot"].init_local_pose is None
+    assert (
+        restored.asset_cfgs["/Robot"].asset_physics_mode
+        == cfg.asset_cfgs["/Robot"].asset_physics_mode
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        UsdSourceCfg(file_path="scene.usda", source_prim_path="/World/Cup"),
+        UsdSourceCfg(file_path="scene.usda", pose_mode="offset"),
+        UsdSourceCfg(file_path="scene.usda", namespace="misplaced"),
+    ],
+)
+def test_scene_recipe_rejects_singleton_or_import_options_in_source(source):
+    with pytest.raises(ValueError, match="source|namespace|placement"):
+        UsdImportCfg(name="scene", source=source).validate_import()
+
+
+def test_source_root_and_legacy_subtree_cannot_disagree():
+    with pytest.raises(ValueError, match="root_prim_path"):
+        UsdSourceCfg(
+            file_path="scene.usda", root_prim_path="/A", prim_path="/B"
+        ).validate_source()
 
 
 @pytest.mark.parametrize("cfg_type", ASSET_CONFIGS)
@@ -126,7 +193,8 @@ def test_source_options_keep_exact_entity_selection_separate_from_stage_selectio
     assert source.source_prim_path == "/World/Cup"
 
 
-def test_usd_pose_mode_preserves_or_offsets_authored_transform():
+@pytest.mark.parametrize("placement_owner", ["asset", "legacy_source"])
+def test_usd_pose_mode_preserves_or_offsets_authored_transform(placement_owner):
     import numpy as np
     from embodichain.lab.sim.spawn.usd import _source_pose
 
@@ -134,11 +202,18 @@ def test_usd_pose_mode_preserves_or_offsets_authored_transform():
     authored[0, 3] = 2
     cfg = RigidObjectCfg(
         uid="cup",
-        source=UsdSourceCfg(file_path="scene.usda", pose_mode="offset"),
+        source=UsdSourceCfg(file_path="scene.usda"),
         init_pos=(1, 0, 0),
     )
+    if placement_owner == "asset":
+        cfg.source_pose_mode = "offset"
+    else:
+        cfg.source.pose_mode = "offset"
     assert _source_pose(cfg, authored)[0, 3] == 3
-    cfg.source.pose_mode = "preserve"
+    if placement_owner == "asset":
+        cfg.source_pose_mode = "preserve"
+    else:
+        cfg.source.pose_mode = "preserve"
     assert _source_pose(cfg, authored)[0, 3] == 2
 
 
@@ -165,6 +240,38 @@ def test_source_exact_path_distinguishes_repeated_leaf_names(tmp_path):
     assert rigid.name == "physical"
     assert visual.physics is None
     assert rigid.physics is not None
+
+
+def test_visual_source_defaults_preserve_authored_pose_and_scale(tmp_path):
+    import numpy as np
+    from itertools import product
+
+    path = _cups(tmp_path, ("Only",))
+    stage = Usd.Stage.Open(str(path))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    body = UsdGeom.Xform(stage.GetPrimAtPath("/World/Only"))
+    body.AddTranslateOp().Set((2.0, 0.0, 0.0))
+    body.AddScaleOp().Set((2.0, 2.0, 2.0))
+    stage.GetRootLayer().Save()
+    cfg = VisualObjectCfg.from_dict(
+        {
+            "uid": "appearance",
+            "source": {"file_path": str(path), "root_prim_path": "/World/Only"},
+        }
+    )
+
+    descriptor, _ = visual_desc_from_usd(cfg)
+
+    np.testing.assert_allclose(descriptor.pose[:3, 3], (2.0, 0.0, 0.0))
+    visual = descriptor.renders[0]
+    corners = np.array(list(product((-0.5, 0.5), repeat=3))) * np.asarray(visual.size)
+    transform = (
+        descriptor.pose @ np.diag([*descriptor.body_scale, 1]) @ visual.local_transform
+    )
+    world = corners @ transform[:3, :3].T + transform[:3, 3]
+    np.testing.assert_allclose(world.min(axis=0), (0.0, -2.0, -2.0), atol=1e-6)
+    np.testing.assert_allclose(world.max(axis=0), (4.0, 2.0, 2.0), atol=1e-6)
+    assert descriptor.physics is None
 
 
 def test_source_omitted_selector_requires_one_candidate(tmp_path):

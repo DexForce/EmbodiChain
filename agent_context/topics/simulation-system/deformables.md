@@ -12,10 +12,16 @@ binding. Return to the [simulation overview](simulation-system.md).
 uses one registry and backend dispatch for both topologies.
 
 The supported path is Newton on CUDA, without gradient mode. Declarations
-accept unresolved AutoSolver or a supported particle solver (`xpbd`,
+accept the native DexUni default or a supported particle solver (`xpbd`,
 `semi_implicit`, `vbd`, `dexuni`); they reject unsupported backends/solvers and
 post-finalization additions. Default soft/cloth compatibility is absent.
 Future backend support belongs at dispatch, not inside a monolithic config.
+
+`UsdImportCfg` whole-scene loading and a deformable config's optional `source`
+bind authored soft-body/cloth descriptors through these same facades. Source
+physics and simulation/render topology are retained; the source route accepts
+identity, pose and particle flag/radius overrides rather than regenerating a
+mesh with the procedural meshing defaults.
 
 `spawn/descriptors.py` translates volume/surface configs to typed `SoftBodyDesc`
 and `ClothDesc`; volume meshing uses `SoftBodyMeshingDesc`. Runtime mutation

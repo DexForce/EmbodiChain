@@ -21,7 +21,7 @@ device, not a separate environment tensor device.
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
 
-Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
+Newton `solver_cfg=None` preserves DexSim 0.6's native `DexUniSolverCfg` default.
 The concrete solver is resolved from the complete Spawn scene, then exposed
 through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot
 preset while it is unresolved. Gradient mode requires an explicit
@@ -53,11 +53,12 @@ drives. Preserve-mode articulation configs warn about ignored overlay fields.
 Root import intent is handled separately in
 [articulation adapters](articulation-adapters.md).
 Unset USD actor type, scale, root flags and placement retain parsed source
-values. An explicit singleton `source.pose_mode` replaces, preserves or offsets
+values. An explicit singleton `source_pose_mode` replaces, preserves or offsets
 the source transform. Non-USD rigid and URDF articulation imports keep their
 dynamic/unit-scale and fixed-root defaults respectively. Whole-scene
-`add_usd(asset_cfgs=...)` applies sparse dictionary fields before Spawn
-declaration; source subtree, variants and namespace belong to its `usd` option.
+`add_usd(UsdImportCfg(...))` applies sparse dictionary fields before Spawn
+declaration. Source subtree and variants belong to its `source`; namespace and
+scene placement belong to the import recipe.
 
 `RigidBodyPhysicsCfg` is the single grouped schema. `mass_props`,
 `rigid_props`, `collision_props` and `material_props` each own one physical

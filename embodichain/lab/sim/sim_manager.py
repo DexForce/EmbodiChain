@@ -108,6 +108,7 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     VisualObjectCfg,
     UsdSourceCfg,
+    UsdImportCfg,
     DeformableObjectCfg,
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
@@ -133,6 +134,7 @@ from embodichain.lab.sim.spawn.usd import (
     rigid_desc_from_usd,
     visual_desc_from_usd,
 )
+from embodichain.lab.sim.spawn.usd_result import UsdImportResult
 from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.lab.sim.material import _material_desc_from_cfg
@@ -2488,333 +2490,70 @@ class SimulationManager:
 
     def add_usd(
         self,
-        name: str,
-        file_path: str,
+        cfg: UsdImportCfg | str | None = None,
+        file_path: str | None = None,
         *,
+        name: str | None = None,
         pose: np.ndarray | None = None,
         robot_cfgs: dict[str, RobotCfg] | None = None,
         usd: UsdSourceCfg | None = None,
         asset_cfgs: (
             dict[str, RigidObjectCfg | ArticulationCfg | dict[str, Any]] | None
         ) = None,
-    ) -> dict[str, VisualObject | RigidObject | Articulation | Robot]:
-        """Declare a USD scene and apply optional per-asset configuration.
+    ) -> (
+        UsdImportResult
+        | dict[
+            str, VisualObject | RigidObject | Articulation | Robot | DeformableObject
+        ]
+    ):
+        """Declare a USD import through a validated configuration recipe.
+
+        The returned mapping uses unchanged source prim paths. Facades bind in
+        place at ``prepare()``. Source selection, overrides and supported facade
+        types are checked before native declaration. Backend materialization is
+        validated at ``prepare()``;
+        native creation failures do not promise rollback.
 
         Args:
-            name: Scene label passed to DexSim's parser.
-            file_path: USD stage path.
-            pose: Optional scene-root transform, left-multiplied onto assets.
-            robot_cfgs: Robot metadata keyed by source prim path; source physics
-                and placement are retained.
-            usd: Optional source subtree, variants and namespace selection.
-            asset_cfgs: Sparse mappings or typed asset configurations keyed by
-                source prim path. Mapping omissions retain source properties.
+            cfg: Complete USD import recipe. A string retains the legacy name argument.
+            file_path: Legacy source path; use ``cfg.source.file_path``.
+            name: Legacy keyword spelling of the import name.
+            pose: Legacy scene transform; use ``cfg.pose``.
+            robot_cfgs: Legacy robot metadata; use ``cfg.robot_cfgs``.
+            usd: Legacy source options; use ``cfg.source`` and ``cfg.namespace``.
+            asset_cfgs: Legacy per-asset overrides; use ``cfg.asset_cfgs``.
 
         Returns:
-            Declared facades keyed by unchanged source prim paths.
+            Source-path mapping of declared facades and imported resource UIDs.
+            Legacy argument forms retain the mutable asset dictionary result.
         """
+        from .cfg.usd import _normalize_usd_import
+        from .spawn.usd_import import _compile_usd_import
+
         if self.spawn_result is not None:
             raise RuntimeError(
                 "add_usd() must be called before SimulationManager.prepare()."
             )
-
-        from dataclasses import fields
-        from dexsim.kit.usd import parse_usd
-        from dexsim.spawn import ArticulationDesc, ConstraintDesc, MeshObjectDesc
-        from embodichain.lab.sim.spawn.usd import (
-            _configure_articulation_usd,
-            _configure_rigid_usd,
-            _require_usd_import_contract,
+        legacy_result = not isinstance(cfg, UsdImportCfg)
+        recipe = _normalize_usd_import(
+            cfg,
+            file_path=file_path,
+            name=name,
+            pose=pose,
+            robot_cfgs=robot_cfgs,
+            usd=usd,
+            asset_cfgs=asset_cfgs,
         )
-
-        _require_usd_import_contract()
-        options = usd or UsdSourceCfg(file_path=file_path)
-        if not isinstance(options, UsdSourceCfg):
-            raise TypeError("usd must be a UsdSourceCfg.")
-        if isinstance(options.file_path, str) and options.file_path != file_path:
-            raise ValueError("add_usd() file_path and usd.file_path must match.")
-        if options.source_prim_path is not None or options.pose_mode != "auto":
-            raise ValueError(
-                "add_usd() selects a source subtree with usd.prim_path; "
-                "scene placement belongs to pose."
-            )
-        source = parse_usd(file_path, root_name=name, **options.parse_kwargs())
-        descriptors = [
-            item
-            for item in source.iter_entities()
-            if not isinstance(item, ConstraintDesc)
-        ]
-        robot_cfgs = robot_cfgs or {}
-        asset_cfgs = asset_cfgs or {}
-        source_paths = {
-            (
-                item.usd.prim_path
-                if item.usd is not None and item.usd.prim_path
-                else item.name
-            )
-            for item in (*source.mesh_objects, *source.articulations)
-        }
-        overlap = robot_cfgs.keys() & asset_cfgs.keys()
-        missing = (robot_cfgs.keys() | asset_cfgs.keys()) - source_paths
-        if overlap or missing:
-            raise ValueError(
-                f"Invalid USD configuration targets; duplicate={sorted(overlap)}, missing={sorted(missing)}."
-            )
-        root_pose = None if pose is None else np.asarray(pose, dtype=np.float32)
-        if root_pose is not None and (
-            root_pose.shape != (4, 4) or not np.isfinite(root_pose).all()
-        ):
-            raise ValueError("USD scene pose must be a finite (4, 4) transform.")
-
-        occupied = set(self.asset_uids)
-        for item in (
-            *getattr(self._spawn_scene.builder, "mesh_objects", ()),
-            *getattr(self._spawn_scene.builder, "scene_entities", ()),
-        ):
-            occupied.add(item.name)
-        declarations = []
-        mounted_sensors = []
-        sensor_uids = set(self._sensors)
-        renamed = {}
-        for descriptor in descriptors:
-            original_name = descriptor.name
-            source_path = (
-                descriptor.usd.prim_path
-                if descriptor.usd is not None and descriptor.usd.prim_path
-                else descriptor.name
-            )
-            configured = asset_cfgs.get(source_path)
-            legacy_robot = robot_cfgs.get(source_path)
-            is_articulation = isinstance(descriptor, ArticulationDesc)
-            if legacy_robot is not None and not is_articulation:
-                raise ValueError(
-                    f"USD robot target must be an articulation: {source_path}."
-                )
-            selected_path = (
-                descriptor.usd.prim_path
-                if descriptor.usd is not None and descriptor.usd.prim_path
-                else None
-            )
-            is_visual = (
-                type(descriptor) is MeshObjectDesc
-                and descriptor.physics is None
-                and not descriptor.collisions
-                and configured is None
-            )
-            if configured is not None and not isinstance(
-                descriptor, (MeshObjectDesc, ArticulationDesc)
-            ):
-                raise ValueError(
-                    f"USD configuration type does not match source entity {source_path}."
-                )
-            if isinstance(configured, dict):
-                data = deepcopy(configured)
-                source_options = data.pop("source", None)
-                if source_options is not None:
-                    if not isinstance(source_options, dict) or set(source_options) != {
-                        "pose_mode"
-                    }:
-                        raise ValueError(
-                            f"Per-asset source selection is not supported: {source_path}."
-                        )
-                if "shape" in data or "fpath" in data:
-                    raise ValueError(
-                        f"USD source selection belongs to add_usd(), not asset_cfgs: {source_path}."
-                    )
-                config_type = ArticulationCfg if is_articulation else RigidObjectCfg
-                unknown = data.keys() - {item.name for item in fields(config_type)}
-                if unknown:
-                    raise ValueError(
-                        f"Unknown USD override fields at {source_path}: {sorted(unknown)}."
-                    )
-                cfg = config_type.from_dict(data)
-                if not {"init_pos", "init_rot", "init_local_pose"}.intersection(data):
-                    cfg.init_local_pose = None
-                if "body_scale" not in data:
-                    cfg.body_scale = None
-                if not is_articulation and "body_type" not in data:
-                    cfg.body_type = None
-                pose_mode = (
-                    "auto" if source_options is None else source_options["pose_mode"]
-                )
-            elif configured is not None:
-                if is_articulation != isinstance(configured, ArticulationCfg) or (
-                    not is_articulation and not isinstance(configured, RigidObjectCfg)
-                ):
-                    raise ValueError(
-                        f"USD configuration type does not match source entity {source_path}."
-                    )
-                cfg = deepcopy(configured)
-                if (is_articulation and cfg.fpath is not None) or (
-                    not is_articulation and cfg.shape is not None
-                ):
-                    raise ValueError(
-                        f"Per-asset source selection is not supported: {source_path}."
-                    )
-                if cfg.source is not None and (
-                    isinstance(cfg.source.file_path, str)
-                    or cfg.source.source_prim_path is not None
-                    or cfg.source.prim_path is not None
-                    or cfg.source.variants is not None
-                    or cfg.source.namespace is not None
-                ):
-                    raise ValueError(
-                        f"Per-asset source selection is not supported: {source_path}."
-                    )
-                pose_mode = "auto" if cfg.source is None else cfg.source.pose_mode
-            elif legacy_robot is not None:
-                cfg = deepcopy(legacy_robot)
-                cfg.asset_physics_mode = "preserve"
-                cfg.init_local_pose = None
-                cfg.root_props = ArticulationRootPropertiesCfg()
-                pose_mode = "preserve"
-            elif is_articulation:
-                cfg = ArticulationCfg(build_pk_chain=False)
-                cfg.init_local_pose = None
-                cfg.body_scale = None
-                pose_mode = "preserve"
-            elif is_visual:
-                cfg = VisualObjectCfg()
-                pose_mode = "preserve"
-            elif type(descriptor) is MeshObjectDesc:
-                cfg = RigidObjectCfg()
-                cfg.init_local_pose = None
-                cfg.body_type = None
-                cfg.body_scale = None
-                pose_mode = "preserve"
-            else:
-                if descriptor.name in occupied:
-                    raise ValueError(
-                        f"USD asset UID already exists: {descriptor.name!r}."
-                    )
-                occupied.add(descriptor.name)
-                if root_pose is not None and hasattr(descriptor, "pose"):
-                    descriptor.pose = root_pose @ descriptor.pose
-                continue
-
-            uid = cfg.uid or descriptor.name
-            if is_visual and uid in occupied:
-                uid = f"{name}_{uid}"
-            if uid in occupied:
-                raise ValueError(f"USD asset UID already exists: {uid!r}.")
-            occupied.add(uid)
-            cfg.uid = uid
-            if is_articulation:
-                cfg.fpath = None
-                cfg.source = UsdSourceCfg(
-                    file_path=file_path,
-                    source_prim_path=selected_path,
-                    pose_mode=pose_mode,
-                )
-                cfg.source.parse_kwargs()
-                if configured is None and legacy_robot is None:
-                    cfg.root_props = ArticulationRootPropertiesCfg()
-                descriptor, materials = _configure_articulation_usd(
-                    cfg,
-                    source,
-                    descriptor,
-                    source_path=file_path,
-                    newton_solver_type=self._active_newton_solver_type,
-                )
-                configure_articulation_desc(
-                    descriptor, cfg, newton_solver_type=self._active_newton_solver_type
-                )
-                kind = "articulation"
-                facade_type = Robot if isinstance(cfg, RobotCfg) else Articulation
-                cfg.root_props.fixed_base = bool(descriptor.fixed_base)
-                cfg.root_props.self_collision_enabled = descriptor.enable_self_collision
-            elif is_visual:
-                descriptor.name = uid
-                cfg.source = UsdSourceCfg(
-                    file_path=file_path, source_prim_path=selected_path
-                )
-                cfg.body_scale = tuple(float(value) for value in descriptor.body_scale)
-                kind = "visual_object"
-                facade_type = VisualObject
-                materials = {}
-            else:
-                cfg.shape = None
-                cfg.source = UsdSourceCfg(
-                    file_path=file_path,
-                    source_prim_path=selected_path,
-                    pose_mode=pose_mode,
-                )
-                cfg.source.parse_kwargs()
-                if descriptor.physics is None and configured is None:
-                    cfg.body_type = "static"
-                    cfg.body_scale = tuple(
-                        float(value) for value in descriptor.body_scale
-                    )
-                    materials = {}
-                else:
-                    descriptor, materials = _configure_rigid_usd(
-                        cfg,
-                        source,
-                        descriptor,
-                        newton_solver_type=self._active_newton_solver_type,
-                    )
-                kind = "rigid_object"
-                facade_type = RigidObject
-            if root_pose is not None:
-                descriptor.pose = root_pose @ descriptor.pose
-            cfg.init_local_pose = descriptor.pose.copy()
-            source.materials.update(materials)
-            if isinstance(cfg, RobotCfg) and cfg.enable_sensor:
-                for sensor_cfg in cfg.sensors:
-                    if not isinstance(sensor_cfg, CameraCfg):
-                        raise TypeError(
-                            "RobotCfg.sensors supports mounted cameras only."
-                        )
-                    if (
-                        not isinstance(sensor_cfg.uid, str)
-                        or not sensor_cfg.uid.strip()
-                    ):
-                        raise ValueError("Mounted sensors require a non-empty uid.")
-                    if sensor_cfg.uid in sensor_uids:
-                        raise ValueError(f"Sensor {sensor_cfg.uid!r} already exists.")
-                    sensor_uids.add(sensor_cfg.uid)
-                    parent = sensor_cfg.extrinsics.parent
-                    if not isinstance(parent, str) or not parent.strip():
-                        raise ValueError("Mounted sensors require a parent link.")
-                    link_name = parent.removeprefix(f"{uid}/")
-                    if not link_name or "/" in link_name:
-                        raise ValueError(
-                            f"Mounted sensor {sensor_cfg.uid!r} must refer to a local link on robot {uid!r}."
-                        )
-                    bound_cfg = deepcopy(sensor_cfg)
-                    bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
-                    mounted_sensors.append(bound_cfg)
-            facade = facade_type(cfg=cfg, device=self.device)
-            declarations.append((source_path, kind, descriptor, facade))
-            renamed[original_name] = descriptor.name
-
-        def renamed_endpoint(endpoint: str) -> str:
-            owner, separator, suffix = endpoint.partition("/")
-            return renamed.get(owner, owner) + separator + suffix
-
-        for constraint in source.constraints:
-            if constraint.body0 is not None:
-                constraint.body0 = renamed_endpoint(constraint.body0)
-            elif root_pose is not None:
-                constraint.origin_pose = root_pose @ constraint.origin_pose
-            if constraint.body1 is not None:
-                constraint.body1 = renamed_endpoint(constraint.body1)
-            elif root_pose is not None:
-                constraint.target_pose = root_pose @ constraint.target_pose
-        source.rigid_collision_filter_pairs = [
-            (renamed_endpoint(first), renamed_endpoint(second))
-            for first, second in source.rigid_collision_filter_pairs
-        ]
-
-        # Keep all validation before DexSim's native declaration and registry writes.
-        source.materials = self._spawn_scene._resolve_materials(source.materials)
-        added = self._spawn_scene.builder.add_scene(source, per_env=True)
+        plan = _compile_usd_import(self, recipe)
+        plan.source.materials = self._spawn_scene._resolve_materials(
+            plan.source.materials
+        )
+        added = self._spawn_scene.builder.add_scene(plan.source, per_env=True)
         added_by_name = {item.name: item for item in added}
         assets = {}
-        for source_path, kind, descriptor, facade in declarations:
-            built_descriptor = added_by_name[descriptor.name]
+        for source_path, kind, descriptor, facade in plan.declarations:
             self._spawn_scene.track(
-                kind, descriptor.name, built_descriptor, facade=facade
+                kind, descriptor.name, added_by_name[descriptor.name], facade=facade
             )
             registry = {
                 "visual_object": self._visual_objects,
@@ -2822,13 +2561,21 @@ class SimulationManager:
                 "articulation": (
                     self._robots if isinstance(facade, Robot) else self._articulations
                 ),
+                "soft_object": self._deformable_objects,
+                "cloth_object": self._deformable_objects,
             }[kind]
             registry[descriptor.name] = facade
             assets[source_path] = facade
-        for sensor_cfg in mounted_sensors:
+        for sensor_cfg in plan.mounted_sensors:
             self.add_sensor(sensor_cfg)
         self.notify_visualization_topology_changed()
-        return assets
+        result = UsdImportResult(
+            assets,
+            resource_uids=plan.resource_uids,
+            resource_types=plan.resource_types,
+            constraint_uids=plan.constraint_uids,
+        )
+        return dict(result) if legacy_result else result
 
     def add_visual_object(self, cfg: VisualObjectCfg) -> VisualObject:
         """Declare a render-only mesh or primitive, without physics or colliders.
@@ -3093,7 +2840,12 @@ class SimulationManager:
                 f"A {deformable_type} deformable requires "
                 f"{config_cls.__name__}, got {type(cfg).__name__}."
             )
-        descriptor, materials = descriptor_factory(cfg, per_env=True)
+        if cfg.source is not None:
+            from .spawn.usd import _deformable_desc_from_usd
+
+            descriptor, materials = _deformable_desc_from_usd(cfg)
+        else:
+            descriptor, materials = descriptor_factory(cfg, per_env=True)
         self._spawn_scene.builder.materials.update(
             self._spawn_scene._resolve_materials(materials)
         )
