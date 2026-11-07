@@ -53,7 +53,6 @@ class QueryProvider:
                 context.scene.version,
             ),
             revision=request.skill_options.native_closing_revision,
-            collision_backend="fcl",
             target_contact_offset=0.002,
             **(
                 {"gravity_in_object": np.array([0.0, 0.0, -1.0])}

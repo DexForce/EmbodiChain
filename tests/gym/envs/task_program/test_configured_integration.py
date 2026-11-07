@@ -7419,50 +7419,6 @@ def test_released_continuation_requires_closed_exact_program_roles():
             ).registration.catalog.preflight(program)
 
 
-@pytest.mark.parametrize("kind", ["closing", "measured"])
-def test_native_contact_backend_is_closed_fingerprinted_and_default_stable(kind):
-    from embodichain.lab.task_program.integrations.catalog import _canonical_value
-
-    payload, program = _grounded_opening_payload()
-    services = payload["runtime_services"]["planning_services"]
-    if kind == "measured":
-        preset = next(
-            value
-            for value in payload["robot_profile"]["presets"]
-            if value["preset_id"] == "native_acquire"
-        )
-        preset["recovery"]["planning_budget"] = {"wall_seconds": 90.0}
-        preset["action_options"]["pick"].update(
-            measured_preshape=True, native_closing_revision=4
-        )
-        identity = payload["runtime_services"]["invocation_policy_bindings"][0][
-            "invocation_id"
-        ]
-        services["measured_rigid_bindings"] = [
-            dict(invocation_id=identity, object_id="cube")
-        ]
-    field = "pick_closing_bindings" if kind == "closing" else "measured_rigid_bindings"
-    original = _decode_configured_task_program_integration(payload).registration
-    original.catalog.preflight(program)
-    baseline = original.fingerprint_payload()
-    services[field][0]["collision_backend"] = "newton"
-    default = _decode_configured_task_program_integration(payload).registration
-    assert default.fingerprint_payload() == baseline
-    binding = getattr(default.planning_services, field)[0]
-    assert "collision_backend" not in _canonical_value(binding)["fields"]
-    services[field][0]["collision_backend"] = "fcl"
-    selected = _decode_configured_task_program_integration(payload).registration
-    selected.catalog.preflight(program)
-    binding = getattr(selected.planning_services, field)[0]
-    assert binding.collision_backend == "fcl"
-    assert _canonical_value(binding)["fields"]["collision_backend"] == "fcl"
-    assert selected.fingerprint_payload() != baseline
-    for value in (True, None, "auto", "FCL"):
-        services[field][0]["collision_backend"] = value
-        with pytest.raises((TypeError, ValueError), match="collision_backend"):
-            _decode_configured_task_program_integration(payload)
-
-
 def test_measured_rigid_configuration_keeps_exact_typed_source_permissions():
     from embodichain.lab.task_program.integrations.catalog import _canonical_value
     from embodichain.lab.sim.atomic_actions import PlaceOptions
