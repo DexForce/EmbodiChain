@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "ranges": {
+    "cube_xy_m": [
+      -0.05,
+      0.05
+    ],
+    "installation_x_m": [
+      -0.04,
+      0.04
+    ],
+    "installation_y_m": [
+      -0.03,
+      0.03
+    ],
+    "installation_yaw_rad": [
+      -0.12,
+      0.12
+    ],
+    "joint_offset_scale": 0.008,
+    "camera_position_delta_m": [
+      0.1,
+      -0.04,
+      0.05
+    ],
+    "focal_scale": 1.25
+  },
+  "acceptance": [
+    {
+      "id": "wide-scene",
+      "status": "passed",
+      "verified_parents": 4,
+      "verified_children": 0,
+      "selected_operators": [],
+      "joint_scene_candidates": 4
+    },
+    {
+      "id": "wide-joint_residual",
+      "status": "passed",
+      "verified_parents": 2,
+      "verified_children": 0,
+      "selected_operators": [
+        "joint_residual",
+        "none"
+      ],
+      "joint_scene_candidates": 0
+    },
+    {
+      "id": "wide-via_points",
+      "status": "passed",
+      "verified_parents": 2,
+      "verified_children": 0,
+      "selected_operators": [
+        "none",
+        "via_points"
+      ],
+      "joint_scene_candidates": 0
+    },
+    {
+      "id": "wide-visual",
+      "status": "passed",
+      "verified_parents": 1,
+      "verified_children": 3,
+      "selected_operators": [],
+      "joint_scene_candidates": 0
+    }
+  ],
+  "measured_motion_comparison": [
+    {
+      "id": "ur5-joint_residual",
+      "angular_deg": 2.6944140049216503,
+      "tcp_mm": 15.8062068934007
+    },
+    {
+      "id": "wide-joint_residual",
+      "angular_deg": 7.965291477988,
+      "tcp_mm": 52.4340251551267
+    },
+    {
+      "id": "ur5-via_points",
+      "angular_deg": 2.493551801809915,
+      "tcp_mm": 7.42725464246815
+    },
+    {
+      "id": "wide-via_points",
+      "angular_deg": 2.2564349545837525,
+      "tcp_mm": 13.124431935327063
+    }
+  ],
+  "note": "Measured sampled trajectories include execution differences. No acceptance threshold was relaxed; prior recipes remain available."
+}

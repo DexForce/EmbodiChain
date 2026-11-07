@@ -1,0 +1,13 @@
+deployment: /tmp/embodichain-expansion/carton/task.measured.yaml
+motion_source: prototype
+source_profile: /tmp/embodichain-expansion/carton/profile.measured.single.yaml
+output_dir: /tmp/embodichain-expansion/real2sim
+batch_size: 8
+target_episodes: 8
+max_attempts: 16
+max_steps: 2400
+seed: 7
+mass_scale:
+  carton:
+  - 0.99
+  - 1.01

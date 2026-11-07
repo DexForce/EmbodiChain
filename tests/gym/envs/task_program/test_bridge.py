@@ -977,6 +977,9 @@ def test_execution_trace_records_only_consumed_actions_and_rejects_unknown_frame
     bridge = TaskProgramDemoBridge.__new__(TaskProgramDemoBridge)
     bridge._clock = EnvironmentStepClock(0.1)
     bridge._execution_trace = []
+    bridge._row_rejection = None
+    bridge._row_hold = None
+    bridge._pending_rejected_ids = ()
     lifecycle = bridge_module._SegmentLifecycle()
     action = ControllerAction(
         torch.zeros(1, 1),
@@ -1561,6 +1564,10 @@ def test_atomic_demo_bridge_is_lazy_and_waits_with_hold_actions() -> None:
 def test_bridge_publishes_completion_only_after_normal_program_exhaustion() -> None:
     """Task success cannot observe a partial segment lifecycle as completion."""
     bridge, _, _ = _bridge(duration=STEP_DT)
+    assert bridge.program_id == "demo-program"
+    selected = bridge.env_ids
+    selected.zero_()
+    assert bridge.env_ids.tolist() == [7, 3]
     segments = iter(bridge.iter_segments())
 
     demo_segment = next(segments)
@@ -2118,6 +2125,61 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary(mode) -> None:
     assert validator_port.seen == [validator]
 
 
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+@pytest.mark.parametrize("reject_tick", [0, 2])
+def test_row_rejection_holds_commands_without_disrupting_policy_clock(
+    mode, reject_tick
+) -> None:
+    class ExactClockPolicy(_PostPolicyPort):
+        def actions(self, policy, *, segment, active_mask):
+            self.active_masks.append(active_mask.clone())
+            start = clock.step_index
+            for tick in range(3):
+                assert clock.step_index == start + tick
+                yield self.action * (tick + 1)
+                assert clock.step_index == start + tick + 1
+
+    port = ExactClockPolicy(torch.ones(BATCH_SIZE, ROBOT_DOF))
+    bridge, _, clock = _bridge(
+        duration=STEP_DT,
+        segment=_FakeSegment(post_policies=(object(),)),
+        post_policy_port=port,
+        joint_command_mode=mode,
+    )
+    segment = next(bridge.iter_segments())
+    policy_commands = []
+    stopped = False
+    holds = 0
+    for action in segment.actions:
+        positions = action.value if mode == "position" else action.value["qpos"]
+        if stopped:
+            torch.testing.assert_close(positions[0], torch.full((ROBOT_DOF,), 9.0))
+            if mode == "position_velocity":
+                assert not action.value["qvel"][0].any()
+        if action.metadata.get("rejected_env_ids"):
+            assert action.metadata["rejected_env_ids"] == [7]
+            holds += 1
+        if action.metadata["bridge_action_kind"] == "program_post_policy":
+            policy_commands.append(positions[1].clone())
+            if len(policy_commands) == reject_tick + 1:
+                hold = action.value.clone()
+                if mode == "position":
+                    hold[0] = 9.0
+                else:
+                    hold["qpos"][0] = 9.0
+                    hold["qvel"][0] = 0.0
+                bridge.request_row_rejection(
+                    (7,), ControllerAction(hold), reason="measured failure"
+                )
+                stopped = True
+    assert holds == 1
+    torch.testing.assert_close(
+        torch.stack(policy_commands),
+        torch.arange(1.0, 4.0)[:, None].expand(3, ROBOT_DOF),
+    )
+    assert segment.validator().tolist() == [False, True]
+
+
 def test_post_policy_receives_only_rows_surviving_partial_runtime_failure() -> None:
     """Post-policy completion cannot be blocked by a runtime-failed row."""
     post_policy = object()
@@ -2607,3 +2669,30 @@ def test_validator_baseline_is_captured_lazily_before_runtime_start() -> None:
     tuple(demo_segment.actions)
     assert baselines == [(declaration, None)]
     assert demo_segment.validator().all()
+
+
+def test_environment_bridge_scope_restores_binding_after_failure() -> None:
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    bridge, _, _ = _bridge(duration=STEP_DT)
+    previous = object()
+    environment = SimpleNamespace(_active_task_program_bridge=previous)
+    with pytest.raises(RuntimeError, match="injected"):
+        with EmbodiedEnv.task_program_bridge_scope(environment, bridge):
+            assert environment._active_task_program_bridge is bridge
+            raise RuntimeError("injected execution failure")
+    assert environment._active_task_program_bridge is previous
+
+
+def test_fresh_bridge_reports_physical_binding_before_runtime_grounding():
+    from types import SimpleNamespace
+    from dataclasses import replace
+
+    bridge, runtime, _ = _bridge(duration=STEP_DT)
+    runtime._result = replace(runtime.result, env_ids=torch.tensor([0, 1]))
+    runtime.observation_provider = SimpleNamespace(env_ids=torch.tensor([7, 3]))
+    assert bridge.env_ids.tolist() == [7, 3]
+    owned = bridge.env_ids
+    owned.zero_()
+    assert runtime.observation_provider.env_ids.tolist() == [7, 3]
