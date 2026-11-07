@@ -207,7 +207,7 @@ def test_native_batch_reports_all_pairs_once_and_owned_results_survive_reuse(
     assert result.below(0.0) is True
 
 
-def test_explicit_triangle_mesh_surface_keeps_concavity_and_mixed_pair_ids():
+def test_explicit_triangle_mesh_surface_keeps_concavity_and_pair_ids():
     import numpy as np
     import trimesh
     from embodichain.lab.sim.scene.feasibility import (
@@ -222,6 +222,7 @@ def test_explicit_triangle_mesh_surface_keeps_concavity_and_mixed_pair_ids():
     first.apply_translation((-1.0, 0.0, 0.0))
     second.apply_translation((1.0, 0.0, 0.0))
     mesh = trimesh.util.concatenate((first, second))
+    probe = trimesh.creation.box((0.25, 0.25, 0.25))
     bodies = (
         CollisionBody(
             "surface",
@@ -230,7 +231,14 @@ def test_explicit_triangle_mesh_surface_keeps_concavity_and_mixed_pair_ids():
             vertices=tuple(map(tuple, mesh.vertices)),
             triangles=tuple(map(tuple, mesh.faces)),
         ),
-        CollisionBody("probe", "probe", "sphere", (0.125,), robot=True),
+        CollisionBody(
+            "probe",
+            "probe",
+            "mesh",
+            vertices=tuple(map(tuple, probe.vertices)),
+            triangles=tuple(map(tuple, probe.faces)),
+            robot=True,
+        ),
     )
     with pytest.raises(UnsupportedFeasibilityError, match="explicit collision adapter"):
         NewtonCollisionChecker(bodies)
@@ -260,6 +268,7 @@ def test_explicit_triangle_mesh_surface_keeps_concavity_and_mixed_pair_ids():
 def test_collection_clearance_bound_preserves_native_precision_and_near_contacts(
     monkeypatch, x
 ):
+    import json
     import numpy as np
     import trimesh
     from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
@@ -287,6 +296,8 @@ def test_collection_clearance_bound_preserves_native_precision_and_near_contacts
     try:
         lower = left.clearance_lower_bound(right)
         assert not builds
+        assert lower is None or type(lower) is float
+        json.dumps({"lower": lower}, allow_nan=False)
         if x > 1e6:
             assert lower is None
             with pytest.raises(UnsupportedFeasibilityError, match="precision range"):
@@ -368,3 +379,118 @@ def test_collection_far_bound_culls_without_native_queries_or_model_rebuild(
     finally:
         left.close()
         right.close()
+
+
+def test_mixed_mesh_primitive_no_contact_needs_a_separation_certificate():
+    import json
+    import numpy as np
+    import trimesh
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+        UnsupportedFeasibilityError,
+    )
+
+    # Independent triangle shells leave a real gap, but their combined AABB
+    # alone cannot certify that gap. No contact is not a mixed-route certificate.
+    shells = []
+    for x in (-1.0, 1.0):
+        shell = trimesh.creation.box((0.5, 0.5, 0.5))
+        shell.apply_translation((x, 0.0, 0.0))
+        shells.append(shell)
+    mesh = trimesh.util.concatenate(shells)
+    checker = NewtonCollisionChecker(
+        (
+            CollisionBody(
+                "surface",
+                "surface",
+                "mesh",
+                vertices=tuple(map(tuple, mesh.vertices)),
+                triangles=tuple(map(tuple, mesh.faces)),
+            ),
+            CollisionBody("sphere", "sphere", "sphere", (0.125,), robot=True),
+        ),
+        allow_triangle_meshes=True,
+    )
+    frames = {"surface": np.eye(4), "sphere": np.eye(4)}
+    try:
+        result = checker.contact_query(frames)
+        assert result.native_contact_count == 0
+        for operation in (
+            lambda: result.below(0.0),
+            lambda: checker.contact_pairs(frames),
+            lambda: checker.check(frames),
+        ):
+            with pytest.raises(
+                UnsupportedFeasibilityError, match="mixed mesh/primitive"
+            ):
+                operation()
+        assert result.lower == 0.0
+        assert result.clearance_unavailable_reason is not None
+        json.dumps(result.metadata(), allow_nan=False)
+        frames["sphere"][0, 3] = 3.0
+        assert checker.contact_query(frames).below(0.0) is False
+        assert checker.contact_pairs(frames) == ()
+        assert checker.check(frames)[0].status == "passed"
+        frames["sphere"][0, 3] = 1.25
+        assert checker.contact_query(frames).below(0.0) is True
+        assert checker.contact_pairs(frames) == (("surface", "sphere"),)
+    finally:
+        checker.close()
+
+
+def test_mixed_mesh_box_overlap_cannot_be_reported_as_clear_without_native_evidence():
+    import numpy as np
+    import trimesh
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+        UnsupportedFeasibilityError,
+    )
+
+    # Frozen numerical dimensions and poses from the public Motion owner
+    # diagnostic: a pad surface intersects the scene box by centimetres.
+    mesh = trimesh.creation.box((0.1, 0.06, 0.06))
+    bodies = (
+        CollisionBody("origin", "origin", "sphere", (0.125,)),
+        CollisionBody(
+            "pad",
+            "pad",
+            "mesh",
+            vertices=tuple(map(tuple, mesh.vertices)),
+            triangles=tuple(map(tuple, mesh.faces)),
+            robot=True,
+        ),
+        CollisionBody("scene", "scene", "box", (0.07999999821186066,) * 3),
+    )
+    ignored = (("origin", "pad"), ("origin", "scene"))
+    checker = NewtonCollisionChecker(
+        bodies, ignored_pairs=ignored, allow_triangle_meshes=True
+    )
+    pad, scene = np.eye(4), np.eye(4)
+    pad[:3, 3] = (0.8399999737739563, 0.019999999552965164, 0.30000001192092896)
+    scene[:3, 3] = (0.8500000238418579, 0.0, 0.30000001192092896)
+    frames = {"origin": np.eye(4), "pad": pad, "scene": scene}
+    try:
+        result = checker.contact_query(frames)
+        # A corrected SDK may supply contacts; neither an unavailable route nor
+        # a reported overlap can become certified clear on any public entry.
+        try:
+            assert result.below(0.0) is True
+        except UnsupportedFeasibilityError:
+            assert result.clearance_unavailable_reason is not None
+        try:
+            assert checker.check(frames)[0].status == "failed"
+        except UnsupportedFeasibilityError:
+            pass
+        try:
+            assert checker.contact_pairs(frames) == (("pad", "scene"),)
+        except UnsupportedFeasibilityError:
+            pass
+        assert checker.contact_pairs(frames, allowed_contacts=(("pad", "scene"),)) == ()
+        assert (
+            checker.check(frames, allowed_contacts=(("pad", "scene"),))[0].status
+            == "passed"
+        )
+    finally:
+        checker.close()
