@@ -90,6 +90,9 @@ def test_native_rest_scene_preserves_analytic_box_decisions_and_first_pair(case)
     # input paths, not the old backend's scalar distances or query metadata.
     assert result["valid"] is (case["name"] in {"clear", "contact_deferred"})
     assert result["collision_backend"] == "newton.CollisionPipeline"
+    if case["name"] == "clear":
+        assert result["queries"] == 0
+        assert result["broadphase_culled_pairs"] > 0
     if not result["valid"]:
         assert result["frame"] == (3 if case["name"] == "later_frame" else 0)
         assert result["link"] == "pad"
@@ -283,6 +286,9 @@ def test_native_rest_query_closes_all_owned_groups_when_precision_is_unavailable
 
         def set_transform(self, *args):
             pass
+
+        def clearance_lower_bound(self, other):
+            return None
 
         def contact_query(self, other, limit):
             assert limit == 0.0
