@@ -1538,8 +1538,9 @@ def test_mllm_and_config_share_invocations_and_verified_results(
 
 
 @pytest.mark.parametrize("capture_root_pose", [False, True])
+@pytest.mark.parametrize("env_ids", [None, (2, 0), (1,)])
 def test_simulation_root_capture_is_explicit_and_owns_the_same_tick_snapshot(
-    monkeypatch: pytest.MonkeyPatch, capture_root_pose: bool
+    monkeypatch: pytest.MonkeyPatch, capture_root_pose: bool, env_ids
 ) -> None:
     factory, robot = _factory(capture_root_pose=capture_root_pose)
     root_pose = torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
@@ -1551,33 +1552,39 @@ def test_simulation_root_capture_is_explicit_and_owns_the_same_tick_snapshot(
         return root_pose
 
     monkeypatch.setattr(robot, "get_local_pose", get_local_pose, raising=False)
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    selected = list(range(_BATCH_SIZE)) if env_ids is None else list(env_ids)
     observation = factory.create_planning_observation_provider(
         scene_registry=factory.create_scene_registry(),
-        engine=factory.create_atomic_action_engine(
-            factory.create_robot_skill_profile()
-        ),
+        engine=engine,
         clock=EnvironmentStepClock(_STEP_DT),
     )
-    context = observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+    context = observation.observe(TaskState.empty(len(selected), robot.device))
     assert context.robot.timestamp == context.scene.timestamp == 0.0
     assert reads == ([True] if capture_root_pose else [])
     if capture_root_pose:
-        assert torch.equal(context.robot.root_pose, root_pose)
+        assert torch.equal(context.robot.root_pose, root_pose[selected])
         root_pose[:, 0, 3].add_(3.0)
-        assert context.robot.root_pose[:, 0, 3].tolist() == [0.0, 1.0, 2.0]
+        assert context.robot.root_pose[:, 0, 3].tolist() == [float(i) for i in selected]
     else:
         assert context.robot.root_pose is None
 
 
 @pytest.mark.parametrize("hold_qpos_source", ["observed", "drive_target"])
+@pytest.mark.parametrize("env_ids", [None, (2, 0)])
 def test_simulation_factory_builds_shared_observation_and_evidence_ports(
-    monkeypatch: pytest.MonkeyPatch, hold_qpos_source: str
+    monkeypatch: pytest.MonkeyPatch, hold_qpos_source: str, env_ids
 ) -> None:
     """Observation and both built-in evidence providers share one scene source."""
     factory, robot = _factory(hold_qpos_source=hold_qpos_source)
     registry = factory.create_scene_registry()
     profile = factory.create_robot_skill_profile()
     engine = factory.create_atomic_action_engine(profile)
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    selected = list(range(_BATCH_SIZE)) if env_ids is None else list(env_ids)
     clock = EnvironmentStepClock(_STEP_DT)
 
     observation = factory.create_planning_observation_provider(
@@ -1586,7 +1593,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
         clock=clock,
     )
     assert type(observation) is SimulationPlanningObservationProvider
-    context = observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+    context = observation.observe(TaskState.empty(len(selected), robot.device))
     providers = tuple(
         factory.create_effect_evidence_providers(
             scene_registry=registry,
@@ -1596,7 +1603,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
     )
     assert context.robot.timestamp == pytest.approx(0.0)
     assert context.control_dt == pytest.approx(_STEP_DT)
-    assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos)
+    assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos[selected])
     reads = []
     original_get_qpos = robot.get_qpos
 
@@ -1608,10 +1615,14 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
     robot.target_qpos.fill_(0.25)
     assert torch.equal(
         observation.hold_qpos(context.env_ids),
-        robot.target_qpos if hold_qpos_source == "drive_target" else context.robot.qpos,
+        (
+            robot.target_qpos[selected]
+            if hold_qpos_source == "drive_target"
+            else context.robot.qpos
+        ),
     )
     robot.target_qpos[:, 0] = torch.tensor([0.0, 1.0, 2.0])
-    selected_hold = observation.hold_qpos(context.env_ids[[2, 0]])
+    selected_hold = observation.hold_qpos(torch.tensor([2, 0]))
     assert selected_hold[:, 0].tolist() == (
         [2.0, 0.0] if hold_qpos_source == "drive_target" else [0.0, 0.0]
     )
@@ -1651,7 +1662,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
         ),
     )[query.evidence_id]
     assert type(evidence) is BinaryEffectEvidenceBatch
-    assert evidence.valid.tolist() == [False] * _BATCH_SIZE
+    assert evidence.valid.tolist() == [False] * len(selected)
     assert all(error is not None for error in evidence.acquisition_errors)
 
 
@@ -1666,7 +1677,10 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert factory.segment_policy_port is not None
 
 
-def test_simulation_factory_preserves_owned_hand_calibration_across_engines() -> None:
+@pytest.mark.parametrize("env_ids", [None, (2,)])
+def test_simulation_factory_preserves_owned_hand_calibration_across_engines(
+    env_ids,
+) -> None:
     from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
 
     robot = _EvidenceRobot()
@@ -1686,12 +1700,20 @@ def test_simulation_factory_preserves_owned_hand_calibration_across_engines() ->
         pad_max_edge=0.004,
         max_subdivisions=10,
     )
+
+    def generator_factory():
+        generator = _motion_generator(robot)
+        generator._env_ids = env_ids
+        return generator
+
     factory = SimulationTaskProgramFactory.from_environment(
         environment,
         registration=registration,
-        motion_generator_factory=lambda: _motion_generator(robot),
+        motion_generator_factory=generator_factory,
         hand_geometry_cfgs={"hand": cfg},
     )
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
     cfg.pad_link_names = ("changed", "input")
     profile = factory.create_robot_skill_profile()
     engines = [factory.create_atomic_action_engine(profile) for _ in range(2)]
@@ -2296,6 +2318,46 @@ def test_closed_factory_rejects_new_observation_and_assembly_without_native_read
         factory.create_adapter()
 
 
+@pytest.mark.parametrize("accessor", ["root_pose", "drive_target"])
+def test_factory_closed_during_read_cannot_publish_without_optional_scope_guard(
+    monkeypatch, accessor
+):
+    factory, robot = _factory(
+        capture_root_pose=accessor == "root_pose", hold_qpos_source="drive_target"
+    )
+    observation = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=factory.create_atomic_action_engine(
+            factory.create_robot_skill_profile()
+        ),
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    if accessor == "root_pose":
+
+        def get_local_pose(*, to_matrix):
+            assert to_matrix
+            factory.close_runtime_resources()
+            return torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
+
+        monkeypatch.setattr(robot, "get_local_pose", get_local_pose, raising=False)
+        with pytest.raises(RuntimeError, match="closed"):
+            observation.observe(state)
+    else:
+        observation.observe(state)
+        original = robot.get_qpos
+
+        def get_qpos(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if kwargs.get("target") is True:
+                factory.close_runtime_resources()
+            return result
+
+        monkeypatch.setattr(robot, "get_qpos", get_qpos)
+        with pytest.raises(RuntimeError, match="closed"):
+            observation.hold_qpos(torch.arange(_BATCH_SIZE, device=robot.device))
+
+
 def test_support_bridges_reject_overlap_without_rebinding_and_allow_closed_iteration(
     monkeypatch,
 ):
@@ -2691,12 +2753,15 @@ def test_registered_geometry_services_use_standard_engine_and_owned_observation(
 
 
 @pytest.mark.parametrize("accessor", ["observe", "current_qpos", "hold_qpos", "scene"])
+@pytest.mark.parametrize("env_ids", [None, (2, 0)])
 def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_access(
-    monkeypatch, accessor
+    monkeypatch, accessor, env_ids
 ):
     factory, robot = _factory(hold_qpos_source="drive_target")
-    registry = factory.create_scene_registry()
     engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    registry = factory.create_scene_registry()
     epoch = [0]
 
     def guard():
@@ -2709,7 +2774,9 @@ def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_acces
         clock=EnvironmentStepClock(_STEP_DT),
         runtime_scope_guard=guard,
     )
-    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    state = TaskState.empty(
+        _BATCH_SIZE if env_ids is None else len(env_ids), robot.device
+    )
     context = observation.observe(state)
     # A separate factory and provider retain their own valid scope.
     other_factory, other_robot = _factory()
@@ -2731,7 +2798,10 @@ def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_acces
             observation.scene_provider.snapshot(timestamp=0.0, env_ids=context.env_ids)
         else:
             getattr(observation, accessor)(context.env_ids)
-    torch.testing.assert_close(other.observe(state).robot.qpos, other_robot.qpos)
+    torch.testing.assert_close(
+        other.observe(TaskState.empty(_BATCH_SIZE, robot.device)).robot.qpos,
+        other_robot.qpos,
+    )
     factory.close_runtime_resources()
     other_factory.close_runtime_resources()
 
