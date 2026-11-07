@@ -33,6 +33,7 @@ from typing import Any
 __all__ = [
     "ArticulationJointPositionValidatorCfg",
     "BarrierCfg",
+    "ConditionValidatorCfg",
     "CompiledTaskProgram",
     "ConfigPath",
     "ConfigPathPart",
@@ -77,6 +78,7 @@ _EXPORTS = {
         "ArticulationJointPositionValidatorCfg",
     ),
     "BarrierCfg": (".language", "BarrierCfg"),
+    "ConditionValidatorCfg": (".language", "ConditionValidatorCfg"),
     "CompiledTaskProgram": (".compiler", "CompiledTaskProgram"),
     "ConfigPath": (".language", "ConfigPath"),
     "ConfigPathPart": (".language", "ConfigPathPart"),

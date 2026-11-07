@@ -127,6 +127,8 @@ Ownership is explicit rather than a generic deep merge:
 
 - `program.yaml` owns task flow, targets, post-policies, and validators; it
   contains neither robot IDs nor an `integration` selection;
+- optional `evaluation.component` owns named measured segment rules; the
+  program uses `kind: condition` with a `ref` to select one;
 - task-local `integration.yaml` owns required contracts, its nested semantic
   `scene_binding`, semantic defaults, action options, effect monitors, and
   task-specific runtime services;
@@ -296,6 +298,48 @@ so reference rotation does not rotate their offset or per-axis tolerances.
 Select `reference_frame: parent` to measure both in the live reference frame,
 matching a target whose relative pose composes the complete parent transform.
 
+
+## Named evaluation rules
+
+Select the library in the runnable deployment.
+
+```yaml
+evaluation:
+  component: task_program/evaluation.yaml
+```
+
+The selected component declares a nonempty `conditions` mapping.
+
+```yaml
+conditions:
+  near_support:
+    kind: near_target_hold
+    object: payload
+    target: support_surface
+    tolerance: 0.12
+    hold_steps: 2
+    window_steps: 4
+```
+
+The two IDs resolve through the integration's rigid-object bindings to existing
+raw arena poses. Distance uses metres and all three translation axes by
+default. Select optional `axes` and `inclusive` to change which coordinates
+are compared or whether equality passes.
+
+```yaml
+validators:
+  - kind: condition
+    ref: near_support
+```
+
+Each segment occurrence starts its own window at its first consumed control
+step. The window includes post-policy steps within its bound. The bridge
+combines the closed window result with runtime and post-policy results at the
+usual validation boundary. Missing or invalid samples interrupt a hold.
+Validation traces retain witness control steps and acquisition revisions.
+The compiler resolves references against the registered deployment, including
+when a program is supplied as an override. The selected rule and its bindings
+participate in registration identity.
 
 ## Asset role requirements
 

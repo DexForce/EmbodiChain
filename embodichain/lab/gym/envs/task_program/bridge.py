@@ -79,6 +79,9 @@ from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+
     from embodichain.lab.task_program.integrations.invocation_policy import (
         BoundInvocationPolicies,
     )
@@ -1033,6 +1036,7 @@ class _SegmentLifecycle:
     actions_started: bool = False
     sink_acceptance_baseline: int | None = None
     yielded_action_count: int = 0
+    observed_step: int | None = None
     abort_started: bool = False
     abort_complete: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -1663,6 +1667,23 @@ class TaskProgramDemoBridge:
             }
         )
         return ControllerAction(value=value, metadata=metadata)
+
+    def _observe_segment_frame(
+        self, frame: ObservationFrame, *, episode_owner: EpisodeContext
+    ) -> None:
+        """Publish the observation after a yielded command's host control step."""
+        lifecycle = self._last_segment_lifecycle
+        if (
+            lifecycle is None
+            or lifecycle.pending_action is None
+            or lifecycle.abort_started
+        ):
+            return
+        observe = getattr(self._validator_port, "_observe_segment_frame", None)
+        step = self._clock.step_index + 1
+        if observe is not None and lifecycle.observed_step != step:
+            observe(frame, step=step, episode_owner=episode_owner)
+            lifecycle.observed_step = step
 
     def _yield_and_advance(
         self,

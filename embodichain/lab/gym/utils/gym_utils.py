@@ -790,6 +790,7 @@ def config_to_cfg(
         deployment = _load_configured_task_program_deployment(
             task_program=config["task_program"],
             skill_profile=component_resolution.embodiment_skill_profile,
+            evaluation=component_resolution.evaluation,
             base_dir=base_dir,
         )
         _validate_scene_binding_targets(

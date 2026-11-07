@@ -102,6 +102,7 @@ from embodichain.lab.gym.utils.gym_utils import (
 from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
 from embodichain.lab.gym.utils.trajectory_state import (
     trajectory_observation_cfgs,
+    _evaluation_observation_cfgs,
     export_observation_history,
 )
 from embodichain.data_pipeline.recording import build_recording_provenance
@@ -487,6 +488,12 @@ class EmbodiedEnv(BaseEnv):
         self._last_action_trace: ActionTrace | None = None
         self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
 
+        registration = getattr(task_program_adapter_factory, "registration", None)
+        self._evaluation_recording = (
+            _evaluation_observation_cfgs(registration)
+            if getattr(registration, "evaluation_conditions", None)
+            else {}
+        )
         super().__init__(cfg, **kwargs)
 
         try:
@@ -879,15 +886,16 @@ class EmbodiedEnv(BaseEnv):
             if "startup" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="startup")
 
-        if self.cfg.observations or self.cfg.record_trajectory:
+        evaluation_recording = getattr(self, "_evaluation_recording", {})
+        if self.cfg.observations or self.cfg.record_trajectory or evaluation_recording:
+            recording = (
+                trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
+                if self.cfg.record_trajectory
+                else {}
+            )
+            recording.update(evaluation_recording)
             self.observation_manager = ObservationManager(
-                self.cfg.observations,
-                self,
-                recording=(
-                    trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
-                    if self.cfg.record_trajectory
-                    else None
-                ),
+                self.cfg.observations, self, recording=recording
             )
 
         if self.cfg.rewards:
@@ -1161,6 +1169,14 @@ class EmbodiedEnv(BaseEnv):
                 active=kwargs.get("recording_active_mask"),
             )
 
+        frame = kwargs.get("observation_frame")
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        if (
+            getattr(self, "_evaluation_recording", None)
+            and bridge is not None
+            and frame is not None
+        ):
+            bridge._observe_segment_frame(frame, episode_owner=self.episode_context)
         self._update_episode_success_status(info, dones)
 
     def _update_episode_success_status(

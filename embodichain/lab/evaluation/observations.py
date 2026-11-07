@@ -36,6 +36,10 @@ if TYPE_CHECKING:
 __all__ = ["advance_observation", "evaluate_recording"]
 
 
+def _rigid_pose_field(uid: str) -> str:
+    return f"rigid_objects/{uid}/pose"
+
+
 def _check_pose(field: str, descriptor: ObservationDescriptor) -> None:
     if (
         descriptor.quantity != "pose"

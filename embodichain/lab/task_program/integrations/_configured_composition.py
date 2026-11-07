@@ -599,6 +599,7 @@ def _load_configured_task_program_deployment(
     task_program: object,
     skill_profile: object,
     base_dir: str | Path,
+    evaluation: Mapping[str, object] | None = None,
 ) -> _ConfiguredTaskProgramDeployment:
     """Compose Task Program metadata after Gym resolves physical components."""
     selected_base_dir = Path(base_dir).expanduser()
@@ -638,6 +639,7 @@ def _load_configured_task_program_deployment(
     integration = _decode_configured_task_program_integration(
         payload,
         planner_config=planner_config,
+        evaluation=evaluation,
     )
     integration_id = _identifier(
         task["integration_id"],

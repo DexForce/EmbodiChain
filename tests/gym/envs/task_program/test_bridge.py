@@ -2696,3 +2696,204 @@ def test_fresh_bridge_reports_physical_binding_before_runtime_grounding():
     owned = bridge.env_ids
     owned.zero_()
     assert runtime.observation_provider.env_ids.tolist() == [7, 3]
+
+
+def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from embodichain.lab.evaluation import NearTargetHoldSpec
+    from embodichain.lab.evaluation.observations import evaluate_recording
+    from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers import ObservationManager
+    from embodichain.lab.gym.utils.gym_utils import (
+        _init_raw_rollout,
+        _write_raw_rollout,
+    )
+    from embodichain.lab.gym.utils.trajectory_state import _evaluation_observation_cfgs
+    from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        SimulationRigidObjectBinding,
+        SimulationSceneBinding,
+    )
+    from embodichain.lab.task_program.integrations.simulation.policies import (
+        SimulationSegmentPolicyPort,
+    )
+
+    scene = SimulationSceneBinding(
+        registry_id="test_scene",
+        rigid_objects=(
+            SimulationRigidObjectBinding(
+                entity_id="cube", simulation_uid="native_cube"
+            ),
+            SimulationRigidObjectBinding(
+                entity_id="goal", simulation_uid="native_goal"
+            ),
+        ),
+    )
+    spec = NearTargetHoldSpec(
+        "rigid_objects/native_cube/pose",
+        "rigid_objects/native_goal/pose",
+        tolerance=0.5,
+        hold_steps=2,
+        window_steps=2,
+    )
+    conditions = {"near_goal": spec}
+    declaration = {
+        "program_id": "measured_hold",
+        "integration": {
+            "scene_registry": "test_scene",
+            "robot_profile": "test_robot",
+            "runtime_preset": "safe",
+        },
+        "targets": {
+            "drop": {
+                "kind": "cyclic_pose",
+                "values": [
+                    {
+                        "position": [0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+                    }
+                ],
+            }
+        },
+        "program": {
+            "kind": "repeat",
+            "count": 2,
+            "body": {
+                "kind": "segment",
+                "name": "hold",
+                "steps": {
+                    "kind": "invoke",
+                    "call": {
+                        "kind": "place",
+                        "object": "cube",
+                        "at": {"kind": "target_ref", "target": "drop"},
+                    },
+                },
+                "post": [
+                    {"kind": "wait_stable", "entity": "cube", "preset": "rigid_object"}
+                ],
+                "validators": [{"kind": "condition", "ref": "near_goal"}],
+            },
+        },
+    }
+    program = TaskProgramCompiler(
+        scene.declare(), evaluation_conditions=conditions
+    ).compile(decode_task_program(declaration))
+    target = torch.zeros(BATCH_SIZE, 7)
+    target[:, 6] = 1
+    position = target.clone()
+    entities = {
+        "native_cube": SimpleNamespace(get_local_pose=lambda **kwargs: position),
+        "native_goal": SimpleNamespace(get_local_pose=lambda **kwargs: target),
+    }
+    sim = SimpleNamespace(
+        asset_uids=entities, get_asset=entities.get, get_rigid_object=entities.get
+    )
+    qpos = torch.zeros(BATCH_SIZE, ROBOT_DOF)
+    clock = EnvironmentStepClock(STEP_DT)
+    sink = BufferedGymCommandSink(
+        RuntimeCommandFrameEncoder(_QposProvider(qpos)), clock
+    )
+    runtime = _FakeRuntime(sink, clock, _joint_frame(duration=STEP_DT))
+    validator = SimulationSegmentPolicyPort(
+        sim,
+        SimpleNamespace(get_qpos=lambda **kwargs: qpos),
+        scene,
+        env_ids=torch.tensor([7, 3]),
+    )
+    validator.bind_clock(clock)
+    bridge = TaskProgramDemoBridge(
+        program,
+        runtime,
+        sink,
+        clock,
+        validator_port=validator,
+        post_policy_port=_PostPolicyPort(qpos),
+        isolate_policy_sessions=True,
+    )
+    context = EpisodeContext(BATCH_SIZE)
+    context._begin_episode([0, 1])
+    context._finish_initialization([0, 1])
+    recording = _evaluation_observation_cfgs(
+        SimpleNamespace(scene_binding=scene, evaluation_conditions=conditions)
+    )
+    env = SimpleNamespace(
+        sim=sim,
+        num_envs=BATCH_SIZE,
+        device=torch.device("cpu"),
+        episode_context=context,
+        rollout_buffer=None,
+        _evaluation_recording=recording,
+        _active_task_program_bridge=bridge,
+        _profiler=SimpleNamespace(section=lambda name: nullcontext()),
+        _write_trajectory_step=Mock(),
+        _update_episode_success_status=Mock(),
+    )
+    env.observation_manager = ObservationManager({}, env, recording=recording)
+    env.get_obs = lambda: env.observation_manager.compute(
+        TensorDict({}, batch_size=[BATCH_SIZE])
+    )
+    storage = TensorDict({}, batch_size=[BATCH_SIZE])
+    recorded_action = torch.zeros(BATCH_SIZE, 1)
+    _init_raw_rollout(storage, context, {}, torch.zeros(BATCH_SIZE, 4, 1))
+    env.observation_manager.bind_rollout_storage(storage)
+    initial = EmbodiedEnv._capture_observation(env)
+    _write_raw_rollout(
+        storage,
+        context,
+        initial,
+        env_ids=[0, 1],
+        field_ids=tuple(env.observation_manager.field_ids.values()),
+    )
+    env._write_trajectory_step = lambda frame, **kwargs: _write_raw_rollout(
+        storage, context, frame, action=recorded_action
+    )
+    revisions = []
+    reports = []
+    for occurrence, segment in enumerate(bridge.iter_segments()):
+        for action in segment.actions:
+            # The first occurrence needs both the runtime command and its
+            # post-policy hold. The second occurrence loses its own hold.
+            position[:, 0] = torch.tensor(
+                [0.5 if occurrence == 0 or clock.step_index == 2 else 0.7, 0.7]
+            )
+            frame = EmbodiedEnv._capture_observation(env)
+            revisions.append(frame.revision)
+            EmbodiedEnv._hook_after_sim_step(
+                env,
+                frame.policy,
+                action,
+                torch.zeros(BATCH_SIZE),
+                torch.zeros(BATCH_SIZE, dtype=torch.bool),
+                {},
+                observation_frame=frame,
+            )
+            bridge._observe_segment_frame(frame, episode_owner=context)
+        assert segment.validator().tolist() == (
+            [True, False] if occurrence == 0 else [False, False]
+        )
+        assert segment.validator().tolist() == (
+            [True, False] if occurrence == 0 else [False, False]
+        )
+        reports.append(segment.metadata["validation"]["validators"][0]["result"])
+
+    assert bridge.program_completed
+    assert reports[0]["status"] == ["satisfied", "failed"]
+    assert reports[0]["witness_steps"] == [[1, 2], [-1, -1]]
+    assert reports[0]["witness_revisions"] == [revisions[:2], [-1, -1]]
+    assert reports[1]["status"] == ["failed", "not_run"]
+    assert reports[1]["witness_steps"] == [[-1, -1], [-1, -1]]
+    offline = evaluate_recording(
+        spec,
+        env.observation_manager,
+        env_ids=(0, 1),
+        episode_ids=(0, 0),
+        start_step=1,
+        recorded_end_step=2,
+        chunk_steps=1,
+    )
+    assert offline.witness_revisions.tolist() == reports[0]["witness_revisions"]
+    assert offline.witness_steps.tolist() == reports[0]["witness_steps"]

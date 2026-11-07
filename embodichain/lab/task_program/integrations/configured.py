@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from embodichain.lab.evaluation import NearTargetHoldSpec
+from embodichain.lab.evaluation.observations import _rigid_pose_field
+
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, fields
@@ -3227,10 +3230,61 @@ class _ConfiguredTaskProgramAdapterFactory:
         return adapter
 
 
+def _decode_evaluation_conditions(
+    value: Mapping[str, object] | None, scene: SimulationSceneBinding
+) -> dict[str, NearTargetHoldSpec]:
+    if value is None:
+        return {}
+    path = "evaluation.conditions"
+    component = _mapping(value, path="evaluation", required=frozenset({"conditions"}))
+    conditions = component["conditions"]
+    if not isinstance(conditions, Mapping) or not conditions:
+        raise ValueError(f"{path} must be a nonempty mapping.")
+    bindings = {
+        binding.entity_id: binding.simulation_uid for binding in scene.rigid_objects
+    }
+    result = {}
+    for name, declaration in conditions.items():
+        ref = _identifier(name, path=f"{path} key")
+        rule_path = f"{path}.{ref}"
+        rule = _mapping(
+            declaration,
+            path=rule_path,
+            required=frozenset(
+                {"kind", "object", "target", "tolerance", "hold_steps", "window_steps"}
+            ),
+            optional=frozenset({"axes", "inclusive"}),
+        )
+        if rule["kind"] != "near_target_hold":
+            raise ValueError(f"{rule_path}.kind must be 'near_target_hold'.")
+        fields = []
+        for key in ("object", "target"):
+            entity = _identifier(rule[key], path=f"{rule_path}.{key}")
+            uid = bindings.get(entity)
+            if uid is None:
+                raise ValueError(
+                    f"{rule_path}.{key} must name a bound rigid object: {entity!r}."
+                )
+            fields.append(_rigid_pose_field(uid))
+        try:
+            result[ref] = NearTargetHoldSpec(
+                *fields,
+                tolerance=rule["tolerance"],
+                hold_steps=rule["hold_steps"],
+                window_steps=rule["window_steps"],
+                axes=rule.get("axes", (0, 1, 2)),
+                inclusive=rule.get("inclusive", True),
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{rule_path}: {exc}") from exc
+    return result
+
+
 def _decode_configured_task_program_integration(
     value: object,
     *,
     planner_config: Mapping[str, object] | None = None,
+    evaluation: Mapping[str, object] | None = None,
 ) -> _ConfiguredTaskProgramIntegration:
     """Decode one composable, callable-free Task Program integration.
 
@@ -3264,6 +3318,7 @@ def _decode_configured_task_program_integration(
         )
     registration = SimulationTaskProgramRegistration(
         scene_binding=scene_binding,
+        evaluation_conditions=_decode_evaluation_conditions(evaluation, scene_binding),
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,

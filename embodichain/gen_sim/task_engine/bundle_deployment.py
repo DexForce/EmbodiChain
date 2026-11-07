@@ -210,6 +210,7 @@ def _preflight(
     deployment = load_configured_task_program_deployment(
         task_program={key: {"inline": parsed[name]} for key, name in expected.items()},
         skill_profile=physical.embodiment_skill_profile,
+        evaluation=physical.evaluation,
         base_dir=base_dir,
     )
     physical.validate_scene_bindings(deployment.scene_binding)

@@ -41,6 +41,12 @@ from embodichain.compute.trajectory.stability import PositionRangeMonitor
 from ._joint_window import JointWindowRecord
 from embodichain.utils import configclass
 
+from embodichain.lab.evaluation import (
+    EvaluationSession,
+    EvaluationStatus,
+    NearTargetHoldSpec,
+)
+from embodichain.lab.evaluation.observations import advance_observation
 from embodichain.lab.gym.envs.objectives.conditions import evaluate_near_target
 from embodichain.lab.gym.envs.settling import (
     DynamicSettleMonitor,
@@ -51,6 +57,7 @@ from embodichain.lab.gym.envs.settling import (
 
 from embodichain.lab.task_program.compiler import (
     CompiledArticulationJointPositionValidator,
+    CompiledConditionValidator,
     CompiledObjectNearRelativeTargetValidator,
     CompiledObjectNearTargetValidator,
     CompiledObjectStateValidator,
@@ -65,6 +72,8 @@ from .stability import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.sensors.base_sensor import BaseSensor
@@ -304,6 +313,11 @@ class SimulationSegmentPolicyPort:
         self._validator_results: dict[int, dict[str, object]] = {}
         self._validator_active_masks: dict[int, torch.Tensor] = {}
         self._lift_baselines: dict[int, torch.Tensor] = {}
+        self._evaluation_specs: dict[str, NearTargetHoldSpec] = {}
+        self._evaluation_sessions: dict[str, EvaluationSession] = {}
+        self._evaluation_start: int | None = None
+        self._evaluation_active: torch.Tensor | None = None
+        self._evaluation_rows: tuple[int, ...] = ()
         self._lifetime = _PolicyLifetime()
         self._observation_clock: SupportControlClock | None = None
         self._observation_generation = 0
@@ -430,6 +444,11 @@ class SimulationSegmentPolicyPort:
         session._validator_results = {}
         session._validator_active_masks = {}
         session._lift_baselines = {}
+        session._evaluation_specs = {}
+        session._evaluation_sessions = {}
+        session._evaluation_start = None
+        session._evaluation_active = None
+        session._evaluation_rows = ()
         if self._condition_runtime is not None:
             session._condition_runtime = self._condition_runtime.new_session()
         return session
@@ -820,6 +839,24 @@ class SimulationSegmentPolicyPort:
             if active_mask is None
             else self._validate_active_mask(active_mask)
         )
+        self._evaluation_specs = {
+            validator.cfg.ref: validator.spec
+            for validator in segment.validators
+            if type(validator) is CompiledConditionValidator
+        }
+        self._evaluation_sessions.clear()
+        self._evaluation_start = None
+        self._evaluation_active = None
+        self._evaluation_rows = ()
+        if self._evaluation_specs:
+            clock = self.observation_clock
+            if clock is None:
+                raise ValueError("Condition validators require a bound control clock.")
+            self._evaluation_start = clock.step_index + 1
+            self._evaluation_active = active.clone()
+            self._evaluation_rows = tuple(
+                self._row_indices[active].detach().cpu().tolist()
+            )
         for validator in segment.validators:
             self.validate_validator(validator, segment=segment)
             if type(validator) is CompiledObjectStateValidator:
@@ -835,6 +872,71 @@ class SimulationSegmentPolicyPort:
                         require_finite=False,
                     )
 
+    def _observe_segment_frame(
+        self, frame: ObservationFrame, *, step: int, episode_owner: EpisodeContext
+    ) -> None:
+        start = self._evaluation_start
+        if start is None or not self._evaluation_rows:
+            return
+        self._require_open()
+        for ref, spec in self._evaluation_specs.items():
+            if step >= start + spec.window_steps:
+                continue
+            session = self._evaluation_sessions.get(ref)
+            if session is None:
+                rows = self._evaluation_rows
+                session = EvaluationSession(
+                    spec,
+                    env_ids=rows,
+                    episode_ids=tuple(frame.episode_ids[row] for row in rows),
+                    start_step=start,
+                    device=self._env_ids.device,
+                )
+                self._evaluation_sessions[ref] = session
+            advance_observation(session, frame, step=step, episode_owner=episode_owner)
+
+    def _validate_condition(
+        self, validator: CompiledConditionValidator
+    ) -> torch.Tensor:
+        active = self._evaluation_active
+        if active is None or validator.cfg.ref not in self._evaluation_specs:
+            raise RuntimeError(
+                "Condition validation requires the current segment to start."
+            )
+        session = self._evaluation_sessions.get(validator.cfg.ref)
+        status = torch.full_like(self._env_ids, EvaluationStatus.NOT_RUN)
+        status[active] = EvaluationStatus.UNAVAILABLE
+        witness_steps = torch.full(
+            (active.numel(), 2), -1, dtype=torch.long, device=active.device
+        )
+        witness_revisions = torch.full_like(witness_steps, -1)
+        distance = [None] * active.numel()
+        if session is not None:
+            snapshot = session.snapshot(closed=True)
+            status[active] = snapshot.window_status
+            witness_steps[active] = snapshot.witness_steps
+            witness_revisions[active] = snapshot.witness_revisions
+            distance = _json_speed_values(
+                snapshot.distance.new_full(active.shape, float("nan")).masked_scatter_(
+                    active, snapshot.distance
+                )
+            )
+        accepted = status == EvaluationStatus.SATISFIED
+        self._validator_results[id(validator)] = {
+            "kind": validator.cfg.kind,
+            "ref": validator.cfg.ref,
+            "env_ids": self._env_ids.cpu().tolist(),
+            "status": [
+                EvaluationStatus(value).name.lower() for value in status.cpu().tolist()
+            ],
+            "tolerance": validator.spec.tolerance,
+            "distance": distance,
+            "witness_steps": witness_steps.cpu().tolist(),
+            "witness_revisions": witness_revisions.cpu().tolist(),
+            "accepted_mask": accepted.cpu().tolist(),
+        }
+        return accepted
+
     def validate_validator(
         self,
         validator: Any,
@@ -843,6 +945,7 @@ class SimulationSegmentPolicyPort:
     ) -> None:
         """Validate one validator against static bindings without observation."""
         if type(validator) not in (
+            CompiledConditionValidator,
             CompiledObjectNearTargetValidator,
             CompiledObjectNearRelativeTargetValidator,
             CompiledArticulationJointPositionValidator,
@@ -850,6 +953,8 @@ class SimulationSegmentPolicyPort:
         ):
             raise TypeError("validator must be an exact compiled validator.")
         self._validate_segment_membership(segment, validator, kind="validator")
+        if type(validator) is CompiledConditionValidator:
+            return
         if type(validator) is CompiledObjectStateValidator:
             for ref in (validator.object, validator.reference):
                 if ref is not None and ref.entity_id not in self._objects:
@@ -915,6 +1020,8 @@ class SimulationSegmentPolicyPort:
         """
         self._require_open()
         self.validate_validator(validator, segment=segment)
+        if type(validator) is CompiledConditionValidator:
+            return self._validate_condition(validator)
         if type(validator) is CompiledObjectStateValidator:
             return self._validate_object_state(validator)
         if type(validator) is CompiledArticulationJointPositionValidator:
@@ -968,6 +1075,7 @@ class SimulationSegmentPolicyPort:
     ) -> Mapping[str, object]:
         """Return an owned JSON-safe trace for one completed validator."""
         if type(validator) not in (
+            CompiledConditionValidator,
             CompiledObjectNearTargetValidator,
             CompiledObjectNearRelativeTargetValidator,
             CompiledArticulationJointPositionValidator,

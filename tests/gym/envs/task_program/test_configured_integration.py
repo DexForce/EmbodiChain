@@ -3704,3 +3704,172 @@ def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
         _decode_runtime_services(
             {"nominal_motion_sources": [{**source, "asset_sha256": "e" * 64}]}
         )
+
+
+@pytest.fixture
+def evaluation_deployment(tmp_path: Path, registered_test_ids: list[str]):
+    import yaml
+
+    source = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    env_id = "ConfiguredEvaluationConditionTest-v1"
+    config["id"] = env_id
+    registered_test_ids.append(env_id)
+    for owner in ("environment", "embodiment"):
+        selector = config[owner]
+        selector["component"] = str((source.parent / selector["component"]).resolve())
+    for key in ("integration", "execution_policy"):
+        config["task_program"][key] = str(
+            (source.parent / config["task_program"][key]).resolve()
+        )
+    program = load_config(source.parent / config["task_program"]["program"])
+    program["program"]["validators"].append({"kind": "condition", "ref": "delivered"})
+    program_path = tmp_path / "program.yaml"
+    program_path.write_text(yaml.safe_dump(program))
+    config["task_program"]["program"] = program_path.name
+    evaluation = {
+        "conditions": {
+            "delivered": {
+                "kind": "near_target_hold",
+                "object": "can",
+                "target": "support_surface",
+                "tolerance": 0.12,
+                "hold_steps": 2,
+                "window_steps": 4,
+            }
+        }
+    }
+    evaluation_path = tmp_path / "evaluation.yaml"
+    evaluation_path.write_text(yaml.safe_dump(evaluation))
+    config["evaluation"] = {"component": evaluation_path.name}
+    deployment_path = tmp_path / "task.yaml"
+    deployment_path.write_text(yaml.safe_dump(config))
+    return deployment_path, evaluation_path, program_path
+
+
+def test_evaluation_component_binds_named_and_legacy_validators(evaluation_deployment):
+    import runpy
+
+    import yaml
+
+    from embodichain.lab.gym.utils.trajectory_state import _evaluation_observation_cfgs
+    from embodichain.lab.task_program.compiler import (
+        CompiledConditionValidator,
+        CompiledObjectNearTargetValidator,
+    )
+
+    path, rule_path, program_path = evaluation_deployment
+    config = load_config(path)
+    inspect = runpy.run_path(
+        str(
+            _REPOSITORY_ROOT
+            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+        )
+    )["inspect_deployment"]
+    assert inspect(path)["environment_id"] == config["id"]
+    cfg = config_to_cfg(config, source_path=path)
+    registered = REGISTERED_ENVS[config["id"]]
+    registration = registered.task_program_registration
+    compiled = registration.catalog.preflight(cfg.task_program)
+    legacy, named = next(compiled.iter_segments()).validators
+    assert type(legacy) is CompiledObjectNearTargetValidator
+    assert type(named) is CompiledConditionValidator
+    assert named.cfg.ref == "delivered"
+    assert named.spec.required_fields == (
+        "rigid_objects/handover_object/pose",
+        "rigid_objects/support_surface/pose",
+    )
+    assert (named.spec.hold_steps, named.spec.window_steps) == (2, 4)
+    assert tuple(
+        cfg.name for cfg in _evaluation_observation_cfgs(registration).values()
+    ) == (named.spec.required_fields)
+    payload = registration.fingerprint_payload()["evaluation"]
+    assert payload["near_target_hold_revision"] == 1
+
+    sources = {
+        config[owner]["component"]: load_config(
+            path.parent / config[owner]["component"]
+        )
+        for owner in ("environment", "embodiment", "evaluation")
+    }
+    replacement = load_config(program_path)
+    replacement["program"]["validators"][-1]["ref"] = "unregistered"
+    override = path.parent / "override.yaml"
+    override.write_text(yaml.safe_dump(replacement))
+    with pytest.raises(ValueError, match="Unknown deployment evaluation condition"):
+        config_to_cfg(config, source_path=path, task_program_path_override=override)
+
+    # A sealed snapshot can load independently of the selected file's live bytes.
+    rule_path.unlink()
+    config_to_cfg(config, source_path=path, component_sources=sources)
+    assert REGISTERED_ENVS[config["id"]] is registered
+    rule = sources["evaluation.yaml"]["conditions"]["delivered"]
+    rule["tolerance"] = 0.2
+    rule_path.write_text(yaml.safe_dump(sources["evaluation.yaml"]))
+    with pytest.raises(ValueError, match="already registered with a different"):
+        config_to_cfg(config, source_path=path)
+    assert REGISTERED_ENVS[config["id"]] is registered
+
+
+@pytest.mark.parametrize(
+    ("damage", "message"),
+    [
+        ("absent_library", "Unknown deployment evaluation condition"),
+        ("unknown_ref", "Unknown deployment evaluation condition"),
+        ("inline_override", "Unknown field.*tolerance"),
+        ("unbound_target", "must name a bound rigid object"),
+        ("short_window", "Hold steps must be positive and fit"),
+        ("unknown_predicate", "kind must be 'near_target_hold'"),
+    ],
+)
+def test_invalid_evaluation_deployment_fails_before_registration(
+    evaluation_deployment, damage, message
+):
+    import yaml
+
+    path, rule_path, program_path = evaluation_deployment
+    config = load_config(path)
+    evaluation = load_config(rule_path)
+    program = load_config(program_path)
+    validator = program["program"]["validators"][-1]
+    rule = evaluation["conditions"]["delivered"]
+    if damage == "absent_library":
+        config.pop("evaluation")
+    elif damage == "unknown_ref":
+        validator["ref"] = "unregistered"
+    elif damage == "inline_override":
+        validator["tolerance"] = 1.0
+    elif damage == "unbound_target":
+        rule["target"] = "can_antipodal_grasp"
+    elif damage == "short_window":
+        rule["window_steps"] = 1
+    else:
+        rule["kind"] = "unregistered"
+    program_path.write_text(yaml.safe_dump(program))
+    rule_path.write_text(yaml.safe_dump(evaluation))
+    with pytest.raises(ValueError, match=message):
+        config_to_cfg(config, source_path=path)
+    assert config["id"] not in REGISTERED_ENVS
+    assert config["id"] not in gym_registry
+
+
+def test_legacy_task_program_identities_keep_pre_evaluation_values():
+    from embodichain.lab.task_program.integrations import task_program_fingerprint
+
+    deployment = _deployment_from_path(_config_path("hand_over"))
+    integration = deployment.integration
+    registration = integration.registration
+    assert "evaluation" not in registration.fingerprint_payload()
+    assert (
+        registration.fingerprint
+        == "cb43b8a53c1274b2f3241b56e855e2ef97c30530d26e7a8d4e4fab30643ba427"
+    )
+    assert (
+        integration.integration_fingerprint
+        == "1d7405d33ac89638bff05dd33ae5de968a46dff977d8729aa5a328ac4637203a"
+    )
+    compiled = registration.catalog.preflight(deployment.load_program())
+    assert (
+        task_program_fingerprint(compiled)
+        == "6a003a01768251ee76d19a489760437f0f3f0c7ccbee780d1a511def7466c040"
+    )

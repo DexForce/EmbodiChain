@@ -121,6 +121,7 @@ def load_configured_task_program_deployment(
     task_program: Mapping[str, object],
     skill_profile: Mapping[str, object],
     base_dir: str | Path,
+    evaluation: Mapping[str, object] | None = None,
 ) -> ConfiguredTaskProgramDeployment:
     """Compose deployment metadata using the shared strict component decoders.
 
@@ -129,6 +130,7 @@ def load_configured_task_program_deployment(
             from a runnable deployment's ``task_program`` mapping.
         skill_profile: The resolved embodiment component's ``skill_profile`` mapping.
         base_dir: Owning deployment directory for relative component paths.
+        evaluation: Owned rule library selected by the deployment, if any.
 
     Returns:
         A fresh deployment with its validated registration, trusted selection and
@@ -152,4 +154,5 @@ def load_configured_task_program_deployment(
         task_program=task_program,
         skill_profile=skill_profile,
         base_dir=base_dir,
+        evaluation=evaluation,
     )

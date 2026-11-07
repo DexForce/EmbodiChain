@@ -30,6 +30,7 @@ from types import MappingProxyType
 from typing import cast
 import torch
 
+from embodichain.lab.evaluation import NearTargetHoldSpec
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
@@ -90,6 +91,7 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
 )
 
 from embodichain.lab.task_program.language.schema import (
+    ConditionValidatorCfg,
     TaskProgramCfg,
     TaskProgramIntegrationCfg,
     PostPolicyCfg,
@@ -570,7 +572,17 @@ class TaskProgramIntegrationCatalog:
     )
     """Immutable preset-to-entity binding for declared geometric conditions."""
 
+    evaluation_conditions: Mapping[str, NearTargetHoldSpec] = field(
+        default_factory=dict, kw_only=True
+    )
+    """Named deployment rules bound to raw observation fields."""
+
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "evaluation_conditions",
+            _snapshot_evaluation_conditions(self.evaluation_conditions),
+        )
         for field_name in ("scene_registry_id", "robot_profile_id"):
             value = getattr(self, field_name)
             if type(value) is not str or not value or value != value.strip():
@@ -815,7 +827,14 @@ class TaskProgramIntegrationCatalog:
         path: ConfigPath,
     ) -> None:
         """Validate one registered segment-validator kind."""
-        del path
+        if type(validator) is ConditionValidatorCfg:
+            if validator.ref not in self.evaluation_conditions:
+                raise TaskProgramValidationError(
+                    "unknown_evaluation_condition",
+                    (*path, "ref"),
+                    f"Unknown deployment evaluation condition {validator.ref!r}.",
+                )
+            return
         if validator.kind not in _VALIDATOR_KINDS:
             raise KeyError(
                 f"Unknown validator kind {validator.kind!r}; available kinds are "
@@ -825,7 +844,9 @@ class TaskProgramIntegrationCatalog:
     def preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
         """Compile and statically link every expanded semantic call."""
         self.validate_integration(program.integration, path=("integration",))
-        compiled = TaskProgramCompiler(self.scene).compile(program)
+        compiled = TaskProgramCompiler(
+            self.scene, evaluation_conditions=self.evaluation_conditions
+        ).compile(program)
         manifest = SemanticIntegrationManifest(
             scene=self.scene,
             robot_profile=self.robot_profile,
@@ -1067,6 +1088,17 @@ class TaskProgramIntegrationCatalog:
                     )
 
 
+def _snapshot_evaluation_conditions(
+    value: Mapping[str, NearTargetHoldSpec],
+) -> Mapping[str, NearTargetHoldSpec]:
+    snapshot = dict(value)
+    for ref, spec in snapshot.items():
+        _exact_identifier(ref, field_name="evaluation condition ref")
+        if type(spec) is not NearTargetHoldSpec:
+            raise TypeError("Evaluation conditions must be NearTargetHoldSpec values.")
+    return MappingProxyType(snapshot)
+
+
 def _registration_payload(
     *,
     scene_binding: SimulationSceneBinding,
@@ -1089,9 +1121,10 @@ def _registration_payload(
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
+    evaluation_conditions: Mapping[str, NearTargetHoldSpec],
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
-    return {
+    payload = {
         "schema_version": _CATALOG_FINGERPRINT_SCHEMA_VERSION,
         "scene_binding": scene_binding,
         "scene_manifest": scene.entries,
@@ -1199,6 +1232,12 @@ def _registration_payload(
         "settle_presets": settle_presets,
         "validator_kinds": _VALIDATOR_KINDS,
     }
+    if evaluation_conditions:
+        payload["evaluation"] = {
+            "near_target_hold_revision": 1,
+            "conditions": evaluation_conditions,
+        }
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -1225,6 +1264,10 @@ class SimulationTaskProgramRegistration:
     registered_semantic_lowerer_factories: tuple[
         RegisteredSemanticLowererFactory, ...
     ] = ()
+    evaluation_conditions: Mapping[str, NearTargetHoldSpec] = field(
+        default_factory=dict, kw_only=True
+    )
+    """Deployment-owned near-target hold rules, keyed by exact reference."""
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1268,6 +1311,11 @@ class SimulationTaskProgramRegistration:
         if type(self.call_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
         settle_presets = _snapshot_settle_presets(self.settle_presets)
+        object.__setattr__(
+            self,
+            "evaluation_conditions",
+            _snapshot_evaluation_conditions(self.evaluation_conditions),
+        )
         rigid_ids = {binding.entity_id for binding in self.scene_binding.rigid_objects}
         reference_ids = (
             rigid_ids
@@ -1384,6 +1432,7 @@ class SimulationTaskProgramRegistration:
                 robot_profile_binding=self.robot_profile_binding,
                 robot_profile=profile,
                 call_catalog=self.call_catalog,
+                evaluation_conditions=self.evaluation_conditions,
                 settle_presets=settle_presets,
                 relation_grounder_keys=relation_grounder_keys,
                 relation_grounders=relation_grounders,
@@ -1439,6 +1488,7 @@ class SimulationTaskProgramRegistration:
                 ),
                 fingerprint=fingerprint,
                 _required_skills=required_skills,
+                evaluation_conditions=self.evaluation_conditions,
             ),
         )
         object.__setattr__(self, "_parallel_safety_validator_history", [])
@@ -1489,6 +1539,7 @@ class SimulationTaskProgramRegistration:
                 robot_profile_binding=self.robot_profile_binding,
                 robot_profile=profile,
                 call_catalog=self.call_catalog,
+                evaluation_conditions=self.evaluation_conditions,
                 settle_presets=self.settle_presets,
                 relation_grounder_keys=relation_grounder_keys,
                 relation_grounders=relation_grounders,

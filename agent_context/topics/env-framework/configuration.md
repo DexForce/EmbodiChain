@@ -41,6 +41,11 @@ physical environment component. The production loader resolves mesh assets and
 in selected-environment reset, while physical background/collision semantics stay
 with `background` and `rigid_object`. See the [simulation object boundary](../simulation-system/simulation-system.md).
 
+Configured Task Program deployments may select a named rule library with
+`evaluation.component`. Resolve it relative to the runnable deployment or
+from its supplied component snapshot. See
+[named evaluation rules](../task-programs/configuration.md#named-evaluation-rules).
+
 ### Component ownership
 
 | File / component | Owns | Must not own |

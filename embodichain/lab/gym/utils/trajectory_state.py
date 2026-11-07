@@ -29,11 +29,15 @@ from dataclasses import asdict
 import torch
 from tensordict import TensorDictBase
 
+from embodichain.lab.evaluation.observations import _rigid_pose_field
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
     from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.task_program.integrations import (
+        SimulationTaskProgramRegistration,
+    )
 
 __all__ = [
     "capture_trajectory_state",
@@ -200,6 +204,38 @@ def restore_trajectory_state(
             )
 
 
+def _raw_entity_observation_cfg(name: str, uid: str, quantity: str) -> ObservationCfg:
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg, SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.observations import get_entity_state
+
+    return ObservationCfg(
+        func=get_entity_state,
+        mode="add",
+        name=name,
+        params={"entity_cfg": SceneEntityCfg(uid=uid), "quantity": quantity},
+        consumers=("recording",),
+    )
+
+
+def _evaluation_observation_cfgs(
+    registration: SimulationTaskProgramRegistration,
+) -> dict[str, ObservationCfg]:
+    fields = {
+        field
+        for spec in registration.evaluation_conditions.values()
+        for field in spec.required_fields
+    }
+    result = {}
+    for binding in registration.scene_binding.rigid_objects:
+        uid = binding.simulation_uid
+        name = _rigid_pose_field(uid)
+        if name in fields:
+            result[f"recording:{name}"] = _raw_entity_observation_cfg(name, uid, "pose")
+    if {cfg.name for cfg in result.values()} != fields:
+        raise ValueError("Evaluation requires registered rigid-object pose fields.")
+    return result
+
+
 def trajectory_observation_cfgs(
     env: _TrajectoryEnv, uids: list[str] | None = None
 ) -> dict[str, ObservationCfg]:
@@ -213,9 +249,6 @@ def trajectory_observation_cfgs(
         Recording-only add functors. No physical state is acquired here; legacy
         trajectory field paths are export names, not another acquisition path.
     """
-    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg, SceneEntityCfg
-    from embodichain.lab.gym.envs.managers.observations import get_entity_state
-
     result = {}
 
     def add(prefix: str, uid: str, quantities: tuple[str, ...]) -> None:
@@ -226,12 +259,10 @@ def trajectory_observation_cfgs(
                 else quantity
             )
             name = f"{prefix}/{uid}/{field}" if prefix != "robot" else f"robot/{field}"
-            result[f"recording:{name}"] = ObservationCfg(
-                func=get_entity_state,
-                mode="add",
-                name=name,
-                params={"entity_cfg": SceneEntityCfg(uid=uid), "quantity": quantity},
-                consumers=("recording",),
+            if prefix == "rigid_objects" and quantity == "pose":
+                name = _rigid_pose_field(uid)
+            result[f"recording:{name}"] = _raw_entity_observation_cfg(
+                name, uid, quantity
             )
 
     add("robot", env.robot.uid, ("pose", "qpos", "qvel"))

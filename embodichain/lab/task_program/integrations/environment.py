@@ -110,6 +110,7 @@ from embodichain.lab.task_program.language.schema import (
     TaskProgramIntegrationCfg,
 )
 from embodichain.lab.task_program.compiler import (
+    CompiledConditionValidator,
     CompiledTaskProgram,
     TaskProgramCompiler,
 )
@@ -1131,6 +1132,17 @@ class TaskProgramEnvironmentAdapter:
                     "SegmentValidatorPort was installed."
                 )
             for validator in segment.validators:
+                if type(validator) is CompiledConditionValidator:
+                    catalog = self._integration_catalog
+                    if (
+                        catalog is None
+                        or catalog.evaluation_conditions.get(validator.cfg.ref)
+                        != validator.spec
+                    ):
+                        raise TaskProgramBridgeError(
+                            f"Compiled evaluation condition {validator.cfg.ref!r} differs "
+                            "from the registered deployment rule."
+                        )
                 assert self._validator_port is not None
                 self._validator_port.validate_validator(
                     validator,
