@@ -39,9 +39,10 @@ _AXES = {
 
 @pytest.mark.parametrize("case", _SOURCE["cases"])
 def test_signed_envelopes_retain_b0_values_dtype_and_axis_order(case):
-    dtype = getattr(torch, case["dtype"].removeprefix("torch."))
+    inputs = _SOURCE["inputs"][case["input"]]
+    dtype = getattr(torch, inputs["dtype"].removeprefix("torch."))
     values = [
-        torch.tensor(case[key], dtype=dtype)
+        torch.tensor(inputs[key], dtype=dtype)
         for key in (
             "object_vertices",
             "object_pose",
