@@ -128,6 +128,127 @@ class PhaseAnnotation:
         object.__setattr__(self, "allowed_operators", operators)
 
 
+def _validate_recording(self: object) -> None:
+    for name in (
+        "robot_geometry_sha256",
+        "object_geometry_sha256",
+        "target_geometry_sha256",
+    ):
+        value = getattr(self, name, None)
+        if value is not None and (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+        ):
+            raise ValueError(f"{name} must be a lowercase SHA-256 digest or None")
+    for name in (
+        "source_id",
+        "source_revision",
+        "unit_id",
+        "calibration_revision",
+        "annotation_revision",
+    ):
+        _text(getattr(self, name, None), name)
+    if self.origin not in {"measured", "synthetic_reference"}:
+        raise ValueError("unsupported trajectory origin")
+    names, units = tuple(self.joint_names), tuple(self.joint_units)
+    if (
+        not names
+        or len(set(names)) != len(names)
+        or any(not isinstance(x, str) or not x.strip() for x in names)
+    ):
+        raise ValueError("joint_names must be unique nonempty strings")
+    if len(units) != len(names) or any(
+        unit not in {"rad", "deg", "m", "mm"} for unit in units
+    ):
+        raise ValueError("each joint requires an explicit supported unit")
+    object.__setattr__(self, "joint_names", names)
+    object.__setattr__(self, "joint_units", units)
+    qpos = _array(self.qpos, "qpos", 2)
+    times = _array(self.timestamps, "timestamps", 1)
+    if qpos.shape != (len(times), len(names)) or len(times) < 2:
+        raise ValueError("qpos must have shape (N >= 2, len(joint_names))")
+    if self.time_unit not in {"s", "ms"}:
+        raise ValueError("time_unit must be s or ms")
+    if self.pose_length_unit not in {
+        None,
+        "m",
+        "mm",
+    } or self.quaternion_order not in {None, "xyzw", "wxyz"}:
+        raise ValueError("pose units and quaternion order must be explicit")
+    if self.pose_origin not in {None, "measured", "fk_derived", "transformed"}:
+        raise ValueError("unknown pose origin")
+    object.__setattr__(self, "qpos", qpos)
+    object.__setattr__(self, "timestamps", times)
+    if self.initial_observed_qpos is not None:
+        initial = _array(self.initial_observed_qpos, "initial_observed_qpos", 1)
+        if initial.shape != (len(names),):
+            raise ValueError("initial_observed_qpos must match the source joint names")
+        object.__setattr__(self, "initial_observed_qpos", initial)
+    for name in ("qvel", "commands"):
+        value = getattr(self, name, None)
+        if value is not None:
+            array = _array(value, name, 2)
+            if (name == "qvel" and array.shape != qpos.shape) or (
+                name == "commands"
+                and array.shape[0] not in {len(times), len(times) - 1}
+            ):
+                raise ValueError(f"{name} must align with source samples")
+            object.__setattr__(self, name, array)
+
+    if (self.commands is None) != (self.command_representation is None) or (
+        self.commands is None
+    ) != (self.command_alignment is None):
+        raise ValueError(
+            "commands, their representation and alignment must be declared together"
+        )
+    if self.command_representation is not None:
+        _text(self.command_representation, "command representation")
+        if self.command_alignment not in {
+            "between_states",
+            "post_step",
+            "sample_aligned_reference",
+        }:
+            raise ValueError("unknown command alignment")
+        expected = (
+            len(times) - 1 if self.command_alignment == "between_states" else len(times)
+        )
+        if self.commands.shape[0] != expected:
+            raise ValueError("command count does not match its declared alignment")
+        if (
+            self.command_alignment == "sample_aligned_reference"
+            and self.origin != "synthetic_reference"
+        ):
+            raise ValueError(
+                "sample-aligned commands are only supported for synthetic references"
+            )
+    if self.eef_poses is not None:
+        if self.pose_origin is None:
+            raise ValueError("EEF data requires an explicit pose origin")
+        if self.pose_length_unit is None or self.quaternion_order is None:
+            raise ValueError(
+                "EEF data requires explicit pose units and quaternion order"
+            )
+        poses = _array(self.eef_poses, "eef_poses", 2)
+        if poses.shape != (len(times), 7):
+            raise ValueError("eef_poses must have shape (N, 7)")
+        if self.world_from_pose_frame is None or self.observed_link_to_tcp is None:
+            raise ValueError("EEF data requires both explicit frame transforms")
+        object.__setattr__(self, "eef_poses", poses)
+    for name in (
+        "world_from_pose_frame",
+        "observed_link_to_tcp",
+        "object_pose",
+        "target_pose",
+    ):
+        value = getattr(self, name, None)
+        if value is not None:
+            array = _array(value, name, 2)
+            if array.shape != (4, 4):
+                raise ValueError(f"{name} must have shape (4, 4)")
+            object.__setattr__(self, name, array)
+
+
 @dataclass(frozen=True)
 class Real2SimTrajectory:
     """One explicitly annotated source unit before conversion.
@@ -176,140 +297,19 @@ class Real2SimTrajectory:
     target_geometry_sha256: str | None = None
 
     def __post_init__(self) -> None:
-        for name in (
-            "robot_geometry_sha256",
-            "object_geometry_sha256",
-            "target_geometry_sha256",
-        ):
-            value = getattr(self, name)
-            if value is not None and (
-                not isinstance(value, str)
-                or len(value) != 64
-                or any(char not in "0123456789abcdef" for char in value)
-            ):
-                raise ValueError(f"{name} must be a lowercase SHA-256 digest or None")
-        for name in (
-            "source_id",
-            "source_revision",
-            "unit_id",
-            "calibration_revision",
-            "annotation_revision",
-        ):
-            _text(getattr(self, name), name)
+        _validate_recording(self)
         if self.skill_id not in {"pick_up", "move_held_object", "place"}:
             raise ValueError("unsupported skill_id")
-        if self.origin not in {"measured", "synthetic_reference"}:
-            raise ValueError("unsupported trajectory origin")
-        names, units = tuple(self.joint_names), tuple(self.joint_units)
-        if (
-            not names
-            or len(set(names)) != len(names)
-            or any(not isinstance(x, str) or not x.strip() for x in names)
-        ):
-            raise ValueError("joint_names must be unique nonempty strings")
-        if len(units) != len(names) or any(
-            unit not in {"rad", "deg", "m", "mm"} for unit in units
-        ):
-            raise ValueError("each joint requires an explicit supported unit")
-        object.__setattr__(self, "joint_names", names)
-        object.__setattr__(self, "joint_units", units)
-        qpos = _array(self.qpos, "qpos", 2)
-        times = _array(self.timestamps, "timestamps", 1)
-        if qpos.shape != (len(times), len(names)) or len(times) < 2:
-            raise ValueError("qpos must have shape (N >= 2, len(joint_names))")
-        if self.time_unit not in {"s", "ms"}:
-            raise ValueError("time_unit must be s or ms")
-        if self.pose_length_unit not in {
-            None,
-            "m",
-            "mm",
-        } or self.quaternion_order not in {None, "xyzw", "wxyz"}:
-            raise ValueError("pose units and quaternion order must be explicit")
-        if self.pose_origin not in {None, "measured", "fk_derived", "transformed"}:
-            raise ValueError("unknown pose origin")
-        object.__setattr__(self, "qpos", qpos)
-        object.__setattr__(self, "timestamps", times)
-        if self.initial_observed_qpos is not None:
-            initial = _array(self.initial_observed_qpos, "initial_observed_qpos", 1)
-            if initial.shape != (len(names),):
-                raise ValueError(
-                    "initial_observed_qpos must match the source joint names"
-                )
-            object.__setattr__(self, "initial_observed_qpos", initial)
         phases = tuple(self.phases)
         if not phases or any(not isinstance(p, PhaseAnnotation) for p in phases):
             raise ValueError("at least one typed phase is required")
         if len({p.name for p in phases}) != len(phases):
             raise ValueError("phase names must be unique within a unit")
-        if phases[0].start != 0 or phases[-1].stop != len(times):
+        if phases[0].start != 0 or phases[-1].stop != len(self.timestamps):
             raise ValueError("phases must cover the complete source unit")
         if any(left.stop != right.start for left, right in zip(phases, phases[1:])):
             raise ValueError("phase ranges must be contiguous and non-overlapping")
         object.__setattr__(self, "phases", phases)
-        for name in ("qvel", "commands"):
-            value = getattr(self, name)
-            if value is not None:
-                array = _array(value, name, 2)
-                if (name == "qvel" and array.shape != qpos.shape) or (
-                    name == "commands"
-                    and array.shape[0] not in {len(times), len(times) - 1}
-                ):
-                    raise ValueError(f"{name} must align with source samples")
-                object.__setattr__(self, name, array)
-
-        if (self.commands is None) != (self.command_representation is None) or (
-            self.commands is None
-        ) != (self.command_alignment is None):
-            raise ValueError(
-                "commands, their representation and alignment must be declared together"
-            )
-        if self.command_representation is not None:
-            _text(self.command_representation, "command representation")
-            if self.command_alignment not in {
-                "between_states",
-                "post_step",
-                "sample_aligned_reference",
-            }:
-                raise ValueError("unknown command alignment")
-            expected = (
-                len(times) - 1
-                if self.command_alignment == "between_states"
-                else len(times)
-            )
-            if self.commands.shape[0] != expected:
-                raise ValueError("command count does not match its declared alignment")
-            if (
-                self.command_alignment == "sample_aligned_reference"
-                and self.origin != "synthetic_reference"
-            ):
-                raise ValueError(
-                    "sample-aligned commands are only supported for synthetic references"
-                )
-        if self.eef_poses is not None:
-            if self.pose_origin is None:
-                raise ValueError("EEF data requires an explicit pose origin")
-            if self.pose_length_unit is None or self.quaternion_order is None:
-                raise ValueError(
-                    "EEF data requires explicit pose units and quaternion order"
-                )
-            poses = _array(self.eef_poses, "eef_poses", 2)
-            if poses.shape != (len(times), 7):
-                raise ValueError("eef_poses must have shape (N, 7)")
-            if self.world_from_pose_frame is None or self.observed_link_to_tcp is None:
-                raise ValueError("EEF data requires both explicit frame transforms")
-            object.__setattr__(self, "eef_poses", poses)
-        for name in (
-            "world_from_pose_frame",
-            "observed_link_to_tcp",
-            "object_pose",
-            "target_pose",
-        ):
-            value = getattr(self, name)
-            if value is not None:
-                array = _array(value, name, 2)
-                if array.shape != (4, 4):
-                    raise ValueError(f"{name} must have shape (4, 4)")
-                object.__setattr__(self, name, array)
 
     @property
     def qpos_semantics(self) -> Literal["measured_state", "design_reference"]:
@@ -431,7 +431,7 @@ class NormalizedReal2SimUnit:
         if (
             not phases
             or phases[0].start != 0
-            or phases[-1].stop != len(times)
+            or phases[-1].stop != len(self.timestamps)
             or any(a.stop != b.start for a, b in zip(phases, phases[1:]))
         ):
             raise ValueError("normalized phases must cover all samples")

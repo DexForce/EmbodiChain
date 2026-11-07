@@ -957,6 +957,9 @@ def _decode_command_preset(
 
 def _decode_action_options(value: object, *, path: str) -> ActionOptions:
     """Decode one allowlisted atomic-action option template."""
+    if isinstance(value, Mapping) and value.get("kind") == "execute_demo_skill":
+        _mapping(value, path=path, required=frozenset({"kind"}))
+        return ActionOptions()
     common = _mapping(
         value,
         path=path,
@@ -2439,6 +2442,10 @@ def _decode_registered_lowerer(
     | _RelativePlaceLowererFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "demo_skill":
+        from .demo_skill import _decode_demo_skill_lowerer
+
+        return _decode_demo_skill_lowerer(value)
     common = _mapping(
         value,
         path=path,
@@ -3050,6 +3057,39 @@ def _decode_runtime_services(
         )
     ):
         item_path = f"{path}.nominal_motion_sources[{index}]"
+        if isinstance(value, Mapping) and value.get("provider_id") == "demo_skill":
+            from .demo_skill import _ConfiguredDemoSkillSource
+
+            item = _mapping(
+                value,
+                path=item_path,
+                required=frozenset(
+                    {
+                        "call_index",
+                        "program_fingerprint",
+                        "provider_id",
+                        "revision",
+                        "asset_manifest",
+                        "asset_sha256",
+                        "call_id",
+                    }
+                ),
+                optional=frozenset({"contact_sensor_uid", "tcp_contact_links"}),
+            )
+            if item["revision"] != "1":
+                raise ValueError("unsupported DemoSkill provider revision")
+            declaration = _ConfiguredDemoSkillSource(
+                call_index=item["call_index"],
+                program_fingerprint=item["program_fingerprint"],
+                asset_manifest=item["asset_manifest"],
+                asset_sha256=item["asset_sha256"],
+                call_id=item["call_id"],
+                contact_sensor_uid=item.get("contact_sensor_uid"),
+                tcp_contact_links=tuple(item.get("tcp_contact_links", ())),
+            )
+            declaration.validate_source()
+            nominal.append(declaration)
+            continue
         item = _mapping(
             value,
             path=item_path,
@@ -3264,7 +3304,7 @@ def _decode_configured_task_program_integration(
             {
                 key: value
                 for key, value in asdict(item).items()
-                if key != "prototype_manifest"
+                if key not in {"prototype_manifest", "asset_manifest"}
             }
             for item in services.nominal_motion_sources
         ]
