@@ -1353,6 +1353,8 @@ class SimulationManager:
         *,
         fps: float | None = None,
         root_poses: torch.Tensor | np.ndarray | None = None,
+        joint_names: Sequence[str] | None = None,
+        initialize_pose: bool = False,
     ) -> None:
         """Register a Newton kinematic joint trajectory for every arena.
 
@@ -1375,6 +1377,8 @@ class SimulationManager:
                 once per EmbodiChain physics frame.
             root_poses: Optional batched world-space root transforms with shape
                 ``(num_envs, frames, 4, 4)``.
+            joint_names: Optional authored joint order for the command columns.
+            initialize_pose: Seed the articulation and its model from the first sample.
 
         Raises:
             RuntimeError: If the active backend is not Newton, the Spawn scene
@@ -1448,6 +1452,8 @@ class SimulationManager:
                 positions[env_index],
                 fps=fps,
                 root_poses=None if poses is None else poses[env_index],
+                **({"joint_names": joint_names} if joint_names is not None else {}),
+                **({"initialize_pose": True} if initialize_pose else {}),
             )
             for env_index, arena_name in enumerate(arena_names)
         )

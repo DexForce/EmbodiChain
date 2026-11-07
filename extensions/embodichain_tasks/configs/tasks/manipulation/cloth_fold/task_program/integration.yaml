@@ -1,0 +1,24 @@
+integration_id: cloth_single_fold_w1_v1
+program_id: cloth_single_fold
+requires:
+  scene_contract: cloth_fold_table_v1
+  embodiment_contract: dual_arm_parallel_gripper
+scene_binding:
+  contract_id: cloth_fold_table_v1
+  registry_id: cloth_fold_table
+profile:
+  action_options:
+    simulation.kinematic_joint_replay: {kind: move_joints}
+  defaults: {}
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: kinematic_joint_replay
+      trajectory: ./trajectory.npz
+      sha256: 51f01325407ecc256c374d4d8c82a43222b90b10e69e7984daa620f1a346ab24
+      fps: 60
+      phases:
+        grasp: [0, 240]
+        lift_and_fold: [240, 660]
+        lay: [660, 750]
+        release: [750, 990]

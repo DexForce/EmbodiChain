@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import ClassVar
 from unittest.mock import Mock
 
+import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
@@ -39,6 +40,7 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionGoal,
     JointPositionPayload,
     JointPositionTarget,
+    MotionPolicy,
     MoveJoints,
     PlanningContext,
     RobotObservation,
@@ -52,6 +54,7 @@ from embodichain.lab.sim.atomic_actions import (
     SkillResourceSlot,
     TaskState,
     TimedCommandSequence,
+    TimedTrajectory,
     TrackingPolicy,
 )
 from embodichain.lab.sim.atomic_actions.invocation import ResolvedActionRequest
@@ -213,6 +216,48 @@ class _JointTransport:
         """Acknowledge synchronous cancellation."""
         del targets, timeout
         return CommandAcknowledgement.accepted_ack()
+
+
+def test_timed_whole_body_replay_uses_each_authored_sample_without_planning() -> None:
+    robot = _Robot()
+    engine = _engine(robot)
+    engine.register(MoveJoints())
+    context = _Provider(robot, _Clock()).observe(
+        TaskState.empty(batch_size=2, device="cpu")
+    )
+    positions = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) * 0.01
+    trajectory = TimedTrajectory(
+        positions=positions,
+        velocities=None,
+        accelerations=None,
+        dt=torch.full((2, 3), context.require_control_dt()),
+        env_ids=context.env_ids,
+    )
+    invocation = ActionInvocation(
+        skill_id="move_joints",
+        goal=JointPositionGoal(trajectory),
+        motion_policy=MotionPolicy(dynamic_collision_mode="off"),
+        binding=engine.bind_control_parts(
+            "move_joints", {"primary": {"motion": "whole_body"}}
+        ),
+    )
+
+    plan = engine.plan(invocation, context)
+
+    with pytest.raises(ValueError, match="one control step"):
+        zero_dt = replace(
+            trajectory, dt=torch.zeros_like(trajectory.dt, dtype=torch.long)
+        )
+        engine.plan(replace(invocation, goal=JointPositionGoal(zero_dt)), context)
+    with pytest.raises(ValueError, match="collision planning to be off"):
+        engine.plan(replace(invocation, motion_policy=MotionPolicy()), context)
+    engine.motion_generator.generate.assert_not_called()
+    assert plan.joint_trajectory is not None
+    torch.testing.assert_close(plan.joint_trajectory.positions, positions)
+    assert len(plan.commands.frames) == 3
+    for sample, command in zip(positions.unbind(dim=1), plan.commands.frames):
+        torch.testing.assert_close(command.commands[0].payload.positions, sample)
+        torch.testing.assert_close(command.hold_duration, trajectory.dt[:, 0])
 
 
 def test_whole_body_joint_endpoint_executes_without_arm_or_tool_roles() -> None:

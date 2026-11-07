@@ -60,6 +60,11 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
+from embodichain.lab.gym.envs._final_acceptance import _FinalAcceptance
+from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay, _ReplaySurface
+from embodichain.lab.task_program.integrations._kinematic_replay import (
+    _KinematicReplayFactory,
+)
 from embodichain.lab.gym.envs._startup_summary import format_functor_summary
 from embodichain.lab.gym.envs.objectives import (
     MeasuredRigidObjectState,
@@ -369,6 +374,15 @@ class EmbodiedEnvCfg(EnvCfg):
     hooks. No live provider, planner, or callable is stored in this config.
     """
 
+    final_acceptance: _FinalAcceptance | None = None
+    """Optional live acceptance decoded from the deployment component."""
+
+    kinematic_replay: _KinematicReplayFactory | None = None
+    """Internal native replay declaration shared with the Task Program adapter."""
+
+    replay_surface: _ReplaySurface | None = None
+    """Surface asset used by a configured native replay."""
+
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
@@ -431,6 +445,16 @@ class EmbodiedEnv(BaseEnv):
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         **kwargs,
     ):
+        final_acceptance = getattr(cfg, "final_acceptance", None)
+        if final_acceptance is not None and (
+            type(final_acceptance) is not _FinalAcceptance
+            or getattr(cfg, "task_program", None) is None
+            or getattr(cfg, "rl_task", None) is not None
+        ):
+            raise ValueError("Final acceptance requires a configured Task Program.")
+        replay = getattr(cfg, "kinematic_replay", None)
+        if replay is not None:
+            cfg = copy.deepcopy(cfg)
         rl_task = getattr(cfg, "rl_task", None)
         if rl_task is not None:
             if not isinstance(rl_task, RLTaskCfg):
@@ -466,11 +490,20 @@ class EmbodiedEnv(BaseEnv):
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
 
         extensions = getattr(cfg, "extensions", {}) or {}
+        if final_acceptance is not None and any(
+            name.startswith("_") or hasattr(cfg, name) or hasattr(self, name)
+            for name in extensions
+        ):
+            raise ValueError(
+                "Extensions cannot override configured acceptance or environment fields."
+            )
 
         for name, value in extensions.items():
             setattr(cfg, name, value)
             setattr(self, name, value)
 
+        self._final_acceptance = final_acceptance
+        self._physical_replay = None if replay is None else _PhysicalReplay(cfg, replay)
         self.event_manager: EventManager | None = None
         self.observation_manager: ObservationManager | None = None
         self.reward_manager: RewardManager | None = None
@@ -495,6 +528,8 @@ class EmbodiedEnv(BaseEnv):
                     "policy_request rollout recording requires an ActionManager."
                 )
             self._initialize_physical_objective()
+            if self._final_acceptance is not None:
+                self._final_acceptance.measure(self.sim)
             self.expert_action_spec = build_expert_action_spec(
                 joint_names=[
                     self.robot.joint_names[joint_id]
@@ -870,6 +905,9 @@ class EmbodiedEnv(BaseEnv):
         if not self.sim.has_native_renderer:
             self._filter_native_visual_functors()
 
+        if self._physical_replay is not None:
+            self._physical_replay.bind(self)
+
         # create event manager
         self.cfg: EmbodiedEnvCfg
         if self.cfg.events:
@@ -1214,6 +1252,8 @@ class EmbodiedEnv(BaseEnv):
         self._setup_background()
         self._setup_interactive_objects()
         self._setup_lights()
+        if self._physical_replay is not None:
+            self._physical_replay.prepare_scene(self)
 
     def _update_sim_state(self, **kwargs) -> None:
         """Perform the simulation step and apply events if configured.
@@ -1525,6 +1565,9 @@ class EmbodiedEnv(BaseEnv):
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            replay.reset(self, env_ids_to_process)
         episode_metadata = getattr(self, "_demo_episode_metadata", None)
         if episode_metadata is not None:
             for env_id in env_ids_to_process.cpu().tolist():
@@ -2551,6 +2594,9 @@ class EmbodiedEnv(BaseEnv):
             The raw policy tensor or applied controller value.
         """
 
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            return replay.consume(self, action)
         if isinstance(action, ControllerAction):
             if getattr(self, "_step_uses_action_manager", False):
                 self.action_manager.apply_action()
@@ -2566,6 +2612,9 @@ class EmbodiedEnv(BaseEnv):
 
     def _advance_physics(self) -> None:
         """Connect manager callbacks to physics and sensor sampling."""
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.hold:
+            return
         manager = getattr(self, "action_manager", None)
         if not getattr(self, "_step_uses_action_manager", False) or manager is None:
             return super()._advance_physics()
@@ -3376,7 +3425,14 @@ class EmbodiedEnv(BaseEnv):
                 "Task Program completion mask must be bool with one value per "
                 "environment."
             )
-        return completion.to(device=self.device)
+        completion = completion.to(device=self.device)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.frame(self) != replay.factory.steps:
+            return torch.zeros_like(completion)
+        acceptance = getattr(self, "_final_acceptance", None)
+        if acceptance is not None:
+            completion = completion & acceptance.measure(self.sim)
+        return completion
 
     def create_demo_segments(
         self,

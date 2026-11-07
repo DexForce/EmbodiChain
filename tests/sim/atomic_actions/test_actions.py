@@ -1030,7 +1030,7 @@ def test_pose_options_own_late_bound_relative_transforms() -> None:
 
 
 def test_joint_position_goal_rejects_unsupported_target_type() -> None:
-    with pytest.raises(TypeError, match="torch.Tensor or str"):
+    with pytest.raises(TypeError, match="torch.Tensor, str or TimedTrajectory"):
         JointPositionGoal(target=1.0)  # type: ignore[arg-type]
 
 

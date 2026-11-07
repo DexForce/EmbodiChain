@@ -53,7 +53,15 @@ with `background` and `rigid_object`. See the [simulation object boundary](../si
 | `configs/components/execution_policies/*.yaml` | Reusable execution policy | Physical environment/embodiment ownership |
 | `<task>/agents/<algorithm>.{json,yaml}` | Optional RL training configuration | Task identity or Python registration ownership |
 | `<task>/catalog.yaml` | Logical task key, presentation metadata and named deployment references | Gym registration or duplicated runtime settings |
+| Optional `acceptance.component` | Current physical acceptance combined with Task Program completion | Scene setup, actions, or arbitrary callbacks |
 | Optional `objective.component` | Independent physical evaluation declaration | Program completion, segment acceptance or persistence authority |
+
+A configured Task Program may declare `acceptance: {component: ...}` in its
+deployment. The closed component records the measurement type, physical entity,
+and tolerance. `particle_centroid_xy` compares live XY centroids for every
+declared pair on one deformable surface. All pairs must pass together after
+program completion. The normalized acceptance declaration is bound to the Gym
+ID and checked again when constructing that environment.
 
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.

@@ -175,6 +175,12 @@ The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in
 `integrations/_configured_services.py` select exact Atomic Skill descriptors;
 the closed decoder in `configured.py` owns accepted options and route fields.
+
+The configured `kinematic_joint_replay` lowerer binds named phases to
+contiguous ranges of a digest-pinned, fixed-rate full-joint command stream.
+The Newton kinematic control interpolates inside each physics step. The
+environment checks each timed `MoveJoints` command against the corresponding
+sample, and its separate acceptance component measures the live task outcome.
 Relative Place resolves a live reference plus world-axis displacement and
 requires the verified held-object transform. Coordinated transport must select
 the real primitive's release mode. Do not install frontend skill replacements.

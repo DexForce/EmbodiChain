@@ -224,6 +224,7 @@ def main():
                 "_graph_assets/*",
             ],
             "embodichain_tasks.configs": [
+                "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
                 "**/*.json",
                 "**/*.yaml",
                 "**/*.yml",

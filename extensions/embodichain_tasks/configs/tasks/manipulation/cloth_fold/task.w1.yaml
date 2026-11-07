@@ -1,0 +1,13 @@
+id: TaskProgramClothFold-W1-v1
+environment:
+  component: env.yaml
+acceptance:
+  component: task_program/acceptance.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy: ../../../components/execution_policies/trajectory_open_loop_dual_arm_manipulation.yaml
+embodiment:
+  component: ../../../components/embodiments/dexforce_w1_030_cloth_fold.yaml
+enable_sensor: false
+headless: true

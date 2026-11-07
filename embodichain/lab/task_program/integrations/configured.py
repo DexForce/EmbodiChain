@@ -27,6 +27,7 @@ import json
 import math
 from typing import TYPE_CHECKING, TypeVar
 
+from ._kinematic_replay import _KinematicReplayFactory, _decode_kinematic_replay
 from ._configured_services import (
     _AntipodalGraspPoseGeneratorFactory,
     _ArticulationLinkSlideLowererFactory,
@@ -2440,8 +2441,11 @@ def _decode_registered_lowerer(
     | _PourLowererFactory
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
+    | _KinematicReplayFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "kinematic_joint_replay":
+        return _decode_kinematic_replay(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") == "demo_skill":
         from .demo_skill import _decode_demo_skill_lowerer
 
@@ -2853,7 +2857,8 @@ class _DecodedRuntimeServices:
         | RoutedMoveHeldObjectLowererFactory
         | _PourLowererFactory
         | _PushObjectLowererFactory
-        | _RelativePlaceLowererFactory,
+        | _RelativePlaceLowererFactory
+        | _KinematicReplayFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None

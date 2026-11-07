@@ -47,6 +47,12 @@ implementation `_plan(request, context)` hook.
 - `ExecutionRunner` drives that session against observation, command, and clock
   ports without blocking `step()`.
 
+For a prequalified replay, `MoveJoints` accepts a typed full-robot
+`TimedTrajectory`. Each command occupies one environment control step.
+The motion binding covers all joints, and the selected rows match the planning
+context. This preserves authored samples and disables replanning. The caller
+qualifies the authored path.
+
 ## PlanningContext invariants
 
 `PlanningContext` carries robot observation, scene snapshot, symbolic

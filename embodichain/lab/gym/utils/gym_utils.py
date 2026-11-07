@@ -32,6 +32,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Callable, Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
+from dataclasses import replace
 from tensordict import TensorDict, TensorDictBase
 
 from embodichain.lab.sim.types import Device, Array
@@ -801,8 +802,49 @@ def config_to_cfg(
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
         configured_task_program_path = deployment.program_path
+        if "acceptance" in config:
+            from embodichain.lab.gym.envs._final_acceptance import (
+                _load_final_acceptance,
+            )
+
+            env_cfg.final_acceptance = _load_final_acceptance(
+                config["acceptance"],
+                base_dir=base_dir,
+                component_sources=component_sources,
+            )
+
+        from embodichain.lab.task_program.integrations._kinematic_replay import (
+            _KinematicReplayFactory,
+        )
+
+        replays = tuple(
+            factory
+            for factory in deployment.integration.registration.registered_semantic_lowerer_factories
+            if isinstance(factory, _KinematicReplayFactory)
+        )
+        if replays:
+            from embodichain.lab.gym.envs._physical_replay import _load_replay_surface
+
+            if (
+                len(replays) != 1
+                or "replay_surface" not in config
+                or env_cfg.final_acceptance is None
+            ):
+                raise ValueError(
+                    "Native replay requires one surface and measured acceptance."
+                )
+            env_cfg.kinematic_replay = replays[0]
+            env_cfg.replay_surface = _load_replay_surface(config["replay_surface"])
+            env_cfg.final_acceptance = replace(
+                env_cfg.final_acceptance, mesh_sha256=env_cfg.replay_surface.mesh_sha256
+            )
+    elif "acceptance" in config:
+        raise ValueError("acceptance requires a configured Task Program deployment.")
     elif "robot" not in config:
         log_error("Missing required config key: robot")
+
+    if "replay_surface" in config and env_cfg.kinematic_replay is None:
+        raise ValueError("replay_surface requires configured kinematic joint replay.")
 
     if (
         task_program_path_override is not None
@@ -1253,6 +1295,7 @@ def config_to_cfg(
             config["id"],
             configured_task_program_integration,
             max_episode_steps=env_cfg.max_episode_steps,
+            final_acceptance=env_cfg.final_acceptance,
         )
 
     return env_cfg

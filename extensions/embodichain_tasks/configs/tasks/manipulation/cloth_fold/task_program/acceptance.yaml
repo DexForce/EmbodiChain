@@ -1,0 +1,6 @@
+kind: particle_centroid_xy
+deformable_uid: cloth
+max_distance_m: 0.015
+pairs:
+  - [[47, 48, 96, 97], [1958, 1959, 2007, 2008]]
+  - [[0, 1, 49, 50], [1911, 1912, 1960, 1961]]
