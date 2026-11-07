@@ -82,8 +82,15 @@ integration consume these contracts in their own layer.
 Already-authored deployment declarations can be sealed through
 `bundle_deployment.prepare_configured_bundle`, atomically published through
 `bundle_io.write_bundle_atomic`, then loaded with
-`bundle_deployment.load_configured_bundle`. Input hashes and implementation
-revisions are explicit caller-owned contracts. `bundle_identity` binds the file
+`bundle_deployment.load_configured_bundle`. Preparation applies the shared
+[explicit local resource rule](../env-framework/configuration.md#explicit-local-resource-paths)
+to detached physical deployment, scene and embodiment declarations before
+preflight. Their resolved bytes enter the snapshot identity without changing
+the caller's source bytes or historical bundles. Resources stay at their
+declared external locations; publication does not copy assets or discover
+dependencies, and absolute references do not provide cross-machine packaging.
+Input hashes and implementation revisions remain explicit caller-owned
+contracts. `bundle_identity` binds the file
 inventory and semantic identities; `bundle_inputs` validates provenance groups.
 These APIs create no simulation, Robot, skill or planner. Shared Task Program
 composition accepts owned inline components, and the Gym parser consumes the

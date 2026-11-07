@@ -28,6 +28,7 @@ from typing import Any, TYPE_CHECKING
 import yaml
 
 from embodichain.gen_sim.task_spec import TaskSpec, canonical_hash
+from embodichain.utils.config_paths import resolve_local_resource_paths
 from .bundle_identity import _REQUIRED_FILES, create_bundle_identity
 from .bundle_spec import bundle_task_spec_payload, decode_bundle_task_spec
 from .bundle_inputs import (
@@ -141,16 +142,8 @@ class LoadedTaskProgramBundle:
         return config["id"], cfg
 
 
-def _preflight(
-    files: Mapping[str, bytes],
-    base_dir: Path,
-) -> tuple[
-    ResolvedGymComponents,
-    ConfiguredTaskProgramDeployment,
-    CompiledTaskProgram,
-    TaskSpec | None,
-]:
-    # This validates source declarations, not an old bundle conversion format.
+def _validate_source_files(files: Mapping[str, bytes]) -> None:
+    """Reject unsupported source layouts before resolving resource paths."""
     if "integration_fingerprint.json" in files:
         raise ValueError(
             "Prepare from source declarations, not an existing runtime envelope."
@@ -167,6 +160,19 @@ def _preflight(
         raise TypeError(
             "Bundle source declarations require string paths and exact bytes."
         )
+
+
+def _preflight(
+    files: Mapping[str, bytes],
+    base_dir: Path,
+) -> tuple[
+    ResolvedGymComponents,
+    ConfiguredTaskProgramDeployment,
+    CompiledTaskProgram,
+    TaskSpec | None,
+]:
+    # This validates source declarations, not an old bundle conversion format.
+    _validate_source_files(files)
     parsed = {name: _decode(files[name], name) for name in _REQUIRED_FILES}
     declaration = parsed["task_program_deployment.yaml"]
     selectors = declaration.get("task_program")
@@ -265,6 +271,32 @@ def _verify_identity(
             )
 
 
+def _materialize_physical_resources(files: dict[str, bytes], *, base_dir: Path) -> None:
+    """Bind physical resource paths to their original declaration owners."""
+    for name in (
+        "task_program_deployment.yaml",
+        "components/scene.yaml",
+        "components/embodiment.yaml",
+    ):
+        if name not in files:
+            continue
+        declaration = _decode(files[name], name)
+        owner = (base_dir / name).parent
+        if name == "components/embodiment.yaml":
+            # The embodiment's skill profile has its own semantic decoder;
+            # physical component resolution owns only robot and sensor paths.
+            materialized = deepcopy(declaration)
+            for field_name in ("simulation", "sensor"):
+                if field_name in declaration:
+                    materialized[field_name] = resolve_local_resource_paths(
+                        declaration[field_name], base_dir=owner
+                    )
+        else:
+            materialized = resolve_local_resource_paths(declaration, base_dir=owner)
+        if materialized != declaration:
+            files[name] = yaml.safe_dump(materialized, sort_keys=False).encode()
+
+
 def prepare_configured_bundle(
     files: Mapping[str, bytes],
     *,
@@ -275,10 +307,12 @@ def prepare_configured_bundle(
 ) -> BundleSnapshot:
     """Preflight pure owner declarations, then seal their identity without writing.
 
-    Source files use the canonical Task Engine bundle layout. Owner-relative
-    external resource files resolve from base_dir; callers supply independently
-    checked input digests. This entry validates graph projection and runtime
-    capabilities, not physical success or TaskSpec certificate readiness.
+    Source files use the canonical Task Engine bundle layout. Explicit relative
+    physical resources are resolved from each declaration's owner beneath
+    base_dir before sealing, so publication does not change their location.
+    Callers supply independently checked input digests. This entry validates
+    graph projection and runtime capabilities, not physical success or TaskSpec
+    certificate readiness.
 
     Args:
         files: Canonical source declaration bytes and optional audit artifacts.
@@ -309,7 +343,10 @@ def prepare_configured_bundle(
     owned[SOURCE_INPUT_PROVENANCE_FILE] = _provenance_bytes(
         provenance, external_input_digests
     )
-    _, deployment, program, spec = _preflight(owned, Path(base_dir))
+    _validate_source_files(owned)
+    source_owner = Path(base_dir).expanduser().resolve()
+    _materialize_physical_resources(owned, base_dir=source_owner)
+    _, deployment, program, spec = _preflight(owned, source_owner)
     identity = create_bundle_identity(
         **_identity_fields(deployment, program, spec),
         implementation_revisions=implementation_revisions,

@@ -60,6 +60,12 @@ Configuration Classes
 Configuration Paths
 -------------------
 
+``resolve_config_path`` selects configuration files, including packaged task
+configs. ``resolve_local_resource_paths`` returns a detached declaration and
+resolves existing ``./`` or ``../`` resource files under ``fpath``,
+``urdf_path`` and ``xml_path`` from their declaring ``base_dir``. It traverses
+dictionaries and lists; other values retain their existing interpretation.
+
 .. automodule:: embodichain.utils.config_paths
    :members:
 
