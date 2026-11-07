@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Pure rigid input validation without motion or runtime dependencies."""
+"""Pure rigid input validation and emitted-pose residual checks."""
 
 from __future__ import annotations
 
@@ -22,7 +22,9 @@ import numpy as np
 from numpy.typing import ArrayLike
 import torch
 
-__all__ = ["as_rigid_matrix"]
+from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
+
+__all__ = ["as_rigid_matrix", "sampled_pose_path_matches"]
 
 
 def as_rigid_matrix(value: ArrayLike | torch.Tensor) -> np.ndarray:
@@ -51,3 +53,36 @@ def as_rigid_matrix(value: ArrayLike | torch.Tensor) -> np.ndarray:
     ):
         raise ValueError("non_rigid_or_missing_staging_pose")
     return value
+
+
+def sampled_pose_path_matches(
+    actual: torch.Tensor,
+    desired: torch.Tensor,
+    position_tolerance: float,
+    rotation_tolerance: float,
+) -> bool:
+    """Check every emitted pose with the preserved sampled-manipulation margins.
+
+    Args:
+        actual: Emitted FK transforms, with arbitrary leading path dimensions.
+        desired: Matching requested rigid transforms.
+        position_tolerance: Solver position budget before the original 1e-6 margin.
+        rotation_tolerance: Solver angular budget, retaining the source factor 2
+            and additional 1e-5 rounding margin.
+
+    Returns:
+        Whether all samples agree. This aggregate check does not widen the
+        environment support of a caller; B1 callers still reject batched actions.
+    """
+    if actual.shape != desired.shape or not torch.isfinite(actual).all():
+        return False
+    position = torch.linalg.vector_norm(
+        actual[..., :3, 3] - desired[..., :3, 3], dim=-1
+    )
+    rotation = quat_error_magnitude(
+        quat_from_matrix(actual[..., :3, :3]), quat_from_matrix(desired[..., :3, :3])
+    )
+    return bool(
+        (position <= position_tolerance + 1e-6).all()
+        and (rotation <= rotation_tolerance * 2 + 1e-5).all()
+    )

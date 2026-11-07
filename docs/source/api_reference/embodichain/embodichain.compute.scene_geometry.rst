@@ -385,6 +385,11 @@ uses explicit TCP/root geometry to produce the ordered outward translations;
 rejected geometry or bounds remain unavailable proposals. Robot kinematics,
 collision queries and execution policy are outside these numeric operations.
 
+``sampled_pose_path_matches`` checks already-emitted FK poses against requested
+poses, preserving the source position margin of ``1e-6`` and angular budget
+``2 * rotation_tolerance + 1e-5``. Shape mismatches and nonfinite actual poses fail;
+it performs no FK, IK, pose repair or physical acceptance evaluation.
+
 .. automodule:: embodichain.compute.geometry.pose_checks
    :members:
 
