@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 from copy import deepcopy
 import json
+import numpy as np
 import pytest
 import trimesh
 from embodichain.lab.sim.scene.source_target_geometry import (
@@ -59,7 +60,22 @@ def test_authored_source_targets_match_complete_b0_graph_geometry(tmp_path, case
             full_rotation_staging=full,
             rotation_margin=0.02,
         )
-        assert target == (expected[name][0], expected[name][1])
+        height, quaternion = target
+        assert height == expected[name][0]
+        actual_quaternion = np.asarray(quaternion)
+        expected_quaternion = np.asarray(expected[name][1])
+        assert actual_quaternion.shape == expected_quaternion.shape == (4,)
+        # Quaternion signs can differ for the same pose. Retain the existing
+        # float32 pose tolerance while keeping height and other geometry exact.
+        if actual_quaternion @ expected_quaternion < 0:
+            expected_quaternion = -expected_quaternion
+        tolerance = float(4 * np.finfo(np.float32).eps)
+        np.testing.assert_allclose(
+            actual_quaternion, expected_quaternion, rtol=0, atol=tolerance
+        )
+        assert np.linalg.norm(actual_quaternion) == pytest.approx(
+            1, rel=0, abs=tolerance
+        )
     assert (
         source_handover_staging_pose(source, case["table"], lift_height=0.16)
         == expected["handover"]
