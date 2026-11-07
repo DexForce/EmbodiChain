@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from importlib.metadata import version
 from types import SimpleNamespace
 import hashlib, json, random
 import numpy as np
@@ -115,6 +116,14 @@ def test_common_seed_branch_preserves_source_grid_rng_and_mandatory_samples(
     engine, invocation, context, ikcalls, batchcalls = branch_fixture(
         tmp_path, mode, monkeypatch
     )
+    checked_frames = []
+    original_clearance = _place_scene.convex_input_clearance
+
+    def observe_clearance(*args, **kwargs):
+        checked_frames.append(args[4].tolist())
+        return original_clearance(*args, **kwargs)
+
+    monkeypatch.setattr(_place_scene, "convex_input_clearance", observe_clearance)
     torch.manual_seed(17)
     np.random.seed(17)
     random.seed(17)
@@ -141,7 +150,80 @@ def test_common_seed_branch_preserves_source_grid_rng_and_mandatory_samples(
     reference = json.loads(
         (Path(__file__).parent / "data/place_branch_reference.json").read_text()
     )[mode]
-    assert actual == reference
+    source_actual = actual
+    if mode == "fallback":
+        # The old raw-AABB shortcut emitted no receipt for this table. The
+        # precision fix now checks every approach frame through the public API.
+        approach = plan.segments[0]
+        assert approach.name == "approach" and approach.start == 0
+        assert checked_frames == [list(range(approach.stop))]
+        receipts = actual["branch"]["inspection"]["convex_clearance"]
+        assert len(receipts) == 1
+        receipt = receipts[0]
+        assert set(receipt) == {
+            "entity",
+            "component",
+            "valid",
+            "scope",
+            "required_clearance_m",
+            "numerical_allowance_m",
+            "minimum_distance_m",
+            "reported_distance_semantics",
+            "checked_frames",
+            "native_queries",
+            "bound_only_frames",
+            "collision_backend",
+            "collision_backend_version",
+            "distance_semantics",
+            "geometry_representation",
+            "last_query_kind",
+            "last_distance_interval_m",
+        }
+        assert receipt["entity"] == receipt["component"] == "table"
+        assert receipt["valid"] is True
+        assert receipt["scope"] == "discrete_source_convex_solids_not_native_contact"
+        assert receipt["required_clearance_m"] == 0.002
+        assert receipt["numerical_allowance_m"] == 1e-6
+        assert (
+            receipt["checked_frames"] == receipt["bound_only_frames"] == approach.stop
+        )
+        assert receipt["native_queries"] == 0
+        assert receipt["collision_backend"] == "newton.CollisionPipeline"
+        assert receipt["collision_backend_version"] == version("newton")
+        assert receipt["distance_semantics"] == "capped_conversion_interval/v1"
+        assert receipt["geometry_representation"] == "declared_input_convex_envelope"
+        assert (
+            receipt["reported_distance_semantics"]
+            == "conservative_clearance_lower_bound"
+        )
+        assert receipt["last_query_kind"] == "canonical_bound"
+        assert receipt["last_distance_interval_m"][1] is None
+        threshold = receipt["required_clearance_m"] + receipt["numerical_allowance_m"]
+        assert (
+            receipt["last_distance_interval_m"][0]
+            >= receipt["minimum_distance_m"]
+            > threshold
+        )
+        assert (
+            receipt["minimum_distance_m"]
+            <= actual["branch"]["inspection"]["minimum_table_gap_m"]
+        )
+        assert "native_contact_result" not in receipt
+        json.dumps(receipt, allow_nan=False)
+        # Every other branch and behavior field is still compared in full;
+        # preserve the immutable Source receipt rather than rewriting its JSON.
+        assert reference["branch"]["inspection"]["convex_clearance"] == []
+        source_actual = {
+            **actual,
+            "branch": {
+                **actual["branch"],
+                "inspection": {
+                    **actual["branch"]["inspection"],
+                    "convex_clearance": [],
+                },
+            },
+        }
+    assert source_actual == reference
     if plan.plan_success.all():
         assert dict(plan.expected_effects.held_object_updates) == {"arm": None}
         assert plan.scene_dependency_monitor_until["target"] == plan.segments[0].stop

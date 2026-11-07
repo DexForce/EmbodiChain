@@ -19,6 +19,8 @@
 from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
+from importlib.metadata import version
+import math
 import json, hashlib, random
 import numpy as np
 import pytest
@@ -39,6 +41,127 @@ from embodichain.lab.sim.scene.native_hand_scene import (
 )
 from ._handover_native_fixture import native_transfer_fixture, transfer_scene
 from ._handover_adaptive_fixture import plain_metadata as plain
+
+_NATIVE_RECEIPT_FIELDS = {
+    "collision_backend",
+    "collision_backend_version",
+    "distance_semantics",
+    "geometry_representation",
+    "native_queries",
+    "reported_distance_semantics",
+    "minimum_checked_distance_interval_m",
+    "broadphase_scope",
+    "broadphase_culled_pairs",
+    "last_native_contact_result",
+}
+
+
+def _assert_native_receiver_receipt(actual, expected):
+    """Check the new native protocol while retaining the Source decision fields."""
+    native_queries = actual["native_queries"]
+    assert type(native_queries) is int and native_queries == expected["fcl_queries"]
+    assert set(actual) == (set(expected) - {"fcl_queries"}) | (
+        _NATIVE_RECEIPT_FIELDS
+        - ({"last_native_contact_result"} if native_queries == 0 else set())
+    )
+    assert actual["collision_backend"] == "newton.CollisionPipeline"
+    assert actual["collision_backend_version"] == version("newton")
+    assert actual["distance_semantics"] == "capped_conversion_interval/v1"
+    assert actual["geometry_representation"] == "captured_native_triangle_surfaces"
+    assert actual["reported_distance_semantics"] == "conservative_clearance_lower_bound"
+    assert actual["broadphase_scope"] == "canonical_native_conversion_lower_bound"
+    culled = actual["broadphase_culled_pairs"]
+    assert type(culled) is int and culled >= 0
+    # These fixtures have one receiver link and one obstacle, in this order.
+    # Every preceding frame is bound-checked; a rejected frame queries native.
+    assert culled == (actual["frames"] if actual["valid"] else actual["frame"])
+    if native_queries == 0:
+        assert actual["valid"]
+        assert actual["minimum_checked_distance_interval_m"] is None
+        assert actual["minimum_checked_distance_m"] is None
+        return
+    assert native_queries == 1 and not actual["valid"]
+    lower, upper = actual["minimum_checked_distance_interval_m"]
+    threshold = actual["native_pair_contact_offset_m"]
+    assert math.isfinite(lower) and math.isfinite(upper)
+    assert lower <= upper <= threshold
+    for key in ("minimum_checked_distance_m", "minimum_distance_m"):
+        assert actual[key] == lower
+        # Historical FCL scalars are retained, but not relabelled as Newton
+        # measurements. They must lie inside the declared native interval.
+        assert lower <= expected[key] <= upper
+    contact = actual["last_native_contact_result"]
+    assert set(contact) == {
+        "backend",
+        "predicate",
+        "distance_semantics",
+        "lower_bound_m",
+        "upper_bound_m",
+        "upper_unbounded",
+        "signed_surface_separation_m",
+        "representation_error_m",
+        "detection_gap_m",
+        "native_contact_count",
+        "pair_ids",
+        "pairs",
+        "clearance_unavailable_reason",
+        "continuous",
+        "physical_acquisition",
+    }
+    assert isinstance(contact["clearance_unavailable_reason"], str)
+    assert contact["backend"] == "newton.CollisionPipeline"
+    assert contact["predicate"] == "native_surface_separation<=threshold"
+    assert contact["distance_semantics"] == actual["distance_semantics"]
+    assert contact["lower_bound_m"] == lower and contact["upper_bound_m"] == upper
+    assert contact["upper_unbounded"] is False
+    assert math.isfinite(contact["signed_surface_separation_m"])
+    assert contact["signed_surface_separation_m"] <= threshold
+    assert math.isfinite(contact["representation_error_m"])
+    assert contact["representation_error_m"] >= 0
+    assert contact["detection_gap_m"] >= threshold
+    assert type(contact["native_contact_count"]) is int
+    assert contact["native_contact_count"] > 0
+    assert contact["continuous"] is contact["physical_acquisition"] is False
+    assert contact["pair_ids"] is None and len(contact["pairs"]) == 1
+    pair = contact["pairs"][0]
+    assert pair["pair_ids"] == ["a:0", "b:0"] and pair["pairs"] == []
+    assert {k: v for k, v in pair.items() if k not in {"pair_ids", "pairs"}} == {
+        k: v for k, v in contact.items() if k not in {"pair_ids", "pairs"}
+    }
+    json.dumps(contact, allow_nan=False)
+
+
+def _assert_source_record(actual, expected):
+    """Compare all fields; only scoped native receipts have separate assertions."""
+    if isinstance(expected, dict):
+        assert isinstance(actual, dict)
+        native = (
+            expected.get("scope")
+            in {
+                "receiver_open_hand_nominal_approach_non_target_scene",
+                "receiver_hand_non_target_scene_discrete_native_shapes",
+            }
+            and "fcl_queries" in expected
+        )
+        if native:
+            _assert_native_receiver_receipt(actual, expected)
+            separately_checked = _NATIVE_RECEIPT_FIELDS | {
+                "fcl_queries",
+                "minimum_checked_distance_m",
+                "minimum_distance_m",
+            }
+            keys = set(expected) - separately_checked
+        else:
+            assert set(actual) == set(expected)
+            keys = expected
+        for key in keys:
+            _assert_source_record(actual[key], expected[key])
+    elif isinstance(expected, list):
+        assert isinstance(actual, list) and len(actual) == len(expected)
+        for value, reference in zip(actual, expected):
+            _assert_source_record(value, reference)
+    else:
+        assert actual == expected
 
 
 def native_inputs(tmp_path, mode):
@@ -145,7 +268,7 @@ def test_native_receiver_station_and_command_guards_match_source(tmp_path, mode)
             Path(__file__).parent / f"data/handover_native_{mode}_reference.json"
         ).read_text()
     )
-    assert record == expected
+    _assert_source_record(record, expected)
     assert all(query.closed for query in queries)
 
 
@@ -221,7 +344,7 @@ def test_complete_cartesian_handover_matches_source_outer_scope(tmp_path, mode):
     expected = json.loads(
         (Path(__file__).parent / f"data/handover_cartesian_{mode}_b0.json").read_text()
     )["record"]
-    assert record == expected
+    _assert_source_record(record, expected)
     assert all(query.closed for query in queries)
 
 
