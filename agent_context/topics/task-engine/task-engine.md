@@ -54,3 +54,16 @@ cutout. These images identify the asset; they are not observations after a call.
 Firefox and WebKit; `tests/gen_sim/task_engine/browser_fixture.py` creates
 synthetic inputs through the public renderer without starting simulation.
 See [`web/README.md`](../../../web/README.md) for both frontend build paths.
+
+## Configuration, requests and replayable state
+
+config.py owns the workflow, semantic planning and execution configuration plus
+defaults.yaml. Explicit direct configuration and packaged workflow defaults keep
+their distinct documented values. workflow_contracts.py validates existing-scene
+requests and source/output separation. state_machine.py owns immutable stage
+transitions and exact event replay; it starts no environment or model call.
+
+orchestration/workflow_artifacts.py owns safe run JSON and history persistence.
+It rejects writes below sealed bundle markers, including symbolic-link paths,
+and preserves interrupted histories. Workflow scheduling and bundle/runtime
+integration consume these contracts in their own layer.
