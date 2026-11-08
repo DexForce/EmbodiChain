@@ -431,11 +431,29 @@ def _populate_dual_cfg(
                 **deepcopy(declaration),
             }
             cfg.gripper_bindings[new_instance] = binding
-    if base_cfg.gripper_bindings and isinstance(base_cfg.qpos_limits, dict):
+    if base_cfg.gripper_bindings and base_cfg.qpos_limits is not None:
+        limits = base_cfg.qpos_limits
+        if not isinstance(limits, dict):
+            import xml.etree.ElementTree as ET
+
+            source_path = base_cfg.fpath or deepcopy(base_cfg.urdf_cfg).assemble_urdf()
+            source_names = [
+                joint.get("name")
+                for joint in ET.parse(source_path).findall("joint")
+                if joint.get("type") != "fixed"
+            ]
+            if hasattr(limits, "detach"):
+                limits = limits.detach().cpu().numpy()
+            rows = np.asarray(limits)
+            if rows.shape != (len(source_names), 2):
+                raise ValueError(
+                    "Base qpos_limits must match complete source-order joints."
+                )
+            limits = dict(zip(source_names, rows.tolist()))
         cfg.qpos_limits = {
             _prefixed_name(name, prefix, "joint", name_case): deepcopy(value)
             for _side, _comp, prefix in _SIDES
-            for name, value in base_cfg.qpos_limits.items()
+            for name, value in limits.items()
         }
 
 

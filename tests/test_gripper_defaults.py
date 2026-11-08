@@ -81,7 +81,7 @@ assert "embodichain.data" not in sys.modules
     )
 
 
-def _compose(tmp_path, *, logical=True):
+def _compose(tmp_path, *, logical=True, model="DHPGI14080"):
     from embodichain.lab.gym.utils.composition import resolve_gym_components
 
     declaration = {
@@ -90,7 +90,7 @@ def _compose(tmp_path, *, logical=True):
         "sensor": [],
         "grippers": {
             "tool": {
-                "class_type": "DHPGI14080",
+                "class_type": model,
                 "mode": "mounted",
                 "component_type": "hand",
                 "motion_part": "arm",
@@ -419,3 +419,29 @@ def test_generic_dual_arm_composition_retains_independent_bound_hands(tmp_path):
     assert (
         base.gripper_bindings["tool"]["defaults"]["default_root_from_tcp"][2][3] == 0.15
     )
+
+
+@pytest.mark.parametrize("form", ["array", "tensor", "list"])
+def test_generic_dual_bound_hands_preserve_source_order_limit_overrides(tmp_path, form):
+    import numpy as np
+    import torch
+    from embodichain.robot_registry import resolve_robot_cfg
+    from embodichain.lab.sim.robots.dual_arm import build_dual_arm_cfg
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    values = deepcopy(
+        _compose(tmp_path, logical=False, model="RobotiqArg2F85").config["robot"]
+    )
+    base = resolve_robot_cfg(values.pop("class_type"), values)
+    rows = np.tile(
+        [-10.0, 10.0], (12, 1)
+    )  # Six UR joints and all six authored hand joints.
+    base.qpos_limits = (
+        rows
+        if form == "array"
+        else torch.from_numpy(rows) if form == "tensor" else rows.tolist()
+    )
+    dual = build_dual_arm_cfg(base, {"left": np.eye(4), "right": np.eye(4)})
+    assert len(dual.qpos_limits) == 24
+    assert all(value == [-10.0, 10.0] for value in dual.qpos_limits.values())
+    prepare_robot_grippers(dual)
