@@ -358,6 +358,7 @@ jobs:
       NVIDIA_DISABLE_REQUIRE: 1
       HF_ENDPOINT: https://hf-mirror.com
       PIP_CACHE_DIR: /cache/pip
+      PYTHONFAULTHANDLER: "1"
       SDL_VIDEODRIVER: dummy
       XDG_RUNTIME_DIR: /tmp/embodichain-ci-runtime
       NEEDS_GENSIM: ${{ needs.test_plan.outputs.needs_gensim }}
