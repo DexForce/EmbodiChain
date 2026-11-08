@@ -837,7 +837,8 @@ def execute_demo_episode(
     Auto-reset is suspended for the duration of execution. The caller owns the
     transaction boundary and must explicitly call ``env.reset()`` to commit a
     successful episode or ``env.reset(options={"save_data": False})`` to
-    discard an invalid attempt.
+    discard an invalid attempt. A sealed deployment-gated row must be reset
+    before another attempt.
 
     Args:
         env: Gym environment or wrapper.
@@ -970,12 +971,12 @@ def execute_demo_episode(
 
     try:
         if begin_episode is not None:
+            parameters = signature(begin_episode).parameters
             row_options = {}
-            if (
-                active_env_ids is not None
-                and "active_env_ids" in signature(begin_episode).parameters
-            ):
+            if active_env_ids is not None and "active_env_ids" in parameters:
                 row_options["active_env_ids"] = active_env_ids
+            if "replan" in parameters:
+                row_options["replan"] = segments is None
             begin_episode(
                 episode_index=episode_index,
                 execution_cfg=execution_cfg,

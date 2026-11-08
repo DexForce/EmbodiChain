@@ -86,6 +86,31 @@ def _json_metric(value):
     return None if isinstance(value, float) and not math.isfinite(value) else value
 
 
+_RULE_BOUNDARIES = (
+    "witness_steps",
+    "witness_revisions",
+    "violation_steps",
+    "violation_revisions",
+)
+
+
+def _rule_tensor_report(result, *, owned=False):
+    def tensor(value):
+        return value if owned else value.clone()
+
+    return {
+        "status": tensor(result.status),
+        "reason_codes": {str(int(code)): code.reason for code in EvaluationStatus},
+        "metrics": {key: tensor(value) for key, value in result.metrics.items()},
+        "parameters": _json_metric(result.parameters),
+        **{
+            key: tensor(value)
+            for key in _RULE_BOUNDARIES
+            if (value := getattr(result, key)) is not None
+        },
+    }
+
+
 def _rule_report(result):
     statuses = [EvaluationStatus(value) for value in result.status.tolist()]
     return {
@@ -97,12 +122,7 @@ def _rule_report(result):
         "parameters": _json_metric(result.parameters),
         **{
             key: value.tolist()
-            for key in (
-                "witness_steps",
-                "witness_revisions",
-                "violation_steps",
-                "violation_revisions",
-            )
+            for key in _RULE_BOUNDARIES
             if (value := getattr(result, key)) is not None
         },
     }
@@ -116,6 +136,10 @@ def advance_observation(
     episode_owner: EpisodeContext,
 ) -> None:
     """Consume a qualified host capture in the session's environment order."""
+    _advance_observation(session, frame, step=step, episode_owner=episode_owner)
+
+
+def _advance_observation(session, frame, *, step, episode_owner, measurements=None):
     import torch
 
     rows = session.env_ids
@@ -138,11 +162,12 @@ def advance_observation(
         )
     indices = session._observation_rows
     values, valid = _graph_frame_inputs(session.compiled, frame, indices)
-    session.advance(
+    session._advance(
         step,
         values,
         valid=valid,
         revisions=torch.full_like(indices, frame.revision),
         episode_ids=session.episode_ids,
+        measurements=measurements,
     )
     session._observation_owner = episode_owner

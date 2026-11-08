@@ -22,6 +22,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from embodichain.compute._evaluation import _temporal_window_decision
+
 from . import EvaluationStatus as Status
 from ._graph import (
     BooleanRule,
@@ -203,7 +205,17 @@ class RuleSession:
         """Consume one control slot, breaking continuity across unobserved slots."""
         self._advance(step, values, revisions, episode_ids, valid)
 
-    def _advance(self, step, values, revisions, episode_ids, valid, *, active=None):
+    def _advance(
+        self,
+        step,
+        values,
+        revisions,
+        episode_ids,
+        valid,
+        *,
+        active=None,
+        measurements=None,
+    ):
         import torch
 
         source_episodes = tuple(episode_ids)
@@ -261,7 +273,12 @@ class RuleSession:
             return self._history[name].result(owned=False)
 
         results = self.compiled._evaluate(
-            values, len(self.env_ids), self.device, qualified, advance_rule
+            values,
+            len(self.env_ids),
+            self.device,
+            qualified,
+            advance_rule,
+            measurements=measurements,
         )
         for name, node in self.compiled._nodes:
             if not isinstance(node, _BoundPredicate):
@@ -318,15 +335,23 @@ class RuleSession:
             )
         )
         history.count.add_(passed.long())
+        ending = unresolved & (step >= last)
+        matched = passed
+        violated = False
         if rule.op == "always":
-            failed = current & available & (measured == Status.FAILED)
-            reached = passed & (last == step) & ~history.missing
-            history.record(failed, step=step, revision=revisions, violation=True)
-            history.status.masked_fill_(failed, Status.FAILED)
+            violated = current & available & (measured == Status.FAILED)
+            history.record(violated, step=step, revision=revisions, violation=True)
             offset = rule.end - rule.start
         else:
-            reached = passed & (history.count == rule.steps)
+            matched = passed & (history.count == rule.steps)
             offset = rule.steps - 1
+        reached, failed = _temporal_window_decision(
+            rule.op,
+            matched=matched,
+            violated=violated,
+            closing=ending,
+            missing=history.missing,
+        )
         history.record(
             reached,
             step=step,
@@ -335,11 +360,10 @@ class RuleSession:
             first_revision=history.start_revision,
         )
         history.status.masked_fill_(reached, Status.SATISFIED)
-        ending = unresolved & (step >= last) & (history.status != Status.SATISFIED)
-        if rule.op == "always":
-            ending &= history.status != Status.FAILED
-        history.status.masked_fill_(ending & ~history.missing, Status.FAILED)
-        history.status.masked_fill_(ending & history.missing, Status.UNAVAILABLE)
+        history.status.masked_fill_(failed, Status.FAILED)
+        history.status.masked_fill_(
+            ending & history.missing & ~(reached | failed), Status.UNAVAILABLE
+        )
 
     def _advance_milestone(self, history, rule, results, step, revisions, active):
         import torch

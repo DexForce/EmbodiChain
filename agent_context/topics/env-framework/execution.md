@@ -106,7 +106,10 @@ stable online language IDs. Language intent does not establish physical success.
   sealed from RL's cached state at the done transition and is exposed through
   step info's `terminal_outcomes`. Reset consumes selected reports before
   clearing rows and returns them with receipts in `reset_episode_outcomes`.
-  A manually driven completed bridge is sealed before saving.
+  A manually driven completed bridge is sealed before saving. An aborted
+  deployment-gated attempt cannot seal success from a Gym flag. Reset a
+  sealed gated row before retrying it. A preplanned segment iterable can use
+  a fresh bound bridge for its attempt.
 - An explicitly configured RL `evaluation_condition` uses the shared
   `RuleSession` for temporal roots. Only transition computation consumes a
   slot. Pending windows remain nonterminal, and row resets restart their

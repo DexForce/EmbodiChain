@@ -2731,6 +2731,8 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     from embodichain.lab.evaluation import (
         EvaluationSpec,
         EvaluationStatus,
+        PredicateDefinition,
+        PredicateMeasurement,
         PredicateSpec,
         TemporalRule,
         builtin_predicates,
@@ -2767,11 +2769,27 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
             ),
         ),
     )
-    bound = builtin_predicates().compile(
+
+    def measure(values, params):
+        distance = torch.linalg.vector_norm(
+            values["position"] - values["target"], dim=-1
+        )
+        return PredicateMeasurement(
+            distance <= params["tolerance"],
+            torch.isfinite(distance),
+            {"distance": distance},
+        )
+
+    measured = Mock(side_effect=measure)
+    registry = builtin_predicates()
+    registry.register(
+        "counted_near", PredicateDefinition(1, ("position", "target"), dict, measured)
+    )
+    graph = registry.compile(
         EvaluationSpec(
             {
                 "near": PredicateSpec(
-                    "near_target",
+                    "counted_near",
                     {
                         "position": "rigid_objects/native_cube/pose",
                         "target": "rigid_objects/native_goal/pose",
@@ -2780,9 +2798,10 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
                 ),
                 "near_goal": TemporalRule("hold_for", "near", 1, steps=2),
             },
-            ("near_goal",),
+            ("near_goal", "near"),
         )
     )
+    bound = graph.select("near_goal")
     raised = builtin_predicates().compile(
         EvaluationSpec(
             {
@@ -2798,7 +2817,7 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
             ("raised",),
         )
     )
-    conditions = {"near_goal": bound, "raised": raised}
+    conditions = {"near_goal": bound, "raised": raised, "near": graph.select("near")}
     declaration = {
         "program_id": "measured_hold",
         "integration": {
@@ -2837,6 +2856,7 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
                 "validators": [
                     {"kind": "condition", "ref": "near_goal"},
                     {"kind": "condition", "ref": "raised"},
+                    {"kind": "condition", "ref": "near"},
                 ],
             },
         },
@@ -2961,6 +2981,7 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     assert reports[1]["witness_steps"] == [[-1, -1], [-1, -1]]
     assert lifts[0] == pytest.approx([0.2, 0.2])
     assert lifts[1] == pytest.approx([0.0])
+    assert measured.call_count == len(revisions) == 4
     history = {"raw_observations": export_observation_history(env.observation_manager)}
     result = evaluate_recorded_rules(
         bound,

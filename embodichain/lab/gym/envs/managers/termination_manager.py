@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from embodichain.lab.evaluation import EvaluationStatus, RuleResult
-from embodichain.lab.evaluation.observations import _json_metric
+from embodichain.lab.evaluation.observations import _rule_tensor_report
 
 from .cfg import ConditionCfg, RLTaskCfg
 from .manager_base import Functor, ManagerBase
@@ -255,28 +255,7 @@ class TerminationManager(ManagerBase):
                         {
                             "evaluation_identity": self._rule_identities[name],
                             "rules": {
-                                rule_id: {
-                                    "status": rule.status.clone(),
-                                    "reason_codes": {
-                                        str(int(code)): code.reason
-                                        for code in EvaluationStatus
-                                    },
-                                    "metrics": {
-                                        metric: tensor.clone()
-                                        for metric, tensor in rule.metrics.items()
-                                    },
-                                    "parameters": _json_metric(rule.parameters),
-                                    **{
-                                        key: boundary.clone()
-                                        for key in (
-                                            "witness_steps",
-                                            "witness_revisions",
-                                            "violation_steps",
-                                            "violation_revisions",
-                                        )
-                                        if (boundary := getattr(rule, key)) is not None
-                                    },
-                                }
+                                rule_id: _rule_tensor_report(rule)
                                 for rule_id, rule in self._rule_results[name].items()
                             },
                         }

@@ -120,6 +120,103 @@ def test_temporal_witnesses_and_partial_reset_are_row_local():
     assert completed.rules["hold"].witness_revisions.tolist() == [[20, 21], [30, 31]]
 
 
+@pytest.mark.parametrize(
+    ("mode", "samples", "status", "witness", "violation"),
+    [
+        ("eventually", (None, 1.0, 0.0), Status.SATISFIED, (2, 2), None),
+        ("eventually", (0.0, 0.0, 0.0), Status.FAILED, None, None),
+        ("eventually", (0.0, None, 0.0), Status.UNAVAILABLE, None, None),
+        ("always", (1.0, 1.0, 1.0), Status.SATISFIED, (1, 3), None),
+        ("always", (None, 0.0, 1.0), Status.FAILED, None, (2, 2)),
+        ("always", (1.0, 1.0), Status.UNAVAILABLE, None, None),
+    ],
+)
+def test_taskspec_and_tensor_windows_share_conclusions_and_evidence(
+    mode, samples, status, witness, violation
+):
+    from embodichain.gen_sim.task_spec.expressions import (
+        Predicate,
+        TemporalCondition,
+        evaluate_temporal_condition,
+    )
+
+    condition = TemporalCondition(
+        Predicate("contact", observation="force", operator="gte", expected=1.0),
+        start_step=1,
+        within_steps=2,
+        mode=mode,
+    )
+    observations = [
+        {"force": 0.0},
+        *({"force": value} if value is not None else {} for value in samples),
+    ]
+    scalar = evaluate_temporal_condition(condition, observations)
+    graph = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "contact": PredicateSpec(
+                    "joint_range", {"position": "force"}, {"lower": 1.0}
+                ),
+                "window": TemporalRule(mode, "contact", start=1, end=3),
+            },
+            ("window",),
+        )
+    )
+    session = RuleSession(graph, env_ids=(7,), episode_ids=(2,), scope="contact")
+    for step, observation in enumerate(observations):
+        values = {name: torch.tensor([value]) for name, value in observation.items()}
+        session.advance(
+            step, values, revisions=torch.tensor([10 + step]), episode_ids=(2,)
+        )
+    batched = session.snapshot(closed=True).rules["window"]
+    values = torch.tensor(
+        [[observation.get("force", float("nan")) for observation in observations]]
+    )
+    recorded = evaluate_recorded_rules(
+        graph,
+        {
+            "raw_observations": {
+                "schema_version": 1,
+                "env_ids": (7,),
+                "episode_ids": (2,),
+                "revisions": torch.arange(10, 10 + len(observations))[None, :],
+                "lengths": torch.tensor([len(observations) - 1]),
+                "fields": {
+                    "force": {
+                        "values": values,
+                        "valid": torch.isfinite(values),
+                        "descriptor": {
+                            "quantity": "scalar",
+                            "shape": (),
+                            "dtype": "torch.float32",
+                        },
+                    }
+                },
+            }
+        },
+        env_ids=(7,),
+        episode_ids=(2,),
+        scope="contact",
+        chunk_steps=2,
+    ).rules["window"]
+    assert batched.status.item() == status
+    assert scalar.status.value == status.name.lower()
+    assert scalar.witness_steps == witness
+    assert scalar.violation_steps == violation
+    assert tuple(batched.witness_steps[0].tolist()) == (witness or (-1, -1))
+    assert tuple(batched.violation_steps[0].tolist()) == (violation or (-1, -1))
+    for key in (
+        "status",
+        "witness_steps",
+        "witness_revisions",
+        "violation_steps",
+        "violation_revisions",
+    ):
+        torch.testing.assert_close(getattr(recorded, key), getattr(batched, key))
+    assert scalar.to_dict()["observed"] == list(samples)
+    assert "witness_steps" not in scalar.to_dict()
+
+
 def test_always_keeps_first_qualified_violation_and_closes_missing_window():
     graph = _graph()
     session = RuleSession(graph, env_ids=(0, 1), episode_ids=(2, 2), scope="place")

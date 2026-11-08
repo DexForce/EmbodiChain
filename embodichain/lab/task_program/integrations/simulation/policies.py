@@ -48,7 +48,7 @@ from embodichain.lab.evaluation import (
 )
 from embodichain.lab.evaluation.observations import (
     _rule_report,
-    advance_observation,
+    _advance_observation,
 )
 from embodichain.lab.evaluation._recording import _is_segment_start_field
 from embodichain.lab.evaluation._predicates import (
@@ -926,6 +926,7 @@ class SimulationSegmentPolicyPort:
         self._require_open()
         if self._evaluation_initial:
             frame = replace(frame, fields={**frame.fields, **self._evaluation_initial})
+        measurements = {}
         for ref, spec in self._evaluation_specs.items():
             session = self._evaluation_sessions.get(ref)
             if session is None:
@@ -939,7 +940,13 @@ class SimulationSegmentPolicyPort:
                     scope=f"{ref}@{start}",
                 )
                 self._evaluation_sessions[ref] = session
-            advance_observation(session, frame, step=step, episode_owner=episode_owner)
+            _advance_observation(
+                session,
+                frame,
+                step=step,
+                episode_owner=episode_owner,
+                measurements=measurements,
+            )
 
     def _validate_condition(
         self, validator: CompiledConditionValidator

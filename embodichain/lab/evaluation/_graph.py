@@ -254,6 +254,7 @@ class PredicateRegistry:
         dependencies = {}
         payload = {}
         fields = set()
+        predicates = {}
         for name, rule in spec.rules.items():
             if not _identifier(name):
                 raise ValueError(f"Invalid evaluation rule ID {name!r}.")
@@ -273,9 +274,6 @@ class PredicateRegistry:
                 params = json.loads(
                     json.dumps(dict(definition.normalize(rule.params)), allow_nan=False)
                 )
-                nodes[name] = _BoundPredicate(
-                    definition, MappingProxyType(bindings), _freeze(params)
-                )
                 dependencies[name] = ()
                 payload[name] = [
                     "predicate",
@@ -286,6 +284,12 @@ class PredicateRegistry:
                     bindings,
                     params,
                 ]
+                key = json.dumps(payload[name], sort_keys=True, separators=(",", ":"))
+                if key not in predicates:
+                    predicates[key] = _BoundPredicate(
+                        definition, MappingProxyType(bindings), _freeze(params)
+                    )
+                nodes[name] = predicates[key]
             elif isinstance(rule, BooleanRule):
                 refs = _refs(rule.refs)
                 if rule.op not in ("all", "any", "not") or (
@@ -446,9 +450,14 @@ class CompiledEvaluation:
                     name, rule.definition, rule.bindings, field_kinds, field_layouts
                 )
 
-    def _evaluate(self, values, size, device, valid, advance):
+    def _evaluate(self, values, size, device, valid, advance, *, measurements=None):
         import torch
 
+        # The caller may share raw measurements across selected roots of one
+        # frame, device, and row order. Qualification and owned results stay
+        # local to each evaluation.
+        if measurements is None:
+            measurements = {}
         device = torch.device(device)
         if device.type == "cuda" and device.index is None:
             device = torch.device("cuda", torch.cuda.current_device())
@@ -470,7 +479,11 @@ class CompiledEvaluation:
                 raise ValueError(
                     f"Evaluation fields for {name!r} must match the batch and device."
                 )
-            measured = rule.definition.measure(arguments, rule.params)
+            key = id(rule)
+            measured = measurements.get(key)
+            if measured is None:
+                measured = rule.definition.measure(arguments, rule.params)
+                measurements[key] = measured
             _validate_masks((measured.satisfied, measured.valid, *masks), size, device)
             available = measured.valid
             for mask in masks:

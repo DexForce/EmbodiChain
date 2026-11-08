@@ -410,6 +410,57 @@ def test_gym_terminal_success_cannot_bypass_incomplete_final_gated_program():
     read_pose.assert_not_called()
 
 
+def test_final_roots_reuse_one_predicate_measurement_per_frame():
+    from unittest.mock import Mock
+
+    from embodichain.lab.evaluation import (
+        BooleanRule,
+        EvaluationSpec,
+        PredicateDefinition,
+        PredicateMeasurement,
+        PredicateSpec,
+        builtin_predicates,
+    )
+    from embodichain.lab.gym.envs.task_program._final_acceptance import (
+        _measure_final_conditions,
+    )
+
+    env, pose, acquisition = _final_acceptance_env()
+
+    def measure(values, params):
+        distance = values["position"][:, 0]
+        return PredicateMeasurement(
+            distance < params["limit"], torch.isfinite(distance), {"distance": distance}
+        )
+
+    measured = Mock(side_effect=measure)
+    registry = builtin_predicates()
+    registry.register("counted", PredicateDefinition(1, ("position",), dict, measured))
+    binding = {"position": "rigid_objects/payload/pose"}
+    graph = registry.compile(
+        EvaluationSpec(
+            {
+                "near": PredicateSpec("counted", binding, {"limit": 0.5}),
+                "alias": PredicateSpec("counted", binding, {"limit": 0.5}),
+                "tighter": PredicateSpec("counted", binding, {"limit": 0.05}),
+                "first": BooleanRule("all", ("near", "alias")),
+                "second": BooleanRule("any", ("near", "tighter")),
+            },
+            ("first", "second"),
+        )
+    )
+    rules = tuple((root, graph.select(root)) for root in graph.roots)
+    result = _measure_final_conditions(env, rules)
+    assert result.satisfied.tolist() == [True, False]
+    assert measured.call_count == 2
+    acquisition.assert_called_once()
+
+    pose[0, 0] = 0.9
+    assert _measure_final_conditions(env, rules).satisfied.tolist() == [False, False]
+    assert measured.call_count == 4
+    assert result.satisfied.tolist() == [True, False]
+
+
 def test_reset_seals_manually_completed_program_before_persistence_retry():
     from unittest.mock import Mock
 
@@ -515,6 +566,87 @@ def test_demo_execution_error_seals_abort_without_replacing_original_error():
         result["physical"]["final_acceptance"]["conditions"]["near_support"]["status"]
         == "not_run"
     )
+
+
+def test_demo_error_cannot_seal_an_early_gym_success_or_save_it():
+    from unittest.mock import Mock
+
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+
+    env, _, read_pose = _final_acceptance_env()
+    action = torch.zeros(2, 1)
+    env.bridge = _CompletedDemoBridge(
+        DemoSegment(
+            actions=(action, action), name="move", failure_policy="row_independent"
+        )
+    )
+    env._mask_demo_action = lambda action, active: action
+    first_row_done = torch.tensor([True, False])
+    env.step = Mock(
+        side_effect=[
+            (
+                {},
+                torch.zeros(2),
+                first_row_done,
+                torch.zeros(2, dtype=torch.bool),
+                {"success": first_row_done},
+            ),
+            ValueError("peer controller failure"),
+        ]
+    )
+    save = Mock()
+    env.dataset_manager = SimpleNamespace(
+        available_modes=["save"], save_failed_episodes=False, apply=save
+    )
+
+    with pytest.raises(RuntimeError, match="action generation") as error:
+        execute_demo_episode(env)
+
+    assert str(error.value.__cause__) == "peer controller failure"
+    first = env.get_demo_episode_metadata(0)
+    assert first["terminated"]
+    assert not first["success"] and not first["completed"]
+    assert not first["final_acceptance"]["accepted"]
+    assert not first["final_acceptance"]["program_accepted"]
+    assert first["final_acceptance"]["physical_satisfied"] is None
+    assert first["episode_outcome"]["acceptance"] == {
+        "accepted": False,
+        "eligible": False,
+        "reason": "execution_error",
+    }
+    _, info = env.reset()
+    assert not info["reset_episode_outcomes"][0]["persistence"]["dataset_selected"]
+    save.assert_not_called()
+    read_pose.assert_not_called()
+
+
+def test_explicit_segments_cannot_reuse_completed_program_in_same_episode():
+    from unittest.mock import Mock
+
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+
+    env, position, read_pose = _final_acceptance_env()
+    action = torch.zeros(2, 1)
+    flags = torch.zeros(2, dtype=torch.bool)
+    env.step = Mock(return_value=({}, torch.zeros(2), flags, flags, {}))
+    assert execute_demo_episode(env).success == (True, False)
+    terminal = [env.get_demo_episode_metadata(row) for row in (0, 1)]
+
+    position[:, 0] = 0.1
+    with pytest.raises(RuntimeError, match="reset"):
+        execute_demo_episode(
+            env, segments=(DemoSegment(actions=(action,)),), attempt_id=1
+        )
+    assert [env.get_demo_episode_metadata(row) for row in (0, 1)] == terminal
+    env.step.assert_called_once()
+    read_pose.assert_called_once()
+
+    env.reset(options={"save_data": False})
+    result = execute_demo_episode(
+        env, segments=(DemoSegment(actions=(action,)),), attempt_id=1
+    )
+    assert result.success == (False, False)
+    assert not env.get_demo_episode_metadata(0)["final_acceptance"]["program_accepted"]
 
 
 def test_partial_reset_keeps_manual_completion_for_unreset_rows():

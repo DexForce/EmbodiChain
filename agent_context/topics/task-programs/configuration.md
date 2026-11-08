@@ -373,14 +373,17 @@ steps and acquisition revisions.
 Program overrides keep these deployment-owned selections. The bridge checks
 process constraints after consumed steps and routes rejected rows through its
 existing safe hold. The rules and bindings participate in registration
-identity.
+identity. Roots sharing a normalized predicate and binding reuse its raw
+measurement within each qualified frame and row cohort. A fresh capture or
+separate evaluation scope measures its own inputs.
 
 An ordered placement objective component can set `condition` to an exported
 root over its object's position and velocities. The objective advances the rule
 with each measured sample and keeps its result independent of termination and
-persistence. With trajectory recording disabled, segment and process checks
-acquire only their active fields. Final-only fields are sampled at final
-queries and sealing.
+persistence. The snapshot reports the configured rule's status and witness
+separately from the raw measurement-validity flag. With trajectory recording
+disabled, segment and process checks acquire only their active fields.
+Final-only fields are sampled at final queries and sealing.
 
 ## Asset role requirements
 

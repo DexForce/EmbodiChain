@@ -2069,8 +2069,26 @@ class EmbodiedEnv(BaseEnv):
         execution_cfg: DemoExecutionCfg | None = None,
         attempt_id: int = 0,
         active_env_ids: Sequence[int] | None = None,
+        *,
+        replan: bool = False,
     ) -> None:
         """Start annotation metadata for a new demonstration episode."""
+        selected = range(self.num_envs) if active_env_ids is None else active_env_ids
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        if (not replan and getattr(bridge, "program_completed", False)) or (
+            getattr(self, "_final_acceptance_rules", ())
+            and any(
+                "episode_outcome" in self._demo_episode_metadata[row]
+                for row in selected
+            )
+        ):
+            raise RuntimeError(
+                "Task Program execution requires a reset before retrying a completed attempt."
+            )
+        if replan:
+            # A fresh planner may bind a bridge after recording starts.
+            self._active_task_program_bridge = bridge = None
+            self._final_bridge_episodes = None
         if execution_cfg is None:
             execution_cfg = DemoExecutionCfg()
         self._demo_episode_index = episode_index
@@ -2080,7 +2098,6 @@ class EmbodiedEnv(BaseEnv):
         self._demo_program_run_id = f"{episode_index}:{attempt_id}"
         self._pending_final_acceptance = None
         self._final_program_completion = None
-        selected = range(self.num_envs) if active_env_ids is None else active_env_ids
         final_observations = getattr(self, "_sealed_final_observations", {})
         self._sealed_final_observations = final_observations
         self._demo_active_segment_id = 0
@@ -2094,7 +2111,6 @@ class EmbodiedEnv(BaseEnv):
             self._demo_episode_metadata[env_id] = self._new_demo_episode_metadata(
                 env_id
             )
-        bridge = getattr(self, "_active_task_program_bridge", None)
         program = getattr(bridge, "_program", None)
         if program is not None:
             from embodichain.data_pipeline.recording import stable_config_hash
@@ -2184,21 +2200,23 @@ class EmbodiedEnv(BaseEnv):
 
     def _end_demo_episode_recording(self, result: DemoEpisodeResult) -> None:
         """Finalize per-environment metadata after demonstration execution."""
+        accepted = result.success
         final_rows = None
         rules = getattr(self, "_final_acceptance_rules", ())
         episode_ids = self.episode_context.episode_ids
         if rules:
             pending = getattr(self, "_pending_final_acceptance", None)
+            self._pending_final_acceptance = None
             completion, measurement = None, None
             eligible = (False,) * self.num_envs
-            if pending is not None:
+            if pending is not None and result.terminal_reason != "execution_error":
                 if pending[0] != episode_ids:
                     raise RuntimeError("Final acceptance belongs to another episode.")
                 _, eligible, completion, measurement = pending
             final_rows = _final_acceptance_rows(
                 rules, episode_ids, result.success, eligible, completion, measurement
             )
-            self._pending_final_acceptance = None
+            accepted = tuple(row["accepted"] for row in final_rows)
         bridge = getattr(self, "_active_task_program_bridge", None)
         program = getattr(bridge, "_program", None)
         program_hash = None
@@ -2242,12 +2260,20 @@ class EmbodiedEnv(BaseEnv):
                 if result.terminal_reasons
                 else result.terminal_reason
             )
+            if final_rows is not None and not accepted[env_id]:
+                completed = False
+                if terminal_reason == "success":
+                    terminal_reason = (
+                        "execution_error"
+                        if result.terminal_reason == "execution_error"
+                        else "task_incomplete"
+                    )
             metadata.update(
                 {
                     "episode_index": result.episode_index,
                     "length": length,
                     "completed": completed,
-                    "success": result.success[env_id],
+                    "success": accepted[env_id],
                     "terminated": result.terminated[env_id],
                     "truncated": result.truncated[env_id],
                     "terminal_reason": terminal_reason,
@@ -2309,9 +2335,13 @@ class EmbodiedEnv(BaseEnv):
                 episode_id=episode_ids[env_id],
                 source="task_program" if bridge is not None else "legacy_expert",
                 eligible=(
-                    result.execution_eligible[env_id]
-                    if result.execution_eligible
-                    else completed
+                    final_rows[env_id]["execution_eligible"]
+                    if final_rows is not None
+                    else (
+                        result.execution_eligible[env_id]
+                        if result.execution_eligible
+                        else completed
+                    )
                 ),
                 program_accepted=(
                     program_accepted[env_id] if program_accepted is not None else None

@@ -31,6 +31,7 @@ from embodichain.compute._evaluation import (
     _speeds_within,
 )
 from embodichain.lab.evaluation import CompiledEvaluation, EvaluationStatus, RuleSession
+from embodichain.lab.evaluation.observations import _rule_tensor_report
 
 from .config import OrderedPlacementObjectiveCfg, decode_objective
 
@@ -224,7 +225,6 @@ class OrderedPlacementObjective:
             self._condition_step += 1
             result = session.snapshot().rules[session.compiled.roots[0]]
             condition_passed = result.status == EvaluationStatus.SATISFIED
-            self._valid &= condition_passed | (result.status == EvaluationStatus.FAILED)
         target = self._progress.clamp(max=len(self.cfg.regions) - 1)
         stable = (
             self._valid
@@ -272,10 +272,12 @@ class OrderedPlacementObjective:
         """Return an isolated batch snapshot of history and current physical truth.
 
         Returns:
-            Predicate identity, milestone progress, current success and metrics.
-            All tensor values are clones; reading them does not advance time.
+            Predicate identity, milestone progress, current success and metrics,
+            plus the configured rule evidence when present. Raw measurement
+            validity is independent of pending window status. Reading the
+            owned tensors does not advance time.
         """
-        return {
+        outcome = {
             "predicate": self.cfg.type,
             "object_uid": self.cfg.object_uid,
             "goal_count": len(self.cfg.regions),
@@ -294,6 +296,20 @@ class OrderedPlacementObjective:
                 "angular_speed": self._angular_speed.clone(),
             },
         }
+        if (session := self._condition_session) is not None:
+            snapshot = session.snapshot()
+            outcome["condition"] = {
+                "evaluation_identity": session.compiled.identity,
+                "root": session.compiled.roots[0],
+                "scope": snapshot.scope,
+                "steps": snapshot.steps,
+                "revisions": snapshot.revisions,
+                "rules": {
+                    name: _rule_tensor_report(rule, owned=True)
+                    for name, rule in snapshot.rules.items()
+                },
+            }
+        return outcome
 
     def snapshot_row(self, env_id: int) -> dict[str, Any]:
         """Return one JSON-compatible row; nonfinite measurements become null.

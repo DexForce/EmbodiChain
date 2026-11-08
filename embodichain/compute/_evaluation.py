@@ -29,20 +29,20 @@ def _within_target(value: Any, target: Any, tolerance: float) -> Any:
     return abs(value - target) <= tolerance
 
 
-def _closed_temporal_status(mode: str, statuses: set[str], *, complete: bool) -> str:
-    if mode == "eventually" and "satisfied" in statuses:
-        return "satisfied"
-    if mode == "always" and "failed" in statuses:
-        return "failed"
-    if not complete or not statuses:
-        return "unavailable"
+def _temporal_window_decision(
+    mode: str, *, matched: Any, violated: Any, closing: Any, missing: Any
+) -> tuple[Any, Any]:
+    """Return satisfaction and failure masks for a scalar or batched control slot.
+
+    Match and violation inputs refer to the current qualified slot. For a hold,
+    the match additionally requires the caller's consecutive count. Missing
+    evidence prevents a decision by exhaustion, while a witness for eventual
+    success or an observed violation of always is conclusive immediately.
+    """
+    complete = closing & (missing ^ True)
     if mode == "always":
-        priority = ("unavailable", "unknown", "not_run")
-        fallback = "satisfied"
-    else:
-        priority = ("unknown", "not_run", "unavailable")
-        fallback = "failed"
-    return next((status for status in priority if status in statuses), fallback)
+        return matched & complete, violated
+    return matched, complete & (matched ^ True)
 
 
 def _compare(observed: Any, expected: Any, operator: str) -> bool:

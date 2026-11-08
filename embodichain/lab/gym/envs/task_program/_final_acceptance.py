@@ -123,8 +123,10 @@ def _evaluate_final_frame(
                 for name, sample in frame.fields.items()
             },
         )
+    measurements = {}
     conditions = tuple(
-        _evaluate_frame_rule(ref, spec, frame, device) for ref, spec in rules
+        _evaluate_frame_rule(ref, spec, frame, device, measurements)
+        for ref, spec in rules
     )
     return _FinalMeasurement(
         torch.stack(
@@ -137,10 +139,15 @@ def _evaluate_final_frame(
     )
 
 
-def _evaluate_frame_rule(ref, spec, frame, device):
+def _evaluate_frame_rule(ref, spec, frame, device, measurements):
     values, valid = _graph_frame_inputs(spec, frame)
-    results = spec.evaluate(
-        values, valid=valid, batch_size=len(frame.episode_ids), device=device
+    results = spec._evaluate(
+        values,
+        len(frame.episode_ids),
+        device,
+        valid,
+        None,
+        measurements=measurements,
     )
     return RuleResult(
         results[ref].status,
@@ -197,7 +204,12 @@ def _final_acceptance_rows(
     rows = [
         {
             "episode_id": episode_id,
-            "accepted": accepted[index],
+            "accepted": (
+                accepted[index]
+                and execution_eligible[index]
+                and program[index]
+                and physical[index] is True
+            ),
             "execution_eligible": execution_eligible[index],
             "program_accepted": program[index],
             "physical_satisfied": physical[index],

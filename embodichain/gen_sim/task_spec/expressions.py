@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Final
 
-from embodichain.compute._evaluation import _closed_temporal_status, _compare
+from embodichain.compute._evaluation import _compare, _temporal_window_decision
 
 from .canonicalization import json_snapshot
 
@@ -322,7 +322,11 @@ class TemporalCondition:
 
 @dataclass(frozen=True, slots=True)
 class PredicateEvaluation:
-    """One auditable predicate measurement outcome."""
+    """One auditable predicate measurement outcome.
+
+    Temporal evaluations also expose optional inclusive witness or violation
+    steps. These diagnostics are separate from the canonical serialized report.
+    """
 
     predicate_id: str
     predicate: str
@@ -331,6 +335,12 @@ class PredicateEvaluation:
     expected: Any
     reason: str
     evidence_refs: tuple[str, ...] = ()
+    witness_steps: tuple[int, int] | None = field(
+        default=None, compare=False, kw_only=True
+    )
+    violation_steps: tuple[int, int] | None = field(
+        default=None, compare=False, kw_only=True
+    )
 
     def __post_init__(self) -> None:
         _nonempty(self.predicate_id, "PredicateEvaluation.predicate_id")
@@ -451,10 +461,8 @@ def evaluate_temporal_condition(
     )
     if not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes)):
         raise TypeError("trajectory must be a sequence of observation mappings.")
-    window = trajectory[
-        expression.start_step : expression.start_step + expression.within_steps + 1
-    ]
-    if not window:
+    end = min(expression.end_step, len(trajectory) - 1)
+    if end < expression.start_step:
         return PredicateEvaluation(
             predicate_id=local_id,
             predicate=expression.predicate.name,
@@ -463,22 +471,52 @@ def evaluate_temporal_condition(
             expected=expression.predicate.expected,
             reason="bounded temporal window has no observations",
         )
-    evaluations = [
-        evaluate_predicate(
+    complete = end == expression.end_step
+    status = None
+    witness_steps = violation_steps = None
+    missing = set()
+    observed = []
+    evidence_refs = []
+    for step in range(expression.start_step, end + 1):
+        item = evaluate_predicate(
             expression.predicate,
-            snapshot,
+            trajectory[step],
             predicate_id=expression.predicate.predicate_id or local_id,
         )
-        for snapshot in window
-    ]
-    complete = len(window) >= expression.within_steps + 1
-    status = EvaluationStatus(
-        _closed_temporal_status(
+        observed.append(item.observed)
+        evidence_refs.extend(item.evidence_refs)
+        if status is not None:
+            continue
+        matched = item.status is EvaluationStatus.SATISFIED
+        violated = item.status is EvaluationStatus.FAILED
+        if not (matched or violated):
+            missing.add(item.status)
+        passed, failed = _temporal_window_decision(
             expression.mode,
-            {item.status.value for item in evaluations},
-            complete=complete,
+            matched=matched,
+            violated=violated,
+            closing=complete and step == end,
+            missing=bool(missing),
         )
-    )
+        if passed:
+            status = EvaluationStatus.SATISFIED
+            first = expression.start_step if expression.mode == "always" else step
+            witness_steps = (first, step)
+        elif failed:
+            status = EvaluationStatus.FAILED
+            if expression.mode == "always":
+                violation_steps = (step, step)
+    if status is None:
+        # Preserve TaskSpec's diagnostic precedence for a closed window
+        # containing an explicit unknown or not-run observation.
+        status = EvaluationStatus.UNAVAILABLE
+        if complete and not (
+            expression.mode == "always" and EvaluationStatus.UNAVAILABLE in missing
+        ):
+            if EvaluationStatus.UNKNOWN in missing:
+                status = EvaluationStatus.UNKNOWN
+            elif EvaluationStatus.NOT_RUN in missing:
+                status = EvaluationStatus.NOT_RUN
     if status is EvaluationStatus.UNAVAILABLE and not complete:
         reason = "bounded temporal window is incomplete"
     elif status is EvaluationStatus.UNKNOWN:
@@ -501,10 +539,12 @@ def evaluate_temporal_condition(
         predicate_id=local_id,
         predicate=expression.predicate.name,
         status=status,
-        observed=[item.observed for item in evaluations],
+        observed=observed,
         expected=expression.predicate.expected,
         reason=reason,
-        evidence_refs=tuple(ref for item in evaluations for ref in item.evidence_refs),
+        evidence_refs=tuple(evidence_refs),
+        witness_steps=witness_steps,
+        violation_steps=violation_steps,
     )
 
 
