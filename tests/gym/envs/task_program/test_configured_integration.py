@@ -3931,7 +3931,6 @@ def test_registered_predicate_is_shared_by_configured_consumers(evaluation_deplo
         EvaluationStatus.SATISFIED,
         EvaluationStatus.UNAVAILABLE,
     ]
-    consumer_rule = {**rule, "bindings": {"position": "position"}}
     assert cfg.objective.condition == "delivered"
     objective = OrderedPlacementObjective(
         cfg.objective,
@@ -3963,12 +3962,15 @@ def test_registered_predicate_is_shared_by_configured_consumers(evaluation_deplo
     manager = TerminationManager(
         RLTaskCfg(
             success={
-                "clear": ConditionCfg(
+                "delivered": ConditionCfg(
                     func=evaluation_condition,
                     params={
-                        "root": "clear",
-                        "rules": {"clear": consumer_rule},
-                        "sources": {"position": {"rigid_object": "can"}},
+                        "root": "delivered",
+                        "rules": {
+                            **component["graph"]["rules"],
+                            "near": {**rule, "bindings": {"position": field}},
+                        },
+                        "sources": {field: {"rigid_object": "can"}},
                         "registry": registry,
                     },
                 )
@@ -3977,7 +3979,26 @@ def test_registered_predicate_is_shared_by_configured_consumers(evaluation_deplo
         host,
     )
     manager.compute()
+    pending = manager.snapshot()
+    assert manager.task_state()[0].tolist() == [False, False]
+    assert manager.terminated.tolist() == [False, False]
+    assert pending["conditions"]["success.delivered"]["rules"]["delivered"][
+        "status"
+    ].tolist() == [EvaluationStatus.UNKNOWN, EvaluationStatus.UNKNOWN]
+    manager.snapshot()
+    manager.compute()
     assert manager.task_state()[0].tolist() == [True, False]
+    assert manager.terminated.tolist() == [True, False]
+    outcome = manager.snapshot()["conditions"]["success.delivered"]
+    assert outcome["evaluation_identity"]
+    torch.testing.assert_close(
+        outcome["rules"]["delivered"]["witness_revisions"],
+        session.snapshot().rules["delivered"].witness_revisions,
+    )
+    manager.reset([0])
+    manager.compute()
+    assert manager.task_state()[0].tolist() == [False, False]
+    assert outcome["rules"]["delivered"]["witness_revisions"][0].tolist() == [0, 1]
 
 
 def test_typed_evaluation_reads_link_frames_and_native_control_parts():

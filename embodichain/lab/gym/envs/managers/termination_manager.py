@@ -63,6 +63,7 @@ class TerminationManager(ManagerBase):
         self._terminated = torch.zeros_like(self._initialized)
         self._results: dict[str, ConditionResult] = {}
         self._rule_results: dict[str, Mapping[str, RuleResult]] = {}
+        self._rule_identities: dict[str, str | None] = {}
         self._steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
 
     @property
@@ -132,6 +133,14 @@ class TerminationManager(ManagerBase):
                 rule.status[ids] = EvaluationStatus.NOT_RUN
                 for metric in rule.metrics.values():
                     metric[ids] = float("nan") if metric.is_floating_point() else 0
+                for boundary in (
+                    rule.witness_steps,
+                    rule.witness_revisions,
+                    rule.violation_steps,
+                    rule.violation_revisions,
+                ):
+                    if boundary is not None:
+                        boundary[ids] = -1
         return {}
 
     def __str__(self) -> str:
@@ -212,6 +221,7 @@ class TerminationManager(ManagerBase):
                     owned.metrics[metric].copy_(value)
                 if result.rule_results:
                     self._rule_results[key] = result.rule_results
+                    self._rule_identities[key] = result.evaluation_identity
         self._initialized.fill_(True)
         self._failure |= ~self._valid
         self._terminated.copy_(self._accepted_success() | self._failure)
@@ -243,6 +253,7 @@ class TerminationManager(ManagerBase):
                     },
                     **(
                         {
+                            "evaluation_identity": self._rule_identities[name],
                             "rules": {
                                 rule_id: {
                                     "status": rule.status.clone(),
@@ -255,9 +266,19 @@ class TerminationManager(ManagerBase):
                                         for metric, tensor in rule.metrics.items()
                                     },
                                     "parameters": _json_metric(rule.parameters),
+                                    **{
+                                        key: boundary.clone()
+                                        for key in (
+                                            "witness_steps",
+                                            "witness_revisions",
+                                            "violation_steps",
+                                            "violation_revisions",
+                                        )
+                                        if (boundary := getattr(rule, key)) is not None
+                                    },
                                 }
                                 for rule_id, rule in self._rule_results[name].items()
-                            }
+                            },
                         }
                         if name in self._rule_results
                         else {}

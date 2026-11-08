@@ -42,12 +42,14 @@ class ConditionResult:
         valid: Boolean vector identifying available finite evidence.
         metrics: Named floating measurements with the same leading batch size.
         rule_results: Optional diagnostics from a compiled rule graph.
+        evaluation_identity: Content identity of the compiled rule graph, if supplied.
     """
 
     satisfied: torch.Tensor
     valid: torch.Tensor
     metrics: Mapping[str, torch.Tensor]
     rule_results: Mapping[str, RuleResult] = field(default_factory=dict)
+    evaluation_identity: str | None = None
 
     def __post_init__(self) -> None:
         if self.satisfied.dtype != torch.bool or self.satisfied.ndim != 1:

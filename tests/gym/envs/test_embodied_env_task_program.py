@@ -337,6 +337,11 @@ def test_live_final_acceptance_revokes_after_movement_but_reset_saves_the_termin
     assert terminal[1]["final_acceptance"]["program_accepted"] is True
     assert terminal[1]["final_acceptance"]["physical_satisfied"] is False
     assert terminal[1]["final_acceptance"]["accepted"] is False
+    report = terminal[1]["episode_outcome"]
+    assert report["execution"]["program_accepted"] is True
+    assert report["physical"]["final_acceptance"]["physical_satisfied"] is False
+    assert report["acceptance"]["accepted"] is False
+    assert report["persistence"] is None
     assert read_pose.call_count == 1
 
     position[:, 0] = torch.tensor([0.9, 0.1])
@@ -361,12 +366,18 @@ def test_live_final_acceptance_revokes_after_movement_but_reset_saves_the_termin
     env.dataset_manager = SimpleNamespace(
         available_modes=["save"], save_failed_episodes=False, apply=save
     )
-    env.reset(options={"reset_ids": [0]})
+    _, info = env.reset(options={"reset_ids": [0]})
+    assert info["reset_episode_outcomes"][0]["persistence"] == {
+        "dataset_selected": True,
+        "dataset": [],
+        "trajectory": None,
+    }
     assert env.episode_context.episode_ids == (1, 0)
     assert "final_acceptance" not in env.get_demo_episode_metadata(0)
     assert env.get_demo_episode_metadata(1) == terminal[1]
 
-    env.reset(options={"reset_ids": [1]})
+    _, info = env.reset(options={"reset_ids": [1]})
+    assert info["reset_episode_outcomes"][1]["persistence"]["dataset_selected"] is False
     assert read_pose.call_count == 3
     assert json.loads(artifact.read_text()) == [terminal[0]]
     assert env.episode_context.episode_ids == (1, 1)
@@ -431,6 +442,79 @@ def test_reset_seals_manually_completed_program_before_persistence_retry():
     env.reset(options={"reset_ids": [0]})
     assert recorded == [terminal]
     assert read_pose.call_count == 2
+
+
+def test_legacy_completion_is_sealed_once_and_subset_execution_keeps_peer():
+    from unittest.mock import Mock
+
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+
+    env, _, _ = _final_acceptance_env()
+    env.cfg.task_program = None
+    env._final_acceptance_rules = ()
+    env._mask_demo_action = lambda action, active: action
+    env.is_task_success = Mock(return_value=torch.tensor([True, False]))
+    validate = Mock(return_value=torch.tensor([True, False]))
+
+    def step(action):
+        env._demo_steps += env._demo_active_mask
+        flags = torch.zeros(2, dtype=torch.bool)
+        return {}, torch.zeros(2), flags, flags, {}
+
+    env.step = step
+    segments = (
+        DemoSegment(
+            actions=(torch.zeros(2, 1),),
+            validator=validate,
+            failure_policy="row_independent",
+        ),
+    )
+    execute_demo_episode(env, segments=segments)
+    first = env.get_demo_episode_metadata(0)["episode_outcome"]
+    failed = env.get_demo_episode_metadata(1)["episode_outcome"]
+    assert first["execution"]["source"] == "legacy_expert"
+    assert first["execution"]["segments"][0]["validator_accepted"] is True
+    assert failed["execution"]["segments"][0]["validator_accepted"] is False
+    assert failed["acceptance"]["reason"] == "segment_validation_failed"
+    assert first["physical"]["final_acceptance"] is None
+    env.get_info = lambda **kwargs: EmbodiedEnv.get_info(env, **kwargs)
+    for _ in range(2):
+        env.compute_task_state()
+        env.get_info()
+        env.evaluate()
+        assert env.get_demo_episode_metadata(0)["episode_outcome"] == first
+    validate.assert_called_once_with()
+    env.is_task_success.assert_called_once_with()
+
+    env.reset(options={"reset_ids": [1], "save_data": False})
+    execute_demo_episode(env, segments=segments, active_env_ids=[1])
+    assert env.get_demo_episode_metadata(0)["episode_outcome"] == first
+    retry = env.get_demo_episode_metadata(1)["episode_outcome"]
+    assert retry["identity"]["episode"] == 1
+    assert retry["identity"]["episode_uuid"] != failed["identity"]["episode_uuid"]
+    _, info = env.reset(options={"reset_ids": [0, 1], "save_data": False})
+    assert info["reset_episode_outcomes"][0]["acceptance"]["accepted"] is True
+    assert validate.call_count == 2
+    env.is_task_success.assert_called_once_with()
+
+
+def test_demo_execution_error_seals_abort_without_replacing_original_error():
+    from unittest.mock import Mock
+
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+
+    env, _, _ = _final_acceptance_env()
+    env.step = Mock(side_effect=ValueError("controller failure"))
+    with pytest.raises(RuntimeError, match="action generation") as exc_info:
+        execute_demo_episode(env)
+    assert str(exc_info.value.__cause__) == "controller failure"
+    result = env.get_demo_episode_metadata(0)["episode_outcome"]
+    assert result["termination"]["reason"] == "execution_error"
+    assert result["acceptance"]["accepted"] is False
+    assert (
+        result["physical"]["final_acceptance"]["conditions"]["near_support"]["status"]
+        == "not_run"
+    )
 
 
 def test_partial_reset_keeps_manual_completion_for_unreset_rows():

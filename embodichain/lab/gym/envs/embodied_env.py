@@ -72,6 +72,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoEpisodeResult,
     DemoSegment,
     DemoSegmentResult,
+    _as_bool_tuple,
 )
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.expert_trajectory import (
@@ -176,6 +177,31 @@ def _demo_last_rollout_flags(
         ),
         bool("truncated" in buffer.keys() and buffer["truncated"][env_id, length - 1]),
     )
+
+
+def _segment_outcome(segment: Mapping[str, Any], env_id: int) -> dict[str, Any]:
+    """Project cached bridge and legacy validator evidence onto one row."""
+    validation = segment.get("metadata", {}).get("validation")
+    if not isinstance(validation, Mapping):
+        validation = {}
+    env_ids = validation.get("env_ids", ())
+    index = env_ids.index(env_id) if env_id in env_ids else None
+    outcome = {
+        "segment_id": segment["segment_id"],
+        "attempt_id": segment.get("attempt_id"),
+        "start_step": segment.get("start_step"),
+        "end_step": segment.get("end_step"),
+        "kind": segment.get("outcome_kind"),
+        "accepted": segment["success"],
+        "reason": segment.get("failure_reason"),
+        "validator_accepted": segment.get("validator_accepted"),
+    }
+    for name in ("runtime_success", "post_policy_success", "accepted"):
+        mask = validation.get(f"{name}_mask")
+        outcome[f"bridge_{name}"] = (
+            mask[index] if index is not None and mask is not None else None
+        )
+    return outcome
 
 
 @configclass
@@ -1508,26 +1534,31 @@ class EmbodiedEnv(BaseEnv):
 
     def _task_success_before_reset(self, env_ids: torch.Tensor) -> torch.Tensor:
         rules = getattr(self, "_final_acceptance_rules", ())
-        if not rules:
+        rows = getattr(self, "_demo_episode_metadata", ())
+        if not rows and not rules:
             return super()._task_success_before_reset(env_ids)
         success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        episode_ids = self.episode_context.episode_ids
         pending = []
         sealed = []
         accepted = []
         for env_id in env_ids.tolist():
-            snapshot = self._demo_episode_metadata[env_id].get("final_acceptance")
-            if snapshot is None or snapshot["episode_id"] != episode_ids[env_id]:
+            snapshot = rows[env_id].get("episode_outcome")
+            if snapshot is None or snapshot["execution"]["source"] == "environment":
                 pending.append(env_id)
             else:
                 sealed.append(env_id)
-                accepted.append(snapshot["accepted"])
+                accepted.append(snapshot["acceptance"]["accepted"])
+        if pending:
+            if rules:
+                self._seal_final_acceptance_before_reset(
+                    pending, self.episode_context.episode_ids, success
+                )
+            else:
+                success = super()._task_success_before_reset(env_ids).clone()
         if sealed:
             success[sealed] = torch.tensor(
                 accepted, dtype=torch.bool, device=self.device
             )
-        if pending:
-            self._seal_final_acceptance_before_reset(pending, episode_ids, success)
         return success
 
     def _seal_final_acceptance_before_reset(
@@ -1571,10 +1602,145 @@ class EmbodiedEnv(BaseEnv):
                 truncated=truncated,
                 terminal_reason=reason,
             )
+            self._seal_episode_outcome(
+                env_id,
+                episode_id=episode_ids[env_id],
+                source="task_program",
+                eligible=not truncated,
+            )
+
+    def _seal_episode_outcome(
+        self,
+        env_id: int,
+        *,
+        episode_id: int,
+        source: str,
+        eligible: bool,
+        program_accepted: bool | None = None,
+        info: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Own the terminal row before any recorder or reset can consume it."""
+        metadata = self._demo_episode_metadata[env_id]
+        if "episode_outcome" in metadata:
+            return metadata["episode_outcome"]
+        for key in ("task_outcome", "physical_objective"):
+            if info is not None:
+                if key in info:
+                    metadata[key] = _outcome_row(info[key], env_id)
+            elif key not in metadata:
+                if key == "task_outcome":
+                    manager = getattr(self, "termination_manager", None)
+                    if manager is not None:
+                        metadata[key] = _outcome_row(manager.snapshot(), env_id)
+                else:
+                    objective = getattr(self, "physical_objective", None)
+                    if objective is not None:
+                        metadata[key] = objective.snapshot_row(env_id)
+        final = metadata.get("final_acceptance")
+        if final is not None:
+            program_accepted = final["program_accepted"]
+        if (
+            "task_outcome" in metadata
+            and getattr(self, "termination_manager", None) is not None
+        ):
+            metadata["task_initial_state"] = self.get_task_initial_state(env_id)
+        outcome = {
+            "identity": {
+                **{
+                    key: metadata.get(key)
+                    for key in (
+                        "run_uuid",
+                        "episode_uuid",
+                        "env_id",
+                        "seed",
+                        "program_run_id",
+                        "program_hash",
+                        "config_hash",
+                    )
+                },
+                "episode": episode_id,
+            },
+            "execution": {
+                "source": source,
+                "length": metadata["length"],
+                "completed": metadata["completed"],
+                "program_accepted": program_accepted,
+                "segments": [
+                    _segment_outcome(segment, env_id)
+                    for segment in metadata.get("segments", ())
+                ],
+            },
+            "physical": {
+                "objective": metadata.get("physical_objective"),
+                "conditions": metadata.get("task_outcome"),
+                "final_acceptance": final,
+            },
+            "acceptance": {
+                "eligible": eligible,
+                "accepted": metadata["success"],
+                "reason": metadata["terminal_reason"],
+            },
+            "termination": {
+                "terminated": metadata["terminated"],
+                "truncated": metadata["truncated"],
+                "reason": metadata["terminal_reason"],
+            },
+            "persistence": None,
+        }
+        metadata["episode_outcome"] = copy.deepcopy(outcome)
+        return metadata["episode_outcome"]
+
+    def _seal_step_outcomes(
+        self,
+        env_ids: torch.Tensor,
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
+        info: dict[str, Any],
+    ) -> None:
+        if (
+            "success" not in info
+            or not getattr(self, "_demo_episode_metadata", None)
+            or getattr(self, "_final_acceptance_rules", ())
+        ):
+            return
+        rows = env_ids.tolist()
+        success = _as_bool_tuple(info["success"], self.num_envs)
+        terminated = terminated[env_ids].tolist()
+        truncated = truncated[env_ids].tolist()
+        lengths = self._elapsed_steps[env_ids].tolist()
+        reports = info.setdefault("terminal_outcomes", {})
+        episode_ids = self.episode_context.episode_ids
+        for row, term, trunc, length in zip(
+            rows, terminated, truncated, lengths, strict=True
+        ):
+            metadata = self._demo_episode_metadata[row]
+            if "episode_outcome" in metadata:
+                reports[row] = copy.deepcopy(metadata["episode_outcome"])
+                continue
+            accepted = success[row] and not trunc
+            metadata.update(
+                length=length,
+                completed=accepted,
+                success=accepted,
+                terminated=term,
+                truncated=trunc,
+                terminal_reason=(
+                    "truncated" if trunc else "success" if accepted else "failure"
+                ),
+            )
+            reports[row] = copy.deepcopy(
+                self._seal_episode_outcome(
+                    row,
+                    episode_id=episode_ids[row],
+                    source="rl" if "task_outcome" in info else "environment",
+                    eligible=accepted,
+                    info=info,
+                )
+            )
 
     def _before_episode_reset(
         self, env_ids: Sequence[int] | None = None, **kwargs
-    ) -> None:
+    ) -> dict[int, dict[str, Any]]:
         if logger.logger.isEnabledFor(logging.DEBUG):
             logger.log_debug(
                 f"Initializing episode for env_ids: {env_ids}", color="blue"
@@ -1621,6 +1787,28 @@ class EmbodiedEnv(BaseEnv):
         # the source episode's initial state even when training exports fragments.
         _traj_buffer = getattr(self, "_traj_buffer", None)
         valid_recording_ids = self.episode_context.filter_recordable(env_ids_to_process)
+        terminal_outcomes = {}
+        if getattr(self, "_demo_episode_metadata", None):
+            episode_ids = self.episode_context.episode_ids
+            for env_id in env_ids_to_process.tolist():
+                metadata = self._demo_episode_metadata[env_id]
+                if (
+                    "episode_outcome" not in metadata
+                    and getattr(self, "_demo_steps", None) is not None
+                    and _demo_recorded_length(self, env_id) > 0
+                ):
+                    metadata.update(self.get_demo_episode_metadata(env_id))
+                    self._seal_episode_outcome(
+                        env_id,
+                        episode_id=episode_ids[env_id],
+                        source="rl" if "task_outcome" in metadata else "legacy_expert",
+                        eligible=not metadata["truncated"],
+                    )
+                if "episode_outcome" in metadata:
+                    terminal_outcomes[env_id] = copy.deepcopy(
+                        metadata["episode_outcome"]
+                    )
+        trajectories = {}
         if (
             save_data
             and _traj_buffer is not None
@@ -1628,9 +1816,11 @@ class EmbodiedEnv(BaseEnv):
         ):
             with self._profiler.section("trajectory_save"):
                 for env_id in valid_recording_ids.tolist():
-                    self._save_trajectory_for_env(env_id)
+                    trajectories[env_id] = self._save_trajectory_for_env(env_id)
 
         # Save dataset before clearing buffers for environments that are being reset
+        selected = set()
+        receipts = {}
         if env_ids_to_commit.numel() > 0 and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
                 if commit_env_ids is not None:
@@ -1660,9 +1850,17 @@ class EmbodiedEnv(BaseEnv):
                 )
                 if env_ids_to_save.numel() > 0:
                     with self._profiler.section("dataset_save"):
-                        self.dataset_manager.apply(
-                            mode="save",
-                            env_ids=env_ids_to_save,
+                        selected = (
+                            set(env_ids_to_save.tolist())
+                            if terminal_outcomes
+                            else set()
+                        )
+                        receipts = (
+                            self.dataset_manager.apply(
+                                mode="save",
+                                env_ids=env_ids_to_save,
+                            )
+                            or {}
                         )
 
         # Save recorded camera data before resetting
@@ -1711,6 +1909,13 @@ class EmbodiedEnv(BaseEnv):
             self._demo_steps[demo_ids] = 0
 
         self.episode_success_status.index_fill_(0, env_ids_to_process, False)
+        for env_id, outcome in terminal_outcomes.items():
+            outcome["persistence"] = {
+                "dataset_selected": env_id in selected,
+                "dataset": receipts.get(env_id, []),
+                "trajectory": trajectories.get(env_id),
+            }
+        return terminal_outcomes
 
     def _initialize_episode(
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
@@ -1863,6 +2068,7 @@ class EmbodiedEnv(BaseEnv):
         episode_index: int = 0,
         execution_cfg: DemoExecutionCfg | None = None,
         attempt_id: int = 0,
+        active_env_ids: Sequence[int] | None = None,
     ) -> None:
         """Start annotation metadata for a new demonstration episode."""
         if execution_cfg is None:
@@ -1874,24 +2080,38 @@ class EmbodiedEnv(BaseEnv):
         self._demo_program_run_id = f"{episode_index}:{attempt_id}"
         self._pending_final_acceptance = None
         self._final_program_completion = None
-        self._sealed_final_observations = {}
+        selected = range(self.num_envs) if active_env_ids is None else active_env_ids
+        final_observations = getattr(self, "_sealed_final_observations", {})
+        self._sealed_final_observations = final_observations
         self._demo_active_segment_id = 0
         self._demo_active_segment_ids.zero_()
         self._demo_active_mask.fill_(True)
         self._demo_segment_participants.fill_(False)
         self._demo_active_segment_start_steps = self._demo_steps.clone()
         self._demo_active_rollout_start_steps = self.rollout_steps.clone()
-        self._demo_episode_metadata = [
-            self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
-        ]
+        for env_id in selected:
+            final_observations.pop(env_id, None)
+            self._demo_episode_metadata[env_id] = self._new_demo_episode_metadata(
+                env_id
+            )
         bridge = getattr(self, "_active_task_program_bridge", None)
         program = getattr(bridge, "_program", None)
         if program is not None:
             from embodichain.data_pipeline.recording import stable_config_hash
 
             program_hash = stable_config_hash(program)
-            for metadata in self._demo_episode_metadata:
-                metadata["program_hash"] = program_hash
+            for env_id in selected:
+                self._demo_episode_metadata[env_id]["program_hash"] = program_hash
+
+    def _capture_demo_terminal_physical(
+        self, env_ids: list[int], info: Mapping[str, Any]
+    ) -> None:
+        for key in ("task_outcome", "physical_objective"):
+            if key in info:
+                for env_id in env_ids:
+                    self._demo_episode_metadata[env_id][key] = _outcome_row(
+                        info[key], env_id
+                    )
 
     def _begin_demo_segment_recording(
         self, segment_id: int, segment: DemoSegment
@@ -1966,8 +2186,8 @@ class EmbodiedEnv(BaseEnv):
         """Finalize per-environment metadata after demonstration execution."""
         final_rows = None
         rules = getattr(self, "_final_acceptance_rules", ())
+        episode_ids = self.episode_context.episode_ids
         if rules:
-            episode_ids = self.episode_context.episode_ids
             pending = getattr(self, "_pending_final_acceptance", None)
             completion, measurement = None, None
             eligible = (False,) * self.num_envs
@@ -1986,8 +2206,17 @@ class EmbodiedEnv(BaseEnv):
             from embodichain.data_pipeline.recording import stable_config_hash
 
             program_hash = stable_config_hash(program)
+        program_accepted = (
+            self._task_program_completion_mask().tolist()
+            if program is not None and final_rows is None
+            else None
+        )
         for env_id in range(self.num_envs):
             metadata = self._demo_episode_metadata[env_id]
+            if "episode_outcome" in metadata or (
+                result.terminal_reasons and result.terminal_reasons[env_id] == "pending"
+            ):
+                continue
             if final_rows is not None:
                 sealed = metadata.get("final_acceptance")
                 if (
@@ -2075,6 +2304,19 @@ class EmbodiedEnv(BaseEnv):
                     metadata["source_episode_uuid"] = next(iter(source_uuids))
                 elif source_uuids:
                     metadata["source_episode_uuids"] = sorted(source_uuids)
+            self._seal_episode_outcome(
+                env_id,
+                episode_id=episode_ids[env_id],
+                source="task_program" if bridge is not None else "legacy_expert",
+                eligible=(
+                    result.execution_eligible[env_id]
+                    if result.execution_eligible
+                    else completed
+                ),
+                program_accepted=(
+                    program_accepted[env_id] if program_accepted is not None else None
+                ),
+            )
 
     def get_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Return segment-aware metadata for one buffered episode.
@@ -2090,13 +2332,11 @@ class EmbodiedEnv(BaseEnv):
         """
         metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
         metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
-        metadata["segments"] = [
-            dict(segment)
-            for segment in self._demo_episode_metadata[env_id].get("segments", [])
-        ]
+        metadata.setdefault("segments", [])
         termination_manager = getattr(self, "termination_manager", None)
-        outcome = None
-        if termination_manager is not None:
+        terminal = "episode_outcome" in metadata
+        outcome = metadata.get("task_outcome")
+        if termination_manager is not None and not terminal:
             outcome = _outcome_row(termination_manager.snapshot(), env_id)
             metadata["task_initial_state"] = self.get_task_initial_state(env_id)
             metadata["task_outcome"] = outcome
@@ -2119,7 +2359,7 @@ class EmbodiedEnv(BaseEnv):
                     truncated=bool(outcome["truncation"]),
                 )
         sealed = metadata.get("final_acceptance")
-        has_terminal_acceptance = (
+        has_terminal_acceptance = terminal or (
             sealed is not None
             and sealed["episode_id"] == metadata["episode_context"]["episode"]
         )
@@ -2194,7 +2434,7 @@ class EmbodiedEnv(BaseEnv):
                 }
             ]
         objective = getattr(self, "physical_objective", None)
-        if objective is not None:
+        if objective is not None and not terminal:
             metadata["physical_objective"] = objective.snapshot_row(env_id)
         return metadata
 

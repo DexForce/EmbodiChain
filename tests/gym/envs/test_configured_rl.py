@@ -443,6 +443,9 @@ def test_step_uses_one_condition_snapshot_for_obs_reward_flags_and_recording(
     monkeypatch, ignore_terminations
 ):
     env = _env()
+    env._demo_episode_metadata = [
+        env._new_demo_episode_metadata(row) for row in range(2)
+    ]
     env.cfg.events = None
     env.cfg.ignore_terminations = ignore_terminations
     env.cfg.rl_task.success["count"] = ConditionCfg(func=_CountingCondition)
@@ -476,6 +479,20 @@ def test_step_uses_one_condition_snapshot_for_obs_reward_flags_and_recording(
     assert info["task_outcome"]["truncation"].tolist() == truncated.tolist()
     assert info["metrics"]["success.count.count"].tolist() == [1, 1]
     assert env.termination_manager.snapshot()["steps"].tolist() == [1, 1]
+    reports = info["terminal_outcomes"]
+    assert set(reports) == ({1} if ignore_terminations else {0, 1})
+    assert reports[1]["physical"]["conditions"]["physical_success"] is True
+    assert reports[1]["acceptance"]["accepted"] is False
+    assert reports[1]["termination"]["truncated"] is True
+    assert reports[1]["persistence"] is None
+    reports[1]["physical"]["conditions"]["steps"] = -1
+    env.termination_manager.reset([1])
+    assert (
+        env.get_demo_episode_metadata(1)["episode_outcome"]["physical"]["conditions"][
+            "steps"
+        ]
+        == 1
+    )
 
 
 @pytest.mark.parametrize("ignore_terminations", [False, True])

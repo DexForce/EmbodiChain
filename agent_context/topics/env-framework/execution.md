@@ -100,9 +100,17 @@ stable online language IDs. Language intent does not establish physical success.
   runtime, post-policy, and validator results. When the deployment selects
   `evaluation.final_acceptance`, each query also checks the selected predicates
   against fresh physical observations.
-- The demo executor seals the terminal result and its measurement per episode
-  row. `reset()` uses the sealed result before clearing the active bridge.
-  For a manually driven completed bridge, reset seals the result before saving.
+- Demo completion seals each row's execution, measured outcome, acceptance and
+  termination under `episode_outcome`. Segment entries include cached runtime,
+  post-policy and validator decisions when available. The same report is
+  sealed from RL's cached state at the done transition and is exposed through
+  step info's `terminal_outcomes`. Reset consumes selected reports before
+  clearing rows and returns them with receipts in `reset_episode_outcomes`.
+  A manually driven completed bridge is sealed before saving.
+- An explicitly configured RL `evaluation_condition` uses the shared
+  `RuleSession` for temporal roots. Only transition computation consumes a
+  slot. Pending windows remain nonterminal, and row resets restart their
+  windows without clearing peer evidence.
 - `DemoSegmentResult.successes` is the persisted segment acceptance authority.
   `DemoExecutionCfg` keeps continuous episodes as the default and can instead
   make each eligible natural segment an independent dataset fragment. This

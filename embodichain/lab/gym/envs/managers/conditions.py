@@ -27,6 +27,7 @@ from embodichain.lab.evaluation import (
     EvaluationSpec,
     EvaluationStatus,
     PredicateRegistry,
+    RuleSession,
     builtin_predicates,
 )
 
@@ -146,7 +147,7 @@ class object_below_height(Functor):
 
 
 class evaluation_condition(Functor):
-    """Adapt a compiled instantaneous rule to an ordinary RL condition.
+    """Adapt a compiled rule to an ordinary RL condition.
 
     Sources select a measured rigid-object position or a reset-owned tensor
     attribute. A trusted Python registry may extend the built-in predicate set.
@@ -188,8 +189,18 @@ class evaluation_condition(Functor):
             field_kinds=field_kinds,
             field_layouts={},
         ).select(root)
-        if self._compiled.stateful:
-            raise ValueError("RL evaluation conditions require instantaneous rules.")
+        self._session = (
+            RuleSession(
+                self._compiled,
+                env_ids=range(env.num_envs),
+                episode_ids=(0,) * env.num_envs,
+                scope=f"rl:{root}",
+                device=env.device,
+            )
+            if self._compiled.stateful
+            else None
+        )
+        self._sample = 0
         self._object_fields = {}
         self._attribute_fields = {}
         for field in self._compiled.required_fields:
@@ -200,6 +211,17 @@ class evaluation_condition(Functor):
                 if uid not in self._objects:
                     self._objects[uid] = _rigid_object(env, SceneEntityCfg(uid=uid))
                 self._object_fields.setdefault(uid, []).append(field)
+
+    def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
+        """Restart compiled windows for the selected environment rows."""
+        session = self._session
+        if session is not None:
+            rows = (
+                session.env_ids
+                if env_ids is None
+                else tuple(torch.as_tensor(env_ids).tolist())
+            )
+            session.reset(rows, tuple(session.episode_ids[row] + 1 for row in rows))
 
     def __call__(
         self,
@@ -219,14 +241,26 @@ class evaluation_condition(Functor):
             value = getattr(env, attribute, None)
             if isinstance(value, torch.Tensor):
                 values.update(dict.fromkeys(fields, value))
-        result = self._compiled.evaluate(
-            values, batch_size=env.num_envs, device=env.device
-        )
+        if self._session is None:
+            result = self._compiled.evaluate(
+                values, batch_size=env.num_envs, device=env.device
+            )
+        else:
+            self._session.advance(
+                self._sample,
+                values,
+                revisions=torch.full(
+                    (env.num_envs,), self._sample, dtype=torch.long, device=env.device
+                ),
+                episode_ids=self._session.episode_ids,
+            )
+            self._sample += 1
+            result = self._session.snapshot().rules
         status = result[root].status
         return ConditionResult(
             status == EvaluationStatus.SATISFIED,
-            (status == EvaluationStatus.FAILED)
-            | (status == EvaluationStatus.SATISFIED),
+            status != EvaluationStatus.UNAVAILABLE,
             {"status": status},
             result,
+            self._compiled.identity,
         )
