@@ -2078,7 +2078,7 @@
       "kind": "module",
       "topic_ids": [],
       "summary": "Defines parallel-jaw gripper models and grasp-pose generation interfaces.",
-      "details": "Input: target meshes and explicit parallel-jaw gripper geometry. Output: candidate grasp poses or annotated contact pairs, depending on the operation. Entry: the public AntipodalGraspPoseGenerator API for generation, or embodichain annotate-grasp for interactive region annotation. Shared interfaces and gripper models are defined by graspkit.pose_generator.",
+      "details": "Input: target meshes and explicit parallel-jaw gripper geometry. Output: candidate grasp poses or annotated contact pairs, depending on the operation. Entry: the public AntipodalGraspPoseGenerator API for generation, or embodichain annotate-grasp for interactive region annotation. Interfaces live in graspkit.pose_generator, physical types in graspkit.gripper_models, and concrete defaults beside robot assets in embodichain_robots.",
       "boundaries": [
         "A geometric grasp candidate is not proof of successful physical grasping."
       ],
@@ -2999,14 +2999,14 @@
       "label": "Parallel-jaw gripper model",
       "kind": "class",
       "topic_ids": [],
-      "summary": "Defines physical gripper dimensions independently of the sampling algorithm.",
-      "details": "Input: opening limits, finger dimensions, palm depth, and a model identifier. Output: validated geometry configuration shared by compatible parallel-jaw generators. Entry: ParallelJawGripperModelCfg or get_parallel_jaw_gripper_model().",
+      "summary": "Defines contact-width bounds and native hand geometry independently of sampling policy.",
+      "details": "Input: contact-width bounds, native root/collision/pad links and contact-frame calibration. Output: a validated physical description. Concrete values come from model-owned robot defaults; GraspKit owns the shared type and algorithms. Entry: ParallelJawGripperModelCfg.",
       "boundaries": [
         "A gripper geometry description is not a robot controller."
       ],
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/pose_generator.py",
+          "path": "embodichain/toolkits/graspkit/gripper_models.py",
           "symbol": "ParallelJawGripperModelCfg",
           "start_line": 49,
           "end_line": 49,
@@ -5530,7 +5530,7 @@
       "source": "antipodal-generator",
       "target": "gripper-model",
       "relation": "reads",
-      "description": "Reads physical gripper dimensions when preparing a mesh backend.",
+      "description": "Reads contact-width bounds when preparing a mesh backend.",
       "provenance": "source-reviewed",
       "scope": "The model configuration is separate from algorithm and collision policies.",
       "evidence": [

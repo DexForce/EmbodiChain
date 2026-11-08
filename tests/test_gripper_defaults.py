@@ -421,7 +421,7 @@ def test_generic_dual_arm_composition_retains_independent_bound_hands(tmp_path):
     )
 
 
-@pytest.mark.parametrize("form", ["array", "tensor", "list"])
+@pytest.mark.parametrize("form", ["array", "tensor", "list", "regex"])
 def test_generic_dual_bound_hands_preserve_source_order_limit_overrides(tmp_path, form):
     import numpy as np
     import torch
@@ -441,7 +441,11 @@ def test_generic_dual_bound_hands_preserve_source_order_limit_overrides(tmp_path
         if form == "array"
         else torch.from_numpy(rows) if form == "tensor" else rows.tolist()
     )
+    if form == "regex":
+        base.qpos_limits = {
+            "left_inner_finger_joint|right_inner_finger_joint": [-10.0, 10.0]
+        }
     dual = build_dual_arm_cfg(base, {"left": np.eye(4), "right": np.eye(4)})
-    assert len(dual.qpos_limits) == 24
+    assert len(dual.qpos_limits) == (4 if form == "regex" else 24)
     assert all(value == [-10.0, 10.0] for value in dual.qpos_limits.values())
     prepare_robot_grippers(dual)

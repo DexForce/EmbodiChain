@@ -432,16 +432,20 @@ def _populate_dual_cfg(
             }
             cfg.gripper_bindings[new_instance] = binding
     if base_cfg.gripper_bindings and base_cfg.qpos_limits is not None:
-        limits = base_cfg.qpos_limits
-        if not isinstance(limits, dict):
-            import xml.etree.ElementTree as ET
+        import xml.etree.ElementTree as ET
+        from embodichain.utils.string import resolve_matching_names_values
 
-            source_path = base_cfg.fpath or deepcopy(base_cfg.urdf_cfg).assemble_urdf()
-            source_names = [
-                joint.get("name")
-                for joint in ET.parse(source_path).findall("joint")
-                if joint.get("type") != "fixed"
-            ]
+        limits = base_cfg.qpos_limits
+        source_path = base_cfg.fpath or deepcopy(base_cfg.urdf_cfg).assemble_urdf()
+        source_names = [
+            joint.get("name")
+            for joint in ET.parse(source_path).findall("joint")
+            if joint.get("type") != "fixed"
+        ]
+        if isinstance(limits, dict):
+            _, names, values = resolve_matching_names_values(limits, source_names)
+            limits = dict(zip(names, values))
+        else:
             if hasattr(limits, "detach"):
                 limits = limits.detach().cpu().numpy()
             rows = np.asarray(limits)
