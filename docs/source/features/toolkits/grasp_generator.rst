@@ -52,7 +52,7 @@ Command-line arguments are parsed with ``argparse`` to select the number of para
 
 .. literalinclude:: ../../../../scripts/tutorials/grasp/grasp_generator.py
    :language: python
-   :start-at: def parse_arguments():
+   :start-at: def parse_arguments(
    :end-at: return parser.parse_args()
 
 The parsed arguments are passed to ``initialize_simulation``, which builds a :class:`SimulationManagerCfg` and creates the :class:`SimulationManager` instance. When ray tracing is enabled a directional :class:`cfg.LightCfg` is also added to the scene.
