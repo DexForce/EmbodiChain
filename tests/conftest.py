@@ -102,6 +102,23 @@ def pytest_configure(config):
         # a CUDA/Vulkan context merely because pytest has started.
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Stop DexSim's process-wide workers before Python unloads native modules."""
+    import gc
+    import sys
+
+    dexsim = sys.modules.get("dexsim")
+    if dexsim is None:
+        return
+    manager_module = sys.modules.get("embodichain.lab.sim.sim_manager")
+    if manager_module is not None:
+        manager_module.SimulationManager.flush_cleanup_queue()
+    gc.collect()
+    if dexsim.get_world_num() == 0:
+        dexsim.quit()
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Record discovery or reject a changed selection before any test setup."""
