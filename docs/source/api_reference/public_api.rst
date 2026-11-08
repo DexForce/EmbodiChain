@@ -5132,47 +5132,20 @@ One Atomic Skill executes a pinned demonstration asset through the ordinary plan
 Image semantic planning
 -----------------------
 
-The image frontend interprets visible objects and task intent, then emits a
-validated pick/place graph and declaration coverage without starting simulation.
-Visual IDs still require a runtime scene and robot integration before execution.
-
-.. currentmodule:: embodichain.gen_sim.task_engine.image_planning
-
-.. autosummary::
-
-   generate_semantic_task_graph_from_image
-
-.. autofunction:: generate_semantic_task_graph_from_image
-
-The command ``embodichain task-engine --image IMAGE --instruction TEXT
---output DIRECTORY`` writes the declarations and
-current standalone HTML viewer to a fresh directory.
-
-.. currentmodule:: embodichain.gen_sim.task_engine.cli
-
-.. autosummary::
-
-   main
-
-.. autofunction:: main
+See :doc:`/features/generative_sim/task_engine` for the image-to-graph workflow
+and :doc:`embodichain/embodichain.gen_sim.task_engine` for the curated image
+planning and CLI API entries. Plans use the full canonical call catalog and
+retain explicit pending bindings before runtime scene/robot integration.
 
 Deferred image semantic planning
 --------------------------------
 
-Image plans retain the complete task and explicitly distinguish visual evidence,
-instruction-declared objects and runtime binding requirements. Semantic validity
-is independent of physical acceptance or runtime readiness. Failed generation
-retains attempts in :class:`~embodichain.gen_sim.task_engine.image_planning.SemanticPlanningError`.
+Image-plan validation is documented in
+:doc:`embodichain/embodichain.gen_sim.task_engine`. Semantic validity remains
+independent of physical acceptance and runtime readiness.
 
-.. currentmodule:: embodichain.gen_sim.task_engine.image_planning
-
-.. autoclass:: SemanticPlanningError
-
-.. currentmodule:: embodichain.gen_sim.task_engine.semantic_plan_validation
-
-.. autofunction:: validate_semantic_plan
-
-.. autofunction:: semantic_plan_rules
+Semantic Call planning catalog
+------------------------------
 
 The following declarations are JSON-only and import without a simulator. They
 are shared by the image planner and configured Semantic Call lowerers; live

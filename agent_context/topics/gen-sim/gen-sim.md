@@ -11,7 +11,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
-| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `simready` |
+| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `simready`, `task-engine` |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
@@ -49,6 +49,9 @@ quarter turns because their vocabulary is axis-aligned.
 The SimReady Asset Pipeline uses the `simready` CLI and `asset_engine` Python
 namespace. Its [user guide](../../../docs/source/features/generative_sim/asset_engine.md)
 owns input selection, processing settings, artifacts and simulation handoff.
+Instruction/image semantic planning belongs to
+[Task Engine](../task-engine/task-engine.md); its unbound graph output retains
+pending runtime bindings rather than creating a scene or executable deployment.
 
 ## Durable scene boundary
 

@@ -1,13 +1,14 @@
 Generative Simulation
 =====================
 
-Prepare an existing mesh with the SimReady Asset Pipeline, or use Scene Engine
-to generate and edit a complete scene from image/text inputs. The asset guide
-also explains the separate articulated-asset service and the path from prepared
-assets into shared simulation scene services.
+Prepare existing meshes with the SimReady Asset Pipeline, generate and edit
+scenes with Scene Engine, or use Task Engine to interpret an instruction and
+photograph into a semantic task graph. Their guides explain the separate asset,
+scene, declaration, and execution responsibilities and the handoff to simulation.
 
 .. toctree::
    :maxdepth: 2
 
    SimReady Asset Pipeline <asset_engine.md>
    Scene Engine <scene_engine.md>
+   Task Engine <task_engine.md>

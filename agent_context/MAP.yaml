@@ -571,7 +571,7 @@ topics:
   - embodichain/gen_sim/gradio_ui/app_env.py
   - embodichain/gen_sim/task_engine/evidence.py
   watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
-  related_topics: [simulation-system, data-assets, env-framework]
+  related_topics: [simulation-system, data-assets, env-framework, task-engine]
   status: active
 - id: data-assets
   title: Data Assets

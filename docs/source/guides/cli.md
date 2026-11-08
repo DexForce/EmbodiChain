@@ -68,6 +68,36 @@ settings, format selection, metadata, and preview commands.
 
 ---
 
+(cli-task-engine)=
+## Task Engine
+
+Plan a canonical Semantic Call graph from a scene photograph and a complete
+instruction, then inspect it in an offline HTML viewer:
+
+```bash
+embodichain task-engine \
+    --image /path/to/tabletop.jpg \
+    --instruction "Pick up the red cup and place it on the tray." \
+    --task-id cup_on_tray \
+    --output outputs/task_engine/cup_on_tray
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--image` | *(required)* | Existing PNG/JPEG photograph |
+| `--instruction` | *(required)* | Complete task instruction |
+| `--output` | *(required)* | Fresh output directory; existing directories are rejected |
+| `--task-id` | `image_task` | Shared task identity |
+
+Configure the shared GenSim model settings before running. The result includes
+candidates, TaskSpec, image evidence, a call-catalog snapshot, the semantic graph,
+validation and pending bindings, a run manifest, and `semantic_task_graph.html`.
+Its execution status is `not_run`; scene/robot binding and physical acceptance
+belong to a later integration. See [Task Engine](../features/generative_sim/task_engine.md)
+for configuration, artifact meanings, Python use, and the execution handoff.
+
+---
+
 (cli-preview-asset)=
 ## Preview Asset
 
