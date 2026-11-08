@@ -51,6 +51,10 @@ Task producer obligations derive from the existing task affordances and catalog
 capabilities rather than per-E-type construction branches. Explicit part parents
 retain drawer/handle identity; step-result selectors inherit earlier source IDs.
 This semantic-only checker does not weaken historical grounded coverage checks.
+Requested destinations and relations must be realized by each subject's producing
+call, rather than an unrelated pickup annotation. Terminal holds are checked at
+the source step boundary; coordinated hold is rejected until a matching hold
+call is available in the catalog.
 
 Image entities distinguish `observed`, `instruction_declared` and
 `runtime_required`; only observed entities carry normalized boxes. Ambiguous references retain

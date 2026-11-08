@@ -61,6 +61,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("--task-id", default="image_task")
     args = parser.parse_args(argv)
+    args.image = args.image.expanduser().resolve(strict=True)
     started = perf_counter()
     with WorkflowRunArtifacts(args.output) as artifacts:
         try:

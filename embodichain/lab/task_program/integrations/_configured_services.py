@@ -457,6 +457,13 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
             raise TypeError(
                 "Articulation-link Slide requires an exact SlideOptions template."
             )
+        arguments = dict(call.arguments)
+        configured_arguments = {"handle": self._link_entity_id}
+        if arguments != configured_arguments:
+            raise ValueError(
+                f"{self.call_id} arguments must name only the configured handle; "
+                "motion options belong to the selected policy preset."
+            )
         validate_semantic_call_payload(
             {
                 "kind": "registered",
@@ -465,13 +472,6 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
                 "resources": dict(call.resources),
             }
         )
-        arguments = dict(call.arguments)
-        configured_arguments = {"handle": self._link_entity_id}
-        if arguments != configured_arguments:
-            raise ValueError(
-                f"{self.call_id} arguments must name only the configured handle; "
-                "motion options belong to the selected policy preset."
-            )
         target_pose: torch.Tensor | SceneEntityPose
         if self._target_pose_mode == "live":
             target_pose = SceneEntityPose(self._link_entity_id)

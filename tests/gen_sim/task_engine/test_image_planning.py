@@ -325,15 +325,28 @@ def test_catalog_is_detached_and_does_not_import_runtime(tmp_path):
     assert semantic_planning_catalog()["calls"]
 
 
+@pytest.mark.parametrize("home_path", [False, True])
 def test_preview_and_existing_output_remain_read_only(
-    source_image, tmp_path, monkeypatch
+    source_image, tmp_path, monkeypatch, home_path
 ):
     from embodichain.cli.main import main
     from embodichain.gen_sim.task_engine import cli
 
-    result = _plan(source_image)
+    def extra(step, grounding, plan):
+        grounding["objects"].append(
+            dict(
+                id="extra",
+                description="unbound decoration",
+                bbox=[0, 0, 100, 100],
+                provenance="observed",
+            )
+        )
+
+    result = _plan(source_image, mutate=extra)
+    monkeypatch.setenv("HOME", str(source_image.parent))
 
     def generate(*a, **kw):
+        assert a[0] == source_image.resolve()
         assert "model" not in kw
         return deepcopy(result)
 
@@ -342,7 +355,7 @@ def test_preview_and_existing_output_remain_read_only(
     argv = [
         "task-engine",
         "--image",
-        str(source_image),
+        "~/scene.png" if home_path else str(source_image),
         "--instruction",
         "执行测试任务",
         "--task-id",
@@ -352,6 +365,7 @@ def test_preview_and_existing_output_remain_read_only(
     ]
     main(argv)
     html = (output / "semantic_task_graph.html").read_text()
+    assert "extra" in html
     assert "semantic_plan_validation/v1" in html and "data:image/png;base64," in html
     with pytest.raises(FileExistsError):
         main(argv)
@@ -552,3 +566,74 @@ def test_single_repair_gets_all_independent_symbolic_state_errors(source_image):
         "missing_held_object",
     }
     assert {item["node_id"] for item in diagnostics["errors"]} == {"n1", "n2"}
+
+
+@pytest.mark.parametrize("arm", ["left", "right"])
+def test_named_arm_requests_keep_canonical_resource_ids(source_image, arm):
+    def mutate(step, grounding, plan):
+        step["required_arm"] = arm + "_arm"
+        for node in plan["nodes"]:
+            node["call"]["resources"] = {"primary": arm}
+
+    assert (
+        _plan(source_image, mutate=mutate)["semantic_graph_validation"]["coverage"][
+            "semantic_status"
+        ]
+        == "valid"
+    )
+
+
+@pytest.mark.parametrize("wrong_relation", [False, True])
+def test_pick_annotation_cannot_cover_wrong_placement(source_image, wrong_relation):
+    def mutate(step, grounding, plan):
+        plan["nodes"][0]["semantic"].update(reference="tray", relation="inside")
+        placement = plan["nodes"][1]
+        if wrong_relation:
+            placement["call"].pop("inside")
+            placement["call"]["on"] = "on_tray"
+            placement["semantic"]["relation"] = "on"
+        else:
+            grounding["objects"].append(
+                dict(
+                    id="elsewhere",
+                    description="another destination",
+                    bbox=[0, 0, 100, 100],
+                    provenance="observed",
+                )
+            )
+            placement["call"]["inside"] = "inside_elsewhere"
+            placement["semantic"]["reference"] = "elsewhere"
+
+    with pytest.raises(SemanticPlanningError, match="target/relation"):
+        _plan(source_image, mutate=mutate)
+
+
+def test_coordinated_release_cannot_satisfy_requested_hold(source_image):
+    def mutate(step, grounding, plan):
+        step["terminal_behavior"] = "hold"
+        plan["nodes"][0]["semantic"]["intent"]["terminal_behavior"] = "hold"
+
+    with pytest.raises(SemanticPlanningError, match="Coordinated hold"):
+        _plan(source_image, "E5", mutate)
+
+
+@pytest.mark.parametrize("malformed", [None, [], "invalid"])
+def test_malformed_intent_gets_one_diagnostic_repair(source_image, malformed):
+    step, grounding, plan = _fixture()
+    broken = deepcopy(plan)
+    broken["nodes"][0]["semantic"]["intent"] = malformed
+    attempts = []
+
+    def provider(**kwargs):
+        attempts.append(json.loads(kwargs["user_prompt"]))
+        return json.dumps(broken if len(attempts) == 1 else plan)
+
+    result = generate_semantic_task_graph_from_image(
+        source_image,
+        "执行测试任务",
+        instruction_caller=lambda **_: dict(steps=[step]),
+        image_caller=lambda **_: json.dumps(grounding),
+        planning_caller=provider,
+    )
+    assert len(attempts) == 2 and attempts[1]["repair_errors"]
+    assert result["semantic_graph_validation"]["coverage"]["semantic_status"] == "valid"

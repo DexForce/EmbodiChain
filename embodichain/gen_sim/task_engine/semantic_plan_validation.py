@@ -143,6 +143,13 @@ def validate_semantic_plan(
 
     if set(annotations) != set(nodes):
         raise ValueError("Every node requires exactly one semantic annotation")
+    for annotation in annotations.values():
+        if (
+            type(annotation) is not dict
+            or set(annotation) != {"object", "reference", "relation", "intent"}
+            or type(annotation["intent"]) is not dict
+        ):
+            raise ValueError("Invalid semantic annotation: intent must be a dictionary")
     if set(g["id"] for g in graph["task_groups"]) != set(steps):
         raise ValueError("Graph must retain every source step")
     _validate_reference_identity(
@@ -199,6 +206,7 @@ def validate_semantic_plan(
         if key in bound_kinds:
             raise ValueError("Duplicate binding requirement")
         bound_kinds[key] = binding
+    held_after: dict[str, dict[str, str]] = {}
     held = {}
     last_object_node = {}
     effects = {}
@@ -360,6 +368,7 @@ def validate_semantic_plan(
             if (node["id"], kind) not in bound_kinds:
                 raise ValueError(f"Missing runtime binding: {node['id']}.{kind}")
         effects[node["id"]] = cid
+        held_after[node["id"]] = dict(held)
     if state_errors:
         raise _PlanDiagnostics(state_errors)
     referenced_nodes = set()
@@ -429,10 +438,41 @@ def validate_semantic_plan(
                 f"Step {step_id} expects objects {expected}, got {actual}. A control part must declare parent: instruction_object_id in grounding, or use that pending logical object identity."
             )
         target = grounding["bindings"].get(f"{step_id}.target")
-        if target and not any(
-            annotations[n["id"]]["reference"] in target for n in calls
-        ):
-            raise ValueError(f"Task target missing for {step_id}")
+        if step.get("terminal_behavior") == "hold":
+            if TASK_CONTRACTS[step["task_type"]].resource_mode == "coordinated":
+                raise ValueError(
+                    "Coordinated hold requires a matching hold call; the current transport call releases"
+                )
+            if any(obj not in held_after[calls[-1]["id"]] for obj in expected or []):
+                raise ValueError("Requested terminal hold is not retained")
+        if target:
+            placement_goal = (
+                "placeable" in TASK_CONTRACTS[step["task_type"]].required_affordances
+                or step.get("terminal_behavior") == "place"
+            )
+            for obj in expected or []:
+                applicable = [
+                    n
+                    for n in calls
+                    if subject_matches(annotations[n["id"]]["object"], obj, step)
+                    and (
+                        validate_semantic_call_payload(n["call"])["effect"]
+                        in {"release", "coordinated_release"}
+                        if placement_goal
+                        else effects[n["id"]] in producer_ids
+                    )
+                ]
+                if not any(
+                    annotations[n["id"]]["reference"] in target
+                    and (
+                        step["relation"] == "none"
+                        or annotations[n["id"]]["relation"] == step["relation"]
+                    )
+                    for n in applicable
+                ):
+                    raise ValueError(
+                        f"Requested target/relation missing on the semantic producer for {step_id}.{obj}"
+                    )
         for key in (
             "relation",
             "orientation_goal",

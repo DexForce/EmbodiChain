@@ -301,6 +301,15 @@ def _assemble(
                 "call must be a JSON object, never a serialized JSON string"
             )
         declaration = validate_semantic_call_payload(item["call"])
+        semantic = item["semantic"]
+        if (
+            type(semantic) is not dict
+            or set(semantic) != {"object", "reference", "relation", "intent"}
+            or type(semantic["intent"]) is not dict
+        ):
+            raise ValueError(
+                "semantic requires object, reference, relation and a dictionary intent"
+            )
         annotations[item["id"]] = item["semantic"]
         nodes.append(
             {
