@@ -46,6 +46,24 @@ def image_url(source: Path | str) -> str:
     return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
 
+def image_semantic_defaults(
+    settings: dict[str, Any], defaults: dict[str, Any]
+) -> dict[str, Any]:
+    """Preserve the upstream image planner's bounded MiMo response policy."""
+    if (
+        "mimo" in settings["model"].casefold()
+        or "xiaomimimo.com" in settings["base_url"].casefold()
+    ):
+        return {
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "thinking": {"type": "disabled"},
+            "max_completion_tokens": 16000,
+            **defaults,
+        }
+    return dict(defaults)
+
+
 class ChatCompletionsAdapter:
     """Stateless, concurrent-call-safe OpenAI-compatible HTTP adapter.
 

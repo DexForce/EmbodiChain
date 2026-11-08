@@ -424,9 +424,64 @@ def test_registered_chat_runs_image_task_without_provider_credentials(tmp_path):
         "bindings": {"step_01.object": ["red_cup"], "step_01.target": ["tray"]},
     }
 
+    for entity in grounding["objects"]:
+        entity["provenance"] = "observed"
+    plan = {
+        "nodes": [
+            {
+                "id": "pick",
+                "step_id": "step_01",
+                "call": {"kind": "pick", "object": "red_cup", "resources": {}},
+                "depends_on": [],
+                "semantic": {
+                    "object": "red_cup",
+                    "reference": "tray",
+                    "relation": "inside",
+                    "intent": {"relation": "inside"},
+                },
+            },
+            {
+                "id": "place",
+                "step_id": "step_01",
+                "call": {
+                    "kind": "place",
+                    "object": "red_cup",
+                    "inside": "cup_in_tray",
+                    "resources": {},
+                },
+                "depends_on": ["pick"],
+                "semantic": {
+                    "object": "red_cup",
+                    "reference": "tray",
+                    "relation": "inside",
+                    "intent": {"relation": "inside"},
+                },
+            },
+        ],
+        "requirements": [
+            {
+                "id": "placement",
+                "quote": "place the red cup in the tray",
+                "node_ids": ["pick", "place"],
+            }
+        ],
+    }
+
     class IndependentChat:
         def complete(self, request):
-            value = intent if request.schema is not None else grounding
+            value = (
+                intent
+                if request.schema is not None
+                else (
+                    grounding
+                    if any(
+                        isinstance(part, ImagePart)
+                        for message in request.messages
+                        for part in message.content
+                    )
+                    else plan
+                )
+            )
             return ChatResponse(
                 json.dumps(value),
                 structured=value if request.schema is not None else None,
@@ -436,25 +491,24 @@ def test_registered_chat_runs_image_task_without_provider_credentials(tmp_path):
     registry.register(
         "independent",
         lambda _: IndependentChat(),
-        roles=("task_interpretation", "task_image_grounding"),
+        roles=("task_interpretation", "task_image_grounding", "task_semantic_planning"),
     )
     image = tmp_path / "image.png"
     Image.new("RGB", (100, 80)).save(image)
     cfg = configured(
-        "independent", roles=("task_interpretation", "task_image_grounding")
+        "independent",
+        roles=("task_interpretation", "task_image_grounding", "task_semantic_planning"),
     )
     with GenSimServices(cfg, registry=registry) as run:
         result = generate_semantic_task_graph_from_image(
             image, "place the red cup in the tray", services=run
         )
         assert result["image_grounding"]["bindings"] == grounding["bindings"]
-        assert (
-            result["semantic_task_graph"]["nodes"][1]["call"]["arguments"]["relation"]
-            == "inside"
-        )
+        assert result["semantic_task_graph"]["nodes"][1]["call"]["kind"] == "place"
         assert {record["role"] for record in run.records()} == {
             "task_interpretation",
             "task_image_grounding",
+            "task_semantic_planning",
         }
 
 

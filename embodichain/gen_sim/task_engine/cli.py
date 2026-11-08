@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
 
-
 import argparse
 import base64
 from collections.abc import Sequence
@@ -30,10 +29,14 @@ from io import BytesIO
 import math
 from pathlib import Path
 import shutil
+import uuid
 from time import perf_counter
 from typing import Any
 
-from .image_planning import generate_semantic_task_graph_from_image
+from .image_planning import (
+    generate_semantic_task_graph_from_image,
+    SemanticPlanningError,
+)
 from .orchestration.workflow_artifacts import WorkflowRunArtifacts, write_run_json
 from .semantic_graph_html import render_semantic_task_graph_html
 
@@ -62,56 +65,64 @@ def main(
         help="Fresh output directory; existing directories are never overwritten.",
     )
     parser.add_argument("--task-id", default="image_task")
-    parser.add_argument("--llm-model", default=None)
-    parser.add_argument(
-        "--stop-after",
-        choices=("semantic-graph",),
-        default="semantic-graph",
-        help="The supported endpoint is the unbound semantic graph.",
-    )
     args = parser.parse_args(argv)
+    args.image = args.image.expanduser().resolve(strict=True)
     started = perf_counter()
     with WorkflowRunArtifacts(args.output) as artifacts:
         try:
             result = generate_semantic_task_graph_from_image(
-                args.image,
-                args.instruction,
-                task_id=args.task_id,
-                model=args.llm_model,
-                services=services,
+                args.image, args.instruction, task_id=args.task_id, services=services
             )
-            for name, value in result.items():
-                write_run_json(artifacts.output_dir / f"{name}.json", value)
-            source_copy = (
-                artifacts.output_dir / f"source_image{args.image.suffix.lower()}"
+        except SemanticPlanningError as error:
+            failure = args.output.with_name(
+                args.output.name + ".failure-" + uuid.uuid4().hex + ".json"
             )
-            shutil.copyfile(args.image, source_copy)
-            if (
-                hashlib.sha256(source_copy.read_bytes()).hexdigest()
-                != result["image_grounding"]["image_sha256"]
-            ):
-                raise ValueError("Input image changed before preview publication.")
-            summary = {
-                "schema_version": "task_engine.image_semantic_run/v1",
-                "task_id": args.task_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "elapsed_seconds": perf_counter() - started,
-                "elapsed_scope": "instruction interpretation and image semantic planning",
-                "stage": "semantic_graph",
-                "status": "graph_ready",
-                "execution_ready": False,
-                "runtime_evidence_status": "not_run",
-                "image_sha256": result["image_grounding"]["image_sha256"],
-                "integration_status": "unbound",
-                "llm_model_override": args.llm_model,
-                "service_selections": services.selections(),
-            }
-            (artifacts.output_dir / "semantic_task_graph.html").write_text(
-                _image_preview(result, source_copy, summary), encoding="utf-8"
+            write_run_json(
+                failure,
+                {
+                    "error": str(error),
+                    "artifacts": error.artifacts,
+                    "service_calls": services.records(),
+                    "service_selections": services.selections(),
+                },
+                overwrite=False,
             )
-            write_run_json(artifacts.output_dir / "run_manifest.json", summary)
-        finally:
-            services.write_records(artifacts.output_dir / "service_calls.json")
+            raise
+        for name, value in result.items():
+            write_run_json(artifacts.output_dir / f"{name}.json", value)
+        source_copy = artifacts.output_dir / f"source_image{args.image.suffix.lower()}"
+        shutil.copyfile(args.image, source_copy)
+        if (
+            hashlib.sha256(source_copy.read_bytes()).hexdigest()
+            != result["image_grounding"]["image_sha256"]
+        ):
+            raise ValueError("Input image changed before preview publication.")
+        summary = {
+            "schema_version": "task_engine.image_semantic_run/v1",
+            "task_id": args.task_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "elapsed_seconds": perf_counter() - started,
+            "elapsed_scope": "instruction interpretation and image semantic planning",
+            "stage": "semantic_graph",
+            "status": "graph_ready",
+            "semantic_status": result["semantic_graph_validation"]["coverage"][
+                "semantic_status"
+            ],
+            "visual_status": result["semantic_graph_validation"]["coverage"][
+                "visual_status"
+            ],
+            "pending_bindings": len(result["binding_requirements"]),
+            "execution_ready": False,
+            "runtime_evidence_status": "not_run",
+            "image_sha256": result["image_grounding"]["image_sha256"],
+            "integration_status": "unbound",
+            "service_selections": services.selections(),
+        }
+        (artifacts.output_dir / "semantic_task_graph.html").write_text(
+            _image_preview(result, source_copy, summary), encoding="utf-8"
+        )
+        services.write_records(artifacts.output_dir / "service_calls.json")
+        write_run_json(artifacts.output_dir / "run_manifest.json", summary)
         artifacts.commit()
     print(f"Semantic graph: {artifacts.output_dir / 'semantic_task_graph.json'}")
     print(f"Offline viewer: {artifacts.output_dir / 'semantic_task_graph.html'}")
@@ -133,6 +144,18 @@ def _image_preview(
                 names.setdefault(uid, ref["reference"])
     with Image.open(image_path) as source:
         for item in result["image_grounding"]["objects"]:
+            if item["bbox"] is None:
+                assets.append(
+                    {
+                        "uid": item["id"],
+                        "name": names.get(item["id"], item["id"]),
+                        "description": item["description"],
+                        "role": item["provenance"],
+                        "render": None,
+                        "cutout": None,
+                    }
+                )
+                continue
             x0, y0, x1, y1 = item["bbox"]
             crop = source.crop(
                 (
@@ -148,7 +171,7 @@ def _image_preview(
             assets.append(
                 {
                     "uid": item["id"],
-                    "name": names[item["id"]],
+                    "name": names.get(item["id"], item["id"]),
                     "description": item["description"],
                     "category": "image reference",
                     "role": "visual",

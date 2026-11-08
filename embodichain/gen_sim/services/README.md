@@ -14,7 +14,7 @@ No migration is required. Without `model_services` in the existing Asset Engine
 | Role | Legacy settings |
 |---|---|
 | Task interpretation / graph localization | Process environment, local GenSim `.env`, then `llm.openai_compatible`; a key and endpoint pair stays together. Model overrides and Task/Action aliases retain their order. |
-| Scene understanding/editing, Scene orientation/dimensions, image grounding | Required fixed GenSim `.env` Scene VLM settings, including the historical body defaults. |
+| Scene understanding/editing, Scene orientation/dimensions, image grounding / semantic planning | Required fixed GenSim `.env` Scene VLM settings, including the historical body defaults. |
 | SimReady asset orientation/dimensions/semantics/physics | Process `OPENAI_*` overrides the existing JSON `llm.openai_compatible` settings. |
 | Image / segmentation / geometry | Existing `SCENE_ENGINE_*` endpoint, timeout, attempt and path keys in the fixed GenSim `.env`. |
 | Articulated generation | `ASSET_ENGINE_ARTICULATED_GENERATION_*`, including the existing Scene-key aliases. |
@@ -44,8 +44,9 @@ Unused roles require no credentials, connection or health check. The example's
 optional job-control profile is only needed when using Gradio's remote panel.
 
 Python configuration overrides the JSON section. A supplied legacy caller or
-client overrides its role. `model=` and `--llm-model` retain their original scope;
-image planning applies that override to interpretation and image grounding.
+client overrides its role. The Python `model=` override applies to interpretation, image grounding and
+semantic planning. The current Task Engine CLI reads GenSim configuration and
+always stops at the unbound semantic graph, matching the upstream interface.
 
 ```python
 from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg

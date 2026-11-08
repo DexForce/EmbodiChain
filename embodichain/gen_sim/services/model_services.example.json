@@ -113,7 +113,8 @@
       "image_segmentation": "segmentation",
       "geometry_reconstruction": "geometry",
       "articulated_generation": "articulation",
-      "articulation_jobs": "articulation_jobs"
+      "articulation_jobs": "articulation_jobs",
+      "task_semantic_planning": "task_chat"
     }
   }
 }

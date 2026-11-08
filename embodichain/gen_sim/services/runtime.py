@@ -34,6 +34,7 @@ CHAT_ROLES = frozenset(
     {
         "task_interpretation",
         "task_image_grounding",
+        "task_semantic_planning",
         "graph_localization",
         "scene_understanding",
         "scene_edit",
@@ -235,7 +236,12 @@ def _legacy_service(role: str, model: str | None) -> tuple[Any, dict[str, Any]]:
                 "base_url": cfg.base_url,
                 "model": cfg.model,
             }
-            options = {"body_defaults": cfg.default_query}
+            body_defaults = cfg.default_query
+            if role in {"task_image_grounding", "task_semantic_planning"}:
+                from .adapters.chat import image_semantic_defaults
+
+                body_defaults = image_semantic_defaults(settings, body_defaults)
+            options = {"body_defaults": body_defaults}
         settings["model"] = model or settings["model"]
         profile = {
             "adapter": "openai_compatible",
@@ -250,6 +256,7 @@ def _legacy_service(role: str, model: str | None) -> tuple[Any, dict[str, Any]]:
             "scene_asset_orientation",
             "scene_asset_dimensions",
             "task_image_grounding",
+            "task_semantic_planning",
         }:
             profile["max_attempts"] = cfg.max_attempts
         return (

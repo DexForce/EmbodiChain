@@ -210,7 +210,11 @@ _INTENT_OUTPUT_SCHEMA = {
                         "enum": sorted(_TARGET_STATES),
                     },
                     "target_setting": {"type": "integer"},
-                    "pour_goal_mode": {"type": "string", "enum": ["fluid", "motion"]},
+                    "pour_goal_mode": {
+                        "type": "string",
+                        "enum": ["fluid", "motion"],
+                        "description": "MANDATORY for every E3 step, in addition to the 16 common fields. Use motion for a requested pouring gesture without liquid-transfer evidence; fluid for actual liquid transfer. Omit on other E types.",
+                    },
                     "twist_goal_mode": {"type": "string", "enum": ["coarse"]},
                     "layout": {"type": "string", "enum": sorted(_LAYOUTS)},
                     "axis": {"type": "string", "enum": sorted(_AXES)},
@@ -269,8 +273,8 @@ def interpret_instruction_draft(
                 "must contain all 16 step keys and every selector all 5 selector "
                 "keys. Keep semantic fields explicit: E4 requires transfer_arm "
                 "and receive_arm, and E1/E3 require target plus relation (unless "
-                "E1 layout=line). Use canonical defaults only for fields that do "
-                "not apply. Validation error: "
+                "E1 layout=line). A return-to-origin cleanup belonging to a pour stays within that E3 step; do not add a targetless E1 for it or invent an original-position scene object. Keep all other original steps. Use canonical defaults only for fields that do "
+                "not apply. E3 MUST include the additional key pour_goal_mode with value motion or fluid; the 16 common fields alone are NOT sufficient for E3. Validation error: "
                 f"{first_error}\n"
                 "Copy this complete shape before filling values (shape only; do "
                 "not copy its values or step count):\n"
@@ -919,10 +923,13 @@ def _instruction_prompt(instruction: str) -> str:
         "axis, direction, terminal_behavior, depends_on; each selector has kind, "
         "step_id, reference, quantifier, count.\n\n"
         "For each new E3 instruction, explicitly declare pour_goal_mode. Use "
-        "'motion' when the user "
-        "explicitly requires only a tilt-and-restore action without actual liquid "
-        "transfer. Use 'fluid' for actual fluid-transfer intent "
-        "or an unspecified evidence mode. Never weaken fluid-transfer intent to "
+        "'motion' for an explicitly requested pouring motion, tilt-and-restore "
+        "gesture or demonstration (including 倾倒动作 / perform a pouring motion), "
+        "even without an additional word meaning only. A container name does not "
+        "establish a requested liquid transfer. Use 'fluid' when transfer of actual "
+        "liquid, a named fluid or a volume is requested; that explicit transfer "
+        "takes precedence over motion wording. Bare ambiguous pouring with no "
+        "motion/evidence cue retains fluid mode. Never weaken fluid-transfer intent to "
         "motion merely because fluid simulation may be unavailable. Do not emit "
         "pour_goal_mode for other E types.\n\n"
         "For E8 only, when the user asks for a coarse turn without a printed-label "
