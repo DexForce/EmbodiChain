@@ -28,7 +28,7 @@
    `preview-scene --usd-file` imports it directly. The manifest and native
    GLTF/USDC files remain legacy compatibility data. It represents a scene,
    not a complete `EmbodiedEnv` deployment.
-6. The SimReady Asset Pipeline CLI is a separate ingest path. `asset_engine/cli/start.py` sets
+6. The Asset Engine CLI is a separate ingest path. `asset_engine/cli/start.py` sets
    `PYOPENGL_PLATFORM=egl`, builds `JsonStore` and `ParserManager`, then calls
    `ingest_one_asset()`.
 7. Ingest accepts mesh formats for canonicalization and `.urdf`/`.usd` for direct copy. Both

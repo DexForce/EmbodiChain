@@ -1,7 +1,7 @@
 # Generative simulation
 
 Scene Engine turns images into editable scenes and portable exports. The
-SimReady Asset Pipeline ingests existing assets; the asset package also owns a
+Asset Engine ingests existing assets; the asset package also owns a
 separate articulated-generation service. Neither output is by itself a complete
 runnable Gym task deployment.
 
@@ -46,7 +46,7 @@ Blueprint objects are in-process values with persisted audit documents; this API
 does not load them as a complete task deployment. Whole-scene rotations also
 rotate planar graph relations and table regions; directional graphs require
 quarter turns because their vocabulary is axis-aligned.
-The SimReady Asset Pipeline uses the `simready` CLI and `asset_engine` Python
+The Asset Engine uses the `simready` CLI and `asset_engine` Python
 namespace. Its [user guide](../../../docs/source/features/generative_sim/asset_engine.md)
 owns input selection, processing settings, artifacts and simulation handoff.
 Instruction/image semantic planning belongs to

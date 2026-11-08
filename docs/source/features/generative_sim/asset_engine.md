@@ -1,11 +1,12 @@
-# SimReady Asset Pipeline
+# Asset Engine
 
-The **SimReady Asset Pipeline** converts an existing mesh into an asset with
-normalized geometry, generated semantic and physical metadata, and mesh/USD
-outputs. Its implementation lives in `embodichain.gen_sim.asset_engine`; the
-command is `embodichain simready`.
+**Asset Engine** owns asset preparation and articulated-asset generation. Its
+SimReady pipeline converts an existing mesh into an asset with normalized
+geometry, generated semantic and physical metadata, and mesh/USD outputs.
+The implementation lives in `embodichain.gen_sim.asset_engine`; mesh conversion
+uses the `embodichain simready` command.
 
-Use this pipeline when you already have a mesh and need to prepare it for scene
+Use the SimReady pipeline when you already have a mesh to prepare for scene
 construction. [Scene Engine](scene_engine.md) owns image-based scene generation,
 editing, support relationships, and export. [Scene Services](../../overview/sim/scene/index.md)
 compose configurations and prepare physical layouts after asset preparation.

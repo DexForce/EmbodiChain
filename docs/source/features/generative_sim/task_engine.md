@@ -19,7 +19,7 @@ supply assets, physical entities, robot bindings, execution, and measured eviden
 | --- | --- |
 | Task Engine | Instruction interpretation, candidates, image references, TaskSpec projection, Semantic Call graphs, declaration checks, and graph display |
 | TaskSpec | Normative task identity, requirements, and evaluation against supplied evidence |
-| [SimReady Asset Pipeline](asset_engine.md) and [Scene Engine](scene_engine.md) | Asset preparation, scene generation/editing, and portable scene exports |
+| [Asset Engine](asset_engine.md) and [Scene Engine](scene_engine.md) | Asset preparation, scene generation/editing, and portable scene exports |
 | [Scene Services](../../overview/sim/scene/index.md) | Physical layout proposals, state operations, and measured scene preparation |
 | [Task Program](../../overview/task_program/index.md) | Language, compilation, configured Semantic Call lowering, execution sequencing, and runtime verification |
 | Simulation, Atomic Skills, motion, and Gym | Physical entities and observations, manipulation planning, explicit stepping, episodes, and recording |

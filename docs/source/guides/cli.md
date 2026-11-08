@@ -30,10 +30,10 @@ embodichain data download --all
 
 ---
 
-## SimReady Asset Pipeline
+## Asset Engine
 
 Prepare one existing mesh directory with the
-[SimReady Asset Pipeline](../features/generative_sim/asset_engine.md).
+[Asset Engine](../features/generative_sim/asset_engine.md).
 
 ```bash
 # Run the full SimReady pipeline on a single asset directory
