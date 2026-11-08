@@ -605,7 +605,16 @@ class TaskProgramEnvironmentAdapter:
             raise TypeError("program must be exactly TaskProgramCfg.")
         self._validate_selection(program.integration)
         if self._integration_catalog is not None:
-            return self._integration_catalog.preflight(program)
+            return self._integration_catalog.preflight(
+                program,
+                **(
+                    {
+                        "invocation_policy_bindings": self._configured_invocation_policy_bindings
+                    }
+                    if self._configured_invocation_policy_bindings
+                    else {}
+                ),
+            )
         registry = self._create_scene_registry()
         return TaskProgramCompiler.from_scene_registry(registry).compile(program)
 
@@ -1081,7 +1090,11 @@ class TaskProgramEnvironmentAdapter:
         else:
             expansion = None
         if expansion_profile is not None:
-            self._program_skill_ids(program, semantic.compiler)
+            self._program_skill_ids(
+                program,
+                semantic.compiler,
+                **({"invocation_policies": policies} if policies is not None else {}),
+            )
         if expansion is not None and plan_transform_factory is not None:
             raise ValueError(
                 "an Expansion Profile and an explicit plan transform cannot both own a bridge"
@@ -1127,14 +1140,27 @@ class TaskProgramEnvironmentAdapter:
     def _program_skill_ids(
         program: CompiledTaskProgram,
         compiler: SemanticCallCompiler,
+        *,
+        invocation_policies: BoundInvocationPolicies | None = None,
     ) -> frozenset[str]:
         """Return every Atomic skill selected by compiled program calls."""
         skill_ids: set[str] = set()
         for analysis in program.preflight_analyses():
+            preset_ids = (
+                invocation_policies._presets_for_analysis(analysis)
+                if invocation_policies is not None
+                and analysis.kind != "parallel_branch"
+                else None
+            )
             for call_index, call in enumerate(analysis.calls):
                 bound = compiler.integration.link_call(
                     call,
                     path=(*analysis.source_path, call_index, "call"),
+                    **(
+                        {"preset_id": preset_ids[call_index]}
+                        if preset_ids is not None
+                        else {}
+                    ),
                 )
                 skill_ids.add(bound.linked.descriptor.skill_id)
         return frozenset(skill_ids)

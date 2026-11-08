@@ -521,6 +521,89 @@ def test_complete_occurrence_presets_are_owned_sealed_and_preflighted() -> None:
             load(candidate)
 
 
+@pytest.mark.parametrize("inline", [False, True])
+def test_gym_final_preflight_uses_configured_occurrence_policies(
+    tmp_path: Path,
+    registered_test_ids: list[str],
+    inline: bool,
+) -> None:
+    """File and inline deployments must retain their selected valid recovery."""
+    import yaml
+    from embodichain.lab.task_program.integrations import task_program_fingerprint
+    from embodichain.lab.task_program.semantics import SemanticValidationError
+
+    path = _config_path("rubiks_cube_pick_place")
+    config = _gym_config("rubiks_cube_pick_place")
+    physical = _physical_components(path, config)
+    program_path, integration, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    baseline = load_configured_task_program_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    compiled = baseline.integration.registration.catalog.preflight(
+        baseline.load_program()
+    )
+    neutral = {
+        key: deepcopy(policy[key])
+        for key in (
+            "motion",
+            "tracking",
+            "recovery",
+            "workflow_recovery",
+            "runner",
+            "effect_assurance",
+        )
+    }
+    neutral["preset_id"] = "selected_neutral"
+    policy["recovery"]["planning_recovery"] = {"kind": "place_bounded", "revision": 1}
+    policy["invocation_presets"] = [neutral]
+    integration["invocation_policy_bindings"] = [
+        {
+            "program_fingerprint": task_program_fingerprint(compiled),
+            "invocation_id": f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}",
+            "preset_id": "selected_neutral",
+        }
+        for segment in compiled.iter_segments()
+        for call in segment.calls
+    ]
+    if inline:
+        selected = {
+            "program": {"inline": load_config(program_path)},
+            "integration": {"inline": integration},
+            "execution_policy": {"inline": policy},
+        }
+    else:
+        integration_path, policy_path = (
+            tmp_path / "integration.yaml",
+            tmp_path / "policy.yaml",
+        )
+        integration_path.write_text(yaml.safe_dump(integration))
+        policy_path.write_text(yaml.safe_dump(policy))
+        selected = {
+            "program": str(program_path),
+            "integration": str(integration_path),
+            "execution_policy": str(policy_path),
+        }
+    deployment = load_configured_task_program_deployment(
+        task_program=selected,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    # All occurrences select the neutral policy; the unused base Place recovery
+    # is incompatible with Pick and cannot be consulted by a later pass.
+    with pytest.raises(SemanticValidationError, match="Planning recovery"):
+        deployment.integration.registration.catalog.preflight(deployment.load_program())
+    identity = f"{_TEST_ENV_ID}-selected-{inline}"
+    registered_test_ids.append(identity)
+    config["id"] = identity
+    config["task_program"] = selected
+    cfg = config_to_cfg(config, source_path=path)
+    assert cfg.task_program.program_id == compiled.program_id
+
+
 def _tableware_config_path(task_name: str) -> Path:
     """Return one config-defined tableware task's Gym config path."""
     return _TABLEWARE_CONFIG_DIRECTORY / task_name / "task.cobotmagic.yaml"

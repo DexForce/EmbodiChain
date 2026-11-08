@@ -863,7 +863,17 @@ def config_to_cfg(
                 f"{task_program.program_id!r}."
             )
         if registration is not None:
-            registration.catalog.preflight(task_program)
+            registration.catalog.preflight(
+                task_program,
+                **(
+                    {
+                        "invocation_policy_bindings": configured_task_program_deployment.invocation_policy_bindings
+                    }
+                    if configured_task_program_deployment is not None
+                    and configured_task_program_deployment.invocation_policy_bindings
+                    else {}
+                ),
+            )
         env_cfg.task_program = task_program
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
