@@ -169,8 +169,8 @@ def prepare_robot_grippers(cfg: RobotCfg) -> None:
             if cfg.urdf_cfg is not None
             else {"joint": "original", "link": "original"}
         )
-        prefixes = (
-            dict(cfg.urdf_cfg.component_prefix) if cfg.urdf_cfg is not None else {}
+        prefixes = NameNormalizer.resolve_component_prefixes(
+            cfg.urdf_cfg.component_prefix if cfg.urdf_cfg is not None else None
         )
         prefix = prefixes.get(declaration.get("component_type"))
         subtree = {defaults["root_link"]}

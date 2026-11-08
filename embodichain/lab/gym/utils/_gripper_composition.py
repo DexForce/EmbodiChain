@@ -37,17 +37,7 @@ def _expand_grippers(
         raise TypeError("embodiment.grippers must be a mapping.")
     bindings = {}
     urdf = simulation.get("urdf_cfg", {})
-    prefixes = dict(
-        urdf.get(
-            "component_prefix",
-            (
-                ("left_arm", "left_"),
-                ("right_arm", "right_"),
-                ("left_hand", "left_"),
-                ("right_hand", "right_"),
-            ),
-        )
-    )
+    prefixes = NameNormalizer.resolve_component_prefixes(urdf.get("component_prefix"))
     normalizer = NameNormalizer(
         urdf.get("name_case", {"joint": "original", "link": "original"})
     )

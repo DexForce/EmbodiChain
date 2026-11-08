@@ -512,3 +512,36 @@ def test_concrete_cfg_overrides_export_owned_numeric_inputs_without_a_model_cfg(
     inputs["max_opening_width"] = 99.0
     assert cfg.max_opening_width == 0.08
     assert resolve_gripper_defaults("DHPGI14080")["max_opening_width"] == 0.1
+
+
+def test_w1_pika_partial_prefixes_match_assembled_hand_names():
+    """A bare-body arm-prefix patch retains the assembler's hand prefixes."""
+    import yaml
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+    from embodichain.robot_registry import resolve_robot_cfg
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.yaml"
+    )
+    declaration = yaml.safe_load(source.read_text())
+    declaration["simulation"]["urdf_cfg"]["component_prefix"] = [
+        ("left_arm", None),
+        ("right_arm", None),
+    ]
+    physical = resolve_gym_components(
+        {"embodiment": {"component": str(source)}},
+        base_dir=source.parent,
+        component_sources={str(source): declaration},
+    )
+    values = deepcopy(physical.config["robot"])
+    cfg = resolve_robot_cfg(values.pop("class_type"), values)
+    prepare_robot_grippers(cfg)
+    assert cfg.control_parts["left_eef"] == ["LEFT_FINGER1_JOINT", "LEFT_FINGER2_JOINT"]
+    assert cfg.control_parts["right_eef"] == [
+        "RIGHT_FINGER1_JOINT",
+        "RIGHT_FINGER2_JOINT",
+    ]
+    assert cfg.gripper_bindings["left_eef"]["root_link"] == "left_gripper_root_link"
+    assert cfg.gripper_bindings["right_eef"]["root_link"] == "right_gripper_root_link"
