@@ -18,6 +18,29 @@
 
 from __future__ import annotations
 
+# Configclass regenerates inherited constructor annotations in this module.
+# These names are needed by static tooling, without runtime import cycles.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+    import torch
+    from typing import Dict, List, Sequence
+    from embodichain.lab.sim.cfg import (
+        AssetPhysicsMode,
+        RigidBodyPhysicsCfg,
+        LinkPhysicsOverrideCfg,
+        ArticulationRootPropertiesCfg,
+        JointDrivePropertiesCfg,
+        URDFCfg,
+        RobotWorkspaceCfg,
+        UsdSourceCfg,
+    )
+    from embodichain.lab.sim.motion.solvers import SolverCfg
+    from embodichain.lab.sim.sensors import SensorCfg
+    from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
+
+
 from embodichain.lab.sim.cfg.gripper import ParallelJawGripperCfg
 from embodichain.utils import configclass
 from ._gripper_defaults import get_gripper_defaults

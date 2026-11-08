@@ -5475,3 +5475,13 @@ Physical and semantic bindings share the assembler's native naming policy.
 
 .. autoclass:: NameNormalizer
    :members:
+
+
+embodichain.lab.sim.cfg parallel-jaw facade
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.cfg
+
+.. autoclass:: ParallelJawGripperCfg
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :no-index:

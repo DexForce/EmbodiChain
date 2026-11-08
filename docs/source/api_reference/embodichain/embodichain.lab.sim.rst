@@ -64,7 +64,7 @@ Configuration
    :members:
    :undoc-members:
    :show-inheritance:
-   :exclude-members: __init__, copy, replace, to_dict, validate
+   :exclude-members: __init__, copy, replace, to_dict, validate, ParallelJawGripperCfg
 
 Common Components
 -----------------
