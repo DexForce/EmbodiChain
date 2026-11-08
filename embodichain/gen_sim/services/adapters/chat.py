@@ -123,11 +123,23 @@ class ChatCompletionsAdapter:
             payload["temperature"] = request.temperature
         if request.schema is not None:
             payload["response_format"] = {"type": "json_object"}
+            # Preserve the original structured caller's user-message boundary
+            # and schema text. A separate schema turn changes the model input.
             schema_text = (
-                "\nReturn one JSON object conforming exactly to this JSON Schema:\n"
-                + json.dumps(dict(request.schema), ensure_ascii=False)
+                "\n\nReturn one JSON object conforming exactly to this JSON "
+                "Schema:\n"
+                + json.dumps(dict(request.schema), ensure_ascii=False, sort_keys=True)
             )
-            messages.append({"role": "user", "content": schema_text})
+            if messages and messages[-1]["role"] == "user":
+                if isinstance(messages[-1]["content"], str):
+                    messages[-1]["content"] += schema_text
+                else:
+                    messages[-1]["content"].append(
+                        {"type": "text", "text": schema_text}
+                    )
+            else:
+                messages.append({"role": "user", "content": schema_text.lstrip()})
+            payload["stream"] = False
         if "mimo" in model.casefold() or "xiaomimimo.com" in self.base_url.casefold():
             payload.setdefault("thinking", {"type": "disabled"})
             payload.setdefault("max_completion_tokens", 4096)
@@ -157,7 +169,12 @@ class ChatCompletionsAdapter:
                     raise ValueError("Expected string model content")
                 structured = None
                 if request.schema is not None:
-                    decoded = json.loads(text)
+                    # The legacy structured caller uses this parser for JSON
+                    # mode, including fenced and partially closed JSON. Domain
+                    # owners still validate every required semantic field.
+                    from langchain_core.output_parsers import JsonOutputParser
+
+                    decoded = JsonOutputParser().parse(text)
                     if not isinstance(decoded, dict):
                         raise ValueError("Expected JSON object")
                     structured = decoded

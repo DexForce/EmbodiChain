@@ -55,8 +55,11 @@ class ServiceTransportError(ServiceError):
     code = "transport"
 
 
-class ServiceResponseError(ServiceError):
-    """A provider returned an invalid capability response."""
+class ServiceResponseError(ServiceError, ValueError):
+    """Invalid model output, recoverable by the owner's bounded value repair.
+
+    Transport and timeout failures remain separate from semantic repair.
+    """
 
     code = "response"
 

@@ -47,6 +47,9 @@ Python configuration overrides the JSON section. A supplied legacy caller or
 client overrides its role. The Python `model=` override applies to interpretation, image grounding and
 semantic planning. The current Task Engine CLI reads GenSim configuration and
 always stops at the unbound semantic graph, matching the upstream interface.
+Structured chat preserves the upstream user-message boundary, sorted schema
+prompt and JSON-mode parsing. Invalid model content remains eligible for the
+business owner's existing bounded diagnostic repair; transport errors do not.
 
 ```python
 from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg
