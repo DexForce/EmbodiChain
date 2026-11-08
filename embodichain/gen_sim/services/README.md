@@ -6,6 +6,9 @@ The service layer imports no business engines, simulator or Blender. Importing
 its contracts does not load Torch, a provider SDK or credentials. Configuration
 uses the repository's `@configclass` and loads only when constructing a run.
 
+The Sphinx [model-service guide](../../../docs/source/features/generative_sim/model_services.md)
+provides the user-facing configuration and workflow overview.
+
 ## Existing installations
 
 No migration is required. Without `model_services` in the existing Asset Engine

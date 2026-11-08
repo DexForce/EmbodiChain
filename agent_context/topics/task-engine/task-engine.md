@@ -6,7 +6,7 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 
 | Request | Owner under `gen_sim/task_engine/` |
 |---|---|
-| Image + instruction → unbound pick/place graph | `image_planning.py`; `cli.py` through `embodichain task-engine` |
+| Image + instruction → unbound canonical-call graph | `image_planning.py`; `cli.py` through `embodichain task-engine` |
 | Instruction intent and explicit model-caller boundary | `interpretation.py` |
 | Supported task intentions and relations | `ontology.py` |
 | Candidates, drafts, scene requests and success declarations | `contracts.py`, `agent.py` |
@@ -34,7 +34,9 @@ physical adaptation and runtime workflow configuration are separate layers.
 
 Fixed candidate/graph inputs can be checked without invoking a model. Run
 `tests/gen_sim/task_engine/` for candidate/spec, coverage and import/ownership
-boundaries. Public API descriptions are in the
+boundaries. The [Task Engine guide](../../../docs/source/features/generative_sim/task_engine.md)
+owns CLI configuration, artifact interpretation, offline display and runtime
+handoff. Public API descriptions are in the
 [Task Engine reference](../../../docs/source/api_reference/embodichain/embodichain.gen_sim.task_engine.rst).
 
 ## Image semantic planning entry

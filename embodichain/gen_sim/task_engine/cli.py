@@ -54,7 +54,7 @@ def main(
     """
     parser = argparse.ArgumentParser(
         prog="embodichain task-engine",
-        description="Plan image-grounded pick/place Semantic Calls without simulation.",
+        description="Plan image-grounded canonical Semantic Calls without simulation.",
     )
     parser.add_argument("--image", type=Path, required=True)
     parser.add_argument("--instruction", required=True)

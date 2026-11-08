@@ -89,7 +89,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             omitted.
     """
     parser = argparse.ArgumentParser(
-        prog="embodichain simready",
+        prog="embodichain asset-engine",
         description="Convert a raw asset directory into a SimReady asset.",
     )
 
