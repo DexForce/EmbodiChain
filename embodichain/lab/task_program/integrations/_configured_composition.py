@@ -42,6 +42,7 @@ from .configured import (
     _decode_motion_policy,
     _decode_recovery_policy,
     _identifier,
+    _identifier_mapping,
     _mapping,
 )
 
@@ -615,7 +616,7 @@ def _load_configured_task_program_deployment(
         required=frozenset(
             {"contract_id", "profile_id", "resources", "command_presets"}
         ),
-        optional=frozenset({"runtime_services"}),
+        optional=frozenset({"runtime_services", "evaluation_links"}),
     )
     scene_binding = _mapping(
         task["scene_binding"],
@@ -643,6 +644,10 @@ def _load_configured_task_program_deployment(
         planner_config=planner_config,
         evaluation=evaluation,
         evaluation_registry=evaluation_registry,
+        evaluation_robot_links=_identifier_mapping(
+            selected_skill_profile.get("evaluation_links", {}),
+            path="embodiment component.skill_profile.evaluation_links",
+        ),
     )
     integration_id = _identifier(
         task["integration_id"],

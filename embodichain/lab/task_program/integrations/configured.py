@@ -27,6 +27,7 @@ from embodichain.lab.evaluation import (
 )
 
 from embodichain.lab.evaluation.observations import _raw_field_kind
+from embodichain.lab.evaluation._recording import _is_segment_start_field
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
@@ -3242,6 +3243,7 @@ def _decode_evaluation(
     scene: SimulationSceneBinding,
     *,
     robot_profile: SimulationRobotSkillProfileBinding | None = None,
+    robot_links: Mapping[str, str] | None = None,
     registry: PredicateRegistry | None = None,
 ) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
     if value is None:
@@ -3256,7 +3258,7 @@ def _decode_evaluation(
     channels = {
         f"rigid_objects/{binding.entity_id}/{quantity}": f"rigid_objects/{binding.simulation_uid}/{quantity}"
         for binding in scene.rigid_objects
-        for quantity in ("pose", "frame", "lin_vel", "ang_vel")
+        for quantity in ("pose", "frame", "segment_start_frame", "lin_vel", "ang_vel")
     }
     articulations = {
         binding.entity_id: binding.simulation_uid for binding in scene.articulations
@@ -3266,7 +3268,11 @@ def _decode_evaluation(
             channels[f"links/{link.entity_id}/{quantity}"] = (
                 f"links/{articulations[link.articulation_id]}/{link.native_link_name}/{quantity}"
             )
+    for alias, link in (robot_links or {}).items():
+        channels[f"robot_links/{alias}/position"] = f"robot_links/{link}/position"
+    endpoint_presets = {}
     if robot_profile is not None:
+        presets = {preset.preset_id: preset for preset in robot_profile.command_presets}
         for resource in robot_profile.resources:
             if not isinstance(resource, ControlPartResourceBinding):
                 continue
@@ -3275,6 +3281,11 @@ def _decode_evaluation(
                     channels[
                         f"robot/{resource.resource_id}/{endpoint.endpoint_id}/{quantity}"
                     ] = f"robot/{endpoint.control_part}/{quantity}"
+                preset = presets.get(endpoint.command_preset)
+                if preset is not None and preset.control_part == endpoint.control_part:
+                    endpoint_presets[
+                        f"robot/{resource.resource_id}/{endpoint.endpoint_id}/qpos"
+                    ] = preset
     rules = {}
     field_kinds = {}
     for name, rule in graph.rules.items():
@@ -3286,6 +3297,12 @@ def _decode_evaluation(
                 )
                 if field in channels:
                     native = channels[field]
+                    if _is_segment_start_field(native) and (
+                        rule.kind != "lift" or role != "baseline"
+                    ):
+                        raise ValueError(
+                            "A segment-start pose can only bind a lift baseline."
+                        )
                 else:
                     parts = field.split("/")
                     if (
@@ -3299,7 +3316,25 @@ def _decode_evaluation(
                     native = f"articulations/{articulations[parts[1]]}/qpos/{parts[3]}"
                 inputs[role] = native
                 field_kinds[native] = _raw_field_kind(native)
-            rule = PredicateSpec(rule.kind, inputs, rule.params)
+            params = rule.params
+            if rule.kind == "command_preset_match":
+                raw = _mapping(
+                    params,
+                    path=f"evaluation.graph.rules.{name}.params",
+                    required=frozenset({"preset", "tolerance"}),
+                )
+                command = _identifier(raw["preset"], path="evaluation command preset")
+                preset = endpoint_presets.get(rule.bindings.get("position"))
+                if preset is None or command not in preset.commands:
+                    raise ValueError(
+                        f"Unknown embodiment command {command!r} for rule {name!r}."
+                    )
+                params = {
+                    "tolerance": raw["tolerance"],
+                    "preset": f"{preset.preset_id}/{command}",
+                    "positions": preset.commands[command],
+                }
+            rule = PredicateSpec(rule.kind, inputs, params)
         rules[name] = rule
     registry = builtin_predicates() if registry is None else registry
     if not isinstance(registry, PredicateRegistry):
@@ -3335,6 +3370,7 @@ def _decode_configured_task_program_integration(
     planner_config: Mapping[str, object] | None = None,
     evaluation: Mapping[str, object] | None = None,
     evaluation_registry: PredicateRegistry | None = None,
+    evaluation_robot_links: Mapping[str, str] | None = None,
 ) -> _ConfiguredTaskProgramIntegration:
     """Decode one composable, callable-free Task Program integration.
 
@@ -3370,6 +3406,7 @@ def _decode_configured_task_program_integration(
         evaluation,
         scene_binding,
         robot_profile=robot_profile_binding,
+        robot_links=evaluation_robot_links,
         registry=evaluation_registry,
     )
     registration = SimulationTaskProgramRegistration(

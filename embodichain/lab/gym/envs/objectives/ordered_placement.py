@@ -37,6 +37,33 @@ from .config import OrderedPlacementObjectiveCfg, decode_objective
 __all__ = ["MeasuredRigidObjectState", "OrderedPlacementObjective"]
 
 
+def _objective_fields(object_uid, rule):
+    prefix = f"rigid_objects/{object_uid}"
+    fields = {
+        "position": ("position", 0),
+        "linear_velocity": ("linear_velocity", 1),
+        "angular_velocity": ("angular_velocity", 2),
+        f"{prefix}/pose": ("position", 0),
+        f"{prefix}/lin_vel": ("linear_velocity", 1),
+        f"{prefix}/ang_vel": ("angular_velocity", 2),
+    }
+    if len(rule.roots) != 1 or set(rule.required_fields) - fields.keys():
+        raise ValueError(
+            "An objective condition needs one root over its measured object."
+        )
+    rule._check_input_contract({key: kind for key, (kind, _) in fields.items()}, {})
+    return {key: fields[key][1] for key in rule.required_fields}
+
+
+def _objective_rule(cfg, rules):
+    ref = getattr(cfg, "condition", None)
+    if ref is None:
+        return None
+    if ref not in rules:
+        raise ValueError(f"Unknown objective.condition ref {ref!r}.")
+    return rules[ref]
+
+
 @dataclass(frozen=True)
 class MeasuredRigidObjectState:
     """Environment-local position and measured velocities, each shaped ``(N, 3)``."""
@@ -76,21 +103,10 @@ class OrderedPlacementObjective:
             raise ValueError("num_envs must be a positive integer.")
         self.num_envs = num_envs
         self.device = torch.device(device)
-        fields = {
-            "position": "position",
-            "linear_velocity": "linear_velocity",
-            "angular_velocity": "angular_velocity",
-        }
-        if condition is not None and (
-            len(condition.roots) != 1 or set(condition.required_fields) - fields.keys()
-        ):
-            raise ValueError(
-                "An objective condition needs one root over measured state."
-            )
         self._condition_session = None
         self._condition_step = 0
         if condition is not None:
-            condition._check_input_contract(fields, {})
+            self._condition_fields = _objective_fields(self.cfg.object_uid, condition)
             self._condition_session = RuleSession(
                 condition,
                 env_ids=range(num_envs),
@@ -200,11 +216,7 @@ class OrderedPlacementObjective:
             session = self._condition_session
             session.advance(
                 self._condition_step,
-                {
-                    "position": position,
-                    "linear_velocity": linear,
-                    "angular_velocity": angular,
-                },
+                {key: tensors[index] for key, index in self._condition_fields.items()},
                 revisions=torch.full_like(self._steps, self._condition_step),
                 episode_ids=session.episode_ids,
                 valid=dict.fromkeys(session.compiled.required_fields, self._valid),

@@ -434,7 +434,14 @@ def test_reset_seals_manually_completed_program_before_persistence_retry():
 
 
 def test_partial_reset_keeps_manual_completion_for_unreset_rows():
-    env, position, _ = _final_acceptance_env()
+    env, position, read_pose = _final_acceptance_env()
+    env.cfg.record_trajectory = False
+    env.cfg.actions = None
+    env.sim.has_native_renderer = True
+    env.observation_manager = None
+    env._init_sim_state()
+    assert not env._capture_observation().fields
+    read_pose.assert_not_called()
     position[:, 0] = 0.1
     env._begin_demo_episode_recording()
     tuple(env.create_demo_segments())
@@ -540,14 +547,28 @@ def test_trajectory_replay_recomputes_the_sealed_capture_after_physics_changes(
     assert report["accepted"] is None
     assert report["conditions"]["near_support"]["status"] == "unavailable"
 
+    field = payload["final_acceptance_observations"]["rows"][1]["fields"][
+        "rigid_objects/payload/pose"
+    ]
+    field["descriptor"]["units"] = ("m", "unitless")
+    field["values"] = field["values"].long()
+    field["descriptor"]["dtype"] = "torch.int64"
+    report = ReplayWrapper(env, payload, mode="kinematic").final_acceptance[1]
+    assert report["status"] == "unavailable"
+    assert report["accepted"] is None
+
 
 @pytest.mark.gpu
 def test_cuda_final_capture_and_cpu_replay_agree_at_inclusive_boundary():
     from embodichain.lab.evaluation import (
         EvaluationSpec,
         PredicateSpec,
+        RuleSession,
         builtin_predicates,
+        evaluate_recorded_rules,
     )
+    from embodichain.lab.evaluation.observations import advance_observation
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.envs.managers.observation_types import (
         ObservationDescriptor,
         ObservationFrame,
@@ -593,13 +614,15 @@ def test_cuda_final_capture_and_cpu_replay_agree_at_inclusive_boundary():
         fields[field] = ObservationSample(
             descriptor, pose, torch.tensor([True], device="cuda"), (None,)
         )
-    frame = ObservationFrame(None, fields, (1,), 4, 0.2)
+    owner = EpisodeContext(1, device="cuda")
+    owner._begin_episode([0])
+    frame = ObservationFrame(None, fields, (0,), 4, 0.2, episode_owner=owner)
     rules = (("near", graph),)
     measured = _evaluate_final_frame(rules, frame)
     assert measured.satisfied.device.type == "cuda"
     seal = _final_acceptance_rows(
         rules,
-        (1,),
+        (0,),
         tuple(measured.satisfied.tolist()),
         (True,),
         torch.tensor([True]),
@@ -615,4 +638,39 @@ def test_cuda_final_capture_and_cpu_replay_agree_at_inclusive_boundary():
     assert seal["accepted"] is True
     assert _replay_final_acceptance(rules, payload) == (
         {"status": "recomputed", "recorded_accepted": True, **seal},
+    )
+    live = RuleSession(
+        graph, env_ids=(0,), episode_ids=(0,), scope="segment", device="cuda"
+    )
+    advance_observation(live, frame, step=0, episode_owner=owner)
+    raw = payload["final_acceptance_observations"]["rows"][0]["fields"]
+    recording = {
+        "schema_version": 1,
+        "env_ids": (0,),
+        "episode_ids": (0,),
+        "revisions": torch.tensor([[frame.revision]]),
+        "lengths": torch.tensor([0]),
+        "fields": {
+            name: {
+                **sample,
+                "values": sample["values"][:, None],
+                "valid": sample["valid"][:, None],
+            }
+            for name, sample in raw.items()
+        },
+    }
+    replay = evaluate_recorded_rules(
+        graph,
+        {"raw_observations": recording},
+        env_ids=(0,),
+        episode_ids=(0,),
+        scope="segment",
+    )
+    live_result, offline_result = live.snapshot().rules["near"], replay.rules["near"]
+    torch.testing.assert_close(live_result.status.cpu(), offline_result.status)
+    torch.testing.assert_close(
+        live_result.metrics["distance"].cpu(),
+        offline_result.metrics["distance"],
+        rtol=0,
+        atol=0,
     )

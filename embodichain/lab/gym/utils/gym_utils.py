@@ -809,6 +809,21 @@ def config_to_cfg(
     elif "robot" not in config:
         log_error("Missing required config key: robot")
 
+    if env_cfg.objective is not None and env_cfg.objective.condition is not None:
+        from embodichain.lab.gym.envs.objectives.ordered_placement import (
+            _objective_fields,
+            _objective_rule,
+        )
+
+        registration = getattr(
+            configured_task_program_integration, "registration", None
+        )
+        rule = _objective_rule(
+            env_cfg.objective,
+            getattr(registration, "evaluation_conditions", {}),
+        )
+        _objective_fields(env_cfg.objective.object_uid, rule)
+
     if (
         task_program_path_override is not None
         or configured_task_program_deployment is not None

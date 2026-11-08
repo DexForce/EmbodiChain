@@ -83,6 +83,10 @@ def _measure_final_conditions(
     env: EmbodiedEnv, rules: _FinalRules
 ) -> _FinalMeasurement:
     fields = dict.fromkeys(field for _, spec in rules for field in spec.required_fields)
+    return _evaluate_final_frame(rules, _capture_evaluation_frame(env, fields))
+
+
+def _capture_evaluation_frame(env, fields):
     owner = env.episode_context
     timestamp = getattr(env.sim, "simulation_time", None)
     with _ObservationCapture(
@@ -93,7 +97,7 @@ def _measure_final_conditions(
         for field in fields:
             cfg = env._evaluation_recording[f"recording:{field}"]
             capture.fields[field] = cfg.func(env, None, **cfg.params)
-    return _evaluate_final_frame(rules, capture.finish(None))
+    return capture.finish(None)
 
 
 def _evaluate_final_frame(

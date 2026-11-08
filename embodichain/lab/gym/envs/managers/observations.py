@@ -206,16 +206,21 @@ def _get_evaluation_state(
     env: EmbodiedEnv, obs: EnvObs, *, field: str
 ) -> ObservationSample:
     parts = field.split("/")
-    if parts[0] == "links":
-        _, uid, link, _ = parts
-        key = ("evaluation_link", uid, link)
+    if parts[0] in ("links", "robot_links"):
+        owner = parts[0]
+        link = parts[-2]
+        if owner == "links":
+            asset = env.sim.get_articulation(parts[1])
+            identity = f"{parts[1]}/{link}"
+        else:
+            asset = env.robot
+            identity = link
+        key = (owner, identity)
 
         def produce() -> ObservationSample:
-            values = env.sim.get_articulation(uid).get_link_pose(link)
+            values = asset.get_link_pose(link)
             valid = torch.isfinite(values).all(-1) & (values[:, 3:] != 0).any(-1)
-            descriptor = _state_descriptor(
-                f"{uid}/{link}", "pose", (7,), values.dtype, ()
-            )
+            descriptor = _state_descriptor(identity, "pose", (7,), values.dtype, ())
             return ObservationSample(descriptor, values, valid, (None,) * env.num_envs)
 
     else:

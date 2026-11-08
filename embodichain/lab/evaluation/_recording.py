@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 
+def _is_segment_start_field(field: str) -> bool:
+    return field.startswith("rigid_objects/") and field.endswith("/segment_start_frame")
+
+
 def evaluate_recorded_rules(
     compiled: CompiledEvaluation,
     recording: str | PathLike[str] | Mapping[str, Any],
@@ -166,6 +170,12 @@ def evaluate_recorded_rules(
     descriptors = {}
     for field in compiled.required_fields:
         sample = history["fields"].get(field)
+        if (
+            sample is None
+            and field.startswith("rigid_objects/")
+            and field.endswith(("/frame", "/segment_start_frame"))
+        ):
+            sample = history["fields"].get(field.rsplit("/", 1)[0] + "/pose")
         if sample is None:
             continue
         values, valid = sample["values"], sample["valid"]
@@ -185,6 +195,27 @@ def evaluate_recorded_rules(
         descriptors[field] = descriptor
     for field in _foreign_layouts(descriptors):
         fields.pop(field)
+
+    initial = {}
+    initial_step = start_step - 1
+    for field in tuple(fields):
+        if not _is_segment_start_field(field):
+            continue
+        values, valid, projection = fields.pop(field)
+        if 0 <= initial_step < revisions.shape[1]:
+            initial[field] = (
+                values[:, initial_step][..., projection]
+                .index_select(0, index.to(values.device))
+                .to(session.device),
+                valid[:, initial_step]
+                .index_select(0, index.to(valid.device))
+                .to(session.device),
+            )
+    if initial:
+        initial_revisions = (
+            revisions[:, initial_step].index_select(0, index).to(session.device)
+        )
+        initial_available = (initial_revisions >= 0) & (initial_step <= row_lengths)
 
     recorded_stop = min(stop, max(available_ends))
     for start in range(start_step, recorded_stop + 1, chunk_steps):
@@ -209,12 +240,26 @@ def evaluate_recorded_rules(
                 revisions_at_step = revisions_at_step.masked_fill(
                     step > row_lengths, -1
                 )
+            values_at_step = {
+                field: values[:, offset] for field, (values, _) in chunk.items()
+            }
+            valid_at_step = {
+                field: valid[:, offset] for field, (_, valid) in chunk.items()
+            }
+            if initial:
+                qualified = initial_available & (initial_revisions < revisions_at_step)
+                values_at_step.update(
+                    {field: values for field, (values, _) in initial.items()}
+                )
+                valid_at_step.update(
+                    {field: valid & qualified for field, (_, valid) in initial.items()}
+                )
             session._advance(
                 step,
-                {field: values[:, offset] for field, (values, _) in chunk.items()},
+                values_at_step,
                 revisions_at_step,
                 source_episode_ids,
-                {field: valid[:, offset] for field, (_, valid) in chunk.items()},
+                valid_at_step,
                 active=None if row_ends is None else step <= row_ends,
             )
     if stop > recorded_stop:
@@ -245,7 +290,12 @@ def evaluate_recorded_rules(
 def _matches_field(field, uid, quantity):
     if field.startswith("rigid_objects/"):
         return field == f"rigid_objects/{uid}/{quantity}" or (
-            quantity == "pose" and field == f"rigid_objects/{uid}/frame"
+            quantity == "pose"
+            and field
+            in (
+                f"rigid_objects/{uid}/frame",
+                f"rigid_objects/{uid}/segment_start_frame",
+            )
         )
     if field.startswith("articulations/"):
         source = f"articulations/{uid}/{quantity}"
@@ -257,6 +307,8 @@ def _matches_field(field, uid, quantity):
             f"links/{uid}/position",
             f"links/{uid}/frame",
         )
+    if field.startswith("robot_links/"):
+        return quantity == "pose" and field == f"robot_links/{uid}/position"
     if field.startswith("robot/"):
         return field == f"robot/{uid}/{quantity}"
     return True
@@ -289,9 +341,10 @@ def _field_projection(field, descriptor):
         return _descriptor_value(descriptor, name, default)
 
     quantity = get("quantity")
-    shape = tuple(get("shape", ()))
-    names = tuple(get("joint_names", ()))
     if not _matches_field(field, get("entity_uid"), quantity):
+        return None
+    shape, names, units = (get(name, ()) for name in ("shape", "joint_names", "units"))
+    if not all(isinstance(value, (tuple, list)) for value in (shape, names, units)):
         return None
     if quantity == "pose":
         contract = ("arena", "xyz_xyzw", ("m", "unitless"), (7,))
@@ -299,14 +352,18 @@ def _field_projection(field, descriptor):
         unit = "m/s" if quantity == "lin_vel" else "rad/s"
         contract = ("arena", "xyz", (unit,), (3,))
     elif quantity in ("qpos", "command"):
-        if not names or len(set(names)) != len(names):
+        if (
+            not names
+            or any(type(name) is not str for name in names)
+            or len(set(names)) != len(names)
+        ):
             return None
         contract = ("joint", "joint_order", ("joint_units",), (len(names),))
     else:
         return (
             slice(None)
             if not field.startswith(
-                ("rigid_objects/", "articulations/", "links/", "robot/")
+                ("rigid_objects/", "articulations/", "links/", "robot/", "robot_links/")
             )
             else None
         )
@@ -314,11 +371,18 @@ def _field_projection(field, descriptor):
     if (
         get("coordinate_frame"),
         get("representation"),
-        tuple(get("units", ())),
-        shape,
+        tuple(units),
+        tuple(shape),
     ) != contract:
         return None
-    if quantity == "pose" and not field.endswith("/frame"):
+    if str(get("dtype")) not in (
+        "torch.float16",
+        "torch.bfloat16",
+        "torch.float32",
+        "torch.float64",
+    ):
+        return None
+    if quantity == "pose" and not field.endswith(("/frame", "/segment_start_frame")):
         return slice(0, 3)
     if quantity == "qpos" and field.startswith("articulations/") and "/qpos/" in field:
         joint = field.rsplit("/", 1)[1]

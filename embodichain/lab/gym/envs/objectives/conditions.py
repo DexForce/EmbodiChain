@@ -24,7 +24,8 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.evaluation._predicates import _HEIGHT, _NEAR
+from embodichain.compute.geometry._distance import _measure_near_target, _positions
+from embodichain.lab.evaluation._predicates import _HEIGHT, _near_params
 
 if TYPE_CHECKING:
     from embodichain.lab.evaluation import RuleResult
@@ -89,11 +90,12 @@ def evaluate_near_target(
     Returns:
         Physical truth, validity and the measured ``distance`` vector.
     """
-    result = _NEAR.measure(
-        {"position": position, "target": target},
-        _NEAR.normalize({"tolerance": tolerance, "axes": axes, "inclusive": inclusive}),
+    params = _near_params(
+        {"tolerance": tolerance, "axes": axes, "inclusive": inclusive}
     )
-    return ConditionResult(result.satisfied, result.valid, result.metrics)
+    _positions(position)
+    passed, valid, distance = _measure_near_target(position, target, **params)
+    return ConditionResult(passed, valid, {"distance": distance})
 
 
 def evaluate_below_height(position: torch.Tensor, height: float) -> ConditionResult:

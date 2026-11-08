@@ -101,6 +101,7 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
 from embodichain.lab.gym.envs.task_program._final_acceptance import (
+    _capture_evaluation_frame,
     _FINAL_OBSERVATIONS_KEY,
     _FinalMeasurement,
     _deployment_final_rules,
@@ -524,6 +525,14 @@ class EmbodiedEnv(BaseEnv):
         self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
 
         registration = getattr(task_program_adapter_factory, "registration", None)
+        from embodichain.lab.gym.envs.objectives.ordered_placement import (
+            _objective_rule,
+        )
+
+        self._physical_objective_rule = _objective_rule(
+            cfg.objective,
+            getattr(registration, "evaluation_conditions", {}),
+        )
         self._final_acceptance_rules = _deployment_final_rules(registration)
         self._final_program_completion: tuple[tuple[int, ...], torch.Tensor] | None = (
             None
@@ -955,14 +964,14 @@ class EmbodiedEnv(BaseEnv):
             if "startup" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="startup")
 
-        evaluation_recording = getattr(self, "_evaluation_recording", {})
-        if self.cfg.observations or self.cfg.record_trajectory or evaluation_recording:
+        if self.cfg.observations or self.cfg.record_trajectory:
             recording = (
                 trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
                 if self.cfg.record_trajectory
                 else {}
             )
-            recording.update(evaluation_recording)
+            if self.cfg.record_trajectory:
+                recording.update(getattr(self, "_evaluation_recording", {}))
             self.observation_manager = ObservationManager(
                 self.cfg.observations, self, recording=recording
             )
@@ -1246,6 +1255,19 @@ class EmbodiedEnv(BaseEnv):
             and frame is not None
         ):
             process_rules = getattr(self, "_process_evaluation_rules", ())
+            if not getattr(self.cfg, "record_trajectory", False):
+                segment_fields = bridge._pending_evaluation_fields()
+                if segment_fields is not None:
+                    fields = dict.fromkeys(segment_fields)
+                    fields.update(
+                        dict.fromkeys(
+                            field
+                            for _, rule in process_rules
+                            for field in rule.required_fields
+                        )
+                    )
+                    if fields:
+                        frame = _capture_evaluation_frame(self, fields)
             if process_rules:
                 bridge._observe_segment_frame(
                     frame,
@@ -1338,7 +1360,12 @@ class EmbodiedEnv(BaseEnv):
         self._physical_objective_object = None
         if cfg is None:
             return
-        objective = OrderedPlacementObjective(cfg, self.num_envs, self.device)
+        objective = OrderedPlacementObjective(
+            cfg,
+            self.num_envs,
+            self.device,
+            condition=getattr(self, "_physical_objective_rule", None),
+        )
         obj = self.sim.get_rigid_object(objective.cfg.object_uid)
         if obj is None:
             raise ValueError(

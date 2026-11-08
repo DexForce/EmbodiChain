@@ -42,10 +42,11 @@ def _raw_field_kind(field: str) -> str:
         return {
             "pose": "position",
             "frame": "object_frame",
+            "segment_start_frame": "object_frame",
             "lin_vel": "linear_velocity",
             "ang_vel": "angular_velocity",
         }[quantity]
-    if owner == "links":
+    if owner in ("links", "robot_links"):
         return f"link_{quantity}"
     if owner == "robot":
         return {"qpos": "joint_positions", "command": "joint_command"}[quantity]

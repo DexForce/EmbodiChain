@@ -3819,7 +3819,6 @@ def test_registered_predicate_is_shared_by_configured_consumers(evaluation_deplo
     import yaml
 
     from embodichain.lab.evaluation import (
-        EvaluationSpec,
         EvaluationStatus,
         PredicateDefinition,
         PredicateMeasurement,
@@ -3834,7 +3833,6 @@ def test_registered_predicate_is_shared_by_configured_consumers(evaluation_deplo
         MeasuredRigidObjectState,
         OrderedPlacementObjective,
     )
-    from embodichain.lab.gym.envs.objectives.config import decode_objective
 
     def clearance(values, params):
         height = values["position"][:, 2]
@@ -3850,6 +3848,23 @@ def test_registered_predicate_is_shared_by_configured_consumers(evaluation_deplo
     path, rule_path, _ = evaluation_deployment
     config = load_config(path)
     component = load_config(rule_path)
+    objective_path = path.parent / "objective.yaml"
+    objective_path.write_text(
+        yaml.safe_dump(
+            {
+                "type": "ordered_stable_regions",
+                "object_uid": "handover_object",
+                "regions": [
+                    {"name": "region", "lower": [-1, -1, -1], "upper": [1, 1, 1]}
+                ],
+                "hold_seconds": 0.1,
+                "max_linear_speed": 0.1,
+                "max_angular_speed": 0.1,
+                "condition": "delivered",
+            }
+        )
+    )
+    config["objective"] = {"component": objective_path.name}
     rule = {
         "kind": "clearance_test",
         "bindings": {"position": "rigid_objects/can/pose"},
@@ -3917,31 +3932,12 @@ def test_registered_predicate_is_shared_by_configured_consumers(evaluation_deplo
         EvaluationStatus.UNAVAILABLE,
     ]
     consumer_rule = {**rule, "bindings": {"position": "position"}}
-    graph = EvaluationSpec.from_dict(
-        {
-            "roots": ["held"],
-            "rules": {
-                "clear": consumer_rule,
-                "held": {"kind": "hold_for", "ref": "clear", "end": 1, "steps": 2},
-            },
-        }
-    )
+    assert cfg.objective.condition == "delivered"
     objective = OrderedPlacementObjective(
-        decode_objective(
-            {
-                "type": "ordered_stable_regions",
-                "object_uid": "can",
-                "regions": [
-                    {"name": "region", "lower": [-1, -1, -1], "upper": [1, 1, 1]}
-                ],
-                "hold_seconds": 0.1,
-                "max_linear_speed": 0.1,
-                "max_angular_speed": 0.1,
-            }
-        ),
+        cfg.objective,
         2,
         "cpu",
-        condition=registry.compile(graph, field_kinds={"position": "position"}),
+        condition=registration.evaluation_conditions[cfg.objective.condition],
     )
     state = MeasuredRigidObjectState(
         position, torch.zeros_like(position), torch.zeros_like(position)
@@ -3995,6 +3991,7 @@ def test_typed_evaluation_reads_link_frames_and_native_control_parts():
     )
     from embodichain.lab.task_program.integrations.configured import _decode_evaluation
     from embodichain.lab.task_program.integrations.simulation.bindings import (
+        ControlPartCommandPreset,
         ControlPartEndpointBinding,
         ControlPartResourceBinding,
         SimulationArticulationBinding,
@@ -4016,10 +4013,15 @@ def test_typed_evaluation_reads_link_frames_and_native_control_parts():
             ControlPartResourceBinding(
                 "hand",
                 (
-                    ControlPartEndpointBinding("gripper", "eef", frozenset()),
+                    ControlPartEndpointBinding(
+                        "gripper", "eef", frozenset(), "hand_commands"
+                    ),
                     ControlPartEndpointBinding("other", "other_part", frozenset()),
                 ),
             ),
+        ),
+        command_presets=(
+            ControlPartCommandPreset("hand_commands", "eef", {"open": (0.2, 0.5)}),
         ),
     )
     component = {
@@ -4054,21 +4056,45 @@ def test_typed_evaluation_reads_link_frames_and_native_control_parts():
                     },
                     "params": {"tolerance": 0.02},
                 },
-                "accept": {"kind": "all", "refs": ["inside", "near", "matched"]},
+                "open": {
+                    "kind": "command_preset_match",
+                    "bindings": {"position": "robot/hand/gripper/qpos"},
+                    "params": {"preset": "open", "tolerance": 0.02},
+                },
+                "finger_close": {
+                    "kind": "link_object_distance",
+                    "bindings": {
+                        "position": "robot_links/finger/position",
+                        "target": "rigid_objects/payload/pose",
+                    },
+                    "params": {"tolerance": 0.1},
+                },
+                "finger_clear": {"kind": "not", "refs": ["finger_close"]},
+                "accept": {
+                    "kind": "all",
+                    "refs": ["inside", "near", "open", "finger_clear"],
+                },
             },
         },
         "final_acceptance": ["accept"],
     }
-    rules, refs, _ = _decode_evaluation(component, scene, robot_profile=profile)
+    robot_links = {"finger": "finger_tip"}
+    rules, refs, _ = _decode_evaluation(
+        component, scene, robot_profile=profile, robot_links=robot_links
+    )
     arm_calls = []
     pose = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).expand(2, -1)
     payload_pose = pose.clone()
     payload_pose[1, 0] = 0.08
     obj = SimpleNamespace(get_local_pose=lambda **kwargs: payload_pose)
     drawer = SimpleNamespace(link_names=["tray_link"], get_link_pose=lambda name: pose)
+    finger = pose.clone()
+    finger[:, 0] = 0.25
     robot = SimpleNamespace(
         control_parts={"eef": ["joint_b", "joint_a"]},
         joint_names=["joint_a", "joint_b"],
+        link_names=["finger_tip"],
+        get_link_pose=lambda name: finger,
         get_joint_ids=lambda *, name: [1, 0],
         get_qpos=lambda *, name, target: (
             arm_calls.append((name, target))
@@ -4096,7 +4122,13 @@ def test_typed_evaluation_reads_link_frames_and_native_control_parts():
     assert measured.conditions[0].metrics["near.distance"].tolist() == pytest.approx(
         [0.0, 0.08]
     )
-    assert sorted(arm_calls) == [("eef", False), ("eef", True)]
+    assert arm_calls == [("eef", False)]
+    assert measured.conditions[0].metrics[
+        "open.maximum_error"
+    ].tolist() == pytest.approx([0.0, 0.1])
+    assert measured.conditions[0].metrics[
+        "finger_close.distance"
+    ].tolist() == pytest.approx([0.25, 0.17])
     assert measured.frame.fields["robot/eef/qpos"].descriptor.joint_names == (
         "joint_b",
         "joint_a",
@@ -4106,7 +4138,9 @@ def test_typed_evaluation_reads_link_frames_and_native_control_parts():
         "command"
     ] = "robot/hand/other/command"
     with pytest.raises(ValueError, match="one joint layout"):
-        _decode_evaluation(component, scene, robot_profile=profile)
+        _decode_evaluation(
+            component, scene, robot_profile=profile, robot_links=robot_links
+        )
 
 
 @pytest.mark.parametrize(

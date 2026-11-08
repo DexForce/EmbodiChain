@@ -2730,6 +2730,7 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
 
     from embodichain.lab.evaluation import (
         EvaluationSpec,
+        EvaluationStatus,
         PredicateSpec,
         TemporalRule,
         builtin_predicates,
@@ -2782,7 +2783,22 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
             ("near_goal",),
         )
     )
-    conditions = {"near_goal": bound}
+    raised = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "raised": PredicateSpec(
+                    "lift",
+                    {
+                        "pose": "rigid_objects/native_cube/frame",
+                        "baseline": "rigid_objects/native_cube/segment_start_frame",
+                    },
+                    {"minimum_lift": 0.1},
+                )
+            },
+            ("raised",),
+        )
+    )
+    conditions = {"near_goal": bound, "raised": raised}
     declaration = {
         "program_id": "measured_hold",
         "integration": {
@@ -2818,7 +2834,10 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
                 "post": [
                     {"kind": "wait_stable", "entity": "cube", "preset": "rigid_object"}
                 ],
-                "validators": [{"kind": "condition", "ref": "near_goal"}],
+                "validators": [
+                    {"kind": "condition", "ref": "near_goal"},
+                    {"kind": "condition", "ref": "raised"},
+                ],
             },
         },
     }
@@ -2865,6 +2884,7 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     )
     env = SimpleNamespace(
         sim=sim,
+        cfg=SimpleNamespace(record_trajectory=True),
         num_envs=BATCH_SIZE,
         device=torch.device("cpu"),
         episode_context=context,
@@ -2896,13 +2916,15 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     )
     revisions = []
     reports = []
+    lifts = []
     for occurrence, segment in enumerate(bridge.iter_segments()):
         for action in segment.actions:
             # The first occurrence needs both the runtime command and its
             # post-policy hold. The second occurrence loses its own hold.
             position[:, 0] = torch.tensor(
-                [0.5 if occurrence == 0 or clock.step_index == 2 else 0.7, 0.7]
+                [0.4 if occurrence == 0 or clock.step_index == 2 else 0.7, 0.7]
             )
+            position[:, 2] = 0.2
             frame = EmbodiedEnv._capture_observation(env)
             revisions.append(frame.revision)
             EmbodiedEnv._hook_after_sim_step(
@@ -2922,6 +2944,11 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
             [True, False] if occurrence == 0 else [False, False]
         )
         reports.append(segment.metadata["validation"]["validators"][0]["result"])
+        lifts.append(
+            segment.metadata["validation"]["validators"][1]["result"]["rules"][
+                "raised"
+            ]["metrics"]["lift"]
+        )
 
     assert bridge.program_completed
     assert reports[0]["status"] == ["satisfied", "failed"]
@@ -2929,9 +2956,12 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     assert reports[0]["witness_revisions"] == [revisions[:2], [-1, -1]]
     assert reports[1]["status"] == ["failed", "not_run"]
     assert reports[1]["witness_steps"] == [[-1, -1], [-1, -1]]
+    assert lifts[0] == pytest.approx([0.2, 0.2])
+    assert lifts[1] == pytest.approx([0.0])
+    history = {"raw_observations": export_observation_history(env.observation_manager)}
     result = evaluate_recorded_rules(
         bound,
-        {"raw_observations": export_observation_history(env.observation_manager)},
+        history,
         env_ids=(0, 1),
         episode_ids=(0, 0),
         scope="pick/0",
@@ -2942,3 +2972,29 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     offline = result.rules["near_goal"]
     assert offline.witness_revisions.tolist() == reports[0]["witness_revisions"]
     assert offline.witness_steps.tolist() == reports[0]["witness_steps"]
+    for start, end, expected in ((1, 2, [0.2, 0.2]), (3, 4, [0.0, 0.0])):
+        offline = evaluate_recorded_rules(
+            raised,
+            history,
+            env_ids=(0, 1),
+            episode_ids=(0, 0),
+            scope=f"pick/{start}",
+            start_step=start,
+            end_step=end,
+            chunk_steps=1,
+        ).rules["raised"]
+        assert offline.metrics["lift"].tolist() == pytest.approx(expected)
+    history["raw_observations"]["revisions"][0, 0] = -1
+    unavailable = evaluate_recorded_rules(
+        raised,
+        history,
+        env_ids=(0, 1),
+        episode_ids=(0, 0),
+        scope="pick/0",
+        start_step=1,
+        end_step=2,
+    ).rules["raised"]
+    assert unavailable.status.tolist() == [
+        EvaluationStatus.UNAVAILABLE,
+        EvaluationStatus.SATISFIED,
+    ]

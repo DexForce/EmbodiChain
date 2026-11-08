@@ -339,9 +339,18 @@ Rigid-body velocities use `lin_vel` and `ang_vel`. Joint predicates select
 object-local corners and link-frame bounds. Command matching uses `qpos`
 and `command` on the same `robot/<resource>/<endpoint>` binding.
 The robot resolves the native joint order. The command channel records the
-current controller target. Trusted Python hosts can pass an
+current controller target. `command_preset_match` instead takes one measured
+`qpos` input and resolves `params.preset` through that endpoint's embodiment
+command preset. An embodiment can declare `skill_profile.evaluation_links`
+as logical aliases to native robot links. Use `robot_links/<alias>/position`
+for measured link distance. Trusted Python hosts can pass an
 `evaluation_registry` when loading the deployment. YAML contains only
 registered kind IDs and inert parameters.
+
+The `lift` predicate can bind its `baseline` to
+`rigid_objects/<entity>/segment_start_frame`. Segment execution captures that
+pose before issuing the first action. Recorded evaluation reads the preceding
+state slot, and a missing boundary yields unavailable evidence.
 
 Boolean rules name child rules in `refs`. Temporal rules select one `ref`
 and inclusive slot offsets `start` and `end`. `hold_for` requires
@@ -364,6 +373,13 @@ Program overrides keep these deployment-owned selections. The bridge checks
 process constraints after consumed steps and routes rejected rows through its
 existing safe hold. The rules and bindings participate in registration
 identity.
+
+An ordered placement objective component can set `condition` to an exported
+root over its object's position and velocities. The objective advances the rule
+with each measured sample and keeps its result independent of termination and
+persistence. With trajectory recording disabled, segment and process checks
+acquire only their active fields. Final-only fields are sampled at final
+queries and sealing.
 
 ## Asset role requirements
 

@@ -128,6 +128,16 @@ def _inside_region(position, lower, upper):
     return ((position >= lower) & (position <= upper)).all(dim=-1)
 
 
+def _evaluation_pose_matrix(pose):
+    from embodichain.utils.math import matrix_from_quat
+
+    matrix = pose.new_zeros((len(pose), 4, 4))
+    matrix[:, :3, :3] = matrix_from_quat(pose[:, 3:])
+    matrix[:, :3, 3] = pose[:, :3]
+    matrix[:, 3, 3] = 1
+    return matrix
+
+
 def _corners_in_frame(pose, frame, corners):
     import torch
     from embodichain.utils.math import matrix_from_quat

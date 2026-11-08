@@ -1671,6 +1671,17 @@ class TaskProgramDemoBridge:
         )
         return ControllerAction(value=value, metadata=metadata)
 
+    def _pending_evaluation_fields(self) -> tuple[str, ...] | None:
+        lifecycle = self._last_segment_lifecycle
+        if (
+            lifecycle is None
+            or lifecycle.pending_action is None
+            or lifecycle.abort_started
+            or lifecycle.observed_step == self._clock.step_index + 1
+        ):
+            return None
+        return getattr(self._validator_port, "_evaluation_fields", ())
+
     def _observe_segment_frame(
         self,
         frame: ObservationFrame,
@@ -1686,16 +1697,10 @@ class TaskProgramDemoBridge:
     ) -> None:
         """Publish the observation after a yielded command's host control step."""
         lifecycle = self._last_segment_lifecycle
-        if (
-            lifecycle is None
-            or lifecycle.pending_action is None
-            or lifecycle.abort_started
-        ):
+        if self._pending_evaluation_fields() is None:
             return
         observe = getattr(self._validator_port, "_observe_segment_frame", None)
         step = self._clock.step_index + 1
-        if lifecycle.observed_step == step:
-            return
         if observe is not None:
             observe(frame, step=step, episode_owner=episode_owner)
         lifecycle.observed_step = step

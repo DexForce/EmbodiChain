@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, MutableMapping
 from copy import copy, deepcopy
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 import math
 from types import MappingProxyType
 from typing import Any, Literal, TYPE_CHECKING
@@ -50,6 +50,7 @@ from embodichain.lab.evaluation.observations import (
     _rule_report,
     advance_observation,
 )
+from embodichain.lab.evaluation._recording import _is_segment_start_field
 from embodichain.lab.evaluation._predicates import (
     _joint_range,
     _lift,
@@ -323,6 +324,8 @@ class SimulationSegmentPolicyPort:
         self._validator_active_masks: dict[int, torch.Tensor] = {}
         self._lift_baselines: dict[int, torch.Tensor] = {}
         self._evaluation_specs: dict[str, CompiledEvaluation] = {}
+        self._evaluation_fields: tuple[str, ...] = ()
+        self._evaluation_initial = {}
         self._evaluation_sessions: dict[str, RuleSession] = {}
         self._evaluation_start: int | None = None
         self._evaluation_active: torch.Tensor | None = None
@@ -454,6 +457,8 @@ class SimulationSegmentPolicyPort:
         session._validator_active_masks = {}
         session._lift_baselines = {}
         session._evaluation_specs = {}
+        session._evaluation_fields = ()
+        session._evaluation_initial = {}
         session._evaluation_sessions = {}
         session._evaluation_start = None
         session._evaluation_active = None
@@ -853,6 +858,17 @@ class SimulationSegmentPolicyPort:
             for validator in segment.validators
             if type(validator) is CompiledConditionValidator
         }
+        required = tuple(
+            dict.fromkeys(
+                field
+                for spec in self._evaluation_specs.values()
+                for field in spec.required_fields
+            )
+        )
+        self._evaluation_fields = tuple(
+            field for field in required if not _is_segment_start_field(field)
+        )
+        self._evaluation_initial = {}
         self._evaluation_sessions.clear()
         self._evaluation_start = None
         self._evaluation_active = None
@@ -866,6 +882,10 @@ class SimulationSegmentPolicyPort:
             self._evaluation_rows = tuple(
                 self._row_indices[active].detach().cpu().tolist()
             )
+            for field in required:
+                if _is_segment_start_field(field):
+                    uid = field.removeprefix("rigid_objects/").rsplit("/", 1)[0]
+                    self._evaluation_initial[field] = self._segment_start_pose(uid)
         for validator in segment.validators:
             self.validate_validator(validator, segment=segment)
             if type(validator) is CompiledObjectStateValidator:
@@ -881,6 +901,22 @@ class SimulationSegmentPolicyPort:
                         require_finite=False,
                     )
 
+    def _segment_start_pose(self, uid):
+        from embodichain.lab.gym.envs.managers.observation_types import (
+            ObservationSample,
+        )
+        from embodichain.lab.gym.envs.managers.observations import _state_descriptor
+
+        pose = (
+            self._simulation.get_rigid_object(uid)
+            .get_local_pose(to_matrix=False)
+            .detach()
+            .clone()
+        )
+        valid = torch.isfinite(pose).all(-1) & (pose[:, 3:] != 0).any(-1)
+        descriptor = _state_descriptor(uid, "pose", (7,), pose.dtype, ())
+        return ObservationSample(descriptor, pose, valid, (None,) * len(pose))
+
     def _observe_segment_frame(
         self, frame: ObservationFrame, *, step: int, episode_owner: EpisodeContext
     ) -> None:
@@ -888,6 +924,8 @@ class SimulationSegmentPolicyPort:
         if start is None or not self._evaluation_rows:
             return
         self._require_open()
+        if self._evaluation_initial:
+            frame = replace(frame, fields={**frame.fields, **self._evaluation_initial})
         for ref, spec in self._evaluation_specs.items():
             session = self._evaluation_sessions.get(ref)
             if session is None:

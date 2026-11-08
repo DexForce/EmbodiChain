@@ -26,7 +26,7 @@ import json
 from pathlib import Path
 from statistics import median
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from time import perf_counter_ns
 
 import torch
@@ -265,6 +265,9 @@ def _measure_process(device, rows, iterations):
         _clock=SimpleNamespace(step_index=0),
         _eligible_mask=torch.ones(rows, device=device, dtype=torch.bool),
         env_ids=indices,
+    )
+    host._pending_evaluation_fields = MethodType(
+        TaskProgramDemoBridge._pending_evaluation_fields, host
     )
 
     def check():

@@ -183,7 +183,10 @@ class evaluation_condition(Functor):
             else:
                 raise ValueError(f"Invalid evaluation source for {field!r}.")
         self._compiled = registry.compile(
-            spec, available_fields=set(sources), field_kinds=field_kinds
+            spec,
+            available_fields=set(sources),
+            field_kinds=field_kinds,
+            field_layouts={},
         ).select(root)
         if self._compiled.stateful:
             raise ValueError("RL evaluation conditions require instantaneous rules.")

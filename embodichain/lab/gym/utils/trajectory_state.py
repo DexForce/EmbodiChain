@@ -237,9 +237,12 @@ def _evaluation_observation_cfgs(
                 result[f"recording:{name}"] = _raw_entity_observation_cfg(
                     name, uid, quantity
                 )
-        name = f"rigid_objects/{uid}/frame"
-        if name in fields:
-            result[f"recording:{name}"] = _raw_entity_observation_cfg(name, uid, "pose")
+        for quantity in ("frame", "segment_start_frame"):
+            name = f"rigid_objects/{uid}/{quantity}"
+            if name in fields:
+                result[f"recording:{name}"] = _raw_entity_observation_cfg(
+                    name, uid, "pose"
+                )
     for binding in getattr(registration.scene_binding, "articulations", ()):
         uid = binding.simulation_uid
         for name in sorted(fields):
@@ -248,7 +251,7 @@ def _evaluation_observation_cfgs(
                     name, uid, "qpos"
                 )
     for name in sorted(fields):
-        if name.startswith(("links/", "robot/")):
+        if name.startswith(("links/", "robot/", "robot_links/")):
             result[f"recording:{name}"] = ObservationCfg(
                 func=_get_evaluation_state,
                 mode="add",
@@ -284,6 +287,11 @@ def _validate_evaluation_observation_bindings(env: _TrajectoryEnv, configs) -> N
             asset = env.sim.get_articulation(uid)
             if asset is None or link not in asset.link_names:
                 raise ValueError(f"Evaluation field {cfg.name!r} has no native link.")
+        elif parts[0] == "robot_links":
+            if parts[1] not in env.robot.link_names:
+                raise ValueError(
+                    f"Evaluation field {cfg.name!r} has no native robot link."
+                )
         elif parts[0] == "robot":
             _require_control_part_dof(env.robot, parts[1])
 

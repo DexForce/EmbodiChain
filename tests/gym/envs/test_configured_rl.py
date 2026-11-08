@@ -205,6 +205,26 @@ def test_registered_graph_is_an_rl_condition_with_cached_outcome_and_limits():
     manager.compute()
     assert manager.task_state()[0].tolist() == [True, True]
 
+    command = ConditionCfg(
+        func=evaluation_condition,
+        params={
+            "sources": {
+                "left": {"attribute": "left_qpos", "kind": "joint_positions"},
+                "right": {"attribute": "right_command", "kind": "joint_command"},
+            },
+            "root": "matched",
+            "rules": {
+                "matched": {
+                    "kind": "command_position_match",
+                    "bindings": {"position": "left", "command": "right"},
+                    "params": {"tolerance": 0.1},
+                },
+            },
+        },
+    )
+    with pytest.raises(RuntimeError, match="one joint layout"):
+        TerminationManager(RLTaskCfg(success={"matched": command}), env)
+
 
 def test_outcome_queries_partial_reset_and_invalid_failure():
     env = _env()

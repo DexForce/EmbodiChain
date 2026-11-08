@@ -31,6 +31,7 @@ from typing import cast
 import torch
 
 from embodichain.lab.evaluation import CompiledEvaluation
+from embodichain.lab.evaluation._recording import _is_segment_start_field
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
@@ -1348,7 +1349,9 @@ class SimulationTaskProgramRegistration:
                 spec = self.evaluation_conditions.get(ref)
                 if spec is None:
                     raise ValueError(f"Unknown evaluation.{key} ref {ref!r}.")
-                if spec.stateful:
+                if spec.stateful or any(
+                    _is_segment_start_field(field) for field in spec.required_fields
+                ):
                     raise ValueError(f"evaluation.{key} requires instantaneous roots.")
             if len(set(refs)) != len(refs):
                 raise ValueError(f"evaluation.{key} refs must be unique.")

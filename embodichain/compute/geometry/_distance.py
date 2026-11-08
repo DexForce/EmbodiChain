@@ -66,6 +66,8 @@ def _measure_near_target(
     tolerance: float,
     axes: tuple[int, ...],
     inclusive: bool,
+    *,
+    portable: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     import torch
 
@@ -76,6 +78,15 @@ def _measure_near_target(
     if target.shape != position.shape:
         raise ValueError("Target batch must match object positions.")
     valid = torch.isfinite(position).all(dim=-1) & torch.isfinite(target).all(dim=-1)
-    distance = torch.linalg.vector_norm((position - target)[:, axes], dim=-1)
+    delta = (position - target)[:, axes]
+    if portable:
+        # Fix the accumulation order and round once to the observation dtype.
+        squares = delta.to(torch.float64).square().unbind(-1)
+        total = squares[0]
+        for square in squares[1:]:
+            total = total + square
+        distance = total.sqrt().to(position.dtype)
+    else:
+        distance = torch.linalg.vector_norm(delta, dim=-1)
     satisfied = distance <= tolerance if inclusive else distance < tolerance
     return satisfied, valid, distance

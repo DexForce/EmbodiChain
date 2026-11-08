@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from embodichain.compute._evaluation import (
     _corners_in_frame,
+    _evaluation_pose_matrix,
     _inside_region,
     _measure_lift,
     _measure_relative_position,
@@ -81,6 +82,7 @@ def _near(arguments, params):
         params["tolerance"],
         params["axes"],
         params["inclusive"],
+        portable=True,
     )
     return PredicateMeasurement(satisfied, valid, {"distance": distance})
 
@@ -154,7 +156,11 @@ def _joint_near(arguments, params):
 
 def _command_params(params):
     _keys(params, ("tolerance",))
-    return _joint_near_params({"target": 0, "tolerance": params["tolerance"]})
+    return {
+        "tolerance": _joint_near_params(
+            {"target": 0, "tolerance": params["tolerance"]}
+        )["tolerance"]
+    }
 
 
 def _command_match(arguments, params):
@@ -171,6 +177,36 @@ def _command_match(arguments, params):
         valid,
         {"maximum_error": (measured - command).abs().amax(-1)},
     )
+
+
+def _preset_params(params):
+    _keys(params, ("tolerance", "preset", "positions"))
+    positions = params["positions"]
+    preset = params["preset"]
+    if not isinstance(preset, str) or not preset or preset != preset.strip():
+        raise ValueError("Command preset requires an exact preset name.")
+    if not isinstance(positions, (tuple, list)) or not positions:
+        raise ValueError("Command preset requires a nonempty joint vector.")
+    return {
+        **_command_params({"tolerance": params["tolerance"]}),
+        "preset": preset,
+        "positions": tuple(
+            _finite(position, "preset joint position") for position in positions
+        ),
+    }
+
+
+def _preset_match(arguments, params):
+    import torch
+
+    position = arguments["position"]
+    if position.ndim != 2 or position.shape[1] != len(params["positions"]):
+        unavailable = torch.zeros(
+            len(position), device=position.device, dtype=torch.bool
+        )
+        return PredicateMeasurement(unavailable, unavailable, {})
+    command = position.new_tensor(params["positions"]).expand_as(position)
+    return _command_match({"position": position, "command": command}, params)
 
 
 def _corner_params(params):
@@ -232,6 +268,100 @@ def _upright(pose, maximum_tilt):
     return PredicateMeasurement(passed, valid, {"tilt_degrees": measured})
 
 
+def _xyz(value, name):
+    if not isinstance(value, (tuple, list)) or len(value) != 3:
+        raise ValueError(f"{name} must be an XYZ triple.")
+    return tuple(_finite(item, name) for item in value)
+
+
+def _near_relative_params(params):
+    _keys(params, ("tolerance", "displacement"), ("axes", "inclusive"))
+    return {
+        **_near_params(
+            {key: value for key, value in params.items() if key != "displacement"}
+        ),
+        "displacement": _xyz(params["displacement"], "displacement"),
+    }
+
+
+def _near_relative(arguments, params):
+    import torch
+
+    position, reference = arguments["position"], arguments["reference"]
+    target = reference + position.new_tensor(params["displacement"])
+    dtype = torch.promote_types(position.dtype, target.dtype)
+    return _near({"position": position.to(dtype), "target": target.to(dtype)}, params)
+
+
+def _lift_params(params):
+    _keys(params, ("minimum_lift",))
+    minimum = _finite(params["minimum_lift"], "minimum_lift")
+    if minimum <= 0:
+        raise ValueError("Minimum lift must be positive.")
+    return {"minimum_lift": minimum}
+
+
+def _lift_predicate(arguments, params):
+    return _lift(
+        _evaluation_pose_matrix(arguments["pose"]),
+        _evaluation_pose_matrix(arguments["baseline"]),
+        params["minimum_lift"],
+    )
+
+
+def _relative_params(params):
+    _keys(params, ("offset", "tolerances"), ("parent_axes",))
+    tolerances = params["tolerances"]
+    parent_axes = params.get("parent_axes", False)
+    if (
+        not isinstance(tolerances, (tuple, list))
+        or len(tolerances) != 3
+        or all(value is None for value in tolerances)
+        or type(parent_axes) is not bool
+    ):
+        raise ValueError(
+            "Relative position requires XYZ tolerances and a boolean parent_axes flag."
+        )
+    tolerances = tuple(
+        None if value is None else _finite(value, "tolerance") for value in tolerances
+    )
+    if any(value is not None and value <= 0 for value in tolerances):
+        raise ValueError("Relative position tolerances must be positive.")
+    return {
+        "offset": _xyz(params["offset"], "offset"),
+        "tolerances": tolerances,
+        "parent_axes": parent_axes,
+    }
+
+
+def _relative_predicate(arguments, params):
+    import torch
+
+    pose, reference = arguments["pose"], arguments["reference"]
+    dtype = torch.promote_types(pose.dtype, reference.dtype)
+    return _relative_position(
+        _evaluation_pose_matrix(pose.to(dtype)),
+        _evaluation_pose_matrix(reference.to(dtype)),
+        pose.new_tensor(params["offset"], dtype=dtype),
+        params["tolerances"],
+        parent_axes=params["parent_axes"],
+    )
+
+
+def _upright_params(params):
+    _keys(params, ("maximum_tilt_degrees",))
+    maximum = _finite(params["maximum_tilt_degrees"], "maximum_tilt_degrees")
+    if not 0 < maximum <= 180:
+        raise ValueError("Upright tilt limit must be in (0, 180].")
+    return {"maximum_tilt_degrees": maximum}
+
+
+def _upright_predicate(arguments, params):
+    return _upright(
+        _evaluation_pose_matrix(arguments["pose"]), params["maximum_tilt_degrees"]
+    )
+
+
 def _stable_params(params):
     _keys(params, ("linear_speed", "angular_speed"))
     limits = {key: _finite(value, key) for key, value in params.items()}
@@ -260,6 +390,8 @@ def _stable(arguments, params):
 
 def _region_params(params):
     _keys(params, ("lower", "upper"))
+    if any(not isinstance(values, (tuple, list)) for values in params.values()):
+        raise ValueError("Region bounds must specify ordered XYZ triples.")
     bounds = {
         name: tuple(_finite(x, name) for x in values) for name, values in params.items()
     }
@@ -287,10 +419,10 @@ def _region(arguments, params):
 
 
 _NEAR = PredicateDefinition(
-    1, ("position", "target"), _near_params, _near, ("position", "position")
+    2, ("position", "target"), _near_params, _near, ("position", "position")
 )
 _LINK_NEAR = PredicateDefinition(
-    1, ("position", "target"), _near_params, _near, ("link_position", "position")
+    2, ("position", "target"), _near_params, _near, ("link_position", "position")
 )
 _HEIGHT = PredicateDefinition(1, ("position",), _height_params, _height, ("position",))
 _JOINT_RANGE = PredicateDefinition(
@@ -306,6 +438,9 @@ _COMMAND = PredicateDefinition(
     _command_match,
     ("joint_positions", "joint_command"),
     shared_layout=True,
+)
+_PRESET = PredicateDefinition(
+    1, ("position",), _preset_params, _preset_match, ("joint_positions",)
 )
 _STABLE = PredicateDefinition(
     1,
@@ -329,10 +464,47 @@ def builtin_predicates() -> PredicateRegistry:
     registry = PredicateRegistry()
     for kind, definition in (
         ("near_target", _NEAR),
+        (
+            "near_relative_target",
+            PredicateDefinition(
+                1,
+                ("position", "reference"),
+                _near_relative_params,
+                _near_relative,
+                ("position", "position"),
+            ),
+        ),
+        (
+            "lift",
+            PredicateDefinition(
+                1,
+                ("pose", "baseline"),
+                _lift_params,
+                _lift_predicate,
+                ("object_frame", "object_frame"),
+            ),
+        ),
+        (
+            "relative_position",
+            PredicateDefinition(
+                1,
+                ("pose", "reference"),
+                _relative_params,
+                _relative_predicate,
+                ("object_frame", "object_frame"),
+            ),
+        ),
+        (
+            "upright",
+            PredicateDefinition(
+                1, ("pose",), _upright_params, _upright_predicate, ("object_frame",)
+            ),
+        ),
         ("below_height", _HEIGHT),
         ("joint_range", _JOINT_RANGE),
         ("joint_near", _JOINT_NEAR),
         ("command_position_match", _COMMAND),
+        ("command_preset_match", _PRESET),
         ("stable", _STABLE),
         ("inside_region", _REGION),
         ("corner_containment", _CORNERS),

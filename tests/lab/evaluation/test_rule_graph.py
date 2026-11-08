@@ -194,6 +194,45 @@ def test_graph_rejects_mapping_in_reference_lists():
         )
 
 
+def test_legacy_geometric_measurements_are_named_predicates():
+    rules = {
+        "lift": PredicateSpec(
+            "lift", {"pose": "a", "baseline": "b"}, {"minimum_lift": 0.05}
+        ),
+        "upright": PredicateSpec(
+            "upright", {"pose": "a"}, {"maximum_tilt_degrees": 45}
+        ),
+        "relative": PredicateSpec(
+            "relative_position",
+            {"pose": "a", "reference": "b"},
+            {"offset": (0, 0, 0.1), "tolerances": (0.01, 0.01, 0.01)},
+        ),
+        "near_relative": PredicateSpec(
+            "near_relative_target",
+            {"position": "position", "reference": "reference"},
+            {"displacement": (0, 0, 0.1), "tolerance": 0.01},
+        ),
+    }
+    graph = builtin_predicates().compile(EvaluationSpec(rules, tuple(rules)))
+    reference = torch.tensor([[0, 0, 0, 0, 0, 0, 1.0]]).expand(2, -1)
+    pose = reference.clone()
+    pose[0, 2] = 0.1
+    pose[1, 3] = 1
+    pose[1, 6] = 0
+    result = graph.evaluate(
+        {
+            "a": pose,
+            "b": reference,
+            "position": pose[:, :3],
+            "reference": reference[:, :3],
+        },
+        batch_size=2,
+        device="cpu",
+    )
+    for name in rules:
+        assert result[name].status.tolist() == [Status.SATISFIED, Status.FAILED]
+
+
 def test_file_replay_uses_original_segment_and_qualifies_each_row(tmp_path):
     graph = _graph().select("goal")
     fields = {
