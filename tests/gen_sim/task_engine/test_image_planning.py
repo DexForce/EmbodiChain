@@ -566,6 +566,12 @@ def test_single_repair_gets_all_independent_symbolic_state_errors(source_image):
         "missing_held_object",
     }
     assert {item["node_id"] for item in diagnostics["errors"]} == {"n1", "n2"}
+    mismatch = next(
+        item for item in diagnostics["errors"] if item["code"] == "holder_mismatch"
+    )
+    assert mismatch["repair_operations"] == [
+        {"operation": "remove", "node_id": "n1", "path": "/call/resources/primary"}
+    ]
 
 
 @pytest.mark.parametrize("arm", ["left", "right"])
@@ -637,3 +643,23 @@ def test_malformed_intent_gets_one_diagnostic_repair(source_image, malformed):
     )
     assert len(attempts) == 2 and attempts[1]["repair_errors"]
     assert result["semantic_graph_validation"]["coverage"]["semantic_status"] == "valid"
+
+
+def test_handover_repair_points_to_existing_unbound_acquisition(source_image):
+    def damage(step, grounding, plan):
+        plan["nodes"][0]["call"]["resources"] = {}
+
+    with pytest.raises(SemanticPlanningError) as failure:
+        _plan(source_image, "E4", damage)
+    diagnostics = failure.value.artifacts["model_attempts"][-1]["errors"][0]
+    handover = next(
+        item for item in diagnostics["errors"] if item["code"] == "handover_state"
+    )
+    assert handover["repair_operations"] == [
+        {
+            "operation": "set",
+            "node_id": "n0",
+            "path": "/call/resources/primary",
+            "value": "right",
+        }
+    ]

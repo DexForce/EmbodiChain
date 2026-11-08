@@ -58,7 +58,11 @@ capabilities rather than per-E-type construction branches. Explicit part parents
 retain drawer/handle identity; step-result selectors inherit earlier source IDs.
 This semantic-only checker does not weaken historical grounded coverage checks.
 Requested destinations and relations must be realized by each subject's producing
-call, rather than an unrelated pickup annotation. Terminal holds are checked at
+call, rather than an unrelated pickup annotation. Resource-state diagnostics
+include proposed node/slot set/remove operations, including the original
+acquisition for a named handover. Repair prompts require retaining unaffected
+fields of the previous plan; suggestions do not mutate the graph or bypass the
+complete strict validator. Terminal holds are checked at
 the source step boundary; coordinated hold is rejected until a matching hold
 call is available in the catalog.
 

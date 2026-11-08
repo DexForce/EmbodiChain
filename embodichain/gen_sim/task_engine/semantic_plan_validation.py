@@ -87,6 +87,9 @@ def validate_semantic_plan(
         Recomputable phase-specific coverage and pending-binding summary.
     Raises:
         ValueError: Invalid call, topology, state, identity or missing semantics.
+            State diagnostics may propose resource-slot edits for a repair
+            request; these suggestions never change the input or establish
+            validity without a complete subsequent validation.
     """
     graph = validate_semantic_task_graph(graph)
     candidate = validate_task_candidate(candidate)
@@ -208,6 +211,7 @@ def validate_semantic_plan(
         bound_kinds[key] = binding
     held_after: dict[str, dict[str, str]] = {}
     held = {}
+    acquisition_nodes: dict[str, str] = {}
     last_object_node = {}
     effects = {}
     state_errors: list[dict[str, Any]] = []
@@ -312,18 +316,23 @@ def validate_semantic_plan(
         actor = resources.get("primary", "auto")
         effect = contract["effect"]
 
-        def state_error(code: str, hint: str) -> None:
-            state_errors.append(
-                {
-                    "code": code,
-                    "node_id": node["id"],
-                    "call_id": cid,
-                    "subject": obj,
-                    "primary_resource": actor,
-                    "held_before": dict(held),
-                    "hint": hint,
-                }
-            )
+        def state_error(
+            code: str,
+            hint: str,
+            repair_operations: list[dict[str, Any]] | None = None,
+        ) -> None:
+            diagnostic = {
+                "code": code,
+                "node_id": node["id"],
+                "call_id": cid,
+                "subject": obj,
+                "primary_resource": actor,
+                "held_before": dict(held),
+                "hint": hint,
+            }
+            if repair_operations:
+                diagnostic["repair_operations"] = repair_operations
+            state_errors.append(diagnostic)
 
         if effect in {"acquire", "acquire_align"}:
             if obj in held or actor in held.values():
@@ -332,6 +341,7 @@ def validate_semantic_plan(
                     f"Remove a redundant acquisition of {obj!r} or release the occupied resource first. Pour restores orientation; never add axis_align to a held pouring source.",
                 )
             held[obj] = actor
+            acquisition_nodes[obj] = node["id"]
         elif effect in {"release", "held"}:
             if obj not in held:
                 state_error(
@@ -342,17 +352,39 @@ def validate_semantic_plan(
                 state_error(
                     "holder_mismatch",
                     f"Use the same acquisition resource {held[obj]!r} for THIS node {node['id']!r}; omit resources consistently when it is auto. Do not change the object's identity.",
+                    [
+                        {
+                            "operation": "remove" if held[obj] == "auto" else "set",
+                            "node_id": node["id"],
+                            "path": "/call/resources/primary",
+                            **({"value": held[obj]} if held[obj] != "auto" else {}),
+                        }
+                    ],
                 )
             if effect == "release":
                 held.pop(obj, None)
+                acquisition_nodes.pop(obj, None)
         elif effect == "transfer":
             source, dest = resources["source"], resources["destination"]
             if held.get(obj) != source or dest in held.values():
                 state_error(
                     "handover_state",
                     f"Handover requires {obj!r} held by {source!r} and receiver {dest!r} free. Acquire using the source arm before THIS node.",
+                    (
+                        [
+                            {
+                                "operation": "set",
+                                "node_id": acquisition_nodes[obj],
+                                "path": "/call/resources/primary",
+                                "value": source,
+                            }
+                        ]
+                        if held.get(obj) == "auto" and obj in acquisition_nodes
+                        else None
+                    ),
                 )
             held[obj] = dest
+            acquisition_nodes.pop(obj, None)
         elif effect == "coordinated_release":
             if held:
                 state_error(
