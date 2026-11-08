@@ -435,9 +435,10 @@ jobs:
           # Run GPU processes before the long DexSim lane.  Native Vulkan/CUDA
           # teardown can briefly retain allocations after the sim subprocess;
           # this order prevents the GPU lane from inheriting that pressure.
-          EMBODICHAIN_CI_GDB_GPU=1 python scripts/ci/run_test_plan.py \
+          python scripts/ci/run_test_plan.py \
             --plan test-plan.json \
             --repo-root "${GITHUB_WORKSPACE}" \
+            --debug-gpu \
             --lane fast \
             --lane distributed \
             --lane gpu \
