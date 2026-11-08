@@ -356,6 +356,8 @@ roles; these envelopes are planning inputs rather than physical contact evidence
 .. automodule:: embodichain.lab.sim.atomic_actions.planning_probes
    :members:
 
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
 .. autodata:: PlanTransform
 
 .. autoclass:: ExecutionSession
