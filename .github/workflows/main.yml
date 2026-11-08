@@ -439,6 +439,7 @@ jobs:
             --plan test-plan.json \
             --repo-root "${GITHUB_WORKSPACE}" \
             --debug-gpu \
+            --no-finalize-gpu \
             --lane fast \
             --lane distributed \
             --lane gpu \

@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -1231,3 +1233,38 @@ def test_runner_dry_run_does_not_discover_or_execute_resource_tests(
     plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
 
     assert run_test_plan.run_plan(plan, root=tmp_path, dry_run=True) == 0
+
+
+@pytest.mark.parametrize(
+    ("assertion", "summary", "exit_code"),
+    [("True", "1 passed", 0), ("False", "1 failed", 1)],
+)
+def test_no_finalize_runner_preserves_pytest_result(
+    tmp_path: Path, assertion: str, summary: str, exit_code: int
+) -> None:
+    test_file = tmp_path / "test_contract.py"
+    finalizer_marker = tmp_path / "atexit-ran"
+    test_file.write_text(
+        "import atexit\n"
+        "from pathlib import Path\n"
+        f"atexit.register(lambda: Path({str(finalizer_marker)!r}).write_text('ran'))\n"
+        f"def test_contract():\n    assert {assertion}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.ci.pytest_no_finalize",
+            "-q",
+            str(test_file),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert summary in result.stdout
+    assert not finalizer_marker.exists()

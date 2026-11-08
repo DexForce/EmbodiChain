@@ -266,7 +266,12 @@ def _resource_command_for_nodes(command: list[str], nodes: list[str]) -> list[st
 
 
 def _run_resource_lane(
-    lane: str, command: list[str], repository_root: Path, *, debug_gpu: bool = False
+    lane: str,
+    command: list[str],
+    repository_root: Path,
+    *,
+    debug_gpu: bool = False,
+    no_finalize_gpu: bool = False,
 ) -> int:
     """Discover selected nodes, then run the same ordered collection freshly."""
     with tempfile.TemporaryDirectory(prefix="embodichain-test-selection-") as directory:
@@ -292,6 +297,8 @@ def _run_resource_lane(
             )
         narrowed = _resource_command_for_nodes(command, nodes)
         narrowed.append(f"--ci-expected-collection={manifest}")
+        if lane == "gpu" and no_finalize_gpu:
+            narrowed[2] = "scripts.ci.pytest_no_finalize"
         if lane == "gpu" and debug_gpu:
             narrowed = [
                 "gdb",
@@ -325,6 +332,7 @@ def run_plan(
     lanes: Sequence[str] | None = None,
     dry_run: bool = False,
     debug_gpu: bool = False,
+    no_finalize_gpu: bool = False,
 ) -> int:
     """Execute all selected lanes and return the first failing exit code.
 
@@ -339,6 +347,7 @@ def run_plan(
     collection-only process before execution. Discovery and execution are both
     included in the reported lane time; ordered nodes and markers must match.
     ``debug_gpu`` runs only the selected GPU process under gdb.
+    ``no_finalize_gpu`` returns after pytest hooks without unloading native libraries.
     """
     repository_root = Path(root).resolve()
     commands = build_commands(
@@ -363,7 +372,11 @@ def run_plan(
         started = time.monotonic()
         if lane.removeprefix(_SLOW_LANE_PREFIX) in {"gpu", "sim"}:
             returncode = _run_resource_lane(
-                lane, command, repository_root, debug_gpu=debug_gpu
+                lane,
+                command,
+                repository_root,
+                debug_gpu=debug_gpu,
+                no_finalize_gpu=no_finalize_gpu,
             )
         else:
             returncode = subprocess.run(
@@ -397,6 +410,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the selected GPU pytest process under gdb for native crash diagnosis.",
     )
+    parser.add_argument(
+        "--no-finalize-gpu",
+        action="store_true",
+        help="Return the GPU pytest result without native interpreter teardown.",
+    )
     return parser
 
 
@@ -412,6 +430,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             lanes=args.lanes,
             dry_run=args.dry_run,
             debug_gpu=args.debug_gpu,
+            no_finalize_gpu=args.no_finalize_gpu,
         )
     except (OSError, RuntimeError, ValueError) as error:
         print(f"test plan execution failed: {error}", file=sys.stderr)
