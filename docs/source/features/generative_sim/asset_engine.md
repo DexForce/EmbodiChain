@@ -1,200 +1,306 @@
-# SimReady Asset Pipeline
+# Asset Engine
 
-The SimReady asset pipeline converts raw mesh archives into normalized simulation assets. It ingests a source mesh, preserves or bakes visual materials, cleans mesh topology, estimates real-world scale and semantics with multimodal LLMs, and exports assets that can be loaded directly in EmbodiChain simulations.
+**Asset Engine** owns asset preparation and articulated-asset generation. Its
+SimReady pipeline converts an existing mesh into an asset with normalized
+geometry, generated semantic and physical metadata, and mesh/USD outputs.
+The implementation lives in `embodichain.gen_sim.asset_engine`; mesh conversion
+uses the `embodichain asset-engine` command.
 
-## Quick Start
+The former `embodichain simready` command has been renamed to
+`embodichain asset-engine`; update existing scripts to use the new entry point.
 
-Run the pipeline on a single asset directory:
+Use the SimReady pipeline when you already have a mesh to prepare for scene
+construction. [Scene Engine](scene_engine.md) owns image-based scene generation,
+editing, support relationships, and export. [Scene Services](../../overview/sim/scene/index.md)
+compose configurations and prepare physical layouts after asset preparation.
 
-```bash
-embodichain simready \
-    --input_dir /path/to/raw_mesh_folder \
-    --output_root /path/to/output_folder \
-    --category YourCategory
-```
+## Place in the architecture
 
-Preview the generated SimReady mesh:
+The asset package contains several entry points with different inputs and
+configuration owners:
 
-```bash
-embodichain preview-asset \
-    --asset_path /path/to/sim_ready_asset_or_usd_asset \
-    --asset_type rigid
-```
+| Entry point | Input and output | Owner under `embodichain/gen_sim/` |
+| --- | --- | --- |
+| `embodichain asset-engine` | One local asset directory → UUID asset directory and registry entry | `asset_engine/cli/start.py`, `asset_engine/pipeline/ingest.py` |
+| SimReady browser workflow | Uploaded mesh/material files → the same CLI conversion and a downloadable mesh | `gradio_ui/app_asset_engine.py` |
+| Scene Engine asset preparation | Generated meshes and graph-conditioned placement inputs → scene-owned prepared assets | `scene_engine/pipeline/utils/simready_processor.py` |
+| Articulated asset generation | Image/text observations and scale metadata → validated articulated USDC | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
+
+The general CLI and Scene Engine's internal processor are separate processing
+flows. The general CLI does not generate a scene graph, choose task roles, or
+build a runnable Gym deployment. A physics-mode annotation of `articulation`
+also does not synthesize links or joints; use the separate generation service
+under [articulated asset generation](#articulated-asset-generation).
 
 ## Prerequisites
 
-The full pipeline uses Blender, trimesh, pyrender, and an OpenAI-compatible multimodal chat completions endpoint. Install EmbodiChain with the `gensim` extra first — see [Installation (gensim extra)](../../quick_start/install.md#optional-generative-simulation-gensim) for package indexes and install commands.
+Install EmbodiChain with the `gensim` extra and configure the isolated Blender
+worker using [Installation](../../quick_start/install.md#optional-generative-simulation-gensim).
+Keep the main EmbodiChain environment active; Blender jobs use the interpreter
+selected by `EMBODICHAIN_BLENDER_PYTHON`.
 
-Set the OpenAI-compatible LLM API (OpenAI, Gemini, Doubao, etc.) before running the pipeline, or configure them in `embodichain/gen_sim/asset_engine/configs/gen_config.json`. Environment variables override the JSON config.
-
-OpenAI-compatible API example:
+The full mesh workflow uses Trimesh, offscreen rendering through Pyrender/EGL,
+USD conversion dependencies, and a multimodal model endpoint compatible with
+chat completions. Configure these values before starting the CLI:
 
 ```bash
-export OPENAI_API_KEY="your-openai-api-key"
-export OPENAI_MODEL="gpt-4o"
-export OPENAI_BASE_URL="https://api.openai.com/v1"
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_MODEL="your-multimodal-model"
+export OPENAI_BASE_URL="https://your-provider.example/v1"
+export EMBODICHAIN_BLENDER_PYTHON="/absolute/path/to/.venv-blender/bin/python"
 ```
 
-## Processing Flow
+Nonempty `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL` environment
+values override `llm.openai_compatible` in
+`embodichain/gen_sim/asset_engine/configs/gen_config.json`. All three resolved
+fields are required, including the base URL. Model responses must include the
+JSON content expected by classification, dimension, semantic, and physics
+processing. General mesh conversion reads these environment variables and JSON
+settings; articulation-service settings have a separate dotenv loader.
 
-The command above runs the full parser sequence:
+## Quick start
 
-- **Ingest**: finds the first parseable mesh (`.glb`, `.gltf`, `.obj`, `.ply`, `.stl`), archives the raw input, and writes a canonical `asset_source/asset.obj`.
-- **Source preparation**: prepares the canonical source mesh according to `ingest.source_preparation.mode`. `blender` remeshes, unwraps UVs, and bakes diffuse/normal textures; `trimesh` converts the source mesh to canonical OBJ without Blender remesh/bake.
-- **Inspection**: detects whether the normalized source is a mesh, articulation, or scene.
-- **Geometry processing**: cleans topology and applies Blender decimation to the canonical mesh.
-- **SimReady finalization**: renders multi-view images, uses the LLM to infer object orientation, physical dimensions, and semantics, then exports `asset_simready/asset_simready.obj`.
-- **Physics and USD export**: infers physics properties and writes a USD package when possible.
-- **Internal preview assets**: generates thumbnails and internal metadata for asset browsing.
-
-## Output Layout
-
-Each processed asset is written under a generated asset ID:
+Put one asset and its sidecars in a directory. Mesh discovery checks files
+directly inside that directory; it does not unpack archives or recursively
+choose meshes from subdirectories.
 
 ```text
-simready_car/
-`-- <asset_id>/
-    |-- asset_archive/          # Raw source directory copy
-    |-- asset_source/           # Canonical normalized source mesh and textures
-    |   |-- asset.obj
-    |   `-- ...                  # MTL/textures depend on source preparation mode
-    |-- asset_simready/         # Final oriented and scaled mesh
-    |   `-- asset_simready.obj
-    |-- asset_usd/              # USD export
-    `-- asset.json              # Metadata, geometry, semantics, physics, and paths
+raw_cup/
+  cup.obj
+  cup.mtl
+  textures/
+  config.json       # Optional semantic and dimension hints
 ```
 
-Use `asset_simready/asset_simready.obj` or `asset_usd/` for simulation preview and downstream scene construction.
+Run one conversion:
 
-## Command-Line Arguments
+```bash
+embodichain asset-engine \
+  --input_dir /path/to/raw_cup \
+  --output_root /path/to/prepared_assets \
+  --category cup
+```
 
-| Argument | Description | Default |
-| :--- | :--- | :--- |
-| `--input_dir` | Directory containing the raw asset files. | **required** |
-| `--output_root` | Directory where processed assets are written. | **required** |
-| `--category` | Category hint passed into the pipeline, such as `car`, `bowl`, or `chair`. | **required** |
+The module entry point accepts the same arguments:
+
+```bash
+python -m embodichain.gen_sim.asset_engine.cli.start \
+  --input_dir /path/to/raw_cup \
+  --output_root /path/to/prepared_assets \
+  --category cup
+```
+
+| Argument | Meaning |
+| --- | --- |
+| `--input_dir` | Required directory containing one asset and its material/texture sidecars |
+| `--output_root` | Required root for UUID asset directories and `registry.json` |
+| `--category` | Required category stored in the asset's identity |
+
+Each invocation creates a new UUID. The source folder hash records provenance;
+it does not deduplicate repeated runs or automatically resume an earlier asset.
+Select pipeline settings in `gen_config.json`; the CLI exposes the three
+arguments above.
+
+## Input selection and processing
+
+The configured mesh preference is `.glb`, `.gltf`, `.obj`, `.ply`, then `.stl`.
+Within the first available format, ingest chooses the first filename in sorted
+order. Put only the intended source asset in the input directory.
+
+With the shipped configuration, a top-level `.urdf` or `.usd` file selects
+**direct-copy mode**, even when mesh files are also present. This mode archives
+and copies the directory, saves its metadata, and returns without running the
+parser sequence. It does not produce a normalized SimReady mesh or newly
+inferred physics. Other USD extensions are not in the default ingest format list.
+
+```mermaid
+flowchart TD
+    input["One input directory"] --> archive["Hash source, allocate UUID, archive input"]
+    archive --> kind{"Configured input branch"}
+    kind -->|"URDF or USD"| copy["Copy raw files to asset_source"]
+    copy --> save["Save asset.json and registry.json"]
+    kind -->|"Mesh"| source["Prepare canonical asset_source/asset.obj"]
+    source --> inspector["Inspect asset and measure canonical geometry"]
+    inspector --> physics["Normalize archived source mesh and infer physics"]
+    physics --> outputs["Export mesh, USD, and browsing thumbnail"]
+    outputs --> save
+```
+
+For mesh inputs, `ParserManager.DEFAULT_PIPELINE` runs these stages in order:
+
+| Stage | Current behavior and output |
+| --- | --- |
+| Ingest and source preparation | Archive original files; create a canonical OBJ and material sidecars under `asset_source/` |
+| `inspector` | Populate `asset_data` with the selected type, format, and source path |
+| `geometry` | Optionally clean/decimate the canonical mesh with Blender; record topology, bounds, and counts in `parsed.geometry` |
+| `physics` | Render the archived selected source, infer orientation/dimensions, uniformly scale and export the final mesh, generate semantics, and infer physical parameters |
+| `usd` | Convert the final OBJ, when present, into a USD package using the resolved physical parameters |
+| `internal` | Render a browsing thumbnail and record its path or rendering error |
+
+The geometry parser measures the canonical source OBJ. The physics stage
+separately reads the archived `identity.source_file` for final normalization;
+its generated mesh is not necessarily the geometry measured by the geometry
+parser. Inspect the final artifact when validating dimensions or topology.
+Final mesh export places the bottom-face bounding-box center at the origin.
 
 ## Configuration
 
-Pipeline hyperparameters live in `embodichain/gen_sim/asset_engine/configs/gen_config.json`. The main hyperparameters are as follow:
+The source of truth is
+{download}`gen_config.json <../../../../embodichain/gen_sim/asset_engine/configs/gen_config.json>`.
+The following table distinguishes shipped defaults from optional modes:
 
-### Ingest
+| Setting | Shipped value | Effect |
+| --- | --- | --- |
+| `ingest.source_preparation.mode` | `"trimesh"` | Canonical OBJ conversion; `"blender"` enables ingest remesh, UV unwrap, and texture baking |
+| `mesh_processing.trimesh_ingest.scene_mesh_strategy` | `"first"` | Source conversion selects the first geometry in a Trimesh scene; `"concatenate"` combines its geometries |
+| `mesh_processing.trimesh_ingest.visual.pbr_base_color_only` | `true` | Source conversion retains the PBR base-color texture rather than every PBR material channel |
+| `mesh_processing.blender_cleanup_decimate.enabled` | `true` | Enables Blender cleanup and decimation in the later geometry stage |
+| `mesh_processing.simready_finalize.render_resolution` | `1024` | Resolution used for finalization views |
+
+Choosing `trimesh` changes ingest source preparation only. The default geometry
+stage still calls Blender, and later stages still need rendering and model
+services. To skip the geometry stage's Blender operations as well, set:
 
 ```json
-"ingest": {
-  "canonical_asset_name": "asset.obj",
-  "source_preparation": {
-    "mode": "blender"
+{
+  "ingest": {
+    "source_preparation": {"mode": "trimesh"}
   },
-  "unprocessed_formats": [".urdf", ".usd"],
-  "parseable_mesh_formats": [".glb", ".gltf", ".obj", ".ply", ".stl"]
+  "mesh_processing": {
+    "blender_cleanup_decimate": {"enabled": false}
+  }
 }
 ```
 
-`ingest.source_preparation.mode` controls how the canonical `asset_source/asset.obj` is prepared:
+These are selected fields to edit in the existing configuration, not a
+replacement for the full file. `mesh_processing.blender_remesh_bake` controls
+remesh resolution, decimation, UV layout, and diffuse/normal baking for Blender
+ingest. `blender_cleanup_decimate.cleanup` and `.simplify` control the separate
+geometry stage.
 
-- `blender`: use Blender remesh, decimation, UV unwrap, and diffuse/normal baking.
-- `trimesh`: use trimesh to load and export the source mesh without Blender remesh/bake.
+### Model settings
 
-### Mesh Processing
+`llm.openai_compatible` accepts `api_key`, `model`, `base_url`, and
+`default_query`. For endpoints requiring an API-version query parameter, set
+`default_query` in the JSON configuration according to that endpoint's contract.
+Changing the ingest mode does not disable model inference.
+
+### Per-asset hints
+
+An optional `config.json` beside the input mesh can provide authored semantics
+and text supplied to finalization:
 
 ```json
-"mesh_processing": {
-  "blender_remesh_bake": {
-    "remesh": {
-      "voxel_size": 0.01,
-      "min_voxel_size_ratio": 0.005,
-      "use_smooth_shade": true
-    },
-    "decimate": {
-      "ratio": 0.9
-    },
-    "uv": {
-      "angle_limit": 66.0,
-      "island_margin": 0.02
-    },
-    "bake": {
-      "texture_size": 2048,
-      "cage_extrusion_ratio": 0.05
-    }
+{
+  "semantic": {
+    "tags": ["cup", "tableware"],
+    "description": "A ceramic cup."
   },
-  "blender_cleanup_decimate": {
-    "enabled": true,
-    "cleanup": {
-      "merge_dist": 0.00001,
-      "remove_non_manifold": true,
-      "triangulate": false
-    },
-    "simplify": {
-      "ratio": 0.5,
-      "weld_distance": 0.0001,
-      "collapse_triangulate": true
-    }
-  },
-}
-```
-
-`blender_remesh_bake` controls the `ingest.source_preparation.mode = "blender"` path. It remeshes the raw mesh, decimates it, unwraps UVs, and bakes textures.
-
-`blender_cleanup_decimate` controls the later geometry parser stage. It uses Blender mesh operators and the Blender Decimate modifier to clean and simplify the canonical mesh.
-
-
-### LLM
-
-```json
-"llm": {
-  "openai_compatible": {
-    "api_key": "",
-    "model": "gpt-4o",
-    "base_url": "https://api.openai.com/v1",
-    "default_query": {}
+  "extra_info": {
+    "simready_info": "The cup is approximately 0.10 m tall."
   }
 }
 ```
 
-This section configures the multimodal LLM used for object classification, orientation selection, dimension inference, semantic annotation, and physics inference. Any provider that supports the OpenAI-compatible chat completions API can be used by changing `api_key`, `model`, `base_url`, and optional `default_query` parameters.
+The mesh branch imports semantic tags/description and passes
+`extra_info.simready_info` to the model as a hint. Direct-copy mode returns
+before these injection steps. Hints do not constrain dimensions as a measured
+calibration would.
 
-For Azure-style OpenAI-compatible endpoints that require an API version query parameter, use `default_query`:
+## Outputs and simulation use
 
-```json
-"llm": {
-  "openai_compatible": {
-    "api_key": "your-api-key",
-    "model": "gpt-4o",
-    "base_url": "your_api",
-    "default_query": {
-      "api-version": "2025-01-01-preview"
-    }
-  }
-}
+A completed mesh run has this layout; sidecars and thumbnails depend on the
+corresponding stage results:
+
+```text
+prepared_assets/
+  registry.json
+  <asset_id>/
+    asset_archive/<input-name>/    # Original files and sidecars
+    asset_source/                 # Canonical OBJ, MTL, and textures
+      asset.obj
+    asset_simready/
+      asset_simready.glb
+      asset_simready.obj
+    asset_usd/
+      asset_simready_inst.usdc
+      ...                         # Base USD, USDZ, and texture resources
+    <asset_id>.png                 # Browsing thumbnail, when rendered
+    asset.json
 ```
 
-## Source Preparation Modes
+`registry.json` maps asset IDs to directories and categories. Within `asset.json`:
 
-The default configuration uses Blender during ingest:
+- `identity` records the source, ingest mode, and preparation mode; the top-level
+  `ingest_sha256` identifies source contents and relative paths.
+- `asset_data` describes the inspected source. Final mesh and USD locations are
+  recorded separately under `simulation.sim_ready.sim_ready_path` and
+  `usd.usd_path`.
+- `parsed.geometry`, `semantics`, and `physics` contain measured source geometry,
+  authored/generated semantics, and resolved physical properties. A failed
+  physics inference can fall back to defaults, with `physics.source="default"`
+  and zero confidence.
+- `status` records processing state. `parsed=true` means the manager completed
+  its sequence; it does not set `validated=true` or certify physical/task success.
+  Inspect stage-specific errors such as `parsed.geometry.error` and `internal.error`.
 
-```json
-"ingest": {
-  "source_preparation": {
-    "mode": "blender"
-  }
-}
+Preview the final mesh, or the concrete USD file:
+
+```bash
+embodichain preview-asset \
+  --asset_path "/path/to/prepared_assets/<asset_id>/asset_simready/asset_simready.glb" \
+  --asset_type rigid --viser
+
+embodichain preview-asset \
+  --asset_path "/path/to/prepared_assets/<asset_id>/asset_usd/asset_simready_inst.usdc" \
+  --asset_type rigid --viser
 ```
 
-Use `trimesh` when you want a faster non-Blender conversion path:
+Replace `<asset_id>` with the generated directory name. Keep USD package
+resources together. Use the owning [object configuration](../../overview/sim/sim_assets.md)
+when declaring the asset in a simulation; choose source-physics preservation
+or an explicit typed overlay there. [Scene Services](../../overview/sim/scene/workflows.md)
+then provide layout, settling, and measured preparation checks.
 
-```json
-"ingest": {
-  "source_preparation": {
-    "mode": "trimesh"
-  }
-}
+## Browser workflow
+
+Launch the existing engine workspace:
+
+```bash
+python -m embodichain.gen_sim.gradio_ui.gradio_app
 ```
 
-The source preparation mode only affects the ingest step. The downstream geometry parser still uses Blender cleanup and decimation unless `mesh_processing.blender_cleanup_decimate.enabled` is set to `false`.
+In **Asset engine → SimReady**, upload the mesh and required material/texture
+sidecars, enter a category, inspect the input preview, and run SimReady. The
+panel copies uploads to a session run directory and invokes the same CLI in a
+subprocess. It streams logs and reports success only after a zero exit code and
+an existing `asset_simready.glb` or `.obj`. Reset/replacement stops that session's
+previous run. The panel also contains a separate articulation-generation workflow.
 
-## See Also
+## Articulated asset generation
 
-- [Previewing Assets](../../guides/preview_asset.md): Load generated meshes and USD assets in the simulator.
-- [Installation](../../quick_start/install.md): Install EmbodiChain with Blender and rendering dependencies.
-- [Toolkits](../toolkits/index.rst): Other asset preparation utilities.
+`generate_articulated_usdcs` accepts explicit asset records, image observations,
+coarse scales, and an `ArticulatedGenerationClient`. It generates and normalizes
+USDC assets and updates record paths/scales; Scene Engine continues to own scene
+layout and export.
+
+This client reads `ASSET_ENGINE_ARTICULATED_GENERATION_*` service settings from
+the shared `embodichain/gen_sim/.env`, with legacy
+`SCENE_ENGINE_ARTICULATED_GENERATION_*` aliases. Those keys configure service
+URL, timeout, retry budget, and endpoints, independently of the general mesh
+pipeline's `OPENAI_*` settings. See the
+{ref}`asset API reference <simready_asset_api>`
+for client and generation entry points.
+
+## Diagnose a run
+
+| Symptom | Check |
+| --- | --- |
+| Missing model configuration | Resolve all three `OPENAI_*` fields before starting the process; verify chat-completions content includes the expected JSON |
+| No final mesh after a successful ingest | Inspect `identity.ingest_mode`; direct-copy inputs only preserve raw files |
+| An unexpected source mesh was selected | Check top-level input files, format preference, and same-format filename ordering |
+| Blender errors in `trimesh` mode | Inspect the separate geometry cleanup setting and `EMBODICHAIN_BLENDER_PYTHON` |
+| Rendering or thumbnail failure | Inspect EGL/offscreen rendering support and the recorded stage error; source conversion mode does not configure the renderer |
+
+For preview modes and asset loading, see [Previewing Assets](../../guides/preview_asset.md).
+For mesh preparation utilities outside this workflow, see [Toolkits](../toolkits/index.rst).

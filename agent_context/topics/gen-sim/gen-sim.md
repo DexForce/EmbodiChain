@@ -1,8 +1,9 @@
 # Generative simulation
 
-Scene Engine turns images into editable scenes and portable exports; Asset
-Engine ingests individual assets and generates articulated assets. Neither output is by
-itself a complete runnable Gym task deployment.
+Scene Engine turns images into editable scenes and portable exports. The
+Asset Engine ingests existing assets; the asset package also owns a
+separate articulated-generation service. Neither output is by itself a complete
+runnable Gym task deployment.
 
 ## Entry points and resolution
 
@@ -10,7 +11,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
-| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `simready` |
+| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `asset-engine`, `task-engine` |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
@@ -45,7 +46,12 @@ Blueprint objects are in-process values with persisted audit documents; this API
 does not load them as a complete task deployment. Whole-scene rotations also
 rotate planar graph relations and table regions; directional graphs require
 quarter turns because their vocabulary is axis-aligned.
-The `simready` CLI remains available, while Python imports use `asset_engine`.
+The Asset Engine uses the `asset-engine` CLI and `asset_engine` Python
+namespace. Its [user guide](../../../docs/source/features/generative_sim/asset_engine.md)
+owns input selection, processing settings, artifacts and simulation handoff.
+Instruction/image semantic planning belongs to
+[Task Engine](../task-engine/task-engine.md); its unbound graph output retains
+pending runtime bindings rather than creating a scene or executable deployment.
 
 ## Durable scene boundary
 
@@ -153,7 +159,9 @@ Blender objects and business-environment Python/native-library paths do not.
 separate Python 3.11/NumPy 1.26 Blender environment. See
 [container setup](../../../docker/README.md) for building and qualification.
 
-Keep parser capabilities idempotent so recorded stages support resume.
+The parser interface requires idempotent capabilities, but the current CLI
+allocates a new UUID and reruns the selected sequence on every invocation.
+`status.parsed` is completion metadata, not per-stage caching or validation.
 Provider configuration belongs to its loader/client, while coordinate and graph
 contracts belong to importer/exporter. Task registration and physical/semantic
 composition belong to [env-framework](../env-framework/env-framework.md).

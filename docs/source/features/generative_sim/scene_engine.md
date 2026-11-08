@@ -54,6 +54,14 @@ debugging.
 - **Layout and export**: refines the edited layout using the updated scene graph
   and writes the resulting scene back to `scene_export`.
 
+## Asset preparation
+
+Scene Engine uses its own `SimReadyProcessor` for graph-conditioned asset
+normalization and physical preparation. To convert a mesh you already have,
+use the separate [Asset Engine](asset_engine.md). Its guide also
+describes the articulated-USDC generation client used by Scene Engine; mesh
+ingest and articulated generation have different configuration owners.
+
 ## Shared Scene Services
 
 Scene Engine uses the shared `sim.scene` CPU strategies for support detection,
@@ -63,12 +71,15 @@ readback services while owning its temporary simulation. Model calls, assets,
 the editable scene graph, hierarchy traversal, Y-up conversion and exports
 remain in Scene Engine.
 
-The [scene services reference](../../api_reference/embodichain/embodichain.lab.sim.scene.rst)
-describes these integration boundaries and a model-free tabletop recipe. That
+The [scene services overview](../../overview/sim/scene/index.md) and
+[integration map](../../overview/sim/scene/integrations.md) explain these
+boundaries. The [usage workflows](../../overview/sim/scene/workflows.md) include
+a model-free tabletop recipe. That
 recipe demonstrates explicit configuration composition, measured layout checks
 and state restoration; it is a separate entry point from image-based generation
-and text editing. Current physical services support B=1, independently of the
-CPU/CUDA batching supported by the underlying tensor geometry kernels.
+and text editing. Basic physical state services support explicit environment
+selections; settling requires a full-world selection because its step callback
+advances all rows. The separate Task Program scene expansion host remains B=1.
 
 ## Configuration
 
