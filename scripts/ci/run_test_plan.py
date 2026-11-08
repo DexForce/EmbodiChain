@@ -290,6 +290,25 @@ def _run_resource_lane(lane: str, command: list[str], repository_root: Path) -> 
             )
         narrowed = _resource_command_for_nodes(command, nodes)
         narrowed.append(f"--ci-expected-collection={manifest}")
+        if lane == "gpu" and os.environ.get("EMBODICHAIN_CI_GDB_GPU") == "1":
+            narrowed = [
+                "gdb",
+                "--quiet",
+                "--batch",
+                "-return-child-result",
+                "-ex",
+                "set pagination off",
+                "-ex",
+                "set print thread-events off",
+                "-ex",
+                "run",
+                "-ex",
+                "bt 40",
+                "-ex",
+                "info threads",
+                "--args",
+                *narrowed,
+            ]
         print(f"[CI] {lane}: selected nodes: {shlex.join(narrowed)}", flush=True)
         return subprocess.run(
             narrowed, cwd=repository_root, check=False, env=None
