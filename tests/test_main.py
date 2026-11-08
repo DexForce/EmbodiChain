@@ -57,6 +57,7 @@ EXPECTED_COMMANDS = {
     "scene-randomization",
     "search-scene-feasibility",
     "simready",
+    "task-engine",
     "train-rl",
     "train-sl",
     "preview-scene",

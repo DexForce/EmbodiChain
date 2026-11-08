@@ -108,3 +108,115 @@ def test_measured_predicates_use_the_frozen_row_snapshot_without_live_reads():
         monitor.reset(frame)
         results.append(monitor.validation(frame).accepted)
     assert results == [False, True]
+
+
+@pytest.mark.parametrize("capture_media", [False, True])
+@pytest.mark.parametrize("contact_owner", [None, "environment", "robot"])
+def test_contact_acquisition_is_independent_of_media_capture(
+    capture_media, contact_owner
+):
+    from embodichain.lab.expansion.host import _configure_sensor_capture
+    from embodichain.lab.sim.sensors import ContactSensorCfg, CameraCfg
+
+    contact = ContactSensorCfg(uid="contacts")
+    camera = CameraCfg(uid="camera")
+    cfg = SimpleNamespace(
+        sensor=[camera] + ([contact] if contact_owner == "environment" else []),
+        robot=SimpleNamespace(
+            sensors=[camera] + ([contact] if contact_owner == "robot" else [])
+        ),
+        enable_sensor=True,
+        sim_cfg=SimpleNamespace(render_cfg=SimpleNamespace(renderer="no-render")),
+    )
+    _configure_sensor_capture(cfg, capture_media=capture_media)
+    selected = [*cfg.sensor, *cfg.robot.sensors]
+    assert (contact in selected) is (contact_owner is not None)
+    assert (camera in selected) is capture_media
+    assert cfg.enable_sensor is (capture_media or contact_owner is not None)
+    assert cfg.sim_cfg.render_cfg.renderer == (
+        "hybrid" if capture_media else "no-render"
+    )
+
+
+def test_sampled_collision_rebinds_each_physical_base_after_scene_preparation(
+    monkeypatch, tmp_path
+):
+    from embodichain.lab.expansion import collision
+    from embodichain.lab.sim.motion.expansion import real2sim_collision as geometry
+
+    bases = torch.eye(4).repeat(2, 1, 1)
+    body = SimpleNamespace(
+        uid="box",
+        geometry=geometry.BoxCollisionBody("box", (0.1, 0.1, 0.1), np.eye(4)),
+        get_local_pose=lambda **kwargs: torch.eye(4).repeat(2, 1, 1),
+    )
+
+    class Monitor:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def _validate(self, item):
+            return item
+
+        def reset(self, env):
+            pass
+
+        def predicate(self, env, item):
+            return item["entry"]
+
+        def observe(self, env, action):
+            pass
+
+        def validation(self, env):
+            return None
+
+    monkeypatch.setattr(collision, "MeasuredTaskMonitor", Monitor)
+    monkeypatch.setattr(
+        geometry.BoxCollisionBody,
+        "from_rigid_object",
+        classmethod(lambda cls, obj, **kwargs: obj.geometry),
+    )
+    monkeypatch.setattr(
+        collision,
+        "load_config",
+        lambda path: {
+            "kind": "sampled_rigid_v1",
+            "initial_checks": [{"entry": True}],
+            "final_checks": [{"entry": False}],
+            "events": [],
+            "allowed_contacts": [],
+        },
+    )
+    urdf = tmp_path / "robot.urdf"
+    urdf.write_text(
+        '<robot name="base_relocation"><link name="base"/><link name="tool"><collision><geometry><box size="0.2 0.2 0.2"/></geometry></collision></link><joint name="joint" type="prismatic"><parent link="base"/><child link="tool"/><axis xyz="1 0 0"/><limit lower="-2" upper="2" effort="1" velocity="1"/></joint></robot>'
+    )
+    bases[:, 2, 3] = 1.0
+    object_pose = torch.eye(4).repeat(2, 1, 1)
+    object_pose[:, 0, 3] = 2.0
+    object_pose[:, 2, 3] = 1.0
+    body.get_local_pose = lambda **kwargs: object_pose
+    env = SimpleNamespace(
+        num_envs=2,
+        robot=SimpleNamespace(
+            cfg=SimpleNamespace(fpath=str(urdf)),
+            joint_names=("joint",),
+            get_local_pose=lambda **kwargs: bases,
+            get_qpos=lambda: torch.zeros(2, 1),
+        ),
+        sim=SimpleNamespace(
+            get_rigid_object_uid_list=lambda: ("box",),
+            get_rigid_object=lambda uid: body,
+            get_articulation_uid_list=lambda: (),
+            get_deformable_object_uid_list=lambda: (),
+            get_rigid_object_group_uid_list=lambda: (),
+        ),
+    )
+    adapter = collision._SampledRigidCollision(env, tmp_path / "profile.yaml", tmp_path)
+    for positions in ((2.0, 4.0), (4.0, 2.0)):
+        bases[:, 0, 3] = torch.tensor(positions)
+        adapter.prepare()
+        adapter.sample((0, 1), None)
+        assert tuple(adapter.results[row].status for row in (0, 1)) == tuple(
+            "failed" if x == 2 else "passed" for x in positions
+        )

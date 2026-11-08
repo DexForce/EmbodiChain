@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass, replace
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
@@ -678,6 +680,12 @@ class TaskProgramMappedRetimeFactory:
                     "prototype phase permissions must contain operator sequences"
                 )
             free = FREE_PHASES.get(plan.skill_id, frozenset())
+            if source.get("demo_skill") is not None:
+                free = {
+                    name
+                    for name, kind in source["demo_skill_phase_kinds"].items()
+                    if kind == "free"
+                }
             selected = {
                 name
                 for name in segment_names
@@ -752,6 +760,11 @@ class TaskProgramMappedRetimeFactory:
                     if index < count
                 }
             )
+            if source.get("demo_skill") is not None:
+                protected = tuple(set(protected) | set(source["demo_skill_events"]))
+                spec = json.loads(source["demo_skill"]["spec"])
+                if not 1 <= self._duration_scale <= spec["max_duration_scale"]:
+                    raise ValueError("retiming exceeds the DemoSkill duration bounds")
             mapped = retime_with_time_map(
                 template,
                 duration_scale=self._duration_scale,

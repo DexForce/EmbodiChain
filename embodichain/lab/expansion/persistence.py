@@ -46,6 +46,11 @@ def _source_references(metadata):
         for bundle in metadata.get("real2sim_source_artifacts", {}).values()
         for reference in bundle.values()
     ]
+    references.extend(
+        reference
+        for bundle in metadata.get("demo_skill_source_artifacts", {}).values()
+        for reference in bundle.values()
+    )
     references.extend(metadata.get("expansion_source_artifacts", {}).values())
     if metadata.get("real2sim_lineage") is not None:
         references.append(metadata["real2sim_lineage"]["trace"])
@@ -146,6 +151,21 @@ class ArtifactEpisodeSink:
                 bundle[field] = self._archive_reference(
                     reference, directory / "sources" / name / relative
                 )
+        for key, bundle in metadata.get("demo_skill_source_artifacts", {}).items():
+            name = hashlib.sha256(str(key).encode()).hexdigest()[:16]
+            for field, reference in tuple(bundle.items()):
+                filenames = {
+                    "asset_manifest": "demo_skill.json",
+                    "source_manifest": "demonstration.json",
+                    "source_arrays": "demonstration.npz",
+                    "nominal_reference": "reference.npz",
+                    "original_recording": "original_recording.bin",
+                }
+                if field not in filenames:
+                    raise ValueError("unknown DemoSkill source attachment")
+                bundle[field] = self._archive_reference(
+                    reference, directory / "demo_sources" / name / filenames[field]
+                )
         for field, reference in tuple(
             metadata.get("expansion_source_artifacts", {}).items()
         ):
@@ -205,16 +225,7 @@ class ArtifactEpisodeSink:
 
     @staticmethod
     def _verify_sources(metadata: dict) -> None:
-        references = [
-            reference
-            for bundle in metadata.get("real2sim_source_artifacts", {}).values()
-            for reference in bundle.values()
-        ]
-        references.extend(metadata.get("expansion_source_artifacts", {}).values())
-        if metadata.get("real2sim_lineage") is not None:
-            references.append(metadata["real2sim_lineage"]["trace"])
-        if metadata.get("real2sim_observed_geometry") is not None:
-            references.append(metadata["real2sim_observed_geometry"])
+        references = _source_references(metadata)
         for reference in references:
             if _digest(Path(reference["path"])) != reference["sha256"]:
                 raise ValueError("archived source attachment changed")

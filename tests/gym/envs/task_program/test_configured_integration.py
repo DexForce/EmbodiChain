@@ -3590,6 +3590,133 @@ def test_physical_component_snapshot_matches_files_without_component_reads(
         )
 
 
+@pytest.mark.parametrize("inline", [False, True])
+def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
+    tmp_path,
+    inline,
+):
+    import numpy as np
+    from embodichain.data_pipeline.real2sim import (
+        RobotDemonstration,
+        DemoSkillSpec,
+        DemoSkillPhase,
+        DemoSkillConstraint,
+        JointSpec,
+        build_demo_skill,
+        save_demo_skill,
+    )
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_runtime_services,
+    )
+    from embodichain.lab.sim.atomic_skills import ExecuteDemoSkill, SkillOptions
+
+    artifact = build_demo_skill(
+        RobotDemonstration(
+            "teleop",
+            "1",
+            "specialized",
+            ("a",),
+            ("rad",),
+            np.zeros((6, 1)),
+            np.arange(6) * 0.02,
+            "s",
+            "a" * 64,
+            "b" * 64,
+        ),
+        DemoSkillSpec(
+            asset_id="task.contour",
+            instruction="Trace contour",
+            phases=(DemoSkillPhase("continuous", 0, 6),),
+            constraints=(DemoSkillConstraint("done", "metric", "terminal"),),
+        ),
+        joints=(JointSpec("a", "revolute"),),
+        control_dt=0.02,
+    )
+    manifest = save_demo_skill(artifact, tmp_path / "skill")
+    declaration = {
+        "kind": "demo_skill",
+        "call_id": "task.contour",
+        "asset_manifest": str(manifest),
+        "asset_sha256": artifact.content_sha256,
+    }
+    source = {
+        "provider_id": "demo_skill",
+        "revision": "1",
+        "call_index": 1,
+        "program_fingerprint": "c" * 64,
+        "call_id": "task.contour",
+        "asset_manifest": str(manifest),
+        "asset_sha256": artifact.content_sha256,
+    }
+    # File integrations resolve assets from the component directory; inline
+    # integrations resolve them from their owning deployment directory.
+    config_path = _config_path("repeated_pick_place")
+    program, task, policy = _resolve_task_program_components(
+        _gym_config("repeated_pick_place")["task_program"], base_dir=config_path.parent
+    )
+    from embodichain.utils.utility import save_config
+
+    save_config(tmp_path / "policy.yaml", policy)
+    relative_manifest = (
+        "skill/demo_skill.json" if inline else "../skill/demo_skill.json"
+    )
+    task["runtime_services"] = {
+        "registered_semantic_lowerers": [
+            {**declaration, "asset_manifest": relative_manifest}
+        ],
+        "nominal_motion_sources": [{**source, "asset_manifest": relative_manifest}],
+    }
+    original_task = deepcopy(task)
+    if inline:
+        selected = {"inline": task}
+    else:
+        components = tmp_path / "components"
+        components.mkdir()
+        save_config(components / "integration.yaml", task)
+        selected = "components/integration.yaml"
+    _, resolved_task, _ = _resolve_task_program_components(
+        {
+            "program": str(program),
+            "integration": selected,
+            "execution_policy": "policy.yaml",
+        },
+        base_dir=tmp_path,
+    )
+    assert task == original_task
+    resolved = resolved_task["runtime_services"]
+    assert resolved["registered_semantic_lowerers"][0]["asset_manifest"] == str(
+        manifest
+    )
+    assert resolved["nominal_motion_sources"][0]["asset_manifest"] == str(manifest)
+    services = _decode_runtime_services(resolved)
+    factory = services.registered_semantic_lowerers[0]
+    assert factory.call_id == "task.contour"
+    assert factory.target_descriptor == ExecuteDemoSkill.descriptor()
+    assert (
+        type(_decode_skill_options({"kind": "execute_demo_skill"}, path="options"))
+        is SkillOptions
+    )
+    payload = _integration_payload("repeated_pick_place")
+    payload.setdefault("runtime_services", {})["registered_semantic_lowerers"] = [
+        declaration
+    ]
+    integration = _decode_configured_task_program_integration(payload)
+    assert "task.contour" in integration.registration.catalog.call_catalog.descriptors
+    assert services.nominal_motion_sources[0].call_index == 1
+    with pytest.raises(ValueError, match="unsupported fields|unknown|requires kind"):
+        _decode_runtime_services(
+            {
+                "registered_semantic_lowerers": [
+                    {**declaration, "class_type": "arbitrary"}
+                ]
+            }
+        )
+    with pytest.raises(ValueError, match="digest|changed"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**source, "asset_sha256": "e" * 64}]}
+        )
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_recovery_policy_migration_normalizes_field_names(legacy: bool) -> None:
     retry_key = "max_action_retries" if legacy else "max_skill_retries"

@@ -590,6 +590,9 @@ class Real2SimTabletopSource:
         environment: Existing initialized environment; lifecycle stays with its owner.
         profile: Qualified source, scene and acceptance declarations.
         env_id: Exact physical row to bind without changing the World.
+        call_indices: Optional prototype-only occurrence subset for a mixed host.
+            The host supplies independent whole-program measured acceptance;
+            the original tabletop episode qualifier still requires its full contract.
     """
 
     def __init__(
@@ -598,6 +601,7 @@ class Real2SimTabletopSource:
         profile: Real2SimTabletopCollectionCfg,
         *,
         env_id: int = 0,
+        call_indices: tuple[int, ...] | None = None,
     ) -> None:
         self.profile = profile
         self.robot = environment.robot
@@ -611,7 +615,9 @@ class Real2SimTabletopSource:
             self.checker,
             self.prototypes,
             self.unique_prototypes,
-        ) = _prepare_tabletop_sources(environment, profile, env_id=env_id)
+        ) = _prepare_tabletop_sources(
+            environment, profile, env_id=env_id, call_indices=call_indices
+        )
         self.bindings = Real2SimTabletopBindings(
             profile,
             self.prototypes,
@@ -1204,7 +1210,11 @@ def _task_space_kinematics_factory(robot, env_id: int = 0):
 
 
 def _prepare_tabletop_sources(
-    target: object, profile: Real2SimTabletopCollectionCfg, *, env_id: int = 0
+    target: object,
+    profile: Real2SimTabletopCollectionCfg,
+    *,
+    env_id: int = 0,
+    call_indices: tuple[int, ...] | None = None,
 ) -> tuple:
     """Resolve pinned sources and exact geometry for one physical arena."""
     if type(env_id) is not int or not 0 <= env_id < target.num_envs:
@@ -1216,6 +1226,21 @@ def _prepare_tabletop_sources(
             key=lambda item: item.call_index,
         )
     )
+    if call_indices is not None:
+        selected = set(call_indices)
+        if len(selected) != len(call_indices):
+            raise ValueError("prototype source occurrences must be unique")
+        declarations = tuple(
+            item for item in declarations if item.call_index in selected
+        )
+        if {item.call_index for item in declarations} != selected:
+            raise ValueError("prototype source occurrence is not configured")
+    from embodichain.lab.task_program.integrations.nominal import (
+        _ConfiguredPrototypeSource,
+    )
+
+    if not all(isinstance(item, _ConfiguredPrototypeSource) for item in declarations):
+        raise TypeError("tabletop bindings require explicit prototype call occurrences")
     call_indices = tuple(item.call_index for item in declarations)
     if not call_indices or len(set(call_indices)) != len(call_indices):
         raise ValueError(

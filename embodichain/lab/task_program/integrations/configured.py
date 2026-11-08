@@ -27,6 +27,11 @@ import json
 import math
 from typing import TYPE_CHECKING, TypeVar
 
+from ._configured_controls import (
+    _PressLowererFactory,
+    _TwistLowererFactory,
+    _OpenDoorLowererFactory,
+)
 from ._configured_services import (
     _AntipodalGraspPoseGeneratorFactory,
     _ArticulationLinkSlideLowererFactory,
@@ -957,6 +962,43 @@ def _decode_command_preset(
 
 def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
     """Decode one allowlisted atomic-skill option template."""
+    if isinstance(value, Mapping) and value.get("kind") in {"twist", "open_door"}:
+        from embodichain.lab.sim.atomic_skills import TwistOptions, OpenDoorOptions
+
+        kind = value["kind"]
+        fields = (
+            {
+                "hand_interp_steps",
+                "twist_waypoint_count",
+                "pre_grasp_distance",
+                "twist_angle",
+            }
+            if kind == "twist"
+            else {
+                "hand_interp_steps",
+                "door_waypoint_count",
+                "approach_distance",
+                "retract_distance",
+                "joint_position_tolerance",
+            }
+        )
+        config = _mapping(
+            value, path=path, required=frozenset({"kind"}), optional=frozenset(fields)
+        )
+        kwargs = {}
+        for name in fields & set(config):
+            if name.endswith("steps") or name.endswith("count"):
+                kwargs[name] = _integer(config[name], path=f"{path}.{name}", minimum=1)
+            else:
+                kwargs[name] = _real(
+                    config[name],
+                    path=f"{path}.{name}",
+                    minimum=-math.inf if name == "twist_angle" else 0.0,
+                )
+        return (TwistOptions if kind == "twist" else OpenDoorOptions)(**kwargs)
+    if isinstance(value, Mapping) and value.get("kind") == "execute_demo_skill":
+        _mapping(value, path=path, required=frozenset({"kind"}))
+        return SkillOptions()
     common = _mapping(
         value,
         path=path,
@@ -1611,7 +1653,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['coordinated_pickment', 'hand_over', 'move_end_effector', 'move_held_object', "
+        "['twist', 'open_door', 'coordinated_pickment', 'hand_over', 'move_end_effector', 'move_held_object', "
         "'move_joints', "
         "'pick_up', 'place', 'pour', 'push_object', 'slide']."
     )
@@ -1857,6 +1899,18 @@ def _normalize_recovery_policy_keys(value: object, *, path: str) -> object:
     return value
 
 
+def _normalize_skill_options_key(value: object, *, path: str) -> object:
+    """Normalize the former policy key before either strict loading boundary."""
+    if isinstance(value, Mapping) and "action_options" in value:
+        value = dict(value)
+        if "skill_options" in value:
+            raise ValueError(
+                f"{path} cannot specify both 'action_options' and 'skill_options'."
+            )
+        value["skill_options"] = value.pop("action_options")
+    return value
+
+
 def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
     """Decode one bounded local recovery policy."""
     value = _normalize_recovery_policy_keys(value, path=path)
@@ -2014,18 +2068,6 @@ def _decode_effect_monitors(
     return monitors
 
 
-def _normalize_skill_options_key(value: object, *, path: str) -> object:
-    """Normalize the former policy key before either strict loading boundary."""
-    if isinstance(value, Mapping) and "action_options" in value:
-        value = dict(value)
-        if "skill_options" in value:
-            raise ValueError(
-                f"{path} cannot specify both 'action_options' and 'skill_options'."
-            )
-        value["skill_options"] = value.pop("action_options")
-    return value
-
-
 def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
     """Decode one complete skill policy preset."""
     value = _normalize_skill_options_key(value, path=path)
@@ -2047,8 +2089,8 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
         ),
         optional=frozenset({"required_planner"}),
     )
-    skill_options_value = config["skill_options"]
-    if not isinstance(skill_options_value, Mapping):
+    action_options_value = config["skill_options"]
+    if not isinstance(action_options_value, Mapping):
         raise TypeError(f"{path}.skill_options must be a mapping.")
     skill_options = {
         _identifier(semantic_id, path=f"{path}.skill_options keys"): (
@@ -2057,7 +2099,7 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
                 path=f"{path}.skill_options.{semantic_id}",
             )
         )
-        for semantic_id, item in skill_options_value.items()
+        for semantic_id, item in action_options_value.items()
     }
     workflow = _mapping(
         config["workflow_recovery"],
@@ -2457,7 +2499,10 @@ def _decode_registered_lowerer(
     *,
     path: str,
 ) -> (
-    _ArticulationLinkSlideLowererFactory
+    _PressLowererFactory
+    | _TwistLowererFactory
+    | _OpenDoorLowererFactory
+    | _ArticulationLinkSlideLowererFactory
     | _AxisAlignLowererFactory
     | _CoordinatedTransportLowererFactory
     | _MoveHeldObjectLowererFactory
@@ -2468,6 +2513,40 @@ def _decode_registered_lowerer(
     | _RelativePlaceLowererFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") in {
+        "press",
+        "twist",
+        "open_door",
+    }:
+        config = _mapping(
+            value, path=path, required=frozenset({"kind", "object_affordances"})
+        )
+        factory = {
+            "press": _PressLowererFactory,
+            "twist": _TwistLowererFactory,
+            "open_door": _OpenDoorLowererFactory,
+        }[config["kind"]]
+        rows = _sequence(
+            config["object_affordances"], path=f"{path}.object_affordances"
+        )
+        bindings = []
+        for index, row in enumerate(rows):
+            pair = _mapping(
+                row,
+                path=f"{path}.object_affordances[{index}]",
+                required=frozenset({"object", "affordance"}),
+            )
+            bindings.append(
+                (
+                    _identifier(pair["object"], path=f"{path}.object"),
+                    _identifier(pair["affordance"], path=f"{path}.affordance"),
+                )
+            )
+        return factory(object_affordances=tuple(bindings))
+    if isinstance(value, Mapping) and value.get("kind") == "demo_skill":
+        from .demo_skill import _decode_demo_skill_lowerer
+
+        return _decode_demo_skill_lowerer(value)
     common = _mapping(
         value,
         path=path,
@@ -2804,7 +2883,7 @@ def _decode_registered_lowerer(
         return _PushObjectLowererFactory(routes=tuple(routes))
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['articulation_link_slide', 'axis_align', 'coordinated_transport', "
+        "['press', 'twist', 'open_door', 'articulation_link_slide', 'axis_align', 'coordinated_transport', "
         "'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
     )
 
@@ -3079,6 +3158,39 @@ def _decode_runtime_services(
         )
     ):
         item_path = f"{path}.nominal_motion_sources[{index}]"
+        if isinstance(value, Mapping) and value.get("provider_id") == "demo_skill":
+            from .demo_skill import _ConfiguredDemoSkillSource
+
+            item = _mapping(
+                value,
+                path=item_path,
+                required=frozenset(
+                    {
+                        "call_index",
+                        "program_fingerprint",
+                        "provider_id",
+                        "revision",
+                        "asset_manifest",
+                        "asset_sha256",
+                        "call_id",
+                    }
+                ),
+                optional=frozenset({"contact_sensor_uid", "tcp_contact_links"}),
+            )
+            if item["revision"] != "1":
+                raise ValueError("unsupported DemoSkill provider revision")
+            declaration = _ConfiguredDemoSkillSource(
+                call_index=item["call_index"],
+                program_fingerprint=item["program_fingerprint"],
+                asset_manifest=item["asset_manifest"],
+                asset_sha256=item["asset_sha256"],
+                call_id=item["call_id"],
+                contact_sensor_uid=item.get("contact_sensor_uid"),
+                tcp_contact_links=tuple(item.get("tcp_contact_links", ())),
+            )
+            declaration.validate_source()
+            nominal.append(declaration)
+            continue
         item = _mapping(
             value,
             path=item_path,
@@ -3293,7 +3405,7 @@ def _decode_configured_task_program_integration(
             {
                 key: value
                 for key, value in asdict(item).items()
-                if key != "prototype_manifest"
+                if key not in {"prototype_manifest", "asset_manifest"}
             }
             for item in services.nominal_motion_sources
         ]

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import replace
 from functools import wraps
 
 from dataclasses import replace
@@ -1492,6 +1493,17 @@ class AtomicSkillEngine:
         ) != tuple((segment.name, segment.start, segment.stop) for segment in segments):
             raise ValueError("reference phases must exactly match the original plan")
         allowed = FREE_PHASES.get(request.skill_id)
+        if (
+            request.skill_id == "execute_demo_skill"
+            and owned.diagnostics.metadata.get("demo_skill") is not None
+        ):
+            allowed = {
+                name
+                for name, kind in owned.diagnostics.metadata[
+                    "demo_skill_phase_kinds"
+                ].items()
+                if kind == "free"
+            }
         selected = {
             phase.phase_id
             for phase in reference.phases
@@ -1695,6 +1707,21 @@ class AtomicSkillEngine:
             rtol=0,
         ):
             raise ValueError("retiming changed a protected derivative boundary")
+        if owned.diagnostics.metadata.get("demo_skill") is not None:
+            metadata = dict(rebuilt.diagnostics.metadata)
+            metadata["nominal_time_map"] = {
+                name: getattr(mapping, name).tolist()
+                for name in (
+                    "left",
+                    "right",
+                    "weight",
+                    "source_event_indices",
+                    "execution_event_indices",
+                )
+            }
+            rebuilt = replace(
+                rebuilt, diagnostics=replace(rebuilt.diagnostics, metadata=metadata)
+            )
         return rebuilt
 
 

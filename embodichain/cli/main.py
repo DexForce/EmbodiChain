@@ -58,6 +58,11 @@ COMMANDS = (
         help="Convert a raw asset directory into a SimReady asset.",
     ),
     Command(
+        name="task-engine",
+        target="embodichain.gen_sim.task_engine.cli:main",
+        help="Generate an image-grounded semantic task graph without simulation.",
+    ),
+    Command(
         name="scene-engine",
         target="embodichain.gen_sim.scene_engine.cli.start:main",
         help="Generate a scene export from an input image using gen_sim/.env.",

@@ -34,7 +34,7 @@ from embodichain.lab.sim.motion.expansion import (
     TrajectoryTemplate,
     validate_motion_limits,
 )
-from ._expansion_phases import FREE_PHASES
+from ._expansion_phases import FREE_PHASES, _canonical_samples
 from .plans import SkillPlan, TimedTrajectory
 from .core import PlannerDiagnostics
 from .trajectory_adapter import SkillPlanTemplateAdapter
@@ -126,6 +126,11 @@ def _expand_plan(
     if not motion_ids:
         raise ValueError("trajectory expansion requires explicitly bound motion joints")
     names = {segment.name for segment in plan.segments}
+    if plan.diagnostics.metadata.get("demo_skill") is not None:
+        if phase_permissions is None:
+            phase_permissions = plan.diagnostics.metadata["prototype_phase_permissions"]
+        if phase_kinds is None:
+            phase_kinds = plan.diagnostics.metadata["demo_skill_phase_kinds"]
     if phase_permissions is not None and names != set(phase_permissions):
         raise ValueError("phase declarations must exactly match the Atomic plan")
     if phase_kinds is not None and names != set(phase_kinds):
@@ -237,6 +242,55 @@ def _expand_plan(
                     dict.fromkeys(
                         operator
                         for phase in phases
+                        for operator in phase.allowed_operators
+                    )
+                ),
+            )
+        if plan.diagnostics.metadata.get("demo_skill") is not None:
+            _, _, _, source_to_canonical = _canonical_samples(
+                trajectory.positions[row], trajectory.dt[row]
+            )
+            locked = {
+                int(source_to_canonical[index])
+                for event in plan.diagnostics.metadata["demo_skill_events"]
+                for index in range(
+                    max(0, event - 1), min(trajectory.waypoint_count, event + 2)
+                )
+            }
+            split = []
+            for phase in template.phases:
+                boundaries = sorted(
+                    {phase.start_index, phase.stop_index}
+                    | {
+                        index
+                        for lock in locked
+                        for index in (lock, lock + 1)
+                        if phase.start_index < index < phase.stop_index
+                    }
+                )
+                for index, (start, stop) in enumerate(zip(boundaries, boundaries[1:])):
+                    permissions = (
+                        phase.allowed_operators
+                        if stop - start >= 3
+                        and not any(start <= lock < stop for lock in locked)
+                        else ()
+                    )
+                    split.append(
+                        replace(
+                            phase,
+                            phase_id=f"{phase.phase_id}:{index}",
+                            start_index=start,
+                            stop_index=stop,
+                            allowed_operators=permissions,
+                        )
+                    )
+            template = replace(
+                template,
+                phases=tuple(split),
+                allowed_operators=tuple(
+                    dict.fromkeys(
+                        operator
+                        for phase in split
                         for operator in phase.allowed_operators
                     )
                 ),

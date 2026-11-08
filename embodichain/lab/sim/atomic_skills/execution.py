@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Closed-loop execution session for dynamic atomic-skill plans."""
+"""Closed-loop execution session for dynamic atomic-action plans."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ from .tracking import (
 
 if TYPE_CHECKING:
     from .engine import AtomicSkillEngine, PlanTransform
-    from .nominal import NominalMotionSource
+    from .nominal import NominalMotionSource, MonitoredNominalMotionSource
 
 
 class ExecutionStatus(str, Enum):
@@ -98,7 +98,6 @@ class ExecutionEventKind(str, Enum):
     ROWS_DEACTIVATED = "rows_deactivated"
     SESSION_COMPLETED = "session_completed"
     SESSION_FAILED = "session_failed"
-
     # Deprecated Python names; enum iteration and emitted values stay canonical.
     ACTION_PLANNED = SKILL_PLANNED
     ACTION_PLANNING_FAILED = SKILL_PLANNING_FAILED
@@ -809,6 +808,14 @@ class ExecutionSession:
         return self._plan.effect_candidates.snapshot()
 
     @property
+    def nominal_motion_monitor(self) -> MonitoredNominalMotionSource | None:
+        """Return the optional source-owned measured-execution monitor."""
+        from .nominal import MonitoredNominalMotionSource
+
+        source = self._nominal_source
+        return source if isinstance(source, MonitoredNominalMotionSource) else None
+
+    @property
     def active_plan(self) -> SkillPlan:
         """Return an independently owned snapshot of the active action plan.
 
@@ -1321,6 +1328,10 @@ class ExecutionSession:
             self._validate_destination_continuity(plan, event_kind)
         self._validate_tracking_continuity(plan, event_kind)
         self._validate_phase_effect_gates(plan)
+        monitor = self.nominal_motion_monitor
+        bind_monitor = getattr(monitor, "bind_execution_plan", None)
+        if plan.plan_success.any() and bind_monitor is not None:
+            bind_monitor(plan)
         if (
             event_kind
             not in (

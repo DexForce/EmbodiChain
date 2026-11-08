@@ -5045,3 +5045,179 @@ Offline runtime adapters validate exact raw acquisition and execution identities
 .. autofunction:: held_observation_request
 
 .. autofunction:: resolve_hold_observation_condition
+
+
+embodichain.data_pipeline.real2sim.demo_skill
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Task-specific demonstration contracts preserve raw observed state, submitted commands, manually confirmed interaction events and source mappings. Prepared assets require measured execution qualification before they can count as successful episodes.
+
+.. currentmodule:: embodichain.data_pipeline.real2sim.demo_skill
+
+.. autosummary::
+
+   RobotDemonstration
+   DemoSkillRole
+   DemoSkillPhase
+   DemoSkillEvent
+   DemoSkillConstraint
+   DemoSkillSpec
+   DemoSkillArtifact
+   DemoSkillReference
+   build_demo_skill
+   decode_demo_skill_spec
+   retarget_demo_skill
+
+.. autoclass:: RobotDemonstration
+   :members:
+
+.. autoclass:: DemoSkillRole
+   :members:
+
+.. autoclass:: DemoSkillPhase
+   :members:
+
+.. autoclass:: DemoSkillEvent
+   :members:
+
+.. autoclass:: DemoSkillConstraint
+   :members:
+
+.. autoclass:: DemoSkillSpec
+   :members:
+
+.. autoclass:: DemoSkillArtifact
+   :members:
+
+.. autoclass:: DemoSkillReference
+   :members:
+
+.. autofunction:: build_demo_skill
+
+.. autofunction:: decode_demo_skill_spec
+
+.. autofunction:: retarget_demo_skill
+
+
+embodichain.data_pipeline.real2sim.demo_skill_io
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Portable, bounded JSON/NPZ bundles retain the raw recording separately from explicitly adapted nominal references. Loading verifies content identity and reconstructs preparation without simulation.
+
+.. currentmodule:: embodichain.data_pipeline.real2sim.demo_skill_io
+
+.. autosummary::
+
+   save_robot_demonstration
+   load_robot_demonstration
+   save_demo_skill
+   load_demo_skill
+
+.. autofunction:: save_robot_demonstration
+
+.. autofunction:: load_robot_demonstration
+
+.. autofunction:: save_demo_skill
+
+.. autofunction:: load_demo_skill
+
+
+embodichain.lab.sim.atomic_skills.demo_skill
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Scene grounding and per-observation monitoring for one demonstration invocation. Evidence must match the physical row and observation timestamp; absent contact or task evidence cannot establish success.
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.demo_skill
+
+.. autosummary::
+
+   DemoSkillObservation
+   DemoSkillEvidenceProvider
+   DemoSkillMonitor
+   DemoSkillMotionProvider
+
+.. autoclass:: DemoSkillObservation
+   :members:
+
+.. autoclass:: DemoSkillEvidenceProvider
+   :members:
+
+.. autoclass:: DemoSkillMonitor
+   :members:
+
+.. autoclass:: DemoSkillMotionProvider
+   :members:
+
+
+embodichain.lab.sim.atomic_skills.primitives.execute_demo_skill
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+One Atomic Skill executes a pinned demonstration asset through the ordinary planning, command, tracking and effect-verification lifecycle. Logical roles are resolved through the selected robot profile and scene integration.
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives.execute_demo_skill
+
+.. autosummary::
+
+   DemoSkillGoal
+   ExecuteDemoSkill
+
+.. autoclass:: DemoSkillGoal
+   :members:
+
+.. autoclass:: ExecuteDemoSkill
+   :members:
+
+Image semantic planning
+-----------------------
+
+The image frontend interprets visible objects and task intent, then emits a
+validated pick/place graph and declaration coverage without starting simulation.
+Visual IDs still require a runtime scene and robot integration before execution.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.image_planning
+
+.. autosummary::
+
+   generate_semantic_task_graph_from_image
+
+.. autofunction:: generate_semantic_task_graph_from_image
+
+The command ``embodichain task-engine --image IMAGE --instruction TEXT
+--output DIRECTORY`` writes the declarations and
+current standalone HTML viewer to a fresh directory.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.cli
+
+.. autosummary::
+
+   main
+
+.. autofunction:: main
+
+Deferred image semantic planning
+--------------------------------
+
+Image plans retain the complete task and explicitly distinguish visual evidence,
+instruction-declared objects and runtime binding requirements. Semantic validity
+is independent of physical acceptance or runtime readiness. Failed generation
+retains attempts in :class:`~embodichain.gen_sim.task_engine.image_planning.SemanticPlanningError`.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.image_planning
+
+.. autoclass:: SemanticPlanningError
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_plan_validation
+
+.. autofunction:: validate_semantic_plan
+
+.. autofunction:: semantic_plan_rules
+
+The following declarations are JSON-only and import without a simulator. They
+are shared by the image planner and configured Semantic Call lowerers; live
+lowering still validates calibrated scene and route bindings.
+
+.. currentmodule:: embodichain.lab.task_program.language.semantic_contracts
+
+.. autofunction:: semantic_planning_catalog
+
+.. autofunction:: validate_semantic_call_payload

@@ -364,10 +364,19 @@ def test_lab_geometry_and_declared_occurrences_feed_independent_taskspec_reports
         )
         for predicate_id in ("goal_001", "milestone:step_01:0")
     ]
+    from embodichain.lab.task_program.integrations.evidence import (
+        normalize_pour_release_evidence,
+    )
+
     report = evaluate_physical_evidence_report(
         common["spec"],
         bindings,
-        {binding.predicate_id: packet for binding in bindings},
+        {
+            binding.predicate_id: normalize_pour_release_evidence(
+                binding.to_dict(), packet, program=common["program"]
+            )
+            for binding in bindings
+        },
         program=common["program"],
         num_envs=1,
     )[0]

@@ -70,7 +70,7 @@ def test_quaternion_target_matches_independent_complete_b0_reference(case):
     # q and -q encode the same pose; backend rounding can choose either near ties.
     if actual @ expected < 0:
         expected = -expected
-    tolerance = 4 * np.finfo(np.float32).eps
+    tolerance = 4 * float(np.finfo(np.float32).eps)
     np.testing.assert_allclose(actual, expected, rtol=0, atol=tolerance)
     assert np.linalg.norm(actual) == pytest.approx(1, rel=0, abs=tolerance)
 

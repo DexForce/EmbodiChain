@@ -30,6 +30,13 @@ import sys as _sys
 import warnings as _warnings
 
 __all__ = [
+    "DemoSkillObservation",
+    "DemoSkillEvidenceProvider",
+    "DemoSkillMonitor",
+    "DemoSkillMotionProvider",
+    "DemoSkillGoal",
+    "ExecuteDemoSkill",
+    "MonitoredNominalMotionSource",
     "ActionBinding",
     "ActionControlOverrides",
     "ActionInvocation",
@@ -255,6 +262,7 @@ __all__ = [
     "WholeBodyPoseTrackingState",
     "TwistAffordance",
 ]
+
 
 _RENAMES = {
     "AtomicAction": "AtomicSkill",
