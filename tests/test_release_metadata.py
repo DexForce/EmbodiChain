@@ -22,10 +22,7 @@ from zipfile import ZipFile
 import pytest
 from packaging.requirements import Requirement
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
+import tomllib
 
 import setup as package_setup
 from scripts.validate_wheel_metadata import WheelMetadataError, validate_wheel
@@ -150,7 +147,7 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
 def test_wheel_metadata_accepts_index_dependencies(tmp_path: Path) -> None:
     wheel_path = _write_test_wheel(
         tmp_path,
-        ["gymnasium>=0.29.1", 'viser==1.0.21; python_version >= "3.10"'],
+        ["gymnasium>=0.29.1", 'viser==1.0.21; python_version >= "3.11"'],
     )
 
     validate_wheel(wheel_path)

@@ -189,10 +189,10 @@ free to install their own Torch/codec profile.
 ## CI rollout and rollback
 
 CI defaults to the published internal `v4-py311-py312` image
-and activates `py311`. The image reference and activation command are explicit
+and activates `py312`. The image reference and activation command are explicit
 in the existing workflows/shared action; the existing job graph, triggers,
 test selection and installation commands are preserved. The SDK compatibility
-matrix selects Python 3.10, 3.11 and 3.12 independently of this default.
+matrix selects Python 3.11 and 3.12 independently of this default.
 
 Builds continue producing source-commit candidate tags. After qualification
 and successful CI, promote the existing manifests to the public
