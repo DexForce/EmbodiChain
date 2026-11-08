@@ -30,7 +30,7 @@ from types import MappingProxyType
 from typing import cast
 import torch
 
-from embodichain.lab.evaluation import CompiledEvaluation, NearTargetHoldSpec
+from embodichain.lab.evaluation import CompiledEvaluation
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
@@ -574,8 +574,8 @@ class TaskProgramIntegrationCatalog:
     )
     """Immutable preset-to-entity binding for declared geometric conditions."""
 
-    evaluation_conditions: Mapping[str, NearTargetHoldSpec | CompiledEvaluation] = (
-        field(default_factory=dict, kw_only=True)
+    evaluation_conditions: Mapping[str, CompiledEvaluation] = field(
+        default_factory=dict, kw_only=True
     )
     """Named deployment rules bound to raw observation fields."""
 
@@ -1091,16 +1091,16 @@ class TaskProgramIntegrationCatalog:
 
 
 def _snapshot_evaluation_conditions(
-    value: Mapping[str, NearTargetHoldSpec | CompiledEvaluation],
-) -> Mapping[str, NearTargetHoldSpec | CompiledEvaluation]:
+    value: Mapping[str, CompiledEvaluation],
+) -> Mapping[str, CompiledEvaluation]:
     snapshot = dict(value)
     for ref, spec in snapshot.items():
         _exact_identifier(ref, field_name="evaluation condition ref")
-        if type(spec) not in (NearTargetHoldSpec, CompiledEvaluation):
+        if type(spec) is not CompiledEvaluation:
             raise TypeError(
                 "Evaluation conditions must be bound rules or compiled graphs."
             )
-        if isinstance(spec, CompiledEvaluation) and spec.roots != (ref,):
+        if spec.roots != (ref,):
             raise ValueError("A compiled condition must export the named root.")
     return MappingProxyType(snapshot)
 
@@ -1127,7 +1127,7 @@ def _registration_payload(
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
-    evaluation_conditions: Mapping[str, NearTargetHoldSpec | CompiledEvaluation],
+    evaluation_conditions: Mapping[str, CompiledEvaluation],
     evaluation_final_refs: tuple[str, ...],
     evaluation_process_refs: tuple[str, ...],
 ) -> dict[str, object]:
@@ -1242,7 +1242,6 @@ def _registration_payload(
     }
     if evaluation_conditions:
         payload["evaluation"] = {
-            "near_target_hold_revision": 1,
             "conditions": evaluation_conditions,
             **(
                 {"process_constraints": evaluation_process_refs}
@@ -1282,8 +1281,8 @@ class SimulationTaskProgramRegistration:
     registered_semantic_lowerer_factories: tuple[
         RegisteredSemanticLowererFactory, ...
     ] = ()
-    evaluation_conditions: Mapping[str, NearTargetHoldSpec | CompiledEvaluation] = (
-        field(default_factory=dict, kw_only=True)
+    evaluation_conditions: Mapping[str, CompiledEvaluation] = field(
+        default_factory=dict, kw_only=True
     )
     """Deployment-owned near-target hold rules, keyed by exact reference."""
     evaluation_final_refs: tuple[str, ...] = field(default=(), kw_only=True)
@@ -1349,7 +1348,7 @@ class SimulationTaskProgramRegistration:
                 spec = self.evaluation_conditions.get(ref)
                 if spec is None:
                     raise ValueError(f"Unknown evaluation.{key} ref {ref!r}.")
-                if isinstance(spec, CompiledEvaluation) and spec.stateful:
+                if spec.stateful:
                     raise ValueError(f"evaluation.{key} requires instantaneous roots.")
             if len(set(refs)) != len(refs):
                 raise ValueError(f"evaluation.{key} refs must be unique.")

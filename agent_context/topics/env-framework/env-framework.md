@@ -138,11 +138,11 @@ metadata before/after copying. It never queries
 live state or substitutes a previous frame. Results own values, validity,
 reasons and temporal identities, without another descriptor model.
 
-`lab/evaluation/observations.py` binds two existing raw arena-pose fields to
-one bounded near-target hold. Feed live captures at explicit control slots
-with `advance_observation`. Use `evaluate_recording` to replay the same
-aligned slots through the history owner in bounded chunks. Each session owns
-one occurrence and separates the latest predicate from its first hold witness.
+Use `advance_observation` to feed a compiled `RuleSession` from explicit
+control slots and qualified host captures. The same graph evaluates recorded
+slots through `evaluate_recorded_rules` in bounded chunks. A row retains
+its own result at its recorded boundary. Missing and foreign evidence cannot
+supply measurements or satisfy a predicate.
 
 `export_observation_history` projects the manager's schema onto one owned numeric
 snapshot. Legacy trajectory state views and raw history share that snapshot's

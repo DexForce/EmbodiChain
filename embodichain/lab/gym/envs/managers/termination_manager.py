@@ -18,11 +18,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import inspect
 from typing import TYPE_CHECKING, Any
 
 import torch
+
+from embodichain.lab.evaluation import EvaluationStatus, RuleResult
+from embodichain.lab.evaluation.observations import _json_metric
 
 from .cfg import ConditionCfg, RLTaskCfg
 from .manager_base import Functor, ManagerBase
@@ -59,6 +62,7 @@ class TerminationManager(ManagerBase):
         self._valid = torch.zeros_like(self._initialized)
         self._terminated = torch.zeros_like(self._initialized)
         self._results: dict[str, ConditionResult] = {}
+        self._rule_results: dict[str, Mapping[str, RuleResult]] = {}
         self._steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
 
     @property
@@ -123,6 +127,11 @@ class TerminationManager(ManagerBase):
             result.valid[ids] = False
             for metric in result.metrics.values():
                 metric[ids] = 0
+        for rules in self._rule_results.values():
+            for rule in rules.values():
+                rule.status[ids] = EvaluationStatus.NOT_RUN
+                for metric in rule.metrics.values():
+                    metric[ids] = float("nan") if metric.is_floating_point() else 0
         return {}
 
     def __str__(self) -> str:
@@ -201,6 +210,8 @@ class TerminationManager(ManagerBase):
                 owned.valid.copy_(result.valid)
                 for metric, value in result.metrics.items():
                     owned.metrics[metric].copy_(value)
+                if result.rule_results:
+                    self._rule_results[key] = result.rule_results
         self._initialized.fill_(True)
         self._failure |= ~self._valid
         self._terminated.copy_(self._accepted_success() | self._failure)
@@ -230,6 +241,27 @@ class TerminationManager(ManagerBase):
                     "metrics": {
                         key: metric.clone() for key, metric in value.metrics.items()
                     },
+                    **(
+                        {
+                            "rules": {
+                                rule_id: {
+                                    "status": rule.status.clone(),
+                                    "reason_codes": {
+                                        str(int(code)): code.reason
+                                        for code in EvaluationStatus
+                                    },
+                                    "metrics": {
+                                        metric: tensor.clone()
+                                        for metric, tensor in rule.metrics.items()
+                                    },
+                                    "parameters": _json_metric(rule.parameters),
+                                }
+                                for rule_id, rule in self._rule_results[name].items()
+                            }
+                        }
+                        if name in self._rule_results
+                        else {}
+                    ),
                 }
                 for name, value in self._results.items()
             },

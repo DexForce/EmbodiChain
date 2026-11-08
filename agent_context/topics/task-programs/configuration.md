@@ -308,66 +308,62 @@ evaluation:
   component: task_program/evaluation.yaml
 ```
 
-The selected component declares a nonempty `conditions` mapping.
+The selected component exports named roots of one rule graph.
 
 ```yaml
-conditions:
-  near_support:
-    kind: near_target_hold
-    object: payload
-    target: support_surface
-    tolerance: 0.12
-    hold_steps: 2
-    window_steps: 4
+graph:
+  roots: [near_support, hold_near_support]
+  rules:
+    near_support:
+      kind: near_target
+      bindings:
+        position: rigid_objects/payload/pose
+        target: rigid_objects/support_surface/pose
+      params: {tolerance: 0.12}
+    hold_near_support:
+      kind: hold_for
+      ref: near_support
+      end: 3
+      steps: 2
+
+final_acceptance: [near_support]
 ```
 
-The two IDs resolve through the integration's rigid-object bindings to existing
-raw arena poses. Distance uses metres and all three translation axes by
-default. Select optional `axes` and `inclusive` to change which coordinates
-are compared or whether equality passes.
+Pose bindings supply XYZ translation in metres. Optional `axes` and
+`inclusive` select coordinates and the threshold boundary. Typed bindings
+resolve through the integration's scene and embodiment before execution.
+Rigid-body velocities use `lin_vel` and `ang_vel`. Joint predicates select
+`articulations/<entity>/qpos/<joint>`. Link-distance predicates use
+`links/<entity>/position`. Corner containment uses
+`rigid_objects/<entity>/frame` and `links/<entity>/frame` with declared
+object-local corners and link-frame bounds. Command matching uses `qpos`
+and `command` on the same `robot/<resource>/<endpoint>` binding.
+The robot resolves the native joint order. The command channel records the
+current controller target. Trusted Python hosts can pass an
+`evaluation_registry` when loading the deployment. YAML contains only
+registered kind IDs and inert parameters.
+
+Boolean rules name child rules in `refs`. Temporal rules select one `ref`
+and inclusive slot offsets `start` and `end`. `hold_for` requires
+consecutive `steps`. Milestones name simultaneous `refs` and optional
+predecessors in `after`.
 
 ```yaml
 validators:
   - kind: condition
-    ref: near_support
+    ref: hold_near_support
 ```
 
-Each segment occurrence starts its own window at its first consumed control
-step. The window includes post-policy steps within its bound. The bridge
-combines the closed window result with runtime and post-policy results at the
-usual validation boundary. Missing or invalid samples interrupt a hold.
-Validation traces retain witness control steps and acquisition revisions.
-The compiler resolves references against the registered deployment, including
-when a program is supplied as an override. The selected rule and its bindings
-participate in registration identity.
+Each segment occurrence starts at its first consumed control step. The window
+includes post-policy steps within its bound. Missing or invalid observations
+interrupt a hold. Validation traces retain measurements, thresholds, witness
+steps and acquisition revisions.
 
-Add `final_acceptance` beside `conditions` to require all listed predicates
-after program completion.
-
-```yaml
-final_acceptance: [near_support]
-```
-
-This selection uses each rule's current physical predicate. Its segment hold
-window is evaluated when a segment explicitly references the rule. Program
-overrides keep the deployment's final selection and can use a different set of
-segment validators. The final selection is part of registration identity.
-
-An evaluation component can also export a `graph` with `rules` and `roots`.
-Predicate rules declare a registered `kind`, `bindings` from input roles to
-logical channels such as `rigid_objects/payload/pose`, and optional `params`.
-Pose bindings supply the measured XYZ translation. Velocity channels use
-`lin_vel` or `ang_vel`. Joint predicates can select
-`articulations/<entity>/qpos/<joint>` in the native joint order. Boolean rules
-reference named rules with `refs`.
-Temporal rules select one `ref` and inclusive control-slot offsets `start`
-and `end`. `hold_for` adds the consecutive `steps` count. Milestones name
-simultaneous `refs` and optional predecessor milestones in `after`.
-
-Segment validators can reference exported graph roots. Each occurrence owns
-its temporal state. `final_acceptance` and `process_constraints` select
-instantaneous roots. The bridge checks process constraints after consumed
-control steps and routes rejected rows through its existing safe hold.
+`final_acceptance` and `process_constraints` select instantaneous roots.
+Program overrides keep these deployment-owned selections. The bridge checks
+process constraints after consumed steps and routes rejected rows through its
+existing safe hold. The rules and bindings participate in registration
+identity.
 
 ## Asset role requirements
 

@@ -29,7 +29,7 @@ from dataclasses import asdict
 import torch
 from tensordict import TensorDictBase
 
-from embodichain.lab.evaluation.observations import _rigid_pose_field
+from embodichain.lab.evaluation.observations import _raw_field_kind
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
@@ -220,6 +220,9 @@ def _raw_entity_observation_cfg(name: str, uid: str, quantity: str) -> Observati
 def _evaluation_observation_cfgs(
     registration: SimulationTaskProgramRegistration,
 ) -> dict[str, ObservationCfg]:
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
+    from embodichain.lab.gym.envs.managers.observations import _get_evaluation_state
+
     fields = {
         field
         for spec in registration.evaluation_conditions.values()
@@ -234,6 +237,9 @@ def _evaluation_observation_cfgs(
                 result[f"recording:{name}"] = _raw_entity_observation_cfg(
                     name, uid, quantity
                 )
+        name = f"rigid_objects/{uid}/frame"
+        if name in fields:
+            result[f"recording:{name}"] = _raw_entity_observation_cfg(name, uid, "pose")
     for binding in getattr(registration.scene_binding, "articulations", ()):
         uid = binding.simulation_uid
         for name in sorted(fields):
@@ -241,11 +247,45 @@ def _evaluation_observation_cfgs(
                 result[f"recording:{name}"] = _raw_entity_observation_cfg(
                     name, uid, "qpos"
                 )
+    for name in sorted(fields):
+        if name.startswith(("links/", "robot/")):
+            result[f"recording:{name}"] = ObservationCfg(
+                func=_get_evaluation_state,
+                mode="add",
+                name=name,
+                params={"field": name},
+                consumers=("recording",),
+            )
     if {cfg.name for cfg in result.values()} != fields:
-        raise ValueError(
-            "Evaluation requires registered rigid-object or articulation state fields."
-        )
+        raise ValueError("Evaluation requires registered raw physical fields.")
+    kinds = {name: _raw_field_kind(name) for name in fields}
+    layouts = {
+        name: name.rsplit("/", 1)[0] for name in fields if name.startswith("robot/")
+    }
+    for spec in registration.evaluation_conditions.values():
+        spec._check_input_contract(kinds, layouts)
     return result
+
+
+def _validate_evaluation_observation_bindings(env: _TrajectoryEnv, configs) -> None:
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        _require_control_part_dof,
+    )
+
+    for cfg in configs.values():
+        parts = cfg.name.split("/")
+        if parts[0] == "articulations":
+            _, uid, _, joint = parts
+            asset = env.sim.get_articulation(uid)
+            if asset is None or joint not in asset.joint_names:
+                raise ValueError(f"Evaluation field {cfg.name!r} has no native joint.")
+        elif parts[0] == "links":
+            _, uid, link, _ = parts
+            asset = env.sim.get_articulation(uid)
+            if asset is None or link not in asset.link_names:
+                raise ValueError(f"Evaluation field {cfg.name!r} has no native link.")
+        elif parts[0] == "robot":
+            _require_control_part_dof(env.robot, parts[1])
 
 
 def trajectory_observation_cfgs(
@@ -272,7 +312,7 @@ def trajectory_observation_cfgs(
             )
             name = f"{prefix}/{uid}/{field}" if prefix != "robot" else f"robot/{field}"
             if prefix == "rigid_objects" and quantity == "pose":
-                name = _rigid_pose_field(uid)
+                name = f"rigid_objects/{uid}/pose"
             result[f"recording:{name}"] = _raw_entity_observation_cfg(
                 name, uid, quantity
             )

@@ -178,6 +178,22 @@ def test_compiler_rejects_invalid_graphs(rules, message):
         )
 
 
+def test_graph_rejects_mapping_in_reference_lists():
+    with pytest.raises(ValueError, match="references"):
+        EvaluationSpec.from_dict(
+            {
+                "rules": {
+                    "root": {
+                        "kind": "below_height",
+                        "bindings": {"position": "pose"},
+                        "params": {"height": 1},
+                    }
+                },
+                "roots": {"root": "silently ignored"},
+            }
+        )
+
+
 def test_file_replay_uses_original_segment_and_qualifies_each_row(tmp_path):
     graph = _graph().select("goal")
     fields = {
@@ -251,6 +267,9 @@ def test_recorded_joint_uses_native_order_and_rejects_foreign_field():
     descriptor = {
         "quantity": "qpos",
         "entity_uid": "drawer",
+        "coordinate_frame": "joint",
+        "representation": "joint_order",
+        "units": ("joint_units",),
         "shape": (2,),
         "dtype": "torch.float32",
         "joint_names": ("latch", "rail"),
@@ -282,5 +301,72 @@ def test_recorded_joint_uses_native_order_and_rejects_foreign_field():
         )
 
     assert replay() == [Status.SATISFIED, Status.FAILED]
+    descriptor["units"] = ("pixels",)
+    assert replay() == [Status.UNAVAILABLE, Status.UNAVAILABLE]
+    descriptor["units"] = ("joint_units",)
     descriptor["entity_uid"] = "foreign"
     assert replay() == [Status.UNAVAILABLE, Status.UNAVAILABLE]
+
+
+def test_replay_preserves_row_ends_and_rejects_missing_endpoint():
+    graph = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "closed": PredicateSpec(
+                    "joint_range", {"position": "joint"}, {"upper": 1}
+                )
+            },
+            ("closed",),
+        )
+    )
+    payload = {
+        "raw_observations": {
+            "schema_version": 1,
+            "env_ids": (5, 9),
+            "episode_ids": (7, 2),
+            "revisions": torch.tensor([[10, 11, -1], [20, 21, 22]]),
+            "lengths": torch.tensor([1, 2]),
+            "fields": {
+                "joint": {
+                    "values": torch.tensor([[0.0, 0.2, 0.0], [0.0, 0.4, 0.3]]),
+                    "valid": torch.ones(2, 3, dtype=torch.bool),
+                    "descriptor": {
+                        "quantity": "scalar",
+                        "shape": (),
+                        "dtype": "torch.float32",
+                    },
+                },
+            },
+        }
+    }
+    for chunk in (1, 2, 64):
+        result = evaluate_recorded_rules(
+            graph,
+            payload,
+            env_ids=(5, 12, 9),
+            episode_ids=(7, 0, 2),
+            scope="rows",
+            chunk_steps=chunk,
+        )
+        assert result.revisions.tolist() == [11, -1, 22]
+        assert result.steps.tolist() == [1, -1, 2]
+        assert result.rules["closed"].status.tolist() == [
+            Status.SATISFIED,
+            Status.UNAVAILABLE,
+            Status.SATISFIED,
+        ]
+        assert result.rules["closed"].metrics["position"][
+            [0, 2]
+        ].tolist() == pytest.approx([0.2, 0.3])
+        assert torch.isnan(result.rules["closed"].metrics["position"][1])
+    beyond = evaluate_recorded_rules(
+        graph,
+        payload,
+        env_ids=(5, 9),
+        episode_ids=(7, 2),
+        scope="rows",
+        end_step=10,
+    )
+    assert beyond.step == 10
+    assert beyond.revisions.tolist() == [-1, -1]
+    assert beyond.rules["closed"].status.tolist() == [Status.UNAVAILABLE] * 2

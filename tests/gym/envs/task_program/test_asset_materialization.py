@@ -1042,16 +1042,19 @@ def test_materialized_deployment_keeps_named_evaluation_component(deployment, tm
     ]
     _write(program_path, program)
     component = {
-        "conditions": {
-            "placed": {
-                "kind": "near_target_hold",
-                "object": "cube",
-                "target": "platform",
-                "tolerance": 0.15,
-                "hold_steps": 2,
-                "window_steps": 4,
-            }
-        }
+        "graph": {
+            "roots": ["placed"],
+            "rules": {
+                "placed": {
+                    "kind": "near_target",
+                    "bindings": {
+                        "position": "rigid_objects/cube/pose",
+                        "target": "rigid_objects/platform/pose",
+                    },
+                    "params": {"tolerance": 0.15},
+                },
+            },
+        },
     }
     _write(source.parent / "rules.yaml", component)
     first = materialize_asset_deployment(
@@ -1069,7 +1072,7 @@ def test_materialized_deployment_keeps_named_evaluation_component(deployment, tm
     )
     validate_materialized_deployment(first)
 
-    component["conditions"]["placed"]["tolerance"] = 0.25
+    component["graph"]["rules"]["placed"]["params"]["tolerance"] = 0.25
     _write(source.parent / "rules.yaml", component)
     second = materialize_asset_deployment(
         source, requirements, resolved, output_dir=tmp_path / "second"

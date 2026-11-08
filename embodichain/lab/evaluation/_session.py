@@ -32,6 +32,7 @@ from ._graph import (
     _BoundPredicate,
     _combine,
     _empty_result,
+    _qualified_metric,
     _validate_masks,
 )
 
@@ -43,7 +44,11 @@ __all__: list[str] = []
 
 @dataclass(frozen=True, slots=True)
 class EvaluationSnapshot:
-    """Owned rule results with row, episode, scope and acquisition identity."""
+    """Owned rule results with row, episode, scope and acquisition identity.
+
+    ``step`` is the last consumed slot overall. ``steps`` records the last
+    slot of each row, or -1 before that row starts.
+    """
 
     env_ids: tuple[int, ...]
     episode_ids: tuple[int, ...]
@@ -51,6 +56,7 @@ class EvaluationSnapshot:
     step: int | None
     revisions: torch.Tensor
     rules: Mapping[str, RuleResult]
+    steps: torch.Tensor
 
 
 class _History:
@@ -164,12 +170,15 @@ class RuleSession:
         self._advanced = False
         self._max_revisions = torch.full_like(self._starts, -1)
         self._revisions = torch.full_like(self._starts, -1)
+        self._steps = torch.full_like(self._starts, -1)
         self._history = {
             name: _History(self._starts)
             for name, rule in compiled._nodes
             if isinstance(rule, (TemporalRule, MilestoneRule))
         }
         self._latest = {}
+        self._observation_owner = None
+        self._observation_rows = None
 
     def evaluate(
         self,
@@ -192,6 +201,9 @@ class RuleSession:
         valid: Mapping[str, torch.Tensor] | None = None,
     ) -> None:
         """Consume one control slot, breaking continuity across unobserved slots."""
+        self._advance(step, values, revisions, episode_ids, valid)
+
+    def _advance(self, step, values, revisions, episode_ids, valid, *, active=None):
         import torch
 
         source_episodes = tuple(episode_ids)
@@ -222,6 +234,8 @@ class RuleSession:
             )
         )
         fresh = owned & (revisions > self._max_revisions)
+        if active is not None:
+            fresh &= active
         accepted_revision = torch.where(fresh, revisions, -1)
         valid = valid or {}
         _validate_masks(valid.values(), len(self.env_ids), self.device)
@@ -238,33 +252,52 @@ class RuleSession:
                     results[rule.ref].status,
                     step,
                     accepted_revision,
+                    active,
                 )
             else:
                 self._advance_milestone(
-                    self._history[name], rule, results, step, accepted_revision
+                    self._history[name], rule, results, step, accepted_revision, active
                 )
             return self._history[name].result(owned=False)
 
         results = self.compiled._evaluate(
             values, len(self.env_ids), self.device, qualified, advance_rule
         )
-        self._latest = {
-            name: results[name]
-            for name, node in self.compiled._nodes
-            if isinstance(node, _BoundPredicate)
-        }
+        for name, node in self.compiled._nodes:
+            if not isinstance(node, _BoundPredicate):
+                continue
+            result = results[name]
+            previous = self._latest.get(name)
+            if active is not None and previous is not None:
+                result.status.copy_(torch.where(active, result.status, previous.status))
+                for key, before in previous.metrics.items():
+                    current = result.metrics.get(key)
+                    if current is None:
+                        current = _qualified_metric(before, ~active)
+                    else:
+                        shape = (len(active),) + (1,) * (current.ndim - 1)
+                        current = torch.where(active.reshape(shape), current, before)
+                    result.metrics[key] = current
+            self._latest[name] = result
         self._max_revisions.copy_(torch.maximum(self._max_revisions, accepted_revision))
+        if active is not None:
+            accepted_revision = torch.where(active, accepted_revision, self._revisions)
+            self._steps.masked_fill_(active, step)
+        else:
+            self._steps.fill_(step)
         self._revisions.copy_(accepted_revision)
         self._last_step = step
         self._advanced = True
 
-    def _advance_window(self, history, rule, measured, step, revisions):
+    def _advance_window(self, history, rule, measured, step, revisions, active):
         import torch
 
         first, last = self._starts + rule.start, self._starts + rule.end
         unresolved = (history.status == Status.UNKNOWN) | (
             history.status == Status.NOT_RUN
         )
+        if active is not None:
+            unresolved &= active
         current = unresolved & (first <= step) & (step <= last)
         skipped = (
             unresolved
@@ -308,10 +341,12 @@ class RuleSession:
         history.status.masked_fill_(ending & ~history.missing, Status.FAILED)
         history.status.masked_fill_(ending & history.missing, Status.UNAVAILABLE)
 
-    def _advance_milestone(self, history, rule, results, step, revisions):
+    def _advance_milestone(self, history, rule, results, step, revisions, active):
         import torch
 
         pending = history.status != Status.SATISFIED
+        if active is not None:
+            pending &= active
         eligible = torch.ones_like(pending)
         for ref in rule.after:
             predecessor = results[ref]
@@ -361,6 +396,7 @@ class RuleSession:
             self._last_step if self._advanced else None,
             self._revisions.clone(),
             results,
+            self._steps.clone(),
         )
 
     def reset(self, env_ids: Sequence[int], episode_ids: Sequence[int]) -> None:
@@ -384,6 +420,7 @@ class RuleSession:
         self.episode_ids = tuple(identities)
         self._starts[rows] = self._last_step + 1
         self._revisions[rows] = -1
+        self._steps[rows] = -1
         self._max_revisions[rows] = -1
         for history in self._history.values():
             history.reset(rows)

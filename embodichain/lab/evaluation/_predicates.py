@@ -22,7 +22,15 @@ from collections.abc import Mapping, Sequence
 import math
 from typing import TYPE_CHECKING, Any
 
-from embodichain.compute._evaluation import _within_target
+from embodichain.compute._evaluation import (
+    _corners_in_frame,
+    _inside_region,
+    _measure_lift,
+    _measure_relative_position,
+    _measure_upright,
+    _speeds_within,
+    _within_target,
+)
 from embodichain.compute.geometry._distance import (
     _measure_near_target,
     _positions,
@@ -165,18 +173,40 @@ def _command_match(arguments, params):
     )
 
 
+def _corner_params(params):
+    _keys(params, ("lower", "upper", "corners"), ("tolerance",))
+    bounds = _region_params({key: params[key] for key in ("lower", "upper")})
+    raw = params["corners"]
+    if (
+        not isinstance(raw, (list, tuple))
+        or not raw
+        or any(not isinstance(point, (list, tuple)) or len(point) != 3 for point in raw)
+    ):
+        raise ValueError("Containment corners must be a nonempty list of XYZ triples.")
+    corners = tuple(tuple(_finite(x, "corner") for x in point) for point in raw)
+    tolerance = _finite(params.get("tolerance", 0), "tolerance")
+    if tolerance < 0:
+        raise ValueError("Containment tolerance must be nonnegative.")
+    return {**bounds, "corners": corners, "tolerance": tolerance}
+
+
 def _corner_containment(arguments, params):
     import torch
 
-    corners = arguments["corners"]
-    if corners.ndim != 3 or not corners.shape[1] or corners.shape[2] != 3:
+    pose, frame = arguments["pose"], arguments["frame"]
+    if pose.ndim != 2 or pose.shape[-1] != 7 or pose.shape != frame.shape:
         raise ValueError(
-            "Containment requires a nonempty batch of qualified XYZ corners."
+            "Containment requires object and reference poses in XYZ/XYZW format."
         )
+    dtype = torch.promote_types(pose.dtype, frame.dtype)
+    corners = _corners_in_frame(
+        pose.to(dtype), frame.to(dtype), pose.new_tensor(params["corners"], dtype=dtype)
+    )
+    tolerance = params["tolerance"]
     inside = _inside_region(
         corners,
-        corners.new_tensor(params["lower"]),
-        corners.new_tensor(params["upper"]),
+        corners.new_tensor(params["lower"]) - tolerance,
+        corners.new_tensor(params["upper"]) + tolerance,
     )
     return PredicateMeasurement(
         inside.all(-1),
@@ -186,56 +216,20 @@ def _corner_containment(arguments, params):
 
 
 def _lift(pose, baseline, minimum):
-    import torch
-
-    lift = pose[:, 2, 3] - baseline[:, 2, 3]
-    valid = torch.isfinite(pose).all(dim=(1, 2)) & torch.isfinite(baseline).all(
-        dim=(1, 2)
-    )
-    return PredicateMeasurement(lift >= minimum, valid, {"lift": lift})
+    passed, valid, measured = _measure_lift(pose, baseline, minimum)
+    return PredicateMeasurement(passed, valid, {"lift": measured})
 
 
 def _relative_position(pose, reference, offset, tolerances, *, parent_axes):
-    import torch
-
-    displacement = pose[:, :3, 3] - reference[:, :3, 3]
-    if parent_axes:
-        displacement = torch.bmm(
-            reference[:, :3, :3].transpose(1, 2), displacement.unsqueeze(-1)
-        ).squeeze(-1)
-    error = torch.abs(displacement - offset)
-    valid = torch.isfinite(pose).all(dim=(1, 2)) & torch.isfinite(reference).all(
-        dim=(1, 2)
+    passed, valid, measured = _measure_relative_position(
+        pose, reference, offset, tolerances, parent_axes=parent_axes
     )
-    passed = valid.clone()
-    for axis, tolerance in enumerate(tolerances):
-        if tolerance is not None:
-            passed &= error[:, axis] < tolerance
-    return PredicateMeasurement(passed, valid, {"position_error": error})
+    return PredicateMeasurement(passed, valid, {"position_error": measured})
 
 
 def _upright(pose, maximum_tilt):
-    import torch
-
-    tilt = torch.rad2deg(torch.acos(pose[:, 2, 2].clamp(-1.0, 1.0)))
-    return PredicateMeasurement(
-        tilt < maximum_tilt,
-        torch.isfinite(pose).all(dim=(1, 2)),
-        {"tilt_degrees": tilt},
-    )
-
-
-def _speeds_within(linear, angular, linear_limit, angular_limit):
-    return (linear <= linear_limit) & (angular <= angular_limit)
-
-
-def _advance_hold(previous, stable, *, increment=1, maximum=None):
-    import torch
-
-    count = previous + increment
-    if maximum is not None:
-        count = count.clamp(max=maximum)
-    return torch.where(stable, count, 0)
+    passed, valid, measured = _measure_upright(pose, maximum_tilt)
+    return PredicateMeasurement(passed, valid, {"tilt_degrees": measured})
 
 
 def _stable_params(params):
@@ -276,10 +270,6 @@ def _region_params(params):
     return bounds
 
 
-def _inside_region(position, lower, upper):
-    return ((position >= lower) & (position <= upper)).all(dim=-1)
-
-
 def _region(arguments, params):
     import torch
 
@@ -296,16 +286,42 @@ def _region(arguments, params):
     )
 
 
-_NEAR = PredicateDefinition(1, ("position", "target"), _near_params, _near)
-_HEIGHT = PredicateDefinition(1, ("position",), _height_params, _height)
-_JOINT_RANGE = PredicateDefinition(1, ("position",), _range_params, _joint_range)
-_JOINT_NEAR = PredicateDefinition(1, ("position",), _joint_near_params, _joint_near)
-_COMMAND = PredicateDefinition(
-    1, ("position", "command"), _command_params, _command_match
+_NEAR = PredicateDefinition(
+    1, ("position", "target"), _near_params, _near, ("position", "position")
 )
-_STABLE = PredicateDefinition(1, ("linear", "angular"), _stable_params, _stable)
-_REGION = PredicateDefinition(1, ("position",), _region_params, _region)
-_CORNERS = PredicateDefinition(1, ("corners",), _region_params, _corner_containment)
+_LINK_NEAR = PredicateDefinition(
+    1, ("position", "target"), _near_params, _near, ("link_position", "position")
+)
+_HEIGHT = PredicateDefinition(1, ("position",), _height_params, _height, ("position",))
+_JOINT_RANGE = PredicateDefinition(
+    1, ("position",), _range_params, _joint_range, ("joint_position",)
+)
+_JOINT_NEAR = PredicateDefinition(
+    1, ("position",), _joint_near_params, _joint_near, ("joint_position",)
+)
+_COMMAND = PredicateDefinition(
+    1,
+    ("position", "command"),
+    _command_params,
+    _command_match,
+    ("joint_positions", "joint_command"),
+    shared_layout=True,
+)
+_STABLE = PredicateDefinition(
+    1,
+    ("linear", "angular"),
+    _stable_params,
+    _stable,
+    ("linear_velocity", "angular_velocity"),
+)
+_REGION = PredicateDefinition(1, ("position",), _region_params, _region, ("position",))
+_CORNERS = PredicateDefinition(
+    1,
+    ("pose", "frame"),
+    _corner_params,
+    _corner_containment,
+    ("object_frame", "link_frame"),
+)
 
 
 def builtin_predicates() -> PredicateRegistry:
@@ -320,7 +336,7 @@ def builtin_predicates() -> PredicateRegistry:
         ("stable", _STABLE),
         ("inside_region", _REGION),
         ("corner_containment", _CORNERS),
-        ("link_object_distance", _NEAR),
+        ("link_object_distance", _LINK_NEAR),
     ):
         registry.register(kind, definition)
     return registry

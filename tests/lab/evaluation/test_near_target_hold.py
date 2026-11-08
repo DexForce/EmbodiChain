@@ -28,14 +28,15 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.evaluation import (
-    EvaluationSession,
-    NearTargetHoldSpec,
+    EvaluationSpec,
     EvaluationStatus,
+    PredicateSpec,
+    RuleSession,
+    TemporalRule,
+    builtin_predicates,
+    evaluate_recorded_rules,
 )
-from embodichain.lab.evaluation.observations import (
-    advance_observation,
-    evaluate_recording,
-)
+from embodichain.lab.evaluation.observations import advance_observation
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from embodichain.lab.gym.envs.managers import (
     ObservationCfg,
@@ -45,15 +46,27 @@ from embodichain.lab.gym.envs.managers import (
 from embodichain.lab.gym.envs.managers.observations import get_entity_state
 from embodichain.lab.gym.envs.objectives import evaluate_near_target
 from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout, _write_raw_rollout
+from embodichain.lab.gym.utils.trajectory_state import export_observation_history
 
 
 def _session():
-    return EvaluationSession(
-        NearTargetHoldSpec(
-            "object", "goal", tolerance=0.5, hold_steps=2, window_steps=4
+    return RuleSession(
+        builtin_predicates().compile(
+            EvaluationSpec(
+                {
+                    "near": PredicateSpec(
+                        "near_target",
+                        {"position": "object", "target": "goal"},
+                        {"tolerance": 0.5},
+                    ),
+                    "hold": TemporalRule("hold_for", "near", 3, steps=2),
+                },
+                ("hold",),
+            )
         ),
         env_ids=(3, 0, 2),
         episode_ids=(0, 0, 0),
+        scope="qualified_hold",
     )
 
 
@@ -110,16 +123,20 @@ def test_live_and_chunked_replay_share_truth_and_original_hold_boundaries():
             position[[3, 0, 2], :3], target[[3, 0, 2], :3], 0.5
         )
         assert torch.equal(
-            snapshot.predicate_status == EvaluationStatus.SATISFIED, legacy.satisfied
+            snapshot.rules["near"].status == EvaluationStatus.SATISFIED,
+            legacy.satisfied,
         )
         assert torch.equal(
-            snapshot.predicate_status != EvaluationStatus.UNAVAILABLE, legacy.valid
+            snapshot.rules["near"].status != EvaluationStatus.UNAVAILABLE, legacy.valid
         )
         torch.testing.assert_close(
-            snapshot.distance[legacy.valid], legacy.metrics["distance"][legacy.valid]
+            snapshot.rules["near"].metrics["distance"][legacy.valid],
+            legacy.metrics["distance"][legacy.valid],
         )
         if step == 0:
-            assert snapshot.window_status.tolist() == [EvaluationStatus.UNKNOWN] * 3
+            assert (
+                snapshot.rules["hold"].status.tolist() == [EvaluationStatus.UNKNOWN] * 3
+            )
             foreign = EpisodeContext(4)
             foreign._begin_episode([0, 1, 2, 3])
             foreign_frame = replace(
@@ -130,7 +147,7 @@ def test_live_and_chunked_replay_share_truth_and_original_hold_boundaries():
                     session, foreign_frame, step=1, episode_owner=foreign
                 )
         if step == 1:
-            assert snapshot.window_status[0].item() == EvaluationStatus.SATISFIED
+            assert snapshot.rules["hold"].status[0].item() == EvaluationStatus.SATISFIED
 
         kwargs = (
             {"action": torch.zeros(4, 1)}
@@ -143,22 +160,27 @@ def test_live_and_chunked_replay_share_truth_and_original_hold_boundaries():
         _write_raw_rollout(storage, context, frame, **kwargs)
 
     live = session.snapshot()
-    assert live.predicate_status.tolist() == [EvaluationStatus.FAILED] * 3
-    assert live.window_status.tolist() == [
+    assert live.rules["near"].status.tolist() == [EvaluationStatus.FAILED] * 3
+    assert live.rules["hold"].status.tolist() == [
         EvaluationStatus.SATISFIED,
         EvaluationStatus.UNAVAILABLE,
         EvaluationStatus.FAILED,
     ]
-    assert live.witness_steps.tolist() == [[0, 1], [-1, -1], [-1, -1]]
-    assert live.witness_revisions.tolist() == [revisions[:2], [-1, -1], [-1, -1]]
+    assert live.rules["hold"].witness_steps.tolist() == [[0, 1], [-1, -1], [-1, -1]]
+    assert live.rules["hold"].witness_revisions.tolist() == [
+        revisions[:2],
+        [-1, -1],
+        [-1, -1],
+    ]
 
     def replay_history(end, chunk_steps=64):
-        return evaluate_recording(
-            session.spec,
-            manager,
+        return evaluate_recorded_rules(
+            session.compiled,
+            {"raw_observations": export_observation_history(manager)},
             env_ids=session.env_ids,
             episode_ids=session.episode_ids,
-            recorded_end_step=end,
+            end_step=end,
+            scope=session.scope,
             chunk_steps=chunk_steps,
         )
 
@@ -169,58 +191,67 @@ def test_live_and_chunked_replay_share_truth_and_original_hold_boundaries():
         assert replay.env_ids == live.env_ids
         assert replay.episode_ids == live.episode_ids
         assert replay.step == live.step
-        for field in (
-            "distance",
-            "predicate_status",
-            "window_status",
-            "revisions",
-            "witness_steps",
-            "witness_revisions",
-        ):
-            torch.testing.assert_close(getattr(replay, field), getattr(live, field))
+        torch.testing.assert_close(replay.revisions, live.revisions)
+        for rule, result in live.rules.items():
+            actual = replay.rules[rule]
+            for field in ("status", "witness_steps", "witness_revisions"):
+                torch.testing.assert_close(
+                    getattr(actual, field), getattr(result, field)
+                )
+            for metric, expected in result.metrics.items():
+                torch.testing.assert_close(
+                    actual.metrics[metric], expected, equal_nan=True
+                )
 
     prefix = replay_history(0)
-    assert prefix.window_status.tolist() == [EvaluationStatus.UNAVAILABLE] * 3
+    assert prefix.rules["hold"].status.tolist() == [EvaluationStatus.UNAVAILABLE] * 3
     context._begin_episode([0])
     with pytest.raises(ValueError, match="evaluation episodes"):
         advance_observation(_session(), frame, step=0, episode_owner=context)
-    with pytest.raises(ValueError, match="another or uninitialized episode"):
-        replay_history(3)
 
 
 def test_gaps_and_stale_revisions_break_holds_without_advancing_on_snapshot():
     session = _session()
     positions = torch.zeros(3, 3)
-    valid = torch.ones(3, dtype=torch.bool)
-    assert session.snapshot().window_status.tolist() == [EvaluationStatus.NOT_RUN] * 3
+    values = {"object": positions, "goal": positions}
+    assert (
+        session.snapshot().rules["hold"].status.tolist()
+        == [EvaluationStatus.NOT_RUN] * 3
+    )
     session.advance(
-        0, positions, positions, valid=valid, revisions=torch.tensor([2, 2, 2])
+        0, values, episode_ids=session.episode_ids, revisions=torch.tensor([2, 2, 2])
     )
     snapshot = session.snapshot()
-    snapshot.window_status.fill_(EvaluationStatus.SATISFIED)
-    assert session.snapshot().window_status.tolist() == [EvaluationStatus.UNKNOWN] * 3
+    snapshot.rules["hold"].status.fill_(EvaluationStatus.SATISFIED)
+    assert (
+        session.snapshot().rules["hold"].status.tolist()
+        == [EvaluationStatus.UNKNOWN] * 3
+    )
     with pytest.raises(ValueError, match="Control slots"):
         session.advance(
-            0, positions, positions, valid=valid, revisions=torch.tensor([3, 3, 3])
+            0,
+            values,
+            episode_ids=session.episode_ids,
+            revisions=torch.tensor([3, 3, 3]),
         )
     session.advance(
-        2, positions, positions, valid=valid, revisions=torch.tensor([4, 4, 2])
+        2, values, episode_ids=session.episode_ids, revisions=torch.tensor([4, 4, 2])
     )
-    assert session.snapshot().predicate_status.tolist() == [
+    assert session.snapshot().rules["near"].status.tolist() == [
         EvaluationStatus.SATISFIED,
         EvaluationStatus.SATISFIED,
         EvaluationStatus.UNAVAILABLE,
     ]
     session.advance(
-        3, positions, positions, valid=valid, revisions=torch.tensor([5, 4, 5])
+        3, values, episode_ids=session.episode_ids, revisions=torch.tensor([5, 4, 5])
     )
     terminal = session.snapshot()
-    assert terminal.window_status.tolist() == [
+    assert terminal.rules["hold"].status.tolist() == [
         EvaluationStatus.SATISFIED,
         EvaluationStatus.UNAVAILABLE,
         EvaluationStatus.UNAVAILABLE,
     ]
-    assert terminal.witness_steps.tolist() == [[2, 3], [-1, -1], [-1, -1]]
+    assert terminal.rules["hold"].witness_steps.tolist() == [[2, 3], [-1, -1], [-1, -1]]
 
 
 def test_evaluation_cold_import_does_not_load_tensor_or_gym_runtime():

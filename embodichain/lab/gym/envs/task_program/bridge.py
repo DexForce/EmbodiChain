@@ -1676,7 +1676,12 @@ class TaskProgramDemoBridge:
         frame: ObservationFrame,
         *,
         episode_owner: EpisodeContext,
-        process_check: Callable[[], torch.Tensor] | None = None,
+        process_check: (
+            Callable[
+                [], tuple[torch.Tensor, Callable[[torch.Tensor], dict[str, object]]]
+            ]
+            | None
+        ) = None,
         hold_qpos: Callable[[], torch.Tensor] | None = None,
     ) -> None:
         """Publish the observation after a yielded command's host control step."""
@@ -1696,7 +1701,7 @@ class TaskProgramDemoBridge:
         lifecycle.observed_step = step
         if process_check is not None:
             rows = self.env_ids
-            passed = process_check()
+            passed, report = process_check()
             indices = getattr(self._validator_port, "_row_indices", None)
             if indices is None:
                 indices = (
@@ -1720,6 +1725,7 @@ class TaskProgramDemoBridge:
                         "step": step,
                         "observation_revision": frame.revision,
                         "env_ids": rows[rejected].tolist(),
+                        "conditions": report(indices[rejected]),
                     }
                 )
 

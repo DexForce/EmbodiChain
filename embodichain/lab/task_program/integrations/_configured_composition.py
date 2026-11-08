@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.task_program.language.schema import TaskProgramCfg
     from .catalog import TaskProgramIntegrationCatalog
 
@@ -600,6 +601,7 @@ def _load_configured_task_program_deployment(
     skill_profile: object,
     base_dir: str | Path,
     evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> _ConfiguredTaskProgramDeployment:
     """Compose Task Program metadata after Gym resolves physical components."""
     selected_base_dir = Path(base_dir).expanduser()
@@ -640,6 +642,7 @@ def _load_configured_task_program_deployment(
         payload,
         planner_config=planner_config,
         evaluation=evaluation,
+        evaluation_registry=evaluation_registry,
     )
     integration_id = _identifier(
         task["integration_id"],

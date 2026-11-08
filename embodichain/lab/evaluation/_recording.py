@@ -144,12 +144,14 @@ def evaluate_recorded_rules(
     row_lengths.masked_fill_(
         torch.tensor([row < 0 for row in rows], device=row_lengths.device), -1
     )
-    if segment_ends is not None:
-        row_lengths = torch.minimum(
-            row_lengths, torch.tensor(segment_ends, device=row_lengths.device)
-        )
-    stop = int(row_lengths.max()) if end_step is None else end_step
-    if stop < start_step or start_step >= revisions.shape[1]:
+    available_ends = tuple(row_lengths.tolist())
+    ends = (
+        segment_ends
+        if segment_ends is not None
+        else available_ends if end_step is None else (end_step,) * len(ids)
+    )
+    stop = max(ends)
+    if stop < start_step:
         session.advance(
             start_step,
             {},
@@ -157,22 +159,19 @@ def evaluate_recorded_rules(
             episode_ids=expected,
         )
         return session.snapshot(closed=True)
+    row_ends = None if min(ends) == stop else torch.tensor(ends, device=session.device)
     row_lengths = row_lengths.to(session.device)
-
+    shortest = min(available_ends)
     fields = {}
+    descriptors = {}
     for field in compiled.required_fields:
         sample = history["fields"].get(field)
         if sample is None:
             continue
         values, valid = sample["values"], sample["valid"]
         descriptor = sample["descriptor"]
-        if not _matches_field(
-            field, descriptor.get("entity_uid"), descriptor["quantity"]
-        ):
-            continue
-        if _is_joint_field(field, descriptor["quantity"]) and not descriptor.get(
-            "joint_names"
-        ):
+        projection = _field_projection(field, descriptor)
+        if projection is None:
             continue
         if (
             values.shape[:2] != revisions.shape
@@ -182,78 +181,149 @@ def evaluate_recorded_rules(
             or descriptor["dtype"] != str(values.dtype)
         ):
             raise ValueError(f"Invalid recorded observation field {field!r}.")
-        fields[field] = (values, valid, descriptor)
+        fields[field] = (values, valid, projection)
+        descriptors[field] = descriptor
+    for field in _foreign_layouts(descriptors):
+        fields.pop(field)
 
-    for start in range(start_step, min(stop + 1, revisions.shape[1]), chunk_steps):
-        end = min(start + chunk_steps, stop + 1, revisions.shape[1])
+    recorded_stop = min(stop, max(available_ends))
+    for start in range(start_step, recorded_stop + 1, chunk_steps):
+        end = min(start + chunk_steps, recorded_stop + 1)
         chunk = {
             field: (
-                _project_field(
-                    values[:, start:end]
-                    .index_select(0, index.to(values.device))
-                    .to(session.device),
-                    descriptor,
-                    field,
-                ),
+                values[:, start:end][..., projection]
+                .index_select(0, index.to(values.device))
+                .to(session.device),
                 valid[:, start:end]
                 .index_select(0, index.to(valid.device))
                 .to(session.device),
             )
-            for field, (values, valid, descriptor) in fields.items()
+            for field, (values, valid, projection) in fields.items()
         }
         revision_chunk = (
             revisions[:, start:end].index_select(0, index).to(session.device)
         )
         for offset, step in enumerate(range(start, end)):
-            session.advance(
+            revisions_at_step = revision_chunk[:, offset]
+            if step > shortest:
+                revisions_at_step = revisions_at_step.masked_fill(
+                    step > row_lengths, -1
+                )
+            session._advance(
                 step,
                 {field: values[:, offset] for field, (values, _) in chunk.items()},
-                valid={field: valid[:, offset] for field, (_, valid) in chunk.items()},
-                revisions=revision_chunk[:, offset].masked_fill(step > row_lengths, -1),
-                episode_ids=source_episode_ids,
+                revisions_at_step,
+                source_episode_ids,
+                {field: valid[:, offset] for field, (_, valid) in chunk.items()},
+                active=None if row_ends is None else step <= row_ends,
+            )
+    if stop > recorded_stop:
+        # Process missing segment endpoints as gaps, without scanning empty slots.
+        missing_ends = (
+            sorted(
+                {
+                    end
+                    for end in segment_ends
+                    if end >= start_step and end > recorded_stop
+                }
+            )
+            if segment_ends is not None
+            else (stop,)
+        )
+        for step in missing_ends:
+            session._advance(
+                step,
+                {},
+                torch.full_like(row_lengths, -1),
+                source_episode_ids,
+                None,
+                active=None if row_ends is None else step <= row_ends,
             )
     return session.snapshot(closed=True)
 
 
 def _matches_field(field, uid, quantity):
     if field.startswith("rigid_objects/"):
-        return field == f"rigid_objects/{uid}/{quantity}"
+        return field == f"rigid_objects/{uid}/{quantity}" or (
+            quantity == "pose" and field == f"rigid_objects/{uid}/frame"
+        )
     if field.startswith("articulations/"):
         source = f"articulations/{uid}/{quantity}"
         return field == source or (
             quantity == "qpos" and field.startswith(f"{source}/")
         )
+    if field.startswith("links/"):
+        return quantity == "pose" and field in (
+            f"links/{uid}/position",
+            f"links/{uid}/frame",
+        )
+    if field.startswith("robot/"):
+        return field == f"robot/{uid}/{quantity}"
     return True
 
 
-def _project_field(values, descriptor, field):
-    quantity = descriptor["quantity"]
-    if quantity == "pose":
-        if (
-            descriptor["coordinate_frame"] != "arena"
-            or descriptor["representation"] != "xyz_xyzw"
-            or values.shape[-1] != 7
+def _descriptor_value(descriptor, name, default=None):
+    if isinstance(descriptor, Mapping):
+        return descriptor.get(name, default)
+    return getattr(descriptor, name, default)
+
+
+def _foreign_layouts(descriptors):
+    invalid = set()
+    for field, descriptor in descriptors.items():
+        if not field.startswith("robot/") or not field.endswith("/command"):
+            continue
+        position = field.removesuffix("/command") + "/qpos"
+        if position in descriptors and (
+            tuple(_descriptor_value(descriptor, "joint_names", ()))
+            != tuple(_descriptor_value(descriptors[position], "joint_names", ()))
         ):
-            raise ValueError(
-                f"Evaluation field {field!r} must contain raw arena poses."
+            invalid.update((field, position))
+    return invalid
+
+
+def _field_projection(field, descriptor):
+    """Return a projection for qualified channels, or None for foreign evidence."""
+
+    def get(name, default=None):
+        return _descriptor_value(descriptor, name, default)
+
+    quantity = get("quantity")
+    shape = tuple(get("shape", ()))
+    names = tuple(get("joint_names", ()))
+    if not _matches_field(field, get("entity_uid"), quantity):
+        return None
+    if quantity == "pose":
+        contract = ("arena", "xyz_xyzw", ("m", "unitless"), (7,))
+    elif quantity in ("lin_vel", "ang_vel"):
+        unit = "m/s" if quantity == "lin_vel" else "rad/s"
+        contract = ("arena", "xyz", (unit,), (3,))
+    elif quantity in ("qpos", "command"):
+        if not names or len(set(names)) != len(names):
+            return None
+        contract = ("joint", "joint_order", ("joint_units",), (len(names),))
+    else:
+        return (
+            slice(None)
+            if not field.startswith(
+                ("rigid_objects/", "articulations/", "links/", "robot/")
             )
-        return values[..., :3]
-    if _is_joint_field(field, quantity):
-        return _select_joint(values, field, descriptor["joint_names"])
-    return values
+            else None
+        )
 
-
-def _is_joint_field(field, quantity):
-    return (
-        quantity == "qpos" and field.startswith("articulations/") and "/qpos/" in field
-    )
-
-
-def _select_joint(values, field, joint_names):
-    joint = field.rsplit("/", 1)[1]
-    if joint not in joint_names or values.shape[-1] != len(joint_names):
-        raise ValueError(f"Evaluation field {field!r} has no matching native joint.")
-    return values[..., joint_names.index(joint)]
+    if (
+        get("coordinate_frame"),
+        get("representation"),
+        tuple(get("units", ())),
+        shape,
+    ) != contract:
+        return None
+    if quantity == "pose" and not field.endswith("/frame"):
+        return slice(0, 3)
+    if quantity == "qpos" and field.startswith("articulations/") and "/qpos/" in field:
+        joint = field.rsplit("/", 1)[1]
+        return names.index(joint) if joint in names else None
+    return slice(None)
 
 
 def _segment_bounds(payload, env_ids, episode_ids, segment_id):

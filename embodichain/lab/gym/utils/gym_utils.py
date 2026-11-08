@@ -41,6 +41,7 @@ from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
 
 if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.gym.envs.managers.cfg import RLTaskCfg
     from embodichain.lab.sim.cfg import RobotCfg
     from embodichain.lab.sim.sensors import SensorCfg
@@ -604,6 +605,7 @@ def config_to_cfg(
     source_path: str | os.PathLike[str] | None = None,
     task_program_path_override: str | os.PathLike[str] | None = None,
     component_sources: Mapping[str, Mapping[str, object]] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -628,6 +630,7 @@ def config_to_cfg(
     Args:
         config (dict): The configuration dictionary containing an optional
             environment component plus an embodiment component or inline robot.
+        evaluation_registry: Optional trusted registry for the selected rule library.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
         source_path: Optional path of the Gym configuration source file.
@@ -791,6 +794,7 @@ def config_to_cfg(
             task_program=config["task_program"],
             skill_profile=component_resolution.embodiment_skill_profile,
             evaluation=component_resolution.evaluation,
+            evaluation_registry=evaluation_registry,
             base_dir=base_dir,
         )
         _validate_scene_binding_targets(

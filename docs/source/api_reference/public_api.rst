@@ -1287,21 +1287,15 @@ embodichain.lab.evaluation
 
 .. currentmodule:: embodichain.lab.evaluation
 
-Evaluate distance to a target and track the first consecutive hold within a
-bounded control-step window. A session keeps its original environment and
-episode order. The latest physical result and the historical hold can differ
-after the object moves. Read an owned result with ``snapshot()``.
-
 Compile trusted predicate registrations and inert rule declarations into an
-immutable graph. ``RuleSession`` advances bounded windows and milestones for
-one occurrence. Instantaneous evaluation and snapshots leave history untouched.
+immutable graph. A typed deployment binding qualifies the source of each role.
+``RuleSession`` advances bounded windows and milestones for one occurrence.
+Instantaneous queries and snapshots leave history untouched. Replay consumes
+the recorded observations and preserves each row's endpoint and witnesses.
 
 .. autosummary::
 
-   NearTargetHoldSpec
    EvaluationStatus
-   EvaluationResult
-   EvaluationSession
    PredicateSpec
    BooleanRule
    TemporalRule
@@ -1322,14 +1316,13 @@ embodichain.lab.evaluation.observations
 
 .. currentmodule:: embodichain.lab.evaluation.observations
 
-Feed a live raw arena-pose capture with its exact episode owner, or replay
-the same aligned slots from the observation manager's recorded fields.
-Replay reads bounded chunks and preserves the original witness revisions.
+Advance a compiled session with a raw capture and its exact episode owner.
+The adapter checks physical descriptors before projecting raw observations
+into predicate inputs.
 
 .. autosummary::
 
    advance_observation
-   evaluate_recording
 
 embodichain.lab.expansion
 ------------------------

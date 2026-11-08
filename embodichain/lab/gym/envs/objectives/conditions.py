@@ -18,12 +18,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import torch
 
 from embodichain.lab.evaluation._predicates import _HEIGHT, _NEAR
+
+if TYPE_CHECKING:
+    from embodichain.lab.evaluation import RuleResult
 
 __all__ = ["ConditionResult", "evaluate_near_target", "evaluate_below_height"]
 
@@ -36,11 +40,13 @@ class ConditionResult:
         satisfied: Boolean vector of physical predicate values.
         valid: Boolean vector identifying available finite evidence.
         metrics: Named floating measurements with the same leading batch size.
+        rule_results: Optional diagnostics from a compiled rule graph.
     """
 
     satisfied: torch.Tensor
     valid: torch.Tensor
     metrics: Mapping[str, torch.Tensor]
+    rule_results: Mapping[str, RuleResult] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.satisfied.dtype != torch.bool or self.satisfied.ndim != 1:

@@ -105,7 +105,7 @@ from embodichain.lab.gym.envs.task_program._final_acceptance import (
     _FinalMeasurement,
     _deployment_final_rules,
     _deployment_process_rules,
-    _evaluate_final_frame,
+    _evaluate_process_frame,
     _export_final_observations,
     _final_acceptance_rows,
     _measure_final_conditions,
@@ -113,6 +113,7 @@ from embodichain.lab.gym.envs.task_program._final_acceptance import (
 from embodichain.lab.gym.utils.trajectory_state import (
     trajectory_observation_cfgs,
     _evaluation_observation_cfgs,
+    _validate_evaluation_observation_bindings,
     export_observation_history,
 )
 from embodichain.data_pipeline.recording import build_recording_provenance
@@ -524,6 +525,10 @@ class EmbodiedEnv(BaseEnv):
 
         registration = getattr(task_program_adapter_factory, "registration", None)
         self._final_acceptance_rules = _deployment_final_rules(registration)
+        self._final_program_completion: tuple[tuple[int, ...], torch.Tensor] | None = (
+            None
+        )
+        self._final_bridge_episodes: tuple[int, ...] | None = None
         self._process_evaluation_rules = _deployment_process_rules(registration)
         self._sealed_final_observations: dict[int, ObservationFrame] = {}
         self._pending_final_acceptance: (
@@ -543,6 +548,10 @@ class EmbodiedEnv(BaseEnv):
         super().__init__(cfg, **kwargs)
 
         try:
+            if self._evaluation_recording:
+                _validate_evaluation_observation_bindings(
+                    self, self._evaluation_recording
+                )
             if self._explicit_policy_rollout and self.action_manager is None:
                 raise ValueError(
                     "policy_request rollout recording requires an ActionManager."
@@ -778,7 +787,21 @@ class EmbodiedEnv(BaseEnv):
         return [("terms", names)] if names else []
 
     def _after_episode_reset(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
+        if getattr(self, "_final_acceptance_rules", ()):
+            bridge = self._active_task_program_bridge
+            if env_ids.numel() == self.num_envs:
+                self._final_program_completion = None
+            elif (bridge is not None and bridge.program_completed) or getattr(
+                self, "_final_program_completion", None
+            ) is not None:
+                completion = self._final_completion_mask().clone()
+                completion.index_fill_(0, env_ids.to(completion.device), False)
+                self._final_program_completion = (
+                    self.episode_context.episode_ids,
+                    completion,
+                )
         self._active_task_program_bridge = None
+        self._final_bridge_episodes = None
         self._seed_recording_state(obs, env_ids)
         if not self.cfg.events or self.event_manager is None or not len(env_ids):
             return
@@ -1227,9 +1250,9 @@ class EmbodiedEnv(BaseEnv):
                 bridge._observe_segment_frame(
                     frame,
                     episode_owner=self.episode_context,
-                    process_check=lambda: _evaluate_final_frame(
-                        process_rules, frame
-                    ).satisfied,
+                    process_check=lambda: _evaluate_process_frame(
+                        process_rules, frame, self.device
+                    ),
                     hold_qpos=lambda: self.robot.get_qpos(target=True),
                 )
             else:
@@ -1823,6 +1846,7 @@ class EmbodiedEnv(BaseEnv):
         self._demo_continuity_id = 0
         self._demo_program_run_id = f"{episode_index}:{attempt_id}"
         self._pending_final_acceptance = None
+        self._final_program_completion = None
         self._sealed_final_observations = {}
         self._demo_active_segment_id = 0
         self._demo_active_segment_ids.zero_()
@@ -3457,11 +3481,15 @@ class EmbodiedEnv(BaseEnv):
         if not isinstance(bridge, TaskProgramDemoBridge):
             raise TypeError("bridge must be a TaskProgramDemoBridge")
         previous = self._active_task_program_bridge
+        previous_episodes = getattr(self, "_final_bridge_episodes", None)
         self._active_task_program_bridge = bridge
+        if getattr(self, "_final_acceptance_rules", ()):
+            self._final_bridge_episodes = self.episode_context.episode_ids
         try:
             yield
         finally:
             self._active_task_program_bridge = previous
+            self._final_bridge_episodes = previous_episodes
 
     def create_task_program_bridge(
         self,
@@ -3549,12 +3577,30 @@ class EmbodiedEnv(BaseEnv):
     def _evaluate_final_task_acceptance(
         self,
     ) -> tuple[torch.Tensor, torch.Tensor, _FinalMeasurement | None]:
-        completion = self._task_program_completion_mask()
+        completion = self._final_completion_mask()
         bridge = self._active_task_program_bridge
-        if bridge is None or not bridge.program_completed:
+        if (
+            bridge is None and getattr(self, "_final_program_completion", None) is None
+        ) or (bridge is not None and not bridge.program_completed):
             return completion, completion, None
         measured = _measure_final_conditions(self, self._final_acceptance_rules)
         return completion & measured.satisfied, completion, measured
+
+    def _final_completion_mask(self) -> torch.Tensor:
+        saved = getattr(self, "_final_program_completion", None)
+        if self._active_task_program_bridge is None and saved is not None:
+            episodes, mask = saved
+        else:
+            episodes = getattr(self, "_final_bridge_episodes", None)
+            mask = self._task_program_completion_mask()
+        current = self.episode_context.episode_ids
+        if episodes is None or episodes == current:
+            return mask
+        return mask & torch.tensor(
+            [before == after for before, after in zip(episodes, current, strict=True)],
+            device=mask.device,
+            dtype=torch.bool,
+        )
 
     def _finalize_demo_task_success(
         self, execution_eligible: tuple[bool, ...]
@@ -3640,6 +3686,8 @@ class EmbodiedEnv(BaseEnv):
                     **bridge_kwargs,
                 )
             self._active_task_program_bridge = bridge
+            if getattr(self, "_final_acceptance_rules", ()):
+                self._final_bridge_episodes = self.episode_context.episode_ids
             if getattr(self, "_demo_instruction_snapshot", None) is None:
                 from .demo import resolve_demo_instruction
 

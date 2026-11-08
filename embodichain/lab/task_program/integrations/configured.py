@@ -21,11 +21,12 @@ from __future__ import annotations
 from embodichain.lab.evaluation import (
     CompiledEvaluation,
     EvaluationSpec,
-    NearTargetHoldSpec,
+    PredicateRegistry,
     PredicateSpec,
     builtin_predicates,
 )
-from embodichain.lab.evaluation.observations import _rigid_pose_field
+
+from embodichain.lab.evaluation.observations import _raw_field_kind
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
@@ -3237,84 +3238,55 @@ class _ConfiguredTaskProgramAdapterFactory:
 
 
 def _decode_evaluation(
-    value: Mapping[str, object] | None, scene: SimulationSceneBinding
-) -> tuple[
-    dict[str, NearTargetHoldSpec | CompiledEvaluation], tuple[str, ...], tuple[str, ...]
-]:
+    value: Mapping[str, object] | None,
+    scene: SimulationSceneBinding,
+    *,
+    robot_profile: SimulationRobotSkillProfileBinding | None = None,
+    registry: PredicateRegistry | None = None,
+) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
     if value is None:
         return {}, (), ()
-    path = "evaluation.conditions"
     component = _mapping(
         value,
         path="evaluation",
-        required=frozenset(),
-        optional=frozenset(
-            {"conditions", "graph", "final_acceptance", "process_constraints"}
-        ),
+        required=frozenset({"graph"}),
+        optional=frozenset({"final_acceptance", "process_constraints"}),
     )
-    conditions = component.get("conditions", {})
-    if not isinstance(conditions, Mapping) or (
-        "conditions" in component and not conditions
-    ):
-        raise ValueError(f"{path} must be a nonempty mapping.")
-    bindings = {
-        binding.entity_id: binding.simulation_uid for binding in scene.rigid_objects
+    graph = EvaluationSpec.from_dict(component["graph"])
+    channels = {
+        f"rigid_objects/{binding.entity_id}/{quantity}": f"rigid_objects/{binding.simulation_uid}/{quantity}"
+        for binding in scene.rigid_objects
+        for quantity in ("pose", "frame", "lin_vel", "ang_vel")
     }
-    result = {}
-    for name, declaration in conditions.items():
-        ref = _identifier(name, path=f"{path} key")
-        rule_path = f"{path}.{ref}"
-        rule = _mapping(
-            declaration,
-            path=rule_path,
-            required=frozenset(
-                {"kind", "object", "target", "tolerance", "hold_steps", "window_steps"}
-            ),
-            optional=frozenset({"axes", "inclusive"}),
-        )
-        if rule["kind"] != "near_target_hold":
-            raise ValueError(f"{rule_path}.kind must be 'near_target_hold'.")
-        fields = []
-        for key in ("object", "target"):
-            entity = _identifier(rule[key], path=f"{rule_path}.{key}")
-            uid = bindings.get(entity)
-            if uid is None:
-                raise ValueError(
-                    f"{rule_path}.{key} must name a bound rigid object: {entity!r}."
-                )
-            fields.append(_rigid_pose_field(uid))
-        try:
-            result[ref] = NearTargetHoldSpec(
-                *fields,
-                tolerance=rule["tolerance"],
-                hold_steps=rule["hold_steps"],
-                window_steps=rule["window_steps"],
-                axes=rule.get("axes", (0, 1, 2)),
-                inclusive=rule.get("inclusive", True),
+    articulations = {
+        binding.entity_id: binding.simulation_uid for binding in scene.articulations
+    }
+    for link in scene.links:
+        for quantity in ("position", "frame"):
+            channels[f"links/{link.entity_id}/{quantity}"] = (
+                f"links/{articulations[link.articulation_id]}/{link.native_link_name}/{quantity}"
             )
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{rule_path}: {exc}") from exc
-    if "graph" in component:
-        graph = EvaluationSpec.from_dict(component["graph"])
-        channels = {
-            f"rigid_objects/{entity}/{quantity}": f"rigid_objects/{uid}/{quantity}"
-            for entity, uid in bindings.items()
-            for quantity in ("pose", "lin_vel", "ang_vel")
-        }
-        articulations = {
-            binding.entity_id: binding.simulation_uid for binding in scene.articulations
-        }
-        rules = {}
-        for name, rule in graph.rules.items():
-            if isinstance(rule, PredicateSpec):
-                inputs = {}
-                for role, field in rule.bindings.items():
-                    field = _identifier(
-                        field, path=f"evaluation.graph.rules.{name}.bindings.{role}"
-                    )
-                    if field in channels:
-                        inputs[role] = channels[field]
-                        continue
+    if robot_profile is not None:
+        for resource in robot_profile.resources:
+            if not isinstance(resource, ControlPartResourceBinding):
+                continue
+            for endpoint in resource.endpoints:
+                for quantity in ("qpos", "command"):
+                    channels[
+                        f"robot/{resource.resource_id}/{endpoint.endpoint_id}/{quantity}"
+                    ] = f"robot/{endpoint.control_part}/{quantity}"
+    rules = {}
+    field_kinds = {}
+    for name, rule in graph.rules.items():
+        if isinstance(rule, PredicateSpec):
+            inputs = {}
+            for role, field in rule.bindings.items():
+                field = _identifier(
+                    field, path=f"evaluation.graph.rules.{name}.bindings.{role}"
+                )
+                if field in channels:
+                    native = channels[field]
+                else:
                     parts = field.split("/")
                     if (
                         len(parts) != 4
@@ -3324,18 +3296,24 @@ def _decode_evaluation(
                         or not parts[3]
                     ):
                         raise ValueError(f"Unresolved evaluation field {field!r}.")
-                    inputs[role] = (
-                        f"articulations/{articulations[parts[1]]}/qpos/{parts[3]}"
-                    )
-                rule = PredicateSpec(rule.kind, inputs, rule.params)
-            rules[name] = rule
-        compiled = builtin_predicates().compile(EvaluationSpec(rules, graph.roots))
-        for root in compiled.roots:
-            if root in result:
-                raise ValueError(f"Duplicate evaluation root {root!r}.")
-            result[root] = compiled.select(root)
-    if not result:
-        raise ValueError("Evaluation requires conditions or exported graph roots.")
+                    native = f"articulations/{articulations[parts[1]]}/qpos/{parts[3]}"
+                inputs[role] = native
+                field_kinds[native] = _raw_field_kind(native)
+            rule = PredicateSpec(rule.kind, inputs, rule.params)
+        rules[name] = rule
+    registry = builtin_predicates() if registry is None else registry
+    if not isinstance(registry, PredicateRegistry):
+        raise TypeError("evaluation_registry must be a trusted PredicateRegistry.")
+    compiled = registry.compile(
+        EvaluationSpec(rules, graph.roots),
+        field_kinds=field_kinds,
+        field_layouts={
+            field: field.rsplit("/", 1)[0]
+            for field in field_kinds
+            if field.startswith("robot/")
+        },
+    )
+    result = {root: compiled.select(root) for root in compiled.roots}
 
     def refs_for(key: str) -> tuple[str, ...]:
         if key not in component:
@@ -3356,6 +3334,7 @@ def _decode_configured_task_program_integration(
     *,
     planner_config: Mapping[str, object] | None = None,
     evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> _ConfiguredTaskProgramIntegration:
     """Decode one composable, callable-free Task Program integration.
 
@@ -3387,7 +3366,12 @@ def _decode_configured_task_program_integration(
                 target_descriptor=lowerer_factory.target_descriptor,
             )
         )
-    conditions, final_refs, process_refs = _decode_evaluation(evaluation, scene_binding)
+    conditions, final_refs, process_refs = _decode_evaluation(
+        evaluation,
+        scene_binding,
+        robot_profile=robot_profile_binding,
+        registry=evaluation_registry,
+    )
     registration = SimulationTaskProgramRegistration(
         scene_binding=scene_binding,
         evaluation_conditions=conditions,

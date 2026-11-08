@@ -202,6 +202,52 @@ def _read_entity_state(env: EmbodiedEnv, uid: str, quantity: str) -> Observation
     return capture.acquire(("entity_state", uid, quantity), produce)
 
 
+def _get_evaluation_state(
+    env: EmbodiedEnv, obs: EnvObs, *, field: str
+) -> ObservationSample:
+    parts = field.split("/")
+    if parts[0] == "links":
+        _, uid, link, _ = parts
+        key = ("evaluation_link", uid, link)
+
+        def produce() -> ObservationSample:
+            values = env.sim.get_articulation(uid).get_link_pose(link)
+            valid = torch.isfinite(values).all(-1) & (values[:, 3:] != 0).any(-1)
+            descriptor = _state_descriptor(
+                f"{uid}/{link}", "pose", (7,), values.dtype, ()
+            )
+            return ObservationSample(descriptor, values, valid, (None,) * env.num_envs)
+
+    else:
+        _, part, quantity = parts
+        key = ("evaluation_robot", part, quantity)
+
+        def produce() -> ObservationSample:
+            values = env.robot.get_qpos(name=part, target=quantity == "command")
+            names = tuple(
+                env.robot.joint_names[i] for i in env.robot.get_joint_ids(name=part)
+            )
+            descriptor = ObservationDescriptor(
+                part,
+                quantity,
+                "joint",
+                "joint_order",
+                ("joint_units",),
+                (len(names),),
+                values.dtype,
+                names,
+            )
+            return ObservationSample(
+                descriptor,
+                values,
+                torch.isfinite(values).all(-1),
+                (None,) * env.num_envs,
+            )
+
+    capture = _current_capture.get()
+    return produce() if capture is None else capture.acquire(key, produce)
+
+
 def get_object_pose(
     env: EmbodiedEnv,
     obs: EnvObs,

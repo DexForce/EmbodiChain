@@ -900,6 +900,12 @@ def test_object_near_relative_target_observes_both_rows_independently() -> None:
     assert obj.pose_reads == 1
     assert reference.pose_reads == 1
 
+    reference._pose = reference._pose.to(torch.float64)
+    obj._pose[0, 0, 3] = 0.0
+    reference._pose[0, 0, 3] = 0.0500000001
+    # The old subtraction promoted to float64 before comparing the inclusive bound.
+    assert port.validate(validator, segment=segment).tolist() == [False, False]
+
 
 def test_articulation_joint_position_validates_measured_rows() -> None:
     """The joint validator applies its inclusive bound to each simulator row."""

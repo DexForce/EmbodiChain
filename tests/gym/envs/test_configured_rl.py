@@ -151,27 +151,36 @@ def test_registered_graph_is_an_rl_condition_with_cached_outcome_and_limits():
     registry = builtin_predicates()
 
     def clearance(values, params):
-        height = values["position"][:, 2]
+        height = torch.minimum(values["position"][:, 2], values["same_position"][:, 2])
         return PredicateMeasurement(
             height >= params["minimum"], torch.isfinite(height), {"height": height}
         )
 
     registry.register(
-        "clearance_test", PredicateDefinition(1, ("position",), dict, clearance)
+        "clearance_test",
+        PredicateDefinition(1, ("position", "same_position"), dict, clearance),
     )
     env = _env()
+    read_pose = Mock(side_effect=lambda **kwargs: env.pose)
+    env.sim.get_rigid_object = Mock(
+        return_value=SimpleNamespace(get_local_pose=read_pose)
+    )
     cfg = RLTaskCfg(
         success={
             "clearance": ConditionCfg(
                 func=evaluation_condition,
                 params={
                     "registry": registry,
-                    "sources": {"cube": {"rigid_object": "cube"}},
+                    "sources": {
+                        "cube": {"rigid_object": "cube"},
+                        "alias": {"rigid_object": "cube"},
+                        "unused": {"rigid_object": "other"},
+                    },
                     "root": "clear",
                     "rules": {
                         "clear": {
                             "kind": "clearance_test",
-                            "bindings": {"position": "cube"},
+                            "bindings": {"position": "cube", "same_position": "alias"},
                             "params": {"minimum": 0.1},
                         }
                     },
@@ -180,8 +189,14 @@ def test_registered_graph_is_an_rl_condition_with_cached_outcome_and_limits():
         }
     )
     manager = TerminationManager(cfg, env)
+    env.sim.get_rigid_object.assert_called_once_with("cube")
     env.pose[:, 2, 3] = torch.tensor([0.1, float("nan")])
     manager.compute(time_out=torch.tensor([True, False]))
+    read_pose.assert_called_once_with(to_matrix=True)
+    evidence = manager.snapshot()["conditions"]["success.clearance"]["rules"]["clear"]
+    assert evidence["metrics"]["height"][0].item() == pytest.approx(0.1)
+    assert torch.isnan(evidence["metrics"]["height"][1])
+    assert evidence["parameters"] == {"minimum": 0.1}
     assert manager.task_state()[0].tolist() == [False, False]
     assert manager.terminated.tolist() == [False, True]
     assert manager.truncated.tolist() == [True, False]

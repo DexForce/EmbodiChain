@@ -3728,15 +3728,19 @@ def evaluation_deployment(tmp_path: Path, registered_test_ids: list[str]):
     program_path.write_text(yaml.safe_dump(program))
     config["task_program"]["program"] = program_path.name
     evaluation = {
-        "conditions": {
-            "delivered": {
-                "kind": "near_target_hold",
-                "object": "can",
-                "target": "support_surface",
-                "tolerance": 0.12,
-                "hold_steps": 2,
-                "window_steps": 4,
-            }
+        "graph": {
+            "roots": ["delivered"],
+            "rules": {
+                "near": {
+                    "kind": "near_target",
+                    "bindings": {
+                        "position": "rigid_objects/can/pose",
+                        "target": "rigid_objects/support_surface/pose",
+                    },
+                    "params": {"tolerance": 0.12},
+                },
+                "delivered": {"kind": "hold_for", "ref": "near", "steps": 2, "end": 3},
+            },
         }
     }
     evaluation_path = tmp_path / "evaluation.yaml"
@@ -3779,12 +3783,12 @@ def test_evaluation_component_binds_named_and_legacy_validators(evaluation_deplo
         "rigid_objects/handover_object/pose",
         "rigid_objects/support_surface/pose",
     )
-    assert (named.spec.hold_steps, named.spec.window_steps) == (2, 4)
+    assert named.spec.stateful
     assert tuple(
         cfg.name for cfg in _evaluation_observation_cfgs(registration).values()
     ) == (named.spec.required_fields)
     payload = registration.fingerprint_payload()["evaluation"]
-    assert payload["near_target_hold_revision"] == 1
+    assert payload["conditions"]["delivered"]["evaluation_graph"] == named.spec.identity
 
     sources = {
         config[owner]["component"]: load_config(
@@ -3803,12 +3807,306 @@ def test_evaluation_component_binds_named_and_legacy_validators(evaluation_deplo
     rule_path.unlink()
     config_to_cfg(config, source_path=path, component_sources=sources)
     assert REGISTERED_ENVS[config["id"]] is registered
-    rule = sources["evaluation.yaml"]["conditions"]["delivered"]
-    rule["tolerance"] = 0.2
+    rule = sources["evaluation.yaml"]["graph"]["rules"]["near"]
+    rule["params"]["tolerance"] = 0.2
     rule_path.write_text(yaml.safe_dump(sources["evaluation.yaml"]))
     with pytest.raises(ValueError, match="already registered with a different"):
         config_to_cfg(config, source_path=path)
     assert REGISTERED_ENVS[config["id"]] is registered
+
+
+def test_registered_predicate_is_shared_by_configured_consumers(evaluation_deployment):
+    import yaml
+
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        EvaluationStatus,
+        PredicateDefinition,
+        PredicateMeasurement,
+        RuleSession,
+        builtin_predicates,
+        evaluate_recorded_rules,
+    )
+    from embodichain.lab.gym.envs.managers import ConditionCfg, RLTaskCfg
+    from embodichain.lab.gym.envs.managers.conditions import evaluation_condition
+    from embodichain.lab.gym.envs.managers.termination_manager import TerminationManager
+    from embodichain.lab.gym.envs.objectives import (
+        MeasuredRigidObjectState,
+        OrderedPlacementObjective,
+    )
+    from embodichain.lab.gym.envs.objectives.config import decode_objective
+
+    def clearance(values, params):
+        height = values["position"][:, 2]
+        return PredicateMeasurement(
+            height >= params["minimum"], torch.isfinite(height), {"height": height}
+        )
+
+    registry = builtin_predicates()
+    registry.register(
+        "clearance_test",
+        PredicateDefinition(1, ("position",), dict, clearance, ("position",)),
+    )
+    path, rule_path, _ = evaluation_deployment
+    config = load_config(path)
+    component = load_config(rule_path)
+    rule = {
+        "kind": "clearance_test",
+        "bindings": {"position": "rigid_objects/can/pose"},
+        "params": {"minimum": 0.1},
+    }
+    component["graph"]["rules"]["near"] = rule
+    component["graph"]["roots"].append("near")
+    component["final_acceptance"] = ["near"]
+    rule_path.write_text(yaml.safe_dump(component))
+    cfg = config_to_cfg(config, source_path=path, evaluation_registry=registry)
+    registration = REGISTERED_ENVS[config["id"]].task_program_registration
+    segment = next(registration.catalog.preflight(cfg.task_program).iter_segments())
+    hold = segment.validators[-1].spec
+    final = registration.evaluation_conditions[registration.evaluation_final_refs[0]]
+    (field,) = final.required_fields
+    position = torch.tensor([[0, 0, 0.2], [0, 0, 0.0]])
+    values = {field: position}
+    session = RuleSession(hold, env_ids=(0, 1), episode_ids=(1, 1), scope="pick")
+    for slot in (0, 1):
+        session.advance(
+            slot, values, revisions=torch.full((2,), slot), episode_ids=(1, 1)
+        )
+    assert final.evaluate(values, batch_size=2, device="cpu")[
+        "near"
+    ].status.tolist() == [
+        EvaluationStatus.SATISFIED,
+        EvaluationStatus.FAILED,
+    ]
+    pose = torch.cat((position, torch.tensor([[0, 0, 0, 1]]).expand(2, -1)), dim=1)
+    recorded = {
+        "schema_version": 1,
+        "env_ids": (0, 1),
+        "episode_ids": (1, 1),
+        "revisions": torch.tensor([[0, 1], [0, 1]]),
+        "lengths": torch.tensor([1, 1]),
+        "fields": {
+            field: {
+                "descriptor": {
+                    "entity_uid": "handover_object",
+                    "quantity": "pose",
+                    "coordinate_frame": "arena",
+                    "representation": "xyz_xyzw",
+                    "units": ("m", "unitless"),
+                    "shape": (7,),
+                    "dtype": "torch.float32",
+                },
+                "values": pose[:, None, :].expand(-1, 2, -1),
+                "valid": torch.ones(2, 2, dtype=torch.bool),
+            }
+        },
+    }
+    offline = evaluate_recorded_rules(
+        hold,
+        {"raw_observations": recorded},
+        env_ids=(0, 1),
+        episode_ids=(1, 1),
+        scope="pick",
+    )
+    torch.testing.assert_close(
+        offline.rules["delivered"].status,
+        session.snapshot(closed=True).rules["delivered"].status,
+    )
+    assert offline.rules["delivered"].status.tolist() == [
+        EvaluationStatus.SATISFIED,
+        EvaluationStatus.UNAVAILABLE,
+    ]
+    consumer_rule = {**rule, "bindings": {"position": "position"}}
+    graph = EvaluationSpec.from_dict(
+        {
+            "roots": ["held"],
+            "rules": {
+                "clear": consumer_rule,
+                "held": {"kind": "hold_for", "ref": "clear", "end": 1, "steps": 2},
+            },
+        }
+    )
+    objective = OrderedPlacementObjective(
+        decode_objective(
+            {
+                "type": "ordered_stable_regions",
+                "object_uid": "can",
+                "regions": [
+                    {"name": "region", "lower": [-1, -1, -1], "upper": [1, 1, 1]}
+                ],
+                "hold_seconds": 0.1,
+                "max_linear_speed": 0.1,
+                "max_angular_speed": 0.1,
+            }
+        ),
+        2,
+        "cpu",
+        condition=registry.compile(graph, field_kinds={"position": "position"}),
+    )
+    state = MeasuredRigidObjectState(
+        position, torch.zeros_like(position), torch.zeros_like(position)
+    )
+    objective.update(state, 0.1)
+    assert objective.snapshot()["success"].tolist() == [False, False]
+    objective.update(state, 0.1)
+    assert objective.snapshot()["success"].tolist() == [True, False]
+    objective.reset([0])
+    objective.update(state, 0.1)
+    assert objective.snapshot()["success"].tolist() == [False, False]
+    native_pose = torch.eye(4).expand(2, -1, -1).clone()
+    native_pose[:, :3, 3] = position
+    host = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(
+            get_rigid_object=lambda uid: SimpleNamespace(
+                get_local_pose=lambda **kwargs: native_pose
+            )
+        ),
+    )
+    manager = TerminationManager(
+        RLTaskCfg(
+            success={
+                "clear": ConditionCfg(
+                    func=evaluation_condition,
+                    params={
+                        "root": "clear",
+                        "rules": {"clear": consumer_rule},
+                        "sources": {"position": {"rigid_object": "can"}},
+                        "registry": registry,
+                    },
+                )
+            }
+        ),
+        host,
+    )
+    manager.compute()
+    assert manager.task_state()[0].tolist() == [True, False]
+
+
+def test_typed_evaluation_reads_link_frames_and_native_control_parts():
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.task_program._final_acceptance import (
+        _measure_final_conditions,
+    )
+    from embodichain.lab.gym.utils.trajectory_state import (
+        _evaluation_observation_cfgs,
+        _validate_evaluation_observation_bindings,
+    )
+    from embodichain.lab.task_program.integrations.configured import _decode_evaluation
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        ControlPartEndpointBinding,
+        ControlPartResourceBinding,
+        SimulationArticulationBinding,
+        SimulationArticulationLinkBinding,
+        SimulationRigidObjectBinding,
+        SimulationRobotSkillProfileBinding,
+        SimulationSceneBinding,
+    )
+
+    scene = SimulationSceneBinding(
+        "scene",
+        rigid_objects=(SimulationRigidObjectBinding("payload", "native_cube"),),
+        articulations=(SimulationArticulationBinding("drawer", "cabinet"),),
+        links=(SimulationArticulationLinkBinding("tray", "drawer", "tray_link"),),
+    )
+    profile = SimulationRobotSkillProfileBinding(
+        "robot",
+        (
+            ControlPartResourceBinding(
+                "hand",
+                (
+                    ControlPartEndpointBinding("gripper", "eef", frozenset()),
+                    ControlPartEndpointBinding("other", "other_part", frozenset()),
+                ),
+            ),
+        ),
+    )
+    component = {
+        "graph": {
+            "roots": ["accept"],
+            "rules": {
+                "inside": {
+                    "kind": "corner_containment",
+                    "bindings": {
+                        "pose": "rigid_objects/payload/frame",
+                        "frame": "links/tray/frame",
+                    },
+                    "params": {
+                        "corners": [[0, 0, 0], [0.05, 0.05, 0.05]],
+                        "lower": [-0.1, -0.1, -0.1],
+                        "upper": [0.1, 0.1, 0.1],
+                    },
+                },
+                "near": {
+                    "kind": "link_object_distance",
+                    "bindings": {
+                        "position": "links/tray/position",
+                        "target": "rigid_objects/payload/pose",
+                    },
+                    "params": {"tolerance": 0.1},
+                },
+                "matched": {
+                    "kind": "command_position_match",
+                    "bindings": {
+                        "position": "robot/hand/gripper/qpos",
+                        "command": "robot/hand/gripper/command",
+                    },
+                    "params": {"tolerance": 0.02},
+                },
+                "accept": {"kind": "all", "refs": ["inside", "near", "matched"]},
+            },
+        },
+        "final_acceptance": ["accept"],
+    }
+    rules, refs, _ = _decode_evaluation(component, scene, robot_profile=profile)
+    arm_calls = []
+    pose = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).expand(2, -1)
+    payload_pose = pose.clone()
+    payload_pose[1, 0] = 0.08
+    obj = SimpleNamespace(get_local_pose=lambda **kwargs: payload_pose)
+    drawer = SimpleNamespace(link_names=["tray_link"], get_link_pose=lambda name: pose)
+    robot = SimpleNamespace(
+        control_parts={"eef": ["joint_b", "joint_a"]},
+        joint_names=["joint_a", "joint_b"],
+        get_joint_ids=lambda *, name: [1, 0],
+        get_qpos=lambda *, name, target: (
+            arm_calls.append((name, target))
+            or torch.tensor([[0.2, 0.5], [0.2, 0.7 if target else 0.4]])
+        ),
+    )
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        robot=robot,
+        episode_context=EpisodeContext(2),
+        sim=SimpleNamespace(
+            asset_uids={"native_cube"},
+            get_asset=lambda uid: obj,
+            get_articulation=lambda uid: drawer if uid == "cabinet" else None,
+        ),
+        _evaluation_recording=_evaluation_observation_cfgs(
+            SimpleNamespace(scene_binding=scene, evaluation_conditions=rules)
+        ),
+    )
+    _validate_evaluation_observation_bindings(env, env._evaluation_recording)
+    measured = _measure_final_conditions(env, tuple((ref, rules[ref]) for ref in refs))
+    assert measured.satisfied.tolist() == [True, False]
+    assert measured.conditions[0].metrics["inside.inside_count"].tolist() == [2, 1]
+    assert measured.conditions[0].metrics["near.distance"].tolist() == pytest.approx(
+        [0.0, 0.08]
+    )
+    assert sorted(arm_calls) == [("eef", False), ("eef", True)]
+    assert measured.frame.fields["robot/eef/qpos"].descriptor.joint_names == (
+        "joint_b",
+        "joint_a",
+    )
+
+    component["graph"]["rules"]["matched"]["bindings"][
+        "command"
+    ] = "robot/hand/other/command"
+    with pytest.raises(ValueError, match="one joint layout"):
+        _decode_evaluation(component, scene, robot_profile=profile)
 
 
 @pytest.mark.parametrize(
@@ -3817,9 +4115,10 @@ def test_evaluation_component_binds_named_and_legacy_validators(evaluation_deplo
         ("absent_library", "Unknown deployment evaluation condition"),
         ("unknown_ref", "Unknown deployment evaluation condition"),
         ("inline_override", "Unknown field.*tolerance"),
-        ("unbound_target", "must name a bound rigid object"),
-        ("short_window", "Hold steps must be positive and fit"),
-        ("unknown_predicate", "kind must be 'near_target_hold'"),
+        ("unbound_target", "Unresolved evaluation field"),
+        ("short_window", "Invalid bounded temporal rule"),
+        ("unknown_predicate", "Unknown predicate"),
+        ("invalid_input_type", "requires .*joint_positions"),
     ],
 )
 def test_invalid_evaluation_deployment_fails_before_registration(
@@ -3832,7 +4131,8 @@ def test_invalid_evaluation_deployment_fails_before_registration(
     evaluation = load_config(rule_path)
     program = load_config(program_path)
     validator = program["program"]["validators"][-1]
-    rule = evaluation["conditions"]["delivered"]
+    rules = evaluation["graph"]["rules"]
+    rule = rules["near"]
     if damage == "absent_library":
         config.pop("evaluation")
     elif damage == "unknown_ref":
@@ -3840,9 +4140,12 @@ def test_invalid_evaluation_deployment_fails_before_registration(
     elif damage == "inline_override":
         validator["tolerance"] = 1.0
     elif damage == "unbound_target":
-        rule["target"] = "can_antipodal_grasp"
+        rule["bindings"]["target"] = "rigid_objects/can_antipodal_grasp/pose"
     elif damage == "short_window":
-        rule["window_steps"] = 1
+        rules["delivered"]["end"] = 0
+    elif damage == "invalid_input_type":
+        rule["kind"] = "command_position_match"
+        rule["bindings"]["command"] = rule["bindings"].pop("target")
     else:
         rule["kind"] = "unregistered"
     program_path.write_text(yaml.safe_dump(program))
@@ -3883,7 +4186,8 @@ def test_final_acceptance_is_registered_independently_of_program_override(
     path, rule_path, program_path = evaluation_deployment
     config = load_config(path)
     component = load_config(rule_path)
-    component["final_acceptance"] = ["delivered"]
+    component["graph"]["roots"].append("near")
+    component["final_acceptance"] = ["near"]
     rule_path.write_text(yaml.safe_dump(component))
     replacement = load_config(program_path)
     replacement["program"].pop("validators")
@@ -3895,9 +4199,9 @@ def test_final_acceptance_is_registered_independently_of_program_override(
     assert not next(
         registration.catalog.preflight(cfg.task_program).iter_segments()
     ).validators
-    assert registration.evaluation_final_refs == ("delivered",)
+    assert registration.evaluation_final_refs == ("near",)
     assert registration.fingerprint_payload()["evaluation"]["final_acceptance"] == [
-        "delivered"
+        "near"
     ]
 
     component.pop("final_acceptance")
@@ -3963,7 +4267,8 @@ def test_configured_graph_shares_named_rules_and_protects_process_selection(
     [
         ([], "must be a nonempty list"),
         (["unregistered"], "Unknown evaluation.final_acceptance ref"),
-        (["delivered", "delivered"], "refs must be unique"),
+        (["near", "near"], "refs must be unique"),
+        (["delivered"], "requires instantaneous roots"),
     ],
 )
 def test_final_acceptance_rejects_invalid_refs_before_registration(
@@ -3973,6 +4278,7 @@ def test_final_acceptance_rejects_invalid_refs_before_registration(
 
     path, rule_path, _ = evaluation_deployment
     component = load_config(rule_path)
+    component["graph"]["roots"].append("near")
     component["final_acceptance"] = refs
     rule_path.write_text(yaml.safe_dump(component))
     config = load_config(path)

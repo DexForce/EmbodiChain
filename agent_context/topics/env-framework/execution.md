@@ -311,9 +311,12 @@ not orchestrate multiple experiments or qualify kinematic playback.
   with `evaluation.final_acceptance`, `ReplayWrapper.final_acceptance` recomputes
   each row's physical predicates from its sealed capture before stepping. It
   combines them with the recorded execution eligibility and program completion.
-  The replay deployment must use the recorded final rule definitions.
-  Legacy trajectories remain playable and report `not_recorded` when they lack
-  the capture. `not_run` identifies a seal created before physical evaluation.
+  Live final queries, sealing and replay use the same CPU evaluation backend
+  for threshold parity. Process constraints stay on the control device.
+  A mismatch in rules, evidence identity or physical descriptors yields
+  `unavailable` for the affected report. Legacy trajectories without the
+  capture report `not_recorded`. A seal created before physical evaluation
+  reports `not_run`.
   Use `evaluate_recorded_rules` to evaluate a compiled graph directly from a
   trusted trajectory in bounded chunks. It can use a recorded segment
   occurrence to select the matching control slots and acquisition revisions.

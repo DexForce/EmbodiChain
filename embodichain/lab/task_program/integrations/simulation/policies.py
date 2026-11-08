@@ -43,13 +43,11 @@ from embodichain.utils import configclass
 
 from embodichain.lab.evaluation import (
     CompiledEvaluation,
-    EvaluationSession,
     EvaluationStatus,
-    NearTargetHoldSpec,
     RuleSession,
 )
 from embodichain.lab.evaluation.observations import (
-    _graph_frame_inputs,
+    _rule_report,
     advance_observation,
 )
 from embodichain.lab.evaluation._predicates import (
@@ -324,8 +322,8 @@ class SimulationSegmentPolicyPort:
         self._validator_results: dict[int, dict[str, object]] = {}
         self._validator_active_masks: dict[int, torch.Tensor] = {}
         self._lift_baselines: dict[int, torch.Tensor] = {}
-        self._evaluation_specs: dict[str, NearTargetHoldSpec | CompiledEvaluation] = {}
-        self._evaluation_sessions: dict[str, EvaluationSession | RuleSession] = {}
+        self._evaluation_specs: dict[str, CompiledEvaluation] = {}
+        self._evaluation_sessions: dict[str, RuleSession] = {}
         self._evaluation_start: int | None = None
         self._evaluation_active: torch.Tensor | None = None
         self._evaluation_rows: tuple[int, ...] = ()
@@ -891,47 +889,19 @@ class SimulationSegmentPolicyPort:
             return
         self._require_open()
         for ref, spec in self._evaluation_specs.items():
-            if (
-                isinstance(spec, NearTargetHoldSpec)
-                and step >= start + spec.window_steps
-            ):
-                continue
             session = self._evaluation_sessions.get(ref)
-            rows = self._evaluation_rows
-            episode_ids = tuple(episode_owner.episode_ids[row] for row in rows)
             if session is None:
-                args = dict(
+                rows = self._evaluation_rows
+                session = RuleSession(
+                    spec,
                     env_ids=rows,
-                    episode_ids=episode_ids,
+                    episode_ids=tuple(episode_owner.episode_ids[row] for row in rows),
                     start_step=start,
                     device=self._env_ids.device,
+                    scope=f"{ref}@{start}",
                 )
-                if isinstance(spec, CompiledEvaluation):
-                    session = RuleSession(spec, scope=f"{ref}@{start}", **args)
-                else:
-                    session = EvaluationSession(spec, **args)
                 self._evaluation_sessions[ref] = session
-            if isinstance(session, RuleSession):
-                if (
-                    frame.episode_owner is not episode_owner
-                    or session.episode_ids != episode_ids
-                ):
-                    raise ValueError(
-                        "Live observation does not belong to the evaluation episodes."
-                    )
-                indices = torch.as_tensor(rows, dtype=torch.long, device=session.device)
-                values, valid = _graph_frame_inputs(session.compiled, frame, indices)
-                session.advance(
-                    step,
-                    values,
-                    valid=valid,
-                    revisions=torch.full_like(indices, frame.revision),
-                    episode_ids=tuple(frame.episode_ids[row] for row in rows),
-                )
-            else:
-                advance_observation(
-                    session, frame, step=step, episode_owner=episode_owner
-                )
+            advance_observation(session, frame, step=step, episode_owner=episode_owner)
 
     def _validate_condition(
         self, validator: CompiledConditionValidator
@@ -948,9 +918,8 @@ class SimulationSegmentPolicyPort:
             (active.numel(), 2), -1, dtype=torch.long, device=active.device
         )
         witness_revisions = torch.full_like(witness_steps, -1)
-        distance = [None] * active.numel()
         graph_trace = {}
-        if isinstance(session, RuleSession):
+        if session is not None:
             snapshot = session.snapshot(closed=True)
             root = snapshot.rules[validator.cfg.ref]
             status[active] = root.status
@@ -960,35 +929,10 @@ class SimulationSegmentPolicyPort:
             graph_trace = {
                 "evaluation_identity": session.compiled.identity,
                 "rules": {
-                    name: {
-                        "status": [
-                            EvaluationStatus(value).name.lower()
-                            for value in result.status.tolist()
-                        ],
-                        "witness_revisions": (
-                            None
-                            if result.witness_revisions is None
-                            else result.witness_revisions.tolist()
-                        ),
-                        "violation_revisions": (
-                            None
-                            if result.violation_revisions is None
-                            else result.violation_revisions.tolist()
-                        ),
-                    }
+                    name: _rule_report(result)
                     for name, result in snapshot.rules.items()
                 },
             }
-        elif session is not None:
-            snapshot = session.snapshot(closed=True)
-            status[active] = snapshot.window_status
-            witness_steps[active] = snapshot.witness_steps
-            witness_revisions[active] = snapshot.witness_revisions
-            distance = _json_speed_values(
-                snapshot.distance.new_full(active.shape, float("nan")).masked_scatter_(
-                    active, snapshot.distance
-                )
-            )
         accepted = status == EvaluationStatus.SATISFIED
         self._validator_results[id(validator)] = {
             "kind": validator.cfg.kind,
@@ -997,11 +941,7 @@ class SimulationSegmentPolicyPort:
             "status": [
                 EvaluationStatus(value).name.lower() for value in status.cpu().tolist()
             ],
-            **(
-                {"tolerance": validator.spec.tolerance, "distance": distance}
-                if isinstance(validator.spec, NearTargetHoldSpec)
-                else graph_trace
-            ),
+            **graph_trace,
             "witness_steps": witness_steps.cpu().tolist(),
             "witness_revisions": witness_revisions.cpu().tolist(),
             "accepted_mask": accepted.cpu().tolist(),
@@ -1178,8 +1118,11 @@ class SimulationSegmentPolicyPort:
         reference_position = reference_pose[:, :3, 3]
         displacement = object_position.new_tensor(validator.cfg.displacement)
         target_position = reference_position + displacement
+        dtype = torch.promote_types(object_position.dtype, target_position.dtype)
         measured = evaluate_near_target(
-            object_position, target_position, float(validator.cfg.position_tolerance)
+            object_position.to(dtype),
+            target_position.to(dtype),
+            float(validator.cfg.position_tolerance),
         )
         error = measured.metrics["distance"]
         accepted = measured.satisfied & torch.isfinite(error)

@@ -212,7 +212,11 @@ def _final_acceptance_env():
     from contextlib import nullcontext
     from unittest.mock import Mock
 
-    from embodichain.lab.evaluation import NearTargetHoldSpec
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        PredicateSpec,
+        builtin_predicates,
+    )
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.envs.task_program._final_acceptance import (
         _deployment_final_rules,
@@ -276,8 +280,20 @@ def _final_acceptance_env():
             ),
         ),
         evaluation_conditions={
-            "near_support": NearTargetHoldSpec(
-                "rigid_objects/payload/pose", "rigid_objects/support/pose", 0.5, 2, 4
+            "near_support": builtin_predicates().compile(
+                EvaluationSpec(
+                    {
+                        "near_support": PredicateSpec(
+                            "near_target",
+                            {
+                                "position": "rigid_objects/payload/pose",
+                                "target": "rigid_objects/support/pose",
+                            },
+                            {"tolerance": 0.5},
+                        )
+                    },
+                    ("near_support",),
+                )
             )
         },
         evaluation_final_refs=("near_support",),
@@ -315,8 +331,8 @@ def test_live_final_acceptance_revokes_after_movement_but_reset_saves_the_termin
     assert env.bridge.program_completed
     assert result.success == (True, False)
     terminal = [env.get_demo_episode_metadata(row) for row in (0, 1)]
-    assert terminal[0]["final_acceptance"]["conditions"]["near_support"][
-        "distance"
+    assert terminal[0]["final_acceptance"]["conditions"]["near_support"]["metrics"][
+        "near_support.distance"
     ] == pytest.approx(0.1)
     assert terminal[1]["final_acceptance"]["program_accepted"] is True
     assert terminal[1]["final_acceptance"]["physical_satisfied"] is False
@@ -417,6 +433,26 @@ def test_reset_seals_manually_completed_program_before_persistence_retry():
     assert read_pose.call_count == 2
 
 
+def test_partial_reset_keeps_manual_completion_for_unreset_rows():
+    env, position, _ = _final_acceptance_env()
+    position[:, 0] = 0.1
+    env._begin_demo_episode_recording()
+    tuple(env.create_demo_segments())
+    env._demo_steps[:] = 1
+    saved = []
+    env.dataset_manager = SimpleNamespace(
+        available_modes=["save"],
+        save_failed_episodes=False,
+        apply=lambda *, mode, env_ids: saved.extend(env_ids.tolist()),
+    )
+    assert env.is_task_success().tolist() == [True, True]
+    env.reset(options={"reset_ids": [0]})
+    assert env.episode_context.episode_ids == (1, 0)
+    assert env.is_task_success().tolist() == [False, True]
+    env.reset(options={"reset_ids": [1]})
+    assert saved == [0, 1]
+
+
 def test_trajectory_replay_recomputes_the_sealed_capture_after_physics_changes(
     tmp_path,
 ):
@@ -476,11 +512,13 @@ def test_trajectory_replay_recomputes_the_sealed_capture_after_physics_changes(
     first = payload["meta"]["demo_episodes"][0]["final_acceptance"]
     first["accepted"] = True
     first["physical_satisfied"] = True
-    first["conditions"]["near_support"]["distance"] = 0.0
+    first["conditions"]["near_support"]["metrics"]["near_support.distance"] = 0.0
     report = ReplayWrapper(env, payload, mode="kinematic").final_acceptance[0]
     assert report["recorded_accepted"] is True
     assert report["accepted"] is False
-    assert report["conditions"]["near_support"]["distance"] == pytest.approx(0.9)
+    assert report["conditions"]["near_support"]["metrics"][
+        "near_support.distance"
+    ] == pytest.approx(0.9)
 
     second = payload["meta"]["demo_episodes"][1]["final_acceptance"]
     second["execution_eligible"] = False
@@ -489,5 +527,92 @@ def test_trajectory_replay_recomputes_the_sealed_capture_after_physics_changes(
     assert report["accepted"] is False
 
     first["observation_revision"] += 1
-    with pytest.raises(ValueError, match="observation does not match the episode seal"):
-        ReplayWrapper(env, payload, mode="kinematic")
+    unavailable, peer = ReplayWrapper(env, payload, mode="kinematic").final_acceptance
+    assert unavailable["status"] == "unavailable"
+    assert unavailable["accepted"] is None
+    assert peer["status"] == "recomputed"
+
+    payload["final_acceptance_observations"]["rows"][1]["fields"][
+        "rigid_objects/payload/pose"
+    ]["descriptor"]["units"] = ("pixels", "unitless")
+    report = ReplayWrapper(env, payload, mode="kinematic").final_acceptance[1]
+    assert report["status"] == "unavailable"
+    assert report["accepted"] is None
+    assert report["conditions"]["near_support"]["status"] == "unavailable"
+
+
+@pytest.mark.gpu
+def test_cuda_final_capture_and_cpu_replay_agree_at_inclusive_boundary():
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        PredicateSpec,
+        builtin_predicates,
+    )
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationDescriptor,
+        ObservationFrame,
+        ObservationSample,
+    )
+    from embodichain.lab.gym.envs.task_program._final_acceptance import (
+        _evaluate_final_frame,
+        _export_final_observations,
+        _final_acceptance_rows,
+        _replay_final_acceptance,
+    )
+
+    position, target = "rigid_objects/a/pose", "rigid_objects/b/pose"
+    graph = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "near": PredicateSpec(
+                    "near_target",
+                    {"position": position, "target": target},
+                    {"axes": (0, 1), "tolerance": 0.7833548188209534},
+                )
+            },
+            ("near",),
+        )
+    )
+    fields = {}
+    for field, coordinates in (
+        (position, (0.11330324411392212, 0.7751175165176392, 0)),
+        (target, (0, 0, 0)),
+    ):
+        pose = torch.tensor(
+            [(*coordinates, 0, 0, 0, 1)], device="cuda", dtype=torch.float32
+        )
+        descriptor = ObservationDescriptor(
+            field.split("/")[1],
+            "pose",
+            "arena",
+            "xyz_xyzw",
+            ("m", "unitless"),
+            (7,),
+            pose.dtype,
+        )
+        fields[field] = ObservationSample(
+            descriptor, pose, torch.tensor([True], device="cuda"), (None,)
+        )
+    frame = ObservationFrame(None, fields, (1,), 4, 0.2)
+    rules = (("near", graph),)
+    measured = _evaluate_final_frame(rules, frame)
+    assert measured.satisfied.device.type == "cuda"
+    seal = _final_acceptance_rows(
+        rules,
+        (1,),
+        tuple(measured.satisfied.tolist()),
+        (True,),
+        torch.tensor([True]),
+        measured,
+    )[0]
+    episode = {"env_id": 0, "episode_uuid": "ep", "final_acceptance": seal}
+    payload = {
+        "meta": {"num_envs": 1, "env_ids": [0], "demo_episodes": [episode]},
+        "final_acceptance_observations": _export_final_observations(
+            rules, {0: measured.frame}, [episode]
+        ),
+    }
+    assert seal["accepted"] is True
+    assert _replay_final_acceptance(rules, payload) == (
+        {"status": "recomputed", "recorded_accepted": True, **seal},
+    )

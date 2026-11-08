@@ -25,11 +25,12 @@ from typing import Any
 
 import torch
 
-from embodichain.lab.evaluation._predicates import (
+from embodichain.compute._evaluation import (
     _advance_hold,
     _inside_region,
     _speeds_within,
 )
+from embodichain.lab.evaluation import CompiledEvaluation, EvaluationStatus, RuleSession
 
 from .config import OrderedPlacementObjectiveCfg, decode_objective
 
@@ -57,6 +58,8 @@ class OrderedPlacementObjective:
         cfg: OrderedPlacementObjectiveCfg,
         num_envs: int,
         device: torch.device | str,
+        *,
+        condition: CompiledEvaluation | None = None,
     ) -> None:
         """Create isolated progress buffers for the environment batch.
 
@@ -64,6 +67,8 @@ class OrderedPlacementObjective:
             cfg: Ordered regions and physical stability thresholds.
             num_envs: Positive number of independent environment rows.
             device: Device shared by progress buffers and measured state.
+            condition: Optional compiled rule over position and measured
+                linear/angular velocity. It observes each control sample.
         """
         cfg.validate()
         self.cfg = decode_objective(cfg.to_dict())
@@ -71,6 +76,28 @@ class OrderedPlacementObjective:
             raise ValueError("num_envs must be a positive integer.")
         self.num_envs = num_envs
         self.device = torch.device(device)
+        fields = {
+            "position": "position",
+            "linear_velocity": "linear_velocity",
+            "angular_velocity": "angular_velocity",
+        }
+        if condition is not None and (
+            len(condition.roots) != 1 or set(condition.required_fields) - fields.keys()
+        ):
+            raise ValueError(
+                "An objective condition needs one root over measured state."
+            )
+        self._condition_session = None
+        self._condition_step = 0
+        if condition is not None:
+            condition._check_input_contract(fields, {})
+            self._condition_session = RuleSession(
+                condition,
+                env_ids=range(num_envs),
+                episode_ids=(0,) * num_envs,
+                scope=f"objective:{self.cfg.object_uid}",
+                device=self.device,
+            )
         self._lower = torch.tensor(
             [r.lower for r in self.cfg.regions], device=self.device, dtype=torch.float64
         )
@@ -128,6 +155,10 @@ class OrderedPlacementObjective:
             tensor[ids] = 0
         self._milestone_steps[ids] = -1
         self._milestone_times[ids] = float("nan")
+        if self._condition_session is not None:
+            session = self._condition_session
+            rows = session.env_ids if env_ids is None else tuple(ids.tolist())
+            session.reset(rows, tuple(session.episode_ids[row] + 1 for row in rows))
 
     @torch.no_grad()
     def update(self, measured_state: MeasuredRigidObjectState, dt: float) -> None:
@@ -164,6 +195,24 @@ class OrderedPlacementObjective:
         self._valid.copy_(
             torch.stack([torch.isfinite(t).all(dim=-1) for t in tensors]).all(dim=0)
         )
+        condition_passed = None
+        if self._condition_session is not None:
+            session = self._condition_session
+            session.advance(
+                self._condition_step,
+                {
+                    "position": position,
+                    "linear_velocity": linear,
+                    "angular_velocity": angular,
+                },
+                revisions=torch.full_like(self._steps, self._condition_step),
+                episode_ids=session.episode_ids,
+                valid=dict.fromkeys(session.compiled.required_fields, self._valid),
+            )
+            self._condition_step += 1
+            result = session.snapshot().rules[session.compiled.roots[0]]
+            condition_passed = result.status == EvaluationStatus.SATISFIED
+            self._valid &= condition_passed | (result.status == EvaluationStatus.FAILED)
         target = self._progress.clamp(max=len(self.cfg.regions) - 1)
         stable = (
             self._valid
@@ -179,6 +228,8 @@ class OrderedPlacementObjective:
                 self.cfg.max_angular_speed,
             )
         )
+        if condition_passed is not None:
+            stable &= condition_passed
         self._stable.copy_(stable)
         self._hold.copy_(
             _advance_hold(

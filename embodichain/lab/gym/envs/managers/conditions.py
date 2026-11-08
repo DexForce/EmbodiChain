@@ -158,34 +158,45 @@ class evaluation_condition(Functor):
         sources = cfg.params["sources"]
         if not isinstance(sources, Mapping) or not sources:
             raise ValueError("An evaluation condition needs observation sources.")
-        self._objects = {}
-        self._attributes = {}
-        for field, source in sources.items():
-            if not isinstance(source, Mapping) or len(source) != 1:
-                raise ValueError(f"Invalid evaluation source for {field!r}.")
-            if "rigid_object" in source:
-                self._objects[field] = _rigid_object(
-                    env, SceneEntityCfg(uid=source["rigid_object"])
-                )
-            elif (
-                "attribute" in source
-                and isinstance(source["attribute"], str)
-                and source["attribute"].isidentifier()
-                and not source["attribute"].startswith("_")
-            ):
-                self._attributes[field] = source["attribute"]
-            else:
-                raise ValueError(f"Invalid evaluation source for {field!r}.")
         registry = cfg.params.get("registry") or builtin_predicates()
         if not isinstance(registry, PredicateRegistry):
             raise TypeError("registry must be a trusted PredicateRegistry.")
         root = cfg.params["root"]
         spec = EvaluationSpec.from_dict({"rules": cfg.params["rules"], "roots": [root]})
-        self._compiled = registry.compile(spec, available_fields=set(sources)).select(
-            root
-        )
+        self._objects = {}
+        attributes = {}
+        field_kinds = {}
+        for field, source in sources.items():
+            if not isinstance(source, Mapping):
+                raise ValueError(f"Invalid evaluation source for {field!r}.")
+            if set(source) == {"rigid_object"}:
+                field_kinds[field] = "position"
+            elif (
+                set(source) in ({"attribute"}, {"attribute", "kind"})
+                and isinstance(source["attribute"], str)
+                and source["attribute"].isidentifier()
+                and not source["attribute"].startswith("_")
+            ):
+                attributes[field] = source["attribute"]
+                if "kind" in source:
+                    field_kinds[field] = source["kind"]
+            else:
+                raise ValueError(f"Invalid evaluation source for {field!r}.")
+        self._compiled = registry.compile(
+            spec, available_fields=set(sources), field_kinds=field_kinds
+        ).select(root)
         if self._compiled.stateful:
             raise ValueError("RL evaluation conditions require instantaneous rules.")
+        self._object_fields = {}
+        self._attribute_fields = {}
+        for field in self._compiled.required_fields:
+            if field in attributes:
+                self._attribute_fields.setdefault(attributes[field], []).append(field)
+            else:
+                uid = sources[field]["rigid_object"]
+                if uid not in self._objects:
+                    self._objects[uid] = _rigid_object(env, SceneEntityCfg(uid=uid))
+                self._object_fields.setdefault(uid, []).append(field)
 
     def __call__(
         self,
@@ -197,14 +208,14 @@ class evaluation_condition(Functor):
         registry: PredicateRegistry | None = None,
     ) -> ConditionResult:
         """Acquire bound inputs and evaluate the compiled root once."""
-        values = {
-            field: obj.get_local_pose(to_matrix=True)[:, :3, 3]
-            for field, obj in self._objects.items()
-        }
-        for field, attribute in self._attributes.items():
+        values = {}
+        for uid, fields in self._object_fields.items():
+            position = self._objects[uid].get_local_pose(to_matrix=True)[:, :3, 3]
+            values.update(dict.fromkeys(fields, position))
+        for attribute, fields in self._attribute_fields.items():
             value = getattr(env, attribute, None)
             if isinstance(value, torch.Tensor):
-                values[field] = value
+                values.update(dict.fromkeys(fields, value))
         result = self._compiled.evaluate(
             values, batch_size=env.num_envs, device=env.device
         )
@@ -214,4 +225,5 @@ class evaluation_condition(Functor):
             (status == EvaluationStatus.FAILED)
             | (status == EvaluationStatus.SATISFIED),
             {"status": status},
+            result,
         )

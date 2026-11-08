@@ -2182,7 +2182,10 @@ def test_row_rejection_holds_commands_without_disrupting_policy_clock(
                     bridge._observe_segment_frame(
                         frame,
                         episode_owner=context,
-                        process_check=lambda: torch.tensor([False, True]),
+                        process_check=lambda: (
+                            torch.tensor([False, True]),
+                            lambda rows: {"bound": {"rows": rows.tolist()}},
+                        ),
                         hold_qpos=lambda: hold if mode == "position" else hold["qpos"],
                     )
                 else:
@@ -2198,6 +2201,9 @@ def test_row_rejection_holds_commands_without_disrupting_policy_clock(
     assert segment.validator().tolist() == [False, True]
     if process:
         assert segment.metadata["process_violations"][0]["observation_revision"] == 31
+        assert segment.metadata["process_violations"][0]["conditions"]["bound"][
+            "rows"
+        ] == [0]
 
 
 def test_post_policy_receives_only_rows_surviving_partial_runtime_failure() -> None:
@@ -2718,20 +2724,17 @@ def test_fresh_bridge_reports_physical_binding_before_runtime_grounding():
     assert runtime.observation_provider.env_ids.tolist() == [7, 3]
 
 
-@pytest.mark.parametrize("graph", (False, True))
-def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments(graph):
+def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     from contextlib import nullcontext
     from types import SimpleNamespace
 
     from embodichain.lab.evaluation import (
         EvaluationSpec,
-        NearTargetHoldSpec,
         PredicateSpec,
         TemporalRule,
         builtin_predicates,
         evaluate_recorded_rules,
     )
-    from embodichain.lab.evaluation.observations import evaluate_recording
     from embodichain.lab.gym.envs import EmbodiedEnv
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.envs.managers import ObservationManager
@@ -2763,29 +2766,22 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments(grap
             ),
         ),
     )
-    spec = NearTargetHoldSpec(
-        "rigid_objects/native_cube/pose",
-        "rigid_objects/native_goal/pose",
-        tolerance=0.5,
-        hold_steps=2,
-        window_steps=2,
-    )
-    if graph:
-        bound = builtin_predicates().compile(
-            EvaluationSpec(
-                {
-                    "near": PredicateSpec(
-                        "near_target",
-                        {"position": spec.position_field, "target": spec.target_field},
-                        {"tolerance": 0.5},
-                    ),
-                    "near_goal": TemporalRule("hold_for", "near", 1, steps=2),
-                },
-                ("near_goal",),
-            )
+    bound = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "near": PredicateSpec(
+                    "near_target",
+                    {
+                        "position": "rigid_objects/native_cube/pose",
+                        "target": "rigid_objects/native_goal/pose",
+                    },
+                    {"tolerance": 0.5},
+                ),
+                "near_goal": TemporalRule("hold_for", "near", 1, steps=2),
+            },
+            ("near_goal",),
         )
-    else:
-        bound = spec
+    )
     conditions = {"near_goal": bound}
     declaration = {
         "program_id": "measured_hold",
@@ -2933,27 +2929,16 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments(grap
     assert reports[0]["witness_revisions"] == [revisions[:2], [-1, -1]]
     assert reports[1]["status"] == ["failed", "not_run"]
     assert reports[1]["witness_steps"] == [[-1, -1], [-1, -1]]
-    if graph:
-        result = evaluate_recorded_rules(
-            bound,
-            {"raw_observations": export_observation_history(env.observation_manager)},
-            env_ids=(0, 1),
-            episode_ids=(0, 0),
-            scope="pick/0",
-            start_step=1,
-            end_step=2,
-            chunk_steps=1,
-        )
-        offline = result.rules["near_goal"]
-    else:
-        offline = evaluate_recording(
-            spec,
-            env.observation_manager,
-            env_ids=(0, 1),
-            episode_ids=(0, 0),
-            start_step=1,
-            recorded_end_step=2,
-            chunk_steps=1,
-        )
+    result = evaluate_recorded_rules(
+        bound,
+        {"raw_observations": export_observation_history(env.observation_manager)},
+        env_ids=(0, 1),
+        episode_ids=(0, 0),
+        scope="pick/0",
+        start_step=1,
+        end_step=2,
+        chunk_steps=1,
+    )
+    offline = result.rules["near_goal"]
     assert offline.witness_revisions.tolist() == reports[0]["witness_revisions"]
     assert offline.witness_steps.tolist() == reports[0]["witness_steps"]

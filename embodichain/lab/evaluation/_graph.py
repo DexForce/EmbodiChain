@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass, field as dataclass_field, replace
 from hashlib import sha256
 import json
 from types import MappingProxyType
@@ -149,6 +149,8 @@ class PredicateDefinition:
     measure: Callable[
         [Mapping[str, torch.Tensor], Mapping[str, Any]], PredicateMeasurement
     ]
+    input_kinds: tuple[str, ...] | None = None
+    shared_layout: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,16 +175,15 @@ def _closed(value, required, optional=()):
         )
 
 
-def _refs(value: tuple[str, ...], *, empty: bool = False) -> tuple[str, ...]:
-    refs = tuple(value)
+def _refs(value: object, *, empty: bool = False) -> tuple[str, ...]:
     if (
-        isinstance(value, str)
-        or (not empty and not refs)
-        or any(not _identifier(ref) for ref in refs)
-        or len(refs) != len(set(refs))
+        not isinstance(value, (list, tuple))
+        or (not empty and not value)
+        or any(not _identifier(ref) for ref in value)
+        or len(value) != len(set(value))
     ):
         raise ValueError("Evaluation references must be unique exact identifiers.")
-    return refs
+    return tuple(value)
 
 
 def _freeze(value: Any) -> Any:
@@ -191,6 +192,22 @@ def _freeze(value: Any) -> Any:
     if isinstance(value, list):
         return tuple(_freeze(item) for item in value)
     return value
+
+
+def _check_input_contract(name, definition, bindings, field_kinds, field_layouts):
+    if field_kinds is not None:
+        for role, kind in zip(definition.roles, definition.input_kinds or ()):
+            field = bindings[role]
+            actual = field_kinds.get(field)
+            if actual != kind:
+                raise ValueError(
+                    f"Rule {name!r} role {role!r} requires {kind!r}, "
+                    f"got {field!r} ({actual!r})."
+                )
+    if definition.shared_layout and field_layouts is not None:
+        layouts = {field_layouts.get(field) for field in bindings.values()}
+        if len(layouts) != 1 or None in layouts:
+            raise ValueError(f"Rule {name!r} requires inputs from one joint layout.")
 
 
 class PredicateRegistry:
@@ -206,12 +223,30 @@ class PredicateRegistry:
         if type(definition.revision) is not int or definition.revision < 1:
             raise ValueError("Predicate revision must be a positive integer.")
         _refs(definition.roles)
+        if definition.input_kinds is not None and (
+            len(definition.input_kinds) != len(definition.roles)
+            or any(not _identifier(kind) for kind in definition.input_kinds)
+        ):
+            raise ValueError("Predicate input kinds must describe each role.")
         if not callable(definition.normalize) or not callable(definition.measure):
             raise TypeError("Predicate registration requires trusted callables.")
-        self._definitions[kind] = definition
+        self._definitions[kind] = replace(
+            definition,
+            roles=tuple(definition.roles),
+            input_kinds=(
+                None
+                if definition.input_kinds is None
+                else tuple(definition.input_kinds)
+            ),
+        )
 
     def compile(
-        self, spec: EvaluationSpec, *, available_fields: set[str] | None = None
+        self,
+        spec: EvaluationSpec,
+        *,
+        available_fields: set[str] | None = None,
+        field_kinds: Mapping[str, str] | None = None,
+        field_layouts: Mapping[str, str] | None = None,
     ) -> CompiledEvaluation:
         """Resolve rules, validate bindings and compute their content identity."""
         roots = _refs(spec.roots)
@@ -231,6 +266,9 @@ class PredicateRegistry:
                 ):
                     raise ValueError(f"Invalid input bindings for rule {name!r}.")
                 bindings = dict(rule.bindings)
+                _check_input_contract(
+                    name, definition, bindings, field_kinds, field_layouts
+                )
                 fields.update(bindings.values())
                 params = json.loads(
                     json.dumps(dict(definition.normalize(rule.params)), allow_nan=False)
@@ -243,6 +281,8 @@ class PredicateRegistry:
                     "predicate",
                     rule.kind,
                     definition.revision,
+                    definition.input_kinds,
+                    definition.shared_layout,
                     bindings,
                     params,
                 ]
@@ -399,6 +439,13 @@ class CompiledEvaluation:
             (root,), tuple(sorted(fields)), identity, tuple(reversed(selected))
         )
 
+    def _check_input_contract(self, field_kinds, field_layouts):
+        for name, rule in self._nodes:
+            if isinstance(rule, _BoundPredicate):
+                _check_input_contract(
+                    name, rule.definition, rule.bindings, field_kinds, field_layouts
+                )
+
     def _evaluate(self, values, size, device, valid, advance):
         import torch
 
@@ -411,7 +458,7 @@ class CompiledEvaluation:
                 continue
             if not all(field in values for field in rule.bindings.values()):
                 results[name] = _empty_result(
-                    size, device, EvaluationStatus.UNAVAILABLE
+                    size, device, EvaluationStatus.UNAVAILABLE, parameters=rule.params
                 )
                 continue
             arguments = {role: values[field] for role, field in rule.bindings.items()}
@@ -439,7 +486,7 @@ class CompiledEvaluation:
                     raise ValueError(
                         f"Evaluation metric {key!r} must match the batch and device."
                     )
-                metrics[key] = metric.detach().clone()
+                metrics[key] = _qualified_metric(metric, available)
             results[name] = RuleResult(status, metrics, parameters=rule.params)
         for name, rule in self._nodes:
             if name in results:
@@ -471,6 +518,16 @@ class RuleResult:
     violation_revisions: torch.Tensor | None = None
     parameters: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
+    def reasons(self) -> tuple[str, ...]:
+        """Return a diagnostic reason for each row, in status order."""
+        return tuple(EvaluationStatus(code).reason for code in self.status.tolist())
+
+
+def _qualified_metric(metric, available):
+    shape = (len(available),) + (1,) * (metric.ndim - 1)
+    missing = float("nan") if metric.is_floating_point() else 0
+    return metric.detach().masked_fill(~available.reshape(shape), missing)
+
 
 def _validate_masks(masks, size, device):
     import torch
@@ -482,10 +539,14 @@ def _validate_masks(masks, size, device):
         raise ValueError("Predicate masks must match the evaluation batch and device.")
 
 
-def _empty_result(size, device, status):
+def _empty_result(size, device, status, *, parameters=None):
     import torch
 
-    return RuleResult(torch.full((size,), status, device=device, dtype=torch.long), {})
+    return RuleResult(
+        torch.full((size,), status, device=device, dtype=torch.long),
+        {},
+        parameters={} if parameters is None else parameters,
+    )
 
 
 def _predicate_status(satisfied, valid):

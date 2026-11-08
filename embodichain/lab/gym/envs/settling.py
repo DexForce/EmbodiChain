@@ -26,7 +26,7 @@ from numbers import Real
 import torch
 
 from embodichain.utils import configclass
-from embodichain.lab.evaluation._predicates import _advance_hold, _speeds_within
+from embodichain.compute._evaluation import _advance_hold, _speeds_within
 
 
 @configclass

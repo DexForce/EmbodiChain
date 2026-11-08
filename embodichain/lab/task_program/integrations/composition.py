@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.task_program.language.schema import TaskProgramCfg
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
@@ -122,6 +123,7 @@ def load_configured_task_program_deployment(
     skill_profile: Mapping[str, object],
     base_dir: str | Path,
     evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> ConfiguredTaskProgramDeployment:
     """Compose deployment metadata using the shared strict component decoders.
 
@@ -131,6 +133,7 @@ def load_configured_task_program_deployment(
         skill_profile: The resolved embodiment component's ``skill_profile`` mapping.
         base_dir: Owning deployment directory for relative component paths.
         evaluation: Owned rule library selected by the deployment, if any.
+        evaluation_registry: Optional trusted registry of built-in and extension predicates.
 
     Returns:
         A fresh deployment with its validated registration, trusted selection and
@@ -155,4 +158,5 @@ def load_configured_task_program_deployment(
         skill_profile=skill_profile,
         base_dir=base_dir,
         evaluation=evaluation,
+        evaluation_registry=evaluation_registry,
     )

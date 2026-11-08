@@ -188,14 +188,30 @@ def test_broadcast_replay_preserves_per_env_lengths():
 def test_trajectory_replays_without_sealed_observations(
     fake_restore, seal, status, accepted
 ):
-    from embodichain.lab.evaluation import NearTargetHoldSpec
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        PredicateSpec,
+        builtin_predicates,
+    )
 
     env = _FakeEnv(num_envs=2)
     env._final_acceptance_rules = (
         (
             "near",
-            NearTargetHoldSpec(
-                "rigid_objects/a/pose", "rigid_objects/b/pose", 0.5, 1, 1
+            builtin_predicates().compile(
+                EvaluationSpec(
+                    {
+                        "near": PredicateSpec(
+                            "near_target",
+                            {
+                                "position": "rigid_objects/a/pose",
+                                "target": "rigid_objects/b/pose",
+                            },
+                            {"tolerance": 0.5},
+                        )
+                    },
+                    ("near",),
+                )
             ),
         ),
     )

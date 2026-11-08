@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Scalar comparisons used by protocol-only evidence adapters."""
+"""Shared numerical comparisons and stability accumulation."""
 
 from __future__ import annotations
 
@@ -73,3 +73,71 @@ def _compare(observed: Any, expected: Any, operator: str) -> bool:
             float(observed), float(expected), rel_tol=1e-6, abs_tol=1e-6
         )
     raise ValueError(f"unsupported predicate operator {operator!r}")
+
+
+def _measure_lift(pose, baseline, minimum):
+    import torch
+
+    lift = pose[:, 2, 3] - baseline[:, 2, 3]
+    valid = torch.isfinite(pose).all(dim=(1, 2)) & torch.isfinite(baseline).all(
+        dim=(1, 2)
+    )
+    return lift >= minimum, valid, lift
+
+
+def _measure_relative_position(pose, reference, offset, tolerances, *, parent_axes):
+    import torch
+
+    displacement = pose[:, :3, 3] - reference[:, :3, 3]
+    if parent_axes:
+        displacement = torch.bmm(
+            reference[:, :3, :3].transpose(1, 2), displacement.unsqueeze(-1)
+        ).squeeze(-1)
+    error = torch.abs(displacement - offset)
+    valid = torch.isfinite(pose).all(dim=(1, 2)) & torch.isfinite(reference).all(
+        dim=(1, 2)
+    )
+    passed = valid.clone()
+    for axis, tolerance in enumerate(tolerances):
+        if tolerance is not None:
+            passed &= error[:, axis] < tolerance
+    return passed, valid, error
+
+
+def _measure_upright(pose, maximum_tilt):
+    import torch
+
+    tilt = torch.rad2deg(torch.acos(pose[:, 2, 2].clamp(-1.0, 1.0)))
+    return tilt < maximum_tilt, torch.isfinite(pose).all(dim=(1, 2)), tilt
+
+
+def _speeds_within(linear, angular, linear_limit, angular_limit):
+    return (linear <= linear_limit) & (angular <= angular_limit)
+
+
+def _advance_hold(previous, stable, *, increment=1, maximum=None):
+    import torch
+
+    count = previous + increment
+    if maximum is not None:
+        count = count.clamp(max=maximum)
+    return torch.where(stable, count, 0)
+
+
+def _inside_region(position, lower, upper):
+    return ((position >= lower) & (position <= upper)).all(dim=-1)
+
+
+def _corners_in_frame(pose, frame, corners):
+    import torch
+    from embodichain.utils.math import matrix_from_quat
+
+    world = (
+        torch.einsum("bij,kj->bki", matrix_from_quat(pose[:, 3:]), corners)
+        + pose[:, None, :3]
+    )
+    return torch.einsum(
+        "bji,bkj->bki",
+        matrix_from_quat(frame[:, 3:]),
+        world - frame[:, None, :3],
+    )
