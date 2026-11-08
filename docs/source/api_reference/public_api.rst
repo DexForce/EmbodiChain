@@ -5253,7 +5253,7 @@ embodichain.lab.sim.cfg.gripper
    ParallelJawGripperCfg
 
 .. autoclass:: ParallelJawGripperCfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain.lab.sim.utility.gripper_binding
@@ -5292,6 +5292,7 @@ embodichain.toolkits.graspkit.gripper_models
 
 .. autoclass:: ParallelJawGripperModelCfg
    :members:
+   :no-index:
    :show-inheritance:
 
 embodichain.toolkits.graspkit.pg_grasp
@@ -5323,31 +5324,31 @@ embodichain_robots
    RobotiqArg2F140Cfg
 
 .. autoclass:: FrankaPandaHandCfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: DHPGI14080Cfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: CobotMagicV100GripperCfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: PikaGripperCfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: TianjiMarvinGripperCfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: RobotiqArg2F85Cfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: RobotiqArg2F140Cfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.agilex.cobotmagic.gripper.cfg
@@ -5361,7 +5362,7 @@ embodichain_robots.agilex.cobotmagic.gripper.cfg
    CobotMagicV100GripperCfg
 
 .. autoclass:: CobotMagicV100GripperCfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.agilex.pika.cfg
@@ -5375,7 +5376,7 @@ embodichain_robots.agilex.pika.cfg
    PikaGripperCfg
 
 .. autoclass:: PikaGripperCfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.dh_robotics.pgi_140_80.cfg
@@ -5389,7 +5390,7 @@ embodichain_robots.dh_robotics.pgi_140_80.cfg
    DHPGI14080Cfg
 
 .. autoclass:: DHPGI14080Cfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.franka.hand.cfg
@@ -5403,7 +5404,7 @@ embodichain_robots.franka.hand.cfg
    FrankaPandaHandCfg
 
 .. autoclass:: FrankaPandaHandCfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.robotiq.arg2f140.cfg
@@ -5417,7 +5418,7 @@ embodichain_robots.robotiq.arg2f140.cfg
    RobotiqArg2F140Cfg
 
 .. autoclass:: RobotiqArg2F140Cfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.robotiq.arg2f85.cfg
@@ -5431,7 +5432,7 @@ embodichain_robots.robotiq.arg2f85.cfg
    RobotiqArg2F85Cfg
 
 .. autoclass:: RobotiqArg2F85Cfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.tianji.marvin.gripper.cfg
@@ -5445,7 +5446,7 @@ embodichain_robots.tianji.marvin.gripper.cfg
    TianjiMarvinGripperCfg
 
 .. autoclass:: TianjiMarvinGripperCfg
-   :members:
+   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 URDF mounting and name normalization
@@ -5463,6 +5464,7 @@ Physical and semantic bindings share the assembler's native naming policy.
 
 .. autoclass:: URDFCfg
    :members:
+   :no-index:
 
 .. currentmodule:: embodichain.toolkits.urdf_assembly.name_normalizer
 
