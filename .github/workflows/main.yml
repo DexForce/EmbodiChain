@@ -358,6 +358,8 @@ jobs:
       NVIDIA_DISABLE_REQUIRE: 1
       HF_ENDPOINT: https://hf-mirror.com
       PIP_CACHE_DIR: /cache/pip
+      SDL_VIDEODRIVER: dummy
+      XDG_RUNTIME_DIR: /tmp/embodichain-ci-runtime
       NEEDS_GENSIM: ${{ needs.test_plan.outputs.needs_gensim }}
       NEEDS_CUROBO: ${{ needs.test_plan.outputs.needs_curobo }}
     container: *container_template
@@ -414,6 +416,7 @@ jobs:
         run: |
           source activate py312
           set -euo pipefail
+          install -d -m 0700 "$XDG_RUNTIME_DIR"
           # Login shells may use a different Git config from actions/checkout.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git -C "$GITHUB_WORKSPACE" rev-parse \
