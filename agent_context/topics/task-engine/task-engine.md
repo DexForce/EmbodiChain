@@ -62,7 +62,9 @@ call, rather than an unrelated pickup annotation. Resource-state diagnostics
 include proposed node/slot set/remove operations, including the original
 acquisition for a named handover. Repair prompts require retaining unaffected
 fields of the previous plan; suggestions do not mutate the graph or bypass the
-complete strict validator. Terminal holds are checked at
+complete strict validator. Task Engine side enums `left_arm`/`right_arm` map
+explicitly to logical resources `left`/`right`; custom resource identifiers and
+robot control-part names are preserved for runtime binding. Terminal holds are checked at
 the source step boundary; coordinated hold is rejected until a matching hold
 call is available in the catalog.
 

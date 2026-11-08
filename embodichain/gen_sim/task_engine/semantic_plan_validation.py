@@ -30,6 +30,10 @@ __all__ = ["validate_semantic_plan", "semantic_plan_rules"]
 
 from .ontology import TASK_CONTRACTS
 
+# Task Engine side enums are distinct from logical resource IDs. This mapping
+# is deliberately closed: custom resource/control-part names are not rewritten.
+_INTENT_RESOURCE_IDS = {"left_arm": "left", "right_arm": "right"}
+
 
 class _PlanDiagnostics(ValueError):
     def __init__(self, errors: list[dict[str, Any]]) -> None:
@@ -533,11 +537,18 @@ def validate_semantic_plan(
             ("receive_arm", "destination"),
         ):
             arm = step.get(field, "none")
+            expected_resource = _INTENT_RESOURCE_IDS.get(arm, arm)
             if arm not in {"none", "auto"} and not any(
-                n["call"].get("resources", {}).get(slot) == arm.removesuffix("_arm")
+                n["call"].get("resources", {}).get(slot) == expected_resource
                 for n in calls
             ):
-                raise ValueError(f"Missing required arm {step_id}.{field}")
+                raise ValueError(
+                    f"Missing required arm {step_id}.{field}: intent {arm!r} "
+                    f"requires logical resource {expected_resource!r} in "
+                    f"call.resources.{slot}. Keep this logical resource consistent "
+                    "across the acquisition, transfer and subsequent held calls. "
+                    "Intent side labels are not robot control-part names."
+                )
         for parent in step["depends_on"]:
             parent_group = next(g for g in graph["task_groups"] if g["id"] == parent)
             if not all(
