@@ -19,16 +19,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from collections.abc import Mapping, Sequence
 
 import torch
 
-from embodichain.compute.geometry._distance import (
-    _measure_near_target,
-    _positions,
-    _validate_near_target,
-)
+from embodichain.lab.evaluation._predicates import _HEIGHT, _NEAR
 
 __all__ = ["ConditionResult", "evaluate_near_target", "evaluate_below_height"]
 
@@ -88,15 +83,11 @@ def evaluate_near_target(
     Returns:
         Physical truth, validity and the measured ``distance`` vector.
     """
-    _positions(position)
-    satisfied, valid, distance = _measure_near_target(
-        position,
-        target,
-        tolerance,
-        _validate_near_target(tolerance, axes, inclusive),
-        inclusive,
+    result = _NEAR.measure(
+        {"position": position, "target": target},
+        _NEAR.normalize({"tolerance": tolerance, "axes": axes, "inclusive": inclusive}),
     )
-    return ConditionResult(satisfied, valid, {"distance": distance})
+    return ConditionResult(result.satisfied, result.valid, result.metrics)
 
 
 def evaluate_below_height(position: torch.Tensor, height: float) -> ConditionResult:
@@ -109,12 +100,7 @@ def evaluate_below_height(position: torch.Tensor, height: float) -> ConditionRes
     Returns:
         Physical truth, validity and measured ``height``.
     """
-    _positions(position)
-    if (
-        isinstance(height, bool)
-        or not isinstance(height, (int, float))
-        or not math.isfinite(height)
-    ):
-        raise ValueError("height must be finite.")
-    valid = torch.isfinite(position).all(dim=-1)
-    return ConditionResult(position[:, 2] < height, valid, {"height": position[:, 2]})
+    result = _HEIGHT.measure(
+        {"position": position}, _HEIGHT.normalize({"height": height})
+    )
+    return ConditionResult(result.satisfied, result.valid, result.metrics)

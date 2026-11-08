@@ -2127,8 +2127,9 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary(mode) -> None:
 
 @pytest.mark.parametrize("mode", ["position", "position_velocity"])
 @pytest.mark.parametrize("reject_tick", [0, 2])
+@pytest.mark.parametrize("process", [False, True])
 def test_row_rejection_holds_commands_without_disrupting_policy_clock(
-    mode, reject_tick
+    mode, reject_tick, process
 ) -> None:
     class ExactClockPolicy(_PostPolicyPort):
         def actions(self, policy, *, segment, active_mask):
@@ -2168,9 +2169,26 @@ def test_row_rejection_holds_commands_without_disrupting_policy_clock(
                 else:
                     hold["qpos"][0] = 9.0
                     hold["qvel"][0] = 0.0
-                bridge.request_row_rejection(
-                    (7,), ControllerAction(hold), reason="measured failure"
-                )
+                if process:
+                    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+                    from embodichain.lab.gym.envs.managers.observation_types import (
+                        ObservationFrame,
+                    )
+
+                    context = EpisodeContext(BATCH_SIZE)
+                    frame = ObservationFrame(
+                        None, {}, context.episode_ids, 31, episode_owner=context
+                    )
+                    bridge._observe_segment_frame(
+                        frame,
+                        episode_owner=context,
+                        process_check=lambda: torch.tensor([False, True]),
+                        hold_qpos=lambda: hold if mode == "position" else hold["qpos"],
+                    )
+                else:
+                    bridge.request_row_rejection(
+                        (7,), ControllerAction(hold), reason="measured failure"
+                    )
                 stopped = True
     assert holds == 1
     torch.testing.assert_close(
@@ -2178,6 +2196,8 @@ def test_row_rejection_holds_commands_without_disrupting_policy_clock(
         torch.arange(1.0, 4.0)[:, None].expand(3, ROBOT_DOF),
     )
     assert segment.validator().tolist() == [False, True]
+    if process:
+        assert segment.metadata["process_violations"][0]["observation_revision"] == 31
 
 
 def test_post_policy_receives_only_rows_surviving_partial_runtime_failure() -> None:
@@ -2698,11 +2718,19 @@ def test_fresh_bridge_reports_physical_binding_before_runtime_grounding():
     assert runtime.observation_provider.env_ids.tolist() == [7, 3]
 
 
-def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
+@pytest.mark.parametrize("graph", (False, True))
+def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments(graph):
     from contextlib import nullcontext
     from types import SimpleNamespace
 
-    from embodichain.lab.evaluation import NearTargetHoldSpec
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        NearTargetHoldSpec,
+        PredicateSpec,
+        TemporalRule,
+        builtin_predicates,
+        evaluate_recorded_rules,
+    )
     from embodichain.lab.evaluation.observations import evaluate_recording
     from embodichain.lab.gym.envs import EmbodiedEnv
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
@@ -2711,7 +2739,10 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
         _init_raw_rollout,
         _write_raw_rollout,
     )
-    from embodichain.lab.gym.utils.trajectory_state import _evaluation_observation_cfgs
+    from embodichain.lab.gym.utils.trajectory_state import (
+        _evaluation_observation_cfgs,
+        export_observation_history,
+    )
     from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
     from embodichain.lab.task_program.integrations.simulation.bindings import (
         SimulationRigidObjectBinding,
@@ -2739,7 +2770,23 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
         hold_steps=2,
         window_steps=2,
     )
-    conditions = {"near_goal": spec}
+    if graph:
+        bound = builtin_predicates().compile(
+            EvaluationSpec(
+                {
+                    "near": PredicateSpec(
+                        "near_target",
+                        {"position": spec.position_field, "target": spec.target_field},
+                        {"tolerance": 0.5},
+                    ),
+                    "near_goal": TemporalRule("hold_for", "near", 1, steps=2),
+                },
+                ("near_goal",),
+            )
+        )
+    else:
+        bound = spec
+    conditions = {"near_goal": bound}
     declaration = {
         "program_id": "measured_hold",
         "integration": {
@@ -2886,14 +2933,27 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     assert reports[0]["witness_revisions"] == [revisions[:2], [-1, -1]]
     assert reports[1]["status"] == ["failed", "not_run"]
     assert reports[1]["witness_steps"] == [[-1, -1], [-1, -1]]
-    offline = evaluate_recording(
-        spec,
-        env.observation_manager,
-        env_ids=(0, 1),
-        episode_ids=(0, 0),
-        start_step=1,
-        recorded_end_step=2,
-        chunk_steps=1,
-    )
+    if graph:
+        result = evaluate_recorded_rules(
+            bound,
+            {"raw_observations": export_observation_history(env.observation_manager)},
+            env_ids=(0, 1),
+            episode_ids=(0, 0),
+            scope="pick/0",
+            start_step=1,
+            end_step=2,
+            chunk_steps=1,
+        )
+        offline = result.rules["near_goal"]
+    else:
+        offline = evaluate_recording(
+            spec,
+            env.observation_manager,
+            env_ids=(0, 1),
+            episode_ids=(0, 0),
+            start_step=1,
+            recorded_end_step=2,
+            chunk_steps=1,
+        )
     assert offline.witness_revisions.tolist() == reports[0]["witness_revisions"]
     assert offline.witness_steps.tolist() == reports[0]["witness_steps"]

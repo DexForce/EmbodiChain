@@ -21,8 +21,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from . import EvaluationResult, EvaluationSession, NearTargetHoldSpec
-from embodichain.compute.geometry._distance import _measure_near_target
+from . import (
+    CompiledEvaluation,
+    EvaluationResult,
+    EvaluationSession,
+    NearTargetHoldSpec,
+)
+from ._predicates import _near
+from ._recording import _is_joint_field, _matches_field, _select_joint
 
 if TYPE_CHECKING:
     import torch
@@ -40,6 +46,31 @@ __all__ = ["advance_observation", "evaluate_recording"]
 
 def _rigid_pose_field(uid: str) -> str:
     return f"rigid_objects/{uid}/pose"
+
+
+def _graph_frame_inputs(
+    compiled: CompiledEvaluation, frame: ObservationFrame, rows=None
+):
+    values, valid = {}, {}
+    for field in compiled.required_fields:
+        sample = frame.fields.get(field)
+        if sample is None or not _matches_field(
+            field, sample.descriptor.entity_uid, sample.descriptor.quantity
+        ):
+            continue
+        value, mask = sample.values, sample.valid
+        if sample.descriptor.quantity == "pose":
+            _check_pose(field, sample.descriptor)
+            value = value[:, :3]
+        elif _is_joint_field(field, sample.descriptor.quantity):
+            if not sample.descriptor.joint_names:
+                continue
+            value = _select_joint(value, field, sample.descriptor.joint_names)
+        if rows is not None:
+            value = value.index_select(0, rows)
+            mask = mask.index_select(0, rows)
+        values[field], valid[field] = value, mask
+    return values, valid
 
 
 def _check_pose(field: str, descriptor: ObservationDescriptor) -> None:
@@ -67,15 +98,12 @@ def _measure_near_target_frame(
     spec: NearTargetHoldSpec, frame: ObservationFrame
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     position, target = _near_target_samples(spec, frame)
-    satisfied, finite, distance = _measure_near_target(
-        position.values[:, :3],
-        target.values[:, :3],
-        spec.tolerance,
-        spec.axes,
-        spec.inclusive,
+    measured = _near(
+        {"position": position.values[:, :3], "target": target.values[:, :3]},
+        {"tolerance": spec.tolerance, "axes": spec.axes, "inclusive": spec.inclusive},
     )
-    valid = position.valid & target.valid & finite
-    return satisfied & valid, valid, distance
+    valid = position.valid & target.valid & measured.valid
+    return measured.satisfied & valid, valid, measured.metrics["distance"]
 
 
 def advance_observation(

@@ -1292,12 +1292,30 @@ bounded control-step window. A session keeps its original environment and
 episode order. The latest physical result and the historical hold can differ
 after the object moves. Read an owned result with ``snapshot()``.
 
+Compile trusted predicate registrations and inert rule declarations into an
+immutable graph. ``RuleSession`` advances bounded windows and milestones for
+one occurrence. Instantaneous evaluation and snapshots leave history untouched.
+
 .. autosummary::
 
    NearTargetHoldSpec
    EvaluationStatus
    EvaluationResult
    EvaluationSession
+   PredicateSpec
+   BooleanRule
+   TemporalRule
+   MilestoneRule
+   EvaluationSpec
+   PredicateMeasurement
+   PredicateDefinition
+   PredicateRegistry
+   CompiledEvaluation
+   RuleResult
+   EvaluationSnapshot
+   RuleSession
+   builtin_predicates
+   evaluate_recorded_rules
 
 embodichain.lab.evaluation.observations
 ---------------------------------------
@@ -4532,12 +4550,17 @@ Measured manipulation functors bind rigid objects and validate geometric paramet
 
    object_near_target
    object_below_height
+   evaluation_condition
 
 .. autoclass:: object_near_target
    :members:
    :special-members: __call__
 
 .. autoclass:: object_below_height
+   :members:
+   :special-members: __call__
+
+.. autoclass:: evaluation_condition
    :members:
    :special-members: __call__
 

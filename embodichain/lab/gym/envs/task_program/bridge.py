@@ -1293,6 +1293,9 @@ class TaskProgramDemoBridge:
         self._sequential_workflows: dict[int, tuple[SemanticWorkflow, int]] = {}
         self._execution_trace: list[dict[str, object]] | None = None
         self._row_rejection: tuple[torch.Tensor, ControllerAction, str] | None = None
+        self._process_rejection: tuple[torch.Tensor, ControllerAction, str] | None = (
+            None
+        )
         self._row_hold: tuple[torch.Tensor, ControllerAction] | None = None
         self._pending_rejected_ids: tuple[int, ...] = ()
 
@@ -1669,7 +1672,12 @@ class TaskProgramDemoBridge:
         return ControllerAction(value=value, metadata=metadata)
 
     def _observe_segment_frame(
-        self, frame: ObservationFrame, *, episode_owner: EpisodeContext
+        self,
+        frame: ObservationFrame,
+        *,
+        episode_owner: EpisodeContext,
+        process_check: Callable[[], torch.Tensor] | None = None,
+        hold_qpos: Callable[[], torch.Tensor] | None = None,
     ) -> None:
         """Publish the observation after a yielded command's host control step."""
         lifecycle = self._last_segment_lifecycle
@@ -1681,9 +1689,39 @@ class TaskProgramDemoBridge:
             return
         observe = getattr(self._validator_port, "_observe_segment_frame", None)
         step = self._clock.step_index + 1
-        if observe is not None and lifecycle.observed_step != step:
+        if lifecycle.observed_step == step:
+            return
+        if observe is not None:
             observe(frame, step=step, episode_owner=episode_owner)
-            lifecycle.observed_step = step
+        lifecycle.observed_step = step
+        if process_check is not None:
+            rows = self.env_ids
+            passed = process_check()
+            indices = getattr(self._validator_port, "_row_indices", None)
+            if indices is None:
+                indices = (
+                    rows
+                    if passed.shape != rows.shape
+                    else torch.arange(rows.numel(), device=rows.device)
+                )
+            rejected = ~passed.index_select(0, indices)
+            if self._eligible_mask is not None:
+                rejected &= self._eligible_mask
+            if bool(rejected.any()):
+                assert hold_qpos is not None
+                hold = ControllerAction(
+                    self._sink.encode_post_policy_hold(
+                        hold_qpos().index_select(0, indices)
+                    )
+                )
+                self._process_rejection = (rejected, hold, "process_constraint_failed")
+                lifecycle.metadata.setdefault("process_violations", []).append(
+                    {
+                        "step": step,
+                        "observation_revision": frame.revision,
+                        "env_ids": rows[rejected].tolist(),
+                    }
+                )
 
     def _yield_and_advance(
         self,
@@ -1709,6 +1747,20 @@ class TaskProgramDemoBridge:
             self._record_consumed_action(action)
             self._clock.advance_after_env_step()
             lifecycle.pending_action = None
+        process = getattr(self, "_process_rejection", None)
+        if process is not None:
+            self._process_rejection = None
+            if self._row_rejection is None:
+                self._row_rejection = process
+            else:
+                process_mask, hold, reason = process
+                external_mask, external_hold, external_reason = self._row_rejection
+                hold.value[external_mask] = external_hold.value[external_mask]
+                self._row_rejection = (
+                    process_mask | external_mask,
+                    hold,
+                    f"{reason}; {external_reason}",
+                )
         if self._row_rejection is not None:
             mask, hold, reason = self._row_rejection
             self._row_rejection = None

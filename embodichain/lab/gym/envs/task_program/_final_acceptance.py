@@ -26,9 +26,16 @@ from typing import Any, TYPE_CHECKING, TypeAlias
 import torch
 
 from embodichain.data_pipeline.recording import stable_config_hash
+from embodichain.lab.evaluation import (
+    CompiledEvaluation,
+    EvaluationStatus,
+    NearTargetHoldSpec,
+    RuleResult,
+)
+from embodichain.lab.evaluation._graph import _predicate_status
 from embodichain.lab.evaluation.observations import (
+    _graph_frame_inputs,
     _measure_near_target_frame,
-    _rigid_pose_field,
 )
 from embodichain.lab.gym.envs.managers.observation_manager import _ObservationCapture
 from embodichain.lab.gym.envs.managers.observation_types import (
@@ -39,7 +46,6 @@ from embodichain.lab.gym.envs.managers.observation_types import (
 from embodichain.lab.gym.envs.managers.observations import _read_entity_state
 
 if TYPE_CHECKING:
-    from embodichain.lab.evaluation import NearTargetHoldSpec
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
     from embodichain.lab.task_program.integrations.catalog import (
         SimulationTaskProgramRegistration,
@@ -47,14 +53,14 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
-_FinalRules: TypeAlias = tuple[tuple[str, "NearTargetHoldSpec"], ...]
+_FinalRules: TypeAlias = tuple[tuple[str, NearTargetHoldSpec | CompiledEvaluation], ...]
 _FINAL_OBSERVATIONS_KEY = "final_acceptance_observations"
 
 
 @dataclass(frozen=True, slots=True)
 class _FinalMeasurement:
     satisfied: torch.Tensor
-    conditions: tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...]
+    conditions: tuple[RuleResult, ...]
     frame: ObservationFrame
 
 
@@ -64,6 +70,15 @@ def _deployment_final_rules(
     return tuple(
         (ref, registration.evaluation_conditions[ref])
         for ref in getattr(registration, "evaluation_final_refs", ())
+    )
+
+
+def _deployment_process_rules(
+    registration: SimulationTaskProgramRegistration | None,
+) -> _FinalRules:
+    return tuple(
+        (ref, registration.evaluation_conditions[ref])
+        for ref in getattr(registration, "evaluation_process_refs", ())
     )
 
 
@@ -81,7 +96,7 @@ def _measure_final_conditions(
         for field in fields:
             cfg = env._evaluation_recording[f"recording:{field}"]
             capture.fields[field] = _read_entity_state(
-                env, cfg.params["entity_cfg"].uid, "pose"
+                env, cfg.params["entity_cfg"].uid, cfg.params["quantity"]
             )
     return _evaluate_final_frame(rules, capture.finish(None))
 
@@ -89,12 +104,58 @@ def _measure_final_conditions(
 def _evaluate_final_frame(
     rules: _FinalRules, frame: ObservationFrame
 ) -> _FinalMeasurement:
-    conditions = tuple(_measure_near_target_frame(spec, frame) for _, spec in rules)
+    conditions = tuple(_evaluate_frame_rule(ref, spec, frame) for ref, spec in rules)
     return _FinalMeasurement(
-        torch.stack([passed for passed, _, _ in conditions]).all(dim=0),
+        torch.stack(
+            [result.status == EvaluationStatus.SATISFIED for result in conditions]
+        ).all(dim=0),
         conditions,
         frame,
     )
+
+
+def _evaluate_frame_rule(ref, spec, frame):
+    if isinstance(spec, CompiledEvaluation):
+        values, valid = _graph_frame_inputs(spec, frame)
+        device = next(iter(frame.fields.values())).values.device
+        results = spec.evaluate(
+            values, valid=valid, batch_size=len(frame.episode_ids), device=device
+        )
+        root = results[ref]
+        return RuleResult(
+            root.status,
+            {
+                f"{name}.{key}": metric
+                for name, result in results.items()
+                for key, metric in result.metrics.items()
+            },
+        )
+    passed, valid, distance = _measure_near_target_frame(spec, frame)
+    return RuleResult(_predicate_status(passed, valid), {"distance": distance})
+
+
+def _rules_hash(rules):
+    return stable_config_hash(
+        tuple(
+            (
+                ref,
+                (
+                    {"graph": spec.identity}
+                    if isinstance(spec, CompiledEvaluation)
+                    else spec
+                ),
+            )
+            for ref, spec in rules
+        )
+    )
+
+
+def _json_metric(value):
+    if isinstance(value, (list, tuple)):
+        return [_json_metric(item) for item in value]
+    if isinstance(value, Mapping):
+        return {key: _json_metric(item) for key, item in value.items()}
+    return None if isinstance(value, float) and not math.isfinite(value) else value
 
 
 def _final_acceptance_rows(
@@ -133,27 +194,34 @@ def _final_acceptance_rows(
             row["conditions"] = {
                 ref: {
                     "status": "not_run",
-                    "distance": None,
-                    "tolerance": spec.tolerance,
+                    **(
+                        {"distance": None, "tolerance": spec.tolerance}
+                        if isinstance(spec, NearTargetHoldSpec)
+                        else {"metrics": {}}
+                    ),
                 }
                 for ref, spec in rules
             }
         return rows
-    for (ref, spec), (passed, valid, distance) in zip(
-        rules, measurement.conditions, strict=True
-    ):
-        for row, passed_row, available, measured in zip(
-            rows, passed.tolist(), valid.tolist(), distance.tolist(), strict=True
-        ):
-            row["conditions"][ref] = {
-                "status": (
-                    ("satisfied" if passed_row else "failed")
-                    if available
-                    else "unavailable"
-                ),
-                "distance": measured if available and math.isfinite(measured) else None,
-                "tolerance": spec.tolerance,
-            }
+    for (ref, spec), result in zip(rules, measurement.conditions, strict=True):
+        metrics = {key: tensor.tolist() for key, tensor in result.metrics.items()}
+        for index, status in enumerate(result.status.tolist()):
+            evidence = {"status": EvaluationStatus(status).name.lower()}
+            if isinstance(spec, NearTargetHoldSpec):
+                evidence.update(
+                    distance=(
+                        None
+                        if status == EvaluationStatus.UNAVAILABLE
+                        else _json_metric(metrics["distance"][index])
+                    ),
+                    tolerance=spec.tolerance,
+                )
+            else:
+                evidence["metrics"] = {
+                    key: _json_metric(values[index]) for key, values in metrics.items()
+                }
+                evidence["parameters"] = _json_metric(spec.parameters)
+            rows[index]["conditions"][ref] = evidence
     return rows
 
 
@@ -193,7 +261,7 @@ def _export_final_observations(
         )
     if not any(row is not None for row in rows):
         return None
-    return {"schema_version": 1, "rules_hash": stable_config_hash(rules), "rows": rows}
+    return {"schema_version": 1, "rules_hash": _rules_hash(rules), "rows": rows}
 
 
 def _replay_final_acceptance(
@@ -226,7 +294,7 @@ def _replay_final_acceptance(
         or meta.get("env_ids") != [episode.get("env_id") for episode in episodes]
     ):
         raise ValueError("Invalid final acceptance observations in trajectory.")
-    if payload.get("rules_hash") != stable_config_hash(rules):
+    if payload.get("rules_hash") != _rules_hash(rules):
         raise ValueError(
             "Trajectory final acceptance rules differ from the deployment."
         )
@@ -278,11 +346,17 @@ def _replay_final_row(
     for field, sample in raw_fields.items():
         values = sample["values"]
         descriptor = dict(sample["descriptor"])
+        uid, quantity = descriptor["entity_uid"], descriptor["quantity"]
+        same_source = (
+            field.startswith(f"articulations/{uid}/qpos/")
+            if quantity == "qpos"
+            else field == f"rigid_objects/{uid}/{quantity}"
+        )
         if (
             not isinstance(values, torch.Tensor)
-            or values.shape != (1, 7)
+            or values.shape[:1] != (1,)
             or descriptor["dtype"] != str(values.dtype)
-            or _rigid_pose_field(descriptor["entity_uid"]) != field
+            or not same_source
         ):
             raise ValueError(f"Invalid final acceptance observation for {field!r}.")
         descriptor["dtype"] = values.dtype

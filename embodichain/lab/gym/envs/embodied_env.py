@@ -104,6 +104,8 @@ from embodichain.lab.gym.envs.task_program._final_acceptance import (
     _FINAL_OBSERVATIONS_KEY,
     _FinalMeasurement,
     _deployment_final_rules,
+    _deployment_process_rules,
+    _evaluate_final_frame,
     _export_final_observations,
     _final_acceptance_rows,
     _measure_final_conditions,
@@ -522,6 +524,7 @@ class EmbodiedEnv(BaseEnv):
 
         registration = getattr(task_program_adapter_factory, "registration", None)
         self._final_acceptance_rules = _deployment_final_rules(registration)
+        self._process_evaluation_rules = _deployment_process_rules(registration)
         self._sealed_final_observations: dict[int, ObservationFrame] = {}
         self._pending_final_acceptance: (
             tuple[
@@ -1219,7 +1222,18 @@ class EmbodiedEnv(BaseEnv):
             and bridge is not None
             and frame is not None
         ):
-            bridge._observe_segment_frame(frame, episode_owner=self.episode_context)
+            process_rules = getattr(self, "_process_evaluation_rules", ())
+            if process_rules:
+                bridge._observe_segment_frame(
+                    frame,
+                    episode_owner=self.episode_context,
+                    process_check=lambda: _evaluate_final_frame(
+                        process_rules, frame
+                    ).satisfied,
+                    hold_qpos=lambda: self.robot.get_qpos(target=True),
+                )
+            else:
+                bridge._observe_segment_frame(frame, episode_owner=self.episode_context)
         self._update_episode_success_status(info, dones)
 
     def _update_episode_success_status(

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Shared near-target evaluation and bounded control-step holds."""
+"""Backend-neutral predicates, evaluation graphs and bounded temporal state."""
 
 from __future__ import annotations
 
@@ -23,11 +23,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
-from embodichain.compute.geometry._distance import (
-    _measure_near_target,
-    _positions,
-    _validate_near_target,
-)
+from embodichain.compute.geometry._distance import _positions, _validate_near_target
 
 if TYPE_CHECKING:
     import torch
@@ -37,6 +33,20 @@ __all__ = [
     "EvaluationStatus",
     "EvaluationResult",
     "EvaluationSession",
+    "PredicateSpec",
+    "BooleanRule",
+    "TemporalRule",
+    "MilestoneRule",
+    "EvaluationSpec",
+    "PredicateMeasurement",
+    "PredicateDefinition",
+    "PredicateRegistry",
+    "CompiledEvaluation",
+    "RuleResult",
+    "EvaluationSnapshot",
+    "RuleSession",
+    "builtin_predicates",
+    "evaluate_recorded_rules",
 ]
 
 
@@ -228,8 +238,18 @@ class EvaluationSession:
                 "Observations and identities must match the evaluation batch and device."
             )
 
-        satisfied, finite, distance = _measure_near_target(
-            position, target, self.spec.tolerance, self.spec.axes, self.spec.inclusive
+        measured = _near(
+            {"position": position, "target": target},
+            {
+                "tolerance": self.spec.tolerance,
+                "axes": self.spec.axes,
+                "inclusive": self.spec.inclusive,
+            },
+        )
+        satisfied, finite, distance = (
+            measured.satisfied,
+            measured.valid,
+            measured.metrics["distance"],
         )
         fresh = revisions > self._max_revision
         qualified = valid & finite & fresh
@@ -241,8 +261,8 @@ class EvaluationSession:
         self._run_start_revision = torch.where(
             passed & (self._consecutive == 0), revisions, self._run_start_revision
         )
-        self._consecutive = torch.where(
-            passed, (self._consecutive + 1).clamp(max=self.spec.hold_steps), 0
+        self._consecutive = _advance_hold(
+            self._consecutive, passed, maximum=self.spec.hold_steps
         )
         reached = (self._consecutive == self.spec.hold_steps) & (
             self._witness_steps[:, 1] < 0
@@ -299,3 +319,21 @@ class EvaluationSession:
             self._witness_steps.clone(),
             self._witness_revisions.clone(),
         )
+
+
+# The compatibility session and graph share the status codes and predicates.
+from ._graph import (
+    BooleanRule,
+    CompiledEvaluation,
+    EvaluationSpec,
+    MilestoneRule,
+    PredicateDefinition,
+    PredicateMeasurement,
+    PredicateRegistry,
+    PredicateSpec,
+    RuleResult,
+    TemporalRule,
+)
+from ._predicates import _advance_hold, _near, builtin_predicates
+from ._session import EvaluationSnapshot, RuleSession
+from ._recording import evaluate_recorded_rules

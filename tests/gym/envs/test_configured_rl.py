@@ -140,6 +140,57 @@ def test_near_target_functor_preserves_strict_boundary_and_invalid_rows():
     assert result["satisfied"].tolist() == [False, False]
 
 
+def test_registered_graph_is_an_rl_condition_with_cached_outcome_and_limits():
+    from embodichain.lab.evaluation import (
+        PredicateDefinition,
+        PredicateMeasurement,
+        builtin_predicates,
+    )
+    from embodichain.lab.gym.envs.managers.conditions import evaluation_condition
+
+    registry = builtin_predicates()
+
+    def clearance(values, params):
+        height = values["position"][:, 2]
+        return PredicateMeasurement(
+            height >= params["minimum"], torch.isfinite(height), {"height": height}
+        )
+
+    registry.register(
+        "clearance_test", PredicateDefinition(1, ("position",), dict, clearance)
+    )
+    env = _env()
+    cfg = RLTaskCfg(
+        success={
+            "clearance": ConditionCfg(
+                func=evaluation_condition,
+                params={
+                    "registry": registry,
+                    "sources": {"cube": {"rigid_object": "cube"}},
+                    "root": "clear",
+                    "rules": {
+                        "clear": {
+                            "kind": "clearance_test",
+                            "bindings": {"position": "cube"},
+                            "params": {"minimum": 0.1},
+                        }
+                    },
+                },
+            )
+        }
+    )
+    manager = TerminationManager(cfg, env)
+    env.pose[:, 2, 3] = torch.tensor([0.1, float("nan")])
+    manager.compute(time_out=torch.tensor([True, False]))
+    assert manager.task_state()[0].tolist() == [False, False]
+    assert manager.terminated.tolist() == [False, True]
+    assert manager.truncated.tolist() == [True, False]
+    env.pose[:, 2, 3] = 0.1
+    assert manager.task_state()[0].tolist() == [False, False]
+    manager.compute()
+    assert manager.task_state()[0].tolist() == [True, True]
+
+
 def test_outcome_queries_partial_reset_and_invalid_failure():
     env = _env()
     assert env.is_task_success().tolist() == [False, False]

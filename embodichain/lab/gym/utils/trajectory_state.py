@@ -228,11 +228,23 @@ def _evaluation_observation_cfgs(
     result = {}
     for binding in registration.scene_binding.rigid_objects:
         uid = binding.simulation_uid
-        name = _rigid_pose_field(uid)
-        if name in fields:
-            result[f"recording:{name}"] = _raw_entity_observation_cfg(name, uid, "pose")
+        for quantity in ("pose", "lin_vel", "ang_vel"):
+            name = f"rigid_objects/{uid}/{quantity}"
+            if name in fields:
+                result[f"recording:{name}"] = _raw_entity_observation_cfg(
+                    name, uid, quantity
+                )
+    for binding in getattr(registration.scene_binding, "articulations", ()):
+        uid = binding.simulation_uid
+        for name in sorted(fields):
+            if name.startswith(f"articulations/{uid}/qpos/"):
+                result[f"recording:{name}"] = _raw_entity_observation_cfg(
+                    name, uid, "qpos"
+                )
     if {cfg.name for cfg in result.values()} != fields:
-        raise ValueError("Evaluation requires registered rigid-object pose fields.")
+        raise ValueError(
+            "Evaluation requires registered rigid-object or articulation state fields."
+        )
     return result
 
 

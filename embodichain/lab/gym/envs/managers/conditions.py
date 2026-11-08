@@ -18,10 +18,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 import torch
+
+from embodichain.lab.evaluation import (
+    EvaluationSpec,
+    EvaluationStatus,
+    PredicateRegistry,
+    builtin_predicates,
+)
 
 from .cfg import ConditionCfg, SceneEntityCfg
 from .manager_base import Functor
@@ -35,7 +42,7 @@ if TYPE_CHECKING:
     from ..embodied_env import EmbodiedEnv
     from embodichain.lab.sim.objects import RigidObject
 
-__all__ = ["object_near_target", "object_below_height"]
+__all__ = ["object_near_target", "object_below_height", "evaluation_condition"]
 
 
 def _rigid_object(env: EmbodiedEnv, entity_cfg: SceneEntityCfg) -> RigidObject:
@@ -136,3 +143,75 @@ class object_below_height(Functor):
         """
         position = self._entity.get_local_pose(to_matrix=True)[:, :3, 3]
         return evaluate_below_height(position, height)
+
+
+class evaluation_condition(Functor):
+    """Adapt a compiled instantaneous rule to an ordinary RL condition.
+
+    Sources select a measured rigid-object position or a reset-owned tensor
+    attribute. A trusted Python registry may extend the built-in predicate set.
+    The termination manager retains update cadence, time limits and Gym flags.
+    """
+
+    def __init__(self, cfg: ConditionCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        sources = cfg.params["sources"]
+        if not isinstance(sources, Mapping) or not sources:
+            raise ValueError("An evaluation condition needs observation sources.")
+        self._objects = {}
+        self._attributes = {}
+        for field, source in sources.items():
+            if not isinstance(source, Mapping) or len(source) != 1:
+                raise ValueError(f"Invalid evaluation source for {field!r}.")
+            if "rigid_object" in source:
+                self._objects[field] = _rigid_object(
+                    env, SceneEntityCfg(uid=source["rigid_object"])
+                )
+            elif (
+                "attribute" in source
+                and isinstance(source["attribute"], str)
+                and source["attribute"].isidentifier()
+                and not source["attribute"].startswith("_")
+            ):
+                self._attributes[field] = source["attribute"]
+            else:
+                raise ValueError(f"Invalid evaluation source for {field!r}.")
+        registry = cfg.params.get("registry") or builtin_predicates()
+        if not isinstance(registry, PredicateRegistry):
+            raise TypeError("registry must be a trusted PredicateRegistry.")
+        root = cfg.params["root"]
+        spec = EvaluationSpec.from_dict({"rules": cfg.params["rules"], "roots": [root]})
+        self._compiled = registry.compile(spec, available_fields=set(sources)).select(
+            root
+        )
+        if self._compiled.stateful:
+            raise ValueError("RL evaluation conditions require instantaneous rules.")
+
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        *,
+        sources: Mapping,
+        rules: Mapping,
+        root: str,
+        registry: PredicateRegistry | None = None,
+    ) -> ConditionResult:
+        """Acquire bound inputs and evaluate the compiled root once."""
+        values = {
+            field: obj.get_local_pose(to_matrix=True)[:, :3, 3]
+            for field, obj in self._objects.items()
+        }
+        for field, attribute in self._attributes.items():
+            value = getattr(env, attribute, None)
+            if isinstance(value, torch.Tensor):
+                values[field] = value
+        result = self._compiled.evaluate(
+            values, batch_size=env.num_envs, device=env.device
+        )
+        status = result[root].status
+        return ConditionResult(
+            status == EvaluationStatus.SATISFIED,
+            (status == EvaluationStatus.FAILED)
+            | (status == EvaluationStatus.SATISFIED),
+            {"status": status},
+        )

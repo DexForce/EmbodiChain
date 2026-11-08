@@ -26,6 +26,7 @@ from numbers import Real
 import torch
 
 from embodichain.utils import configclass
+from embodichain.lab.evaluation._predicates import _advance_hold, _speeds_within
 
 
 @configclass
@@ -327,18 +328,15 @@ class DynamicSettleMonitor:
                 angular,
                 torch.full_like(angular, float("inf")),
             ).amax(dim=1)
-            stable = (
-                finite
-                & (self._max_linear <= self.cfg.linear_velocity_threshold)
-                & (self._max_angular <= self.cfg.angular_velocity_threshold)
+            stable = finite & _speeds_within(
+                self._max_linear,
+                self._max_angular,
+                self.cfg.linear_velocity_threshold,
+                self.cfg.angular_velocity_threshold,
             )
             active = ~self._settled & ~self._timeout
             self._stable_counts = torch.where(
-                active & stable,
-                self._stable_counts + 1,
-                torch.where(
-                    active, torch.zeros_like(self._stable_counts), self._stable_counts
-                ),
+                active, _advance_hold(self._stable_counts, stable), self._stable_counts
             )
             self._settled |= active & (
                 self._stable_counts >= self.cfg.required_stable_checks

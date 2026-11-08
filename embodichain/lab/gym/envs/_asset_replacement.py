@@ -186,6 +186,7 @@ def _apply_asset_deployment(
     """
     from embodichain.lab.gym.envs.task_program._final_acceptance import (
         _deployment_final_rules,
+        _deployment_process_rules,
     )
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.gym.utils.registration import get_env_spec
@@ -213,6 +214,12 @@ def _apply_asset_deployment(
         registration
     ):
         raise ValueError("Asset replacement must preserve deployment final acceptance.")
+    if getattr(env, "_process_evaluation_rules", ()) != _deployment_process_rules(
+        registration
+    ):
+        raise ValueError(
+            "Asset replacement must preserve deployment process constraints."
+        )
     bindings = {
         binding.entity_id: binding.simulation_uid
         for binding in registration.scene_binding.rigid_objects

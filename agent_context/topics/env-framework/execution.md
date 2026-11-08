@@ -314,6 +314,9 @@ not orchestrate multiple experiments or qualify kinematic playback.
   The replay deployment must use the recorded final rule definitions.
   Legacy trajectories remain playable and report `not_recorded` when they lack
   the capture. `not_run` identifies a seal created before physical evaluation.
+  Use `evaluate_recorded_rules` to evaluate a compiled graph directly from a
+  trusted trajectory in bounded chunks. It can use a recorded segment
+  occurrence to select the matching control slots and acquisition revisions.
 - **Policy projection**: `rollout_buffer` retains actual policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than

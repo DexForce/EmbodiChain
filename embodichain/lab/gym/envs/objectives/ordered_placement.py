@@ -25,6 +25,12 @@ from typing import Any
 
 import torch
 
+from embodichain.lab.evaluation._predicates import (
+    _advance_hold,
+    _inside_region,
+    _speeds_within,
+)
+
 from .config import OrderedPlacementObjectiveCfg, decode_objective
 
 __all__ = ["MeasuredRigidObjectState", "OrderedPlacementObjective"]
@@ -161,14 +167,23 @@ class OrderedPlacementObjective:
         target = self._progress.clamp(max=len(self.cfg.regions) - 1)
         stable = (
             self._valid
-            & (position >= self._lower[target].to(dtype=position.dtype)).all(dim=-1)
-            & (position <= self._upper[target].to(dtype=position.dtype)).all(dim=-1)
-            & (linear_speed <= self.cfg.max_linear_speed)
-            & (angular_speed <= self.cfg.max_angular_speed)
+            & _inside_region(
+                position,
+                self._lower[target].to(dtype=position.dtype),
+                self._upper[target].to(dtype=position.dtype),
+            )
+            & _speeds_within(
+                linear_speed,
+                angular_speed,
+                self.cfg.max_linear_speed,
+                self.cfg.max_angular_speed,
+            )
         )
         self._stable.copy_(stable)
         self._hold.copy_(
-            torch.where(stable, (self._hold + dt).clamp(max=self.cfg.hold_seconds), 0.0)
+            _advance_hold(
+                self._hold, stable, increment=dt, maximum=self.cfg.hold_seconds
+            )
         )
         # Avoid one extra control step when repeated decimal dt additions land
         # a few floating-point ulps below the configured duration.

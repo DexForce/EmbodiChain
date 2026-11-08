@@ -353,6 +353,22 @@ window is evaluated when a segment explicitly references the rule. Program
 overrides keep the deployment's final selection and can use a different set of
 segment validators. The final selection is part of registration identity.
 
+An evaluation component can also export a `graph` with `rules` and `roots`.
+Predicate rules declare a registered `kind`, `bindings` from input roles to
+logical channels such as `rigid_objects/payload/pose`, and optional `params`.
+Pose bindings supply the measured XYZ translation. Velocity channels use
+`lin_vel` or `ang_vel`. Joint predicates can select
+`articulations/<entity>/qpos/<joint>` in the native joint order. Boolean rules
+reference named rules with `refs`.
+Temporal rules select one `ref` and inclusive control-slot offsets `start`
+and `end`. `hold_for` adds the consecutive `steps` count. Milestones name
+simultaneous `refs` and optional predecessor milestones in `after`.
+
+Segment validators can reference exported graph roots. Each occurrence owns
+its temporal state. `final_acceptance` and `process_constraints` select
+instantaneous roots. The bridge checks process constraints after consumed
+control steps and routes rejected rows through its existing safe hold.
+
 ## Asset role requirements
 
 An integration may declare optional `asset_requirements`; decoding validates its

@@ -3906,6 +3906,58 @@ def test_final_acceptance_is_registered_independently_of_program_override(
         config_to_cfg(config, source_path=path, task_program_path_override=override)
 
 
+def test_configured_graph_shares_named_rules_and_protects_process_selection(
+    evaluation_deployment,
+):
+    import yaml
+
+    path, rule_path, program_path = evaluation_deployment
+    config = load_config(path)
+    component = {
+        "graph": {
+            "roots": ["delivered", "safe"],
+            "rules": {
+                "low": {
+                    "kind": "below_height",
+                    "bindings": {"position": "rigid_objects/can/pose"},
+                    "params": {"height": 0.4},
+                },
+                "safe": {"kind": "not", "refs": ["low"]},
+                "delivered": {"kind": "hold_for", "ref": "safe", "end": 3, "steps": 2},
+            },
+        },
+        "final_acceptance": ["safe"],
+        "process_constraints": ["safe"],
+    }
+    rule_path.write_text(yaml.safe_dump(component))
+    cfg = config_to_cfg(config, source_path=path)
+    registration = REGISTERED_ENVS[config["id"]].task_program_registration
+    validator = next(
+        registration.catalog.preflight(cfg.task_program).iter_segments()
+    ).validators[-1]
+    assert validator.spec.stateful
+    assert validator.spec.required_fields == ("rigid_objects/handover_object/pose",)
+    assert (
+        registration.evaluation_final_refs
+        == registration.evaluation_process_refs
+        == ("safe",)
+    )
+    assert registration.fingerprint_payload()["evaluation"]["process_constraints"] == [
+        "safe"
+    ]
+
+    replacement = load_config(program_path)
+    replacement["program"].pop("validators")
+    program_path.write_text(yaml.safe_dump(replacement))
+    override = config_to_cfg(
+        config, source_path=path, task_program_path_override=program_path
+    )
+    assert not next(
+        registration.catalog.preflight(override.task_program).iter_segments()
+    ).validators
+    assert REGISTERED_ENVS[config["id"]].task_program_registration is registration
+
+
 @pytest.mark.parametrize(
     ("refs", "message"),
     [

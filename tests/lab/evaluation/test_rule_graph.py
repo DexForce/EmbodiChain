@@ -1,0 +1,286 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Regression coverage for compiled evaluation graphs and episode isolation."""
+
+from __future__ import annotations
+
+import pytest
+import torch
+
+from embodichain.lab.evaluation import (
+    BooleanRule,
+    EvaluationSpec,
+    EvaluationStatus as Status,
+    MilestoneRule,
+    PredicateDefinition,
+    PredicateMeasurement,
+    PredicateSpec,
+    RuleSession,
+    TemporalRule,
+    builtin_predicates,
+    evaluate_recorded_rules,
+)
+
+
+def _graph():
+    registry = builtin_predicates()
+
+    def measure(values, params):
+        value = values["force"]
+        return PredicateMeasurement(
+            value >= params["minimum"], torch.isfinite(value), {"force": value}
+        )
+
+    registry.register(
+        "measured_force", PredicateDefinition(1, ("force",), dict, measure)
+    )
+    return registry.compile(
+        EvaluationSpec(
+            {
+                "touching": PredicateSpec(
+                    "measured_force", {"force": "contact"}, {"minimum": 1.0}
+                ),
+                "closed": PredicateSpec(
+                    "joint_range", {"position": "joint"}, {"lower": 0.0, "upper": 0.1}
+                ),
+                "not_closed": BooleanRule("not", ("closed",)),
+                "hold": TemporalRule("hold_for", "touching", 2, steps=2),
+                "in_range": TemporalRule("always", "closed", 2),
+                "touched": TemporalRule("eventually", "touching", 2),
+                "first": MilestoneRule(("touching",)),
+                "second": MilestoneRule(("touching", "closed"), after=("first",)),
+                "goal": BooleanRule("all", ("hold", "second")),
+                "progress": BooleanRule("any", ("first", "closed")),
+            },
+            ("goal", "progress"),
+        ),
+        available_fields={"contact", "joint"},
+    )
+
+
+def test_registered_predicate_boolean_and_missing_evidence():
+    graph = _graph()
+    assert graph.required_fields == ("contact", "joint")
+    result = graph.evaluate(
+        {"contact": torch.tensor([1.0, float("nan")])}, batch_size=2
+    )
+    assert result["touching"].status.tolist() == [Status.SATISFIED, Status.UNAVAILABLE]
+    assert result["not_closed"].status.tolist() == [Status.UNAVAILABLE] * 2
+    assert result["hold"].status.tolist() == [Status.NOT_RUN] * 2
+    assert result["progress"].status.tolist() == [Status.UNAVAILABLE] * 2
+
+
+def test_temporal_witnesses_and_partial_reset_are_row_local():
+    graph = _graph()
+    session = RuleSession(graph, env_ids=(4, 1), episode_ids=(9, 8), scope="pick/0")
+    good = {"contact": torch.ones(2), "joint": torch.zeros(2)}
+    session.advance(0, good, revisions=torch.tensor([20, 30]), episode_ids=(9, 8))
+    before = session.snapshot()
+    assert before.rules["second"].status.tolist() == [Status.UNKNOWN] * 2
+    session.evaluate(good)
+    assert session.snapshot().step == 0
+
+    session.advance(1, good, revisions=torch.tensor([21, 31]), episode_ids=(9, 8))
+    completed = session.snapshot()
+    assert completed.rules["goal"].status.tolist() == [Status.SATISFIED] * 2
+    assert completed.rules["hold"].witness_revisions.tolist() == [[20, 21], [30, 31]]
+    assert completed.rules["second"].witness_steps.tolist() == [[1, 1], [1, 1]]
+    session.reset((4,), (10,))
+    assert session.snapshot().rules["hold"].status.tolist() == [
+        Status.NOT_RUN,
+        Status.SATISFIED,
+    ]
+    session.advance(2, good, revisions=torch.tensor([1, 32]), episode_ids=(9, 8))
+    assert session.snapshot().rules["in_range"].status.tolist() == [
+        Status.UNKNOWN,
+        Status.SATISFIED,
+    ]
+    session.advance(4, good, revisions=torch.tensor([2, 33]), episode_ids=(10, 8))
+    after = session.snapshot(closed=True)
+    assert after.rules["hold"].status.tolist() == [Status.UNAVAILABLE, Status.SATISFIED]
+    assert after.rules["in_range"].status.tolist() == [
+        Status.UNAVAILABLE,
+        Status.SATISFIED,
+    ]
+    assert after.rules["touched"].witness_revisions.tolist() == [[2, 2], [30, 30]]
+    assert completed.rules["hold"].witness_revisions.tolist() == [[20, 21], [30, 31]]
+
+
+def test_always_keeps_first_qualified_violation_and_closes_missing_window():
+    graph = _graph()
+    session = RuleSession(graph, env_ids=(0, 1), episode_ids=(2, 2), scope="place")
+    session.advance(
+        0,
+        {"joint": torch.tensor([0.3, 0.0])},
+        revisions=torch.tensor([3, 3]),
+        episode_ids=(2, 2),
+    )
+    snap = session.snapshot(closed=True).rules["in_range"]
+    assert snap.status.tolist() == [Status.FAILED, Status.UNAVAILABLE]
+    assert snap.violation_revisions.tolist() == [[3, 3], [-1, -1]]
+
+
+def test_closed_milestone_distinguishes_failure_and_missing_evidence():
+    session = RuleSession(_graph(), env_ids=(0, 1), episode_ids=(2, 2), scope="place")
+    session.advance(
+        0,
+        {"contact": torch.tensor([0.0, float("nan")])},
+        revisions=torch.tensor([3, 3]),
+        episode_ids=(2, 2),
+    )
+    assert session.snapshot(closed=True).rules["first"].status.tolist() == [
+        Status.FAILED,
+        Status.UNAVAILABLE,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("rules", "message"),
+    [
+        ({"root": BooleanRule("any", ())}, "references"),
+        ({"root": BooleanRule("not", ("missing",))}, "Unknown evaluation reference"),
+        (
+            {"root": MilestoneRule(("child",)), "child": MilestoneRule(("root",))},
+            "cycle",
+        ),
+        (
+            {
+                "root": PredicateSpec(
+                    "joint_range", {"position": "wrong"}, {"lower": 0, "upper": 1}
+                )
+            },
+            "Unresolved",
+        ),
+        (
+            {"root": PredicateSpec("unknown", {"position": "joint"}, {})},
+            "Unknown predicate",
+        ),
+    ],
+)
+def test_compiler_rejects_invalid_graphs(rules, message):
+    with pytest.raises(ValueError, match=message):
+        builtin_predicates().compile(
+            EvaluationSpec(rules, ("root",)), available_fields={"joint"}
+        )
+
+
+def test_file_replay_uses_original_segment_and_qualifies_each_row(tmp_path):
+    graph = _graph().select("goal")
+    fields = {
+        name: {
+            "values": values,
+            "valid": torch.ones_like(values, dtype=torch.bool),
+            "descriptor": {"quantity": "scalar", "shape": (), "dtype": "torch.float32"},
+        }
+        for name, values in {
+            "contact": torch.tensor([[0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 1.0, 1.0]]),
+            "joint": torch.zeros(2, 4),
+        }.items()
+    }
+    file = tmp_path / "recording.pt"
+    torch.save(
+        {
+            "raw_observations": {
+                "schema_version": 1,
+                "env_ids": (4, 1),
+                "episode_ids": (9, 8),
+                "revisions": torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]]),
+                "lengths": torch.tensor([3, 3]),
+                "fields": fields,
+            },
+            "meta": {
+                "demo_episodes": [
+                    {
+                        "env_id": row,
+                        "episode_context": {"episode": episode},
+                        "segments": [
+                            {"segment_id": 7, "start_step": 1, "end_step": 3},
+                        ],
+                    }
+                    for row, episode in [(4, 9), (1, 8)]
+                ]
+            },
+        },
+        file,
+    )
+    for chunk in (1, 2, 64):
+        result = evaluate_recorded_rules(
+            graph,
+            file,
+            env_ids=(1, 4),
+            episode_ids=(8, 10),
+            scope="pick/7",
+            segment_id=7,
+            chunk_steps=chunk,
+        )
+        assert result.step == 3
+        assert result.rules["goal"].status.tolist() == [
+            Status.SATISFIED,
+            Status.UNAVAILABLE,
+        ]
+        assert result.rules["hold"].witness_steps.tolist() == [[2, 3], [-1, -1]]
+        assert result.rules["hold"].witness_revisions.tolist() == [[22, 23], [-1, -1]]
+
+
+def test_recorded_joint_uses_native_order_and_rejects_foreign_field():
+    field = "articulations/drawer/qpos/rail"
+    graph = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "closed": PredicateSpec(
+                    "joint_range", {"position": field}, {"upper": 0.01}
+                ),
+            },
+            ("closed",),
+        )
+    )
+    descriptor = {
+        "quantity": "qpos",
+        "entity_uid": "drawer",
+        "shape": (2,),
+        "dtype": "torch.float32",
+        "joint_names": ("latch", "rail"),
+    }
+    payload = {
+        "raw_observations": {
+            "schema_version": 1,
+            "env_ids": (1, 4),
+            "episode_ids": (3, 3),
+            "lengths": torch.tensor([0, 0]),
+            "revisions": torch.tensor([[11], [15]]),
+            "fields": {
+                field: {
+                    "values": torch.tensor([[[1.0, 0.0]], [[0.0, 1.0]]]),
+                    "valid": torch.ones(2, 1, dtype=torch.bool),
+                    "descriptor": descriptor,
+                }
+            },
+        }
+    }
+
+    def replay():
+        return (
+            evaluate_recorded_rules(
+                graph, payload, env_ids=(1, 4), episode_ids=(3, 3), scope="final"
+            )
+            .rules["closed"]
+            .status.tolist()
+        )
+
+    assert replay() == [Status.SATISFIED, Status.FAILED]
+    descriptor["entity_uid"] = "foreign"
+    assert replay() == [Status.UNAVAILABLE, Status.UNAVAILABLE]

@@ -42,11 +42,22 @@ from ._joint_window import JointWindowRecord
 from embodichain.utils import configclass
 
 from embodichain.lab.evaluation import (
+    CompiledEvaluation,
     EvaluationSession,
     EvaluationStatus,
     NearTargetHoldSpec,
+    RuleSession,
 )
-from embodichain.lab.evaluation.observations import advance_observation
+from embodichain.lab.evaluation.observations import (
+    _graph_frame_inputs,
+    advance_observation,
+)
+from embodichain.lab.evaluation._predicates import (
+    _joint_range,
+    _lift,
+    _relative_position,
+    _upright,
+)
 from embodichain.lab.gym.envs.objectives.conditions import evaluate_near_target
 from embodichain.lab.gym.envs.settling import (
     DynamicSettleMonitor,
@@ -313,8 +324,8 @@ class SimulationSegmentPolicyPort:
         self._validator_results: dict[int, dict[str, object]] = {}
         self._validator_active_masks: dict[int, torch.Tensor] = {}
         self._lift_baselines: dict[int, torch.Tensor] = {}
-        self._evaluation_specs: dict[str, NearTargetHoldSpec] = {}
-        self._evaluation_sessions: dict[str, EvaluationSession] = {}
+        self._evaluation_specs: dict[str, NearTargetHoldSpec | CompiledEvaluation] = {}
+        self._evaluation_sessions: dict[str, EvaluationSession | RuleSession] = {}
         self._evaluation_start: int | None = None
         self._evaluation_active: torch.Tensor | None = None
         self._evaluation_rows: tuple[int, ...] = ()
@@ -880,20 +891,47 @@ class SimulationSegmentPolicyPort:
             return
         self._require_open()
         for ref, spec in self._evaluation_specs.items():
-            if step >= start + spec.window_steps:
+            if (
+                isinstance(spec, NearTargetHoldSpec)
+                and step >= start + spec.window_steps
+            ):
                 continue
             session = self._evaluation_sessions.get(ref)
+            rows = self._evaluation_rows
+            episode_ids = tuple(episode_owner.episode_ids[row] for row in rows)
             if session is None:
-                rows = self._evaluation_rows
-                session = EvaluationSession(
-                    spec,
+                args = dict(
                     env_ids=rows,
-                    episode_ids=tuple(frame.episode_ids[row] for row in rows),
+                    episode_ids=episode_ids,
                     start_step=start,
                     device=self._env_ids.device,
                 )
+                if isinstance(spec, CompiledEvaluation):
+                    session = RuleSession(spec, scope=f"{ref}@{start}", **args)
+                else:
+                    session = EvaluationSession(spec, **args)
                 self._evaluation_sessions[ref] = session
-            advance_observation(session, frame, step=step, episode_owner=episode_owner)
+            if isinstance(session, RuleSession):
+                if (
+                    frame.episode_owner is not episode_owner
+                    or session.episode_ids != episode_ids
+                ):
+                    raise ValueError(
+                        "Live observation does not belong to the evaluation episodes."
+                    )
+                indices = torch.as_tensor(rows, dtype=torch.long, device=session.device)
+                values, valid = _graph_frame_inputs(session.compiled, frame, indices)
+                session.advance(
+                    step,
+                    values,
+                    valid=valid,
+                    revisions=torch.full_like(indices, frame.revision),
+                    episode_ids=tuple(frame.episode_ids[row] for row in rows),
+                )
+            else:
+                advance_observation(
+                    session, frame, step=step, episode_owner=episode_owner
+                )
 
     def _validate_condition(
         self, validator: CompiledConditionValidator
@@ -911,7 +949,37 @@ class SimulationSegmentPolicyPort:
         )
         witness_revisions = torch.full_like(witness_steps, -1)
         distance = [None] * active.numel()
-        if session is not None:
+        graph_trace = {}
+        if isinstance(session, RuleSession):
+            snapshot = session.snapshot(closed=True)
+            root = snapshot.rules[validator.cfg.ref]
+            status[active] = root.status
+            if root.witness_steps is not None:
+                witness_steps[active] = root.witness_steps
+                witness_revisions[active] = root.witness_revisions
+            graph_trace = {
+                "evaluation_identity": session.compiled.identity,
+                "rules": {
+                    name: {
+                        "status": [
+                            EvaluationStatus(value).name.lower()
+                            for value in result.status.tolist()
+                        ],
+                        "witness_revisions": (
+                            None
+                            if result.witness_revisions is None
+                            else result.witness_revisions.tolist()
+                        ),
+                        "violation_revisions": (
+                            None
+                            if result.violation_revisions is None
+                            else result.violation_revisions.tolist()
+                        ),
+                    }
+                    for name, result in snapshot.rules.items()
+                },
+            }
+        elif session is not None:
             snapshot = session.snapshot(closed=True)
             status[active] = snapshot.window_status
             witness_steps[active] = snapshot.witness_steps
@@ -929,8 +997,11 @@ class SimulationSegmentPolicyPort:
             "status": [
                 EvaluationStatus(value).name.lower() for value in status.cpu().tolist()
             ],
-            "tolerance": validator.spec.tolerance,
-            "distance": distance,
+            **(
+                {"tolerance": validator.spec.tolerance, "distance": distance}
+                if isinstance(validator.spec, NearTargetHoldSpec)
+                else graph_trace
+            ),
             "witness_steps": witness_steps.cpu().tolist(),
             "witness_revisions": witness_revisions.cpu().tolist(),
             "accepted_mask": accepted.cpu().tolist(),
@@ -1107,10 +1178,11 @@ class SimulationSegmentPolicyPort:
         reference_position = reference_pose[:, :3, 3]
         displacement = object_position.new_tensor(validator.cfg.displacement)
         target_position = reference_position + displacement
-        error = torch.linalg.vector_norm(object_position - target_position, dim=1)
-        accepted = torch.isfinite(error) & (
-            error <= float(validator.cfg.position_tolerance)
+        measured = evaluate_near_target(
+            object_position, target_position, float(validator.cfg.position_tolerance)
         )
+        error = measured.metrics["distance"]
+        accepted = measured.satisfied & torch.isfinite(error)
         self._validator_results[id(validator)] = {
             "kind": validator.cfg.kind,
             "object_id": object_id,
@@ -1147,13 +1219,12 @@ class SimulationSegmentPolicyPort:
                     "object_lifted requires begin_segment before execution."
                 )
             baseline = baseline.to(device=pose.device, dtype=pose.dtype)
-            lift = pose[:, 2, 3] - baseline[:, 2, 3]
-            accepted &= torch.isfinite(baseline).all(dim=(1, 2))
-            accepted &= lift >= float(validator.cfg.minimum_lift)
+            measured = _lift(pose, baseline, float(validator.cfg.minimum_lift))
+            accepted &= measured.valid & measured.satisfied
             evidence = {
                 "minimum_lift": validator.cfg.minimum_lift,
                 "initial_height": _json_speed_values(baseline[:, 2, 3]),
-                "measured_lift": _json_speed_values(lift),
+                "measured_lift": _json_speed_values(measured.metrics["lift"]),
             }
         elif validator.cfg.kind == "object_relative_position":
             assert validator.reference is not None
@@ -1162,17 +1233,15 @@ class SimulationSegmentPolicyPort:
                 entity_id=validator.reference.entity_id,
                 require_finite=False,
             ).to(device=pose.device, dtype=pose.dtype)
-            accepted &= torch.isfinite(reference).all(dim=(1, 2))
-            offset = pose.new_tensor(validator.cfg.position_offset)
-            displacement = pose[:, :3, 3] - reference[:, :3, 3]
-            if validator.cfg.reference_frame == "parent":
-                displacement = torch.bmm(
-                    reference[:, :3, :3].transpose(1, 2), displacement.unsqueeze(-1)
-                ).squeeze(-1)
-            error = torch.abs(displacement - offset)
-            for axis, tolerance in enumerate(validator.cfg.position_tolerance):
-                if tolerance is not None:
-                    accepted &= error[:, axis] < tolerance
+            measured = _relative_position(
+                pose,
+                reference,
+                pose.new_tensor(validator.cfg.position_offset),
+                validator.cfg.position_tolerance,
+                parent_axes=validator.cfg.reference_frame == "parent",
+            )
+            accepted &= measured.satisfied
+            error = measured.metrics["position_error"]
             evidence = {
                 "reference_id": validator.reference.entity_id,
                 "reference_frame": validator.cfg.reference_frame,
@@ -1181,11 +1250,11 @@ class SimulationSegmentPolicyPort:
                 "position_error": [_json_speed_values(row) for row in error],
             }
         elif validator.cfg.kind == "object_upright":
-            tilt = torch.rad2deg(torch.acos(pose[:, 2, 2].clamp(-1.0, 1.0)))
-            accepted &= tilt < float(validator.cfg.maximum_tilt_degrees)
+            measured = _upright(pose, float(validator.cfg.maximum_tilt_degrees))
+            accepted &= measured.satisfied
             evidence = {
                 "maximum_tilt_degrees": validator.cfg.maximum_tilt_degrees,
-                "tilt_degrees": _json_speed_values(tilt),
+                "tilt_degrees": _json_speed_values(measured.metrics["tilt_degrees"]),
             }
         else:
             raise ValueError(
@@ -1220,11 +1289,13 @@ class SimulationSegmentPolicyPort:
                 f"outside articulation {entity_id!r} qpos width {qpos.shape[1]}."
             )
         position = qpos[:, joint_index]
-        accepted = torch.isfinite(position)
-        if validator.cfg.minimum_position is not None:
-            accepted &= position >= float(validator.cfg.minimum_position)
-        if validator.cfg.maximum_position is not None:
-            accepted &= position <= float(validator.cfg.maximum_position)
+        accepted = _joint_range(
+            {"position": position},
+            {
+                "lower": validator.cfg.minimum_position,
+                "upper": validator.cfg.maximum_position,
+            },
+        ).satisfied
         self._validator_results[id(validator)] = {
             "kind": validator.cfg.kind,
             "articulation_id": entity_id,

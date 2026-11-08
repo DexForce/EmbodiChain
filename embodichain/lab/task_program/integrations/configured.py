@@ -18,7 +18,13 @@
 
 from __future__ import annotations
 
-from embodichain.lab.evaluation import NearTargetHoldSpec
+from embodichain.lab.evaluation import (
+    CompiledEvaluation,
+    EvaluationSpec,
+    NearTargetHoldSpec,
+    PredicateSpec,
+    builtin_predicates,
+)
 from embodichain.lab.evaluation.observations import _rigid_pose_field
 
 from collections.abc import Mapping, Sequence
@@ -3232,18 +3238,24 @@ class _ConfiguredTaskProgramAdapterFactory:
 
 def _decode_evaluation(
     value: Mapping[str, object] | None, scene: SimulationSceneBinding
-) -> tuple[dict[str, NearTargetHoldSpec], tuple[str, ...]]:
+) -> tuple[
+    dict[str, NearTargetHoldSpec | CompiledEvaluation], tuple[str, ...], tuple[str, ...]
+]:
     if value is None:
-        return {}, ()
+        return {}, (), ()
     path = "evaluation.conditions"
     component = _mapping(
         value,
         path="evaluation",
-        required=frozenset({"conditions"}),
-        optional=frozenset({"final_acceptance"}),
+        required=frozenset(),
+        optional=frozenset(
+            {"conditions", "graph", "final_acceptance", "process_constraints"}
+        ),
     )
-    conditions = component["conditions"]
-    if not isinstance(conditions, Mapping) or not conditions:
+    conditions = component.get("conditions", {})
+    if not isinstance(conditions, Mapping) or (
+        "conditions" in component and not conditions
+    ):
         raise ValueError(f"{path} must be a nonempty mapping.")
     bindings = {
         binding.entity_id: binding.simulation_uid for binding in scene.rigid_objects
@@ -3282,18 +3294,61 @@ def _decode_evaluation(
             )
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{rule_path}: {exc}") from exc
-    refs = ()
-    if "final_acceptance" in component:
-        raw = component["final_acceptance"]
+    if "graph" in component:
+        graph = EvaluationSpec.from_dict(component["graph"])
+        channels = {
+            f"rigid_objects/{entity}/{quantity}": f"rigid_objects/{uid}/{quantity}"
+            for entity, uid in bindings.items()
+            for quantity in ("pose", "lin_vel", "ang_vel")
+        }
+        articulations = {
+            binding.entity_id: binding.simulation_uid for binding in scene.articulations
+        }
+        rules = {}
+        for name, rule in graph.rules.items():
+            if isinstance(rule, PredicateSpec):
+                inputs = {}
+                for role, field in rule.bindings.items():
+                    field = _identifier(
+                        field, path=f"evaluation.graph.rules.{name}.bindings.{role}"
+                    )
+                    if field in channels:
+                        inputs[role] = channels[field]
+                        continue
+                    parts = field.split("/")
+                    if (
+                        len(parts) != 4
+                        or parts[0] != "articulations"
+                        or parts[1] not in articulations
+                        or parts[2] != "qpos"
+                        or not parts[3]
+                    ):
+                        raise ValueError(f"Unresolved evaluation field {field!r}.")
+                    inputs[role] = (
+                        f"articulations/{articulations[parts[1]]}/qpos/{parts[3]}"
+                    )
+                rule = PredicateSpec(rule.kind, inputs, rule.params)
+            rules[name] = rule
+        compiled = builtin_predicates().compile(EvaluationSpec(rules, graph.roots))
+        for root in compiled.roots:
+            if root in result:
+                raise ValueError(f"Duplicate evaluation root {root!r}.")
+            result[root] = compiled.select(root)
+    if not result:
+        raise ValueError("Evaluation requires conditions or exported graph roots.")
+
+    def refs_for(key: str) -> tuple[str, ...]:
+        if key not in component:
+            return ()
+        raw = component[key]
         if type(raw) is not list or not raw:
-            raise ValueError(
-                "evaluation.final_acceptance must be a nonempty list of rule refs."
-            )
-        refs = tuple(
-            _identifier(ref, path=f"evaluation.final_acceptance[{index}]")
+            raise ValueError(f"evaluation.{key} must be a nonempty list of rule refs.")
+        return tuple(
+            _identifier(ref, path=f"evaluation.{key}[{index}]")
             for index, ref in enumerate(raw)
         )
-    return result, refs
+
+    return result, refs_for("final_acceptance"), refs_for("process_constraints")
 
 
 def _decode_configured_task_program_integration(
@@ -3332,11 +3387,12 @@ def _decode_configured_task_program_integration(
                 target_descriptor=lowerer_factory.target_descriptor,
             )
         )
-    conditions, final_refs = _decode_evaluation(evaluation, scene_binding)
+    conditions, final_refs, process_refs = _decode_evaluation(evaluation, scene_binding)
     registration = SimulationTaskProgramRegistration(
         scene_binding=scene_binding,
         evaluation_conditions=conditions,
         evaluation_final_refs=final_refs,
+        evaluation_process_refs=process_refs,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TypeAlias
 
-from embodichain.lab.evaluation import NearTargetHoldSpec
+from embodichain.lab.evaluation import CompiledEvaluation, NearTargetHoldSpec
 from embodichain.lab.task_program.semantics.calls import (
     DeclarativeValue,
     HandOver,
@@ -480,14 +480,14 @@ class CompiledConditionValidator:
     """An immutable reference resolved against the deployment rule library."""
 
     cfg: ConditionValidatorCfg | _ConditionValues
-    spec: NearTargetHoldSpec
+    spec: NearTargetHoldSpec | CompiledEvaluation
     source_path: ConfigPath
 
     def __post_init__(self) -> None:
         if type(self.cfg) not in (ConditionValidatorCfg, _ConditionValues):
             raise TypeError("cfg must be a condition validator.")
         if (
-            type(self.spec) is not NearTargetHoldSpec
+            type(self.spec) not in (NearTargetHoldSpec, CompiledEvaluation)
             or type(self.source_path) is not tuple
         ):
             raise TypeError("Expected a bound rule and a ConfigPath tuple.")
@@ -1453,7 +1453,9 @@ class TaskProgramCompiler:
         self,
         scene_manifest: SceneManifest,
         *,
-        evaluation_conditions: Mapping[str, NearTargetHoldSpec] | None = None,
+        evaluation_conditions: (
+            Mapping[str, NearTargetHoldSpec | CompiledEvaluation] | None
+        ) = None,
     ) -> None:
         """Create one provider-free compiler.
 

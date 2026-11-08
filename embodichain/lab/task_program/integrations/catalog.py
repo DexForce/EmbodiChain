@@ -30,7 +30,7 @@ from types import MappingProxyType
 from typing import cast
 import torch
 
-from embodichain.lab.evaluation import NearTargetHoldSpec
+from embodichain.lab.evaluation import CompiledEvaluation, NearTargetHoldSpec
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
@@ -165,6 +165,8 @@ def _canonical_value(value: object) -> object:
         if not math.isfinite(value):
             raise ValueError("Fingerprint metadata cannot contain non-finite floats.")
         return value
+    if isinstance(value, CompiledEvaluation):
+        return {"evaluation_graph": value.identity}
     if isinstance(value, Enum):
         return {
             "type": _qualified_name(value),
@@ -572,8 +574,8 @@ class TaskProgramIntegrationCatalog:
     )
     """Immutable preset-to-entity binding for declared geometric conditions."""
 
-    evaluation_conditions: Mapping[str, NearTargetHoldSpec] = field(
-        default_factory=dict, kw_only=True
+    evaluation_conditions: Mapping[str, NearTargetHoldSpec | CompiledEvaluation] = (
+        field(default_factory=dict, kw_only=True)
     )
     """Named deployment rules bound to raw observation fields."""
 
@@ -1089,13 +1091,17 @@ class TaskProgramIntegrationCatalog:
 
 
 def _snapshot_evaluation_conditions(
-    value: Mapping[str, NearTargetHoldSpec],
-) -> Mapping[str, NearTargetHoldSpec]:
+    value: Mapping[str, NearTargetHoldSpec | CompiledEvaluation],
+) -> Mapping[str, NearTargetHoldSpec | CompiledEvaluation]:
     snapshot = dict(value)
     for ref, spec in snapshot.items():
         _exact_identifier(ref, field_name="evaluation condition ref")
-        if type(spec) is not NearTargetHoldSpec:
-            raise TypeError("Evaluation conditions must be NearTargetHoldSpec values.")
+        if type(spec) not in (NearTargetHoldSpec, CompiledEvaluation):
+            raise TypeError(
+                "Evaluation conditions must be bound rules or compiled graphs."
+            )
+        if isinstance(spec, CompiledEvaluation) and spec.roots != (ref,):
+            raise ValueError("A compiled condition must export the named root.")
     return MappingProxyType(snapshot)
 
 
@@ -1121,8 +1127,9 @@ def _registration_payload(
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
-    evaluation_conditions: Mapping[str, NearTargetHoldSpec],
+    evaluation_conditions: Mapping[str, NearTargetHoldSpec | CompiledEvaluation],
     evaluation_final_refs: tuple[str, ...],
+    evaluation_process_refs: tuple[str, ...],
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
     payload = {
@@ -1238,6 +1245,11 @@ def _registration_payload(
             "near_target_hold_revision": 1,
             "conditions": evaluation_conditions,
             **(
+                {"process_constraints": evaluation_process_refs}
+                if evaluation_process_refs
+                else {}
+            ),
+            **(
                 {"final_acceptance": evaluation_final_refs}
                 if evaluation_final_refs
                 else {}
@@ -1270,12 +1282,14 @@ class SimulationTaskProgramRegistration:
     registered_semantic_lowerer_factories: tuple[
         RegisteredSemanticLowererFactory, ...
     ] = ()
-    evaluation_conditions: Mapping[str, NearTargetHoldSpec] = field(
-        default_factory=dict, kw_only=True
+    evaluation_conditions: Mapping[str, NearTargetHoldSpec | CompiledEvaluation] = (
+        field(default_factory=dict, kw_only=True)
     )
     """Deployment-owned near-target hold rules, keyed by exact reference."""
     evaluation_final_refs: tuple[str, ...] = field(default=(), kw_only=True)
     """Rule references whose instantaneous predicates gate final acceptance."""
+    evaluation_process_refs: tuple[str, ...] = field(default=(), kw_only=True)
+    """Deployment-owned instantaneous process constraints checked per control step."""
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1324,15 +1338,21 @@ class SimulationTaskProgramRegistration:
             "evaluation_conditions",
             _snapshot_evaluation_conditions(self.evaluation_conditions),
         )
-        refs = self.evaluation_final_refs
-        if type(refs) is not tuple:
-            raise TypeError("evaluation_final_refs must be a tuple.")
-        for ref in refs:
-            _exact_identifier(ref, field_name="evaluation.final_acceptance ref")
-            if ref not in self.evaluation_conditions:
-                raise ValueError(f"Unknown evaluation.final_acceptance ref {ref!r}.")
-        if len(set(refs)) != len(refs):
-            raise ValueError("evaluation.final_acceptance refs must be unique.")
+        for key, refs in (
+            ("final_acceptance", self.evaluation_final_refs),
+            ("process_constraints", self.evaluation_process_refs),
+        ):
+            if type(refs) is not tuple:
+                raise TypeError(f"evaluation.{key} refs must be a tuple.")
+            for ref in refs:
+                _exact_identifier(ref, field_name=f"evaluation.{key} ref")
+                spec = self.evaluation_conditions.get(ref)
+                if spec is None:
+                    raise ValueError(f"Unknown evaluation.{key} ref {ref!r}.")
+                if isinstance(spec, CompiledEvaluation) and spec.stateful:
+                    raise ValueError(f"evaluation.{key} requires instantaneous roots.")
+            if len(set(refs)) != len(refs):
+                raise ValueError(f"evaluation.{key} refs must be unique.")
         rigid_ids = {binding.entity_id for binding in self.scene_binding.rigid_objects}
         reference_ids = (
             rigid_ids
@@ -1451,6 +1471,7 @@ class SimulationTaskProgramRegistration:
                 call_catalog=self.call_catalog,
                 evaluation_conditions=self.evaluation_conditions,
                 evaluation_final_refs=self.evaluation_final_refs,
+                evaluation_process_refs=self.evaluation_process_refs,
                 settle_presets=settle_presets,
                 relation_grounder_keys=relation_grounder_keys,
                 relation_grounders=relation_grounders,
@@ -1559,6 +1580,7 @@ class SimulationTaskProgramRegistration:
                 call_catalog=self.call_catalog,
                 evaluation_conditions=self.evaluation_conditions,
                 evaluation_final_refs=self.evaluation_final_refs,
+                evaluation_process_refs=self.evaluation_process_refs,
                 settle_presets=self.settle_presets,
                 relation_grounder_keys=relation_grounder_keys,
                 relation_grounders=relation_grounders,
