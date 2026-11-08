@@ -16,13 +16,14 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
+from urllib.parse import urlsplit
 from zipfile import ZipFile
 
 import pytest
 from packaging.requirements import Requirement
-
-import tomllib
+from packaging.utils import canonicalize_name, parse_wheel_filename
 
 import setup as package_setup
 from scripts.validate_wheel_metadata import WheelMetadataError, validate_wheel
@@ -35,6 +36,39 @@ _TEST_VERSION = "0.2.4"
 def _read_project_metadata() -> dict:
     with (_REPOSITORY_ROOT / "pyproject.toml").open("rb") as stream:
         return tomllib.load(stream)
+
+
+def test_docker_locks_match_core_dexsim_requirement() -> None:
+    dependencies = _read_project_metadata()["project"]["dependencies"]
+    core = next(
+        requirement
+        for requirement in map(Requirement, dependencies)
+        if canonicalize_name(requirement.name) == "dexsim-engine"
+    )
+
+    for profile in ("py311", "py312"):
+        requirements = []
+        for directory in ("profiles", "locks"):
+            path = (
+                _REPOSITORY_ROOT
+                / "docker"
+                / directory
+                / f"{profile}.{'in' if directory == 'profiles' else 'txt'}"
+            )
+            lines = [
+                line
+                for line in path.read_text().splitlines()
+                if line.startswith("dexsim-engine @ ")
+            ]
+            assert len(lines) == 1
+            requirements.append(Requirement(lines[0]))
+        assert requirements[0].url == requirements[1].url
+
+        wheel_name = Path(urlsplit(requirements[0].url).path).name
+        package_name, version, _, tags = parse_wheel_filename(wheel_name)
+        assert canonicalize_name(package_name) == "dexsim-engine"
+        assert version in core.specifier
+        assert any(tag.interpreter == f"cp{profile[2:]}" for tag in tags)
 
 
 def _write_test_wheel(tmp_path: Path, requirements: list[str]) -> Path:

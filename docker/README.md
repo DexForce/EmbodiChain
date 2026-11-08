@@ -163,7 +163,8 @@ complete Python dependency sets and explicit conda package URLs/checksums.
 The CUDA base, Node base, Miniforge installer and cuRobo commit are pinned.
 Both DexSim wheel URLs carry SHA256 pins, which the installer verifies even
 though the wheel server uses HTTP. These match the published index checksums
-and the payloads in the previously qualified Python 3.11/3.12 installations.
+for DexSim 0.6.0rc1. Build and qualify both updated profiles before promoting
+new image digests.
 DexSim and LeRobot currently require different OpenCV distributions sharing
 `cv2`. Python-selected dependencies pin both to the same release; qualification
 checks the imported binding as well as distribution metadata.
