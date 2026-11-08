@@ -126,9 +126,11 @@ Configuration
 
 Configuration ownership is split by meaning:
 
-* :class:`~embodichain.toolkits.graspkit.ParallelJawGripperModelCfg` describes
-  physical opening limits, finger dimensions, and palm depth. A concrete EEF
-  name belongs only in its ``model_id``.
+* :class:`~embodichain.lab.sim.cfg.gripper.ParallelJawGripperCfg` owns physical
+  opening bounds, native geometry, commands, calibration and compatible
+  ``grasp_generators`` declarations. Concrete defaults live beside model assets.
+  GraspKit receives resolved scalar limits and collision geometry through the
+  Sim adapter, without importing the Cfg or looking up a model identifier.
 * :class:`~embodichain.toolkits.graspkit.pg_grasp.AntipodalGraspPoseGeneratorCfg`
   controls sample count, angular deviations, approach variants, and result
   count.

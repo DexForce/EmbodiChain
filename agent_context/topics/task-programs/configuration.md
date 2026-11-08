@@ -212,7 +212,11 @@ endpoints opt into a binding with `gripper`; composition fills omitted command
 presets and generator physical descriptions before strict Task Program decoding.
 A standalone configured generator accepts an explicit `gripper` description or
 catalog-class selection; the former `model` string/mapping route is removed.
-GraspKit owns numerical types and algorithms, not concrete model values. Search
+Concrete hand Cfgs own flat physical fields and the explicit `grasp_generators`
+allowlist. Composition selects a unique supported default kind, or checks an
+explicit policy kind against that allowlist. An empty list grants no service;
+endpoints still require an explicit binding and grasp capability. GraspKit
+receives projected scalar limits and numerical geometry. Search
 and collision policy retain toolkit defaults and the task allowlist. Duplicate
 explicit service ownership is rejected. See the [robot binding owner](../robot-system/robot-system.md)
 for assembly, source identity and TCP validation.

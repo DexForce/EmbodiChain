@@ -38,7 +38,6 @@ if TYPE_CHECKING:
     )
     from embodichain.lab.sim.motion.solvers import SolverCfg
     from embodichain.lab.sim.sensors import SensorCfg
-    from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
 
 
 from embodichain.lab.sim.cfg.gripper import ParallelJawGripperCfg

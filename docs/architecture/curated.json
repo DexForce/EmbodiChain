@@ -2078,7 +2078,7 @@
       "kind": "module",
       "topic_ids": [],
       "summary": "Defines parallel-jaw gripper models and grasp-pose generation interfaces.",
-      "details": "Input: target meshes and explicit parallel-jaw gripper geometry. Output: candidate grasp poses or annotated contact pairs, depending on the operation. Entry: the public AntipodalGraspPoseGenerator API for generation, or embodichain annotate-grasp for interactive region annotation. Interfaces live in graspkit.pose_generator, physical types in graspkit.gripper_models, and concrete defaults beside robot assets in embodichain_robots.",
+      "details": "Input: target meshes, explicit scalar opening limits and numerical hand collision geometry. Output: candidate grasp poses or annotated contact pairs. Entry: AntipodalGraspPoseGenerator, or embodichain annotate-grasp through its Lab launcher. GraspKit owns numerical interfaces and algorithms; concrete physics and generator support declarations belong to hand Cfg defaults beside robot assets.",
       "boundaries": [
         "A geometric grasp candidate is not proof of successful physical grasping."
       ],
@@ -2620,7 +2620,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0\u2026DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -2996,21 +2996,21 @@
     },
     {
       "id": "gripper-model",
-      "label": "Parallel-jaw gripper model",
+      "label": "Parallel-jaw gripper configuration",
       "kind": "class",
       "topic_ids": [],
-      "summary": "Defines contact-width bounds and native hand geometry independently of sampling policy.",
-      "details": "Input: contact-width bounds, native root/collision/pad links and contact-frame calibration. Output: a validated physical description. Concrete values come from model-owned robot defaults; GraspKit owns the shared type and algorithms. Entry: ParallelJawGripperModelCfg.",
+      "summary": "Owns native hand physics, calibration and declared grasp-generator support.",
+      "details": "Input: source asset, contact-width bounds, native links and commands, contact/TCP calibration and supported generator kinds. Output: independently controllable hand configuration with shared pure defaults. Concrete values belong to model-owned robot defaults. Entry: ParallelJawGripperCfg or resolve_gripper_defaults().",
       "boundaries": [
-        "A gripper geometry description is not a robot controller."
+        "GraspKit receives numerical scalar limits and collision geometry; it does not consume this Cfg."
       ],
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/gripper_models.py",
-          "symbol": "ParallelJawGripperModelCfg",
-          "start_line": 49,
-          "end_line": 49,
-          "excerpt": "class ParallelJawGripperModelCfg:"
+          "path": "embodichain/lab/sim/cfg/gripper.py",
+          "symbol": "ParallelJawGripperCfg",
+          "start_line": 48,
+          "end_line": 48,
+          "excerpt": "class ParallelJawGripperCfg(RobotCfg):"
         }
       ],
       "documentation": [
@@ -3136,7 +3136,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/scripts/annotate_grasp.py",
+          "path": "embodichain/lab/scripts/annotate_grasp.py",
           "symbol": "cli",
           "start_line": 35,
           "end_line": 35,
@@ -4506,7 +4506,7 @@
           "symbol": "<module>",
           "start_line": 94,
           "end_line": 94,
-          "excerpt": "        target=\"embodichain.toolkits.graspkit.scripts.annotate_grasp:cli\","
+          "excerpt": "        target=\"embodichain.lab.scripts.annotate_grasp:cli\","
         }
       ]
     },
@@ -5499,7 +5499,7 @@
       "scope": "Invoked by annotate-grasp with interactive selection enabled.",
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/scripts/annotate_grasp.py",
+          "path": "embodichain/lab/scripts/annotate_grasp.py",
           "symbol": "cli",
           "start_line": 107,
           "end_line": 107,
@@ -5522,24 +5522,6 @@
           "start_line": 386,
           "end_line": 386,
           "excerpt": "        backend = _AntipodalMeshBackend("
-        }
-      ]
-    },
-    {
-      "id": "antipodal-generator-reads-gripper-model",
-      "source": "antipodal-generator",
-      "target": "gripper-model",
-      "relation": "reads",
-      "description": "Reads contact-width bounds when preparing a mesh backend.",
-      "provenance": "source-reviewed",
-      "scope": "The model configuration is separate from algorithm and collision policies.",
-      "evidence": [
-        {
-          "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
-          "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 382,
-          "end_line": 382,
-          "excerpt": "        model = self._gripper_model"
         }
       ]
     },
@@ -6916,7 +6898,6 @@
         "cli-calls-grasp-annotation",
         "grasp-annotation-constructs-antipodal-generator",
         "antipodal-generator-constructs-grasp-backend",
-        "antipodal-generator-reads-gripper-model",
         "antipodal-generator-imports-grasp-tools",
         "grasp-backend-constructs-grasp-sampler",
         "grasp-backend-constructs-grasp-collision",

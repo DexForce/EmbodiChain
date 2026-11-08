@@ -64,8 +64,11 @@ Hand Cfgs own native physical data; embodiment bindings own installation and
 optional `root_from_tcp`/contact calibration and complete command replacements.
 
 A declared grasp endpoint opts in with `gripper: <instance>`, matching control
-part and explicit capability. Composition fills its omitted command preset and
-generator; keep only search-policy adjustments in runtime services. Do not repeat
+part and explicit capability. The hand Cfg must declare a compatible kind in
+`grasp_generators`; a unique kind supplies the default, while multiple kinds
+require an explicit policy selection. Empty support grants no service.
+Composition fills its omitted command preset and generator; keep only
+search-policy adjustments in runtime services. Do not repeat
 physical command presets or old generator `model` fields. Solver TCPs are derived
 from the hand reference and fixed installation; any explicit value must agree.
 Without a semantic profile the same declaration supplies physical assembly only.

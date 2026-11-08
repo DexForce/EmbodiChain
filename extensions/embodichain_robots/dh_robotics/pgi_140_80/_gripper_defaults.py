@@ -26,7 +26,6 @@ _DEFAULTS = {
     "default": {
         "uid": "DHPGI14080",
         "fpath": "DH_PGI_140_80/DH_PGI_140_80.urdf",
-        "source_root_link": "gripper_base_link_1",
         "control_parts": {
             "eef": ["gripper_finger1_joint_1", "gripper_finger2_joint_1"]
         },
@@ -37,25 +36,6 @@ _DEFAULTS = {
             "stiffness": 1000.0,
             "damping": 100.0,
             "max_effort": 40.0,
-        },
-        "grasp_cfg": {
-            "catalog_id": "DHPGI14080",
-            "model_id": "dh_pgi_140_80",
-            "min_opening_width": 0.005,
-            "max_opening_width": 0.1,
-            "root_link": "gripper_base_link_1",
-            "collision_links": [
-                "gripper_base_link_1",
-                "gripper_finger1_link_1",
-                "gripper_finger2_link_1",
-            ],
-            "pad_links": ["gripper_finger1_link_1", "gripper_finger2_link_1"],
-            "root_from_contact_frame": [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.15],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
         },
         "joint_commands": {
             "open": {"gripper_finger1_joint_1": 0.0, "gripper_finger2_joint_1": 0.0},
@@ -76,6 +56,24 @@ _DEFAULTS = {
         },
         "mesh_paths": {},
         "source_sha256": "09997a476916af8a9bca51d2cb110bd044275eec6a0707ab84d4bc67c2476b1f",
+        "catalog_id": "DHPGI14080",
+        "model_id": "dh_pgi_140_80",
+        "min_opening_width": 0.005,
+        "max_opening_width": 0.1,
+        "root_link": "gripper_base_link_1",
+        "collision_links": [
+            "gripper_base_link_1",
+            "gripper_finger1_link_1",
+            "gripper_finger2_link_1",
+        ],
+        "pad_links": ["gripper_finger1_link_1", "gripper_finger2_link_1"],
+        "root_from_contact_frame": [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.15],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        "grasp_generators": ["antipodal_parallel_jaw"],
     }
 }
 

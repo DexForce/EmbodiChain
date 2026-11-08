@@ -26,7 +26,6 @@ _DEFAULTS = {
     "default": {
         "uid": "FrankaPandaHand",
         "fpath": "Franka/Panda/Fr3HandV1.urdf",
-        "source_root_link": "fr3_hand",
         "control_parts": {"eef": ["fr3_finger_joint1", "fr3_finger_joint2"]},
         "solver_cfg": {},
         "init_qpos": [0.04, 0.04],
@@ -35,21 +34,6 @@ _DEFAULTS = {
             "stiffness": 1000.0,
             "damping": 100.0,
             "max_effort": 40.0,
-        },
-        "grasp_cfg": {
-            "catalog_id": "FrankaPandaHand",
-            "model_id": "franka_panda_hand",
-            "min_opening_width": 0.001,
-            "max_opening_width": 0.08,
-            "root_link": "fr3_hand",
-            "collision_links": ["fr3_hand", "fr3_leftfinger", "fr3_rightfinger"],
-            "pad_links": ["fr3_leftfinger", "fr3_rightfinger"],
-            "root_from_contact_frame": [
-                [0.0, -1.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.1034],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
         },
         "joint_commands": {
             "open": {"fr3_finger_joint1": 0.04, "fr3_finger_joint2": 0.04},
@@ -67,6 +51,20 @@ _DEFAULTS = {
         },
         "mesh_paths": {},
         "source_sha256": "0a227ab180b032e8e268ad618f2e564f7d6c0cb44c13011797dca4ffa1a0e79a",
+        "catalog_id": "FrankaPandaHand",
+        "model_id": "franka_panda_hand",
+        "min_opening_width": 0.001,
+        "max_opening_width": 0.08,
+        "root_link": "fr3_hand",
+        "collision_links": ["fr3_hand", "fr3_leftfinger", "fr3_rightfinger"],
+        "pad_links": ["fr3_leftfinger", "fr3_rightfinger"],
+        "root_from_contact_frame": [
+            [0.0, -1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.1034],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        "grasp_generators": ["antipodal_parallel_jaw"],
     }
 }
 

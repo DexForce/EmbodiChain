@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from embodichain.robot_registry import resolve_gripper_defaults
-from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+from embodichain.lab.sim.utility.gripper_geometry import (
     build_gripper_collision_geometry,
 )
 
@@ -30,7 +30,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 from embodichain.data import get_data_path
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+
 from embodichain.toolkits.graspkit.pg_grasp import FixedGripperCollisionGeometry
 
 if TYPE_CHECKING:
@@ -90,7 +90,7 @@ def geometry_from_asset(
 
 def mounted_gripper_geometry(
     robot_cfg: RobotCfg, *, arm_control_part: str = "arm"
-) -> tuple[ParallelJawGripperModelCfg, FixedGripperCollisionGeometry]:
+) -> tuple[dict[str, object], FixedGripperCollisionGeometry]:
     """Bind the known mounted PGI, PGC or Robotiq fixture to its actual TCP.
 
     Unknown hardware must supply its own explicit geometry. The identity is
@@ -109,11 +109,11 @@ def mounted_gripper_geometry(
     name = Path(asset).stem.lower()
     if name == "dh_pgi_140_80":
         return (
-            ParallelJawGripperModelCfg(
-                model_id="dh_pgi_140_80",
-                min_opening_width=0.003,
-                max_opening_width=0.1,
-            ),
+            {
+                "model_id": "dh_pgi_140_80",
+                "min_opening_width": 0.003,
+                "max_opening_width": 0.1,
+            },
             build_gripper_collision_geometry(
                 resolve_gripper_defaults("DHPGI14080"), root_from_tcp=root_from_tcp
             ),
@@ -127,28 +127,28 @@ def mounted_gripper_geometry(
         ]
     )
     if name == "robotiq_arg2f_140":
-        model = ParallelJawGripperModelCfg(
-            model_id="robotiq_2f_140",
-            min_opening_width=0.005,
-            max_opening_width=0.14,
-        )
+        model = {
+            "model_id": "robotiq_2f_140",
+            "min_opening_width": 0.005,
+            "max_opening_width": 0.14,
+        }
         root_from_grasp[2, 3] = 0.21
     elif name == "dh_pgc_140_50":
-        model = ParallelJawGripperModelCfg(
-            model_id=name,
-            min_opening_width=0.002,
-            max_opening_width=0.05,
-        )
+        model = {
+            "model_id": name,
+            "min_opening_width": 0.002,
+            "max_opening_width": 0.05,
+        }
         root_from_grasp[2, 3] = 0.12
     elif name == "dh_pgc_140_50_m":
         # The modified long-finger fixture declares its contact TCP explicitly
         # in each caller. Preserve those task calibrations and aperture bounds;
         # collision surfaces still come only from this distinct source asset.
-        model = ParallelJawGripperModelCfg(
-            model_id=name,
-            min_opening_width=0.003,
-            max_opening_width=0.088,
-        )
+        model = {
+            "model_id": name,
+            "min_opening_width": 0.003,
+            "max_opening_width": 0.088,
+        }
         root_from_grasp = root_from_tcp.copy()
     else:
         raise ValueError(f"No declared open-state geometry for mounted URDF {asset!r}.")

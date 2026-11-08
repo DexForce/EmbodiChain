@@ -26,7 +26,6 @@ _DEFAULTS = {
     "left": {
         "uid": "TianjiMarvinGripper",
         "fpath": "TianjiMarvin/robot_with_ee_acd.urdf",
-        "source_root_link": "left_hand_base_link",
         "extract_subtree": True,
         "reference_link": "left_hand_tool_link",
         "root_from_reference": [
@@ -43,25 +42,6 @@ _DEFAULTS = {
             "stiffness": 1000.0,
             "damping": 100.0,
             "max_effort": 40.0,
-        },
-        "grasp_cfg": {
-            "catalog_id": "TianjiMarvinGripper",
-            "model_id": "tianji_marvin_gripper",
-            "min_opening_width": 0.001,
-            "max_opening_width": 0.095,
-            "root_link": "left_hand_base_link",
-            "collision_links": [
-                "left_hand_base_link",
-                "left_hand_finger_1_link",
-                "left_hand_finger_2_link",
-            ],
-            "pad_links": ["left_hand_finger_1_link", "left_hand_finger_2_link"],
-            "root_from_contact_frame": [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.13],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
         },
         "joint_commands": {
             "open": {"LEFT_HAND_FINGER_1": 0.0, "LEFT_HAND_FINGER_2": 0.0},
@@ -94,11 +74,28 @@ _DEFAULTS = {
         },
         "mesh_paths": {},
         "source_sha256": "691a5f5a08d3335a1e1a50487b0f886f17eb30da4ea7703bf320a0bf9eac874f",
+        "catalog_id": "TianjiMarvinGripper",
+        "model_id": "tianji_marvin_gripper",
+        "min_opening_width": 0.001,
+        "max_opening_width": 0.095,
+        "root_link": "left_hand_base_link",
+        "collision_links": [
+            "left_hand_base_link",
+            "left_hand_finger_1_link",
+            "left_hand_finger_2_link",
+        ],
+        "pad_links": ["left_hand_finger_1_link", "left_hand_finger_2_link"],
+        "root_from_contact_frame": [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.13],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        "grasp_generators": ["antipodal_parallel_jaw"],
     },
     "right": {
         "uid": "TianjiMarvinGripper",
         "fpath": "TianjiMarvin/robot_with_ee_acd.urdf",
-        "source_root_link": "right_hand_base_link",
         "extract_subtree": True,
         "reference_link": "right_hand_tool_link",
         "root_from_reference": [
@@ -115,25 +112,6 @@ _DEFAULTS = {
             "stiffness": 1000.0,
             "damping": 100.0,
             "max_effort": 40.0,
-        },
-        "grasp_cfg": {
-            "catalog_id": "TianjiMarvinGripper",
-            "model_id": "tianji_marvin_gripper",
-            "min_opening_width": 0.001,
-            "max_opening_width": 0.095,
-            "root_link": "right_hand_base_link",
-            "collision_links": [
-                "right_hand_base_link",
-                "right_hand_finger_1_link",
-                "right_hand_finger_2_link",
-            ],
-            "pad_links": ["right_hand_finger_1_link", "right_hand_finger_2_link"],
-            "root_from_contact_frame": [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.13],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
         },
         "joint_commands": {
             "open": {"RIGHT_HAND_FINGER_1": 0.0, "RIGHT_HAND_FINGER_2": 0.0},
@@ -166,6 +144,24 @@ _DEFAULTS = {
         },
         "mesh_paths": {},
         "source_sha256": "691a5f5a08d3335a1e1a50487b0f886f17eb30da4ea7703bf320a0bf9eac874f",
+        "catalog_id": "TianjiMarvinGripper",
+        "model_id": "tianji_marvin_gripper",
+        "min_opening_width": 0.001,
+        "max_opening_width": 0.095,
+        "root_link": "right_hand_base_link",
+        "collision_links": [
+            "right_hand_base_link",
+            "right_hand_finger_1_link",
+            "right_hand_finger_2_link",
+        ],
+        "pad_links": ["right_hand_finger_1_link", "right_hand_finger_2_link"],
+        "root_from_contact_frame": [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.13],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        "grasp_generators": ["antipodal_parallel_jaw"],
     },
 }
 

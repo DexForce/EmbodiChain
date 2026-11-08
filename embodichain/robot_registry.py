@@ -326,8 +326,6 @@ def resolve_gripper_defaults(
         ValueError: The ID or variant has no explicit gripper description.
         TypeError: The provider returns incomplete or non-serializable data.
     """
-    import json
-
     spec = _robot_specs().get(name)
     if spec is None or not spec.get("description_path"):
         raise ValueError(f"Robot {name!r} has no parallel-jaw description.")
@@ -337,30 +335,132 @@ def resolve_gripper_defaults(
     if variant is not None and variant not in (spec.get("variants") or {}):
         raise ValueError(f"Unknown gripper variant {variant!r} for {name!r}.")
     result = getattr(import_module(module), symbol)(variant)
-    if (
-        not isinstance(result, dict)
-        or not {
-            "fpath",
-            "grasp_cfg",
-            "joint_commands",
-            "default_root_from_tcp",
-            "control_parts",
-        }
-        <= result.keys()
-    ):
-        raise TypeError("Gripper description is incomplete.")
-    json.dumps(result, allow_nan=False)
-    from embodichain.toolkits.graspkit.gripper_models import (
-        ParallelJawGripperModelCfg,
-        _validate_gripper_transform,
-    )
+    return _validate_gripper_description(result)
 
-    ParallelJawGripperModelCfg(**result["grasp_cfg"])
-    _validate_gripper_transform(result["default_root_from_tcp"])
-    commands = result["joint_commands"]
-    names = set(result["control_parts"]["eef"])
-    if not {"open", "grasp"} <= commands.keys() or any(
-        set(command) != names for command in commands.values()
+
+def _validate_gripper_transform(value: object) -> tuple[tuple[float, ...], ...]:
+    """Normalize a finite SE(3) matrix without importing numerical backends."""
+    import math
+
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        raise ValueError("Gripper transform must have shape (4, 4).")
+    try:
+        rows = tuple(tuple(float(x) for x in row) for row in value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Gripper transform must contain finite numbers.") from exc
+    if any(len(row) != 4 or any(not math.isfinite(x) for x in row) for row in rows):
+        raise ValueError("Gripper transform must have finite shape (4, 4).")
+    if any(abs(a - b) > 1e-7 for a, b in zip(rows[3], (0, 0, 0, 1))):
+        raise ValueError("Gripper transform must have homogeneous last row.")
+    if any(
+        abs(sum(rows[k][i] * rows[k][j] for k in range(3)) - (i == j)) > 1e-6
+        for i in range(3)
+        for j in range(3)
     ):
-        raise ValueError("Gripper commands must cover all native moving joints.")
-    return deepcopy(result)
+        raise ValueError("Gripper transform rotation must be orthonormal.")
+    r = rows
+    determinant = (
+        r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+        - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+        + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0])
+    )
+    if abs(determinant - 1) > 1e-6:
+        raise ValueError("Gripper transform must be a proper rotation.")
+    return rows
+
+
+def _validate_gripper_description(value: object) -> dict[str, object]:
+    """Validate and detach model-owned primitives without importing Lab or GraspKit."""
+    import json
+    import math
+
+    if not isinstance(value, Mapping):
+        raise TypeError("Gripper description must be a mapping.")
+    required = {
+        "fpath",
+        "model_id",
+        "root_link",
+        "collision_links",
+        "root_from_contact_frame",
+        "joint_commands",
+        "default_root_from_tcp",
+        "control_parts",
+        "min_opening_width",
+        "max_opening_width",
+        "grasp_generators",
+    }
+    if required - value.keys():
+        raise ValueError(
+            f"Gripper description is incomplete: {sorted(required - value.keys())}"
+        )
+    data = deepcopy(dict(value))
+    for name in ("fpath", "model_id", "root_link"):
+        if (
+            type(data[name]) is not str
+            or not data[name]
+            or data[name] != data[name].strip()
+        ):
+            raise ValueError(f"Gripper {name} must be an explicit nonempty string.")
+    for name in ("collision_links", "grasp_generators"):
+        items = data[name]
+        if (
+            not isinstance(items, (list, tuple))
+            or len(set(items)) != len(items)
+            or any(type(x) is not str or not x or x != x.strip() for x in items)
+        ):
+            raise ValueError(f"Gripper {name} must contain distinct explicit names.")
+        data[name] = list(items)
+    if data["grasp_generators"] and not data["collision_links"]:
+        raise ValueError(
+            "Grasp generation requires explicit root_link and collision_links."
+        )
+    pads = data.get("pad_links")
+    if pads is not None and (
+        not isinstance(pads, (list, tuple))
+        or len(pads) != 2
+        or len(set(pads)) != 2
+        or not set(pads) <= set(data["collision_links"])
+    ):
+        raise ValueError("pad_links must identify two distinct collision links.")
+    for name in ("min_opening_width", "max_opening_width"):
+        number = data[name]
+        if (
+            isinstance(number, bool)
+            or not isinstance(number, (int, float))
+            or not math.isfinite(number)
+            or number <= 0
+        ):
+            raise ValueError(f"{name} must be finite and positive.")
+        data[name] = float(number)
+    if data["min_opening_width"] >= data["max_opening_width"]:
+        raise ValueError("min_opening_width must be less than max_opening_width.")
+    for name in ("root_from_contact_frame", "default_root_from_tcp"):
+        data[name] = [list(row) for row in _validate_gripper_transform(data[name])]
+    parts = data["control_parts"]
+    names = parts.get("eef") if isinstance(parts, Mapping) else None
+    if (
+        not isinstance(names, (list, tuple))
+        or not names
+        or len(set(names)) != len(names)
+        or any(type(x) is not str or not x for x in names)
+    ):
+        raise ValueError("Gripper native eef joints must be explicit and unique.")
+    commands = data["joint_commands"]
+    if not isinstance(commands, Mapping) or not {"open", "grasp"} <= commands.keys():
+        raise ValueError("Gripper commands must provide open and grasp.")
+    for command in commands.values():
+        if (
+            not isinstance(command, Mapping)
+            or set(command) != set(names)
+            or any(
+                isinstance(x, bool)
+                or not isinstance(x, (int, float))
+                or not math.isfinite(x)
+                for x in command.values()
+            )
+        ):
+            raise ValueError(
+                "Gripper commands must cover all native moving joints with finite positions."
+            )
+    json.dumps(data, allow_nan=False)
+    return data

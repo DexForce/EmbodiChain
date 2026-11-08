@@ -26,7 +26,6 @@ _DEFAULTS = {
     "default": {
         "uid": "CobotMagicV100Gripper",
         "fpath": "CobotMagicArm/CobotMagicWithGripperV100.urdf",
-        "source_root_link": "gripper_base",
         "extract_subtree": True,
         "reference_link": "link6",
         "root_from_reference": [
@@ -43,21 +42,6 @@ _DEFAULTS = {
             "stiffness": 1000.0,
             "damping": 100.0,
             "max_effort": 40.0,
-        },
-        "grasp_cfg": {
-            "catalog_id": "CobotMagicV100Gripper",
-            "model_id": "cobotmagic_v100_gripper",
-            "min_opening_width": 0.001,
-            "max_opening_width": 0.1,
-            "root_link": "gripper_base",
-            "collision_links": ["gripper_base", "link7", "link8"],
-            "pad_links": ["link7", "link8"],
-            "root_from_contact_frame": [
-                [0.0, 1.0, 0.0, 0.0],
-                [-1.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.143],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
         },
         "joint_commands": {
             "open": {"joint7": 0.05, "joint8": 0.05},
@@ -79,6 +63,20 @@ _DEFAULTS = {
             "../Collision/link8_acd.obj": "CobotMagicArm/Collision/link8_acd.obj",
         },
         "source_sha256": "4340728998d271c3fbc677016baeac1bea014888e1c08fe40e6969b27b61dee6",
+        "catalog_id": "CobotMagicV100Gripper",
+        "model_id": "cobotmagic_v100_gripper",
+        "min_opening_width": 0.001,
+        "max_opening_width": 0.1,
+        "root_link": "gripper_base",
+        "collision_links": ["gripper_base", "link7", "link8"],
+        "pad_links": ["link7", "link8"],
+        "root_from_contact_frame": [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.143],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        "grasp_generators": ["antipodal_parallel_jaw"],
     }
 }
 

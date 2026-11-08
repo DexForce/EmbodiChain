@@ -38,14 +38,12 @@ if TYPE_CHECKING:
     )
     from embodichain.lab.sim.motion.solvers import SolverCfg
     from embodichain.lab.sim.sensors import SensorCfg
-    from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
 
 
 from copy import deepcopy
 from typing import Any
 
 from embodichain.utils import configclass
-from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
 from .robot import RobotCfg
 
 __all__ = ["ParallelJawGripperCfg"]
@@ -53,10 +51,26 @@ __all__ = ["ParallelJawGripperCfg"]
 
 @configclass
 class ParallelJawGripperCfg(RobotCfg):
-    """A native hand; mounting and logical capabilities belong to its caller."""
+    """Native physics and supported generators; callers choose mounting and endpoints."""
 
-    grasp_cfg: ParallelJawGripperModelCfg | None = None
-    """Model-owned geometry and contact-frame declaration."""
+    model_id: str | None = None
+    """Exact physical model identity, independent of the mounting robot."""
+    catalog_id: str | None = None
+    """Originating catalog identity; never used by GraspKit for lookup."""
+    root_link: str | None = None
+    """Native hand root before assembly name mapping."""
+    collision_links: tuple[str, ...] = ()
+    """Native collision links defining the complete hand surfaces."""
+    pad_links: tuple[str, str] | None = None
+    """Optional ordered native contact pads."""
+    root_from_contact_frame: list[list[float]] | None = None
+    """Canonical grasp contact frame expressed in the hand root."""
+    min_opening_width: float | None = None
+    """Qualified minimum usable full contact opening in metres."""
+    max_opening_width: float | None = None
+    """Qualified maximum usable full contact opening in metres."""
+    grasp_generators: tuple[str, ...] = ()
+    """Explicit compatible generator kinds; empty grants no grasp service."""
     joint_commands: dict[str, dict[str, float]] = {}
     """Complete commands keyed by native joint name, including followers."""
     default_root_from_tcp: list[list[float]] | None = None
@@ -77,11 +91,6 @@ class ParallelJawGripperCfg(RobotCfg):
         cfg = cls()
         cfg._build_defaults(init_dict)
         result = merge_robot_cfg(cfg, init_dict)
-        for key in ("grasp_cfg", "joint_commands", "default_root_from_tcp", "variant"):
-            if key in init_dict:
-                setattr(result, key, deepcopy(init_dict[key]))
-        if isinstance(result.grasp_cfg, dict):
-            result.grasp_cfg = ParallelJawGripperModelCfg(**result.grasp_cfg)
         return result
 
     def _build_defaults(self, init_dict: dict[str, Any] | None = None) -> None:
@@ -90,8 +99,37 @@ class ParallelJawGripperCfg(RobotCfg):
         from .articulation import JointDrivePropertiesCfg, ArticulationRootPropertiesCfg
 
         self.variant = (init_dict or {}).get("variant", self.variant)
-        defaults = self.get_gripper_defaults(self.variant)
-        self.grasp_cfg = ParallelJawGripperModelCfg(**defaults["grasp_cfg"])
+        from embodichain.robot_registry import _validate_gripper_description
+
+        values = self.get_gripper_defaults(self.variant)
+        for key in (
+            "model_id",
+            "catalog_id",
+            "root_link",
+            "collision_links",
+            "pad_links",
+            "root_from_contact_frame",
+            "min_opening_width",
+            "max_opening_width",
+            "grasp_generators",
+            "joint_commands",
+            "default_root_from_tcp",
+        ):
+            if key in (init_dict or {}):
+                values[key] = deepcopy(init_dict[key])
+        defaults = _validate_gripper_description(values)
+        for key in (
+            "model_id",
+            "catalog_id",
+            "root_link",
+            "collision_links",
+            "pad_links",
+            "root_from_contact_frame",
+            "min_opening_width",
+            "max_opening_width",
+            "grasp_generators",
+        ):
+            setattr(self, key, deepcopy(defaults.get(key, getattr(self, key))))
         self.joint_commands = deepcopy(defaults["joint_commands"])
         self.default_root_from_tcp = deepcopy(defaults["default_root_from_tcp"])
         self.uid = defaults["uid"]
@@ -109,7 +147,7 @@ class ParallelJawGripperCfg(RobotCfg):
             self.fpath = str(
                 materialize_urdf_subtree(
                     self.fpath,
-                    self.grasp_cfg.root_link,
+                    self.root_link,
                     mesh_paths={
                         k: get_data_path(v)
                         for k, v in defaults.get("mesh_paths", {}).items()

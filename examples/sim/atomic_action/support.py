@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
+
 import argparse
 import math
 import pathlib
@@ -76,7 +78,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     ParallelJawGraspCollisionCfg,
     FixedGripperCollisionGeometry,
 )
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+
 from embodichain.utils import configclass, logger
 from embodichain.lab.sim.motion.solvers import FEPSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -1931,7 +1933,7 @@ def create_parallel_jaw_grasp_pose_generator(
     robot: Robot,
     arm_control_part: str = "arm",
     collision_geometry: FixedGripperCollisionGeometry | None = None,
-    gripper_model: ParallelJawGripperModelCfg | None = None,
+    gripper_data: dict[str, object] | None = None,
     approach_direction_samples: int = 4,
 ) -> AntipodalGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
@@ -1942,7 +1944,7 @@ def create_parallel_jaw_grasp_pose_generator(
         robot: Actual mounted robot supplying the runtime TCP calibration.
         arm_control_part: Arm whose mounted tool is sampled.
         collision_geometry: Explicit geometry for custom/native embodiments.
-        gripper_model: Explicit contact aperture; omission uses the mounted tool.
+        gripper_data: Explicit contact aperture; omission uses the mounted tool.
         approach_direction_samples: Candidate approach draws; the fixed-scene
             CLI uses one to isolate geometric and trajectory factors.
 
@@ -1955,16 +1957,16 @@ def create_parallel_jaw_grasp_pose_generator(
         mounted_model, collision_geometry = mounted_gripper_geometry(
             robot.cfg, arm_control_part=arm_control_part
         )
-        if gripper_model is None:
-            gripper_model = mounted_model
-        elif gripper_model.model_id != mounted_model.model_id:
+        if gripper_data is None:
+            gripper_data = mounted_model
+        elif gripper_data["model_id"] != mounted_model["model_id"]:
             raise ValueError(
                 "The requested gripper model does not match the mounted URDF."
             )
-    if gripper_model is None:
+    if gripper_data is None:
         raise ValueError("Explicit collision geometry also requires a gripper model.")
     return AntipodalGraspPoseGenerator(
-        gripper_model,
+        **grasp_generator_parameters(gripper_data),
         collision_geometry=collision_geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample, approach_direction_samples=approach_direction_samples

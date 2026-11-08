@@ -173,7 +173,7 @@ def prepare_robot_grippers(cfg: RobotCfg) -> None:
             dict(cfg.urdf_cfg.component_prefix) if cfg.urdf_cfg is not None else {}
         )
         prefix = prefixes.get(declaration.get("component_type"))
-        subtree = {defaults["grasp_cfg"]["root_link"]}
+        subtree = {defaults["root_link"]}
         while True:
             children = {
                 j.find("child").get("link")

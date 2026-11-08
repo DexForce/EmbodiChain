@@ -29,7 +29,7 @@ _GRIPPER_IDS = {
 }
 
 from embodichain.robot_registry import resolve_gripper_defaults
-from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
+
 
 from types import SimpleNamespace
 
@@ -57,9 +57,7 @@ def test_native_open_hand_mesh_rejects_real_collision_without_false_palm_collisi
     native = create_parallel_jaw_grasp_pose_generator(
         n_sample=32,
         force_refresh=False,
-        gripper_model=ParallelJawGripperModelCfg(
-            **resolve_gripper_defaults("FrankaPandaHand")["grasp_cfg"]
-        ),
+        gripper_data=resolve_gripper_defaults("FrankaPandaHand"),
     )
     geometry = native.collision_geometry
     assert geometry.provenance["joint_positions"] == {
@@ -176,25 +174,21 @@ def test_benchmark_mounted_hand_uses_bound_solver_tcp(
         ).build_cfg()
         scenario.control_part = "left_arm"
     scenario.robot = SimpleNamespace(cfg=cfg)
-    scenario.grasp_model = lambda: ParallelJawGripperModelCfg(
-        **resolve_gripper_defaults(
-            _GRIPPER_IDS.get(model_id, model_id),
-            variant="left" if model_id == "tianji_marvin_gripper" else None,
-        )["grasp_cfg"]
+    scenario.grasp_model = lambda: resolve_gripper_defaults(
+        _GRIPPER_IDS.get(model_id, model_id),
+        variant="left" if model_id == "tianji_marvin_gripper" else None,
     )
     actual_tcp = scenario.grasp_root_from_tcp()
     assert actual_tcp[2][3] == expected_tcp_z
     sampler = create_parallel_jaw_grasp_pose_generator(
         n_sample=32,
         force_refresh=False,
-        gripper_model=scenario.grasp_model(),
+        gripper_data=scenario.grasp_model(),
         root_from_tcp=actual_tcp,
     )
     offset = np.array(sampler.collision_geometry.provenance["grasp_from_tcp"])
     np.testing.assert_allclose(offset[:3, 3], [0, 0, expected_offset], atol=1e-9)
-    scenario.grasp_model = lambda: ParallelJawGripperModelCfg(
-        **resolve_gripper_defaults("FrankaPandaHand")["grasp_cfg"]
-    )
+    scenario.grasp_model = lambda: resolve_gripper_defaults("FrankaPandaHand")
     assert scenario.grasp_root_from_tcp() is None  # Native uses its named hand TCP.
 
 
@@ -206,9 +200,7 @@ def test_grasp_depth_moves_contact_toward_hand_and_rebases_collision_surfaces() 
     arguments = dict(
         n_sample=32,
         force_refresh=False,
-        gripper_model=ParallelJawGripperModelCfg(
-            **resolve_gripper_defaults("RobotiqArg2F140")["grasp_cfg"]
-        ),
+        gripper_data=resolve_gripper_defaults("RobotiqArg2F140"),
         root_from_tcp=tcp,
     )
     original = create_parallel_jaw_grasp_pose_generator(**arguments).collision_geometry

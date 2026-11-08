@@ -21,11 +21,9 @@ from __future__ import annotations
 from .pose_generator import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
 )
 
 __all__ = [
     "GraspPoseGenerator",
     "ParallelJawGraspPoseGenerator",
-    "ParallelJawGripperModelCfg",
 ]

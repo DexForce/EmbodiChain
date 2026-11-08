@@ -160,8 +160,10 @@ Place its pure `get_gripper_defaults(variant=None)` beside its model assets and
 reuse it in full Cfg construction; register its `description_path` in the
 existing robot catalog. The pure provider must not import Lab, read assets or
 initialize geometry/backends. Physical geometry/contact frames and complete
-native commands belong to that provider; GraspKit keeps numerical types and
-algorithm defaults. Provide explicit left/right variants where source hands
+native commands and `grasp_generators` support declarations belong to that
+provider and the flat Cfg fields. Do not introduce a second physical model Cfg.
+GraspKit receives scalar opening bounds and numerical geometry; simulation
+asset adaptation belongs to `lab/sim/utility/gripper_geometry.py`. Provide explicit left/right variants where source hands
 differ. Do not fill unknown hardware with a generic grasp model.
 
 Embodiment bindings reuse mounted or existing hand definitions and generate

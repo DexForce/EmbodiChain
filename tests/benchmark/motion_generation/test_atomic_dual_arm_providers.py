@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from embodichain.robot_registry import resolve_gripper_defaults
-from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
+
 
 import math
 import xml.etree.ElementTree as ET
@@ -37,10 +37,7 @@ from embodichain_benchmarks.motion_generation.scenarios._atomic_pose_sampling im
 )
 
 from embodichain.lab.sim.motion.planners import PlanState
-from embodichain.toolkits.graspkit import (
-    ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-)
+from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 from embodichain_benchmarks.motion_generation.config import (
     AtomicPoseRandomizationCfg,
@@ -978,7 +975,9 @@ def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
     )
     scenario.restore_base_robot = Mock()
     scenario.open_grippers = Mock()
-    scenario.grasp_model = Mock()
+    scenario.grasp_model = Mock(
+        return_value=resolve_gripper_defaults("FrankaPandaHand")
+    )
     monkeypatch.setattr(dual, "_settled_pose", Mock(return_value=(object_pose, 0)))
     monkeypatch.setattr(
         dual, "snapshot_case_qpos", Mock(return_value=(full_start[:, :3], full_start))
@@ -1368,10 +1367,22 @@ class _CountingSampler(ParallelJawGraspPoseGenerator):
         self,
         n_sample: int,
         *,
-        gripper_model: ParallelJawGripperModelCfg | None = None,
+        gripper_data: dict[str, object] | None = None,
         root_from_tcp: list[list[float]] | None = None,
     ) -> None:
-        super().__init__(gripper_model or ParallelJawGripperModelCfg())
+        super().__init__(
+            **{
+                key: (
+                    gripper_data
+                    or {
+                        "model_id": "parallel_jaw",
+                        "min_opening_width": 0.001,
+                        "max_opening_width": 0.1,
+                    }
+                )[key]
+                for key in ("model_id", "min_opening_width", "max_opening_width")
+            }
+        )
         self.n_sample = n_sample
         self.root_from_tcp = root_from_tcp
 
@@ -1445,8 +1456,8 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(
     sampler = scenario.require_engine().grasp_pose_generators["left_eef"]
     assert isinstance(sampler, CaseSampleCountGraspPoseGenerator)
     if model_id is not None:
-        assert sampler.gripper_model.model_id == model_id
-        assert sampler.gripper_model.max_opening_width == pytest.approx(0.08)
+        assert sampler.gripper_data["model_id"] == model_id
+        assert sampler.gripper_data["max_opening_width"] == pytest.approx(0.08)
     assert scenario.require_engine().grasp_pose_generators["right_eef"] is sampler
     engine = Mock(motion_generator=motion_generator)
     engine.compile.side_effect = lambda *args, **kwargs: (
@@ -1777,9 +1788,7 @@ def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monke
         torch.tensor([0.03]),
         torch.tensor([True]),
     )
-    model = ParallelJawGripperModelCfg(
-        **resolve_gripper_defaults("FrankaPandaHand")["grasp_cfg"]
-    )
+    model = resolve_gripper_defaults("FrankaPandaHand")
     source = Mock(device=torch.device("cpu"))
     source.get_valid_grasp_poses.return_value = (True, canonical, widths, costs)
     source.get_grasp_poses.return_value = (True, canonical[0], float(widths[0]))
@@ -1791,7 +1800,7 @@ def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monke
         None,
     ]
     sampler = _atomic_fixtures.create_parallel_jaw_grasp_pose_generator(
-        n_sample=32, force_refresh=False, gripper_model=model
+        n_sample=32, force_refresh=False, gripper_data=model
     )
     monkeypatch.setattr(sampler, "_backend", lambda *_: source)
     arguments = dict(

@@ -128,9 +128,6 @@ from embodichain.lab.task_program.semantics import (
     WorkflowRecoveryPolicy,
     builtin_semantic_call_catalog,
 )
-from embodichain.toolkits.graspkit import (
-    ParallelJawGripperModelCfg,
-)
 
 if TYPE_CHECKING:
     from .environment import TaskProgramEnvironmentAdapter
@@ -2240,7 +2237,7 @@ def _decode_grasp_generator(
     import json
     from copy import deepcopy
     from embodichain.robot_registry import resolve_gripper_defaults
-    from embodichain.toolkits.graspkit.gripper_models import _validate_gripper_transform
+    from embodichain.robot_registry import _validate_gripper_transform
 
     selected = config["gripper"]
     if isinstance(selected, Mapping) and "class_type" in selected:
@@ -2255,49 +2252,22 @@ def _decode_grasp_generator(
         )
     elif isinstance(selected, Mapping):
         defaults = deepcopy(dict(selected))
-        if (
-            not {"fpath", "grasp_cfg", "joint_commands", "default_root_from_tcp"}
-            <= defaults.keys()
-        ):
-            raise ValueError(f"{path}.gripper needs a complete physical description.")
     else:
         raise ValueError(
             f"{path}.gripper must select a catalog class or complete physical description; model strings are removed."
         )
     for field in ("min_opening_width", "max_opening_width"):
         if field in config:
-            defaults["grasp_cfg"][field] = _real(
+            defaults[field] = _real(
                 config[field], path=f"{path}.{field}", minimum=0, strict_minimum=True
             )
-    model = ParallelJawGripperModelCfg(**defaults["grasp_cfg"])
-    if not model.root_link or not model.collision_links:
+    from embodichain.robot_registry import _validate_gripper_description
+
+    defaults = _validate_gripper_description(defaults)
+    if kind not in defaults["grasp_generators"]:
         raise ValueError(
-            f"{path}.gripper requires explicit root_link and collision_links."
+            f"{path}: selected gripper does not declare generator {kind!r}."
         )
-    if not isinstance(defaults["fpath"], str) or not defaults["fpath"]:
-        raise ValueError(f"{path}.gripper requires an explicit source asset.")
-    commands = _mapping(
-        defaults["joint_commands"],
-        path=f"{path}.gripper.joint_commands",
-        required=frozenset({"open", "grasp"}),
-        optional=frozenset(set(defaults["joint_commands"]) - {"open", "grasp"}),
-    )
-    opened = commands["open"]
-    if (
-        not isinstance(opened, Mapping)
-        or not opened
-        or any(
-            not isinstance(command, Mapping) or set(command) != set(opened)
-            for command in commands.values()
-        )
-    ):
-        raise ValueError(f"{path}.gripper commands must cover identical native joints.")
-    if any(
-        not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v)
-        for command in commands.values()
-        for v in command.values()
-    ):
-        raise ValueError(f"{path}.gripper requires complete finite native commands.")
     root_from_tcp = None
     if "root_from_tcp" in config:
         root_from_tcp = _geometry_pose(
@@ -2310,7 +2280,7 @@ def _decode_grasp_generator(
         contact = _geometry_pose(
             config["root_from_contact_frame"], path=f"{path}.root_from_contact_frame"
         )
-        defaults["grasp_cfg"]["root_from_contact_frame"] = [
+        defaults["root_from_contact_frame"] = [
             list(contact[i : i + 4]) for i in range(0, 16, 4)
         ]
     _validate_gripper_transform(defaults["default_root_from_tcp"])
@@ -2318,10 +2288,10 @@ def _decode_grasp_generator(
     if "center_mode" in config and center_mode not in ("bounds", "centroid"):
         raise ValueError(f"{path}.center_mode must be 'bounds' or 'centroid'.")
     return _AntipodalGraspPoseGeneratorFactory(
-        model_id=model.model_id,
+        model_id=defaults["model_id"],
         gripper_json=json.dumps(defaults, sort_keys=True, allow_nan=False),
-        min_opening_width=model.min_opening_width,
-        max_opening_width=model.max_opening_width,
+        min_opening_width=defaults["min_opening_width"],
+        max_opening_width=defaults["max_opening_width"],
         point_spacing=_real(
             config.get("point_spacing", 0.012),
             path=f"{path}.point_spacing",

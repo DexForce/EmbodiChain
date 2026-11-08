@@ -26,7 +26,7 @@ _GRIPPER_IDS = {
 }
 
 from embodichain.robot_registry import resolve_gripper_defaults
-from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+from embodichain.lab.sim.utility.gripper_geometry import (
     build_gripper_collision_geometry,
 )
 

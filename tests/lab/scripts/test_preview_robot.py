@@ -679,5 +679,5 @@ def test_registered_gripper_preview_uses_its_actual_native_asset(robot_id, varia
         args += ["--variant", variant]
     cfg = preview_robot.build_robot_cfg(_args(*args))
     assert cfg.urdf_cfg.force_assembly
-    assert cfg.grasp_cfg.catalog_id == robot_id
+    assert cfg.catalog_id == robot_id
     assert cfg.solver_cfg == {}

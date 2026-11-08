@@ -26,7 +26,6 @@ _DEFAULTS = {
     "default": {
         "uid": "RobotiqArg2F140",
         "fpath": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf",
-        "source_root_link": "robotiq_arg2f_base_link",
         "control_parts": {
             "eef": [
                 "finger_joint",
@@ -44,33 +43,6 @@ _DEFAULTS = {
             "stiffness": 1000.0,
             "damping": 100.0,
             "max_effort": 40.0,
-        },
-        "grasp_cfg": {
-            "catalog_id": "RobotiqArg2F140",
-            "model_id": "robotiq_arg2f_140",
-            "min_opening_width": 0.002,
-            "max_opening_width": 0.15,
-            "root_link": "robotiq_arg2f_base_link",
-            "collision_links": [
-                "robotiq_arg2f_base_link",
-                "left_outer_knuckle",
-                "left_outer_finger",
-                "left_inner_knuckle",
-                "left_inner_finger",
-                "left_inner_finger_pad",
-                "right_outer_knuckle",
-                "right_outer_finger",
-                "right_inner_knuckle",
-                "right_inner_finger",
-                "right_inner_finger_pad",
-            ],
-            "pad_links": ["left_inner_finger_pad", "right_inner_finger_pad"],
-            "root_from_contact_frame": [
-                [0.0, -1.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.2],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
         },
         "joint_commands": {
             "open": {
@@ -106,6 +78,32 @@ _DEFAULTS = {
         },
         "mesh_paths": {},
         "source_sha256": "ac9136384ba1882b0bda767e2246eb5e4a2e10437d435457fbfbdad984a4dbca",
+        "catalog_id": "RobotiqArg2F140",
+        "model_id": "robotiq_arg2f_140",
+        "min_opening_width": 0.002,
+        "max_opening_width": 0.15,
+        "root_link": "robotiq_arg2f_base_link",
+        "collision_links": [
+            "robotiq_arg2f_base_link",
+            "left_outer_knuckle",
+            "left_outer_finger",
+            "left_inner_knuckle",
+            "left_inner_finger",
+            "left_inner_finger_pad",
+            "right_outer_knuckle",
+            "right_outer_finger",
+            "right_inner_knuckle",
+            "right_inner_finger",
+            "right_inner_finger_pad",
+        ],
+        "pad_links": ["left_inner_finger_pad", "right_inner_finger_pad"],
+        "root_from_contact_frame": [
+            [0.0, -1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.2],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        "grasp_generators": ["antipodal_parallel_jaw"],
     }
 }
 

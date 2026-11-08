@@ -1,6 +1,10 @@
 # Parallel-jaw grippers
 
-Concrete `ParallelJawGripperCfg` subclasses own native simulation and grasp data.
+Concrete `ParallelJawGripperCfg` subclasses own flat native simulation and grasp
+fields: model identity, opening bounds, root/collision/pad links, contact frame,
+TCP and complete joint commands. Their `grasp_generators` declaration names the
+supported algorithm kinds; there is no nested physical model Cfg. Shared pure
+defaults back both Cfg construction and static catalog resolution.
 They are registered in the existing `embodichain.robots` catalog and can be
 previewed independently with `embodichain preview-robot --robot DHPGI14080`.
 
@@ -40,7 +44,9 @@ through the same name-normalization policy as ordinary URDF assembly.
 A declared grasp endpoint opts into reuse with `gripper: tool`, its matching
 `control_part`, and explicit `interaction.grasp` capability. Omitted presets
 receive `gripper.tool`; a default grasp generator is created only for those
-explicit endpoints. Existing preset IDs may be retained, but their physical
+explicit endpoints. A unique declared `grasp_generators` kind supplies the
+default; multiple kinds require an explicit policy kind. An empty declaration
+grants no service and an undeclared kind fails validation. Existing preset IDs may be retained, but their physical
 commands must not also be repeated inline. Algorithm policy remains under the
 existing `runtime_services.grasp_pose_generators` target and task override route.
 Handwritten/RL embodiments may omit the semantic profile completely.
@@ -72,18 +78,24 @@ hand calibration. Fixed TCP/object-to-EEF inputs retain their existing bypass.
 
 ```python
 from embodichain.robot_registry import resolve_gripper_defaults, resolve_robot_cfg
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
-    AntipodalGraspPoseGenerator, build_gripper_collision_geometry,
+    AntipodalGraspPoseGenerator,
+)
+from embodichain.lab.sim.utility.gripper_geometry import (
+    build_gripper_collision_geometry, grasp_generator_parameters,
 )
 
 data = resolve_gripper_defaults("DHPGI14080")  # Pure declarations, no asset I/O.
 hand = resolve_robot_cfg("DHPGI14080")        # Full standalone RobotCfg.
 generator = AntipodalGraspPoseGenerator(
-    ParallelJawGripperModelCfg(**data["grasp_cfg"]),
+    **grasp_generator_parameters(data),
     collision_geometry=build_gripper_collision_geometry(data),
 )
 ```
+
+`ParallelJawGripperModelCfg` and the nested `grasp_cfg` field are removed.
+GraspKit accepts scalar limits plus numerical geometry; asset and frame
+adaptation belongs to the Sim adapter shown above.
 
 The former `get_parallel_jaw_gripper_model` and
 `get_parallel_jaw_collision_geometry` APIs are removed. The former generator

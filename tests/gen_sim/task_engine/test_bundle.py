@@ -215,13 +215,16 @@ def _configured_files():
         success={},
     )
     program = build_program_declaration(graph, integration["program_id"])
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    physical = resolve_gym_components(original, base_dir=root)
     configured = load_configured_task_program_deployment(
         task_program={
             "program": {"inline": program},
             "integration": {"inline": integration},
             "execution_policy": {"inline": policy},
         },
-        skill_profile=embodiment["skill_profile"],
+        skill_profile=physical.embodiment_skill_profile,
         base_dir=root,
     )
     graph["integration_fingerprint"] = configured.integration.integration_fingerprint

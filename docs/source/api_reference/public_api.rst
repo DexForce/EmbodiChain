@@ -4168,20 +4168,27 @@ embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
    GripperCollisionCfg
    GripperCollisionChecker
 
-embodichain.toolkits.graspkit.pg_grasp.model_geometry
+embodichain.lab.sim.utility.gripper_geometry
 ---------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+Resolve source geometry and project numerical generator inputs at the Sim boundary.
+
+.. currentmodule:: embodichain.lab.sim.utility.gripper_geometry
 
 .. autosummary::
    :nosignatures:
 
    build_gripper_collision_geometry
+   grasp_generator_parameters
 
-embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. autofunction:: build_gripper_collision_geometry
+
+.. autofunction:: grasp_generator_parameters
+
+embodichain.lab.scripts.annotate_grasp
 ----------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. currentmodule:: embodichain.lab.scripts.annotate_grasp
 
 .. autosummary::
 
@@ -5253,7 +5260,7 @@ embodichain.lab.sim.cfg.gripper
    ParallelJawGripperCfg
 
 .. autoclass:: ParallelJawGripperCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain.lab.sim.utility.gripper_binding
@@ -5280,33 +5287,6 @@ embodichain.robot_registry
 
 .. autofunction:: resolve_gripper_defaults
 
-embodichain.toolkits.graspkit.gripper_models
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. currentmodule:: embodichain.toolkits.graspkit.gripper_models
-
-.. autosummary::
-   :nosignatures:
-
-   ParallelJawGripperModelCfg
-
-.. autoclass:: ParallelJawGripperModelCfg
-   :members:
-   :no-index:
-   :show-inheritance:
-
-embodichain.toolkits.graspkit.pg_grasp
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp
-
-.. autosummary::
-   :nosignatures:
-
-   build_gripper_collision_geometry
-
-.. autofunction:: build_gripper_collision_geometry
-
 embodichain_robots
 ~~~~~~~~~~~~~~~~~~
 
@@ -5324,31 +5304,31 @@ embodichain_robots
    RobotiqArg2F140Cfg
 
 .. autoclass:: FrankaPandaHandCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: DHPGI14080Cfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: CobotMagicV100GripperCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: PikaGripperCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: TianjiMarvinGripperCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: RobotiqArg2F85Cfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 .. autoclass:: RobotiqArg2F140Cfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.agilex.cobotmagic.gripper.cfg
@@ -5362,7 +5342,7 @@ embodichain_robots.agilex.cobotmagic.gripper.cfg
    CobotMagicV100GripperCfg
 
 .. autoclass:: CobotMagicV100GripperCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.agilex.pika.cfg
@@ -5376,7 +5356,7 @@ embodichain_robots.agilex.pika.cfg
    PikaGripperCfg
 
 .. autoclass:: PikaGripperCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.dh_robotics.pgi_140_80.cfg
@@ -5390,7 +5370,7 @@ embodichain_robots.dh_robotics.pgi_140_80.cfg
    DHPGI14080Cfg
 
 .. autoclass:: DHPGI14080Cfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.franka.hand.cfg
@@ -5404,7 +5384,7 @@ embodichain_robots.franka.hand.cfg
    FrankaPandaHandCfg
 
 .. autoclass:: FrankaPandaHandCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.robotiq.arg2f140.cfg
@@ -5418,7 +5398,7 @@ embodichain_robots.robotiq.arg2f140.cfg
    RobotiqArg2F140Cfg
 
 .. autoclass:: RobotiqArg2F140Cfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.robotiq.arg2f85.cfg
@@ -5432,7 +5412,7 @@ embodichain_robots.robotiq.arg2f85.cfg
    RobotiqArg2F85Cfg
 
 .. autoclass:: RobotiqArg2F85Cfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 embodichain_robots.tianji.marvin.gripper.cfg
@@ -5446,7 +5426,7 @@ embodichain_robots.tianji.marvin.gripper.cfg
    TianjiMarvinGripperCfg
 
 .. autoclass:: TianjiMarvinGripperCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
 URDF mounting and name normalization
@@ -5483,5 +5463,5 @@ embodichain.lab.sim.cfg parallel-jaw facade
 .. currentmodule:: embodichain.lab.sim.cfg
 
 .. autoclass:: ParallelJawGripperCfg
-   :members: grasp_cfg, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :no-index:

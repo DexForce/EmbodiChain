@@ -23,7 +23,7 @@ from copy import deepcopy
 import math
 
 from embodichain.robot_registry import resolve_gripper_defaults
-from embodichain.toolkits.graspkit.gripper_models import _validate_gripper_transform
+from embodichain.robot_registry import _validate_gripper_transform
 from embodichain.toolkits.urdf_assembly.name_normalizer import NameNormalizer
 
 __all__: list[str] = []
@@ -112,7 +112,7 @@ def _expand_grippers(
                     "transform": transform,
                     **(
                         {
-                            "source_root_link": defaults["source_root_link"],
+                            "source_root_link": defaults["root_link"],
                             "mesh_paths": defaults.get("mesh_paths", {}),
                         }
                         if defaults.get("extract_subtree")
@@ -203,8 +203,8 @@ def _expand_grippers(
                 raw["root_from_tcp"]
             )
         if "root_from_contact_frame" in raw:
-            defaults["grasp_cfg"]["root_from_contact_frame"] = (
-                _validate_gripper_transform(raw["root_from_contact_frame"])
+            defaults["root_from_contact_frame"] = _validate_gripper_transform(
+                raw["root_from_contact_frame"]
             )
         defaults["binding"] = {"instance": instance, **deepcopy(dict(raw))}
         bindings[instance] = {
@@ -213,7 +213,7 @@ def _expand_grippers(
             "joint_names": mapped,
             "link_names": {
                 n: normalizer.component_name("link", n, prefix)
-                for n in defaults["grasp_cfg"]["collision_links"]
+                for n in defaults["collision_links"]
             },
             "control_joint_names": selected,
             "reference_link": (
@@ -222,7 +222,7 @@ def _expand_grippers(
                 else None
             ),
             "root_link": normalizer.component_name(
-                "link", defaults["grasp_cfg"]["root_link"], prefix
+                "link", defaults["root_link"], prefix
             ),
         }
         explicit_tcp = (
@@ -288,8 +288,20 @@ def _expand_grippers(
                 raise ValueError(
                     "A bound gripper owns generator physical data; only policy fields may be repeated."
                 )
+            supported = defaults["grasp_generators"]
+            selected_kind = policy.get("kind")
+            if selected_kind is None:
+                if len(supported) != 1:
+                    raise ValueError(
+                        "A grasp endpoint must explicitly select one declared generator kind."
+                    )
+                selected_kind = supported[0]
+            if selected_kind not in supported:
+                raise ValueError(
+                    f"Gripper {instance!r} does not declare generator {selected_kind!r}."
+                )
             generators[part] = {
-                "kind": "antipodal_parallel_jaw",
+                "kind": selected_kind,
                 **policy,
                 "gripper": deepcopy(defaults),
             }

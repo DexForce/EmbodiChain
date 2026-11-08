@@ -140,7 +140,8 @@ topics:
   - embodichain/lab/sim/utility/grasp_geometry.py
   - embodichain/lab/sim/robots/
   - embodichain/robot_registry.py
-  - embodichain/gripper_binding.py
+  - embodichain/lab/gym/utils/_gripper_composition.py
+  - embodichain/lab/sim/utility/gripper_geometry.py
   - embodichain/cli/list_robot.py
   - embodichain/lab/scripts/preview_robot.py
   - extensions/embodichain_robots/

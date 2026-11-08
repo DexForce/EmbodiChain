@@ -26,7 +26,6 @@ _DEFAULTS = {
     "default": {
         "uid": "PikaGripper",
         "fpath": "PikaGripper/PikaGripper.urdf",
-        "source_root_link": "GRIPPER_ROOT_LINK",
         "control_parts": {"eef": ["FINGER1_JOINT", "FINGER2_JOINT"]},
         "solver_cfg": {},
         "init_qpos": [0.05, 0.05],
@@ -35,21 +34,6 @@ _DEFAULTS = {
             "stiffness": 1000.0,
             "damping": 100.0,
             "max_effort": 40.0,
-        },
-        "grasp_cfg": {
-            "catalog_id": "PikaGripper",
-            "model_id": "pika_gripper",
-            "min_opening_width": 0.001,
-            "max_opening_width": 0.094,
-            "root_link": "GRIPPER_ROOT_LINK",
-            "collision_links": ["GRIPPER_BASE", "FINGER1", "FINGER2"],
-            "pad_links": ["FINGER1", "FINGER2"],
-            "root_from_contact_frame": [
-                [0.0, 1.0, 0.0, 0.00064],
-                [-1.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.16],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
         },
         "joint_commands": {
             "open": {"FINGER1_JOINT": 0.05, "FINGER2_JOINT": 0.05},
@@ -64,6 +48,20 @@ _DEFAULTS = {
         "qpos_limits": {"FINGER1_JOINT": [0.0, 0.05], "FINGER2_JOINT": [0.0, 0.05]},
         "mesh_paths": {},
         "source_sha256": "cb99efefd74f26011c56d5afcf13839c13a5374160fecb02ac02ba9fa172d952",
+        "catalog_id": "PikaGripper",
+        "model_id": "pika_gripper",
+        "min_opening_width": 0.001,
+        "max_opening_width": 0.094,
+        "root_link": "GRIPPER_ROOT_LINK",
+        "collision_links": ["GRIPPER_BASE", "FINGER1", "FINGER2"],
+        "pad_links": ["FINGER1", "FINGER2"],
+        "root_from_contact_frame": [
+            [0.0, 1.0, 0.0, 0.00064],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.16],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        "grasp_generators": ["antipodal_parallel_jaw"],
     }
 }
 

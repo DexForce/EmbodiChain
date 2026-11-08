@@ -22,9 +22,11 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .fixed_geometry import FixedGripperCollisionGeometry
+    from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
+        FixedGripperCollisionGeometry,
+    )
 
-__all__ = ["build_gripper_collision_geometry"]
+__all__ = ["build_gripper_collision_geometry", "grasp_generator_parameters"]
 
 
 def build_gripper_collision_geometry(
@@ -38,7 +40,7 @@ def build_gripper_collision_geometry(
 
     Args:
         defaults: Complete primitive gripper description, including source asset,
-            grasp_cfg, native commands and default_root_from_tcp.
+            native commands and default_root_from_tcp.
         point_spacing: Maximum triangle sampling edge in metres.
         root_from_tcp: Explicit runtime TCP relative to the native hand root.
         root_from_contact_frame: Explicit contact-frame calibration, if selected.
@@ -47,16 +49,17 @@ def build_gripper_collision_geometry(
         Independent collision geometry converting canonical candidates to TCP.
     """
     from embodichain.data import get_data_path
-    from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
-    from .fixed_geometry import FixedGripperCollisionGeometry, _rigid_transform
+    from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
+        FixedGripperCollisionGeometry,
+        _rigid_transform,
+    )
     import numpy as np
 
-    model = ParallelJawGripperModelCfg(**defaults["grasp_cfg"])
-    if not model.root_link or not model.collision_links:
+    if not defaults["root_link"] or not tuple(defaults["collision_links"]):
         raise ValueError("Explicit root_link and collision_links are required.")
     canonical = _rigid_transform(
         (
-            model.root_from_contact_frame
+            defaults["root_from_contact_frame"]
             if root_from_contact_frame is None
             else root_from_contact_frame
         ),
@@ -78,10 +81,10 @@ def build_gripper_collision_geometry(
         raise ValueError("Gripper source asset differs from its pinned description.")
     geometry = FixedGripperCollisionGeometry.from_urdf(
         source_path,
-        root_link=model.root_link,
-        tcp_link=model.root_link,
+        root_link=defaults["root_link"],
+        tcp_link=defaults["root_link"],
         link_from_tcp=tcp,
-        collision_links=model.collision_links,
+        collision_links=tuple(defaults["collision_links"]),
         joint_positions=dict(defaults["joint_commands"]["open"]),
         grasp_from_tcp=np.linalg.inv(canonical) @ tcp,
         point_spacing=point_spacing,
@@ -94,9 +97,23 @@ def build_gripper_collision_geometry(
         geometry.points,
         {
             **geometry.provenance,
-            "model_id": model.model_id,
+            "model_id": defaults["model_id"],
             "root_from_contact_frame": canonical.tolist(),
             "default_root_from_tcp": defaults["default_root_from_tcp"],
             "runtime_tcp_overridden": root_from_tcp is not None,
         },
     )
+
+
+def grasp_generator_parameters(data: Mapping[str, object]) -> dict[str, object]:
+    """Project an owned numeric algorithm input from a resolved physical hand.
+
+    Args:
+        data: Caller-selected primitive hand data with calibrated opening bounds.
+
+    Returns:
+        Scalar generator inputs; assets, topology and runtime objects are excluded.
+    """
+    return {
+        key: data[key] for key in ("model_id", "min_opening_width", "max_opening_width")
+    }

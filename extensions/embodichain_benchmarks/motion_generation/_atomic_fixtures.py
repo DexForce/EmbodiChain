@@ -22,10 +22,12 @@ The calibrations and defaults preserve the benchmark's original sample scenes.
 
 from __future__ import annotations
 
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
+
 from pathlib import Path
 
 from embodichain.robot_registry import resolve_gripper_defaults
-from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+from embodichain.lab.sim.utility.gripper_geometry import (
     build_gripper_collision_geometry,
 )
 
@@ -52,10 +54,7 @@ from embodichain.lab.sim.robots import build_dual_arm_cfg
 from embodichain.lab.sim.motion.solvers import FEPSolverCfg, PytorchSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
-from embodichain.toolkits.graspkit import (
-    ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-)
+from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
@@ -111,12 +110,12 @@ _UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
 )
 
 
-TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
-    model_id="dh_pgi_140_80",
-    catalog_id="DHPGI14080",
-    min_opening_width=0.003,
-    max_opening_width=0.100,
-)
+TUTORIAL_PARALLEL_JAW_MODEL = {
+    "model_id": "dh_pgi_140_80",
+    "catalog_id": "DHPGI14080",
+    "min_opening_width": 0.003,
+    "max_opening_width": 0.100,
+}
 
 
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
@@ -164,7 +163,7 @@ def create_parallel_jaw_grasp_pose_generator(
     force_refresh: bool,
     max_candidates: int = 50,
     approach_alignment_angle: float | None = None,
-    gripper_model: ParallelJawGripperModelCfg | None = None,
+    gripper_data: dict[str, object] | None = None,
     root_from_tcp: Sequence[Sequence[float]] | None = None,
     grasp_depth_offset_m: float = 0.0,
 ) -> ParallelJawGraspPoseGenerator:
@@ -176,7 +175,7 @@ def create_parallel_jaw_grasp_pose_generator(
         max_candidates: Maximum ranked grasp candidates returned per object.
         approach_alignment_angle: Optional hard contact-Z angle before
             candidate deduplication and ranking; proposal cones are unchanged.
-        gripper_model: Explicit fixture geometry; omission uses the PGI sample.
+        gripper_data: Explicit fixture geometry; omission uses the PGI sample.
         root_from_tcp: Actual fixture TCP relative to the hand root, when it
             differs from the model's default calibration.
         grasp_depth_offset_m: Move the physical contact centre toward the hand
@@ -195,9 +194,9 @@ def create_parallel_jaw_grasp_pose_generator(
         grasp_depth_offset_m
     ):
         raise ValueError("grasp_depth_offset_m must be finite.")
-    model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model
+    model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_data is None else gripper_data
     geometry = build_gripper_collision_geometry(
-        resolve_gripper_defaults(model.catalog_id),
+        resolve_gripper_defaults(model["catalog_id"]),
         point_spacing=0.012,
         root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
     )
@@ -234,7 +233,7 @@ def create_parallel_jaw_grasp_pose_generator(
             },
         )
     return AntipodalGraspPoseGenerator(
-        model,
+        **grasp_generator_parameters(model),
         collision_geometry=geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample,

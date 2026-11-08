@@ -46,7 +46,7 @@ def test_native_defaults_preserve_qualified_width_and_commands(
     name, variant, width, opened, closed
 ):
     defaults = resolve_gripper_defaults(name, variant=variant)
-    model = defaults["grasp_cfg"]
+    model = defaults
     assert model["max_opening_width"] == width
     leader = defaults["control_parts"]["eef"][0]
     assert defaults["joint_commands"]["open"][leader] == opened
@@ -66,7 +66,7 @@ def test_static_descriptions_do_not_import_runtime_or_access_assets():
 import sys
 class Fence:
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.startswith(("embodichain.lab", "dexsim", "open3d", "scipy", "trimesh")):
+        if fullname.startswith(("embodichain.lab", "dexsim", "open3d", "scipy", "trimesh", "torch", "embodichain.toolkits.graspkit")):
             raise AssertionError("Unexpected runtime import: " + fullname)
 sys.meta_path.insert(0, Fence())
 from embodichain.robot_registry import resolve_gripper_defaults
@@ -81,7 +81,7 @@ assert "embodichain.data" not in sys.modules
     )
 
 
-def _compose(tmp_path, *, logical=True, model="DHPGI14080"):
+def _compose(tmp_path, *, logical=True, model="DHPGI14080", generator_kind=None):
     from embodichain.lab.gym.utils.composition import resolve_gym_components
 
     declaration = {
@@ -116,6 +116,10 @@ def _compose(tmp_path, *, logical=True, model="DHPGI14080"):
                 }
             ],
         }
+    if logical and generator_kind is not None:
+        declaration["skill_profile"]["runtime_services"] = {
+            "grasp_pose_generators": {"custom_fingers": {"kind": generator_kind}}
+        }
     path = tmp_path / "hand.yaml"
     return resolve_gym_components(
         {"embodiment": {"component": "hand.yaml"}},
@@ -137,10 +141,7 @@ def test_production_composition_fills_only_explicit_endpoints_and_owns_commands(
     }
     generators = profile["runtime_services"]["grasp_pose_generators"]
     assert set(generators) == {"custom_fingers"}
-    assert (
-        generators["custom_fingers"]["gripper"]["grasp_cfg"]["catalog_id"]
-        == "DHPGI14080"
-    )
+    assert generators["custom_fingers"]["gripper"]["catalog_id"] == "DHPGI14080"
     assert "tcp" not in physical.config["robot"].get("solver_cfg", {}).get("arm", {})
     assert _compose(tmp_path, logical=False).embodiment_skill_profile is None
     profile["command_presets"][0]["commands"]["open"][0] = 9.0
@@ -275,9 +276,9 @@ def test_static_decode_rejects_missing_physical_geometry(tmp_path):
     )
 
     description = resolve_gripper_defaults("DHPGI14080")
-    description["grasp_cfg"].pop("root_link")
-    description["grasp_cfg"]["collision_links"] = []
-    with pytest.raises(ValueError, match="root_link.*collision_links"):
+    description.pop("root_link")
+    description["collision_links"] = []
+    with pytest.raises(ValueError, match="root_link|collision_links"):
         _decode_grasp_generator(
             {"kind": "antipodal_parallel_jaw", "gripper": description}, path="test"
         )
@@ -297,7 +298,7 @@ def test_runtime_service_binding_rejects_changed_contact_frame(tmp_path):
         path="test",
     )
     actual = deepcopy(physical.config["robot"]["gripper_bindings"])
-    actual["tool"]["defaults"]["grasp_cfg"]["root_from_contact_frame"][2][3] += 0.01
+    actual["tool"]["defaults"]["root_from_contact_frame"][2][3] += 0.01
     with pytest.raises(ValueError, match="calibration"):
         factory.validate_binding(
             SimpleNamespace(cfg=SimpleNamespace(gripper_bindings=actual)),
@@ -449,3 +450,65 @@ def test_generic_dual_bound_hands_preserve_source_order_limit_overrides(tmp_path
     assert len(dual.qpos_limits) == (4 if form == "regex" else 24)
     assert all(value == [-10.0, 10.0] for value in dual.qpos_limits.values())
     prepare_robot_grippers(dual)
+
+
+@pytest.mark.parametrize("supported", [[], ["antipodal_parallel_jaw", "other_kind"]])
+def test_generator_capabilities_are_explicit_and_do_not_grant_undeclared_endpoints(
+    tmp_path, monkeypatch, supported
+):
+    import embodichain_robots.dh_robotics.pgi_140_80._gripper_defaults as provider
+
+    values = provider.get_gripper_defaults()
+    values["grasp_generators"] = supported
+    monkeypatch.setattr(
+        provider, "get_gripper_defaults", lambda variant=None: deepcopy(values)
+    )
+    assert _compose(tmp_path, logical=False).embodiment_skill_profile is None
+    with pytest.raises(ValueError, match="generator"):
+        _compose(tmp_path)
+    if supported:
+        selected = _compose(tmp_path, generator_kind="antipodal_parallel_jaw")
+        assert (
+            selected.embodiment_skill_profile["runtime_services"][
+                "grasp_pose_generators"
+            ]["custom_fingers"]["kind"]
+            == "antipodal_parallel_jaw"
+        )
+
+
+def test_bound_endpoint_cannot_select_an_undeclared_generator(tmp_path):
+    with pytest.raises(ValueError, match="does not declare generator"):
+        _compose(tmp_path, generator_kind="other_kind")
+
+
+def test_physical_fields_and_capability_declaration_live_on_the_concrete_cfg():
+    from embodichain.robot_registry import resolve_robot_cfg
+
+    cfg = resolve_robot_cfg("DHPGI14080")
+    assert not hasattr(cfg, "grasp_cfg")
+    assert cfg.root_link == "gripper_base_link_1"
+    assert cfg.min_opening_width == 0.005 and cfg.max_opening_width == 0.1
+    assert cfg.grasp_generators == ["antipodal_parallel_jaw"]
+
+
+def test_concrete_cfg_overrides_export_owned_numeric_inputs_without_a_model_cfg():
+    from embodichain.robot_registry import resolve_robot_cfg
+    from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
+
+    source = resolve_gripper_defaults("DHPGI14080")
+    commands = deepcopy(source["joint_commands"])
+    commands["open"] = {name: 0.001 for name in commands["open"]}
+    cfg = resolve_robot_cfg(
+        "DHPGI14080",
+        {"max_opening_width": 0.08, "grasp_generators": [], "joint_commands": commands},
+    )
+    assert cfg.grasp_generators == [] and cfg.init_qpos == [0.001, 0.001]
+    inputs = grasp_generator_parameters(cfg.to_dict())
+    assert inputs == {
+        "model_id": "dh_pgi_140_80",
+        "min_opening_width": 0.005,
+        "max_opening_width": 0.08,
+    }
+    inputs["max_opening_width"] = 99.0
+    assert cfg.max_opening_width == 0.08
+    assert resolve_gripper_defaults("DHPGI14080")["max_opening_width"] == 0.1

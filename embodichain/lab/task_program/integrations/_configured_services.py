@@ -396,23 +396,22 @@ class _AntipodalGraspPoseGeneratorFactory:
                 if key not in {"min_opening_width", "max_opening_width"}
             }
 
-        if json.dumps(
-            physical_model(actual["grasp_cfg"]), sort_keys=True
-        ) != json.dumps(physical_model(expected["grasp_cfg"]), sort_keys=True):
+        if json.dumps(physical_model(actual), sort_keys=True) != json.dumps(
+            physical_model(expected), sort_keys=True
+        ):
             raise ValueError(
                 "Configured grasp calibration or geometry disagrees with the actual gripper."
             )
 
     def __call__(self) -> GraspPoseGenerator:
         """Create a fresh configured antipodal grasp-pose generator."""
-        from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
         from embodichain.toolkits.graspkit.pg_grasp import (
             AntipodalGraspPoseGenerator,
             AntipodalGraspPoseGeneratorCfg,
             GraspAnnotationCfg,
             ParallelJawGraspCollisionCfg,
         )
-        from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+        from embodichain.lab.sim.utility.gripper_geometry import (
             build_gripper_collision_geometry,
         )
         import numpy as np
@@ -441,7 +440,9 @@ class _AntipodalGraspPoseGeneratorFactory:
 
         defaults = json.loads(self.gripper_json)
         return AntipodalGraspPoseGenerator(
-            ParallelJawGripperModelCfg(**defaults["grasp_cfg"]),
+            model_id=defaults["model_id"],
+            min_opening_width=defaults["min_opening_width"],
+            max_opening_width=defaults["max_opening_width"],
             collision_geometry=build_gripper_collision_geometry(
                 defaults,
                 point_spacing=self.point_spacing,

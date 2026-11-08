@@ -1488,7 +1488,7 @@ def test_object_rotation_providers_screen_every_pose_row(
     for index, call in enumerate(references):
         torch.testing.assert_close(call[2], case.start_qpos + index * 0.01)
     generator_factory.assert_called_once_with(
-        gripper_model=None,
+        gripper_data=None,
         root_from_tcp=robot.cfg.solver_cfg["arm"].tcp,
         n_sample=321,
         force_refresh=False,

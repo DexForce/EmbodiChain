@@ -19,18 +19,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from copy import deepcopy
 
 import torch
 
 __all__ = [
     "GraspPoseGenerator",
     "ParallelJawGraspPoseGenerator",
-    "ParallelJawGripperModelCfg",
 ]
-
-
-from .gripper_models import ParallelJawGripperModelCfg
 
 
 class GraspPoseGenerator(ABC):
@@ -69,17 +64,73 @@ class GraspPoseGenerator(ABC):
 class ParallelJawGraspPoseGenerator(GraspPoseGenerator, ABC):
     """Base service shared by two-finger parallel-jaw grippers."""
 
-    def __init__(self, gripper_model: ParallelJawGripperModelCfg) -> None:
-        if not isinstance(gripper_model, ParallelJawGripperModelCfg):
-            raise TypeError(
-                "gripper_model must be a ParallelJawGripperModelCfg instance."
-            )
-        self._gripper_model = deepcopy(gripper_model)
+    def __init__(
+        self,
+        *,
+        min_opening_width: float,
+        max_opening_width: float,
+        model_id: str = "parallel_jaw",
+    ) -> None:
+        """Own validated scalar constraints independently of any hardware Cfg.
+
+        Args:
+            min_opening_width: Minimum usable full contact distance in metres.
+            max_opening_width: Maximum usable full contact distance in metres.
+            model_id: Opaque caller identity used for provenance and compatibility.
+        """
+        import math
+
+        for name, value in (
+            ("min_opening_width", min_opening_width),
+            ("max_opening_width", max_opening_width),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be finite and positive.")
+        if min_opening_width >= max_opening_width:
+            raise ValueError("min_opening_width must be less than max_opening_width.")
+        if type(model_id) is not str or not model_id or model_id != model_id.strip():
+            raise ValueError("model_id must be an explicit nonempty caller identity.")
+        self._model_id = model_id
+        self._opening_limits = (float(min_opening_width), float(max_opening_width))
 
     @property
-    def gripper_model(self) -> ParallelJawGripperModelCfg:
-        """Return an owned snapshot of the physical gripper model."""
-        return deepcopy(self._gripper_model)
+    def model_id(self) -> str:
+        """Return the opaque identity without performing model lookup."""
+        return self._model_id
+
+    @property
+    def min_opening_width(self) -> float:
+        """Return the minimum full contact distance in metres."""
+        return self._opening_limits[0]
+
+    @property
+    def max_opening_width(self) -> float:
+        """Return the maximum full contact distance in metres."""
+        return self._opening_limits[1]
+
+    @property
+    def gripper_data(self) -> dict[str, object]:
+        """Return an owned scalar input snapshot for composed generator views."""
+        return {
+            "model_id": self.model_id,
+            "min_opening_width": self.min_opening_width,
+            "max_opening_width": self.max_opening_width,
+        }
+
+    @property
+    def paired_query_key(self) -> object:
+        """Identify one service that owns both role geometries and TCP mappings.
+
+        Distinct custom instances are incompatible unless they explicitly expose
+        an equal immutable key or share the same paired provider. Model identity
+        and opening limits alone cannot authorize one query for both hands.
+        """
+        return ("instance", id(self))
 
     def get_grasp_candidates(
         self,

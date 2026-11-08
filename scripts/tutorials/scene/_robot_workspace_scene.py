@@ -21,6 +21,8 @@ This module deliberately has no Gym or Task Program dependency.
 
 from __future__ import annotations
 
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
+
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
@@ -230,7 +232,7 @@ def _choose_grasp(
     model, geometry = mounted_gripper_geometry(robot.cfg)
     mesh = trimesh.creation.box(extents=[CUBE_SIZE] * 3)
     generator = AntipodalGraspPoseGenerator(
-        model,
+        **grasp_generator_parameters(model),
         collision_geometry=geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=1000,
