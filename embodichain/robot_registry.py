@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import RobotCfg
 
-__all__ = ["list_robot_cfgs", "resolve_robot_cfg"]
+__all__ = ["list_robot_cfgs", "resolve_robot_cfg", "resolve_gripper_defaults"]
 
 
 def _validate_control_metadata(name: str, spec: Mapping[str, Any]) -> None:
@@ -306,4 +306,61 @@ def resolve_robot_cfg(
     params = deepcopy(
         {**spec.get("defaults", {}), **variant_defaults, **(overrides or {})}
     )
-    return cfg_cls.from_dict(params)
+    cfg = cfg_cls.from_dict(params)
+    return cfg
+
+
+def resolve_gripper_defaults(
+    name: str, *, variant: str | None = None
+) -> dict[str, object]:
+    """Read owned parallel-jaw defaults through the existing metadata-only catalog.
+
+    Args:
+        name: Exact robot-catalog ID exposing a gripper description.
+        variant: Explicit model variant, including native left/right selection.
+
+    Returns:
+        Detached primitive configuration; asset references remain unresolved.
+
+    Raises:
+        ValueError: The ID or variant has no explicit gripper description.
+        TypeError: The provider returns incomplete or non-serializable data.
+    """
+    import json
+
+    spec = _robot_specs().get(name)
+    if spec is None or not spec.get("description_path"):
+        raise ValueError(f"Robot {name!r} has no parallel-jaw description.")
+    module, separator, symbol = spec["description_path"].partition(":")
+    if not separator or not module or not symbol:
+        raise ValueError("description_path must use module:function format.")
+    if variant is not None and variant not in (spec.get("variants") or {}):
+        raise ValueError(f"Unknown gripper variant {variant!r} for {name!r}.")
+    result = getattr(import_module(module), symbol)(variant)
+    if (
+        not isinstance(result, dict)
+        or not {
+            "fpath",
+            "grasp_cfg",
+            "joint_commands",
+            "default_root_from_tcp",
+            "control_parts",
+        }
+        <= result.keys()
+    ):
+        raise TypeError("Gripper description is incomplete.")
+    json.dumps(result, allow_nan=False)
+    from embodichain.toolkits.graspkit.gripper_models import (
+        ParallelJawGripperModelCfg,
+        _validate_gripper_transform,
+    )
+
+    ParallelJawGripperModelCfg(**result["grasp_cfg"])
+    _validate_gripper_transform(result["default_root_from_tcp"])
+    commands = result["joint_commands"]
+    names = set(result["control_parts"]["eef"])
+    if not {"open", "grasp"} <= commands.keys() or any(
+        set(command) != names for command in commands.values()
+    ):
+        raise ValueError("Gripper commands must cover all native moving joints.")
+    return deepcopy(result)

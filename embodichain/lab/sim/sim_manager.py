@@ -3425,6 +3425,12 @@ class SimulationManager:
                 newton_solver_type=self._active_newton_solver_type,
             )
 
+        if cfg.gripper_bindings:
+            from embodichain.lab.sim.utility.gripper_binding import (
+                prepare_robot_grippers,
+            )
+
+            prepare_robot_grippers(cfg)
         uid = cfg.uid
         source_path = _asset_file_path(cfg)
         if source_path is None:

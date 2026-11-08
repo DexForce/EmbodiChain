@@ -1327,7 +1327,9 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.control_part = "arm"
-    scenario.track = Mock(config={"grasp_model": model_id})
+    scenario.track = Mock(
+        config={"grasp_model": "FrankaPandaHand" if model_id else None}
+    )
 
     grasp = scenario.resolve_articulation_grasp(
         mesh_vertices=torch.zeros(3, 3),

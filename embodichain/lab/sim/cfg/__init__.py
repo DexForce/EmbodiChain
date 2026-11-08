@@ -86,6 +86,7 @@ DEFAULT_RENDERER: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "aut
 # Robot imports are kept last because SolverCfg discovery imports simulation
 # modules that themselves rely on the public facade above.
 from .robot import RobotCfg, RobotPresetCfg  # noqa: E402
+from .gripper import ParallelJawGripperCfg  # noqa: E402
 
 __all__ = [
     "DEFAULT_RENDERER",
@@ -143,6 +144,7 @@ __all__ = [
     "URDFCfg",
     "RobotCfg",
     "RobotPresetCfg",
+    "ParallelJawGripperCfg",
     "RobotWorkspaceCfg",
     "get_data_path",
 ]

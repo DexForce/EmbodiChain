@@ -66,18 +66,19 @@ def test_builtin_cli_keeps_physical_apertures_and_selected_geometry(
             assert kwargs["mesh_vertices"].shape[1] == 3
             return torch.zeros(2, 2, 3)
 
-    monkeypatch.setattr(model_geometry, "get_parallel_jaw_collision_geometry", geometry)
+    monkeypatch.setattr(module, "build_gripper_collision_geometry", geometry)
     monkeypatch.setattr(pg_grasp, "AntipodalGraspPoseGenerator", Generator)
     module.cli(
         [
             "--mesh_path",
             str(path),
             "--gripper-model",
-            "franka_panda_hand",
+            "FrankaPandaHand",
             *contact_options,
         ]
     )
-    assert seen["identity"] == ("franka_panda_hand", {"side": None})
+    assert seen["identity"][0]["grasp_cfg"]["model_id"] == "franka_panda_hand"
+    assert seen["identity"][1] == {}
     assert seen["geometry"] is selected
     assert (
         seen["model"].min_opening_width,

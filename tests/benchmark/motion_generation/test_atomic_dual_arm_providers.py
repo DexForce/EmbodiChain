@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
+
 import math
 import xml.etree.ElementTree as ET
 from dataclasses import replace
@@ -1402,7 +1405,9 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(
     }[name]
     robot.get_qpos_limits.side_effect = lambda name: torch.tensor([[[0.0, 0.04]]])
     scenario = AtomicSkillScenario()
-    scenario.track = SimpleNamespace(config={"grasp_model": model_id})
+    scenario.track = SimpleNamespace(
+        config={"grasp_model": "FrankaPandaHand" if model_id else None}
+    )
     scenario.robot = robot
     scenario.control_part = "left_arm"
     scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
@@ -1761,7 +1766,7 @@ def test_native_panda_dual_rejects_incompatible_arm_or_tool_override(
 
 def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monkeypatch):
     """Every sampler API preserves metadata and native replay retains the pose."""
-    from embodichain.toolkits.graspkit import get_parallel_jaw_gripper_model
+
     from embodichain_benchmarks.motion_generation import _atomic_fixtures
 
     canonical = _pose(0.2, 0.3, 0.4).unsqueeze(0)
@@ -1772,7 +1777,9 @@ def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monke
         torch.tensor([0.03]),
         torch.tensor([True]),
     )
-    model = get_parallel_jaw_gripper_model("franka_panda_hand")
+    model = ParallelJawGripperModelCfg(
+        **resolve_gripper_defaults("FrankaPandaHand")["grasp_cfg"]
+    )
     source = Mock(device=torch.device("cpu"))
     source.get_valid_grasp_poses.return_value = (True, canonical, widths, costs)
     source.get_grasp_poses.return_value = (True, canonical[0], float(widths[0]))

@@ -133,13 +133,14 @@ topics:
   keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
     FrankaCfg, FrankaPandaCfg, URRobotCfg, BrainCoRevo1Cfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
     asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot,
-    RobotHandGeometryCfg, RobotHandGeometryProvider, RobotCoordinatedGraspProvider, 机器人手部几何采样]
+    RobotHandGeometryCfg, RobotHandGeometryProvider, RobotCoordinatedGraspProvider, ParallelJawGripperCfg, resolve_gripper_defaults, 二指夹爪, 机器人手部几何采样]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
   - embodichain/lab/sim/objects/robot.py
   - embodichain/lab/sim/utility/grasp_geometry.py
   - embodichain/lab/sim/robots/
   - embodichain/robot_registry.py
+  - embodichain/gripper_binding.py
   - embodichain/cli/list_robot.py
   - embodichain/lab/scripts/preview_robot.py
   - extensions/embodichain_robots/

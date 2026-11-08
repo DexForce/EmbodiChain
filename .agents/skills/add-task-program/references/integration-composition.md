@@ -129,3 +129,10 @@ If generation discovers a missing:
 - Semantic Call/allowlisted provider: route to `$add-semantic-call`.
 
 Do not encode a guessed value to make static validation pass.
+
+
+Parallel-jaw physical data is selected by the embodiment's explicit `grippers`
+bindings and endpoint `gripper` references. Compose them before decoding the
+integration. Do not copy hardware descriptions/commands or a second TCP into
+task integration; use only supported search-policy overrides. The former
+runtime-generator `model` string/mapping is removed.

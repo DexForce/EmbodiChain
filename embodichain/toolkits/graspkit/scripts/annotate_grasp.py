@@ -27,6 +27,12 @@ Usage examples::
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
+from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+    build_gripper_collision_geometry,
+)
+
 import argparse
 from collections.abc import Sequence
 
@@ -67,7 +73,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--gripper-model",
         required=True,
-        help="Explicit built-in gripper identity; supplies the actual URDF collision geometry.",
+        help="Exact robot-catalog gripper ID, e.g. FrankaPandaHand or RobotiqArg2F85.",
     )
     parser.add_argument(
         "--max_length",
@@ -98,21 +104,20 @@ def cli(argv: Sequence[str] | None = None) -> None:
     import torch
     import trimesh
 
-    from embodichain.toolkits.graspkit import (
-        ParallelJawGripperModelCfg,
-        get_parallel_jaw_gripper_model,
-    )
+    from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
     from embodichain.toolkits.graspkit.pg_grasp import (
         AntipodalGraspPoseGenerator,
         AntipodalGraspPoseGeneratorCfg,
         GraspAnnotationCfg,
     )
-    from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
-        get_parallel_jaw_collision_geometry,
-    )
+
     from embodichain.utils.logger import log_info
 
-    selected_model = get_parallel_jaw_gripper_model(args.gripper_model)
+    selected_model = ParallelJawGripperModelCfg(
+        **resolve_gripper_defaults(args.gripper_model, variant=args.gripper_side)[
+            "grasp_cfg"
+        ]
+    )
     # Retain the existing contact-pair filters; they never synthesize geometry.
     model = ParallelJawGripperModelCfg(
         model_id=selected_model.model_id,
@@ -127,8 +132,8 @@ def cli(argv: Sequence[str] | None = None) -> None:
             else args.max_length
         ),
     )
-    geometry = get_parallel_jaw_collision_geometry(
-        args.gripper_model, side=args.gripper_side
+    geometry = build_gripper_collision_geometry(
+        resolve_gripper_defaults(args.gripper_model, variant=args.gripper_side)
     )
 
     # Load mesh via trimesh

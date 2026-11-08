@@ -130,7 +130,6 @@ from embodichain.lab.task_program.semantics import (
 )
 from embodichain.toolkits.graspkit import (
     ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
 )
 
 if TYPE_CHECKING:
@@ -2180,49 +2179,6 @@ def _decode_robot_profile(value: object) -> SimulationRobotSkillProfileBinding:
     )
 
 
-def _decode_parallel_jaw_gripper_model(
-    value: object,
-    *,
-    path: str,
-) -> ParallelJawGripperModelCfg:
-    """Resolve a registered aperture model, with optional inline bounds."""
-    if type(value) is str:
-        try:
-            return get_parallel_jaw_gripper_model(value)
-        except ValueError as exc:
-            raise ValueError(f"{path}: {exc}") from exc
-    model = _mapping(
-        value,
-        path=path,
-        required=frozenset({"model_id"}),
-        optional=frozenset({"min_opening_width", "max_opening_width"}),
-    )
-    model_id = _identifier(model["model_id"], path=f"{path}.model_id")
-    try:
-        defaults = get_parallel_jaw_gripper_model(model_id)
-    except ValueError as exc:
-        raise ValueError(f"{path}: {exc}") from exc
-    minimum = _real(
-        model.get("min_opening_width", defaults.min_opening_width),
-        path=f"{path}.min_opening_width",
-        minimum=0.0,
-        strict_minimum=True,
-    )
-    maximum = _real(
-        model.get("max_opening_width", defaults.max_opening_width),
-        path=f"{path}.max_opening_width",
-        minimum=0.0,
-        strict_minimum=True,
-    )
-    if minimum >= maximum:
-        raise ValueError(
-            f"{path}.min_opening_width must be less than {path}.max_opening_width."
-        )
-    return ParallelJawGripperModelCfg(
-        model_id=model_id, min_opening_width=minimum, max_opening_width=maximum
-    )
-
-
 def _geometry_pose(value: object, *, path: str) -> tuple[float, ...]:
     """Freeze and validate one explicit rigid geometry/TCP transform."""
     import numpy as np
@@ -2251,13 +2207,19 @@ def _decode_grasp_generator(
     value: object, *, path: str
 ) -> _AntipodalGraspPoseGeneratorFactory:
     """Decode explicit physical geometry; removed box fields are rejected."""
+    if isinstance(value, Mapping) and "model" in value:
+        raise ValueError(
+            f"{path}.model was removed; select embodiment.grippers and endpoint.gripper, or supply an explicit gripper description."
+        )
     config = _mapping(
         value,
         path=path,
-        required=frozenset({"kind", "model"}),
+        required=frozenset({"kind", "gripper"}),
         optional=frozenset(
             {
                 "sample_count",
+                "min_opening_width",
+                "max_opening_width",
                 "approach_direction_samples",
                 "approach_deviation_angle",
                 "max_candidates",
@@ -2265,7 +2227,6 @@ def _decode_grasp_generator(
                 "filter_ground_collision",
                 "force_refresh",
                 "point_spacing",
-                "side",
                 "root_from_tcp",
                 "root_from_contact_frame",
             }
@@ -2276,27 +2237,89 @@ def _decode_grasp_generator(
         raise ValueError(
             f"Unsupported {path}.kind {kind!r}; supported kinds are ['antipodal_parallel_jaw']."
         )
-    model = _decode_parallel_jaw_gripper_model(config["model"], path=f"{path}.model")
-    side = (
-        _identifier(config["side"], path=f"{path}.side") if "side" in config else None
-    )
-    root_from_tcp = (
-        _geometry_pose(config["root_from_tcp"], path=f"{path}.root_from_tcp")
-        if "root_from_tcp" in config
-        else None
-    )
-    if model.model_id == "tianji_marvin_gripper":
-        if side not in ("left", "right"):
-            raise ValueError(
-                f"{path}: Marvin geometry requires explicit left/right side."
+    import json
+    from copy import deepcopy
+    from embodichain.robot_registry import resolve_gripper_defaults
+    from embodichain.toolkits.graspkit.gripper_models import _validate_gripper_transform
+
+    selected = config["gripper"]
+    if isinstance(selected, Mapping) and "class_type" in selected:
+        selection = _mapping(
+            selected,
+            path=f"{path}.gripper",
+            required=frozenset({"class_type"}),
+            optional=frozenset({"variant"}),
+        )
+        defaults = resolve_gripper_defaults(
+            selection["class_type"], variant=selection.get("variant")
+        )
+    elif isinstance(selected, Mapping):
+        defaults = deepcopy(dict(selected))
+        if (
+            not {"fpath", "grasp_cfg", "joint_commands", "default_root_from_tcp"}
+            <= defaults.keys()
+        ):
+            raise ValueError(f"{path}.gripper needs a complete physical description.")
+    else:
+        raise ValueError(
+            f"{path}.gripper must select a catalog class or complete physical description; model strings are removed."
+        )
+    for field in ("min_opening_width", "max_opening_width"):
+        if field in config:
+            defaults["grasp_cfg"][field] = _real(
+                config[field], path=f"{path}.{field}", minimum=0, strict_minimum=True
             )
-    elif side is not None:
-        raise ValueError(f"{path}: side is only supported by Marvin geometry.")
+    model = ParallelJawGripperModelCfg(**defaults["grasp_cfg"])
+    if not model.root_link or not model.collision_links:
+        raise ValueError(
+            f"{path}.gripper requires explicit root_link and collision_links."
+        )
+    if not isinstance(defaults["fpath"], str) or not defaults["fpath"]:
+        raise ValueError(f"{path}.gripper requires an explicit source asset.")
+    commands = _mapping(
+        defaults["joint_commands"],
+        path=f"{path}.gripper.joint_commands",
+        required=frozenset({"open", "grasp"}),
+        optional=frozenset(set(defaults["joint_commands"]) - {"open", "grasp"}),
+    )
+    opened = commands["open"]
+    if (
+        not isinstance(opened, Mapping)
+        or not opened
+        or any(
+            not isinstance(command, Mapping) or set(command) != set(opened)
+            for command in commands.values()
+        )
+    ):
+        raise ValueError(f"{path}.gripper commands must cover identical native joints.")
+    if any(
+        not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v)
+        for command in commands.values()
+        for v in command.values()
+    ):
+        raise ValueError(f"{path}.gripper requires complete finite native commands.")
+    root_from_tcp = None
+    if "root_from_tcp" in config:
+        root_from_tcp = _geometry_pose(
+            config["root_from_tcp"], path=f"{path}.root_from_tcp"
+        )
+        defaults["default_root_from_tcp"] = [
+            list(root_from_tcp[i : i + 4]) for i in range(0, 16, 4)
+        ]
+    if "root_from_contact_frame" in config:
+        contact = _geometry_pose(
+            config["root_from_contact_frame"], path=f"{path}.root_from_contact_frame"
+        )
+        defaults["grasp_cfg"]["root_from_contact_frame"] = [
+            list(contact[i : i + 4]) for i in range(0, 16, 4)
+        ]
+    _validate_gripper_transform(defaults["default_root_from_tcp"])
     center_mode = config.get("center_mode")
     if "center_mode" in config and center_mode not in ("bounds", "centroid"):
         raise ValueError(f"{path}.center_mode must be 'bounds' or 'centroid'.")
     return _AntipodalGraspPoseGeneratorFactory(
         model_id=model.model_id,
+        gripper_json=json.dumps(defaults, sort_keys=True, allow_nan=False),
         min_opening_width=model.min_opening_width,
         max_opening_width=model.max_opening_width,
         point_spacing=_real(
@@ -2305,7 +2328,6 @@ def _decode_grasp_generator(
             minimum=0,
             strict_minimum=True,
         ),
-        side=side,
         root_from_tcp=root_from_tcp,
         root_from_contact_frame=(
             _geometry_pose(

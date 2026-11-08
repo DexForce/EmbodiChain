@@ -31,7 +31,6 @@ or installed in a higher-level planning runtime.
    GraspPoseGenerator
    ParallelJawGraspPoseGenerator
    ParallelJawGripperModelCfg
-   get_parallel_jaw_gripper_model
 
 .. autoclass:: GraspPoseGenerator
    :members:
@@ -44,7 +43,6 @@ or installed in a higher-level planning runtime.
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
-.. autofunction:: get_parallel_jaw_gripper_model
 
 .. currentmodule:: embodichain.toolkits.graspkit.pose_generator
 
@@ -54,7 +52,6 @@ or installed in a higher-level planning runtime.
    GraspPoseGenerator
    ParallelJawGraspPoseGenerator
    ParallelJawGripperModelCfg
-   get_parallel_jaw_gripper_model
 
 Box-side grasp regions
 ~~~~~~~~~~~~~~~~~~~~~
@@ -124,7 +121,7 @@ configuration/hand geometry; subsequent queries prepare lazily again.
    ParallelJawGraspCollisionCfg
    GraspAnnotationCfg
    FixedGripperCollisionGeometry
-   get_parallel_jaw_collision_geometry
+   build_gripper_collision_geometry
    AntipodalSampler
    AntipodalSamplerCfg
    GripperCollisionChecker
@@ -191,15 +188,15 @@ continuous intersections, closing contact, or full robot/path safety.
 .. autoclass:: FixedGripperCollisionGeometry
    :members:
 
-get_parallel_jaw_collision_geometry
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+build_gripper_collision_geometry
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Resolve a registered hand's actual meshes, open joints and calibrated TCP.
+Build a hand's actual meshes, open joints and calibrated TCP from an explicit model-owned description.
 Asymmetric hands require an explicit side; a TCP override preserves the
 physical geometry while changing returned poses. Custom hands supply their
 own :class:`FixedGripperCollisionGeometry`.
 
-.. autofunction:: get_parallel_jaw_collision_geometry
+.. autofunction:: build_gripper_collision_geometry
 
 GraspAnnotationCfg
 ~~~~~~~~~~~~~~~~~~

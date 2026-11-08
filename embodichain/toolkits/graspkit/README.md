@@ -3,29 +3,31 @@
 `AntipodalGraspPoseGenerator` requires an explicit `collision_geometry`.
 `ParallelJawGripperModelCfg` supplies the model identity and minimum/maximum
 contact opening; it does not approximate fingers or the palm with boxes.
-`get_parallel_jaw_collision_geometry` resolves the registered hand's actual
+`build_gripper_collision_geometry` consumes an explicit model-owned description and builds its actual
 URDF collision meshes, open joint state and calibrated TCP. Custom hardware
 must provide its own geometry; missing geometry is an error.
 
 ## Construct a generator
 
 ```python
-from embodichain.toolkits.graspkit import get_parallel_jaw_gripper_model
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
-    get_parallel_jaw_collision_geometry,
+    build_gripper_collision_geometry,
 )
 
+defaults = resolve_gripper_defaults("FrankaPandaHand")
 generator = AntipodalGraspPoseGenerator(
-    get_parallel_jaw_gripper_model("franka_panda_hand"),
-    collision_geometry=get_parallel_jaw_collision_geometry("franka_panda_hand"),
+    ParallelJawGripperModelCfg(**defaults["grasp_cfg"]),
+    collision_geometry=build_gripper_collision_geometry(defaults),
 )
 ```
 
 Task Program, benchmark and example integrations use the same service and
 geometry contract. The algorithm, collision policy and annotation/cache policy
 retain their separate configuration objects. Marvin requires an explicit
-`side="left"` or `side="right"` because its two hands have different meshes.
+`variant="left"` or `variant="right"` when selecting its Cfg because its two hands have different meshes.
 A runtime TCP calibration can be supplied explicitly with `root_from_tcp`;
 this changes the returned TCP poses without moving the physical geometry.
 `root_from_contact_frame` independently calibrates the canonical grasp origin and

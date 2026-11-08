@@ -15,6 +15,11 @@
 # ----------------------------------------------------------------------------
 
 
+from __future__ import annotations
+
+__all__ = ["NameNormalizer"]
+
+
 class NameNormalizer:
     """Handles name normalization for different entity types."""
 
@@ -77,3 +82,9 @@ class NameNormalizer:
         if mode == "upper":
             return name.upper()
         return name
+
+    def component_name(self, kind: str, name: str, prefix: str | None) -> str:
+        """Map an unambiguous native component name before collision resolution."""
+        if prefix and not name.lower().startswith(prefix.lower()):
+            name = prefix + name
+        return self.normalize(kind, name)

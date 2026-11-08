@@ -391,6 +391,53 @@ def _populate_dual_cfg(
     cfg.attrs = base_cfg.attrs.copy()
     cfg.root_props = base_cfg.root_props.copy()
 
+    # Preserve explicitly bound hands when composing a complete single-arm model.
+    from copy import deepcopy
+
+    cfg.gripper_bindings = {}
+    for side, _comp, prefix in _SIDES:
+        for instance, original in base_cfg.gripper_bindings.items():
+            binding = deepcopy(original)
+            declaration = binding["declaration"]
+            declaration["motion_part"] = f"{side}_{declaration['motion_part']}"
+            declaration["control_part"] = f"{side}_{declaration['control_part']}"
+            component = declaration.get("component_type")
+            if declaration["mode"] == "mounted":
+                source = base_components[component]
+                declaration["component_type"] = f"{side}_{component}"
+                cfg.urdf_cfg.add_component(
+                    declaration["component_type"],
+                    source["urdf_path"],
+                    source["transform"],
+                    **source.get("params", {}),
+                )
+            else:
+                declaration["component_type"] = f"{side}_{arm_part}"
+            for field, kind in (("joint_names", "joint"), ("link_names", "link")):
+                binding[field] = {
+                    native: _prefixed_name(actual, prefix, kind, name_case)
+                    for native, actual in binding[field].items()
+                }
+            binding["root_link"] = _prefixed_name(
+                binding["root_link"], prefix, "link", name_case
+            )
+            if binding.get("reference_link"):
+                binding["reference_link"] = _prefixed_name(
+                    binding["reference_link"], prefix, "link", name_case
+                )
+            new_instance = f"{side}_{instance}"
+            binding["defaults"]["binding"] = {
+                "instance": new_instance,
+                **deepcopy(declaration),
+            }
+            cfg.gripper_bindings[new_instance] = binding
+    if base_cfg.gripper_bindings and isinstance(base_cfg.qpos_limits, dict):
+        cfg.qpos_limits = {
+            _prefixed_name(name, prefix, "joint", name_case): deepcopy(value)
+            for _side, _comp, prefix in _SIDES
+            for name, value in base_cfg.qpos_limits.items()
+        }
+
 
 def build_dual_arm_cfg(
     base_cfg: RobotCfg,

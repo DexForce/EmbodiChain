@@ -95,7 +95,12 @@ def _embodiment() -> dict[str, Any]:
         "extensions/embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml",
         base_dir=Path(__file__).parent,
     )
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    physical = resolve_gym_components(
+        {"embodiment": {"component": str(path)}}, base_dir=path.parent
+    )
+    return {"simulation": physical.config["robot"]}
 
 
 def _robot_cfg() -> RobotCfg:

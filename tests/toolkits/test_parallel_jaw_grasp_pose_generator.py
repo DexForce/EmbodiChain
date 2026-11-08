@@ -18,6 +18,19 @@
 
 from __future__ import annotations
 
+_GRIPPER_IDS = {
+    "franka_panda_hand": "FrankaPandaHand",
+    "dh_pgi_140_80": "DHPGI14080",
+    "cobotmagic_v100_gripper": "CobotMagicV100Gripper",
+    "pika_gripper": "PikaGripper",
+    "tianji_marvin_gripper": "TianjiMarvinGripper",
+    "robotiq_2f85": "RobotiqArg2F85",
+    "robotiq_arg2f_140": "RobotiqArg2F140",
+}
+
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
+
 import ast
 import gc
 import importlib
@@ -36,7 +49,6 @@ from embodichain.toolkits.graspkit import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
 )
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
@@ -217,7 +229,12 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
 def test_named_gripper_model_returns_reviewed_geometry(
     model_id: str, expected: tuple[float, ...]
 ) -> None:
-    model = get_parallel_jaw_gripper_model(model_id)
+    model = ParallelJawGripperModelCfg(
+        **resolve_gripper_defaults(
+            _GRIPPER_IDS.get(model_id, model_id),
+            variant="left" if model_id == "tianji_marvin_gripper" else None,
+        )["grasp_cfg"]
+    )
 
     assert model.model_id == model_id
     assert (
@@ -237,15 +254,33 @@ def test_named_gripper_model_returns_reviewed_geometry(
     ],
 )
 def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
-    first = get_parallel_jaw_gripper_model(model_id)
-    second = get_parallel_jaw_gripper_model(model_id)
+    first = ParallelJawGripperModelCfg(
+        **resolve_gripper_defaults(
+            _GRIPPER_IDS.get(model_id, model_id),
+            variant="left" if model_id == "tianji_marvin_gripper" else None,
+        )["grasp_cfg"]
+    )
+    second = ParallelJawGripperModelCfg(
+        **resolve_gripper_defaults(
+            _GRIPPER_IDS.get(model_id, model_id),
+            variant="left" if model_id == "tianji_marvin_gripper" else None,
+        )["grasp_cfg"]
+    )
     expected = second.to_dict()
 
     first.max_opening_width = 2.0
 
     assert first is not second
     assert second.to_dict() == expected
-    assert get_parallel_jaw_gripper_model(model_id).to_dict() == expected
+    assert (
+        ParallelJawGripperModelCfg(
+            **resolve_gripper_defaults(
+                _GRIPPER_IDS.get(model_id, model_id),
+                variant="left" if model_id == "tianji_marvin_gripper" else None,
+            )["grasp_cfg"]
+        ).to_dict()
+        == expected
+    )
 
 
 @pytest.mark.parametrize(
@@ -259,7 +294,9 @@ def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
 def test_named_geometry_rejects_invalid_calibration(
     field: str, value: float | bool, error: type[Exception]
 ) -> None:
-    values = get_parallel_jaw_gripper_model("franka_panda_hand").to_dict()
+    values = ParallelJawGripperModelCfg(
+        **resolve_gripper_defaults("FrankaPandaHand")["grasp_cfg"]
+    ).to_dict()
     values[field] = value
 
     with pytest.raises(error, match=field):
@@ -267,8 +304,10 @@ def test_named_geometry_rejects_invalid_calibration(
 
 
 def test_named_gripper_model_rejects_unknown_ids() -> None:
-    with pytest.raises(ValueError, match="unknown.*available.*dh_pgi_140_80"):
-        get_parallel_jaw_gripper_model("missing_gripper")
+    with pytest.raises(ValueError, match="no parallel-jaw description"):
+        ParallelJawGripperModelCfg(
+            **resolve_gripper_defaults("missing_gripper")["grasp_cfg"]
+        )
 
 
 def test_package_exposes_only_the_unified_generator_api() -> None:

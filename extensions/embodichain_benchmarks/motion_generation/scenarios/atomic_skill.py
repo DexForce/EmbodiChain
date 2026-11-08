@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.toolkits.graspkit.gripper_models import ParallelJawGripperModelCfg
+
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -42,11 +45,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from embodichain.toolkits.graspkit import (
-    GraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
-)
+from embodichain.toolkits.graspkit import GraspPoseGenerator, ParallelJawGripperModelCfg
 from embodichain.utils.math import pose_inv
 
 from ..atomic_skill import AtomicSkillCaseProvider, create_atomic_skill_provider
@@ -158,7 +157,9 @@ class AtomicSkillScenario(ScenarioProvider):
             return None
         if not isinstance(model_id, str) or not model_id:
             raise ValueError("track.config.grasp_model must be a non-empty model id.")
-        return get_parallel_jaw_gripper_model(model_id)
+        return ParallelJawGripperModelCfg(
+            **resolve_gripper_defaults(model_id)["grasp_cfg"]
+        )
 
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
         """Bind flange-mounted hand geometry to this fixture's solver TCP.

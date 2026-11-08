@@ -207,13 +207,15 @@ limits are carried into these explicit options, while omitted limits retain
 Robot speed caps and the planner's acceleration default. Sampling count remains
 owned by `motion.sample_count`.
 
-Grasp generators select toolkit-owned geometry with a string `model` ID;
-an inline mapping is a custom calibration and its `model_id` does not trigger
-catalog lookup. The catalog is owned by
-`embodichain/toolkits/graspkit/pose_generator.py`, with source provenance in
-`embodichain/toolkits/graspkit/README.md`. Embodiments may omit algorithm and
-collision fields to use GraspKit defaults; task-specific tuning belongs in
-the allowlisted `grasp_pose_generator_overrides` mapping.
+Embodiment `grippers` explicitly selects model-owned physical defaults. Grasp
+endpoints opt into a binding with `gripper`; composition fills omitted command
+presets and generator physical descriptions before strict Task Program decoding.
+A standalone configured generator accepts an explicit `gripper` description or
+catalog-class selection; the former `model` string/mapping route is removed.
+GraspKit owns numerical types and algorithms, not concrete model values. Search
+and collision policy retain toolkit defaults and the task allowlist. Duplicate
+explicit service ownership is rejected. See the [robot binding owner](../robot-system/robot-system.md)
+for assembly, source identity and TCP validation.
 
 `runtime_services.hand_geometries` declares explicit hand calibration by grasp
 endpoint target ID. Its `sampled_parallel_jaw` entries reference an existing

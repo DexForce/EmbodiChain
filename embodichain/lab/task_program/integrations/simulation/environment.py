@@ -1525,6 +1525,9 @@ class SimulationTaskProgramAdapterFactory:
         self._registration.assert_unchanged()
         generators: dict[str, GraspPoseGenerator] = {}
         for target_id, factory in self._grasp_pose_generator_factories.items():
+            validator = getattr(factory, "validate_binding", None)
+            if validator is not None:
+                validator(environment.robot, target_id)
             generator = factory()
             if not isinstance(generator, GraspPoseGenerator):
                 raise TypeError(

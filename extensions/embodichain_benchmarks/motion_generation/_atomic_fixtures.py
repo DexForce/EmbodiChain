@@ -22,6 +22,13 @@ The calibrations and defaults preserve the benchmark's original sample scenes.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+    build_gripper_collision_geometry,
+)
+
 import math
 from collections.abc import Sequence
 from typing import Any, Literal, TYPE_CHECKING
@@ -54,7 +61,6 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGeneratorCfg,
     GraspAnnotationCfg,
     FixedGripperCollisionGeometry,
-    get_parallel_jaw_collision_geometry,
     ParallelJawGraspCollisionCfg,
 )
 from embodichain_robots import FrankaPandaCfg, URRobotCfg
@@ -107,6 +113,7 @@ _UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
 
 TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     model_id="dh_pgi_140_80",
+    catalog_id="DHPGI14080",
     min_opening_width=0.003,
     max_opening_width=0.100,
 )
@@ -189,8 +196,8 @@ def create_parallel_jaw_grasp_pose_generator(
     ):
         raise ValueError("grasp_depth_offset_m must be finite.")
     model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model
-    geometry = get_parallel_jaw_collision_geometry(
-        model.model_id,
+    geometry = build_gripper_collision_geometry(
+        resolve_gripper_defaults(model.catalog_id),
         point_spacing=0.012,
         root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
     )
@@ -513,12 +520,15 @@ class _FrankaPgiCfg(RobotCfg):
 def _create_franka_native_hand_cfg(overrides: dict[str, Any] | None = None) -> RobotCfg:
     """Resolve the official explicit FR3/hand assembly without creating a Gym."""
     from embodichain_tasks.configs import get_config_path
-    from embodichain.utils.utility import load_config
     from embodichain.robot_registry import resolve_robot_cfg
 
-    values = load_config(get_config_path("components/embodiments/franka_panda.yaml"))[
-        "simulation"
-    ]
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    path = get_config_path("components/embodiments/franka_panda.yaml")
+    physical = resolve_gym_components(
+        {"embodiment": {"component": str(path)}}, base_dir=Path(path).parent
+    )
+    values = dict(physical.config["robot"])
     cfg = resolve_robot_cfg(values.pop("class_type"), values)
     return merge_robot_cfg(cfg, overrides or {})
 

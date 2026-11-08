@@ -18,6 +18,11 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+    build_gripper_collision_geometry,
+)
+
 from pathlib import Path
 from typing import TYPE_CHECKING
 import xml.etree.ElementTree as ET
@@ -27,9 +32,6 @@ import numpy as np
 from embodichain.data import get_data_path
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.toolkits.graspkit.pg_grasp import FixedGripperCollisionGeometry
-from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
-    get_parallel_jaw_collision_geometry,
-)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import RobotCfg
@@ -112,8 +114,8 @@ def mounted_gripper_geometry(
                 min_opening_width=0.003,
                 max_opening_width=0.1,
             ),
-            get_parallel_jaw_collision_geometry(
-                "dh_pgi_140_80", root_from_tcp=root_from_tcp
+            build_gripper_collision_geometry(
+                resolve_gripper_defaults("DHPGI14080"), root_from_tcp=root_from_tcp
             ),
         )
     root_from_grasp = np.array(
