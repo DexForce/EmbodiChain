@@ -4,7 +4,10 @@
 SimReady pipeline converts an existing mesh into an asset with normalized
 geometry, generated semantic and physical metadata, and mesh/USD outputs.
 The implementation lives in `embodichain.gen_sim.asset_engine`; mesh conversion
-uses the `embodichain simready` command.
+uses the `embodichain asset-engine` command.
+
+The former `embodichain simready` command has been renamed to
+`embodichain asset-engine`; update existing scripts to use the new entry point.
 
 Use the SimReady pipeline when you already have a mesh to prepare for scene
 construction. [Scene Engine](scene_engine.md) owns image-based scene generation,
@@ -18,7 +21,7 @@ configuration owners:
 
 | Entry point | Input and output | Owner under `embodichain/gen_sim/` |
 | --- | --- | --- |
-| `embodichain simready` | One local asset directory → UUID asset directory and registry entry | `asset_engine/cli/start.py`, `asset_engine/pipeline/ingest.py` |
+| `embodichain asset-engine` | One local asset directory → UUID asset directory and registry entry | `asset_engine/cli/start.py`, `asset_engine/pipeline/ingest.py` |
 | SimReady browser workflow | Uploaded mesh/material files → the same CLI conversion and a downloadable mesh | `gradio_ui/app_asset_engine.py` |
 | Scene Engine asset preparation | Generated meshes and graph-conditioned placement inputs → scene-owned prepared assets | `scene_engine/pipeline/utils/simready_processor.py` |
 | Articulated asset generation | Image/text observations and scale metadata → validated articulated USDC | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
@@ -72,7 +75,7 @@ raw_cup/
 Run one conversion:
 
 ```bash
-embodichain simready \
+embodichain asset-engine \
   --input_dir /path/to/raw_cup \
   --output_root /path/to/prepared_assets \
   --category cup

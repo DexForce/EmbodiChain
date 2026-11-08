@@ -37,7 +37,7 @@ Prepare one existing mesh directory with the
 
 ```bash
 # Run the full SimReady pipeline on a single asset directory
-embodichain simready \
+embodichain asset-engine \
     --input_dir /path/to/raw_mesh_folder \
     --output_root /path/to/output_folder \
     --category YourCategory

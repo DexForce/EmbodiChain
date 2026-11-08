@@ -11,7 +11,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
-| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `simready`, `task-engine` |
+| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `asset-engine`, `task-engine` |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
@@ -46,7 +46,7 @@ Blueprint objects are in-process values with persisted audit documents; this API
 does not load them as a complete task deployment. Whole-scene rotations also
 rotate planar graph relations and table regions; directional graphs require
 quarter turns because their vocabulary is axis-aligned.
-The Asset Engine uses the `simready` CLI and `asset_engine` Python
+The Asset Engine uses the `asset-engine` CLI and `asset_engine` Python
 namespace. Its [user guide](../../../docs/source/features/generative_sim/asset_engine.md)
 owns input selection, processing settings, artifacts and simulation handoff.
 Instruction/image semantic planning belongs to
