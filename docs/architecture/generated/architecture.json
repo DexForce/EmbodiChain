@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "cfedbb4c2ef3e2a717432331db8fc4ad2080c750",
+  "revision": "a54b08dd2636143ec64e5709ebe27575bd48f639",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -3317,9 +3317,11 @@
       "topic_ids": [
         "task-engine"
       ],
-      "summary": "Interprets task intentions and validates candidates, TaskSpec projections and semantic graph coverage.",
-      "details": "Task Engine converts explicit instruction intent into candidate declarations and independent TaskSpec requirements. Canonical graph and role/lineage coverage describe intended Semantic Calls; execution, physical evidence and acceptance remain with their owning systems.",
+      "summary": "Interprets instructions and image evidence into candidates, TaskSpec requirements and canonical Semantic Call graphs.",
+      "details": "Task Engine's image CLI interprets the complete instruction, grounds logical image references, and plans calls from the data-only Task Program catalog. It publishes source provenance, candidate and TaskSpec declarations, recomputable semantic/visual coverage, pending runtime bindings, raw model attempts and an offline viewer. Pure Python contracts also validate authored declarations and prepare explicit program/bundle snapshots. Scene/robot integration, motion planning, execution and measured physical acceptance remain with their owning systems.",
       "boundaries": [
+        "Image planning ends at an unbound semantic graph: execution_ready is false and runtime_evidence_status is not_run, even when visual evidence is complete.",
+        "Image bounds and logical object identities are not calibrated physical bindings. Missing or ambiguous evidence remains explicit until a runtime integration resolves it.",
         "This semantic front end does not implement Atomic Skills, motion planning or physics observation. Declaration coverage is not a physical-success certificate."
       ],
       "evidence": [
@@ -3336,9 +3338,28 @@
           "start_line": 186,
           "end_line": 186,
           "excerpt": "    template = TaskSpec("
+        },
+        {
+          "path": "embodichain/gen_sim/task_engine/cli.py",
+          "symbol": "main",
+          "start_line": 104,
+          "end_line": 108,
+          "excerpt": "            \"pending_bindings\": len(result[\"binding_requirements\"]),\n            \"execution_ready\": False,\n            \"runtime_evidence_status\": \"not_run\",\n            \"image_sha256\": result[\"image_grounding\"][\"image_sha256\"],\n            \"integration_status\": \"unbound\","
+        },
+        {
+          "path": "embodichain/gen_sim/task_engine/semantic_plan_validation.py",
+          "symbol": "validate_semantic_plan",
+          "start_line": 549,
+          "end_line": 556,
+          "excerpt": "        \"status\": \"covered\",\n        \"semantic_status\": \"valid\",\n        \"visual_status\": (\"complete\" if observed == total else \"pending\"),\n        \"pending_bindings\": len(bindings),\n        \"visual_observed_entities\": observed,\n        \"visual_total_entities\": total,\n        \"execution_ready\": False,\n        \"runtime_evidence_status\": \"not_run\","
         }
       ],
       "documentation": [
+        {
+          "docname": "features/generative_sim/task_engine",
+          "label": "Task Engine workflow and artifact guide",
+          "source_extension": ".md"
+        },
         {
           "docname": "api_reference/embodichain/embodichain.gen_sim.task_engine",
           "label": "Task Engine semantic contracts",
