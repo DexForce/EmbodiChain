@@ -96,3 +96,35 @@ def test_task_candidate_rejects_scene_constraints_not_derived_from_draft():
 
     with pytest.raises(ValueError, match="derived exactly"):
         validate_task_candidate(candidate)
+
+
+def test_default_instruction_transport_uses_supported_chat_parameters(monkeypatch):
+    from types import SimpleNamespace
+    import langchain_openai
+    from embodichain.gen_sim.task_engine import interpretation
+
+    expected = {"steps": [_step()]}
+    settings = {
+        "api_key": "test-key",
+        "model": "test-model",
+        "base_url": "",
+        "default_query": {},
+    }
+    captured = {}
+
+    def client(*, api_key, model, temperature):
+        captured.update(api_key=api_key, model=model, temperature=temperature)
+        return object()
+
+    monkeypatch.setattr(interpretation, "_load_llm_settings", lambda **_: settings)
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", client)
+    monkeypatch.setattr(
+        interpretation,
+        "_structured_output_runnable",
+        lambda *_a, **_k: SimpleNamespace(invoke=lambda _: expected),
+    )
+    result = interpretation._default_instruction_caller(
+        prompt="interpret", schema={}, model=None
+    )
+    assert result == expected
+    assert captured == {"api_key": "test-key", "model": "test-model", "temperature": 0}
