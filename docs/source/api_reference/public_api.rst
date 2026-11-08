@@ -1674,52 +1674,6 @@ Adapt legacy phase-aligned geometry, timing and measured manipulability to the c
 
    TrajectorySessionCoverage
 
-embodichain.lab.sim.scene.operations
-----------------------------------
-
-.. currentmodule:: embodichain.lab.sim.scene.operations
-
-``apply_changes_batch`` accepts an environment-indexed change set for each row
-of a scene view. It preflights every row before any mutation, then batches writes
-by entity. Neighboring rows remain untouched; no operation steps physics.
-
-.. autosummary::
-
-   apply_changes_batch
-
-.. currentmodule:: embodichain.lab.sim.scene
-
-.. autosummary::
-
-   apply_changes_batch
-
-.. autosummary::
-
-   restore_render_state
-
-embodichain.lab.sim.scene.physics
--------------------------------
-
-.. currentmodule:: embodichain.lab.sim.scene.physics
-
-Capture and restore measured mass, principal inertia and friction for explicitly
-selected dynamic rigid bodies on Default or Newton. Applying a mass scale also
-scales inertia from the original baseline, so repeated application does not
-accumulate. Every parameter is preflighted before writes; actual backend readback
-must match the request. These operations do not step physics or verify task success.
-Native failures may leave partial changes, requiring the host to stop execution.
-
-.. autosummary::
-
-   RigidPhysicsState
-   capture_rigid_physics
-   apply_rigid_physics
-   restore_rigid_physics
-
-.. autosummary::
-
-   capture_physics_properties
-
 embodichain.lab.sim.motion.planners.curobo.payload
 --------------------------------------------------
 
