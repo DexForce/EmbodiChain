@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run GPU pytest to completion without DexSim's unsafe native finalizers."""
+"""Run resource-lane pytest without DexSim's unsafe native finalizers."""
 
 from __future__ import annotations
 

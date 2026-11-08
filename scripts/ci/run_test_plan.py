@@ -270,8 +270,7 @@ def _run_resource_lane(
     command: list[str],
     repository_root: Path,
     *,
-    debug_gpu: bool = False,
-    no_finalize_gpu: bool = False,
+    no_finalize_resource_lanes: bool = False,
 ) -> int:
     """Discover selected nodes, then run the same ordered collection freshly."""
     with tempfile.TemporaryDirectory(prefix="embodichain-test-selection-") as directory:
@@ -297,27 +296,8 @@ def _run_resource_lane(
             )
         narrowed = _resource_command_for_nodes(command, nodes)
         narrowed.append(f"--ci-expected-collection={manifest}")
-        if lane == "gpu" and no_finalize_gpu:
+        if no_finalize_resource_lanes:
             narrowed[2] = "scripts.ci.pytest_no_finalize"
-        if lane == "gpu" and debug_gpu:
-            narrowed = [
-                "gdb",
-                "--quiet",
-                "--batch",
-                "-return-child-result",
-                "-ex",
-                "set pagination off",
-                "-ex",
-                "set print thread-events off",
-                "-ex",
-                "run",
-                "-ex",
-                "bt 40",
-                "-ex",
-                "info threads",
-                "--args",
-                *narrowed,
-            ]
         print(f"[CI] {lane}: selected nodes: {shlex.join(narrowed)}", flush=True)
         return subprocess.run(
             narrowed, cwd=repository_root, check=False, env=None
@@ -331,8 +311,7 @@ def run_plan(
     python_executable: str | None = None,
     lanes: Sequence[str] | None = None,
     dry_run: bool = False,
-    debug_gpu: bool = False,
-    no_finalize_gpu: bool = False,
+    no_finalize_resource_lanes: bool = False,
 ) -> int:
     """Execute all selected lanes and return the first failing exit code.
 
@@ -346,8 +325,8 @@ def run_plan(
     Serial GPU and simulation lanes discover their selected nodes in a fresh
     collection-only process before execution. Discovery and execution are both
     included in the reported lane time; ordered nodes and markers must match.
-    ``debug_gpu`` runs only the selected GPU process under gdb.
-    ``no_finalize_gpu`` returns after pytest hooks without unloading native libraries.
+    ``no_finalize_resource_lanes`` returns after pytest hooks without unloading
+    native libraries in GPU and simulation processes.
     """
     repository_root = Path(root).resolve()
     commands = build_commands(
@@ -375,8 +354,7 @@ def run_plan(
                 lane,
                 command,
                 repository_root,
-                debug_gpu=debug_gpu,
-                no_finalize_gpu=no_finalize_gpu,
+                no_finalize_resource_lanes=no_finalize_resource_lanes,
             )
         else:
             returncode = subprocess.run(
@@ -406,14 +384,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--lane", action="append", dest="lanes")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
-        "--debug-gpu",
+        "--no-finalize-resource-lanes",
         action="store_true",
-        help="Run the selected GPU pytest process under gdb for native crash diagnosis.",
-    )
-    parser.add_argument(
-        "--no-finalize-gpu",
-        action="store_true",
-        help="Return the GPU pytest result without native interpreter teardown.",
+        help="Return GPU and simulation pytest results without native teardown.",
     )
     return parser
 
@@ -429,8 +402,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             python_executable=args.python_executable,
             lanes=args.lanes,
             dry_run=args.dry_run,
-            debug_gpu=args.debug_gpu,
-            no_finalize_gpu=args.no_finalize_gpu,
+            no_finalize_resource_lanes=args.no_finalize_resource_lanes,
         )
     except (OSError, RuntimeError, ValueError) as error:
         print(f"test plan execution failed: {error}", file=sys.stderr)

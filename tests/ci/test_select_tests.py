@@ -1095,8 +1095,12 @@ def _write_collection_manifest(command: list[str], files: list[str]) -> Path | N
     ["gpu", "sim", "slow-gpu", "slow-sim"],
     ids=["accelerator", "simulation", "slow-accelerator", "slow-simulation"],
 )
+@pytest.mark.parametrize("no_finalize_resource_lanes", [False, True])
 def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lane: str,
+    no_finalize_resource_lanes: bool,
 ) -> None:
     original_selectors = [
         "tests/empty.py",
@@ -1134,11 +1138,22 @@ def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
     }
     original = dict(build_commands(plan, lanes=[base_lane]))[lane]
 
-    assert run_test_plan.run_plan(plan, root=tmp_path, lanes=[base_lane]) == 0
+    assert (
+        run_test_plan.run_plan(
+            plan,
+            root=tmp_path,
+            lanes=[base_lane],
+            no_finalize_resource_lanes=no_finalize_resource_lanes,
+        )
+        == 0
+    )
 
     assert len(calls) == 2
     discovery, execution = calls[0][0], calls[1][0]
     assert discovery[: len(original)] == original
+    assert execution[2] == (
+        "scripts.ci.pytest_no_finalize" if no_finalize_resource_lanes else "pytest"
+    )
     assert "--collect-only" in discovery and "--collect-only" not in execution
     marker_index = execution.index("-m", 3)
     assert execution[4:marker_index] == [

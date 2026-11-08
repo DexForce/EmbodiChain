@@ -412,13 +412,6 @@ jobs:
         run: |
           python -c "import matplotlib, numpy, open3d, requests, scipy, shapely, trimesh; from PIL import Image; import embodichain.gen_sim.scene_engine.pipeline.generate"
 
-      - name: Install native debugger
-        run: |
-          if ! command -v gdb >/dev/null 2>&1; then
-            apt-get update
-            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gdb
-          fi
-
       - name: Run selected tests
         shell: bash -l {0}
         run: |
@@ -438,8 +431,7 @@ jobs:
           python scripts/ci/run_test_plan.py \
             --plan test-plan.json \
             --repo-root "${GITHUB_WORKSPACE}" \
-            --debug-gpu \
-            --no-finalize-gpu \
+            --no-finalize-resource-lanes \
             --lane fast \
             --lane distributed \
             --lane gpu \
