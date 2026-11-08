@@ -350,7 +350,8 @@ registered kind IDs and inert parameters.
 The `lift` predicate can bind its `baseline` to
 `rigid_objects/<entity>/segment_start_frame`. Segment execution captures that
 pose before issuing the first action. Recorded evaluation reads the preceding
-state slot, and a missing boundary yields unavailable evidence.
+capture stored as a distinct raw channel on the first consumed control slot.
+A missing segment-start capture yields unavailable evidence.
 
 Boolean rules name child rules in `refs`. Temporal rules select one `ref`
 and inclusive slot offsets `start` and `end`. `hold_for` requires

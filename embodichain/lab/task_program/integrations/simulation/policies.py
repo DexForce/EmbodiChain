@@ -914,7 +914,7 @@ class SimulationSegmentPolicyPort:
             .clone()
         )
         valid = torch.isfinite(pose).all(-1) & (pose[:, 3:] != 0).any(-1)
-        descriptor = _state_descriptor(uid, "pose", (7,), pose.dtype, ())
+        descriptor = _state_descriptor(uid, "segment_start_pose", (7,), pose.dtype, ())
         return ObservationSample(descriptor, pose, valid, (None,) * len(pose))
 
     def _observe_segment_frame(

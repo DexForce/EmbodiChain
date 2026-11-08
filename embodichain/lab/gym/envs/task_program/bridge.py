@@ -1682,6 +1682,15 @@ class TaskProgramDemoBridge:
             return None
         return getattr(self._validator_port, "_evaluation_fields", ())
 
+    def _segment_start_observation(self, field):
+        if (
+            self._pending_evaluation_fields() is None
+            or self._clock.step_index + 1
+            != getattr(self._validator_port, "_evaluation_start", None)
+        ):
+            return None
+        return self._validator_port._evaluation_initial.get(field)
+
     def _observe_segment_frame(
         self,
         frame: ObservationFrame,

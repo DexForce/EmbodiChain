@@ -221,7 +221,10 @@ def _evaluation_observation_cfgs(
     registration: SimulationTaskProgramRegistration,
 ) -> dict[str, ObservationCfg]:
     from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
-    from embodichain.lab.gym.envs.managers.observations import _get_evaluation_state
+    from embodichain.lab.gym.envs.managers.observations import (
+        _get_evaluation_state,
+        _get_segment_start_state,
+    )
 
     fields = {
         field
@@ -237,12 +240,18 @@ def _evaluation_observation_cfgs(
                 result[f"recording:{name}"] = _raw_entity_observation_cfg(
                     name, uid, quantity
                 )
-        for quantity in ("frame", "segment_start_frame"):
-            name = f"rigid_objects/{uid}/{quantity}"
-            if name in fields:
-                result[f"recording:{name}"] = _raw_entity_observation_cfg(
-                    name, uid, "pose"
-                )
+        name = f"rigid_objects/{uid}/frame"
+        if name in fields:
+            result[f"recording:{name}"] = _raw_entity_observation_cfg(name, uid, "pose")
+        name = f"rigid_objects/{uid}/segment_start_frame"
+        if name in fields:
+            result[f"recording:{name}"] = ObservationCfg(
+                func=_get_segment_start_state,
+                mode="add",
+                name=name,
+                params={"uid": uid, "field": name},
+                consumers=("recording",),
+            )
     for binding in getattr(registration.scene_binding, "articulations", ()):
         uid = binding.simulation_uid
         for name in sorted(fields):

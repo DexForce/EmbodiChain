@@ -173,7 +173,7 @@ def evaluate_recorded_rules(
         if (
             sample is None
             and field.startswith("rigid_objects/")
-            and field.endswith(("/frame", "/segment_start_frame"))
+            and field.endswith("/frame")
         ):
             sample = history["fields"].get(field.rsplit("/", 1)[0] + "/pose")
         if sample is None:
@@ -197,7 +197,7 @@ def evaluate_recorded_rules(
         fields.pop(field)
 
     initial = {}
-    initial_step = start_step - 1
+    initial_step = start_step
     for field in tuple(fields):
         if not _is_segment_start_field(field):
             continue
@@ -247,7 +247,7 @@ def evaluate_recorded_rules(
                 field: valid[:, offset] for field, (_, valid) in chunk.items()
             }
             if initial:
-                qualified = initial_available & (initial_revisions < revisions_at_step)
+                qualified = initial_available & (initial_revisions <= revisions_at_step)
                 values_at_step.update(
                     {field: values for field, (values, _) in initial.items()}
                 )
@@ -289,13 +289,13 @@ def evaluate_recorded_rules(
 
 def _matches_field(field, uid, quantity):
     if field.startswith("rigid_objects/"):
-        return field == f"rigid_objects/{uid}/{quantity}" or (
-            quantity == "pose"
-            and field
-            in (
-                f"rigid_objects/{uid}/frame",
-                f"rigid_objects/{uid}/segment_start_frame",
+        if _is_segment_start_field(field):
+            return (
+                quantity == "segment_start_pose"
+                and field == f"rigid_objects/{uid}/segment_start_frame"
             )
+        return field == f"rigid_objects/{uid}/{quantity}" or (
+            quantity == "pose" and field == f"rigid_objects/{uid}/frame"
         )
     if field.startswith("articulations/"):
         source = f"articulations/{uid}/{quantity}"
@@ -346,7 +346,7 @@ def _field_projection(field, descriptor):
     shape, names, units = (get(name, ()) for name in ("shape", "joint_names", "units"))
     if not all(isinstance(value, (tuple, list)) for value in (shape, names, units)):
         return None
-    if quantity == "pose":
+    if quantity in ("pose", "segment_start_pose"):
         contract = ("arena", "xyz_xyzw", ("m", "unitless"), (7,))
     elif quantity in ("lin_vel", "ang_vel"):
         unit = "m/s" if quantity == "lin_vel" else "rad/s"

@@ -2903,6 +2903,7 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     recorded_action = torch.zeros(BATCH_SIZE, 1)
     _init_raw_rollout(storage, context, {}, torch.zeros(BATCH_SIZE, 4, 1))
     env.observation_manager.bind_rollout_storage(storage)
+    position[:, 2] = -0.05
     initial = EmbodiedEnv._capture_observation(env)
     _write_raw_rollout(
         storage,
@@ -2911,6 +2912,8 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
         env_ids=[0, 1],
         field_ids=tuple(env.observation_manager.field_ids.values()),
     )
+    # Scene setup can update a pose without consuming another control slot.
+    position[:, 2] = 0
     env._write_trajectory_step = lambda frame, **kwargs: _write_raw_rollout(
         storage, context, frame, action=recorded_action
     )
@@ -2984,7 +2987,9 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
             chunk_steps=1,
         ).rules["raised"]
         assert offline.metrics["lift"].tolist() == pytest.approx(expected)
-    history["raw_observations"]["revisions"][0, 0] = -1
+    history["raw_observations"]["fields"][
+        "rigid_objects/native_cube/segment_start_frame"
+    ]["valid"][0, 1] = False
     unavailable = evaluate_recorded_rules(
         raised,
         history,
