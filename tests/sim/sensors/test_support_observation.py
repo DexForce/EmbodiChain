@@ -108,7 +108,7 @@ class _Query:
     def actor_info(self, actor_id):
         return next(actor for actor in self.actors if actor.actor_id == actor_id)
 
-    def fetch(self):
+    def fetch_solver_report(self):
         self.fetches += 1
         self.on_fetch()
         return self.buffer
