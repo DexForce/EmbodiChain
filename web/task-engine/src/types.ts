@@ -130,6 +130,17 @@ export interface ViewerData {
   };
   task_spec: { goal: Predicate[]; [key: string]: unknown } | null;
   validation: {
+    source?: {
+      bindings?: {
+        id: string;
+        node_id: string;
+        kind: string;
+        subject: string;
+        value: unknown;
+      }[];
+      requirements?: { id: string; quote: string; node_ids: string[] }[];
+      [key: string]: unknown;
+    };
     coverage: {
       goals: { id: string; groups: string[] }[];
       [key: string]: unknown;

@@ -773,6 +773,57 @@ export default function App({ data }: { data: ViewerData }) {
           </Badge>
         </div>
       </section>
+      {data.validation?.schema_version === "semantic_plan_validation/v1" && (
+        <section
+          className="semantic-plan-status"
+          aria-label="Semantic planning status"
+        >
+          <strong>
+            {locale === "zh" ? "语义校验通过" : "Semantic plan validated"}
+          </strong>
+          <span>
+            {locale === "zh" ? "视觉绑定" : "Visual binding"}:{" "}
+            {String(data.validation.coverage.visual_status)} (
+            {String(data.validation.coverage.visual_observed_entities)}/
+            {String(data.validation.coverage.visual_total_entities)})
+          </span>
+          <span>
+            {locale === "zh" ? "运行时待绑定项" : "Pending runtime bindings"}:{" "}
+            {String(data.validation.coverage.pending_bindings)}
+          </span>
+          <span>
+            {locale === "zh"
+              ? "尚未执行 · 非可执行部署"
+              : "Not executed · runtime integration unbound"}
+          </span>
+          <details>
+            <summary>
+              {locale === "zh"
+                ? "查看待绑定信息和指令覆盖"
+                : "Inspect pending bindings and instruction coverage"}
+            </summary>
+            <ul>
+              {data.validation.source?.bindings?.map((binding) => (
+                <li key={binding.id}>
+                  <code>{binding.node_id}</code> · {binding.subject} ·{" "}
+                  {binding.kind} ·{" "}
+                  {locale === "zh"
+                    ? "待运行时绑定"
+                    : "Awaiting runtime binding"}
+                </li>
+              ))}
+            </ul>
+            <ul>
+              {data.validation.source?.requirements?.map((requirement) => (
+                <li key={requirement.id}>
+                  {requirement.quote} →{" "}
+                  <code>{requirement.node_ids.join(", ")}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </section>
+      )}
       <div className="task-metrics">
         <div>
           <Clock3 />

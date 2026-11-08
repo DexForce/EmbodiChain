@@ -14,7 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Normative coverage beside the unchanged v38 graph and bundle protocol."""
+"""Normative coverage beside the unchanged v38 graph and bundle protocol.
+
+Historical sealed declarations retain their recorded producer IDs here. New
+unbound image plans use semantic_plan_validation and the current Task Program
+call catalog; this compatibility checker does not authorize runtime calls.
+"""
 
 from __future__ import annotations
 
