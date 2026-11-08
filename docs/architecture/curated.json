@@ -1990,29 +1990,38 @@
     },
     {
       "id": "simready",
-      "label": "SimReady pipeline",
+      "label": "SimReady Asset Pipeline",
       "kind": "module",
       "topic_ids": [
         "gen-sim"
       ],
-      "summary": "Ingests raw assets through parsing and conversion stages into SimReady outputs.",
-      "details": "The general asset-ingest pipeline coordinates parser capabilities and persisted processing state for supported input formats. Scene Engine also has an internal asset-preparation flow; these are distinct entry points.",
+      "summary": "Prepares an existing mesh through source conversion, semantic/physics inference, and mesh/USD export.",
+      "details": "The SimReady Asset Pipeline uses the simready CLI and asset_engine Python namespace. Each run archives one input directory in a new UUID asset directory. Mesh inputs run source preparation and parser stages; configured URDF/USD inputs are copied directly without parser execution. The shipped source conversion mode is trimesh, while later Blender cleanup is configured separately. Source geometry metrics and the final mesh have separate acquisition paths. Scene Engine's graph-conditioned preparation and the asset package's articulated-generation service are distinct integrations.",
       "boundaries": [
-        "A converted asset is not a complete runnable Gym deployment."
+        "The CLI consumes one existing asset directory and owns asset/registry metadata; scene layout and task deployment belong to downstream callers.",
+        "General mesh inference uses OPENAI_* and gen_config.json; articulated generation has a separate service client and dotenv configuration.",
+        "Processing completion does not establish physical validation or task success; direct-copy mode produces no inferred SimReady mesh."
       ],
       "evidence": [
         {
           "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
-          "symbol": "<module>",
-          "start_line": 17,
-          "end_line": 17,
-          "excerpt": "from __future__ import annotations"
+          "symbol": "ingest_one_asset",
+          "start_line": 164,
+          "end_line": 170,
+          "excerpt": "    if ingest_mode == \"direct_copy\":\n        shutil.copytree(asset_dir, asset_source)\n        asset.identity[\"normalized_source\"] = \"raw_copy\"\n        asset.identity[\"source_file\"] = None\n        asset.identity[\"source_type\"] = \"direct_copy\"\n        store.save_asset(asset)\n        return asset  # no parser"
+        },
+        {
+          "path": "embodichain/gen_sim/asset_engine/configs/gen_config.json",
+          "symbol": "<document>",
+          "start_line": 4,
+          "end_line": 6,
+          "excerpt": "    \"source_preparation\": {\n      \"mode\": \"trimesh\"\n    },"
         }
       ],
       "documentation": [
         {
           "docname": "features/generative_sim/asset_engine",
-          "label": "SimReady pipeline documentation"
+          "label": "SimReady Asset Pipeline guide"
         }
       ]
     },
@@ -2778,7 +2787,7 @@
         "gen-sim"
       ],
       "summary": "Dispatches inspector, geometry, physics, USD, and internal asset parsers.",
-      "details": "ParserManager registers the supported parser implementations and runs the selected stage names for an ingested asset. Individual parsers own their metadata and resume behavior; the manager records parsed status after the pipeline completes.",
+      "details": "ParserManager registers inspector, geometry, physics, USD, and internal parsers and runs their selected sequence. Geometry measures the canonical source, while physics finalization rereads the archived selected mesh. Individual parsers record their own outputs and errors; parsed status records sequence completion without per-stage caching or physical validation.",
       "boundaries": [
         "Pipeline stages belong to single-asset ingestion, not the Scene Engine geometry processor."
       ],
@@ -2786,15 +2795,15 @@
         {
           "path": "embodichain/gen_sim/asset_engine/parser/base.py",
           "symbol": "ParserManager",
-          "start_line": 46,
-          "end_line": 46,
-          "excerpt": "class ParserManager:"
+          "start_line": 53,
+          "end_line": 59,
+          "excerpt": "    DEFAULT_PIPELINE: List[str] = [\n        \"inspector\",\n        \"geometry\",\n        \"physics\",\n        \"usd\",\n        \"internal\",\n    ]"
         }
       ],
       "documentation": [
         {
           "docname": "features/generative_sim/asset_engine",
-          "label": "SimReady pipeline documentation"
+          "label": "SimReady Asset Pipeline guide"
         }
       ]
     },

@@ -32,7 +32,8 @@ embodichain data download --all
 
 ## SimReady Asset Pipeline
 
-Convert a raw mesh asset directory into sim_ready assets for simulation.
+Prepare one existing mesh directory with the
+[SimReady Asset Pipeline](../features/generative_sim/asset_engine.md).
 
 ```bash
 # Run the full SimReady pipeline on a single asset directory
@@ -45,7 +46,9 @@ embodichain simready \
 Select the source preparation strategy in
 ``embodichain/gen_sim/asset_engine/configs/gen_config.json`` via
 ``ingest.source_preparation.mode``. Supported modes are ``blender`` and
-``trimesh``.
+``trimesh``; the shipped configuration selects ``trimesh``. Blender cleanup in
+the later geometry stage is enabled separately by default, so this mode does
+not make the full workflow independent of Blender.
 
 ### Arguments
 
@@ -55,7 +58,13 @@ Select the source preparation strategy in
 | ``--output_root`` | *(required)* | Directory where processed assets are written |
 | ``--category`` | *(required)* | Category hint passed into the pipeline |
 
-The generated output contains the canonical source mesh under ``asset_source/``, the final SimReady mesh under ``asset_simready/``, and USD export files under ``asset_usd/`` when export succeeds.
+Each run creates a UUID directory under ``--output_root`` and an entry in
+``registry.json``. Mesh processing writes canonical source files under
+``asset_source/``, final GLB/OBJ files under ``asset_simready/``, and a USD package
+under ``asset_usd/``. With the default format configuration, a top-level ``.urdf``
+or ``.usd`` selects direct-copy mode and returns before these processing stages.
+See the [pipeline guide](../features/generative_sim/asset_engine.md) for model
+settings, format selection, metadata, and preview commands.
 
 ---
 

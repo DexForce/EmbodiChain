@@ -354,8 +354,14 @@ Simulation-independent camera dimensions used to reconstruct recording features 
 
    RecordedCamera
 
+.. _simready_asset_api:
+
 embodichain.gen_sim.asset_engine.cli.start
 -----------------------------------------------
+
+Single-directory entry point for the :doc:`/features/generative_sim/asset_engine`.
+Mesh inputs run normalization and parser
+stages; configured direct-copy formats preserve raw files without those stages.
 
 .. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
 
@@ -391,8 +397,10 @@ of returned articulation artifacts before publication.
 embodichain.gen_sim.asset_engine.configs
 ----------------------------------------
 
-Read Asset Engine settings from the shared GenSim dotenv file. Legacy Scene
-Engine articulation keys remain accepted as aliases.
+Read articulated-asset service settings from the shared GenSim dotenv file.
+Legacy Scene Engine articulation keys remain accepted as aliases. These service
+settings are separate from the general mesh pipeline's ``OPENAI_*`` and JSON
+configuration; see :doc:`/features/generative_sim/asset_engine`.
 
 .. currentmodule:: embodichain.gen_sim.asset_engine.configs
 
@@ -403,7 +411,7 @@ Engine articulation keys remain accepted as aliases.
 embodichain.gen_sim.asset_engine.configs.environment
 ----------------------------------------------------
 
-Resolves requested Asset Engine dotenv keys and reports missing configuration
+Resolves requested asset-service dotenv keys and reports missing configuration
 without mutating process environment variables.
 
 .. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
@@ -427,7 +435,7 @@ updates their USDC path and scale metadata after normalization.
 embodichain.gen_sim.asset_engine.pipeline.articulation
 ------------------------------------------------------
 
-Materializes functional articulated records through the Asset Engine client.
+Materializes functional articulated records through the articulated-asset client.
 Records provide source observations and coarse scales; the owning scene pipeline
 continues to control layout and export.
 

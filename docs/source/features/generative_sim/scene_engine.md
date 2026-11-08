@@ -54,6 +54,14 @@ debugging.
 - **Layout and export**: refines the edited layout using the updated scene graph
   and writes the resulting scene back to `scene_export`.
 
+## Asset preparation
+
+Scene Engine uses its own `SimReadyProcessor` for graph-conditioned asset
+normalization and physical preparation. To convert a mesh you already have,
+use the separate [SimReady Asset Pipeline](asset_engine.md). Its guide also
+describes the articulated-USDC generation client used by Scene Engine; mesh
+ingest and articulated generation have different configuration owners.
+
 ## Shared Scene Services
 
 Scene Engine uses the shared `sim.scene` CPU strategies for support detection,

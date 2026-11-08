@@ -1,7 +1,10 @@
 Generative Simulation
 =====================
 
-Generative Simulation collects EmbodiChain features for generating simulation-ready assets and executing agent-driven task workflows.
+Prepare an existing mesh with the SimReady Asset Pipeline, or use Scene Engine
+to generate and edit a complete scene from image/text inputs. The asset guide
+also explains the separate articulated-asset service and the path from prepared
+assets into shared simulation scene services.
 
 .. toctree::
    :maxdepth: 2
