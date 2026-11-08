@@ -371,14 +371,12 @@ class GenSimServices:
         injected: Mapping[str, Any] | None = None,
         model_overrides: Mapping[str, str] | None = None,
     ) -> None:
-        from .config import load_services_config
+        if cfg is not None:
+            self.cfg, self._source = deepcopy(cfg), "python"
+        else:
+            from .config import _load_services_config
 
-        self.cfg = deepcopy(cfg) if cfg is not None else load_services_config()
-        self._source = (
-            "python"
-            if cfg is not None
-            else "json" if self.cfg is not None else "legacy"
-        )
+            self.cfg, self._source = _load_services_config()
         self.registry = registry or ServiceRegistry.defaults()
         self._injected = dict(injected or {})
         self._models = dict(model_overrides or {})
@@ -561,6 +559,12 @@ def service_entry(function: Callable[..., Any]) -> Callable[..., Any]:
     def wrapped(
         *args: Any, services: GenSimServices | None = None, **kwargs: Any
     ) -> Any:
+        owner = args[0] if args else kwargs.get("self")
+        bound = getattr(owner, "_services", None)
+        if isinstance(bound, GenSimServices):
+            # Match the method's existing constructor-injection precedence
+            # without first discovering an unrelated implicit configuration.
+            services = bound
         with service_scope(services) as run:
             return function(*args, services=run, **kwargs)
 

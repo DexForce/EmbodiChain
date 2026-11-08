@@ -213,10 +213,15 @@ def test_legacy_resolution_does_not_mix_key_and_endpoint_sources(tmp_path, monke
     assert legacy.instruction_model("explicit") == "explicit"
 
 
-def test_json_configuration_is_opt_in(tmp_path):
+def test_json_configuration_is_opt_in(tmp_path, monkeypatch):
+    from embodichain.gen_sim.services import config
+
+    monkeypatch.delenv("EMBODICHAIN_MODEL_SERVICES_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty-home"))
     path = tmp_path / "gen_config.json"
     path.write_text(json.dumps({"llm": {}}))
-    assert load_services_config(path) is None
+    monkeypatch.setattr(config, "DEFAULT_JSON", path)
+    assert load_services_config() is None
     path.write_text(
         json.dumps(
             {
@@ -766,3 +771,93 @@ def test_shared_owned_instance_closes_once_and_model_lookup_needs_no_credentials
     )
     with GenSimServices(cfg, registry=registry) as run:
         assert run.model("task_interpretation") == "selected-model"
+
+
+@pytest.mark.parametrize("selection", ["env", "xdg", "home", "explicit"])
+def test_external_discovery_precedence_and_python_override(
+    tmp_path, monkeypatch, selection
+):
+    from embodichain.gen_sim.services import config
+
+    monkeypatch.delenv("EMBODICHAIN_MODEL_SERVICES_CONFIG", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+    def write(path, model):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "model_services": {
+                        "profiles": {"one": {"adapter": "test", "model": model}},
+                        "roles": {"task_interpretation": "one"},
+                    }
+                }
+            )
+        )
+        return path
+
+    bundled = write(tmp_path / "bundled.json", "bundled")
+    monkeypatch.setattr(config, "DEFAULT_JSON", bundled)
+    user = write(tmp_path / "xdg/embodichain/model_services.json", "xdg")
+    write(tmp_path / "home/.config/embodichain/model_services.json", "home")
+    explicit = write(tmp_path / "explicit.json", "explicit")
+    if selection in {"env", "explicit"}:
+        monkeypatch.setenv("EMBODICHAIN_MODEL_SERVICES_CONFIG", str(explicit))
+    elif selection == "home":
+        monkeypatch.delenv("XDG_CONFIG_HOME")
+    with GenSimServices() as run:
+        assert (
+            run.model("task_interpretation")
+            == {
+                "env": "explicit",
+                "explicit": "explicit",
+                "xdg": "xdg",
+                "home": "home",
+            }[selection]
+        )
+    if selection == "explicit":
+        assert load_services_config(bundled).profiles["one"]["model"] == "bundled"
+    if selection == "explicit":
+        from ..task_engine.test_image_planning import _fixture
+        from embodichain.gen_sim.task_engine import TaskAgent
+
+        step, _, _ = _fixture()
+        monkeypatch.setenv(
+            "EMBODICHAIN_MODEL_SERVICES_CONFIG", str(tmp_path / "missing")
+        )
+        with GenSimServices(
+            configured(), injected={"task_interpretation": Chat()}
+        ) as run:
+            assert run.get("task_interpretation").complete(ChatRequest(())).text == "ok"
+            result = TaskAgent(
+                services=run, caller=lambda **_: {"steps": [step]}
+            ).generate("priority", "执行测试任务", candidate_count=1)
+            assert (
+                result["candidates"][0]["draft"]["steps"][0]["object"]["reference"]
+                == "source"
+            )
+
+
+@pytest.mark.parametrize(
+    "content", [None, "not json", "[]", "{}", '{"model_services":null}']
+)
+def test_selected_external_config_fails_without_provider_fallback(
+    tmp_path, monkeypatch, content
+):
+    path = tmp_path / "selected.json"
+    if content is not None:
+        path.write_text(content)
+    monkeypatch.setenv("EMBODICHAIN_MODEL_SERVICES_CONFIG", str(path))
+    with pytest.raises(ServiceConfigurationError):
+        GenSimServices()
+
+
+def test_invalid_default_user_file_is_not_ignored(tmp_path, monkeypatch):
+    monkeypatch.delenv("EMBODICHAIN_MODEL_SERVICES_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    p = tmp_path / "embodichain/model_services.json"
+    p.parent.mkdir()
+    p.write_text("{}")
+    with pytest.raises(ServiceConfigurationError):
+        load_services_config()

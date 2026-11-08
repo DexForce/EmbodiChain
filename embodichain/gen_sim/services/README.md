@@ -11,8 +11,9 @@ provides the user-facing configuration and workflow overview.
 
 ## Existing installations
 
-No migration is required. Without `model_services` in the existing Asset Engine
-`configs/gen_config.json`, each role retains its previous selection rules:
+Existing service settings remain usable. When no external/user configuration
+is selected and the bundled Asset Engine `configs/gen_config.json` has no
+`model_services` section, each role retains its previous selection rules:
 
 | Role | Legacy settings |
 |---|---|
@@ -29,6 +30,22 @@ reconstruction capability returns typed xyzw results. Business pipeline pose
 conversion uses only that canonical result. Generation submission timeouts and
 connection failures are intentionally no longer blindly retried: they report
 `SubmissionUnknown` because an earlier submission may already be running.
+
+## Ordinary wheel installs: external files
+
+Set `EMBODICHAIN_MODEL_SERVICES_CONFIG` to a JSON file containing
+`model_services` with `profiles` and `roles`. Set `EMBODICHAIN_ENV_FILE` separately
+for referenced credentials. The existing CLI commands require no additional flags
+and no installed files need editing.
+
+Without the JSON selector, discovery checks
+`$XDG_CONFIG_HOME/embodichain/model_services.json` (default
+`~/.config/embodichain/model_services.json`) before the bundled JSON. Explicit
+Python configuration overrides discovery. Each run selects a whole configuration;
+files are not merged. A selected external file that is missing, unreadable or
+invalid raises `ServiceConfigurationError`; a missing default user file simply
+allows the bundled/legacy path. `load_services_config(path)` selects that exact
+file and applies the same strict external-file checks. Paths expand `~`.
 
 ## Explicit role configuration
 

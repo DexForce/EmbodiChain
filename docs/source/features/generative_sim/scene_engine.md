@@ -10,8 +10,9 @@ loaded by EmbodiChain.
 Install EmbodiChain with the `gensim` extra first; see
 [Installation](../../quick_start/install.md#optional-generative-simulation-gensim).
 
-Configure the required services in `embodichain/gen_sim/.env`, then generate a
-scene:
+For a normal wheel installation, select an external JSON file as described in
+[Model services](model_services.md#configure-a-normal-wheel-installation). The
+legacy alternative is `embodichain/gen_sim/.env`. Then generate a scene:
 
 ```bash
 embodichain scene-engine \

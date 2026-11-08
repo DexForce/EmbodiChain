@@ -42,9 +42,9 @@ Use `embodichain asset-engine` for general mesh ingestion, as described in
 
 ## Preserve existing configuration
 
-Without an explicit Python configuration or a `model_services` section in
-`asset_engine/configs/gen_config.json`, each role retains its legacy selection
-rules. There is no automatic cross-provider fallback.
+When no Python configuration, external selector or user configuration is present,
+the bundled JSON and legacy per-role rules below remain available. Configuration
+is discovered once per run; profiles are not merged across different files.
 
 | Workflow | Legacy source |
 |---|---|
@@ -58,10 +58,56 @@ The engine guides list the required legacy keys. `EMBODICHAIN_ENV_FILE` is used
 by explicit profile references; it does not silently replace every legacy
 loader's fixed dotenv path.
 
-## Opt into explicit profiles
+## Configure a normal wheel installation
 
-Add a `model_services` section to the existing JSON file while keeping its
-`ingest`, `mesh_processing` and other sections. This minimal example configures
+An ordinary `pip install` can configure all GenSim CLI workflows without editing
+Python or `site-packages`. The shared loader checks these sources in order:
+
+1. A supplied Python `GenSimServicesCfg` (when using Python injection).
+2. `EMBODICHAIN_MODEL_SERVICES_CONFIG`, pointing to an external JSON file.
+3. `$XDG_CONFIG_HOME/embodichain/model_services.json`, or
+   `~/.config/embodichain/model_services.json` when XDG is unset/empty.
+4. The bundled `asset_engine/configs/gen_config.json`, then legacy role settings
+   if that file has no `model_services` section.
+
+An explicit `load_services_config(path)` bypasses discovery. Selected external
+files must exist and contain a valid `model_services` object with `profiles` and
+`roles`. Invalid JSON, missing sections and unreadable files fail explicitly;
+they do not silently switch providers. An absent user-default file is optional.
+
+For example, keep both files outside the installation:
+
+```text
+~/.config/embodichain/
+  model_services.json
+  models.env
+```
+
+`models.env` contains the variables referenced by the JSON profiles:
+
+```dotenv
+MY_MODEL_KEY=your-api-key
+```
+
+Export the selectors, then run the existing CLI unchanged:
+
+```bash
+export EMBODICHAIN_MODEL_SERVICES_CONFIG="$HOME/.config/embodichain/model_services.json"
+export EMBODICHAIN_ENV_FILE="$HOME/.config/embodichain/models.env"
+embodichain task-engine --image scene.png --instruction "Place the cup in the tray" --output ./result
+```
+
+`EMBODICHAIN_ENV_FILE` selects variables, not the JSON configuration. Process
+variables win over that dotenv file. Paths support `~`; relative explicit paths
+are relative to the process working directory. When using the user-default JSON
+location the JSON selector can be omitted. Scene Engine, Asset Engine and Gradio
+use the same discovery mechanism; bind every role required by the chosen workflow.
+
+## Define profiles
+
+External JSON files need only the `model_services` section. When editing the
+existing bundled-format JSON, keep its `ingest`, `mesh_processing` and other
+sections. This minimal example configures
 the three image-planning roles:
 
 ```json
@@ -102,7 +148,8 @@ shorthand for an API-key reference. Process values override the selected dotenv
 referenced variables. Unrelated `OPENAI_*` settings do not fill missing explicit
 profile fields. Unused profiles require no credentials or health checks.
 
-Python `GenSimServicesCfg` takes precedence over the JSON section. Existing
+Python `GenSimServicesCfg` takes precedence over discovery, even if an external
+selector points to an invalid file. Existing
 caller/client injection takes precedence for its operation. The Python `model=`
 override remains available; the Task Engine CLI reads configuration and ends at
 the unbound semantic graph.

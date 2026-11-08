@@ -56,20 +56,77 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
-def load_services_config(path: str | Path = DEFAULT_JSON) -> GenSimServicesCfg | None:
-    """Read the optional model_services section; absence selects legacy mode."""
-    selected = Path(path)
-    if not selected.is_file():
-        return None
-    raw = json.loads(selected.read_text())
+def _load_services_config(
+    path: str | Path | None = None,
+) -> tuple[GenSimServicesCfg | None, str]:
+    """Discover one configuration file; selected files never fall through."""
+    if path is not None:
+        selected, source, required = Path(path).expanduser(), "file", True
+    elif "EMBODICHAIN_MODEL_SERVICES_CONFIG" in os.environ:
+        value = os.environ["EMBODICHAIN_MODEL_SERVICES_CONFIG"].strip()
+        if not value:
+            raise ServiceConfigurationError(
+                "EMBODICHAIN_MODEL_SERVICES_CONFIG must not be empty"
+            )
+        selected, source, required = Path(value).expanduser(), "environment", True
+    else:
+        config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
+        user_file = (
+            Path(config_home).expanduser() if config_home else Path.home() / ".config"
+        ) / "embodichain/model_services.json"
+        # lexists semantics: a broken user-file symlink is an invalid selected
+        # configuration, not permission to silently switch providers.
+        if user_file.exists() or user_file.is_symlink():
+            selected, source, required = user_file, "user", True
+        else:
+            selected, source, required = DEFAULT_JSON, "json", False
+    try:
+        raw = json.loads(selected.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if not required and not selected.is_symlink():
+            return None, "legacy"
+        raise ServiceConfigurationError(
+            f"Model service configuration not found: {selected}"
+        ) from None
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ServiceConfigurationError(
+            f"Cannot read valid model service JSON: {selected}"
+        ) from None
+    if not isinstance(raw, dict):
+        raise ServiceConfigurationError(
+            f"Model service configuration must be an object: {selected}"
+        )
     if "model_services" not in raw:
-        return None
+        if required:
+            raise ServiceConfigurationError(
+                f"Selected configuration requires model_services: {selected}"
+            )
+        return None, "legacy"
     section = raw["model_services"]
     if not isinstance(section, dict) or set(section) != {"profiles", "roles"}:
         raise ServiceConfigurationError("model_services requires profiles and roles")
     from ._cfg import GenSimServicesCfg
 
-    return GenSimServicesCfg(**deepcopy(section))
+    return GenSimServicesCfg(**deepcopy(section)), source
+
+
+def load_services_config(path: str | Path | None = None) -> GenSimServicesCfg | None:
+    """Load explicit JSON or discover environment, user, then bundled settings.
+
+    Args:
+        path: Explicit JSON file. Otherwise consult
+            ``EMBODICHAIN_MODEL_SERVICES_CONFIG``, then
+            ``$XDG_CONFIG_HOME/embodichain/model_services.json`` (defaulting to
+            ``~/.config``), then the bundled GenSim JSON.
+
+    Returns:
+        Validated profiles, or ``None`` when bundled settings select legacy mode.
+
+    Raises:
+        ServiceConfigurationError: A selected external file is missing, unreadable
+            or invalid. External files must contain ``model_services``.
+    """
+    return _load_services_config(path)[0]
 
 
 def resolve_profile(
@@ -78,7 +135,9 @@ def resolve_profile(
     """Resolve only explicit references, using process values before dotenv."""
     env = {
         **read_env(
-            env_path or Path(os.getenv("EMBODICHAIN_ENV_FILE", str(DEFAULT_ENV)))
+            (
+                env_path or Path(os.getenv("EMBODICHAIN_ENV_FILE", str(DEFAULT_ENV)))
+            ).expanduser()
         ),
         **os.environ,
     }

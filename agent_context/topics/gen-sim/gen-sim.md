@@ -30,6 +30,12 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 
 Generate: validate input → VLM understanding → geometry/articulation generation
 → placement refinement → export. Model capabilities resolve lazily through one run-scoped `GenSimServices`.
+Normal wheel installs discover external profiles through
+`EMBODICHAIN_MODEL_SERVICES_CONFIG`, then the XDG/home user configuration, before
+bundled JSON and legacy rules. Python configuration overrides discovery. Selected
+external files fail explicitly when invalid; no installed file needs editing.
+`EMBODICHAIN_ENV_FILE` independently supplies referenced variables.
+
 Owned transports close when the run exits; explicit legacy clients and supplied
 service runs remain caller-owned. Chat requests own their stateless transport.
 Edit: import export → validate graph/typed edit plan → generate additions
