@@ -139,7 +139,7 @@ def semantic_planning_catalog() -> dict[str, Any]:
             "simulation.coordinated_transport",
             "coordinated_pickment",
             {"object": "entity", "target": "target"},
-            {},
+            {"reference": "entity", "relation": ["on"]},
             ["left", "right"],
             "coordinated_release",
             ["paired_grasp", "transport_target"],
@@ -261,6 +261,12 @@ def validate_semantic_call_payload(call: dict[str, Any]) -> dict[str, Any]:
             valid = isinstance(value, str) and bool(value.strip())
         if not valid:
             raise ValueError(f"{cid}.{key}: invalid argument {value!r}")
+    if cid == "simulation.coordinated_transport" and (
+        ("reference" in args) != ("relation" in args)
+    ):
+        raise ValueError(
+            "Coordinated transport reference and relation must be declared together."
+        )
     if cid == "place" and len(set(args) & {"on", "inside", "at"}) != 1:
         raise ValueError("place requires exactly one destination")
     resources = call.get("resources", {})

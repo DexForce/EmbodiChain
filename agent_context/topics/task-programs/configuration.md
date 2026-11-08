@@ -224,7 +224,16 @@ The routed-2 factory uses named transport goals and verified retention-only
 phases: grounding checks the exact object and every eligible input-hold row,
 then guards `transport` and requests terminal attachment verification. Projected
 presets reject this contract before motion planning or dispatch. The legacy
-single-target factory keeps its existing effectless behavior and identity.
+single-target factory keeps its existing effectless behavior and identity. The optional
+`RegisteredSemanticLowererCallValidator` validates compiled calls against that
+same immutable registration-owned factory during catalog preflight; no live
+resources or observation ports are available. Configured coordinated transport
+may explicitly select `relation: on` only with `reference_entity_id` and
+`world_displacement`, without `relative_pose`. Its call must match the declared
+reference/relation. The target uses the current reference world position plus
+that world-axis offset, retaining the object world orientation from lowering.
+Omitted relation retains the existing object-relative displacement or
+reference-relative pose branch and its default identity.
 
 
 Container affordances may declare a local-z release clearance while retaining

@@ -2735,6 +2735,7 @@ def _decode_registered_lowerer(
                     {
                         "reference_entity_id",
                         "relative_pose",
+                        "relation",
                         "world_displacement",
                     }
                 ),
@@ -2742,7 +2743,22 @@ def _decode_registered_lowerer(
             has_reference = "reference_entity_id" in route
             has_pose = "relative_pose" in route
             has_displacement = "world_displacement" in route
-            if has_reference != has_pose or has_reference == has_displacement:
+            relation = (
+                _identifier(route["relation"], path=f"{route_path}.relation")
+                if "relation" in route
+                else None
+            )
+            if relation is not None:
+                if (
+                    relation != "on"
+                    or not has_reference
+                    or not has_displacement
+                    or has_pose
+                ):
+                    raise ValueError(
+                        f"{route_path} on requires reference_entity_id and world_displacement, without relative_pose."
+                    )
+            elif has_reference != has_pose or has_reference == has_displacement:
                 raise ValueError(
                     f"{route_path} must declare exactly one of "
                     "reference_entity_id with relative_pose or "
@@ -2750,6 +2766,7 @@ def _decode_registered_lowerer(
                 )
             routes.append(
                 _CoordinatedTransportRoute(
+                    relation=relation,
                     object_id=_identifier(
                         route["object_id"], path=f"{route_path}.object_id"
                     ),

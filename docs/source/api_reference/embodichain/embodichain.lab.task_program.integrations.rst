@@ -478,16 +478,27 @@ missing or ambiguous references against the immutable scene manifest during
 registration. The routed transport factory uses this optional contract;
 existing factories remain valid and keep their fingerprints. Implementations
 must not construct resources or read live state during this preflight.
+``RegisteredSemanticLowererCallValidator`` similarly validates compiled call
+arguments against the exact registered immutable factory declaration during
+catalog preflight. Its identity is the factory's type, revision and sealed
+fields; it adds no executable configuration or live observation callback.
+Coordinated ``relation=on`` routes require a matching reference and world-frame
+displacement. They retain the object's orientation from that lowering and
+resolve the reference position anew, without rotating the world displacement.
 
 .. currentmodule:: embodichain.lab.task_program.integrations
 
 .. autosummary::
 
    RegisteredSemanticLowererSceneValidator
+   RegisteredSemanticLowererCallValidator
 
 .. currentmodule:: embodichain.lab.task_program.integrations.extensions
 
 .. autoclass:: RegisteredSemanticLowererSceneValidator
+   :members:
+
+.. autoclass:: RegisteredSemanticLowererCallValidator
    :members:
 
 

@@ -1914,6 +1914,281 @@ def test_coordinated_transport_config_decodes_world_displacement() -> None:
     assert factory.routes[0].world_displacement == (-0.16, 0.0, 0.0)
 
 
+def _coordinated_on_declaration() -> dict[str, object]:
+    return {
+        "kind": "coordinated_transport",
+        "routes": [
+            {
+                "object_id": "tray",
+                "target_id": "tray_target",
+                "reference_entity_id": "table",
+                "relation": "on",
+                "world_displacement": [0.05, 0.0, 0.06],
+            }
+        ],
+    }
+
+
+def test_coordinated_on_preserves_world_axes_and_fresh_object_orientation() -> None:
+    """A rotated reference anchors translation without rotating the offset."""
+    factory = _decode_registered_lowerer(_coordinated_on_declaration(), path="lowerers")
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, label="tray", entity_id="tray"
+    )
+    from embodichain.lab.task_program.semantics import (
+        SceneObjectRef,
+        SceneAffordanceRef,
+    )
+
+    robot = object()
+    registry = SimpleNamespace(
+        resolve=lambda *args, **kwargs: SceneObjectRef("tray"),
+        resolve_affordance=lambda *args, **kwargs: SceneAffordanceRef("tray_grasp"),
+        lookup=lambda identifier: SimpleNamespace(ref=SceneObjectRef(identifier)),
+        object_semantics=lambda *args, **kwargs: semantics,
+    )
+    lowerer = factory.create(
+        simulation=None,
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    call = RegisteredSemanticCall(
+        call_id=factory.call_id,
+        arguments={
+            "object": "tray",
+            "target": "tray_target",
+            "reference": "table",
+            "relation": "on",
+        },
+    )
+    for angle_sign in (1.0, -1.0):
+        obj, ref = torch.eye(4).unsqueeze(0), torch.eye(4).unsqueeze(0)
+        obj[:, :3, :3] = torch.tensor(
+            [[0.0, -angle_sign, 0.0], [angle_sign, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        )
+        obj[:, :3, 3] = torch.tensor([9.0, 8.0, 7.0])
+        ref[:, :3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+        ref[:, :3, 3] = torch.tensor([angle_sign, 2.0, 0.5])
+        qpos = torch.zeros((1, 1))
+        context = PlanningContext(
+            robot=RobotObservation(timestamp=1.0, qpos=qpos, qvel=qpos.clone()),
+            task=TaskState(batch_size=1, device="cpu"),
+            scene=SceneSnapshot(
+                timestamp=1.0,
+                version=1,
+                entities={"tray": EntityState(obj), "table": EntityState(ref)},
+            ),
+            env_ids=torch.tensor([0]),
+        )
+        result = lowerer.lower(
+            call,
+            context=context,
+            bound=None,
+            option_template=CoordinatedPickmentOptions(release=True),
+        )
+        target = resolve_pose_goal(
+            result.goal.object_target_pose, context, name="target"
+        )
+        torch.testing.assert_close(
+            target[:, :3, 3], torch.tensor([[angle_sign + 0.05, 2.0, 0.56]])
+        )
+        torch.testing.assert_close(target[:, :3, :3], obj[:, :3, :3])
+        assert result.registered_effect.effect_kind is SemanticEffectKind.RELEASE
+        assert tuple(x.slot_id for x in result.registered_effect.held_objects) == (
+            "left",
+            "right",
+        )
+        shifted_ref = ref.clone()
+        shifted_ref[:, :3, 3] += torch.tensor([0.2, 0.3, 0.4])
+        later = PlanningContext(
+            robot=context.robot,
+            task=context.task,
+            scene=SceneSnapshot(
+                timestamp=1.0,
+                version=2,
+                entities={
+                    "tray": EntityState(torch.eye(4).unsqueeze(0)),
+                    "table": EntityState(shifted_ref),
+                },
+            ),
+            env_ids=context.env_ids,
+        )
+        retained = resolve_pose_goal(
+            result.goal.object_target_pose, later, name="target"
+        )
+        torch.testing.assert_close(
+            retained[:, :3, 3], torch.tensor([[angle_sign + 0.25, 2.3, 0.96]])
+        )
+        torch.testing.assert_close(retained[:, :3, :3], obj[:, :3, :3])
+        for changed in ({"reference": "other"}, {"relation": "above"}):
+            with pytest.raises(ValueError):
+                lowerer.lower(
+                    RegisteredSemanticCall(
+                        call_id=factory.call_id,
+                        arguments={**dict(call.arguments), **changed},
+                    ),
+                    context=context,
+                    bound=None,
+                    option_template=CoordinatedPickmentOptions(release=True),
+                )
+
+
+@pytest.mark.parametrize(
+    "mutation", ["relation", "missing_reference", "missing_displacement", "mixed_pose"]
+)
+def test_coordinated_on_rejects_incomplete_or_mixed_routes(mutation: str) -> None:
+    raw = _coordinated_on_declaration()
+    route = raw["routes"][0]
+    if mutation == "relation":
+        route["relation"] = "above"
+    elif mutation == "missing_reference":
+        route.pop("reference_entity_id")
+    elif mutation == "missing_displacement":
+        route.pop("world_displacement")
+    else:
+        route["relative_pose"] = torch.eye(4).reshape(-1).tolist()
+    with pytest.raises(ValueError):
+        _decode_registered_lowerer(raw, path="lowerers")
+
+
+def test_coordinated_on_payload_is_closed_and_relation_fields_are_paired() -> None:
+    from embodichain.lab.task_program.language.semantic_contracts import (
+        validate_semantic_call_payload,
+    )
+
+    raw = {
+        "kind": "registered",
+        "call_id": "simulation.coordinated_transport",
+        "arguments": {
+            "object": "tray",
+            "target": "tray_target",
+            "reference": "table",
+            "relation": "on",
+        },
+        "resources": {"left": "left", "right": "right"},
+    }
+    validate_semantic_call_payload(raw)
+    for field in ("reference", "relation"):
+        invalid = deepcopy(raw)
+        invalid["arguments"].pop(field)
+        with pytest.raises(ValueError):
+            validate_semantic_call_payload(invalid)
+
+
+def test_coordinated_on_rejects_mismatched_calls_during_public_preflight() -> None:
+    from embodichain.lab.task_program import decode_task_program
+    from embodichain.lab.task_program.semantics import SemanticValidationError
+
+    # The scene is independent of embodiment; use a real coordinated-capable profile.
+    coordinated_profile = load_config(
+        _REPOSITORY_ROOT
+        / "extensions/embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml"
+    )["skill_profile"]
+    path = _config_path("hand_over")
+    physical = _physical_components(path, _gym_config("hand_over"))
+    _, integration, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    integration["program_id"] = "coordinated_preflight"
+    integration["profile"]["action_options"]["simulation.coordinated_transport"] = {
+        "kind": "coordinated_pickment",
+        "release": True,
+    }
+    integration["profile"]["effect_monitors"]["simulation.coordinated_transport"] = (
+        deepcopy(integration["profile"]["effect_monitors"]["hand_over"])
+    )
+    route = {
+        "object_id": "can",
+        "target_id": "transport_target",
+        "reference_entity_id": "support_surface",
+        "relation": "on",
+        "world_displacement": [0.05, 0.0, 0.06],
+    }
+    integration["runtime_services"]["registered_semantic_lowerers"] = [
+        {"kind": "coordinated_transport", "routes": [route]}
+    ]
+    call = {
+        "kind": "registered",
+        "call_id": "simulation.coordinated_transport",
+        "arguments": {
+            "object": "can",
+            "target": "transport_target",
+            "reference": "support_surface",
+            "relation": "on",
+        },
+        "resources": {"left": "left", "right": "right"},
+    }
+    program = {
+        "program_id": "coordinated_preflight",
+        "targets": {},
+        "program": {
+            "kind": "sequence",
+            "items": [
+                {
+                    "kind": "segment",
+                    "name": "release",
+                    "steps": {"kind": "invoke", "call": call},
+                }
+            ],
+        },
+    }
+
+    def load(raw_program, raw_integration):
+        return load_configured_task_program_deployment(
+            task_program={
+                "program": {"inline": raw_program},
+                "integration": {"inline": raw_integration},
+                "execution_policy": {"inline": policy},
+            },
+            skill_profile=coordinated_profile,
+            base_dir=path.parent,
+        )
+
+    deployment = load(program, integration)
+    compiled = deployment.integration.registration.catalog.preflight(
+        deployment.load_program()
+    )
+    assert compiled.program_id == "coordinated_preflight"
+    altered = deepcopy(integration)
+    altered["runtime_services"]["registered_semantic_lowerers"][0]["routes"][0][
+        "world_displacement"
+    ][0] = 0.07
+    assert (
+        load(program, altered).integration.integration_fingerprint
+        != deployment.integration.integration_fingerprint
+    )
+    for change in (
+        {"reference": "can"},
+        {"relation": "above"},
+        {"target": "unknown_target"},
+    ):
+        bad = deepcopy(program)
+        bad["program"]["items"][0]["steps"]["call"]["arguments"].update(change)
+        with pytest.raises(SemanticValidationError) as error:
+            deployment.integration.registration.catalog.preflight(
+                decode_task_program(
+                    {
+                        **bad,
+                        "integration": {
+                            "scene_registry": deployment.selection.scene_registry,
+                            "robot_profile": deployment.selection.robot_profile,
+                            "runtime_preset": deployment.selection.runtime_preset,
+                        },
+                    }
+                )
+            )
+        assert error.value.diagnostic.code == "registered_call_declaration_mismatch"
+        with pytest.raises(SemanticValidationError):
+            load(bad, integration)
+    unknown = deepcopy(integration)
+    unknown["runtime_services"]["registered_semantic_lowerers"][0]["routes"][0][
+        "reference_entity_id"
+    ] = "missing_scene_reference"
+    with pytest.raises(SemanticValidationError):
+        load(program, unknown)
+
+
 def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
     """Configured fixed grasps must contain exactly one SE(3) transform."""
     payload = deepcopy(_tableware_integration_payload("pour_water"))

@@ -58,7 +58,10 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.lab.task_program.semantics import SceneManifest
+    from embodichain.lab.task_program.semantics import (
+        SceneManifest,
+        RegisteredSemanticCall,
+    )
     from embodichain.lab.sim.atomic_actions import AtomicActionEngine, SceneProvider
     from embodichain.lab.task_program.semantics import (
         EffectEvidenceProvider,
@@ -573,6 +576,25 @@ class RegisteredSemanticLowererFactory(Protocol):
 
         Returns:
             A fresh registered semantic lowerer matching the declared call.
+        """
+
+
+@runtime_checkable
+class RegisteredSemanticLowererCallValidator(Protocol):
+    """Optional pure call admission implemented by a registered immutable factory.
+
+    The registration fingerprints the same factory type, revision and complete
+    declaration. Validation must not create live resources or observe physics.
+    """
+
+    call_id: ClassVar[str]
+    revision: ClassVar[str]
+
+    def validate_call_declaration(self, call: RegisteredSemanticCall) -> None:
+        """Reject a call that disagrees with this factory's declared routes.
+
+        Args:
+            call: Compiled registered call with immutable declarative arguments.
         """
 
 
@@ -1187,6 +1209,7 @@ __all__ = [
     "RegisteredSemanticLowererDeclaration",
     "RegisteredSemanticLowererFactory",
     "RegisteredSemanticLowererSceneValidator",
+    "RegisteredSemanticLowererCallValidator",
     "RuntimeTransportDeclaration",
     "StandardExtensionDeclarations",
     "VersionedKey",

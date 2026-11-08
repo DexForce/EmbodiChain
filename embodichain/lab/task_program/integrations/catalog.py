@@ -19,7 +19,12 @@
 from __future__ import annotations
 
 from .simulation.planning_services import SimulationPlanningServicesCfg
+from embodichain.lab.task_program.semantics.integration import (
+    SemanticDiagnostic,
+    SemanticValidationError,
+)
 
+from copy import deepcopy
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
@@ -123,6 +128,8 @@ from .extensions import (
     RegisteredSemanticLowererDeclaration,
     RegisteredSemanticLowererFactory,
     RegisteredSemanticLowererSceneValidator,
+    RegisteredSemanticLowererCallValidator,
+    validate_immutable_extension_declaration,
     RuntimeTransportDeclaration,
     StandardExtensionDeclarations,
     build_standard_extension_declarations,
@@ -222,6 +229,11 @@ def _canonical_value(value: object) -> object:
         )
         from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
         from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
+
+        from ._configured_services import _CoordinatedTransportRoute
+
+        if type(value) is _CoordinatedTransportRoute and value.relation is None:
+            metadata.pop("relation")
 
         from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
 
@@ -610,6 +622,11 @@ class TaskProgramIntegrationCatalog:
     )
     """Immutable preset-to-entity binding for declared geometric conditions."""
 
+    registered_call_validators: Mapping[str, RegisteredSemanticLowererCallValidator] = (
+        field(default_factory=dict, kw_only=True, repr=False, compare=False)
+    )
+    """Pure admission owned by the exact registered immutable lowerer factories."""
+
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
             value = getattr(self, field_name)
@@ -669,6 +686,26 @@ class TaskProgramIntegrationCatalog:
             self,
             "registered_semantic_lowerer_declarations",
             extensions.registered_semantic_lowerers,
+        )
+        validators = {}
+        for call_id, validator in self.registered_call_validators.items():
+            declaration = self.registered_semantic_lowerer_declarations.get(call_id)
+            if (
+                declaration is None
+                or type(validator) is not declaration.factory_type
+                or not isinstance(validator, RegisteredSemanticLowererCallValidator)
+                or validator.call_id != call_id
+                or validator.revision != declaration.revision
+            ):
+                raise TypeError(
+                    "Call validators must be exact registered lowerer factories."
+                )
+            validate_immutable_extension_declaration(
+                validator, field_name="registered_call_validators"
+            )
+            validators[call_id] = deepcopy(validator)
+        object.__setattr__(
+            self, "registered_call_validators", MappingProxyType(validators)
         )
         if self.robot_profile.profile_id != self.robot_profile_id:
             raise ValueError("robot_profile_id must match robot_profile.profile_id.")
@@ -915,6 +952,19 @@ class TaskProgramIntegrationCatalog:
                     "physical safety-validator factory.",
                 )
             for call in segment.calls:
+                if type(call.call) is RegisteredSemanticCall:
+                    validator = self.registered_call_validators.get(call.call.call_id)
+                    if validator is not None:
+                        try:
+                            validator.validate_call_declaration(call.call)
+                        except (ValueError, KeyError, TypeError) as error:
+                            raise SemanticValidationError(
+                                SemanticDiagnostic(
+                                    "registered_call_declaration_mismatch",
+                                    call.source_path,
+                                    str(error),
+                                )
+                            ) from error
                 linked = manifest.link_call(
                     call.call,
                     path=call.source_path,
@@ -1534,6 +1584,11 @@ class SimulationTaskProgramRegistration:
                 ),
                 fingerprint=fingerprint,
                 _required_skills=required_skills,
+                registered_call_validators={
+                    factory.call_id: factory
+                    for factory in self.registered_semantic_lowerer_factories
+                    if isinstance(factory, RegisteredSemanticLowererCallValidator)
+                },
             ),
         )
         object.__setattr__(self, "_parallel_safety_validator_history", [])
