@@ -550,13 +550,14 @@ topics:
   status: active
 - id: gen-sim
   title: Gen Sim
-  aliases: [gen sim, Scene Engine, Asset Engine, asset-engine, SimReady Asset Pipeline, SimReady, scene generation, scene editing, scene-randomization,
+  aliases: [gen sim, GenSim model services, 模型服务解耦, Scene Engine, Asset Engine, asset-engine, SimReady Asset Pipeline, SimReady, scene generation, scene editing, scene-randomization,
     grouped scene randomization, GPU场景扩增, 批量场景扩增, 组内扩增, 组内场景扩增, intra-group augmentation, 分组场景随机化, 场景生成, 场景编辑, 生成式仿真]
-  keywords: [generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, SceneRandomizationCfg,
+  keywords: [EMBODICHAIN_MODEL_SERVICES_CONFIG, GenSimServices, GenSimServicesCfg, ServiceRegistry, model_services, generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, SceneRandomizationCfg,
     randomize_scene, prepare_scene_baseline, scene-randomization, load_layouts, preview_layouts, ingest_one_asset,
     ParserManager, SceneBlueprintPackage, analyze_image, materialize_blueprint, SessionProcessRegistry, Gradio, project_placement_evidence_binding, project_configured_placement_evidence_binding]
   paths: [topics/gen-sim/gen-sim.md]
   source_of_truth:
+  - embodichain/gen_sim/services/
   - embodichain/gen_sim/scene_engine/cli/start.py
   - embodichain/gen_sim/scene_engine/pipeline/generate.py
   - embodichain/gen_sim/scene_engine/pipeline/edit.py

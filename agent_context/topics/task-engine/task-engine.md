@@ -16,6 +16,12 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 | Roles, binding reports and scene manifest contracts | `orchestration/contracts.py` |
 | Graph/TaskSpec/grounding coverage and source lineage | `semantic_graph_validation.py` |
 
+Model calls use role-bound capabilities in `gen_sim/services/`; interpretation,
+image grounding and display translation have separate bindings. An injected
+caller takes precedence and requires no default transport credentials. TaskAgent
+shares the supplied run across its joined candidate workers; provider-specific
+options and protocol handling stay in adapters. See the [service guide](../../../embodichain/gen_sim/services/README.md).
+
 TaskSpec identity and predicate evaluation belong to
 [Task specification](../task-spec/task-spec.md). Both mappings and instances must
 retain their verified semantic identity. Graph coverage checks declarations; it
@@ -54,7 +60,13 @@ capabilities rather than per-E-type construction branches. Explicit part parents
 retain drawer/handle identity; step-result selectors inherit earlier source IDs.
 This semantic-only checker does not weaken historical grounded coverage checks.
 Requested destinations and relations must be realized by each subject's producing
-call, rather than an unrelated pickup annotation. Terminal holds are checked at
+call, rather than an unrelated pickup annotation. Resource-state diagnostics
+include proposed node/slot set/remove operations, including the original
+acquisition for a named handover. Repair prompts require retaining unaffected
+fields of the previous plan; suggestions do not mutate the graph or bypass the
+complete strict validator. Task Engine side enums `left_arm`/`right_arm` map
+explicitly to logical resources `left`/`right`; custom resource identifiers and
+robot control-part names are preserved for runtime binding. Terminal holds are checked at
 the source step boundary; coordinated hold is rejected until a matching hold
 call is available in the catalog.
 

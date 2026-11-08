@@ -32,6 +32,14 @@ build a runnable Gym deployment. A physics-mode annotation of `articulation`
 also does not synthesize links or joints; use the separate generation service
 under [articulated asset generation](#articulated-asset-generation).
 
+## Model-service ownership
+
+Asset annotation can select separate orientation, dimension, semantic and physics
+roles through [Model services](model_services.md). ParserManager and ingestion
+accept a borrowed `GenSimServices` run; model clients are created on demand rather
+than during module import. The legacy environment/JSON precedence below remains
+available when explicit profiles are absent.
+
 ## Prerequisites
 
 Install EmbodiChain with the `gensim` extra and configure the isolated Blender

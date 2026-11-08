@@ -46,6 +46,11 @@ runtime observations and the selected validators.
 
 ## Configure the model
 
+The following describes the legacy configuration path. For independent model
+roles, explicit profiles and Python injection, use [Model services](model_services.md).
+Unused services are resolved lazily; supplied clients/runs remain caller-owned.
+
+
 Install the `gensim` dependencies described in
 [Installation](../../quick_start/install.md#optional-generative-simulation-gensim).
 The default image workflow makes text and multimodal model requests. Configure
@@ -59,7 +64,8 @@ SCENE_ENGINE_OPENAI_DEFAULT_QUERY={}
 OPENAI_MAX_ATTEMPTS=2
 ```
 
-Grounding and graph planning use the Scene Engine model loader, which requires
+In legacy mode, grounding and graph planning retain the Scene Engine settings
+loader, which requires
 this file and all five keys. `SCENE_ENGINE_OPENAI_DEFAULT_QUERY` must decode to
 a JSON object, and `OPENAI_MAX_ATTEMPTS` must be a positive integer. Exporting
 process variables alone does not replace this loader's dotenv file.
@@ -291,3 +297,20 @@ separately from the four-argument image CLI.
 
 See the [Task Engine API reference](../../api_reference/embodichain/embodichain.gen_sim.task_engine.rst)
 for these contracts and the [CLI reference](../../guides/cli.md) for command usage.
+
+
+## Model-service and repair boundaries
+
+Interpretation, image grounding and semantic planning have separate roles under
+`GenSimServices`. A supplied caller overrides its stage. Structured content repair
+retains the existing single diagnostic retry; state failures can propose exact
+node/resource-slot edits while the corrected graph is fully revalidated.
+
+Task intent sides `left_arm`/`right_arm` map to logical resources `left`/`right`.
+This mapping concerns Task Engine enums; actual robot control-part names and
+custom resource identifiers remain unchanged and require runtime bindings.
+
+The pinned image-cohort acceptance follows producing actions within the same
+source step and subject, including split noun/action quotes. Pickup origins are
+not counted as placement destinations. This semantic-only check supplements the
+strict plan validator and never establishes physical success.

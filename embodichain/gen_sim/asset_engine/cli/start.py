@@ -18,13 +18,23 @@
 
 from __future__ import annotations
 
+from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
+
+
 import argparse
 import os
 from collections.abc import Sequence
 from pathlib import Path
 
 
-def cli_ingest_single(input_dir: str, output_dir: str, category: str) -> None:
+@service_entry
+def cli_ingest_single(
+    input_dir: str,
+    output_dir: str,
+    category: str,
+    *,
+    services: GenSimServices | None = None,
+) -> None:
     """Ingest one asset directory.
 
     Args:
@@ -49,18 +59,22 @@ def cli_ingest_single(input_dir: str, output_dir: str, category: str) -> None:
 
     output_path.mkdir(parents=True, exist_ok=True)
     store = JsonStore(output_path)
-    manager = ParserManager()
+    manager = ParserManager(services=services)
 
     print(f"Processing Single Asset: {input_path.name} (Category: {category})")
 
-    asset = ingest_one_asset(
-        asset_dir=input_path,
-        category=category,
-        output_root=output_path,
-        store=store,
-        manager=manager,
-    )
+    try:
+        asset = ingest_one_asset(
+            asset_dir=input_path,
+            category=category,
+            output_root=output_path,
+            store=store,
+            manager=manager,
+            services=services,
+        )
 
+    finally:
+        services.write_records(output_path / "service_calls.json")
     if asset:
         print("Successfully processed")
     else:

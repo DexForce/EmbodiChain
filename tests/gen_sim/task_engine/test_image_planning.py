@@ -566,6 +566,12 @@ def test_single_repair_gets_all_independent_symbolic_state_errors(source_image):
         "missing_held_object",
     }
     assert {item["node_id"] for item in diagnostics["errors"]} == {"n1", "n2"}
+    mismatch = next(
+        item for item in diagnostics["errors"] if item["code"] == "holder_mismatch"
+    )
+    assert mismatch["repair_operations"] == [
+        {"operation": "remove", "node_id": "n1", "path": "/call/resources/primary"}
+    ]
 
 
 @pytest.mark.parametrize("arm", ["left", "right"])
@@ -637,3 +643,59 @@ def test_malformed_intent_gets_one_diagnostic_repair(source_image, malformed):
     )
     assert len(attempts) == 2 and attempts[1]["repair_errors"]
     assert result["semantic_graph_validation"]["coverage"]["semantic_status"] == "valid"
+
+
+def test_handover_repair_points_to_existing_unbound_acquisition(source_image):
+    def damage(step, grounding, plan):
+        plan["nodes"][0]["call"]["resources"] = {}
+
+    with pytest.raises(SemanticPlanningError) as failure:
+        _plan(source_image, "E4", damage)
+    diagnostics = failure.value.artifacts["model_attempts"][-1]["errors"][0]
+    handover = next(
+        item for item in diagnostics["errors"] if item["code"] == "handover_state"
+    )
+    assert handover["repair_operations"] == [
+        {
+            "operation": "set",
+            "node_id": "n0",
+            "path": "/call/resources/primary",
+            "value": "right",
+        }
+    ]
+
+
+def test_repair_receives_explicit_intent_to_logical_resource_mapping(source_image):
+    step, grounding, plan = _fixture("E4")
+    wrong = deepcopy(plan)
+    for node in wrong["nodes"]:
+        node["call"]["resources"] = {
+            slot: value + "_arm" for slot, value in node["call"]["resources"].items()
+        }
+    requests = []
+
+    def provider(**kwargs):
+        requests.append(json.loads(kwargs["user_prompt"]))
+        return json.dumps(wrong if len(requests) == 1 else plan)
+
+    result = generate_semantic_task_graph_from_image(
+        source_image,
+        "执行测试任务",
+        instruction_caller=lambda **_: {"steps": [step]},
+        image_caller=lambda **_: json.dumps(grounding),
+        planning_caller=provider,
+    )
+    assert len(requests) == 2
+    assert requests[1]["resource_identity"]["intent_side_to_logical_resource"] == {
+        "left_arm": "left",
+        "right_arm": "right",
+    }
+    assert "logical resource 'right'" in str(requests[1]["repair_errors"])
+    assert result["semantic_task_graph"]["nodes"][1]["call"]["resources"] == {
+        "source": "right",
+        "destination": "left",
+    }
+    assert (
+        result["task_candidates"]["candidates"][0]["draft"]["steps"][0]["transfer_arm"]
+        == "right_arm"
+    )

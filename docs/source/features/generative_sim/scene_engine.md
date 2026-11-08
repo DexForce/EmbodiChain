@@ -10,8 +10,9 @@ loaded by EmbodiChain.
 Install EmbodiChain with the `gensim` extra first; see
 [Installation](../../quick_start/install.md#optional-generative-simulation-gensim).
 
-Configure the required services in `embodichain/gen_sim/.env`, then generate a
-scene:
+For a normal wheel installation, select an external JSON file as described in
+[Model services](model_services.md#configure-a-normal-wheel-installation). The
+legacy alternative is `embodichain/gen_sim/.env`. Then generate a scene:
 
 ```bash
 embodichain scene-engine \
@@ -82,6 +83,11 @@ selections; settling requires a full-world selection because its step callback
 advances all rows. The separate Task Program scene expansion host remains B=1.
 
 ## Configuration
+
+The following describes the legacy configuration path. For independent model
+roles, explicit profiles and Python injection, use [Model services](model_services.md).
+Unused services are resolved lazily; supplied clients/runs remain caller-owned.
+
 
 Scene Engine reads the LLM, segmentation, image-generation, and
 geometry-generation settings from `embodichain/gen_sim/.env`. The same file

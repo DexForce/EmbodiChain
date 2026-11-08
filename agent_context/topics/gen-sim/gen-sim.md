@@ -11,6 +11,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
+| Model service configuration, adapters and ownership | `services/`; [service guide](../../../embodichain/gen_sim/services/README.md) |
 | Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `asset-engine`, `task-engine` |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
@@ -28,8 +29,15 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Frozen placement declaration → normative evidence binding | `task_engine/evidence.py` → [TaskSpec evidence boundary](../task-spec/task-spec.md#physical-evidence-boundary) |
 
 Generate: validate input → VLM understanding → geometry/articulation generation
-→ placement refinement → export. Segmentation, geometry and articulation
-clients are closed in `finally` blocks; VLM lifetime is separate.
+→ placement refinement → export. Model capabilities resolve lazily through one run-scoped `GenSimServices`.
+Normal wheel installs discover external profiles through
+`EMBODICHAIN_MODEL_SERVICES_CONFIG`, then the XDG/home user configuration, before
+bundled JSON and legacy rules. Python configuration overrides discovery. Selected
+external files fail explicitly when invalid; no installed file needs editing.
+`EMBODICHAIN_ENV_FILE` independently supplies referenced variables.
+
+Owned transports close when the run exits; explicit legacy clients and supplied
+service runs remain caller-owned. Chat requests own their stateless transport.
 Edit: import export → validate graph/typed edit plan → generate additions
 → change layout → overwrite export. Combined image/edit mode generates first.
 

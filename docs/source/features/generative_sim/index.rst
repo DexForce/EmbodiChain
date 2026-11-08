@@ -10,7 +10,7 @@ Architecture
 ------------
 
 GenSim lives in ``embodichain.gen_sim``. Its three engines have independent CLI
-and Python entry points. Model clients, asset-processing workers, and task
+and Python entry points. Role-bound model services, asset-processing workers, and task
 contracts support these workflows; explicit runtime integrations turn their
 outputs into physical scenes and executable tasks.
 
@@ -28,7 +28,7 @@ it needs.
                task["Task Engine<br/>Task declarations"]
            end
            subgraph support["Supporting modules"]
-               models["Model and<br/>generation clients"]
+               models["GenSimServices<br/>Roles / adapters / ownership"]
                blender["Isolated Blender worker"]
                spec["TaskSpec"]
            end
@@ -106,11 +106,12 @@ Supporting modules
      - Simulator-independent task requirements, semantic identity, predicate and
        milestone evaluation, and content-addressed caching. It evaluates supplied
        evidence; callers acquire physical observations.
-   * - Engine clients and configuration
-     - ``scene_engine/llms/`` and the engines' ``clients/`` adapters connect to
-       model, segmentation, geometry, and articulation providers as needed.
-       ``env.py``, ``environment.py``, and engine-specific configuration loaders
-       own settings resolution; each guide documents its required services.
+   * - :doc:`Model services <model_services>`
+
+       ``services/``
+     - Capability contracts, role/profile configuration, adapter factories,
+       lazy run-scoped ownership and safe call records. Existing engine client
+       modules retain compatibility import paths.
    * - Blender process boundary
      - ``_blender_runtime.py`` sends file-based jobs to ``_blender_worker.py`` in
        an isolated Python environment. Asset and scene processing select the
@@ -142,6 +143,7 @@ the selected assets, scene, robot, and task declarations.
 .. toctree::
    :maxdepth: 2
 
+   Model services <model_services.md>
    Asset Engine <asset_engine.md>
    Scene Engine <scene_engine.md>
    Task Engine <task_engine.md>

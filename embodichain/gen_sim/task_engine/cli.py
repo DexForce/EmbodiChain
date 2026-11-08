@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
+
 import argparse
 import base64
 from collections.abc import Sequence
@@ -41,7 +43,10 @@ from .semantic_graph_html import render_semantic_task_graph_html
 __all__ = ["main"]
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+@service_entry
+def main(
+    argv: Sequence[str] | None = None, *, services: GenSimServices | None = None
+) -> None:
     """Generate JSON declarations and an offline graph viewer from a photograph.
 
     Args:
@@ -66,7 +71,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     with WorkflowRunArtifacts(args.output) as artifacts:
         try:
             result = generate_semantic_task_graph_from_image(
-                args.image, args.instruction, task_id=args.task_id
+                args.image, args.instruction, task_id=args.task_id, services=services
             )
         except SemanticPlanningError as error:
             failure = args.output.with_name(
@@ -74,7 +79,12 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
             write_run_json(
                 failure,
-                {"error": str(error), "artifacts": error.artifacts},
+                {
+                    "error": str(error),
+                    "artifacts": error.artifacts,
+                    "service_calls": services.records(),
+                    "service_selections": services.selections(),
+                },
                 overwrite=False,
             )
             raise
@@ -106,10 +116,12 @@ def main(argv: Sequence[str] | None = None) -> None:
             "runtime_evidence_status": "not_run",
             "image_sha256": result["image_grounding"]["image_sha256"],
             "integration_status": "unbound",
+            "service_selections": services.selections(),
         }
         (artifacts.output_dir / "semantic_task_graph.html").write_text(
             _image_preview(result, source_copy, summary), encoding="utf-8"
         )
+        services.write_records(artifacts.output_dir / "service_calls.json")
         write_run_json(artifacts.output_dir / "run_manifest.json", summary)
         artifacts.commit()
     print(f"Semantic graph: {artifacts.output_dir / 'semantic_task_graph.json'}")
