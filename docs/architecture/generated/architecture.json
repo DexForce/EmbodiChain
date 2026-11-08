@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "a54b08dd2636143ec64e5709ebe27575bd48f639",
+  "revision": "32ac2c1a40b6c4e0cc7a61e9a0801bbf58b3b4d8",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -182,7 +182,7 @@
       "documentation": [
         {
           "docname": "features/generative_sim/asset_engine",
-          "label": "SimReady Asset Pipeline guide",
+          "label": "Asset Engine guide",
           "source_extension": ".md"
         }
       ]
@@ -3031,13 +3031,13 @@
     },
     {
       "id": "simready",
-      "label": "SimReady Asset Pipeline",
+      "label": "Asset Engine",
       "kind": "module",
       "topic_ids": [
         "gen-sim"
       ],
       "summary": "Prepares an existing mesh through source conversion, semantic/physics inference, and mesh/USD export.",
-      "details": "The SimReady Asset Pipeline uses the simready CLI and asset_engine Python namespace. Each run archives one input directory in a new UUID asset directory. Mesh inputs run source preparation and parser stages; configured URDF/USD inputs are copied directly without parser execution. The shipped source conversion mode is trimesh, while later Blender cleanup is configured separately. Source geometry metrics and the final mesh have separate acquisition paths. Scene Engine's graph-conditioned preparation and the asset package's articulated-generation service are distinct integrations.",
+      "details": "The Asset Engine uses the simready CLI and asset_engine Python namespace. Each run archives one input directory in a new UUID asset directory. Mesh inputs run source preparation and parser stages; configured URDF/USD inputs are copied directly without parser execution. The shipped source conversion mode is trimesh, while later Blender cleanup is configured separately. Source geometry metrics and the final mesh have separate acquisition paths. Scene Engine's graph-conditioned preparation and the asset package's articulated-generation service are distinct integrations.",
       "boundaries": [
         "The CLI consumes one existing asset directory and owns asset/registry metadata; scene layout and task deployment belong to downstream callers.",
         "General mesh inference uses OPENAI_* and gen_config.json; articulated generation has a separate service client and dotenv configuration.",
@@ -3062,7 +3062,7 @@
       "documentation": [
         {
           "docname": "features/generative_sim/asset_engine",
-          "label": "SimReady Asset Pipeline guide",
+          "label": "Asset Engine guide",
           "source_extension": ".md"
         }
       ]
