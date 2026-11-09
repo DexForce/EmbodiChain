@@ -21,8 +21,6 @@ in a simulated environment using the SimulationManager and grasp planning utilit
 
 from __future__ import annotations
 
-from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
-
 import argparse
 import time
 from embodichain.cli.sim import add_sim_args_to_parser
@@ -57,6 +55,7 @@ import numpy as np
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.compute.trajectory import interpolate_with_distance
