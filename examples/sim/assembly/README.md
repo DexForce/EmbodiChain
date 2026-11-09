@@ -1,5 +1,14 @@
 # Precision assembly examples
 
+Current main uses Python 3.12 and DexSim 0.6.0rc1. Direct compound construction
+and raw-contact forwarding were checked on that installed SDK without the
+historical source overlay. The static compound USD import route is unavailable
+on 0.6.0rc1: its parser drops child colliders under disabled rigid bodies.
+EmbodiChain rejects that loss explicitly. Exported USD retains the authored
+static ownership; use direct manifests for runtime construction until the SDK
+parser is corrected. This dependency gap is retained as one strict expected
+failure in the USD round-trip tests.
+
 The native path attaches multiple convex collision pieces to one rigid body.
 An independent visual mesh never closes its collision aperture. The generator
 uses the separately installed optional mjfit provider pinned to revision

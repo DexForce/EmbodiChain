@@ -1,5 +1,16 @@
 # DexSim assembly capabilities
 
+Current main selects DexSim 0.6.0rc1 on Python 3.12. The installed package
+exposes raw contact and prepared-variant descriptor fields; direct native
+compound, raw-contact and compatible-variant smoke checks passed without these
+historical patches. The notes below retain the earlier source profiles for
+reproducible old runs and do not replace current dependency selection.
+
+One current dependency limitation remains: static compound USD import drops
+child colliders. EmbodiChain rejects this at the import boundary and recommends
+direct manifest construction. The static USD round-trip test retains its full
+collider-count oracle with a strict expected failure for exactly 0.6.0rc1.
+
 Current SDK integration is tracked in [Dexverse Draft MR !1562](http://192.168.3.16/Engine/dexverse/-/merge_requests/1562),
 revision `c780c60b89a9926e52c17fd55e910702018a9a73` based on dev `0868c31e96ec4bbe37686c79d4c1dbcd7dec8dd4`.
 That MR already handles continuous rotation in current dev and adds the missing descriptor

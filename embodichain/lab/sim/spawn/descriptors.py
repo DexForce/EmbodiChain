@@ -237,6 +237,13 @@ def _resolve_rigid_physics(
             values = _configured_values(collision_props)
             for name in ("collision_enabled", "contact_offset", "rest_offset"):
                 values.pop(name, None)
+            # Normalize the original collision aliases before per-link specs
+            # merge. Raw contact impedance is material-owned on current SDKs;
+            # leaving it in two maps would let a global material override a
+            # more specific link collision setting during final lowering.
+            for name in ("solref", "solimp", "solmix"):
+                if name in values:
+                    spec.newton_material_props[name] = values.pop(name)
             spec.newton_collision_props = values
         elif (
             collision_props is not None
@@ -255,7 +262,7 @@ def _resolve_rigid_physics(
                 values["mu_torsional"] = values.pop("torsional_friction")
             if "rolling_friction" in values:
                 values["mu_rolling"] = values.pop("rolling_friction")
-            spec.newton_material_props = values
+            spec.newton_material_props.update(values)
         elif (
             material_props is not None
             and type(material_props) is not RigidBodyMaterialCfg
@@ -1669,7 +1676,7 @@ def _compile_newton_collision(
     # non-None descriptor suppresses DexSim's descriptor factory defaults.
     values = {field.name: None for field in fields(NewtonCollisionDesc)}
     raw_contact_fields = {"solref", "solimp", "solmix"}.intersection(
-        physics.newton_collision_props
+        physics.newton_collision_props.keys() | physics.newton_material_props.keys()
     )
     unsupported_fields = raw_contact_fields.difference(values)
     if unsupported_fields:
