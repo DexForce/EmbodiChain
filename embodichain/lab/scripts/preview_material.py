@@ -168,6 +168,9 @@ def _create_parser() -> argparse.ArgumentParser:
         default=16,
         help="DexSim render iterations per frame.",
     )
+    from embodichain.cli._visualization import add_viewer_args_to_parser
+
+    add_viewer_args_to_parser(parser, allow_viser=False)
     return parser
 
 
@@ -193,9 +196,11 @@ def _select_materials(
         raise ValueError("--compatible-only requires --all")
     if args.source != "all" and not args.all:
         raise ValueError("--source requires --list or --all")
-    if args.max_steps is not None and (args.headless or args.all):
+    if args.max_steps is not None and (
+        (args.headless and not getattr(args, "web", False)) or args.all
+    ):
         raise ValueError(
-            "--max-steps applies to native-window previews; remove --headless/--all"
+            "--max-steps applies to interactive previews; remove --all or select --web with --headless"
         )
     if args.compare_native and args.material_params:
         raise ValueError(
@@ -338,9 +343,12 @@ def _render_materials(
     from embodichain.data.assets.materials import DefaultMaterials
 
     args.output.mkdir(parents=True, exist_ok=True)
+    from embodichain.lab.visualization import visualization_cfg_from_args
+
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=visualization_cfg_from_args(args),
             gpu_id=args.gpu_id,
             device="cpu",
             scene_node_capacity=256,
@@ -647,11 +655,11 @@ def _render_materials(
         (args.output / "results.json").write_text(
             json.dumps(report, indent=2) + "\n", encoding="utf-8"
         )
-        if not args.headless and not args.all:
+        if (not args.headless or getattr(args, "web", False)) and not args.all:
             from embodichain.lab.scripts._preview import _run_preview_loop
 
             sim.prepare()
-            if not sim.open_window():
+            if not sim.open_viewer():
                 raise RuntimeError(
                     "The native material-preview window could not be opened"
                 )
@@ -660,7 +668,7 @@ def _render_materials(
                 if args.model is not None
                 else ([1.5, -3.8, 1.8], [0, 0, 0.8])
             )
-            world.get_windows().set_look_at(eye, target, [0, 0, 1])
+            sim.viewer.set_look_at(eye, target, [0, 0, 1])
             print(
                 "Material preview ready. Press Ctrl+C to exit.",
                 file=sys.stderr,

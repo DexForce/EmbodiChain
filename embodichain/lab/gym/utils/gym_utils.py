@@ -902,6 +902,7 @@ def config_to_cfg(
         dexsim_startup_info=config.get("dexsim_startup_info", False),
         scene_node_capacity=config.get("scene_node_capacity"),
         headless=config.get("headless", False),
+        web=config.get("web", False),
         enable_entity_gizmo=config.get("enable_entity_gizmo", True),
         robot_ik_gizmo=config.get("robot_ik_gizmo", {}),
         device=config.get("device"),
@@ -1511,6 +1512,7 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     if args.headless is not None or viser_enabled or web_enabled:
         merged_config["headless"] = bool(args.headless or viser_enabled or web_enabled)
     if web_enabled:
+        merged_config["web"] = True
         visualization = deepcopy(merged_config.get("visualization", {}))
         visualization.update(backend="dexsim-web", allow_commands=True)
         web = deepcopy(visualization.get("web", {}))
@@ -1566,6 +1568,7 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["env"] = deepcopy(dict(env_config))
         merged_config["env"]["dataset"] = updated_datasets
     if viser_enabled:
+        merged_config["web"] = False
         from embodichain.lab.visualization.cli import visualization_cfg_from_args
 
         cli_visualization = visualization_cfg_from_args(args)

@@ -108,6 +108,9 @@ class PhysicsBackend(ABC):
         """
         del result
 
+    def process_interaction(self) -> None:
+        """Apply pending editor commands without integrating physics."""
+
     def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
         """Publish the current physics state to render resources without stepping.
 

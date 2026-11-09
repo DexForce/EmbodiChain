@@ -2374,12 +2374,16 @@ class CuroboPlanner(BasePlanner):
         world_scene = None
         if rigid_objects:
             world_scene = self._auto_generate_world_scene(world_cfg)
+        from embodichain.lab.sim import SimulationManager
+
+        manager = SimulationManager.get_instance(self.cfg.sim_instance_id)
         visualize_curobo_collision_models(
             self.robot,
             profile.robot_config_path,
             rigid_objects,
             world_scene,
             env_id,
+            wait_for_input=manager.wait_for_input,
         )
 
     def _resolve_sim_joint_names(self, control_part: str) -> list[str]:

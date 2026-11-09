@@ -392,6 +392,9 @@ def fake_simulation(monkeypatch, robot_asset):
             events.append("window")
             return True
 
+        def open_viewer(self):
+            return self.open_window()
+
         def update_gizmos(self):
             events.append("gizmos")
 

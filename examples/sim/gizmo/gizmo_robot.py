@@ -150,8 +150,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     sim.update(step=1)
 
     native_window_opened = False
-    if not args.headless:
-        native_window_opened = sim.open_window()
+    if not args.headless and not getattr(args, "web", False):
+        native_window_opened = sim.open_viewer()
 
     native_control = None
     if native_window_opened:
@@ -161,7 +161,7 @@ def main(args: argparse.Namespace | None = None) -> None:
             cfg=gizmo_cfg,
             world=sim.get_world(),
         )
-    elif args.viser:
+    elif args.viser or getattr(args, "web", False):
         sim.enable_gizmo(
             uid="ur10_gizmo_test",
             control_part="arm",
@@ -176,7 +176,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         )
 
     logger.log_info("Gizmo-Robot example started!")
-    if native_window_opened or args.viser:
+    if native_window_opened or args.viser or getattr(args, "web", False):
         logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
     if native_window_opened:
         logger.log_info("Press I to show or hide the native robot IK Gizmo")

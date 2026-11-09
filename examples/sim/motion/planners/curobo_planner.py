@@ -476,7 +476,7 @@ def _build_scene(
             device=robot.device,
         )
 
-        # sim.open_window()
+        # sim.open_viewer()
         # # sim.update(50)
         # current_qpos = robot.get_qpos(name=control_part)
         # current_xpos = robot.compute_fk(name=control_part, qpos=current_qpos, to_matrix=True)
@@ -802,8 +802,8 @@ def main(args: argparse.Namespace | None = None) -> None:
 
         # Delay viewer/recorder startup until the robot and every obstacle have
         # been loaded and placed at their final initial poses.
-        if not args.headless:
-            sim.open_window()
+        if not args.headless or getattr(args, "web", False):
+            sim.open_viewer()
         _start_headless_recording(sim, args)
         if args.hold_steps:
             sim.update(step=args.hold_steps)
@@ -921,8 +921,8 @@ def main(args: argparse.Namespace | None = None) -> None:
             trajectory,
             step_repeat=args.step_repeat,
         )
-        if not args.headless:
-            input("Press Enter to exit the cuRobo demo...")
+        if not args.headless or getattr(args, "web", False):
+            sim.wait_for_input("Press Enter to exit the cuRobo demo...")
     finally:
         # Guarantee GPU sim resources and the recorder subprocess are released
         # even when planning/replay raises mid-demo.

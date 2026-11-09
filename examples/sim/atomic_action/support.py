@@ -2086,9 +2086,9 @@ def prepare_tutorial_scene(
     """
     wait_for_user = should_wait_for_tutorial_input(args)
     if should_open_tutorial_window(args):
-        sim.open_window()
+        sim.open_viewer()
     if wait_for_user:
-        input(prompt)
+        sim.wait_for_input(prompt)
     return wait_for_user
 
 
@@ -2104,7 +2104,7 @@ def publish_tutorial_scene(sim: SimulationManager, args: argparse.Namespace) -> 
         sim: Simulation manager whose scene should be published.
         args: Parsed tutorial arguments.
     """
-    if getattr(args, "viser", False):
+    if getattr(args, "viser", False) or getattr(args, "web", False):
         sim.capture_visualization_safely(force=True)
 
 
@@ -2131,7 +2131,7 @@ def serve_tutorial_scene(
     """
     if getattr(args, "run", None) is not None:
         return False
-    if not getattr(args, "viser", False):
+    if not (getattr(args, "viser", False) or getattr(args, "web", False)):
         return False
     logger.log_info(message, color="green")
     try:
@@ -2271,7 +2271,7 @@ def replay_trajectory(
             on_trajectory_step(index, count)
         if getattr(args, "real_time", False):
             following = float(dt[:, index + 1].max()) if index + 1 < count else 0.0
-            time.sleep(following + holds.get(index, 0.0))
+            sim.sleep(following + holds.get(index, 0.0))
 
     try:
         if record:

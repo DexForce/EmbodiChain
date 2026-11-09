@@ -158,7 +158,7 @@ def main() -> None:
     sim.update(step=RESET_STEPS)
 
     if wait_for_user:
-        input("Robot reset. Press Enter to replay the slow trajectory...")
+        sim.wait_for_input("Robot reset. Press Enter to replay the slow trajectory...")
     replay_trajectory(
         sim,
         robot,
@@ -168,7 +168,7 @@ def main() -> None:
         hold_steps=POST_TRAJECTORY_STEPS,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 if __name__ == "__main__":

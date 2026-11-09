@@ -49,8 +49,8 @@ def _wait(read, accept=bool, timeout=30):
     raise AssertionError(f"Timed out: {value!r}")
 
 
-@pytest.mark.parametrize("backend", ["default", "newton"])
-def test_native_browser_view_and_sensor_isolation(tmp_path, backend):
+@pytest.mark.parametrize("backend,num_envs", [("default", 2), ("newton", 1)])
+def test_native_browser_view_and_sensor_isolation(tmp_path, backend, num_envs):
     import dexsim
 
     if not hasattr(dexsim, "WebApplication"):
@@ -73,6 +73,7 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend):
                 str(port),
                 backend,
                 str(result_path),
+                str(num_envs),
             ],
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -87,7 +88,9 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend):
             except OSError:
                 return None
 
-        initial = _wait(ready, timeout=45)
+        initial = _wait(
+            ready, lambda value: value and "test_sim_step" in value, timeout=45
+        )
         with playwright.sync_playwright() as service:
             browser = service.chromium.launch(
                 executable_path=chrome,
@@ -114,9 +117,9 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend):
                 assert (
                     pixels > 20
                 )  # Nonuniform rendered scene, not the initial black frame.
-                assert page.locator("#sensor-views video").count() == 1
+                assert page.locator("#sensor-views video").count() == num_envs
                 assert (
-                    page.locator("#sensor-views video").get_attribute("tabindex")
+                    page.locator("#sensor-views video").first.get_attribute("tabindex")
                     == "-1"
                 )
                 before = page.evaluate("state.camera_pose")
@@ -149,7 +152,8 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend):
                     ]
 
                 cube_before = np.asarray(ready()["test_cube_pose"])[0]
-                x, y = projected(cube_before[:3, 3])
+                offset = np.asarray(ready()["test_arena_offsets"][0])
+                x, y = projected(cube_before[:3, 3] + offset)
                 page.evaluate(
                     """([x,y])=>{const p=RTC_ViewPeer;
                     p.InputStream=p.Config.StreamNames.indexOf(state.camera_name);
@@ -158,8 +162,8 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend):
                 )
                 _wait(ready, lambda value: value["test_gizmo_count"] == 1)
                 page.screenshot(path=str(tmp_path / "gizmo.png"))
-                x, y = projected(cube_before[:3, 3] + [0.32, 0, 0])
-                ex, ey = projected(cube_before[:3, 3] + [0.52, 0, 0])
+                x, y = projected(cube_before[:3, 3] + offset + [0.32, 0, 0])
+                ex, ey = projected(cube_before[:3, 3] + offset + [0.52, 0, 0])
                 page.evaluate("([x,y])=>RTC_ViewPeer.SendInput(2,1,x,y)", [x, y])
                 for i in range(1, 6):
                     page.evaluate(
@@ -224,3 +228,34 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend):
     with socket.socket() as released:
         released.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         released.bind(("127.0.0.1", port))
+
+
+def test_web_does_not_restrict_task_sensor_construction(tmp_path):
+    import dexsim
+
+    if not hasattr(dexsim, "WebApplication"):
+        pytest.skip("WebRTC-enabled DexSim is required")
+    with socket.socket() as candidate:
+        candidate.bind(("127.0.0.1", 0))
+        port = candidate.getsockname()[1]
+    result_path = tmp_path / "sensors.json"
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).with_name("_web_scene.py")),
+            str(port),
+            "default",
+            str(result_path),
+            "8",
+            "sensors",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert process.returncode == 0, process.stdout + process.stderr
+    assert json.loads(result_path.read_text()) == {
+        "num_envs": 8,
+        "depth_size": [65, 49],
+        "stereo_instances": 8,
+    }

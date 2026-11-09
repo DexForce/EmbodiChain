@@ -23,6 +23,7 @@ import queue
 import time
 import threading
 from contextlib import contextmanager
+import math
 import dexsim
 import torch
 import numpy as np
@@ -148,6 +149,7 @@ from embodichain.utils.math import (
 
 if TYPE_CHECKING:
     from dexsim.engine import PhysicsScene
+    from embodichain.lab.visualization._web_viewer import _WebViewer
     from dexsim.scene import Scene
     from dexsim.interaction import EntityGizmoConfig, EntityGizmoManipulator
     from embodichain.lab.visualization import (
@@ -248,6 +250,7 @@ class SimulationManagerCfg:
         startup_summary: Literal["compact", "full", "off"] = "compact",
         dexsim_startup_info: bool = False,
         scene_node_capacity: int | None = None,
+        web: bool = False,
     ) -> None:
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
@@ -255,6 +258,7 @@ class SimulationManagerCfg:
         self.width = width
         self.height = height
         self.headless = headless
+        self.web = web
         self.render_cfg = RenderCfg() if render_cfg is None else render_cfg
         self.gpu_id = gpu_id
         self.thread_mode = thread_mode
@@ -330,6 +334,9 @@ class SimulationManagerCfg:
     ``dexsim-web`` uses a separate native observation camera; Viser exports
     scene snapshots to its own browser renderer.
     """
+
+    web: bool = False
+    """Present the native scene in a browser instead of a local window."""
 
     enable_entity_gizmo: bool = True
     """Enable native object interaction when the first native window opens.
@@ -413,13 +420,15 @@ class SimulationManagerCfg:
             self.robot_ik_gizmo, GizmoCfg
         ):
             raise TypeError("robot_ik_gizmo must be a GizmoCfg, mapping, or None.")
+        if self.web:
+            if self.visualization.backend == "viser":
+                raise ValueError("web and Viser are mutually exclusive.")
+            self.visualization.backend = "dexsim-web"
+        self.web = self.visualization.backend == "dexsim-web"
         if self.visualization.backend != "none":
             self.headless = True
-        if self.visualization.backend == "dexsim-web":
-            if self.num_envs != 1:
-                raise ValueError("dexsim-web currently supports num_envs=1 only.")
-            if self.render_cfg.renderer == "no-render":
-                raise ValueError("dexsim-web requires a native renderer.")
+        if self.web and self.render_cfg.renderer == "no-render":
+            raise ValueError("web requires a native renderer.")
 
     @property
     def physics_dt(self) -> float:
@@ -615,6 +624,8 @@ class SimulationManager:
         self._window_record_save_threads: list[threading.Thread] = []
         self._visualization_runtime = None
         self._web_viewer = None
+        self._web_viewer_stopped = False
+        self._web_camera_group = None
         self._arenas: list[dexsim.environment.Arena] = []
         self._gizmos: dict[str, object] = {}
         self._markers: dict[str, _AxisMarkerGroup] = {}
@@ -649,6 +660,7 @@ class SimulationManager:
         ]:
             os.makedirs(path, exist_ok=True)
 
+        sim_config.__post_init__()
         self.sim_config = sim_config
         self.device = torch.device("cpu")
 
@@ -1012,9 +1024,9 @@ class SimulationManager:
         return uid_list
 
     @property
-    def visualization_runtime(self) -> VisualizationRuntime | None:
+    def visualization_runtime(self) -> VisualizationRuntime | _WebViewer | None:
         """Return the active visualization runtime, if one has been started."""
-        return self._visualization_runtime
+        return getattr(self, "_web_viewer", None) or self._visualization_runtime
 
     @property
     def visualization_health(self) -> RuntimeHealth:
@@ -1089,10 +1101,12 @@ class SimulationManager:
         if self.sim_config.visualization.backend == "none":
             return None
         if self.sim_config.visualization.backend == "dexsim-web":
+            self._web_viewer_stopped = False
             if getattr(self, "_web_viewer", None) is None:
                 from embodichain.lab.visualization._web_viewer import _WebViewer
 
                 self._web_viewer = _WebViewer(self)
+                self._setup_viewer_controls()
                 self._visualization_error_reported = False
                 logger.log_info(
                     f"WebRTC viewer ready at {self._web_viewer.endpoint} "
@@ -1197,6 +1211,8 @@ class SimulationManager:
             Whether scene or camera data was captured.
         """
         if self.sim_config.visualization.backend == "dexsim-web":
+            if getattr(self, "_web_viewer_stopped", False):
+                return False
             self.start_visualization()
             return self._web_viewer.capture(force=force)
         runtime = self.start_visualization()
@@ -1248,8 +1264,18 @@ class SimulationManager:
     def stop_visualization(self) -> None:
         """Close the visualizer; the native WebRTC listener lives until World teardown."""
         if getattr(self, "_web_viewer", None) is not None:
+            recording = getattr(self, "_window_record_state", None)
+            if (
+                recording is not None
+                and recording.pose_provider is None
+                and recording.fixed_pose is None
+            ):
+                self.stop_window_record()
             self._web_viewer.close()
             self._web_viewer = None
+            self._web_viewer_stopped = True
+            self._window_record_input_control = None
+            self._window_camera_pose_input_control = None
         runtime = self._visualization_runtime
         if runtime is None:
             return
@@ -1309,8 +1335,6 @@ class SimulationManager:
                 raise RuntimeError(
                     "dexsim-web requires a WebRTC-enabled DexSim build with WebApplication (8b867e321 or later)."
                 )
-            if sim_config.num_envs != 1:
-                raise ValueError("dexsim-web currently supports num_envs=1 only.")
             if sim_config.render_cfg.renderer == "no-render":
                 raise ValueError("dexsim-web requires a native renderer.")
             world_config.webrtc_enabled = True
@@ -1318,8 +1342,6 @@ class SimulationManager:
             world_config.webrtc_input_camera = _CAMERA_NAME
             if sim_config.visualization.web.ice is not None:
                 world_config.webrtc_ice = sim_config.visualization.web.ice
-            if sim_config.render_cfg.renderer == "auto":
-                sim_config.render_cfg.renderer = "hybrid"
 
         process_renderer = SimulationManager._get_process_renderer()
 
@@ -1381,6 +1403,8 @@ class SimulationManager:
                 f"native-renderer reservation was {sim_config.scene_node_capacity}."
             )
 
+        if sim_config.web and sim_config.render_cfg.renderer == "no-render":
+            raise ValueError("web requires a native renderer.")
         sim_config.render_cfg.apply_to_dexsim_config(world_config)
         if sim_config.render_cfg.renderer == "no-render":
             if not sim_config.headless:
@@ -1997,6 +2021,8 @@ class SimulationManager:
             self._ensure_render_state()
         if group_ids:
             self._world.render_camera_group(group_ids)
+        if getattr(self, "_render_state_published", None) is None:
+            self.poll_viewer()
         self._log_scene_summary()
 
     def update(
@@ -2174,6 +2200,113 @@ class SimulationManager:
         """
         return self.physics.get_scene()
 
+    @property
+    def viewer(self) -> Windows | _WebViewer | None:
+        """Return the active local or Web viewport (camera and input operations)."""
+        return getattr(self, "_web_viewer", None) or self._window
+
+    @property
+    def is_viewer_open(self) -> bool:
+        """Whether a local window or Web application is available."""
+        if getattr(self, "_web_viewer", None) is not None:
+            return not self._web_viewer.closed
+        return self._window is not None and self._world.is_window_initialized()
+
+    def open_viewer(self) -> bool:
+        """Open the selected presentation without changing physics or sensors.
+
+        Returns:
+            Whether the selected viewport is available. Viser has its own
+            scene UI and does not expose a native viewport.
+        """
+        if self.sim_config.web:
+            self.start_visualization()
+            self._setup_viewer_controls()
+            return self.is_viewer_open
+        return self.open_window()
+
+    def _setup_viewer_controls(self) -> None:
+        """Bind configured controls for automatic and explicit viewport startup."""
+        self._enable_default_entity_gizmo()
+        if (
+            self._window_record_hotkey_cfg is not None
+            and self._window_record_input_control is None
+        ):
+            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
+        if (
+            self._window_camera_pose_hotkey_cfg is not None
+            and self._window_camera_pose_input_control is None
+        ):
+            self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
+
+    def close_viewer(self) -> None:
+        """Close the selected viewport on the World creator thread."""
+        if self.sim_config.web:
+            enabled = (
+                self._web_viewer is not None and self._web_viewer.gizmo is not None
+            )
+            if self.is_window_recording():
+                self.stop_window_record()
+            self.stop_visualization()
+            self._auto_entity_gizmo_pending = enabled
+        else:
+            self.close_window()
+
+    def poll_viewer(self) -> None:
+        """Process controls and redraw while paused, without stepping physics.
+
+        Call on the World creator thread from waiting or render-only loops.
+        The native window runs its own event loop; Web renders are rate limited.
+        """
+        if getattr(self, "_web_viewer", None) is not None:
+            self.capture_visualization_safely()
+
+    def sleep(self, seconds: float) -> None:
+        """Wait in wall time while keeping the Web viewport responsive.
+
+        Args:
+            seconds: Finite, nonnegative duration. Physics does not advance.
+
+        Raises:
+            ValueError: If the duration is negative or nonfinite.
+        """
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError("seconds must be finite and nonnegative.")
+        if not self.sim_config.web:
+            time.sleep(seconds)
+            return
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self.poll_viewer()
+            time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
+
+    def wait_for_input(self, prompt: str = "") -> str:
+        """Read a terminal line while keeping Web presentation responsive.
+
+        Args:
+            prompt: Text printed before waiting.
+
+        Returns:
+            The entered line without its trailing newline.
+
+        Raises:
+            EOFError: If the terminal input is closed.
+        """
+        if not self.sim_config.web:
+            return input(prompt)
+        import select
+        import sys
+
+        print(prompt, end="", flush=True)
+        while True:
+            self.poll_viewer()
+            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+            if ready:
+                line = sys.stdin.readline()
+                if line == "":
+                    raise EOFError
+                return line.rstrip("\n")
+
     def can_open_native_window(self) -> bool:
         """Return whether the native DexSim window may be opened.
 
@@ -2209,18 +2342,8 @@ class SimulationManager:
         self._window = self._world.get_windows()
         if self._window is None:
             return False
-        self._enable_default_entity_gizmo()
+        self._setup_viewer_controls()
 
-        if (
-            self._window_record_hotkey_cfg is not None
-            and self._window_record_input_control is None
-        ):
-            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
-        if (
-            self._window_camera_pose_hotkey_cfg is not None
-            and self._window_camera_pose_input_control is None
-        ):
-            self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
         self.is_window_opened = True
         if self.spawn_result is not None:
             self.sync_render_state()
@@ -3647,6 +3770,12 @@ class SimulationManager:
             else self._world.enable_entity_gizmo(config)
         )
         self._auto_entity_gizmo_pending = False
+        if (
+            getattr(self, "_web_viewer", None) is not None
+            and self.sim_config.visualization.allow_commands
+        ):
+            self._web_viewer.gizmo = controller
+            controller.attach_camera(self._web_viewer.camera)
         default_plane = getattr(self, "_default_plane", None)
         if default_plane is None:
             return controller
@@ -3670,13 +3799,26 @@ class SimulationManager:
         Robot IK controllers and Viser command permissions are independent.
         """
         self._world.disable_entity_gizmo()
+        if getattr(self, "_web_viewer", None) is not None:
+            self._web_viewer.gizmo = None
         self._auto_entity_gizmo_pending = False
 
     def _enable_default_entity_gizmo(self) -> None:
         # Apply the startup default once; DexSim owns subsequent controller
         # state, including explicit native disable calls and window reopens.
-        if self._window is not None and self._auto_entity_gizmo_pending:
-            self.enable_entity_gizmo()
+        web = (
+            getattr(self, "_web_viewer", None) is not None
+            and self.sim_config.visualization.allow_commands
+            and self.spawn_result is not None
+        )
+        if (self._window is not None or web) and self._auto_entity_gizmo_pending:
+            if web and self._window is None:
+                config = dexsim.interaction.EntityGizmoConfig()
+                config.attach_on_click = True
+                config.selection_cache = False
+                self.enable_entity_gizmo(config)
+            else:
+                self.enable_entity_gizmo()
 
     def enable_gizmo(
         self,
@@ -3907,7 +4049,11 @@ class SimulationManager:
             self.sim_config.visualization.backend == "viser"
             and self.sim_config.visualization.allow_commands
         )
-        if not native and not viser:
+        web = (
+            getattr(self, "_web_viewer", None) is not None
+            and self.sim_config.visualization.allow_commands
+        )
+        if not native and not viser and not web:
             return
         for uid, robot in self._robots.items():
             solver_cfgs = robot.cfg.solver_cfg
@@ -4045,10 +4191,6 @@ class SimulationManager:
             BaseSensor: The added sensor instance handle.
         """
         sensor_type = sensor_cfg.sensor_type
-        if getattr(self, "_web_viewer", None) is not None:
-            from embodichain.lab.visualization._web_viewer import _validate_sensor
-
-            _validate_sensor(sensor_cfg, self._sensors.values())
         uid = sensor_cfg.uid
         if uid is None:
             uid = f"{sensor_type.lower()}_{len(self._sensors)}"
@@ -4421,12 +4563,12 @@ class SimulationManager:
                 If no window is available, the controls are not added and a
                 warning is logged.
         """
-        if self._window is None:
+        if self.viewer is None:
             logger.log_warning("No window available to add custom controls.")
             return
 
         for control in controls:
-            self._window.add_input_control(control)
+            self.viewer.add_input_control(control)
 
     def _build_window_record_output(
         self, save_path: str | None, video_prefix: str
@@ -4468,8 +4610,8 @@ class SimulationManager:
         if state.fixed_pose is not None:
             return np.asarray(state.fixed_pose, dtype=np.float32)
 
-        if self._window is not None:
-            return np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+        if self.viewer is not None:
+            return np.asarray(self.viewer.get_pose_matrix(), dtype=np.float32)
 
         return None
 
@@ -4616,7 +4758,7 @@ class SimulationManager:
         if look_at is not None:
             fixed_pose = self._build_window_record_pose_from_look_at(*look_at)
 
-        if pose_provider is None and fixed_pose is None and self._window is None:
+        if pose_provider is None and fixed_pose is None and self.viewer is None:
             logger.log_warning(
                 "No simulation window available for viewer recording. "
                 "Provide `pose_provider`, `fixed_pose`, or `look_at` to record in headless mode."
@@ -4624,7 +4766,7 @@ class SimulationManager:
             return False
 
         if use_sim_time is None:
-            use_sim_time = self._window is None
+            use_sim_time = self.viewer is None
 
         width = self.sim_config.width
         height = self.sim_config.height
@@ -4668,14 +4810,14 @@ class SimulationManager:
 
         follow_source = (
             "live viewer pose"
-            if pose_provider is None and fixed_pose is None and self._window is not None
+            if pose_provider is None and fixed_pose is None and self.viewer is not None
             else "custom pose source"
         )
         timing_source = (
             "simulation time" if state.capture_from_sim_update else "wall time"
         )
         save_target = os.path.join(output_dir, video_name + ".mp4")
-        if self._window is not None:
+        if self.viewer is not None:
             logger.log_info(
                 f"Viewer recording started ({follow_source}, {timing_source}). Press 'r' again to stop and save to "
                 f"{save_target}"
@@ -4767,7 +4909,7 @@ class SimulationManager:
             "max_memory": max_memory,
             "video_prefix": video_prefix,
         }
-        if self._window is None:
+        if self.viewer is None:
             logger.log_warning(
                 "No simulation window available yet. The viewer record hotkey will be registered after `open_window()`."
             )
@@ -4786,7 +4928,7 @@ class SimulationManager:
                     sim.toggle_window_record(**hotkey_cfg)
 
         self._window_record_input_control = WindowRecordEvent()
-        self._window.add_input_control(self._window_record_input_control)
+        self.viewer.add_input_control(self._window_record_input_control)
         logger.log_info(
             "Viewer record hotkey registered. Press 'r' to start/stop recording."
         )
@@ -4884,11 +5026,11 @@ class SimulationManager:
         Returns:
             The printed snippet, or ``None`` when no viewer window is open.
         """
-        if self._window is None:
+        if self.viewer is None:
             logger.log_warning("No simulation window available to print its pose.")
             return None
 
-        pose = np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+        pose = np.asarray(self.viewer.get_pose_matrix(), dtype=np.float32)
         snippet = self._format_window_camera_pose(pose, convert_to_look_at)
         print(snippet)
         return snippet
@@ -4904,7 +5046,7 @@ class SimulationManager:
             Whether the control is registered on an available window.
         """
         self._window_camera_pose_hotkey_cfg = {"convert_to_look_at": convert_to_look_at}
-        if self._window is None:
+        if self.viewer is None:
             logger.log_warning(
                 "No simulation window available yet. The camera pose print "
                 "hotkey will be registered after `open_window()`."
@@ -4924,7 +5066,7 @@ class SimulationManager:
                     sim.print_window_camera_pose(**hotkey_cfg)
 
         self._window_camera_pose_input_control = WindowCameraPoseEvent()
-        self._window.add_input_control(self._window_camera_pose_input_control)
+        self.viewer.add_input_control(self._window_camera_pose_input_control)
         logger.log_info(
             "Camera pose print hotkey registered. Press 'p' to print the "
             "current viewer pose."
@@ -5186,6 +5328,7 @@ class SimulationManager:
 
         try:
             self.stop_visualization()
+            self._web_camera_group = None
         except Exception as error:
             logger.log_warning(f"Failed to stop Viser visualization cleanly: {error!r}")
 

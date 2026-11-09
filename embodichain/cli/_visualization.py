@@ -44,7 +44,9 @@ def _parse_viser_env_id(value: str) -> int | str:
     return env_id
 
 
-def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
+def add_viewer_args_to_parser(
+    parser: argparse.ArgumentParser, *, allow_viser: bool = True
+) -> None:
     """Add browser frontend selection and backend-specific command-line options.
 
     Args:
@@ -54,7 +56,7 @@ def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
     frontend.add_argument(
         "--web",
         action="store_true",
-        help="Experimental native WebRTC viewer (Linux/NVIDIA, single environment, trusted network).",
+        help="Present native rendering in a WebRTC viewport (Linux/NVIDIA).",
     )
     parser.add_argument(
         "--web-port",
@@ -68,6 +70,8 @@ def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="WebRTC observation-view render rate (default 15).",
     )
+    if not allow_viser:
+        return
     frontend.add_argument(
         "--viser",
         action="store_true",
@@ -115,3 +119,8 @@ def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
         default=(["all"] if _DEFAULT_ENV_IDS is None else list(_DEFAULT_ENV_IDS)),
         help="Environment IDs published to Viser, or 'all'.",
     )
+
+
+def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
+    """Compatibility entry point for shared browser presentation arguments."""
+    add_viewer_args_to_parser(parser)

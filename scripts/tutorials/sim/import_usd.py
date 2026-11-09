@@ -131,8 +131,8 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     # Open window when the scene has been set up
     sim.prepare()
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     print("[INFO]: Scene setup complete!")
     print("[INFO]: Press Ctrl+C to stop the simulation")

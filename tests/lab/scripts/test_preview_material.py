@@ -127,7 +127,7 @@ def test_overrides_keep_explicit_zero_false_and_none(captures) -> None:
         (["--material-params", '{"uid":"caller"}'], "preview UIDs"),
         (["--spp", "0"], "positive integer"),
         (["--renderer", "no-render"], "invalid choice"),
-        (["--headless", "--max-steps", "1"], "native-window"),
+        (["--headless", "--max-steps", "1"], "interactive"),
         (["--source", "builtin"], "requires --list or --all"),
         (["--compatible-only"], "requires --all"),
         (["--compare-native", "--material-params", '{"ior":1.6}'], "authored presets"),

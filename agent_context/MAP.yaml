@@ -178,7 +178,7 @@ topics:
 - id: sim-visualization
   title: Simulation Visualization
   aliases: [browser visualization, viser, sim visualization, WebRTC, 网页渲染, 仿真可视化]
-  keywords: [VisualizationCfg, ViserServerCfg, DexSimWebCfg, dexsim-web, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
+  keywords: [VisualizationCfg, ViserServerCfg, DexSimWebCfg, dexsim-web, open_viewer, poll_viewer, wait_for_input, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
     GizmoCfg, backpressure, capture_visualization, Newton deformable, particle set, render topology, quaternion, xyzw]
   paths: [topics/sim-visualization/sim-visualization.md]
   source_of_truth:

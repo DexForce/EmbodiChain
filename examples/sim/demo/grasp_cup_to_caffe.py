@@ -483,8 +483,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     apply_random_xy_perturbation(caffe, max_perturbation=0.05, rng=rng)
     sim.update(step=1)
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     run_simulation(sim, robot, cup, caffe)
 

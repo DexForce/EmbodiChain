@@ -39,7 +39,7 @@ import numpy as np
 from PIL import Image
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.visualization import VisualizationCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.utils import logger
 from embodichain.utils.math import look_at_to_pose
 
@@ -130,6 +130,9 @@ def parse_args() -> argparse.Namespace:
             f"(default: {DEFAULT_OUTPUT_PATH.as_posix()})."
         ),
     )
+    from embodichain.cli._visualization import add_viewer_args_to_parser
+
+    add_viewer_args_to_parser(parser)
     return parser.parse_args()
 
 
@@ -141,7 +144,7 @@ def main() -> None:
             width=FRAME_WIDTH,
             height=FRAME_HEIGHT,
             headless=True,
-            visualization=VisualizationCfg(),
+            visualization=visualization_cfg_from_args(args),
         )
     )
     try:
@@ -152,15 +155,15 @@ def main() -> None:
             point_size=8.0,
             name="rgb_point_cloud_axes",
         )
-        if args.headless:
+        if args.headless and not args.web:
             sim.update(step=1)
             render_headless_frame(sim, args.output)
             return
 
-        if not sim.open_window():
+        if not sim.open_viewer():
             raise RuntimeError("Unable to open the native DexSim viewer.")
 
-        sim.get_world().get_windows().set_look_at(
+        sim.viewer.set_look_at(
             eye=np.array(CAMERA_EYE, dtype=np.float32),
             look_at=np.array(CAMERA_TARGET, dtype=np.float32),
             up=np.array(CAMERA_UP, dtype=np.float32),

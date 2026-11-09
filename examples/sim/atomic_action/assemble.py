@@ -379,7 +379,7 @@ def run_assemble_demo(
         return
 
     if wait_for_user:
-        input("Press Enter to execute the assembly...")
+        sim.wait_for_input("Press Enter to execute the assembly...")
 
     replay_trajectory(
         sim,
@@ -392,7 +392,7 @@ def run_assemble_demo(
         look_at=ASSEMBLE_RECORD_LOOK_AT,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 def main() -> None:

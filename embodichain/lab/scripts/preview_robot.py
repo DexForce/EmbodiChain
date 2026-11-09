@@ -230,8 +230,8 @@ def _run_simulation(
         if robot is None:
             raise RuntimeError("Robot declaration failed.")
         sim.prepare()
-        if not args.headless and not args.viser and not getattr(args, "web", False):
-            if not sim.open_window():
+        if (not args.headless or getattr(args, "web", False)) and not args.viser:
+            if not sim.open_viewer():
                 raise RuntimeError("The native preview window could not be opened.")
         sim.update_gizmos()
         controller = _setup_viser_joint_control(

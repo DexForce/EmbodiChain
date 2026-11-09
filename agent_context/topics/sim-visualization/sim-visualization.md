@@ -56,8 +56,14 @@ The experimental `dexsim-web` backend replaces the native window using the
 existing World renderer and a separate observer camera. It bypasses the Viser
 snapshot/worker pipeline above. `WebApplication` creation, request pumping,
 render scheduling and closure run on the World creator thread. Configuration
-must enable WebRTC before World construction; auto selects Hybrid. It supports
-one environment and one viewer, with native camera-count/RGB restrictions.
+must enable WebRTC before World construction; native renderer selection is preserved. Top-level
+`SimulationManagerCfg.web` and common `--web` select it independently of arena
+count and task-sensor eligibility. `open_viewer()` / `viewer` provide the shared
+local/Web camera and keyboard surface; explicit window APIs stay native.
+Paused and terminal loops use `poll_viewer()` / `wait_for_input()` on the creator
+thread. TCP and joint commands reuse existing managed controls, and paused
+Newton entity edits consume the SDK's Scene-owned mailbox without stepping.
+Native video-catalog restrictions remain an SDK media limitation.
 The listener binds all IPv4 interfaces and remains World-owned after application
 closure. See [WebRTC operation and limitations](../../../embodichain/lab/visualization/README.md).
 
@@ -87,6 +93,7 @@ this invariant.
 
 - WebRTC observes the existing scene without exporting meshes or stepping physics.
   Its observer has a dedicated group; task-camera buffers and transforms are read-only.
+  Explicit close persists until reopen and reuses the World-owned observer group.
   Application stop does not release the native listener; World teardown does.
 
 - Scene export must not mutate physics, actions, or asset state.

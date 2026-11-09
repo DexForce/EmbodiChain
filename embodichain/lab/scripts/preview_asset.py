@@ -200,7 +200,7 @@ def preview(
     print("Press `q` to quit the simulation.")
 
     while True:
-        txt = input().strip()
+        txt = sim.wait_for_input().strip()
 
         if txt == "q":
             break
@@ -214,7 +214,14 @@ def preview(
                 )
                 continue
 
-            embed()
+            if sim.sim_config.web:
+                import code
+
+                code.interact(
+                    local={"sim": sim, "assets": assets}, readfunc=sim.wait_for_input
+                )
+            else:
+                embed()
         elif txt.startswith("s"):
             parts = txt.split()
             n = int(parts[1]) if len(parts) > 1 else 10

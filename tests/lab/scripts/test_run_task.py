@@ -335,7 +335,7 @@ def test_preview_quit_returns_without_zero_exit(monkeypatch) -> None:
     """Preview quit lets CLI cleanup failures determine the process status."""
     env = MagicMock()
     env.reset.return_value = (None, {})
-    monkeypatch.setattr("builtins.input", lambda: "q")
+    env.unwrapped.sim.wait_for_input.return_value = "q"
 
     run_task.preview(env)
 
@@ -1489,7 +1489,8 @@ def test_zero_system_exit_cannot_hide_cleanup_failure(monkeypatch) -> None:
         run_task.cli([])
 
 
-def test_control_loop_consumes_viser_seek_while_paused() -> None:
+@pytest.mark.parametrize("web", [False, True])
+def test_control_loop_consumes_viser_seek_while_paused(web) -> None:
     """A browser slider seek is applied without waiting for terminal input."""
 
     class FakeControlInput:
@@ -1507,6 +1508,9 @@ def test_control_loop_consumes_viser_seek_while_paused() -> None:
             self._lengths = torch.tensor([REPLAY_NUM_STEPS])
             self.env = SimpleNamespace(
                 sim_cfg=SimpleNamespace(physics_dt=0.01),
+                sim=SimpleNamespace(
+                    sim_config=SimpleNamespace(web=web), poll_viewer=MagicMock()
+                ),
                 cfg=SimpleNamespace(sim_steps_per_control=4),
             )
             self.visited_steps: list[int] = []
@@ -1547,4 +1551,10 @@ def test_control_loop_consumes_viser_seek_while_paused() -> None:
         REPLAY_TARGET_STEP,
         REPLAY_NUM_STEPS - 1,
         False,
+    )
+
+    assert (
+        replay_env.env.sim.poll_viewer.call_count > 0
+        if web
+        else replay_env.env.sim.poll_viewer.call_count == 0
     )

@@ -100,6 +100,18 @@ class NewtonPhysicsBackend(PhysicsBackend):
         # SceneBuilder.finalize() completes its model; no second manager-level
         # activation or rebuild domain participates.
 
+    def process_interaction(self) -> None:
+        """Consume the SDK's entity-Gizmo mailbox while the viewer is paused."""
+        result = self._manager.spawn_result
+        # DexSim currently exposes the pause-safe mailbox only through its
+        # Scene-owned bridge. Keep this SDK adaptation in the physics owner.
+        bridge = getattr(result, "_gizmo_bridge", None)
+        if bridge is not None:
+            bridge.refresh_targets()
+            bridge.on_model_ready()
+            bridge.consume_commands()
+            bridge.sync_target_poses()
+
     def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
         """Publish Newton state through DexSim's render bridge without stepping."""
         if not self._manager.has_native_renderer:

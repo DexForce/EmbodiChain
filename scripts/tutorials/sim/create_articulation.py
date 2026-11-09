@@ -271,7 +271,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         print(f"[INFO]: Initial joint positions: {articulation.get_qpos()}", flush=True)
 
         if open_native_window:
-            sim.open_window()
+            sim.open_viewer()
 
         print("[INFO]: Running simulation. Press Ctrl+C to stop.", flush=True)
         run_simulation(

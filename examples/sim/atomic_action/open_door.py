@@ -247,7 +247,7 @@ def run(args: argparse.Namespace) -> None:
         focus_position[2] + 1.5,
     ]
     if wait_for_user:
-        input("Press Enter to replay OpenDoor...")
+        sim.wait_for_input("Press Enter to replay OpenDoor...")
     replay_trajectory(
         sim,
         robot,
@@ -259,7 +259,7 @@ def run(args: argparse.Namespace) -> None:
         compiled=compiled,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 def main() -> None:

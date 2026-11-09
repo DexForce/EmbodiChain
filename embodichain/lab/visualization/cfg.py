@@ -65,12 +65,12 @@ class DexSimWebCfg:
 
     Requires a Linux/NVIDIA DexSim build with WebApplication and NVENC.
     The native listener binds all IPv4 interfaces and lives until World teardown.
-    One viewer and one simulation environment are supported initially.
+    One browser viewer observes the existing replicated simulation scene.
 
     Args:
         port: Native HTTP/signaling port on a trusted network.
-        width: Main observation view width, even and between 32 and 4096.
-        height: Main observation view height, even and between 32 and 4096.
+        width: Optional video width override; otherwise inherit the window width.
+        height: Optional video height override; otherwise inherit the window height.
         fps: Maximum application rendering rate, independent of physics time.
         eye: Initial observation camera location in world coordinates.
         target: Initial observation camera look-at target.
@@ -78,8 +78,8 @@ class DexSimWebCfg:
     """
 
     port: int = 8765
-    width: int = 1280
-    height: int = 720
+    width: int | None = None
+    height: int | None = None
     fps: float = 15.0
     eye: tuple[float, float, float] = (2.5, -3.5, 2.0)
     target: tuple[float, float, float] = (0.0, 0.0, 0.6)
@@ -91,7 +91,9 @@ class DexSimWebCfg:
             raise ValueError("WebRTC port must be between 1 and 65535.")
         for name in ("width", "height"):
             value = getattr(self, name)
-            if type(value) is not int or not 32 <= value <= 4096 or value % 2:
+            if value is not None and (
+                type(value) is not int or not 32 <= value <= 4096 or value % 2
+            ):
                 raise ValueError(f"WebRTC {name} must be even and in [32, 4096].")
         if not math.isfinite(self.fps) or not 0 < self.fps <= 30:
             raise ValueError("WebRTC fps must be finite and in (0, 30].")
@@ -180,5 +182,3 @@ class VisualizationCfg:
                 )
         if self.allow_commands and self.backend == "none":
             raise ValueError("allow_commands requires Viser or dexsim-web.")
-        if self.backend == "dexsim-web" and self.env_ids != [0]:
-            raise ValueError("dexsim-web currently requires env_ids=[0].")

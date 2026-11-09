@@ -262,8 +262,8 @@ def main(args: argparse.Namespace | None = None) -> None:
         device = robot.device
 
         sim.prepare()
-        if not args.headless:
-            sim.open_window()
+        if not args.headless or getattr(args, "web", False):
+            sim.open_viewer()
 
         start_qpos = torch.tensor(
             [0.0, -np.pi / 4, 0.0, -3 * np.pi / 4, 0.0, np.pi / 2, np.pi / 4],

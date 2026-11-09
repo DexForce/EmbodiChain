@@ -102,8 +102,8 @@ def main(args: argparse.Namespace | None = None) -> None:
         print(f"Robot created successfully with {robot.dof} joints")
 
         # Open visualization window if not headless
-        if not args.headless:
-            sim.open_window()
+        if not args.headless or getattr(args, "web", False):
+            sim.open_viewer()
 
         # Run simulation loop
         run_simulation(sim, robot, max_steps=args.max_steps)

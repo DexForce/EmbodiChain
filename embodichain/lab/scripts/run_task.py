@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import argparse
 from dataclasses import dataclass
 import json
@@ -1255,7 +1257,10 @@ class _ReplayControlInput:
 
 
 def _read_replay_control_command(
-    control_input: _ReplayControlInput, initial: str | None = None
+    control_input: _ReplayControlInput,
+    initial: str | None = None,
+    *,
+    poll: Callable[[], None] | None = None,
 ) -> str:
     """Read a command, collecting multi-digit jump targets until Enter."""
     command = control_input.read_key() if initial is None else initial
@@ -1267,7 +1272,13 @@ def _read_replay_control_command(
     digits = command
     print(digits, end="", flush=True)
     while True:
-        key = control_input.read_key()
+        if poll is not None:
+            poll()
+        key = control_input.read_key(
+            timeout=_REPLAY_CONTROL_POLL_INTERVAL if poll else None
+        )
+        if key is None:
+            continue
         if key in ("\r", "\n"):
             print()
             return digits
@@ -1327,10 +1338,14 @@ def _run_replay_control_loop(
             terminal_active = False
             return None
 
+    sim = getattr(replay_env.env, "sim", None)
+    web = getattr(getattr(sim, "sim_config", None), "web", False)
     seek(0)
     print(f"Trajectory has {num_steps} transitions (state indices 0..{max_step}).")
     try:
         while True:
+            if web:
+                sim.poll_viewer()
             if visualization_runtime is not None:
                 browser_step = visualization_runtime.drain_replay_control_command()
                 if browser_step is not None:
@@ -1390,6 +1405,7 @@ def _run_replay_control_loop(
                 command = _read_replay_control_command(
                     control_input,
                     initial=initial,
+                    **({"poll": sim.poll_viewer} if web else {}),
                 )
             except (EOFError, KeyboardInterrupt):
                 break
@@ -1626,7 +1642,7 @@ def preview(env: gymnasium.Env) -> None:
     while end is False:
         print("Press `p` to enter embed mode to interact with the environment.")
         print("Press `q` to quit the simulation.")
-        txt = input()
+        txt = env.unwrapped.sim.wait_for_input()
         if txt == "p":
             try:
                 from IPython import embed
@@ -1637,7 +1653,15 @@ def preview(env: gymnasium.Env) -> None:
                 )
                 continue
 
-            embed()
+            if env.unwrapped.sim.sim_config.web:
+                import code
+
+                code.interact(
+                    local={"env": env, "sim": env.unwrapped.sim},
+                    readfunc=env.unwrapped.sim.wait_for_input,
+                )
+            else:
+                embed()
         elif txt == "q":
             end = True
 

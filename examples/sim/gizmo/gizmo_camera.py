@@ -127,10 +127,10 @@ def main(args: argparse.Namespace | None = None) -> None:
     sim.update(step=1)
 
     native_window_opened = False
-    if not args.headless:
-        native_window_opened = sim.open_window()
+    if not args.headless and not getattr(args, "web", False):
+        native_window_opened = sim.open_viewer()
 
-    if args.viser:
+    if args.viser or getattr(args, "web", False):
         sim.enable_gizmo(
             uid="gizmo_camera",
         )
@@ -142,10 +142,12 @@ def main(args: argparse.Namespace | None = None) -> None:
             "Gizmo interaction is disabled in headless mode without Viser."
         )
     else:
-        logger.log_warning("Camera Gizmo control is available through Viser only.")
+        logger.log_warning(
+            "Camera Gizmo control is available through browser viewports."
+        )
 
     logger.log_info("Gizmo-Camera tutorial started!")
-    if args.viser:
+    if args.viser or getattr(args, "web", False):
         logger.log_info(
             "Use the gizmo to interactively control the camera position and orientation"
         )

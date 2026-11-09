@@ -127,7 +127,7 @@ class EmbodiChainTaskEnvironment:
         self.env = env
         self._base_env = getattr(env, "unwrapped", env)
         world = self._world()
-        if world is None or not world.is_window_initialized():
+        if world is None or not self._base_env.sim.is_viewer_open:
             raise ValueError(
                 "Viewer evaluation requires an initialized simulator window"
             )
@@ -169,7 +169,7 @@ class EmbodiChainTaskEnvironment:
     def viewer_is_open(self) -> bool:
         """Return whether the original task Viewer remains open."""
         world = self._world()
-        return bool(world is not None and world.is_window_initialized())
+        return bool(world is not None and self._base_env.sim.is_viewer_open)
 
     @property
     def current_frame(self) -> EvaluationFrame:
@@ -187,7 +187,7 @@ class EmbodiChainTaskEnvironment:
         """Apply the evaluation title to the task Viewer."""
         from dexsim.types import InputKey
 
-        window = self._world().get_windows()
+        window = self._base_env.sim.viewer
         window.set_window_title(title)
         cfg = getattr(self._base_env, "policy_viewer_camera_cfg", None)
         if cfg is not None:
@@ -226,11 +226,12 @@ class EmbodiChainTaskEnvironment:
     def poll(self) -> str | None:
         """Report when the native Viewer is closed or Escape is pressed."""
         world = self._world()
-        if world is None or not world.is_window_initialized():
+        if world is None or not self._base_env.sim.is_viewer_open:
             return "viewer closed"
         from dexsim.types import InputKey
 
-        native = world.get_windows().native()
+        self._base_env.sim.poll_viewer()
+        native = self._base_env.sim.viewer.native()
         if self._keyboard is not None:
             self._keyboard.poll(
                 native, self._command, tracking_toggle=self._camera is not None

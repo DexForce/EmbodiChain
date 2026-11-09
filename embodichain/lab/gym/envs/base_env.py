@@ -213,8 +213,8 @@ class BaseEnv(gym.Env):
                 if isinstance(sensor, Camera)
             ]
 
-            if not self.sim_cfg.headless:
-                self.sim.open_window()
+            if not self.sim_cfg.headless or self.sim_cfg.web:
+                self.sim.open_viewer()
 
             self._elapsed_steps = torch.zeros(
                 self._num_envs, dtype=torch.int32, device=self.sim_cfg.device

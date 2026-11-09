@@ -346,7 +346,9 @@ def _move_arm_to_poses(
         sample_count=sample_count,
     )
     if wait_for_input:
-        input("[READY]: Trajectory planned. Press Enter to start execution...")
+        sim.wait_for_input(
+            "[READY]: Trajectory planned. Press Enter to start execution..."
+        )
     play_arm_trajectory(
         sim,
         robot,
@@ -594,7 +596,7 @@ def main(args: argparse.Namespace | None = None) -> None:
 
         sim.prepare()
         if open_native_window:
-            sim.open_window()
+            sim.open_viewer()
 
         sim.update(step=5)
         motion_generator = MotionGenerator(

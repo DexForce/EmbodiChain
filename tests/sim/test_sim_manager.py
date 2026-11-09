@@ -3328,9 +3328,9 @@ def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
     assert SimulationManager._get_process_renderer() == "no-render"
 
 
-@pytest.mark.parametrize("num_envs,renderer", [(2, "hybrid"), (1, "no-render")])
+@pytest.mark.parametrize("num_envs,renderer", [(1, "no-render")])
 def test_web_rejects_unsupported_world_before_creation(num_envs, renderer) -> None:
-    with pytest.raises(ValueError, match="dexsim-web"):
+    with pytest.raises(ValueError, match="web"):
         SimulationManagerCfg(
             num_envs=num_envs,
             render_cfg=RenderCfg(renderer=renderer),
@@ -3342,6 +3342,10 @@ def test_web_config_selects_headless_native_streaming(monkeypatch, tmp_path) -> 
     from embodichain.lab.visualization import DexSimWebCfg
 
     monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer",
+        lambda _: "fast-rt",
+    )
     monkeypatch.setattr(dexsim, "WebApplication", object, raising=False)
     native = dexsim.WorldConfig()
     world_fields = SimpleNamespace(
@@ -3363,7 +3367,7 @@ def test_web_config_selects_headless_native_streaming(monkeypatch, tmp_path) -> 
     assert config.headless and not world.open_windows
     assert world.webrtc_enabled and world.webrtc_port == 8766
     assert world.webrtc_input_camera == "__embodichain_web_viewer"
-    assert world.renderer == RenderCfg(renderer="hybrid").to_dexsim_flags()
+    assert world.renderer == RenderCfg(renderer="fast-rt").to_dexsim_flags()
 
 
 def test_web_preflight_reports_missing_dexsim_api(monkeypatch, tmp_path) -> None:
@@ -3372,3 +3376,96 @@ def test_web_preflight_reports_missing_dexsim_api(monkeypatch, tmp_path) -> None
     manager = SimpleNamespace(_material_cache_dir=tmp_path)
     with pytest.raises(RuntimeError, match="WebRTC-enabled DexSim"):
         SimulationManager._convert_sim_config(manager, config)
+
+
+def test_web_is_a_top_level_mode_independent_of_environment_count():
+    config = SimulationManagerCfg(web=True, num_envs=8)
+    assert config.web and config.headless
+    assert config.visualization.backend == "dexsim-web"
+    assert config.num_envs == 8
+
+
+def test_closed_web_viewer_stays_closed_until_explicit_reopen() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    viewer = MagicMock()
+    sim._web_viewer = viewer
+    sim._visualization_runtime = None
+    sim.stop_visualization()
+    viewer.close.assert_called_once()
+    sim.start_visualization = MagicMock(side_effect=AssertionError("unexpected reopen"))
+    assert not sim.capture_visualization(force=True)
+    sim.start_visualization.assert_not_called()
+
+
+def test_web_open_viewer_registers_configured_keyboard_controls_once() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    sim._web_viewer = SimpleNamespace(closed=False)
+    sim._window = None
+    sim._auto_entity_gizmo_pending = False
+    sim._window_record_hotkey_cfg = {"fps": 12}
+    sim._window_camera_pose_hotkey_cfg = {"convert_to_look_at": True}
+    sim._window_record_input_control = None
+    sim._window_camera_pose_input_control = None
+    sim.start_visualization = MagicMock()
+
+    def register_record(**kwargs):
+        assert kwargs == {"fps": 12}
+        sim._window_record_input_control = object()
+
+    def register_pose(**kwargs):
+        assert kwargs == {"convert_to_look_at": True}
+        sim._window_camera_pose_input_control = object()
+
+    sim.enable_window_record_hotkey = MagicMock(side_effect=register_record)
+    sim.enable_window_camera_pose_hotkey = MagicMock(side_effect=register_pose)
+    assert sim.open_viewer()
+    assert sim.open_viewer()
+    sim.enable_window_record_hotkey.assert_called_once()
+    sim.enable_window_camera_pose_hotkey.assert_called_once()
+
+
+def test_web_terminal_wait_keeps_polling_without_advancing_physics(monkeypatch) -> None:
+    import os
+
+    if os.name == "nt":
+        pytest.skip("WebRTC terminal polling runs on its Linux host")
+    import threading
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    sim.poll_viewer = MagicMock()
+    sim._world = MagicMock()
+    reader, writer = os.pipe()
+    timer = threading.Timer(0.1, lambda: os.write(writer, b"continue\n"))
+    try:
+        with os.fdopen(reader) as stream:
+            monkeypatch.setattr("sys.stdin", stream)
+            timer.start()
+            assert sim.wait_for_input() == "continue"
+        assert sim.poll_viewer.call_count > 0
+        sim._world.update.assert_not_called()
+    finally:
+        timer.join()
+        os.close(writer)
+
+
+def test_stopping_web_visualization_stops_viewer_recording_before_camera_close():
+    sim = object.__new__(SimulationManager)
+    sim._window_record_state = SimpleNamespace(pose_provider=None, fixed_pose=None)
+    viewer = MagicMock()
+    sim._web_viewer = viewer
+    sim._visualization_runtime = None
+
+    def stop_record():
+        sim._window_record_state = None
+
+    def close():
+        assert sim._window_record_state is None
+
+    sim.stop_window_record = MagicMock(side_effect=stop_record)
+    viewer.close.side_effect = close
+    sim.stop_visualization()
+    sim.stop_window_record.assert_called_once()
+    viewer.close.assert_called_once()

@@ -124,8 +124,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     sim.update(step=1)  # Refresh link poses before creating the IK target.
 
     native_window_opened = False
-    if not args.headless:
-        native_window_opened = sim.open_window()
+    if not args.headless and not getattr(args, "web", False):
+        native_window_opened = sim.open_viewer()
 
     if not native_window_opened and not args.viser:
         logger.log_warning(
@@ -133,7 +133,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         )
 
     logger.log_info("Gizmo-Robot example started!")
-    if native_window_opened or args.viser:
+    if native_window_opened or args.viser or getattr(args, "web", False):
         logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
     if native_window_opened:
         logger.log_info(

@@ -66,7 +66,7 @@ is rendered from `render_frame()` without adding sensor renders. Paused callers
 pump `capture_visualization()` on the World creator thread. WebRTC application
 closure precedes sensor/scene teardown; its listener is released with World
 cleanup. Follow [visualization](../sim-visualization/sim-visualization.md) for
-configuration and current single-environment restrictions.
+the shared viewport API, interactions and native video-catalog limitations.
 
 ## Default scene presentation
 

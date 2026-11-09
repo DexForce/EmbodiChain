@@ -34,13 +34,14 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     physics_cfg_for_backend,
 )
-from embodichain.lab.sim.sensors import CameraCfg
+from embodichain.lab.sim.sensors import CameraCfg, StereoCameraCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.visualization import DexSimWebCfg, VisualizationCfg
 
 
 def main() -> None:
     port, backend, result_path = int(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+    num_envs = int(sys.argv[4]) if len(sys.argv) > 4 else 1
     running = True
 
     def stop(*_: object) -> None:
@@ -51,6 +52,8 @@ def main() -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            web=True,
+            num_envs=num_envs,
             startup_summary="off",
             physics_cfg=physics_cfg_for_backend(backend),
             render_cfg=RenderCfg(
@@ -68,6 +71,34 @@ def main() -> None:
     )
     sensor = cube = None
     try:
+        if len(sys.argv) > 5 and sys.argv[5] == "sensors":
+            sim.prepare()
+            depth = sim.add_sensor(
+                CameraCfg(
+                    uid="depth_only",
+                    width=65,
+                    height=49,
+                    enable_color=False,
+                    enable_depth=True,
+                )
+            )
+            stereo = sim.add_sensor(
+                StereoCameraCfg(uid="stereo", width=64, height=48, enable_color=True)
+            )
+            assert depth.num_instances == stereo.num_instances == num_envs
+            assert not depth.cfg.enable_color and depth.cfg.enable_depth
+            assert depth.cfg.width == 65 and depth.cfg.height == 49
+            assert sim._visualization_sim_step == 0
+            result_path.write_text(
+                json.dumps(
+                    {
+                        "num_envs": num_envs,
+                        "depth_size": [65, 49],
+                        "stereo_instances": stereo.num_instances,
+                    }
+                )
+            )
+            return
         cube = sim.add_rigid_object(
             RigidObjectCfg(
                 uid="cube",
@@ -77,6 +108,10 @@ def main() -> None:
             )
         )
         sim.prepare()
+        offset = sim.arena_offsets[0].detach().cpu().numpy()
+        sim.viewer.set_look_at(
+            np.array([2.0, -3.0, 2.0]) + offset, np.array([0.0, 0.0, 0.4]) + offset
+        )
         sensor = sim.add_sensor(
             CameraCfg(
                 uid="task_camera",
@@ -87,8 +122,12 @@ def main() -> None:
             )
         )
         sensor.look_at(
-            eye=torch.tensor([[1.0, -2.0, 1.0]], device=sim.device),
-            target=torch.tensor([[0.0, 0.0, 0.4]], device=sim.device),
+            eye=torch.tensor([[1.0, -2.0, 1.0]], device=sim.device).expand(
+                num_envs, -1
+            ),
+            target=torch.tensor([[0.0, 0.0, 0.4]], device=sim.device).expand(
+                num_envs, -1
+            ),
         )
         sim.update(step=1)
         sim.render_camera_group([sensor.group_id])
@@ -103,6 +142,7 @@ def main() -> None:
             return dict(
                 original_state(),
                 test_sim_step=sim._visualization_sim_step,
+                test_arena_offsets=sim.arena_offsets.tolist(),
                 test_sensor_pose=sensor.get_local_pose(to_matrix=True).tolist(),
                 test_cube_pose=cube.get_local_pose(to_matrix=True).tolist(),
                 test_intrinsic=np.asarray(viewer.camera.get_intrinsic()).tolist(),

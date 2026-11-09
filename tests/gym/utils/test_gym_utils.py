@@ -2853,3 +2853,14 @@ def test_web_launcher_preserves_file_view_settings_and_applies_overrides():
         "port": 8766,
     }
     assert "port" not in config["visualization"]["web"]
+
+
+def test_viser_cli_selection_overrides_authored_web_mode():
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    args = parser.parse_args(["--viser"])
+    merged = merge_args_with_gym_config(
+        args, {"id": "Dummy-v0", "physics": "default", "web": True}
+    )
+    assert merged["web"] is False
+    assert merged["visualization"]["backend"] == "viser"

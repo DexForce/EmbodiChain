@@ -500,7 +500,7 @@ def run_coordinated_pickment_demo(
         return
 
     if wait_for_user:
-        input("Press Enter to execute coordinated pickment...")
+        sim.wait_for_input("Press Enter to execute coordinated pickment...")
 
     def log_execution(step_idx: int, total_steps: int) -> None:
         if args.debug_state and (
@@ -520,7 +520,7 @@ def run_coordinated_pickment_demo(
         look_at=PICKMENT_RECORD_LOOK_AT,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 def main() -> None:

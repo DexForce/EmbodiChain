@@ -4,8 +4,10 @@ Read this when the request needs these details. [Topic overview](sim-visualizati
 
 ## Configuration
 
-`backend="dexsim-web"` selects the experimental native WebRTC window
-replacement; `visualization.web` owns `DexSimWebCfg`. Shared launchers accept
+Top-level `SimulationManagerCfg.web=True` (Gym `web: true`) selects native
+WebRTC presentation, alongside headless/window selection. The compatibility
+`visualization.backend="dexsim-web"` spelling remains valid;
+`visualization.web` owns `DexSimWebCfg`. Shared launchers accept
 `--web`, mutually exclusive with `--viser`, and optional `--web-port` /
 `--web-fps` overrides. Browser modes force headless before World construction.
 WebRTC calls to `capture_visualization()` pump application events and render

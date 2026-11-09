@@ -17,7 +17,10 @@ the first window. These explicit calls take precedence over the startup default.
 Query through `sim.get_world().get_entity_gizmo()`. DexSim owns window
 detach/reopen and controller state; reopening never reapplies the default or
 overwrites an explicit native disable. Pure headless and Viser runs do not
-automatically create a native entity controller.
+automatically create a native entity controller. A writable Web viewport binds
+the same native entity controller to its observer camera with click picking.
+Newton's Scene-owned mailbox is consumed during paused viewer polling without
+advancing physics.
 
 `SimulationManagerCfg.robot_ik_gizmo` defaults to `GizmoCfg()`. During normal
 updates the manager registers robot control parts with complete solver chain/TCP
@@ -27,6 +30,11 @@ press creates DexSim's `IKGizmoController` by default;
 `GizmoCfg(ik_start_enabled=True)` opts into activation on the first update with
 an open window. The startup attempt is consumed once, including on failure;
 later key presses can retry. Viser constructs IK on its first drag.
+The Web viewport exposes configured robot targets through browser TCP axes,
+using the same `Gizmo.request_local_pose()` and solver/drive-target path as
+Viser. It does not require an SDL window or a separate IK solver implementation.
+`create_robot_ik_gizmo_controller()` remains the explicit native-window factory.
+
 Registration never writes drive targets. `Gizmo` owns managed native input and
 target-node cleanup, detaches input on window close, and reattaches the same
 controller on reopen. Robot removal releases all its managed controls.
