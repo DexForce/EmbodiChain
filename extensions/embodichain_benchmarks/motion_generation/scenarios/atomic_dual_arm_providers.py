@@ -1487,6 +1487,7 @@ def _placement_pose_row(
         support_vertices,
         device,
         z_clearance=float(config.get("support_grasp_z_clearance_m", 0.0)),
+        pan_frame=str(config.get("support_mesh_frame", "authored_z_up")),
     )
     if placing_target_frame_pose is None:
         placing_target_frame_pose = placing_pose
@@ -1502,6 +1503,7 @@ def _placement_pose_row(
         support_target,
         device,
         pan_triangles=support_triangles,
+        pan_frame=str(config.get("support_mesh_frame", "authored_z_up")),
     )
     return {
         "placing_grasp_pose": placing_grasp,
@@ -1728,6 +1730,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
             support.entity.get_triangles(env_ids=[0])[0],
             poses["placing_target_pose"],
             poses["support_target_pose"],
+            pan_frame=str(config.get("support_mesh_frame", "authored_z_up")),
         )
         parts = _control_parts(config, ("placing", "support"))
         parameters: dict[str, object] = {

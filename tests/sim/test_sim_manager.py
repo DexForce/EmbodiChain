@@ -3426,17 +3426,18 @@ def test_reset_fluid_and_rigid_controls_selects_rows_and_honors_exclusions():
         "_deformable_objects",
     ):
         setattr(sim, name, {})
-    first, second, excluded = MagicMock(), MagicMock(), MagicMock()
-    fluid = MagicMock()
+    first, second, excluded_control = MagicMock(), MagicMock(), MagicMock()
+    fluid, excluded_fluid = MagicMock(), MagicMock()
     sim._rigid_trajectory_controls = {
         "cup": (first, second),
-        "other": (excluded, excluded),
+        "other": (excluded_control, excluded_control),
     }
-    sim._fluid_objects = {"water": fluid}
-    sim.reset_objects_state(env_ids=[1], excluded_uids=["other"])
+    sim._fluid_objects = {"water": fluid, "other_fluid": excluded_fluid}
+    sim.reset_objects_state(env_ids=[1], excluded_uids=["other", "other_fluid"])
     first.reset.assert_not_called()
     second.reset.assert_called_once_with()
-    excluded.reset.assert_not_called()
+    excluded_control.reset.assert_not_called()
+    excluded_fluid.reset.assert_not_called()
     fluid.reset.assert_called_once_with([1])
 
 

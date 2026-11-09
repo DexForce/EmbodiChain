@@ -601,18 +601,23 @@ def _explicit_tet_mesh_from_cfg(
         raise ValueError("Volume deformable vertices must have shape (N, 3).")
     if not np.isfinite(positions).all():
         raise ValueError("Volume deformable vertices must be finite.")
-    tetrahedra = np.asarray(cfg.tetrahedra, dtype=np.int32).reshape(-1, 4)
+    tetrahedra = np.asarray(cfg.tetrahedra)
+    if tetrahedra.dtype.kind not in "iu":
+        raise TypeError("Volume deformable tetrahedra must be integer indices.")
+    tetrahedra = tetrahedra.reshape(-1, 4)
     if tetrahedra.min() < 0 or tetrahedra.max() >= len(positions):
         raise ValueError("Volume deformable tetrahedra index outside the vertices.")
+    tetrahedra = tetrahedra.astype(np.int32)
     if shape.triangles is None:
         surface_triangles = extract_tet_surface_triangles(tetrahedra)
     else:
         surface_triangles = np.asarray(shape.triangles)
         if surface_triangles.dtype.kind not in "iu":
             raise TypeError("Volume deformable triangles must be integer indices.")
-        surface_triangles = surface_triangles.astype(np.int32).reshape(-1, 3)
+        surface_triangles = surface_triangles.reshape(-1, 3)
         if surface_triangles.min() < 0 or surface_triangles.max() >= len(positions):
             raise ValueError("Volume deformable triangles index outside the vertices.")
+        surface_triangles = surface_triangles.astype(np.int32)
     if shape.normals is not None or shape.uv_coords is not None:
         raise ValueError(
             "Volume deformable tetrahedra do not support shape normals or uv_coords."

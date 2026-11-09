@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from embodichain.lab.sim.cfg.fluid import FluidObjectCfg
 from embodichain.lab.sim.objects.fluid import FluidObject
 

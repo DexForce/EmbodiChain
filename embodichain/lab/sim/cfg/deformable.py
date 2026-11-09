@@ -301,6 +301,10 @@ class VolumeDeformableObjectCfg(DeformableObjectCfg):
                 raise TypeError("tetrahedra must contain integer indices.")
             if raw.ndim != 2 or raw.shape[1:] != (4,) or len(raw) == 0:
                 raise ValueError("tetrahedra must have non-empty shape (M, 4).")
+            if np.any(raw < 0) or np.any(raw > np.iinfo(np.int32).max):
+                raise ValueError(
+                    "tetrahedra indices must be nonnegative and fit int32."
+                )
             self.tetrahedra = raw.astype(np.int32)
 
 
