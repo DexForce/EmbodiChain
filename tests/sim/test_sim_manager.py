@@ -1454,19 +1454,43 @@ def test_constructor_starts_visualization_after_default_scene(
     assert sim._arenas == []
 
 
-def test_render_camera_group_syncs_state_before_rendering() -> None:
+@pytest.mark.parametrize("in_render_frame", [False, True])
+def test_render_camera_group_syncs_state_before_rendering(
+    in_render_frame: bool,
+) -> None:
     lifecycle: list[str] = []
     sim = object.__new__(SimulationManager)
     sim.is_window_opened = False
+    sim._render_state_published = False if in_render_frame else None
+    camera = MagicMock(spec=Camera)
+    camera.group_id = 3
+    camera._capture_metadata = {"capture_sequence": 1}
+    camera._pending_capture_metadata = {"capture_sequence": 2}
+    camera._snapshot_render_metadata.side_effect = lambda: lifecycle.append("metadata")
+    other_camera = MagicMock(spec=Camera)
+    other_camera.group_id = 4
+    other_camera._capture_metadata = {"capture_sequence": 5}
+    sim._sensors = {"selected": camera, "other": other_camera}
     sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
+
+    def render(_group_ids: list[int]) -> None:
+        assert camera._capture_metadata is None
+        assert camera._pending_capture_metadata is None
+        lifecycle.append("render")
+
     sim._world = SimpleNamespace(
-        render_camera_group=lambda _group_ids: lifecycle.append("render")
+        render_camera_group=render,
     )
+    sim.poll_viewer = lambda: lifecycle.append("viewer")
     sim._log_scene_summary = lambda: lifecycle.append("summary")
 
     sim.render_camera_group([3])
 
-    assert lifecycle == ["sync", "render", "summary"]
+    assert lifecycle == ["sync", "render", "metadata"] + (
+        [] if in_render_frame else ["viewer"]
+    ) + ["summary"]
+    assert other_camera._capture_metadata == {"capture_sequence": 5}
+    other_camera._snapshot_render_metadata.assert_not_called()
 
 
 def test_empty_camera_group_does_not_publish_render_state() -> None:
@@ -1519,6 +1543,7 @@ def test_recording_and_viser_share_substep_publication() -> None:
 def _make_render_frame_sim(*, window=False, viser=False, automatic_sync=False):
     """Track published state through real manager/backend scheduling methods."""
     sim, runtime = _make_visualization_sim_manager()
+    sim._sensors = {}
     sim.sim_config.physics_cfg = NewtonPhysicsCfg(sync_to_renderer=automatic_sync)
     sim.sim_config.visualization.backend = "viser" if viser else "none"
     sim.physics = NewtonPhysicsBackend(sim)
