@@ -66,7 +66,18 @@ that state. Flat-PLY point opacity/SH overrides create immutable resource varian
 at birth; selecting prepared elements changes appearance without uploading point
 arrays each frame. Variants remain separately resident and share only within
 their clone group; modifying points with an existing LoD sidecar is rejected.
-Gaussian USD loading remains deferred until its import path is separately validated.
+DexSim's native USD loader accepts a visual Xform referencing an external
+Gaussian PLY beside independently authored collision geometry. `add_usd()` and
+`source=UsdSourceCfg(...)` retain the USD owner, source prim and local visual
+offset. This path is qualified in one Arena with Default physics and Hybrid
+rendering; native Arena replication of USD Gaussian renders is rejected before
+declaration. Existing explicit Gaussian visuals remain the multi-Arena route.
+`GaussianSplatCfg.file_path` itself still accepts only PLY/GSQ. Standard USD
+ParticleField import and native Gaussian source-appearance replacement are not
+implied by this reference route. NoRender drops the Gaussian render descriptor
+before native materialization while retaining the USD body, collision, source
+configuration and typed authored-visual metadata across Arenas. A Gaussian-only
+USD needs `semantic_shape` for semantic mesh consumers.
 
 `objects/backends/collision.py` owns physical collision descriptors and strict
 cooked convex/box snapshots through `capture_physical_collision_geometry`.

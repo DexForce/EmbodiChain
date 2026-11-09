@@ -38,8 +38,8 @@ class VisualObjectCfg(ObjectBaseCfg):
 
     Like :class:`~embodichain.lab.sim.cfg.RigidObjectCfg`, ``MeshCfg.fpath``
     supplies ordinary mesh files such as OBJ, STL, GLB and glTF.
-    ``source=UsdSourceCfg(...)`` optionally selects one mesh object from a
-    source USD scene. Explicit
+    ``source=UsdSourceCfg(...)`` optionally selects one object from a source
+    USD scene, including an external Gaussian PLY visual. Explicit
     visual-object creation uses only its appearance; USD physics is omitted.
     Whole-scene import instead preserves each entity's authored physical type.
     """

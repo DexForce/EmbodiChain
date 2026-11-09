@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
 from ._usd_assets import _UsdTextureFiles
+from .usd import _has_native_gaussian_renders
 from .._material_presets import (
     _AssetMaterialDesc,
     _MaterialResources,
@@ -465,13 +466,17 @@ class SpawnScene:
 
     def _gaussian_capture_state(self) -> dict[str, object]:
         """Snapshot instance parameters without copying source point arrays."""
-        return {
-            uid: binding.describe()
-            for uid, declaration in self._assets.items()
-            if (binding := getattr(declaration.facade, "_visual_binding", None))
-            is not None
-            and binding.has_gaussians
-        }
+        state = {}
+        for uid, declaration in self._assets.items():
+            binding = getattr(declaration.facade, "_visual_binding", None)
+            if binding is not None:
+                if binding.has_gaussians:
+                    state[uid] = binding.describe()
+            elif declaration.facade is not None and _has_native_gaussian_renders(
+                declaration.descriptor
+            ):
+                state[uid] = declaration.facade.get_visual_elements()
+        return state
 
     @property
     def has_visual_composition(self) -> bool:
@@ -485,7 +490,11 @@ class SpawnScene:
     def has_gaussians(self) -> bool:
         """Whether managed declarations contain Gaussian resources."""
         return any(
-            getattr(getattr(d.facade, "_visual_binding", None), "has_gaussians", False)
+            (
+                binding.has_gaussians
+                if (binding := getattr(d.facade, "_visual_binding", None)) is not None
+                else _has_native_gaussian_renders(d.descriptor)
+            )
             for d in self._assets.values()
         )
 

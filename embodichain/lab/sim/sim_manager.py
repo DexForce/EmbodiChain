@@ -129,6 +129,8 @@ from embodichain.lab.sim.spawn.descriptors import (
     volume_deformable_desc_from_cfg,
 )
 from embodichain.lab.sim.spawn.usd import (
+    _has_native_gaussian_renders,
+    _source_visual_elements,
     articulation_desc_from_usd,
     rigid_desc_from_usd,
     visual_desc_from_usd,
@@ -2614,6 +2616,60 @@ class SimulationManager:
         """
         return list(self._lights.keys())
 
+    def _prepare_native_usd_gaussians(self, descriptors: Sequence[object]) -> bool:
+        """Prepare parsed USD Gaussian visuals before native Spawn mutation."""
+        if not any(_has_native_gaussian_renders(desc) for desc in descriptors):
+            return False
+        if self.sim_config.render_cfg.renderer == "no-render":
+            from dexsim.spawn import GeometryType
+
+            for desc in descriptors:
+                desc.renders = [
+                    render
+                    for render in desc.renders
+                    if render.geometry_type != GeometryType.GAUSSIAN_SPLAT
+                ]
+            return False
+        if self.num_envs != 1:
+            raise NotImplementedError(
+                "DexSim USD Gaussian visuals cannot be replicated across Arenas; "
+                "use explicit GaussianSplatCfg visuals for multi-environment scenes."
+            )
+        if self.sim_config.visualization.backend == "viser":
+            raise NotImplementedError(
+                "USD Gaussian visuals require native camera or window rendering."
+            )
+        from dexsim.types import Renderer
+
+        if self.physics.name != "default":
+            raise NotImplementedError(
+                "USD Gaussian visuals currently require physics='default' in EmbodiChain."
+            )
+        if self._world.get_renderer_type() != Renderer.HYBRID:
+            raise NotImplementedError(
+                "DexSim USD Gaussian visuals currently require the Hybrid renderer."
+            )
+        if not self.sim_config.render_cfg.gaussian.enabled:
+            raise ValueError(
+                "USD Gaussian visuals require render_cfg.gaussian.enabled=True before World construction."
+            )
+        effective_config = getattr(self._world, "get_gaussian_effective_config", None)
+        if (
+            not callable(effective_config)
+            or not effective_config()["normalized"]["enabled"]
+        ):
+            raise RuntimeError("The native renderer has Gaussian composition disabled.")
+        render = self.sim_config.render_cfg
+        if "nrd" in (render.denoising.window, render.denoising.offscreen):
+            raise ValueError("Hybrid standalone NRD omits Gaussian composition.")
+        if getattr(self, "_window_record_state", None) is not None:
+            raise NotImplementedError(
+                "Gaussian recording requires a managed Camera, not the native viewer recorder."
+            )
+        for sensor in self._sensors.values():
+            self._validate_gaussian_camera(sensor.cfg)
+        return True
+
     def add_usd(
         self,
         name: str,
@@ -2636,6 +2692,11 @@ class SimulationManager:
         USD does not identify which articulations should expose EmbodiChain's
         robot interface. Pass those explicitly through ``robot_cfgs``; all
         other articulation descriptions become :class:`Articulation` objects.
+        A USD visual Xform referencing a Gaussian PLY uses DexSim's native
+        loader. This path currently supports one Arena with Default physics,
+        Hybrid rendering and enabled Gaussian composition. Use explicit
+        ``GaussianSplatCfg`` visuals for replicated Arenas. NoRender keeps the
+        authored physical body and colliders without loading its Gaussian visual.
 
         Args:
             name: Name passed to DexSim's USD scene parser.
@@ -2666,6 +2727,19 @@ class SimulationManager:
         from dexsim.kit.usd import parse_usd
 
         source = parse_usd(file_path, root_name=name)
+        source_elements = {
+            (
+                desc.usd.prim_path
+                if desc.usd is not None and desc.usd.prim_path
+                else desc.name
+            ): _source_visual_elements(desc)
+            for desc in source.mesh_objects
+        }
+        has_gaussians = self._prepare_native_usd_gaussians(source.mesh_objects)
+        if has_gaussians:
+            for descriptor in source.mesh_objects:
+                if _has_native_gaussian_renders(descriptor):
+                    descriptor.per_env = False
         occupied = set(self.asset_uids)
         for descriptor in (
             *getattr(self._spawn_scene.builder, "mesh_objects", ()),
@@ -2702,7 +2776,9 @@ class SimulationManager:
                         @ descriptor.pose
                     )
         source.materials = self._spawn_scene._resolve_materials(source.materials)
-        descriptors = self._spawn_scene.builder.add_scene(source, per_env=True)
+        descriptors = self._spawn_scene.builder.add_scene(
+            source, per_env=None if has_gaussians else True
+        )
         assets: dict[str, VisualObject | RigidObject | Articulation | Robot] = {}
         robot_cfgs = robot_cfgs or {}
 
@@ -2731,6 +2807,9 @@ class SimulationManager:
                         ),
                     )
                     facade = VisualObject(cfg=cfg, device=self.device)
+                    facade._source_visual_elements = source_elements.get(
+                        source_path, ()
+                    )
                     self._spawn_scene.track(
                         "visual_object", descriptor.name, descriptor, facade=facade
                     )
@@ -2763,6 +2842,7 @@ class SimulationManager:
                     cfg=cfg,
                     device=self.device,
                 )
+                facade._source_visual_elements = source_elements.get(source_path, ())
 
                 self._spawn_scene.track(
                     "rigid_object",
@@ -2906,11 +2986,12 @@ class SimulationManager:
             )
 
     def add_visual_object(self, cfg: VisualObjectCfg) -> VisualObject:
-        """Declare a render-only mesh or primitive, without physics or colliders.
+        """Declare a render-only asset, without physics or colliders.
 
         Args:
             cfg: Appearance and initial state. ``source=UsdSourceCfg(...)``
-                selects a source USD object; only its appearance is imported.
+                selects a source USD object, including a Gaussian PLY reference;
+                only its appearance is imported.
 
         Returns:
             The declared facade, bound after ``prepare()``.
@@ -2919,11 +3000,22 @@ class SimulationManager:
             raise ValueError("Visual object requires a unique, nonempty UID.")
         self._validate_visual_config(cfg)
         path = _asset_file_path(cfg)
+        source_elements = None
         if _is_usd_path(path):
             descriptor, materials = visual_desc_from_usd(cfg)
+            source_elements = _source_visual_elements(descriptor)
+            if self._prepare_native_usd_gaussians((descriptor,)):
+                if cfg.visuals is not None:
+                    raise NotImplementedError(
+                        "USD-native Gaussian appearance cannot be replaced by visuals; "
+                        "use a Mesh USD source with explicit GaussianSplatCfg visuals."
+                    )
+                descriptor.per_env = False
         else:
             descriptor, materials = visual_desc_from_cfg(cfg)
         visual = VisualObject(cfg, self.device)
+        if source_elements is not None:
+            visual._source_visual_elements = source_elements
         was_materialized = self.spawn_result is not None
         self._spawn_scene.builder.materials.update(
             self._spawn_scene._resolve_materials(materials)
@@ -3044,12 +3136,21 @@ class SimulationManager:
         for cfg in cfgs:
             self._validate_visual_config(cfg)
             source_path = _asset_file_path(cfg)
+            source_elements = None
             if _is_usd_path(source_path):
                 descriptor, materials = rigid_desc_from_usd(
                     cfg,
                     per_env=True,
                     newton_solver_type=self._active_newton_solver_type,
                 )
+                source_elements = _source_visual_elements(descriptor)
+                if self._prepare_native_usd_gaussians((descriptor,)):
+                    if cfg.visuals is not None:
+                        raise NotImplementedError(
+                            "USD-native Gaussian appearance cannot be replaced by visuals; "
+                            "use a Mesh USD source with explicit GaussianSplatCfg visuals."
+                        )
+                    descriptor.per_env = False
             else:
                 descriptor, materials = rigid_desc_from_cfg(
                     cfg,
@@ -3057,6 +3158,8 @@ class SimulationManager:
                     newton_solver_type=self._active_newton_solver_type,
                 )
             rigid_obj = RigidObject(cfg=cfg, device=self.device)
+            if source_elements is not None:
+                rigid_obj._source_visual_elements = source_elements
             declarations.append((cfg.uid, descriptor, materials, rigid_obj))
 
         was_materialized = self.spawn_result is not None

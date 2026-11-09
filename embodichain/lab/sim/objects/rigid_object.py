@@ -1893,6 +1893,15 @@ class RigidObject(BatchEntity):
         binding = getattr(self, "_visual_binding", None)
         if binding is None:
             if self.cfg.semantic_shape is None:
+                if getattr(self.cfg, "source", None) is not None:
+                    elements = self.get_visual_elements()
+                    if elements and all(
+                        element["representation"] == "gaussian_splat"
+                        for element in elements
+                    ):
+                        raise ValueError(
+                            "Semantic mesh is unavailable for Gaussian-only USD appearance; configure semantic_shape."
+                        )
                 return self.get_vertices(env_ids, scale=True), self.get_triangles(
                     env_ids
                 )

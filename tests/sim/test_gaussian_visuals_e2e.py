@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+import subprocess
+import sys
 import numpy as np
 import pytest
 import torch
@@ -31,6 +33,7 @@ from embodichain.lab.sim.cfg import (
     GaussianSplatCfg,
     RenderCfg,
     RigidObjectCfg,
+    UsdSourceCfg,
     VisualElementCfg,
     VisualObjectCfg,
 )
@@ -57,6 +60,34 @@ def _write_splat(path: Path) -> None:
         + " ".join(map(str, values))
         + "\n"
     )
+
+
+def _write_usd_splat(path: Path, *, with_mesh: bool = False) -> Path:
+    """Author a native PLY reference with independent USD mass and collision."""
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    _write_splat(path / "visual.ply")
+    stage = Usd.Stage.CreateNew(str(path / "asset.usda"))
+    UsdGeom.SetStageMetersPerUnit(stage, 1)
+    UsdGeom.SetStageUpAxis(stage, "Z")
+    body = UsdGeom.Xform.Define(stage, "/Asset").GetPrim()
+    stage.SetDefaultPrim(body)
+    UsdGeom.Xformable(body).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0.8))
+    UsdPhysics.RigidBodyAPI.Apply(body)
+    UsdPhysics.MassAPI.Apply(body).CreateMassAttr(0.3)
+    visual = UsdGeom.Xform.Define(stage, "/Asset/Visual").GetPrim()
+    visual.GetReferences().AddReference("./visual.ply")
+    UsdGeom.Xformable(visual).AddTranslateOp().Set(Gf.Vec3d(0.01, 0, 0.01))
+    collider = UsdGeom.Cube.Define(stage, "/Asset/Collision")
+    collider.CreateSizeAttr(0.1)
+    collider.CreateVisibilityAttr("invisible")
+    UsdPhysics.CollisionAPI.Apply(collider.GetPrim())
+    if with_mesh:
+        mesh = UsdGeom.Cube.Define(stage, "/Asset/Mesh")
+        mesh.CreateSizeAttr(0.1)
+        mesh.AddTranslateOp().Set(Gf.Vec3d(0.5, 0, 0))
+    stage.GetRootLayer().Save()
+    return path / "asset.usda"
 
 
 def _write_arm(path: Path) -> None:
@@ -404,3 +435,253 @@ def test_gaussian_randomization_parallel_cameras_isolation_and_reset(
         visual = None
         sim.destroy(exit_process=False)
         sim.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("entry", ["scene", "rigid", "visual"])
+def test_native_usd_gaussian_import_keeps_physics_and_capture(tmp_path, entry):
+    """DexSim's USD PLY reference renders through each supported facade entry."""
+    usd = _write_usd_splat(tmp_path)
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=1,
+            device="cpu",
+            enable_entity_gizmo=False,
+            startup_summary="off",
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                gaussian=GaussianRenderCfg(enabled=True),
+                denoising=DenoisingCfg(window="off", offscreen="off"),
+            ),
+        )
+    )
+    try:
+        source = UsdSourceCfg(file_path=str(usd), source_prim_path="/Asset")
+        if entry == "scene":
+            asset = sim.add_usd("sample", str(usd))["/Asset"]
+        elif entry == "rigid":
+            asset = sim.add_rigid_object(
+                RigidObjectCfg(uid="body", source=source, init_pos=(0, 0, 0.8))
+            )
+        else:
+            asset = sim.add_visual_object(
+                VisualObjectCfg(uid="visual", source=source, init_pos=(0, 0, 0.8))
+            )
+        camera = sim.add_sensor(
+            CameraCfg(
+                uid="view",
+                width=64,
+                height=64,
+                intrinsics=(64, 64, 32, 32),
+                enable_depth=True,
+                extrinsics=CameraCfg.ExtrinsicsCfg(
+                    eye=(0, -1.5, 0.8), target=(0, 0, 0.8)
+                ),
+            )
+        )
+        sim.prepare()
+        sim.enable_physics(False)
+        elements = asset.get_visual_elements()
+        assert len(elements) == 1
+        assert elements[0]["representation"] == "gaussian_splat"
+        assert elements[0]["source_prim_path"] == "/Asset/Visual"
+        assert elements[0]["file_path"] == str(tmp_path / "visual.ply")
+        np.testing.assert_allclose(elements[0]["local_pose"][:3, 3], [0.01, 0, 0.01])
+        elements[0]["local_pose"][0, 3] = 99
+        assert asset.get_visual_elements()[0]["local_pose"][0, 3] == pytest.approx(0.01)
+
+        sim.render_camera_group([camera.group_id])
+        camera.update(fetch_only=True)
+        color = camera.get_data()["color"][0].cpu().numpy().astype(np.int16)
+        red = color[..., 0] > np.maximum(color[..., 1], color[..., 2]) + 25
+        assert red.sum() >= 4
+        depth = camera.get_data()["depth"][0, 32, 32].item()
+        assert depth == pytest.approx(1.5, abs=0.3)
+        capture = camera.capture_metadata
+        assert capture["valid"] is True
+        assert capture["frame_id"] == capture["status"]["frame_index"]
+        assert capture["output_contract"]["depth"]["is_view_z"]
+        assert capture["gaussian_instances"][asset.uid][0]["source_prim_path"] == (
+            "/Asset/Visual"
+        )
+        assert camera.get_capture_metadata()["frame_id"] == capture["frame_id"]
+
+        if entry != "visual":
+            assert asset.get_mass().item() == pytest.approx(0.3)
+            assert len(asset.get_collision_shapes()) == 1
+            with pytest.raises(ValueError, match="semantic_shape"):
+                asset.get_semantic_mesh()
+        if entry == "rigid":
+            sim.add_visual_object(
+                VisualObjectCfg(
+                    uid="rebuild_trigger",
+                    shape=CubeCfg(size=(0.05, 0.05, 0.05)),
+                    init_pos=(3, 0, 0.8),
+                )
+            )
+            sim.render_camera_group([camera.group_id])
+            camera.update(fetch_only=True)
+            assert camera.capture_metadata["valid"]
+            rebuilt = camera.get_data()["color"][0].cpu().numpy().astype(np.int16)
+            assert (
+                rebuilt[..., 0] > np.maximum(rebuilt[..., 1], rebuilt[..., 2]) + 25
+            ).sum() >= 4
+            assert asset.get_visual_elements()[0]["source_prim_path"] == "/Asset/Visual"
+        if entry == "scene":
+            sim.enable_physics(True)
+            sim.update(step=30, render_final_step=False)
+            assert asset.get_local_pose()[0, 2].item() < 0.7
+            sim.render_camera_group([camera.group_id])
+            camera.update(fetch_only=True)
+            moved = camera.get_data()["color"][0].cpu().numpy().astype(np.int16)
+            assert np.abs(moved - color).mean() > 0.1
+            assert camera.capture_metadata["valid"]
+            assert sim.remove_asset(asset.uid)
+            sim.render_camera_group([camera.group_id])
+            camera.update(fetch_only=True)
+            assert camera.capture_metadata == {}
+    finally:
+        sim.destroy(exit_process=False)
+        sim.flush_cleanup_queue()
+
+
+def test_native_usd_gaussian_rejects_arena_replication_before_declaration(tmp_path):
+    """Keep the native singleton restriction visible before Spawn writes."""
+    usd = _write_usd_splat(tmp_path)
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=4,
+            device="cpu",
+            enable_entity_gizmo=False,
+            startup_summary="off",
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                gaussian=GaussianRenderCfg(enabled=True),
+            ),
+        )
+    )
+    try:
+        with pytest.raises(NotImplementedError, match="replicated across Arenas"):
+            sim.add_usd("sample", str(usd))
+        with pytest.raises(NotImplementedError, match="replicated across Arenas"):
+            sim.add_rigid_object(
+                RigidObjectCfg(
+                    uid="body",
+                    source=UsdSourceCfg(file_path=str(usd)),
+                )
+            )
+        assert all(
+            desc.name not in {"Asset", "body"}
+            for desc in sim._spawn_scene.builder.mesh_objects
+        )
+    finally:
+        sim.destroy(exit_process=False)
+        sim.flush_cleanup_queue()
+
+
+def test_native_usd_gaussian_rejects_unapplied_visual_replacement(tmp_path):
+    """A source Gaussian must not remain visible behind an explicit override."""
+    usd = _write_usd_splat(tmp_path)
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=1,
+            device="cpu",
+            enable_entity_gizmo=False,
+            startup_summary="off",
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                gaussian=GaussianRenderCfg(enabled=True),
+            ),
+        )
+    )
+    try:
+        source = UsdSourceCfg(file_path=str(usd))
+        with pytest.raises(NotImplementedError, match="cannot be replaced"):
+            sim.add_rigid_object(RigidObjectCfg(uid="body", source=source, visuals=[]))
+        with pytest.raises(NotImplementedError, match="cannot be replaced"):
+            sim.add_visual_object(
+                VisualObjectCfg(uid="visual", source=source, visuals=[])
+            )
+        assert all(
+            desc.name not in {"body", "visual"}
+            for desc in sim._spawn_scene.builder.mesh_objects
+        )
+    finally:
+        sim.destroy(exit_process=False)
+        sim.flush_cleanup_queue()
+
+
+def test_native_usd_gaussian_with_mesh_keeps_semantic_surface(tmp_path):
+    """A mixed USD exposes its Mesh geometry without triangulating Gaussians."""
+    usd = _write_usd_splat(tmp_path, with_mesh=True)
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=1,
+            device="cpu",
+            enable_entity_gizmo=False,
+            startup_summary="off",
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                gaussian=GaussianRenderCfg(enabled=True),
+            ),
+        )
+    )
+    try:
+        body = sim.add_usd("sample", str(usd))["/Asset"]
+        sim.prepare()
+        assert {item["representation"] for item in body.get_visual_elements()} == {
+            "gaussian_splat",
+            "mesh",
+        }
+        vertices, faces = body.get_semantic_mesh()
+        assert vertices.shape[1] > 0
+        assert faces.shape[1] > 0
+        assert len(body.get_collision_shapes()) == 1
+    finally:
+        sim.destroy(exit_process=False)
+        sim.flush_cleanup_queue()
+
+
+@pytest.mark.subprocess_sim
+def test_native_usd_gaussian_no_render_keeps_replicated_physics(tmp_path):
+    """NoRender skips the Gaussian loader while retaining USD body and shapes."""
+    usd = _write_usd_splat(tmp_path)
+    code = """
+import sys
+import torch
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg
+
+sim = SimulationManager(SimulationManagerCfg(
+    headless=True, num_envs=4, device="cpu", enable_entity_gizmo=False,
+    startup_summary="off", render_cfg=RenderCfg(renderer="no-render")))
+try:
+    body = sim.add_usd("sample", sys.argv[1])["/Asset"]
+    sim.prepare()
+    assert body.num_instances == 4
+    torch.testing.assert_close(body.get_mass(), torch.full((4,), 0.3))
+    assert len(body.get_collision_shapes(0)) == 1
+    assert len(body.get_collision_shapes(3)) == 1
+    assert not sim._spawn_scene.has_gaussians
+    assert body.cfg.source.file_path == sys.argv[1]
+    assert body.get_visual_elements()[0]["representation"] == "gaussian_splat"
+    try:
+        body.get_semantic_mesh()
+    except ValueError as error:
+        assert "semantic_shape" in str(error)
+    else:
+        raise AssertionError("Gaussian-only USD needs a semantic proxy")
+finally:
+    sim.destroy(exit_process=False)
+    sim.flush_cleanup_queue()
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code, str(usd)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr

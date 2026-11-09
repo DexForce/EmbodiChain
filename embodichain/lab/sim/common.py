@@ -100,10 +100,11 @@ class BatchEntity(ABC):
         pass
 
     def get_visual_elements(self) -> tuple[dict[str, object], ...]:
-        """Return owned metadata snapshots for explicitly configured visuals.
+        """Return owned metadata snapshots for configured or USD source visuals.
 
         Gaussian arrays are not copied. Resource IDs are diagnostics scoped to
-        the current Scene; configuration element IDs remain stable.
+        the current Scene; USD-native visual references do not expose them.
+        Configuration element IDs and USD prim paths remain stable.
 
         Returns:
             Element metadata with representation, local transform and resource IDs.
@@ -111,6 +112,20 @@ class BatchEntity(ABC):
         binding = getattr(self, "_visual_binding", None)
         if binding is not None:
             return binding.describe()
+        source_elements = getattr(self, "_source_visual_elements", None)
+        if source_elements is not None:
+            from copy import deepcopy
+
+            return deepcopy(source_elements)
+        if getattr(self.cfg, "source", None) is not None and getattr(
+            self, "is_spawn_bound", False
+        ):
+            from embodichain.lab.sim.spawn.usd import _source_visual_elements
+
+            entities = getattr(self, "_entities", ())
+            descriptor = getattr(entities[0], "object_desc", None) if entities else None
+            if descriptor is not None:
+                return _source_visual_elements(descriptor)
         from embodichain.lab.sim.cfg.visuals import GaussianSplatCfg
 
         groups = getattr(self.cfg, "link_visuals", {})

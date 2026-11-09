@@ -60,6 +60,9 @@ For Gaussian scenes, `Camera.capture_metadata` retains completed-frame identity,
 calibration and output semantics separately from image tensors. Gym exposes the
 snapshot through `sensor_capture_metadata`. Capability checks and publication
 ordering follow [Gaussian composition](../simulation-system/rendering.md#gaussian-composition).
+USD-native Gaussian PLY references use the same capture-status path; source prim
+and local visual transform appear in `gaussian_instances`. The separate
+`get_capture_metadata()` method also includes the ground visibility policy.
 
 ## Camera ground visibility
 

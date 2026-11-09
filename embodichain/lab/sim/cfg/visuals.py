@@ -35,8 +35,9 @@ __all__ = ["GaussianSplatCfg", "VisualElementCfg", "GaussianRenderCfg"]
 class GaussianSplatCfg:
     """Reference captured-radiance Gaussian data; no physical geometry is inferred.
 
-    File decoding and immutable resource residency belong to DexSim. USD
-    Gaussian import is deferred until the qualified DexSim 0.6.0 release.
+    File decoding and immutable resource residency belong to DexSim. Use
+    ``UsdSourceCfg`` or ``SimulationManager.add_usd`` for a USD stage whose
+    visual Xform references an external Gaussian PLY.
     """
 
     file_path: str = ""
@@ -95,7 +96,7 @@ class GaussianSplatCfg:
             ".gsq",
         }:
             raise ValueError(
-                "GaussianSplatCfg.file_path requires .ply or .gsq; Gaussian USD is not supported yet."
+                "GaussianSplatCfg.file_path requires .ply or .gsq; use UsdSourceCfg or add_usd for USD visual references."
             )
         if self.lod_path and Path(self.lod_path).suffix.lower() != ".dgslod":
             raise ValueError("Gaussian LoD requires a .dgslod sidecar.")
