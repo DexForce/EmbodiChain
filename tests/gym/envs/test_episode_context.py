@@ -173,7 +173,7 @@ def test_info_can_omit_provenance_without_disabling_episode_checks(embodied):
     assert EnvCfg().episode_context_in_info is True
     context = ready_context()
     env = SimpleNamespace(
-        cfg=SimpleNamespace(episode_context_in_info=True),
+        cfg=SimpleNamespace(),
         num_envs=4,
         device=torch.device("cpu"),
         _elapsed_steps=torch.zeros(4),
