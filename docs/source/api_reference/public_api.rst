@@ -1816,10 +1816,12 @@ embodichain.lab.gym.envs.differentiable_dynamics_env
 
 Solver-backed Gym environments retain independent functional state and defer terminal resets until backward has consumed their graphs.
 
+.. currentmodule:: embodichain.lab.gym.envs.differentiable_dynamics_env
+
 .. autosummary::
    :nosignatures:
 
-   embodichain.lab.gym.envs.differentiable_dynamics_env.DifferentiableDynamicsEnv
+   DifferentiableDynamicsEnv
 
 .. autoclass:: embodichain.lab.gym.envs.differentiable_dynamics_env.DifferentiableDynamicsEnv
    :members:
@@ -1839,11 +1841,13 @@ embodichain.lab.sim.diff.dynamics
 
 Functional trajectories advance through SimulationManager and Scene APIs. Detaching state creates an explicit rollout boundary without aliasing live simulation buffers.
 
+.. currentmodule:: embodichain.lab.sim.diff.dynamics
+
 .. autosummary::
    :nosignatures:
 
-   embodichain.lab.sim.diff.dynamics.FunctionalDynamics
-   embodichain.lab.sim.diff.dynamics.detach_dynamics_state
+   FunctionalDynamics
+   detach_dynamics_state
 
 .. autoclass:: embodichain.lab.sim.diff.dynamics.FunctionalDynamics
    :members:
@@ -1893,11 +1897,13 @@ embodichain.lab.sim.physics.solvers.nerd
 
 The named NeRD provider binds portable model exports to the ordered Scene physics domain. It requires a DexSim build exposing named solver providers and the functional dynamics service.
 
+.. currentmodule:: embodichain.lab.sim.physics.solvers.nerd
+
 .. autosummary::
    :nosignatures:
 
-   embodichain.lab.sim.physics.solvers.nerd.NeRDProvider
-   embodichain.lab.sim.physics.solvers.nerd.NeuralRobotDynamicSolver
+   NeRDProvider
+   NeuralRobotDynamicSolver
 
 .. autoclass:: embodichain.lab.sim.physics.solvers.nerd.NeRDProvider
    :members:
@@ -3134,11 +3140,13 @@ autograd. It does not advance the Newton dynamics solver.
 
 Registered solver dynamics share the public differentiable facade with explicit state-detach boundaries.
 
+.. currentmodule:: embodichain.lab.sim.diff
+
 .. autosummary::
    :nosignatures:
 
-   embodichain.lab.sim.diff.FunctionalDynamics
-   embodichain.lab.sim.diff.detach_dynamics_state
+   FunctionalDynamics
+   detach_dynamics_state
 
 .. autoclass:: embodichain.lab.sim.diff.FunctionalDynamics
    :members:
