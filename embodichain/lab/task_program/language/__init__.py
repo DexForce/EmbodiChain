@@ -34,6 +34,7 @@ from .loader import load_task_program, loads_task_program_json, parse_task_progr
 from .schema import (
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
+    ConditionValidatorCfg,
     CyclicPoseTargetCfg,
     HandOverCfg,
     InvokeCfg,
@@ -59,6 +60,7 @@ from .schema import (
 __all__ = [
     "ArticulationJointPositionValidatorCfg",
     "BarrierCfg",
+    "ConditionValidatorCfg",
     "ConfigPath",
     "ConfigPathPart",
     "CyclicPoseTargetCfg",

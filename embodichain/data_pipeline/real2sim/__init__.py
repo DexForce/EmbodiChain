@@ -35,6 +35,21 @@ from .prototype import (
 from .io import load_prototype, load_trajectory, prepare_prototype, save_trajectory
 
 __all__ = [
+    "RobotDemonstration",
+    "DemoSkillRole",
+    "DemoSkillPhase",
+    "DemoSkillEvent",
+    "DemoSkillConstraint",
+    "DemoSkillSpec",
+    "DemoSkillArtifact",
+    "DemoSkillReference",
+    "build_demo_skill",
+    "decode_demo_skill_spec",
+    "retarget_demo_skill",
+    "save_robot_demonstration",
+    "load_robot_demonstration",
+    "save_demo_skill",
+    "load_demo_skill",
     "JointSpec",
     "NormalizationReport",
     "NormalizedReal2SimUnit",
@@ -50,3 +65,23 @@ __all__ = [
     "retarget_motion_prototype",
     "save_trajectory",
 ]
+
+from .demo_skill import (
+    RobotDemonstration,
+    DemoSkillRole,
+    DemoSkillPhase,
+    DemoSkillEvent,
+    DemoSkillConstraint,
+    DemoSkillSpec,
+    DemoSkillArtifact,
+    DemoSkillReference,
+    build_demo_skill,
+    decode_demo_skill_spec,
+    retarget_demo_skill,
+)
+from .demo_skill_io import (
+    save_robot_demonstration,
+    load_robot_demonstration,
+    save_demo_skill,
+    load_demo_skill,
+)

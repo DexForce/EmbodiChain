@@ -239,6 +239,9 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/repeated_pick_place/objective.yaml"),
         Path("tasks/manipulation/push_cube/catalog.yaml"),
         Path("tasks/manipulation/push_cube/README.md"),
+        Path(
+            "tasks/manipulation/tableware/stack_blocks_two/task_program/evaluation.yaml"
+        ),
         Path("tasks/manipulation/tableware/stack_cups/catalog.yaml"),
         Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
@@ -435,6 +438,7 @@ for relative_path, expected_ids in expected_deployments.items():
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=env_path.parent,
+        evaluation=physical.evaluation,
     )
     program = load_task_program(
         deployment.program_path,
@@ -545,17 +549,21 @@ from gymnasium import registry
 
 configs = installed / "embodichain_tasks/configs/tasks/manipulation/drawer_storage"
 assert not (installed / "embodichain_tasks/manipulation/drawer_storage.py").exists()
-assert (configs / "task_program/acceptance.yaml").is_file()
+assert (configs / "task_program/evaluation.yaml").is_file()
 assert "embodichain_tasks" not in sys.modules
 
 for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
     path = configs / f"task.{name}.yaml"
     raw = load_config(path)
     assert raw["id"] not in registry
-    cfg = config_to_cfg(raw, source_path=path)
-    assert cfg.final_acceptance.open_positions == open_positions
-    assert len(cfg.final_acceptance.finger_links) == 2
-    assert get_env_spec(raw["id"]).cls is EmbodiedEnv
+    config_to_cfg(raw, source_path=path)
+    spec = get_env_spec(raw["id"])
+    assert spec.cls is EmbodiedEnv
+    registration = spec.task_program_registration
+    rules = registration.evaluation_conditions
+    assert rules["hand_open"].parameters["hand_open"]["positions"] == open_positions
+    assert len(rules["fingers_clear"].required_fields) == 3
+    assert "cube_contained" in registration.evaluation_final_refs
 
 import embodichain_tasks
 from embodichain.cli.list_task import _collect_environment_entries

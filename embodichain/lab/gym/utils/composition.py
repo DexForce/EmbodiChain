@@ -37,7 +37,7 @@ class ResolvedGymComponents:
         embodiment_skill_profile: Optional detached profile for the public Task
             Program deployment composer.
         scene_config: Optional physical scene projection for semantic binding checks.
-        embodiment_finger_links: Optional finger link names by robot control part.
+        evaluation: Optional owned evaluation component declaration.
 
     Resolver calls own their nested data independently. The mappings remain
     mutable for explicit declaration assembly; this is not a sealed identity.
@@ -48,11 +48,29 @@ class ResolvedGymComponents:
     scene_selected: bool
     embodiment_skill_profile: dict[str, object] | None
     scene_config: dict[str, object] | None
-    embodiment_finger_links: dict[str, tuple[str, ...]] | None = None
+    evaluation: dict[str, object] | None = None
+
+    def validate_scene_bindings(self, binding: Mapping[str, object]) -> None:
+        """Check semantic native roots against the resolved physical scene.
+
+        Args:
+            binding: Semantic rigid/articulation declarations naming native roots.
+
+        Raises:
+            ValueError: No physical scene was selected or a native root is absent.
+        """
+        from ._component_composition import _validate_scene_binding_targets
+
+        if self.scene_config is None:
+            raise ValueError("Scene binding validation requires a physical scene.")
+        _validate_scene_binding_targets(binding, simulation=self.scene_config)
 
 
 def resolve_gym_components(
-    config: Mapping[str, object], *, base_dir: str | Path
+    config: Mapping[str, object],
+    *,
+    base_dir: str | Path,
+    component_sources: Mapping[str, Mapping[str, object]] | None = None,
 ) -> ResolvedGymComponents:
     """Expand physical components without registering or constructing an environment.
 
@@ -66,6 +84,10 @@ def resolve_gym_components(
     Args:
         config: Inline or component-based runnable environment declaration.
         base_dir: Owning deployment directory for relative component references.
+        component_sources: Optional complete selected-component snapshot, keyed
+            by owner-relative or absolute component paths. When provided, all
+            selected components must be present; component files are never read.
+            Relative resource assets still resolve from each component owner.
 
     Returns:
         Independently owned expanded mappings and component-selection metadata.
@@ -77,4 +99,6 @@ def resolve_gym_components(
     """
     from ._component_composition import _resolve_gym_components
 
-    return _resolve_gym_components(config, base_dir=base_dir)
+    return _resolve_gym_components(
+        config, base_dir=base_dir, component_sources=component_sources
+    )

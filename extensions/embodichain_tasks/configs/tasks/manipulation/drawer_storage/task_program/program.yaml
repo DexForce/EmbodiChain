@@ -51,6 +51,13 @@ program:
     - kind: wait_stable
       entity: cube
       preset: stored_cube
+    validators:
+    - kind: condition
+      ref: cube_contained
+    - kind: condition
+      ref: hand_open
+    - kind: condition
+      ref: fingers_clear
   - kind: segment
     name: close_drawer
     instruction: close drawer.

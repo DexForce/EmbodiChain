@@ -64,7 +64,7 @@ Embodied Environment Classes
 
 .. autoclass:: EmbodiedEnvCfg
     :members:
-    :exclude-members: __init__, class_type, visual_object, rl_task, final_acceptance
+    :exclude-members: __init__, class_type, visual_object, rl_task
 
     Configuration class for embodied environments with extended settings for lighting, observation management,
     and advanced simulation features.

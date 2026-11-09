@@ -1990,29 +1990,38 @@
     },
     {
       "id": "simready",
-      "label": "SimReady pipeline",
+      "label": "Asset Engine",
       "kind": "module",
       "topic_ids": [
         "gen-sim"
       ],
-      "summary": "Ingests raw assets through parsing and conversion stages into SimReady outputs.",
-      "details": "The general asset-ingest pipeline coordinates parser capabilities and persisted processing state for supported input formats. Scene Engine also has an internal asset-preparation flow; these are distinct entry points.",
+      "summary": "Prepares an existing mesh through source conversion, semantic/physics inference, and mesh/USD export.",
+      "details": "The Asset Engine uses the asset-engine CLI and asset_engine Python namespace. Each run archives one input directory in a new UUID asset directory. Mesh inputs run source preparation and parser stages; configured URDF/USD inputs are copied directly without parser execution. The shipped source conversion mode is trimesh, while later Blender cleanup is configured separately. Source geometry metrics and the final mesh have separate acquisition paths. Scene Engine's graph-conditioned preparation and the asset package's articulated-generation service are distinct integrations.",
       "boundaries": [
-        "A converted asset is not a complete runnable Gym deployment."
+        "The CLI consumes one existing asset directory and owns asset/registry metadata; scene layout and task deployment belong to downstream callers.",
+        "General mesh inference uses OPENAI_* and gen_config.json; articulated generation has a separate service client and dotenv configuration.",
+        "Processing completion does not establish physical validation or task success; direct-copy mode produces no inferred SimReady mesh."
       ],
       "evidence": [
         {
           "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
-          "symbol": "<module>",
-          "start_line": 17,
-          "end_line": 17,
-          "excerpt": "from __future__ import annotations"
+          "symbol": "ingest_one_asset",
+          "start_line": 164,
+          "end_line": 170,
+          "excerpt": "    if ingest_mode == \"direct_copy\":\n        shutil.copytree(asset_dir, asset_source)\n        asset.identity[\"normalized_source\"] = \"raw_copy\"\n        asset.identity[\"source_file\"] = None\n        asset.identity[\"source_type\"] = \"direct_copy\"\n        store.save_asset(asset)\n        return asset  # no parser"
+        },
+        {
+          "path": "embodichain/gen_sim/asset_engine/configs/gen_config.json",
+          "symbol": "<document>",
+          "start_line": 4,
+          "end_line": 6,
+          "excerpt": "    \"source_preparation\": {\n      \"mode\": \"trimesh\"\n    },"
         }
       ],
       "documentation": [
         {
           "docname": "features/generative_sim/asset_engine",
-          "label": "SimReady pipeline documentation"
+          "label": "Asset Engine guide"
         }
       ]
     },
@@ -2620,7 +2629,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on supported Python 3.11--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -2778,7 +2787,7 @@
         "gen-sim"
       ],
       "summary": "Dispatches inspector, geometry, physics, USD, and internal asset parsers.",
-      "details": "ParserManager registers the supported parser implementations and runs the selected stage names for an ingested asset. Individual parsers own their metadata and resume behavior; the manager records parsed status after the pipeline completes.",
+      "details": "ParserManager registers inspector, geometry, physics, USD, and internal parsers and runs their selected sequence. Geometry measures the canonical source, while physics finalization rereads the archived selected mesh. Individual parsers record their own outputs and errors; parsed status records sequence completion without per-stage caching or physical validation.",
       "boundaries": [
         "Pipeline stages belong to single-asset ingestion, not the Scene Engine geometry processor."
       ],
@@ -2786,15 +2795,15 @@
         {
           "path": "embodichain/gen_sim/asset_engine/parser/base.py",
           "symbol": "ParserManager",
-          "start_line": 46,
-          "end_line": 46,
-          "excerpt": "class ParserManager:"
+          "start_line": 53,
+          "end_line": 59,
+          "excerpt": "    DEFAULT_PIPELINE: List[str] = [\n        \"inspector\",\n        \"geometry\",\n        \"physics\",\n        \"usd\",\n        \"internal\",\n    ]"
         }
       ],
       "documentation": [
         {
           "docname": "features/generative_sim/asset_engine",
-          "label": "SimReady pipeline documentation"
+          "label": "Asset Engine guide"
         }
       ]
     },
@@ -3314,12 +3323,12 @@
         "scene-services"
       ],
       "summary": "Composes explicit configurations, proposes layouts, and operates on caller-owned physical state.",
-      "details": "Scene services are shared by procedural recipes and GenSim adapters. They compose existing entity configurations, solve fixed-orientation XY layouts, query or change supported B=1 physical state, and collect measured validation. Compute owns reusable tensor geometry kernels; scene services retain CPU support, polygon-placement, packing and SLSQP strategies. Spawn and SimulationManager retain native resource and topology ownership; callers retain stepping, task lifecycle and persistence.",
+      "details": "Scene services are shared by standalone recipes, GenSim adapters, Gym reset events, Task Program and Expansion Engine hosts. They compose existing entity configurations, solve fixed-orientation XY layouts, query or change selected-row physical state, and collect measured validation. Compute owns reusable tensor geometry kernels; scene services retain CPU support, polygon-placement, packing and SLSQP strategies. Spawn and SimulationManager retain native resource and topology ownership; callers retain stepping, task lifecycle and persistence.",
       "boundaries": [
         "Arena-local Z-up geometry in metres; AABB layout is not exact mesh collision or task-success evidence.",
-        "Runtime state operations currently require B=1; snapshots are owner-bound physical state, not complete backend checkpoints.",
+        "Basic state capture, restoration and rigid pose changes support explicit ordered environment selections with fixed topology; snapshots remain owner-bound physical state, not complete backend checkpoints.",
         "GenSim retains model calls, assets, editing semantics, temporary simulation lifetime and export formats.",
-        "Tensor geometry supports independent leading batches and CPU/CUDA devices; current physical state services remain B=1 and CPU strategies do not become GPU solvers."
+        "Tensor geometry and expansion sampling have separate CPU/CUDA batch contracts; CPU strategies do not become GPU solvers. Settling requires full-world selection, while the Task Program scene expansion host remains B=1."
       ],
       "evidence": [
         {
@@ -3328,9 +3337,42 @@
           "start_line": 17,
           "end_line": 22,
           "excerpt": "\"\"\"Shared scene construction, layout and runtime services.\n\nSubmodules are loaded on first access. Scene services own no simulator, task\nlifecycle, semantic registry, or model-generation clients. Expansion contracts\nare available separately in :mod:`embodichain.lab.sim.scene.expansion`.\n\"\"\""
+        },
+        {
+          "path": "embodichain/lab/sim/scene/query.py",
+          "symbol": "SceneView.__init__",
+          "start_line": 40,
+          "end_line": 44,
+          "excerpt": "        self.sim = sim\n        self.env_ids = tuple(env_ids)\n        self._num_envs = getattr(sim, \"num_envs\", 1)\n        self._validate_selection()\n        self.topology = self.describe_entities()"
+        },
+        {
+          "path": "embodichain/lab/sim/scene/operations.py",
+          "symbol": "apply_changes_batch",
+          "start_line": 123,
+          "end_line": 130,
+          "excerpt": "def apply_changes_batch(\n    view: SceneView, changes: Mapping[int, SceneChangeSet]\n) -> SceneChangeResult:\n    \"\"\"Apply distinct per-arena changes after preflighting the entire selection.\n\n    Args:\n        view: Ordered set of physical rows to prepare.\n        changes: Exactly one change set for every selected environment index."
+        },
+        {
+          "path": "embodichain/lab/sim/scene/validation.py",
+          "symbol": "settle_scene",
+          "start_line": 250,
+          "end_line": 253,
+          "excerpt": "    if set(view.env_ids) != set(range(view._num_envs)):\n        raise ValueError(\n            \"Settling requires a full-world selection because physics advances every row\"\n        )"
         }
       ],
       "documentation": [
+        {
+          "docname": "overview/sim/scene/index",
+          "label": "Scene services architecture and capabilities"
+        },
+        {
+          "docname": "overview/sim/scene/workflows",
+          "label": "Scene construction and preparation workflows"
+        },
+        {
+          "docname": "overview/sim/scene/integrations",
+          "label": "Production scene service integrations"
+        },
         {
           "docname": "api_reference/embodichain/embodichain.lab.sim.scene",
           "label": "Scene composition, layout, state and validation"
@@ -3529,9 +3571,11 @@
       "topic_ids": [
         "task-engine"
       ],
-      "summary": "Interprets task intentions and validates candidates, TaskSpec projections and semantic graph coverage.",
-      "details": "Task Engine converts explicit instruction intent into candidate declarations and independent TaskSpec requirements. Canonical graph and role/lineage coverage describe intended Semantic Calls; execution, physical evidence and acceptance remain with their owning systems.",
+      "summary": "Interprets instructions and image evidence into candidates, TaskSpec requirements and canonical Semantic Call graphs.",
+      "details": "Task Engine's image CLI interprets the complete instruction, grounds logical image references, and plans calls from the data-only Task Program catalog. It publishes source provenance, candidate and TaskSpec declarations, recomputable semantic/visual coverage, pending runtime bindings, raw model attempts and an offline viewer. Pure Python contracts also validate authored declarations and prepare explicit program/bundle snapshots. Scene/robot integration, motion planning, execution and measured physical acceptance remain with their owning systems.",
       "boundaries": [
+        "Image planning ends at an unbound semantic graph: execution_ready is false and runtime_evidence_status is not_run, even when visual evidence is complete.",
+        "Image bounds and logical object identities are not calibrated physical bindings. Missing or ambiguous evidence remains explicit until a runtime integration resolves it.",
         "This semantic front end does not implement Atomic Skills, motion planning or physics observation. Declaration coverage is not a physical-success certificate."
       ],
       "evidence": [
@@ -3548,9 +3592,27 @@
           "start_line": 186,
           "end_line": 186,
           "excerpt": "    template = TaskSpec("
+        },
+        {
+          "path": "embodichain/gen_sim/task_engine/cli.py",
+          "symbol": "main",
+          "start_line": 104,
+          "end_line": 108,
+          "excerpt": "            \"pending_bindings\": len(result[\"binding_requirements\"]),\n            \"execution_ready\": False,\n            \"runtime_evidence_status\": \"not_run\",\n            \"image_sha256\": result[\"image_grounding\"][\"image_sha256\"],\n            \"integration_status\": \"unbound\","
+        },
+        {
+          "path": "embodichain/gen_sim/task_engine/semantic_plan_validation.py",
+          "symbol": "validate_semantic_plan",
+          "start_line": 549,
+          "end_line": 556,
+          "excerpt": "        \"status\": \"covered\",\n        \"semantic_status\": \"valid\",\n        \"visual_status\": (\"complete\" if observed == total else \"pending\"),\n        \"pending_bindings\": len(bindings),\n        \"visual_observed_entities\": observed,\n        \"visual_total_entities\": total,\n        \"execution_ready\": False,\n        \"runtime_evidence_status\": \"not_run\","
         }
       ],
       "documentation": [
+        {
+          "docname": "features/generative_sim/task_engine",
+          "label": "Task Engine workflow and artifact guide"
+        },
         {
           "docname": "api_reference/embodichain/embodichain.gen_sim.task_engine",
           "label": "Task Engine semantic contracts"
@@ -4195,9 +4257,9 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "config_to_cfg",
-          "start_line": 514,
-          "end_line": 515,
-          "excerpt": "    component_resolution = _resolve_gym_components(config, base_dir=base_dir)\n    config = component_resolution.config"
+          "start_line": 725,
+          "end_line": 728,
+          "excerpt": "    component_resolution = _resolve_gym_components(\n        config, base_dir=base_dir, component_sources=component_sources\n    )\n    config = component_resolution.config"
         }
       ]
     },
@@ -4461,7 +4523,7 @@
       "source": "cli",
       "target": "simready",
       "relation": "calls",
-      "description": "Dispatches the general SimReady asset-ingest command.",
+      "description": "Dispatches the asset-engine command for general asset ingestion.",
       "provenance": "source-reviewed",
       "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
       "evidence": [
@@ -5339,9 +5401,9 @@
         {
           "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "ingest_one_asset",
-          "start_line": 178,
-          "end_line": 178,
-          "excerpt": "    manager.parse(asset, asset_root)"
+          "start_line": 186,
+          "end_line": 186,
+          "excerpt": "    manager.parse(asset, asset_root, services=services)"
         }
       ]
     },

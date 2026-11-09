@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,6 +26,11 @@ import torch
 import yaml
 
 from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+from embodichain.lab.gym.envs.task_program._final_acceptance import (
+    _deployment_final_rules,
+)
+from embodichain.lab.gym.utils.trajectory_state import _evaluation_observation_cfgs
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import get_env_spec
 from embodichain.utils.utility import load_config
@@ -50,23 +54,22 @@ def _observed_task(embodiment="ur5"):
         "franka": ((0.04, 0.04), ("fr3_leftfinger", "fr3_rightfinger")),
     }[embodiment]
     n = 7
-    tray = torch.eye(4).repeat(n, 1, 1)
-    tray[:, :3, :3] = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
-    tray[:, :3, 3] = torch.tensor([-1.0, 0.0, 0.445])
+    tray = torch.tensor([-1.0, 0.0, 0.445, 0.0, 0.0, 0.5**0.5, 0.5**0.5]).repeat(n, 1)
+    tray_rotation = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
     local = torch.tensor([[0.0, 0.105, -0.032]]).repeat(n, 1)
     local[1, 2] += 0.3  # XY-aligned floating cube must fail.
     local[2, 0] = 0.19  # Centre inside, but a corner protrudes through the side.
-    cube = torch.eye(4).repeat(n, 1, 1)
-    cube[:, :3, 3] = torch.einsum("bij,bj->bi", tray[:, :3, :3], local) + tray[:, :3, 3]
+    cube = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]).repeat(n, 1)
+    cube[:, :3] = local @ tray_rotation.T + tray[:, :3]
     rail = torch.zeros(n, 1)
     rail[3] = 0.1
     hand = torch.tensor(open_hand).repeat(n, 1)
     hand[4, -1] += 0.01  # A single unopen joint must fail.
     finger = cube.clone()
-    finger[:, 0, 3] += 0.2
+    finger[:, 0] += 0.2
     second_finger = finger.clone()
-    second_finger[5, 0, 3] -= 0.18
-    second_finger[6, 0, 3] = torch.inf
+    second_finger[5, 0] -= 0.18
+    second_finger[6, 0] = torch.inf
     fingers = dict(zip(finger_links, (finger, second_finger), strict=True))
     obj = SimpleNamespace(get_local_pose=lambda **kw: cube)
     drawer = SimpleNamespace(
@@ -77,13 +80,20 @@ def _observed_task(embodiment="ur5"):
     env = object.__new__(EmbodiedEnv)
     env._num_envs = n
     env.cfg = cfg
-    env._final_acceptance = cfg.final_acceptance
+    env.episode_context = EpisodeContext(n)
+    env.episode_context._begin_episode(range(n))
+    registration = get_env_spec(
+        f"TaskProgramDrawerStorage-{'UR5' if embodiment == 'ur5' else 'Franka'}-v1"
+    ).task_program_registration
+    env._final_acceptance_rules = _deployment_final_rules(registration)
+    env._evaluation_recording = _evaluation_observation_cfgs(registration)
     env._active_task_program_bridge = SimpleNamespace(
         program_completed=True, completion_mask=torch.ones(n, dtype=torch.bool)
     )
     env.sim = SimpleNamespace(
         device=torch.device("cpu"),
-        get_rigid_object=lambda uid: obj,
+        asset_uids=("cube", "drawer"),
+        get_asset={"cube": obj, "drawer": drawer}.get,
         get_articulation=lambda uid: drawer,
     )
 
@@ -94,6 +104,8 @@ def _observed_task(embodiment="ur5"):
 
     env.robot = SimpleNamespace(
         get_qpos=read_hand,
+        joint_names=tuple(f"finger_{index}" for index in range(len(open_hand))),
+        get_joint_ids=lambda **kw: tuple(range(len(open_hand))),
         get_link_pose=lambda name, **kw: fingers[name],
     )
     return env
@@ -155,56 +167,49 @@ def test_configured_acceptance_is_part_of_registration_and_construction(tmp_path
 
     source = _CONFIG / "task.ur5.yaml"
     raw = load_config(source)
-    cfg = config_to_cfg(raw, source_path=source)
+    config_to_cfg(raw, source_path=source)
     assert resolve_collection_plan(Namespace(), raw).max_attempts == 1
     spec = get_env_spec(raw["id"])
     assert spec.cls is EmbodiedEnv
-    assert (
-        cfg.final_acceptance == config_to_cfg(raw, source_path=source).final_acceptance
+    config_to_cfg(raw, source_path=source)
+    assert get_env_spec(raw["id"]) is spec
+    assert spec.task_program_registration.evaluation_final_refs == (
+        "cube_contained",
+        "rail_closed",
+        "hand_open",
+        "fingers_clear",
     )
 
-    weaker = tmp_path / "acceptance.yaml"
-    declaration = load_config(_CONFIG / "task_program/acceptance.yaml")
-    declaration["articulation_joint"]["max"] = 0.02
+    weaker = tmp_path / "evaluation.yaml"
+    declaration = load_config(_CONFIG / "task_program/evaluation.yaml")
+    declaration["graph"]["rules"]["rail_closed"]["params"]["upper"] = 0.02
     weaker.write_text(yaml.safe_dump(declaration), encoding="utf-8")
-    with pytest.raises(ValueError, match="different final acceptance"):
+    with pytest.raises(ValueError, match="different environment or integration"):
         config_to_cfg(
-            {**raw, "acceptance": {"component": str(weaker)}}, source_path=source
+            {**raw, "evaluation": {"component": str(weaker)}}, source_path=source
         )
-    with pytest.raises(ValueError, match="different final acceptance"):
-        config_to_cfg(
-            {key: value for key, value in raw.items() if key != "acceptance"},
-            source_path=source,
-        )
-
-    cfg.final_acceptance = replace(cfg.final_acceptance, joint_max=0.02)
-    with pytest.raises(ValueError, match="registered final acceptance"):
-        spec.make(cfg=cfg)
-    cfg.final_acceptance = None
-    with pytest.raises(ValueError, match="registered final acceptance"):
-        spec.make(cfg=cfg)
 
 
 @pytest.mark.parametrize(
     ("field", "value", "error", "message"),
     [
-        ("tolerence", 0.001, ValueError, "unsupported fields"),
-        ("tolerance", True, TypeError, "finite number"),
+        ("tolerence", 0.001, ValueError, "declared contract"),
+        ("tolerance", True, ValueError, "must be finite"),
         ("tolerance", float("nan"), ValueError, "must be finite"),
-        ("half_extents", [0.025, 0.025], ValueError, "exactly 3"),
-        ("lower", [0.3, 0.31, 0.05], ValueError, "must not exceed upper"),
+        ("corners", [[0.025, 0.025]], ValueError, "XYZ triples"),
+        ("lower", [0.3, 0.31, 0.05], ValueError, "ordered XYZ triples"),
     ],
 )
-def test_acceptance_component_rejects_invalid_predicates(
+def test_evaluation_component_rejects_invalid_predicates(
     tmp_path, field, value, error, message
 ):
     source = _CONFIG / "task.franka.yaml"
     raw = load_config(source)
-    component = tmp_path / "acceptance.yaml"
-    payload = load_config(_CONFIG / "task_program/acceptance.yaml")
-    payload["containment"][field] = value
+    component = tmp_path / "evaluation.yaml"
+    payload = load_config(_CONFIG / "task_program/evaluation.yaml")
+    payload["graph"]["rules"]["cube_contained"]["params"][field] = value
     component.write_text(yaml.safe_dump(payload), encoding="utf-8")
-    raw["acceptance"]["component"] = str(component)
+    raw["evaluation"]["component"] = str(component)
     with pytest.raises(error, match=message):
         config_to_cfg(raw, source_path=source)
 

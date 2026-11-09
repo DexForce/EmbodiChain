@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from embodichain.lab.task_program.language.semantic_contracts import (
+    validate_semantic_call_payload,
+)
 from .simulation.targets import _pose
 
 from dataclasses import dataclass
@@ -226,6 +229,14 @@ class _AxisAlignLowerer(RegisteredSemanticLowerer):
                 "Configured semantic axis alignment requires an exact "
                 "AxisAlignOptions template."
             )
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if set(arguments) != {"object"}:
             raise ValueError(f"{self.call_id} arguments must contain only 'object'.")
@@ -461,6 +472,14 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
                 + (" and position; " if self._joint_target is not None else "; ")
                 + "motion options belong to the selected policy preset."
             )
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         target_pose: torch.Tensor | SceneEntityPose
         if self._target_pose_mode == "live":
             target_pose = SceneEntityPose(self._link_entity_id)
@@ -718,6 +737,14 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
 
     def _validate_call(self, call: RegisteredSemanticCall) -> None:
         """Require the configured immutable target selector."""
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if arguments != {"target": self._target_id}:
             raise ValueError(
@@ -948,6 +975,14 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
 
     def _resolve_route(self, call: RegisteredSemanticCall) -> _RelativePlaceRoute:
         """Validate one call and return its exact configured route."""
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         allowed = {"object", "reference", "relation", "stage_id"}
         if set(arguments) - allowed or set(arguments) < {
@@ -1183,6 +1218,14 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
             raise ValueError(
                 "Configured coordinated transport must enable coordinated release."
             )
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if set(arguments) != {"object", "target"}:
             raise ValueError(
@@ -1455,6 +1498,14 @@ class _PourLowerer(RegisteredSemanticLowerer):
 
     def _validate_call(self, call: RegisteredSemanticCall) -> None:
         """Require the configured immutable held-object selector."""
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if arguments != {"object": self._object_id}:
             raise ValueError(
@@ -1560,6 +1611,14 @@ class _PushObjectLowerer(RegisteredSemanticLowerer):
                 "Configured planar pushing requires an exact PushObjectOptions "
                 "template."
             )
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if set(arguments) != {"object", "target"}:
             raise ValueError(

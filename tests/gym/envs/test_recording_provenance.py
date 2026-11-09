@@ -34,13 +34,14 @@ from embodichain.lab.gym.envs.episode_context import EpisodeContext
 import copy
 from dataclasses import asdict
 from pathlib import Path
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from uuid import UUID
 
 import pytest
 import torch
 
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.envs.demo import DemoEpisodeResult
 from embodichain.lab.gym.envs.managers.datasets import LeRobotRecorder
 from embodichain.data_pipeline.recording import stable_config_hash
 from embodichain.lab.sim.motion.expansion.contracts import (
@@ -80,6 +81,10 @@ def make_env() -> SimpleNamespace:
     env.episode_context = EpisodeContext(1)
     env.episode_context._begin_episode([0])
     env.episode_context._finish_initialization([0])
+    env._seal_episode_outcome = MethodType(EmbodiedEnv._seal_episode_outcome, env)
+    env._task_program_completion_mask = MethodType(
+        EmbodiedEnv._task_program_completion_mask, env
+    )
     return env
 
 
@@ -98,18 +103,20 @@ def test_episode_override_program_hash_uses_executed_program() -> None:
     env.cfg.task_program = {"program_id": "configured_default"}
     actual = {"program_id": "episode_override", "segments": ["pick", "place"]}
     env._active_task_program_bridge = SimpleNamespace(
-        _program=actual, expansion_records=[]
+        _program=actual,
+        expansion_records=[],
+        program_completed=True,
+        completion_mask=torch.tensor([True]),
     )
-    result = SimpleNamespace(
-        instruction=None,
-        instruction_source="unknown",
-        lengths=[3],
-        completed_by_env=[True],
-        terminal_reasons=["success"],
+    result = DemoEpisodeResult(
         episode_index=1,
-        success=[True],
-        terminated=[False],
-        truncated=[False],
+        length=3,
+        completed=True,
+        success=(True,),
+        terminated=(False,),
+        truncated=(False,),
+        terminal_reason="success",
+        lengths=(3,),
     )
 
     EmbodiedEnv._end_demo_episode_recording(env, result)
@@ -117,6 +124,12 @@ def test_episode_override_program_hash_uses_executed_program() -> None:
     recorded_hash = env._demo_episode_metadata[0]["program_hash"]
     assert recorded_hash == stable_config_hash(actual)
     assert recorded_hash != stable_config_hash(env.cfg.task_program)
+    assert (
+        env._demo_episode_metadata[0]["episode_outcome"]["execution"][
+            "program_accepted"
+        ]
+        is True
+    )
 
 
 def test_external_payloads_without_identity_do_not_share_worker_episode_index() -> None:
@@ -164,16 +177,15 @@ def test_executed_expansion_records_preserve_selected_candidate_lineage() -> Non
     env._active_task_program_bridge = SimpleNamespace(
         _program=None, expansion_records=[record]
     )
-    result = SimpleNamespace(
-        instruction=None,
-        instruction_source="unknown",
-        lengths=[3],
-        completed_by_env=[True],
-        terminal_reasons=["success"],
+    result = DemoEpisodeResult(
         episode_index=1,
-        success=[True],
-        terminated=[False],
-        truncated=[False],
+        length=3,
+        completed=True,
+        success=(True,),
+        terminated=(False,),
+        truncated=(False,),
+        terminal_reason="success",
+        lengths=(3,),
     )
 
     EmbodiedEnv._end_demo_episode_recording(env, result)

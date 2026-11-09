@@ -2417,34 +2417,6 @@ def test_invalid_config_does_not_leave_an_integration_registration(
     assert _TEST_ENV_ID not in gym_registry
 
 
-def test_integration_registration_preserves_explicit_environment_discovered_on_load(
-    registered_test_ids: list[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from embodichain.lab.gym.utils import registration
-
-    registered_test_ids.append(_TEST_ENV_ID)
-    integration = _decode_configured_task_program_integration(
-        _integration_payload("repeated_pick_place")
-    )
-
-    class ExplicitEnv(EmbodiedEnv):
-        pass
-
-    def discover():
-        registration.register_env_function(
-            ExplicitEnv,
-            _TEST_ENV_ID,
-            max_episode_steps=321,
-            task_program_adapter_factory=integration.adapter_factory,
-        )
-
-    monkeypatch.setattr(registration, "discover_task_packages", discover)
-    spec = _register_configured_task_program_integration(
-        _TEST_ENV_ID, integration, max_episode_steps=321
-    )
-    assert spec.cls is ExplicitEnv
-
-
 def test_integration_registration_rejects_reusing_an_id_for_changed_config(
     registered_test_ids: list[str],
 ) -> None:
@@ -3553,3 +3525,832 @@ def test_final_velocity_rejection_representation_is_explicit_and_default_identit
         _decode_motion_policy(
             {"sample_count": 50, "final_velocity_rejection": "unknown"}, path="motion"
         )
+
+
+def test_physical_component_snapshot_matches_files_without_component_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.gym.utils import _component_composition as composition
+    from embodichain.utils.config_paths import resolve_config_path
+
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    expected = resolve_gym_components(config, base_dir=path.parent)
+    binding = _deployment_from_path(path).scene_binding
+    selected = deepcopy(config)
+    sources = {}
+    for owner in ("environment", "embodiment", "scene"):
+        if owner not in selected:
+            continue
+        declaration = selected[owner]
+        reference = declaration.get("component", declaration.get("default"))
+        if isinstance(reference, dict):
+            reference = reference["component"]
+        component = resolve_config_path(reference, base_dir=path.parent).resolve()
+        sources[str(component)] = load_config(component)
+        selected[owner] = {"component": str(component)}
+        if "overrides" in declaration:
+            selected[owner]["overrides"] = deepcopy(declaration["overrides"])
+    original = deepcopy(sources)
+    physical_only = deepcopy(selected)
+    physical_only.pop("task_program")
+    expected_cfg = config_to_cfg(physical_only, source_path=path)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Snapshot parsing reopened a component file")
+
+    monkeypatch.setattr(composition, "load_config", forbidden)
+    monkeypatch.setattr(composition, "resolve_config_path", forbidden)
+    actual = resolve_gym_components(
+        selected, base_dir=path.parent, component_sources=sources
+    )
+    assert actual == expected
+    actual_cfg = config_to_cfg(
+        physical_only, source_path=path, component_sources=sources
+    )
+    import numpy as np
+
+    np.testing.assert_equal(actual_cfg.to_dict(), expected_cfg.to_dict())
+    actual.validate_scene_bindings(binding)
+    with pytest.raises(ValueError, match="not declared"):
+        actual.validate_scene_bindings(
+            {"rigid_objects": [{"entity_id": "missing_native_root"}]}
+        )
+    assert sources == original
+    sources[next(iter(sources))].clear()
+    assert actual == expected
+    missing = dict(original)
+    missing.pop(next(iter(missing)))
+    with pytest.raises(ValueError, match="absent from"):
+        resolve_gym_components(
+            selected, base_dir=path.parent, component_sources=missing
+        )
+    duplicate = deepcopy(selected)
+    duplicate["robot"] = {"uid": "duplicate_owner"}
+    with pytest.raises(ValueError, match="owns robot"):
+        resolve_gym_components(
+            duplicate, base_dir=path.parent, component_sources=original
+        )
+
+
+@pytest.mark.parametrize("inline", [False, True])
+def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
+    tmp_path,
+    inline,
+):
+    import numpy as np
+    from embodichain.data_pipeline.real2sim import (
+        RobotDemonstration,
+        DemoSkillSpec,
+        DemoSkillPhase,
+        DemoSkillConstraint,
+        JointSpec,
+        build_demo_skill,
+        save_demo_skill,
+    )
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_runtime_services,
+    )
+    from embodichain.lab.sim.atomic_actions import ExecuteDemoSkill, ActionOptions
+
+    artifact = build_demo_skill(
+        RobotDemonstration(
+            "teleop",
+            "1",
+            "specialized",
+            ("a",),
+            ("rad",),
+            np.zeros((6, 1)),
+            np.arange(6) * 0.02,
+            "s",
+            "a" * 64,
+            "b" * 64,
+        ),
+        DemoSkillSpec(
+            asset_id="task.contour",
+            instruction="Trace contour",
+            phases=(DemoSkillPhase("continuous", 0, 6),),
+            constraints=(DemoSkillConstraint("done", "metric", "terminal"),),
+        ),
+        joints=(JointSpec("a", "revolute"),),
+        control_dt=0.02,
+    )
+    manifest = save_demo_skill(artifact, tmp_path / "skill")
+    declaration = {
+        "kind": "demo_skill",
+        "call_id": "task.contour",
+        "asset_manifest": str(manifest),
+        "asset_sha256": artifact.content_sha256,
+    }
+    source = {
+        "provider_id": "demo_skill",
+        "revision": "1",
+        "call_index": 1,
+        "program_fingerprint": "c" * 64,
+        "call_id": "task.contour",
+        "asset_manifest": str(manifest),
+        "asset_sha256": artifact.content_sha256,
+    }
+    # File integrations resolve assets from the component directory; inline
+    # integrations resolve them from their owning deployment directory.
+    config_path = _config_path("repeated_pick_place")
+    program, task, policy = _resolve_task_program_components(
+        _gym_config("repeated_pick_place")["task_program"], base_dir=config_path.parent
+    )
+    from embodichain.utils.utility import save_config
+
+    save_config(tmp_path / "policy.yaml", policy)
+    relative_manifest = (
+        "skill/demo_skill.json" if inline else "../skill/demo_skill.json"
+    )
+    task["runtime_services"] = {
+        "registered_semantic_lowerers": [
+            {**declaration, "asset_manifest": relative_manifest}
+        ],
+        "nominal_motion_sources": [{**source, "asset_manifest": relative_manifest}],
+    }
+    original_task = deepcopy(task)
+    if inline:
+        selected = {"inline": task}
+    else:
+        components = tmp_path / "components"
+        components.mkdir()
+        save_config(components / "integration.yaml", task)
+        selected = "components/integration.yaml"
+    _, resolved_task, _ = _resolve_task_program_components(
+        {
+            "program": str(program),
+            "integration": selected,
+            "execution_policy": "policy.yaml",
+        },
+        base_dir=tmp_path,
+    )
+    assert task == original_task
+    resolved = resolved_task["runtime_services"]
+    assert resolved["registered_semantic_lowerers"][0]["asset_manifest"] == str(
+        manifest
+    )
+    assert resolved["nominal_motion_sources"][0]["asset_manifest"] == str(manifest)
+    services = _decode_runtime_services(resolved)
+    factory = services.registered_semantic_lowerers[0]
+    assert factory.call_id == "task.contour"
+    assert factory.target_descriptor == ExecuteDemoSkill.descriptor()
+    assert (
+        type(_decode_action_options({"kind": "execute_demo_skill"}, path="options"))
+        is ActionOptions
+    )
+    payload = _integration_payload("repeated_pick_place")
+    payload.setdefault("runtime_services", {})["registered_semantic_lowerers"] = [
+        declaration
+    ]
+    integration = _decode_configured_task_program_integration(payload)
+    assert "task.contour" in integration.registration.catalog.call_catalog.descriptors
+    assert services.nominal_motion_sources[0].call_index == 1
+    with pytest.raises(ValueError, match="unsupported fields|unknown|requires kind"):
+        _decode_runtime_services(
+            {
+                "registered_semantic_lowerers": [
+                    {**declaration, "class_type": "arbitrary"}
+                ]
+            }
+        )
+    with pytest.raises(ValueError, match="digest|changed"):
+        _decode_runtime_services(
+            {"nominal_motion_sources": [{**source, "asset_sha256": "e" * 64}]}
+        )
+
+
+@pytest.fixture
+def evaluation_deployment(tmp_path: Path, registered_test_ids: list[str]):
+    import yaml
+
+    source = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    env_id = "ConfiguredEvaluationConditionTest-v1"
+    config["id"] = env_id
+    registered_test_ids.append(env_id)
+    for owner in ("environment", "embodiment"):
+        selector = config[owner]
+        selector["component"] = str((source.parent / selector["component"]).resolve())
+    for key in ("integration", "execution_policy"):
+        config["task_program"][key] = str(
+            (source.parent / config["task_program"][key]).resolve()
+        )
+    program = load_config(source.parent / config["task_program"]["program"])
+    program["program"]["validators"].append({"kind": "condition", "ref": "delivered"})
+    program_path = tmp_path / "program.yaml"
+    program_path.write_text(yaml.safe_dump(program))
+    config["task_program"]["program"] = program_path.name
+    evaluation = {
+        "graph": {
+            "roots": ["delivered"],
+            "rules": {
+                "near": {
+                    "kind": "near_target",
+                    "bindings": {
+                        "position": "rigid_objects/can/pose",
+                        "target": "rigid_objects/support_surface/pose",
+                    },
+                    "params": {"tolerance": 0.12},
+                },
+                "delivered": {"kind": "hold_for", "ref": "near", "steps": 2, "end": 3},
+            },
+        }
+    }
+    evaluation_path = tmp_path / "evaluation.yaml"
+    evaluation_path.write_text(yaml.safe_dump(evaluation))
+    config["evaluation"] = {"component": evaluation_path.name}
+    deployment_path = tmp_path / "task.yaml"
+    deployment_path.write_text(yaml.safe_dump(config))
+    return deployment_path, evaluation_path, program_path
+
+
+def test_evaluation_component_binds_named_and_legacy_validators(evaluation_deployment):
+    import runpy
+
+    import yaml
+
+    from embodichain.lab.gym.utils.trajectory_state import _evaluation_observation_cfgs
+    from embodichain.lab.task_program.compiler import (
+        CompiledConditionValidator,
+        CompiledObjectNearTargetValidator,
+    )
+
+    path, rule_path, program_path = evaluation_deployment
+    config = load_config(path)
+    inspect = runpy.run_path(
+        str(
+            _REPOSITORY_ROOT
+            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+        )
+    )["inspect_deployment"]
+    assert inspect(path)["environment_id"] == config["id"]
+    cfg = config_to_cfg(config, source_path=path)
+    registered = REGISTERED_ENVS[config["id"]]
+    registration = registered.task_program_registration
+    compiled = registration.catalog.preflight(cfg.task_program)
+    legacy, named = next(compiled.iter_segments()).validators
+    assert type(legacy) is CompiledObjectNearTargetValidator
+    assert type(named) is CompiledConditionValidator
+    assert named.cfg.ref == "delivered"
+    assert named.spec.required_fields == (
+        "rigid_objects/handover_object/pose",
+        "rigid_objects/support_surface/pose",
+    )
+    assert named.spec.stateful
+    assert tuple(
+        cfg.name for cfg in _evaluation_observation_cfgs(registration).values()
+    ) == (named.spec.required_fields)
+    payload = registration.fingerprint_payload()["evaluation"]
+    assert payload["conditions"]["delivered"]["evaluation_graph"] == named.spec.identity
+
+    sources = {
+        config[owner]["component"]: load_config(
+            path.parent / config[owner]["component"]
+        )
+        for owner in ("environment", "embodiment", "evaluation")
+    }
+    replacement = load_config(program_path)
+    replacement["program"]["validators"][-1]["ref"] = "unregistered"
+    override = path.parent / "override.yaml"
+    override.write_text(yaml.safe_dump(replacement))
+    with pytest.raises(ValueError, match="Unknown deployment evaluation condition"):
+        config_to_cfg(config, source_path=path, task_program_path_override=override)
+
+    # A sealed snapshot can load independently of the selected file's live bytes.
+    rule_path.unlink()
+    config_to_cfg(config, source_path=path, component_sources=sources)
+    assert REGISTERED_ENVS[config["id"]] is registered
+    rule = sources["evaluation.yaml"]["graph"]["rules"]["near"]
+    rule["params"]["tolerance"] = 0.2
+    rule_path.write_text(yaml.safe_dump(sources["evaluation.yaml"]))
+    with pytest.raises(ValueError, match="already registered with a different"):
+        config_to_cfg(config, source_path=path)
+    assert REGISTERED_ENVS[config["id"]] is registered
+
+
+def test_registered_predicate_is_shared_by_configured_consumers(evaluation_deployment):
+    import yaml
+
+    from embodichain.lab.evaluation import (
+        EvaluationStatus,
+        PredicateDefinition,
+        PredicateMeasurement,
+        RuleSession,
+        builtin_predicates,
+        evaluate_recorded_rules,
+    )
+    from embodichain.lab.gym.envs.managers import ConditionCfg, RLTaskCfg
+    from embodichain.lab.gym.envs.managers.conditions import evaluation_condition
+    from embodichain.lab.gym.envs.managers.termination_manager import TerminationManager
+    from embodichain.lab.gym.envs.objectives import (
+        MeasuredRigidObjectState,
+        OrderedPlacementObjective,
+    )
+
+    def clearance(values, params):
+        height = values["position"][:, 2]
+        return PredicateMeasurement(
+            height >= params["minimum"], torch.isfinite(height), {"height": height}
+        )
+
+    registry = builtin_predicates()
+    registry.register(
+        "clearance_test",
+        PredicateDefinition(1, ("position",), dict, clearance, ("position",)),
+    )
+    path, rule_path, _ = evaluation_deployment
+    config = load_config(path)
+    component = load_config(rule_path)
+    objective_path = path.parent / "objective.yaml"
+    objective_path.write_text(
+        yaml.safe_dump(
+            {
+                "type": "ordered_stable_regions",
+                "object_uid": "handover_object",
+                "regions": [
+                    {"name": "region", "lower": [-1, -1, -1], "upper": [1, 1, 1]}
+                ],
+                "hold_seconds": 0.1,
+                "max_linear_speed": 0.1,
+                "max_angular_speed": 0.1,
+                "condition": "delivered",
+            }
+        )
+    )
+    config["objective"] = {"component": objective_path.name}
+    rule = {
+        "kind": "clearance_test",
+        "bindings": {"position": "rigid_objects/can/pose"},
+        "params": {"minimum": 0.1},
+    }
+    component["graph"]["rules"]["near"] = rule
+    component["graph"]["roots"].append("near")
+    component["final_acceptance"] = ["near"]
+    rule_path.write_text(yaml.safe_dump(component))
+    cfg = config_to_cfg(config, source_path=path, evaluation_registry=registry)
+    registration = REGISTERED_ENVS[config["id"]].task_program_registration
+    segment = next(registration.catalog.preflight(cfg.task_program).iter_segments())
+    hold = segment.validators[-1].spec
+    final = registration.evaluation_conditions[registration.evaluation_final_refs[0]]
+    (field,) = final.required_fields
+    position = torch.tensor([[0, 0, 0.2], [0, 0, 0.0]])
+    values = {field: position}
+    session = RuleSession(hold, env_ids=(0, 1), episode_ids=(1, 1), scope="pick")
+    for slot in (0, 1):
+        session.advance(
+            slot, values, revisions=torch.full((2,), slot), episode_ids=(1, 1)
+        )
+    assert final.evaluate(values, batch_size=2, device="cpu")[
+        "near"
+    ].status.tolist() == [
+        EvaluationStatus.SATISFIED,
+        EvaluationStatus.FAILED,
+    ]
+    pose = torch.cat((position, torch.tensor([[0, 0, 0, 1]]).expand(2, -1)), dim=1)
+    recorded = {
+        "schema_version": 1,
+        "env_ids": (0, 1),
+        "episode_ids": (1, 1),
+        "revisions": torch.tensor([[0, 1], [0, 1]]),
+        "lengths": torch.tensor([1, 1]),
+        "fields": {
+            field: {
+                "descriptor": {
+                    "entity_uid": "handover_object",
+                    "quantity": "pose",
+                    "coordinate_frame": "arena",
+                    "representation": "xyz_xyzw",
+                    "units": ("m", "unitless"),
+                    "shape": (7,),
+                    "dtype": "torch.float32",
+                },
+                "values": pose[:, None, :].expand(-1, 2, -1),
+                "valid": torch.ones(2, 2, dtype=torch.bool),
+            }
+        },
+    }
+    offline = evaluate_recorded_rules(
+        hold,
+        {"raw_observations": recorded},
+        env_ids=(0, 1),
+        episode_ids=(1, 1),
+        scope="pick",
+    )
+    torch.testing.assert_close(
+        offline.rules["delivered"].status,
+        session.snapshot(closed=True).rules["delivered"].status,
+    )
+    assert offline.rules["delivered"].status.tolist() == [
+        EvaluationStatus.SATISFIED,
+        EvaluationStatus.UNAVAILABLE,
+    ]
+    assert cfg.objective.condition == "delivered"
+    objective = OrderedPlacementObjective(
+        cfg.objective,
+        2,
+        "cpu",
+        condition=registration.evaluation_conditions[cfg.objective.condition],
+    )
+    state = MeasuredRigidObjectState(
+        position, torch.zeros_like(position), torch.zeros_like(position)
+    )
+    objective.update(state, 0.1)
+    assert objective.snapshot()["success"].tolist() == [False, False]
+    objective.update(state, 0.1)
+    assert objective.snapshot()["success"].tolist() == [True, False]
+    objective.reset([0])
+    objective.update(state, 0.1)
+    assert objective.snapshot()["success"].tolist() == [False, False]
+    native_pose = torch.eye(4).expand(2, -1, -1).clone()
+    native_pose[:, :3, 3] = position
+    host = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(
+            get_rigid_object=lambda uid: SimpleNamespace(
+                get_local_pose=lambda **kwargs: native_pose
+            )
+        ),
+    )
+    manager = TerminationManager(
+        RLTaskCfg(
+            success={
+                "delivered": ConditionCfg(
+                    func=evaluation_condition,
+                    params={
+                        "root": "delivered",
+                        "rules": {
+                            **component["graph"]["rules"],
+                            "near": {**rule, "bindings": {"position": field}},
+                        },
+                        "sources": {field: {"rigid_object": "can"}},
+                        "registry": registry,
+                    },
+                )
+            }
+        ),
+        host,
+    )
+    manager.compute()
+    pending = manager.snapshot()
+    assert manager.task_state()[0].tolist() == [False, False]
+    assert manager.terminated.tolist() == [False, False]
+    assert pending["conditions"]["success.delivered"]["rules"]["delivered"][
+        "status"
+    ].tolist() == [EvaluationStatus.UNKNOWN, EvaluationStatus.UNKNOWN]
+    manager.snapshot()
+    manager.compute()
+    assert manager.task_state()[0].tolist() == [True, False]
+    assert manager.terminated.tolist() == [True, False]
+    outcome = manager.snapshot()["conditions"]["success.delivered"]
+    assert outcome["evaluation_identity"]
+    torch.testing.assert_close(
+        outcome["rules"]["delivered"]["witness_revisions"],
+        session.snapshot().rules["delivered"].witness_revisions,
+    )
+    manager.reset([0])
+    manager.compute()
+    assert manager.task_state()[0].tolist() == [False, False]
+    assert outcome["rules"]["delivered"]["witness_revisions"][0].tolist() == [0, 1]
+
+
+def test_typed_evaluation_reads_link_frames_and_native_control_parts():
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.task_program._final_acceptance import (
+        _measure_final_conditions,
+    )
+    from embodichain.lab.gym.utils.trajectory_state import (
+        _evaluation_observation_cfgs,
+        _validate_evaluation_observation_bindings,
+    )
+    from embodichain.lab.task_program.integrations.configured import _decode_evaluation
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        ControlPartCommandPreset,
+        ControlPartEndpointBinding,
+        ControlPartResourceBinding,
+        SimulationArticulationBinding,
+        SimulationArticulationLinkBinding,
+        SimulationRigidObjectBinding,
+        SimulationRobotSkillProfileBinding,
+        SimulationSceneBinding,
+    )
+
+    scene = SimulationSceneBinding(
+        "scene",
+        rigid_objects=(SimulationRigidObjectBinding("payload", "native_cube"),),
+        articulations=(SimulationArticulationBinding("drawer", "cabinet"),),
+        links=(SimulationArticulationLinkBinding("tray", "drawer", "tray_link"),),
+    )
+    profile = SimulationRobotSkillProfileBinding(
+        "robot",
+        (
+            ControlPartResourceBinding(
+                "hand",
+                (
+                    ControlPartEndpointBinding(
+                        "gripper", "eef", frozenset(), "hand_commands"
+                    ),
+                    ControlPartEndpointBinding("other", "other_part", frozenset()),
+                ),
+            ),
+        ),
+        command_presets=(
+            ControlPartCommandPreset("hand_commands", "eef", {"open": (0.2, 0.5)}),
+        ),
+    )
+    component = {
+        "graph": {
+            "roots": ["accept"],
+            "rules": {
+                "inside": {
+                    "kind": "corner_containment",
+                    "bindings": {
+                        "pose": "rigid_objects/payload/frame",
+                        "frame": "links/tray/frame",
+                    },
+                    "params": {
+                        "corners": [[0, 0, 0], [0.05, 0.05, 0.05]],
+                        "lower": [-0.1, -0.1, -0.1],
+                        "upper": [0.1, 0.1, 0.1],
+                    },
+                },
+                "near": {
+                    "kind": "link_object_distance",
+                    "bindings": {
+                        "position": "links/tray/position",
+                        "target": "rigid_objects/payload/pose",
+                    },
+                    "params": {"tolerance": 0.1},
+                },
+                "matched": {
+                    "kind": "command_position_match",
+                    "bindings": {
+                        "position": "robot/hand/gripper/qpos",
+                        "command": "robot/hand/gripper/command",
+                    },
+                    "params": {"tolerance": 0.02},
+                },
+                "open": {
+                    "kind": "command_preset_match",
+                    "bindings": {"position": "robot/hand/gripper/qpos"},
+                    "params": {"preset": "open", "tolerance": 0.02},
+                },
+                "finger_close": {
+                    "kind": "link_object_distance",
+                    "bindings": {
+                        "position": "robot_links/finger/position",
+                        "target": "rigid_objects/payload/pose",
+                    },
+                    "params": {"tolerance": 0.1},
+                },
+                "finger_clear": {"kind": "not", "refs": ["finger_close"]},
+                "accept": {
+                    "kind": "all",
+                    "refs": ["inside", "near", "open", "finger_clear"],
+                },
+            },
+        },
+        "final_acceptance": ["accept"],
+    }
+    robot_links = {"finger": "finger_tip"}
+    rules, refs, _ = _decode_evaluation(
+        component, scene, robot_profile=profile, robot_links=robot_links
+    )
+    arm_calls = []
+    pose = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).expand(2, -1)
+    payload_pose = pose.clone()
+    payload_pose[1, 0] = 0.08
+    obj = SimpleNamespace(get_local_pose=lambda **kwargs: payload_pose)
+    drawer = SimpleNamespace(link_names=["tray_link"], get_link_pose=lambda name: pose)
+    finger = pose.clone()
+    finger[:, 0] = 0.25
+    robot = SimpleNamespace(
+        control_parts={"eef": ["joint_b", "joint_a"]},
+        joint_names=["joint_a", "joint_b"],
+        link_names=["finger_tip"],
+        get_link_pose=lambda name: finger,
+        get_joint_ids=lambda *, name: [1, 0],
+        get_qpos=lambda *, name, target: (
+            arm_calls.append((name, target))
+            or torch.tensor([[0.2, 0.5], [0.2, 0.7 if target else 0.4]])
+        ),
+    )
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        robot=robot,
+        episode_context=EpisodeContext(2),
+        sim=SimpleNamespace(
+            asset_uids={"native_cube"},
+            get_asset=lambda uid: obj,
+            get_articulation=lambda uid: drawer if uid == "cabinet" else None,
+        ),
+        _evaluation_recording=_evaluation_observation_cfgs(
+            SimpleNamespace(scene_binding=scene, evaluation_conditions=rules)
+        ),
+    )
+    _validate_evaluation_observation_bindings(env, env._evaluation_recording)
+    measured = _measure_final_conditions(env, tuple((ref, rules[ref]) for ref in refs))
+    assert measured.satisfied.tolist() == [True, False]
+    assert measured.conditions[0].metrics["inside.inside_count"].tolist() == [2, 1]
+    assert measured.conditions[0].metrics["near.distance"].tolist() == pytest.approx(
+        [0.0, 0.08]
+    )
+    assert arm_calls == [("eef", False)]
+    assert measured.conditions[0].metrics[
+        "open.maximum_error"
+    ].tolist() == pytest.approx([0.0, 0.1])
+    assert measured.conditions[0].metrics[
+        "finger_close.distance"
+    ].tolist() == pytest.approx([0.25, 0.17])
+    assert measured.frame.fields["robot/eef/qpos"].descriptor.joint_names == (
+        "joint_b",
+        "joint_a",
+    )
+
+    component["graph"]["rules"]["matched"]["bindings"][
+        "command"
+    ] = "robot/hand/other/command"
+    with pytest.raises(ValueError, match="one joint layout"):
+        _decode_evaluation(
+            component, scene, robot_profile=profile, robot_links=robot_links
+        )
+
+
+@pytest.mark.parametrize(
+    ("damage", "message"),
+    [
+        ("absent_library", "Unknown deployment evaluation condition"),
+        ("unknown_ref", "Unknown deployment evaluation condition"),
+        ("inline_override", "Unknown field.*tolerance"),
+        ("unbound_target", "Unresolved evaluation field"),
+        ("short_window", "Invalid bounded temporal rule"),
+        ("unknown_predicate", "Unknown predicate"),
+        ("invalid_input_type", "requires .*joint_positions"),
+    ],
+)
+def test_invalid_evaluation_deployment_fails_before_registration(
+    evaluation_deployment, damage, message
+):
+    import yaml
+
+    path, rule_path, program_path = evaluation_deployment
+    config = load_config(path)
+    evaluation = load_config(rule_path)
+    program = load_config(program_path)
+    validator = program["program"]["validators"][-1]
+    rules = evaluation["graph"]["rules"]
+    rule = rules["near"]
+    if damage == "absent_library":
+        config.pop("evaluation")
+    elif damage == "unknown_ref":
+        validator["ref"] = "unregistered"
+    elif damage == "inline_override":
+        validator["tolerance"] = 1.0
+    elif damage == "unbound_target":
+        rule["bindings"]["target"] = "rigid_objects/can_antipodal_grasp/pose"
+    elif damage == "short_window":
+        rules["delivered"]["end"] = 0
+    elif damage == "invalid_input_type":
+        rule["kind"] = "command_position_match"
+        rule["bindings"]["command"] = rule["bindings"].pop("target")
+    else:
+        rule["kind"] = "unregistered"
+    program_path.write_text(yaml.safe_dump(program))
+    rule_path.write_text(yaml.safe_dump(evaluation))
+    with pytest.raises(ValueError, match=message):
+        config_to_cfg(config, source_path=path)
+    assert config["id"] not in REGISTERED_ENVS
+    assert config["id"] not in gym_registry
+
+
+def test_legacy_task_program_identities_keep_pre_evaluation_values():
+    from embodichain.lab.task_program.integrations import task_program_fingerprint
+
+    deployment = _deployment_from_path(_config_path("hand_over"))
+    integration = deployment.integration
+    registration = integration.registration
+    assert "evaluation" not in registration.fingerprint_payload()
+    assert (
+        registration.fingerprint
+        == "cb43b8a53c1274b2f3241b56e855e2ef97c30530d26e7a8d4e4fab30643ba427"
+    )
+    assert (
+        integration.integration_fingerprint
+        == "1d7405d33ac89638bff05dd33ae5de968a46dff977d8729aa5a328ac4637203a"
+    )
+    compiled = registration.catalog.preflight(deployment.load_program())
+    assert (
+        task_program_fingerprint(compiled)
+        == "6a003a01768251ee76d19a489760437f0f3f0c7ccbee780d1a511def7466c040"
+    )
+
+
+def test_final_acceptance_is_registered_independently_of_program_override(
+    evaluation_deployment,
+):
+    import yaml
+
+    path, rule_path, program_path = evaluation_deployment
+    config = load_config(path)
+    component = load_config(rule_path)
+    component["graph"]["roots"].append("near")
+    component["final_acceptance"] = ["near"]
+    rule_path.write_text(yaml.safe_dump(component))
+    replacement = load_config(program_path)
+    replacement["program"].pop("validators")
+    override = path.parent / "replacement.yaml"
+    override.write_text(yaml.safe_dump(replacement))
+
+    cfg = config_to_cfg(config, source_path=path, task_program_path_override=override)
+    registration = REGISTERED_ENVS[config["id"]].task_program_registration
+    assert not next(
+        registration.catalog.preflight(cfg.task_program).iter_segments()
+    ).validators
+    assert registration.evaluation_final_refs == ("near",)
+    assert registration.fingerprint_payload()["evaluation"]["final_acceptance"] == [
+        "near"
+    ]
+
+    component.pop("final_acceptance")
+    rule_path.write_text(yaml.safe_dump(component))
+    with pytest.raises(ValueError, match="already registered with a different"):
+        config_to_cfg(config, source_path=path, task_program_path_override=override)
+
+
+def test_configured_graph_shares_named_rules_and_protects_process_selection(
+    evaluation_deployment,
+):
+    import yaml
+
+    path, rule_path, program_path = evaluation_deployment
+    config = load_config(path)
+    component = {
+        "graph": {
+            "roots": ["delivered", "safe"],
+            "rules": {
+                "low": {
+                    "kind": "below_height",
+                    "bindings": {"position": "rigid_objects/can/pose"},
+                    "params": {"height": 0.4},
+                },
+                "safe": {"kind": "not", "refs": ["low"]},
+                "delivered": {"kind": "hold_for", "ref": "safe", "end": 3, "steps": 2},
+            },
+        },
+        "final_acceptance": ["safe"],
+        "process_constraints": ["safe"],
+    }
+    rule_path.write_text(yaml.safe_dump(component))
+    cfg = config_to_cfg(config, source_path=path)
+    registration = REGISTERED_ENVS[config["id"]].task_program_registration
+    validator = next(
+        registration.catalog.preflight(cfg.task_program).iter_segments()
+    ).validators[-1]
+    assert validator.spec.stateful
+    assert validator.spec.required_fields == ("rigid_objects/handover_object/pose",)
+    assert (
+        registration.evaluation_final_refs
+        == registration.evaluation_process_refs
+        == ("safe",)
+    )
+    assert registration.fingerprint_payload()["evaluation"]["process_constraints"] == [
+        "safe"
+    ]
+
+    replacement = load_config(program_path)
+    replacement["program"].pop("validators")
+    program_path.write_text(yaml.safe_dump(replacement))
+    override = config_to_cfg(
+        config, source_path=path, task_program_path_override=program_path
+    )
+    assert not next(
+        registration.catalog.preflight(override.task_program).iter_segments()
+    ).validators
+    assert REGISTERED_ENVS[config["id"]].task_program_registration is registration
+
+
+@pytest.mark.parametrize(
+    ("refs", "message"),
+    [
+        ([], "must be a nonempty list"),
+        (["unregistered"], "Unknown evaluation.final_acceptance ref"),
+        (["near", "near"], "refs must be unique"),
+        (["delivered"], "requires instantaneous roots"),
+    ],
+)
+def test_final_acceptance_rejects_invalid_refs_before_registration(
+    evaluation_deployment, refs, message
+):
+    import yaml
+
+    path, rule_path, _ = evaluation_deployment
+    component = load_config(rule_path)
+    component["graph"]["roots"].append("near")
+    component["final_acceptance"] = refs
+    rule_path.write_text(yaml.safe_dump(component))
+    config = load_config(path)
+    with pytest.raises(ValueError, match=message):
+        config_to_cfg(config, source_path=path)
+    assert config["id"] not in REGISTERED_ENVS

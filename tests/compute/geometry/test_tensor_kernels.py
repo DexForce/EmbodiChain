@@ -32,8 +32,6 @@ from embodichain.compute.geometry import (
     triangle_geometry,
 )
 
-from embodichain.compute.geometry.transforms import box_corners_inside_frame_bounds
-
 
 @pytest.fixture(params=["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
 def device(request):
@@ -428,14 +426,3 @@ def test_resolvable_thin_triangles_remain_valid(device, dtype):
     assert valid
     torch.testing.assert_close(normals, normals.new_tensor([0.0, 0.0, 1.0]))
     torch.testing.assert_close(areas / height, areas.new_tensor(0.5))
-
-
-def test_box_corner_containment_preserves_inclusive_float32_boundary():
-    poses = torch.eye(4, dtype=torch.float32).repeat(3, 1, 1)
-    poses[:, 0, 3] = torch.tensor([0.0, torch.finfo(torch.float32).eps, torch.nan])
-    corners = torch.tensor(list(product((-0.375, 0.375), repeat=3)))
-    frame = torch.eye(4, dtype=torch.float32).expand_as(poses)
-    upper = torch.full((3,), 0.25)
-    assert box_corners_inside_frame_bounds(
-        poses, frame, corners, -upper, upper, tolerance=0.125
-    ).tolist() == [True, False, False]

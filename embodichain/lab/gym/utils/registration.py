@@ -39,7 +39,6 @@ from dexsim.utility import log_warning
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnvCfg
-    from embodichain.lab.gym.envs._final_acceptance import _FinalAcceptance
     from embodichain.lab.task_program.integrations import (
         TaskProgramAdapterFactory,
         SimulationTaskProgramRegistration,
@@ -74,8 +73,6 @@ class EnvSpec:
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         supports_rl: bool = False,
         supports_handwritten_demo: bool | None = None,
-        *,
-        _final_acceptance: _FinalAcceptance | None = None,
     ):
         """A specification for a Embodied environment."""
         if (
@@ -142,19 +139,11 @@ class EnvSpec:
         self.supports_handwritten_demo = supports_handwritten_demo
         self.task_program_registration = task_program_registration
         self.task_program_adapter_factory = task_program_adapter_factory
-        self._final_acceptance = _final_acceptance
 
     def make(self, **kwargs):
         _kwargs = self.default_kwargs.copy()
         _kwargs.update(kwargs)
         if self.task_program_adapter_factory is not None:
-            if (
-                getattr(_kwargs.get("cfg"), "final_acceptance", None)
-                != self._final_acceptance
-            ):
-                raise ValueError(
-                    "Environment construction requires the registered final acceptance."
-                )
             supplied_factory = _kwargs.get("task_program_adapter_factory")
             if (
                 supplied_factory is not None
@@ -191,8 +180,6 @@ def register(
     task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     supports_rl: bool = False,
     supports_handwritten_demo: bool | None = None,
-    *,
-    _final_acceptance: _FinalAcceptance | None = None,
 ):
     """Register a Embodied environment."""
 
@@ -212,7 +199,6 @@ def register(
         supports_handwritten_demo=supports_handwritten_demo,
         task_program_registration=task_program_registration,
         task_program_adapter_factory=task_program_adapter_factory,
-        _final_acceptance=_final_acceptance,
     )
 
 
@@ -365,7 +351,6 @@ def register_env_function(
     supports_handwritten_demo: bool | None = None,
     task_program_registration: SimulationTaskProgramRegistration | None = None,
     task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
-    _final_acceptance: _FinalAcceptance | None = None,
     **kwargs,
 ):
     if uid in REGISTERED_ENVS:
@@ -388,7 +373,6 @@ def register_env_function(
         supports_handwritten_demo=supports_handwritten_demo,
         task_program_registration=task_program_registration,
         task_program_adapter_factory=task_program_adapter_factory,
-        _final_acceptance=_final_acceptance,
     )
 
     # Register for gym

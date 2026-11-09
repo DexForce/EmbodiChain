@@ -18,6 +18,17 @@
 
 from __future__ import annotations
 
+from embodichain.lab.evaluation import (
+    CompiledEvaluation,
+    EvaluationSpec,
+    PredicateRegistry,
+    PredicateSpec,
+    builtin_predicates,
+)
+
+from embodichain.lab.evaluation.observations import _raw_field_kind
+from embodichain.lab.evaluation._recording import _is_segment_start_field
+
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, fields
@@ -27,6 +38,11 @@ import json
 import math
 from typing import TYPE_CHECKING, TypeVar
 
+from ._configured_controls import (
+    _PressLowererFactory,
+    _TwistLowererFactory,
+    _OpenDoorLowererFactory,
+)
 from ._configured_services import (
     _AntipodalGraspPoseGeneratorFactory,
     _ArticulationLinkJointTargetSlideLowererFactory,
@@ -958,6 +974,43 @@ def _decode_command_preset(
 
 def _decode_action_options(value: object, *, path: str) -> ActionOptions:
     """Decode one allowlisted atomic-action option template."""
+    if isinstance(value, Mapping) and value.get("kind") in {"twist", "open_door"}:
+        from embodichain.lab.sim.atomic_actions import TwistOptions, OpenDoorOptions
+
+        kind = value["kind"]
+        fields = (
+            {
+                "hand_interp_steps",
+                "twist_waypoint_count",
+                "pre_grasp_distance",
+                "twist_angle",
+            }
+            if kind == "twist"
+            else {
+                "hand_interp_steps",
+                "door_waypoint_count",
+                "approach_distance",
+                "retract_distance",
+                "joint_position_tolerance",
+            }
+        )
+        config = _mapping(
+            value, path=path, required=frozenset({"kind"}), optional=frozenset(fields)
+        )
+        kwargs = {}
+        for name in fields & set(config):
+            if name.endswith("steps") or name.endswith("count"):
+                kwargs[name] = _integer(config[name], path=f"{path}.{name}", minimum=1)
+            else:
+                kwargs[name] = _real(
+                    config[name],
+                    path=f"{path}.{name}",
+                    minimum=-math.inf if name == "twist_angle" else 0.0,
+                )
+        return (TwistOptions if kind == "twist" else OpenDoorOptions)(**kwargs)
+    if isinstance(value, Mapping) and value.get("kind") == "execute_demo_skill":
+        _mapping(value, path=path, required=frozenset({"kind"}))
+        return ActionOptions()
     common = _mapping(
         value,
         path=path,
@@ -1625,7 +1678,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['coordinated_pickment', 'hand_over', 'move_end_effector', 'move_held_object', "
+        "['twist', 'open_door', 'coordinated_pickment', 'hand_over', 'move_end_effector', 'move_held_object', "
         "'move_joints', "
         "'pick_up', 'place', 'pour', 'push_object', 'slide']."
     )
@@ -2442,7 +2495,10 @@ def _decode_registered_lowerer(
     *,
     path: str,
 ) -> (
-    _ArticulationLinkSlideLowererFactory
+    _PressLowererFactory
+    | _TwistLowererFactory
+    | _OpenDoorLowererFactory
+    | _ArticulationLinkSlideLowererFactory
     | _AxisAlignLowererFactory
     | _CoordinatedTransportLowererFactory
     | _MoveHeldObjectLowererFactory
@@ -2453,6 +2509,40 @@ def _decode_registered_lowerer(
     | _RelativePlaceLowererFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") in {
+        "press",
+        "twist",
+        "open_door",
+    }:
+        config = _mapping(
+            value, path=path, required=frozenset({"kind", "object_affordances"})
+        )
+        factory = {
+            "press": _PressLowererFactory,
+            "twist": _TwistLowererFactory,
+            "open_door": _OpenDoorLowererFactory,
+        }[config["kind"]]
+        rows = _sequence(
+            config["object_affordances"], path=f"{path}.object_affordances"
+        )
+        bindings = []
+        for index, row in enumerate(rows):
+            pair = _mapping(
+                row,
+                path=f"{path}.object_affordances[{index}]",
+                required=frozenset({"object", "affordance"}),
+            )
+            bindings.append(
+                (
+                    _identifier(pair["object"], path=f"{path}.object"),
+                    _identifier(pair["affordance"], path=f"{path}.affordance"),
+                )
+            )
+        return factory(object_affordances=tuple(bindings))
+    if isinstance(value, Mapping) and value.get("kind") == "demo_skill":
+        from .demo_skill import _decode_demo_skill_lowerer
+
+        return _decode_demo_skill_lowerer(value)
     common = _mapping(
         value,
         path=path,
@@ -2815,7 +2905,7 @@ def _decode_registered_lowerer(
         return _PushObjectLowererFactory(routes=tuple(routes))
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['articulation_link_slide', 'axis_align', 'coordinated_transport', "
+        "['press', 'twist', 'open_door', 'articulation_link_slide', 'axis_align', 'coordinated_transport', "
         "'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
     )
 
@@ -3090,6 +3180,39 @@ def _decode_runtime_services(
         )
     ):
         item_path = f"{path}.nominal_motion_sources[{index}]"
+        if isinstance(value, Mapping) and value.get("provider_id") == "demo_skill":
+            from .demo_skill import _ConfiguredDemoSkillSource
+
+            item = _mapping(
+                value,
+                path=item_path,
+                required=frozenset(
+                    {
+                        "call_index",
+                        "program_fingerprint",
+                        "provider_id",
+                        "revision",
+                        "asset_manifest",
+                        "asset_sha256",
+                        "call_id",
+                    }
+                ),
+                optional=frozenset({"contact_sensor_uid", "tcp_contact_links"}),
+            )
+            if item["revision"] != "1":
+                raise ValueError("unsupported DemoSkill provider revision")
+            declaration = _ConfiguredDemoSkillSource(
+                call_index=item["call_index"],
+                program_fingerprint=item["program_fingerprint"],
+                asset_manifest=item["asset_manifest"],
+                asset_sha256=item["asset_sha256"],
+                call_id=item["call_id"],
+                contact_sensor_uid=item.get("contact_sensor_uid"),
+                tcp_contact_links=tuple(item.get("tcp_contact_links", ())),
+            )
+            declaration.validate_source()
+            nominal.append(declaration)
+            continue
         item = _mapping(
             value,
             path=item_path,
@@ -3227,10 +3350,139 @@ class _ConfiguredTaskProgramAdapterFactory:
         return adapter
 
 
+def _decode_evaluation(
+    value: Mapping[str, object] | None,
+    scene: SimulationSceneBinding,
+    *,
+    robot_profile: SimulationRobotSkillProfileBinding | None = None,
+    robot_links: Mapping[str, str] | None = None,
+    registry: PredicateRegistry | None = None,
+) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
+    if value is None:
+        return {}, (), ()
+    component = _mapping(
+        value,
+        path="evaluation",
+        required=frozenset({"graph"}),
+        optional=frozenset({"final_acceptance", "process_constraints"}),
+    )
+    graph = EvaluationSpec.from_dict(component["graph"])
+    channels = {
+        f"rigid_objects/{binding.entity_id}/{quantity}": f"rigid_objects/{binding.simulation_uid}/{quantity}"
+        for binding in scene.rigid_objects
+        for quantity in ("pose", "frame", "segment_start_frame", "lin_vel", "ang_vel")
+    }
+    articulations = {
+        binding.entity_id: binding.simulation_uid for binding in scene.articulations
+    }
+    for link in scene.links:
+        for quantity in ("position", "frame"):
+            channels[f"links/{link.entity_id}/{quantity}"] = (
+                f"links/{articulations[link.articulation_id]}/{link.native_link_name}/{quantity}"
+            )
+    for alias, link in (robot_links or {}).items():
+        channels[f"robot_links/{alias}/position"] = f"robot_links/{link}/position"
+    endpoint_presets = {}
+    if robot_profile is not None:
+        presets = {preset.preset_id: preset for preset in robot_profile.command_presets}
+        for resource in robot_profile.resources:
+            if not isinstance(resource, ControlPartResourceBinding):
+                continue
+            for endpoint in resource.endpoints:
+                for quantity in ("qpos", "command"):
+                    channels[
+                        f"robot/{resource.resource_id}/{endpoint.endpoint_id}/{quantity}"
+                    ] = f"robot/{endpoint.control_part}/{quantity}"
+                preset = presets.get(endpoint.command_preset)
+                if preset is not None and preset.control_part == endpoint.control_part:
+                    endpoint_presets[
+                        f"robot/{resource.resource_id}/{endpoint.endpoint_id}/qpos"
+                    ] = preset
+    rules = {}
+    field_kinds = {}
+    for name, rule in graph.rules.items():
+        if isinstance(rule, PredicateSpec):
+            inputs = {}
+            for role, field in rule.bindings.items():
+                field = _identifier(
+                    field, path=f"evaluation.graph.rules.{name}.bindings.{role}"
+                )
+                if field in channels:
+                    native = channels[field]
+                    if _is_segment_start_field(native) and (
+                        rule.kind != "lift" or role != "baseline"
+                    ):
+                        raise ValueError(
+                            "A segment-start pose can only bind a lift baseline."
+                        )
+                else:
+                    parts = field.split("/")
+                    if (
+                        len(parts) != 4
+                        or parts[0] != "articulations"
+                        or parts[1] not in articulations
+                        or parts[2] != "qpos"
+                        or not parts[3]
+                    ):
+                        raise ValueError(f"Unresolved evaluation field {field!r}.")
+                    native = f"articulations/{articulations[parts[1]]}/qpos/{parts[3]}"
+                inputs[role] = native
+                field_kinds[native] = _raw_field_kind(native)
+            params = rule.params
+            if rule.kind == "command_preset_match":
+                raw = _mapping(
+                    params,
+                    path=f"evaluation.graph.rules.{name}.params",
+                    required=frozenset({"preset", "tolerance"}),
+                )
+                command = _identifier(raw["preset"], path="evaluation command preset")
+                preset = endpoint_presets.get(rule.bindings.get("position"))
+                if preset is None or command not in preset.commands:
+                    raise ValueError(
+                        f"Unknown embodiment command {command!r} for rule {name!r}."
+                    )
+                params = {
+                    "tolerance": raw["tolerance"],
+                    "preset": f"{preset.preset_id}/{command}",
+                    "positions": preset.commands[command],
+                }
+            rule = PredicateSpec(rule.kind, inputs, params)
+        rules[name] = rule
+    registry = builtin_predicates() if registry is None else registry
+    if not isinstance(registry, PredicateRegistry):
+        raise TypeError("evaluation_registry must be a trusted PredicateRegistry.")
+    compiled = registry.compile(
+        EvaluationSpec(rules, graph.roots),
+        field_kinds=field_kinds,
+        field_layouts={
+            field: field.rsplit("/", 1)[0]
+            for field in field_kinds
+            if field.startswith("robot/")
+        },
+    )
+    result = {root: compiled.select(root) for root in compiled.roots}
+
+    def refs_for(key: str) -> tuple[str, ...]:
+        if key not in component:
+            return ()
+        raw = component[key]
+        if type(raw) is not list or not raw:
+            raise ValueError(f"evaluation.{key} must be a nonempty list of rule refs.")
+        return tuple(
+            _identifier(ref, path=f"evaluation.{key}[{index}]")
+            for index, ref in enumerate(raw)
+        )
+
+    return result, refs_for("final_acceptance"), refs_for("process_constraints")
+
+
 def _decode_configured_task_program_integration(
     value: object,
     *,
     planner_config: Mapping[str, object] | None = None,
+    evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
+    evaluation_robot_links: Mapping[str, str] | None = None,
 ) -> _ConfiguredTaskProgramIntegration:
     """Decode one composable, callable-free Task Program integration.
 
@@ -3262,8 +3514,18 @@ def _decode_configured_task_program_integration(
                 target_descriptor=lowerer_factory.target_descriptor,
             )
         )
+    conditions, final_refs, process_refs = _decode_evaluation(
+        evaluation,
+        scene_binding,
+        robot_profile=robot_profile_binding,
+        robot_links=evaluation_robot_links,
+        registry=evaluation_registry,
+    )
     registration = SimulationTaskProgramRegistration(
         scene_binding=scene_binding,
+        evaluation_conditions=conditions,
+        evaluation_final_refs=final_refs,
+        evaluation_process_refs=process_refs,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,
@@ -3304,7 +3566,7 @@ def _decode_configured_task_program_integration(
             {
                 key: value
                 for key, value in asdict(item).items()
-                if key != "prototype_manifest"
+                if key not in {"prototype_manifest", "asset_manifest"}
             }
             for item in services.nominal_motion_sources
         ]

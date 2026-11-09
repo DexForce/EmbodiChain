@@ -41,6 +41,11 @@ physical environment component. The production loader resolves mesh assets and
 in selected-environment reset, while physical background/collision semantics stay
 with `background` and `rigid_object`. See the [simulation object boundary](../simulation-system/simulation-system.md).
 
+Configured Task Program deployments may select a named rule library with
+`evaluation.component`. Resolve it relative to the runnable deployment or
+from its supplied component snapshot. See
+[named evaluation rules](../task-programs/configuration.md#named-evaluation-rules).
+
 ### Component ownership
 
 | File / component | Owns | Must not own |
@@ -54,7 +59,6 @@ with `background` and `rigid_object`. See the [simulation object boundary](../si
 | `<task>/agents/<algorithm>.{json,yaml}` | Optional RL training configuration | Task identity or Python registration ownership |
 | `<task>/catalog.yaml` | Logical task key, presentation metadata and named deployment references | Gym registration or duplicated runtime settings |
 | Optional `objective.component` | Independent physical evaluation declaration | Program completion, segment acceptance or persistence authority |
-| Optional `acceptance.component` | Final measured conditions for a configured Task Program deployment | Program steps, planner settings or hand joint commands |
 
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.
@@ -67,6 +71,14 @@ component expansion without Gym registration or simulator construction. Its
 call. Task Program selectors remain declarations; pass the returned skill
 profile to the public Task Program deployment composer for semantic preflight.
 This is not complete runtime-config validation.
+
+Both `resolve_gym_components` and `config_to_cfg` accept optional
+`component_sources`: a complete mapping of selected physical-component paths to
+owned declarations. Snapshot mode reads no component files and rejects missing
+or duplicate resolved selections; relative asset paths retain their component
+owner. Callers verify snapshot provenance and external assets separately.
+`ResolvedGymComponents.validate_scene_bindings` checks semantic native roots
+against the expanded physical scene without runtime construction.
 
 `config_to_cfg()` resolves optional `environment`,
 `embodiment.component`, and `scene.component` selections before ordinary Gym
@@ -185,28 +197,15 @@ lowers the environment, robot, and sensors into the existing
 `EmbodiedEnvCfg` fields, it checks every semantic root's `simulation_uid`
 against the physical scene. The Task Program layer then checks
 scene/embodiment contracts, composes the immutable catalog, preflights the
-deployment-bound program, and resolves the requested Gym ID. For a missing
-ID, it discovers installed task packages before falling back to
+deployment-bound program, and calls
 `register_env_function(EmbodiedEnv, config["id"], ...)`.
 
 The ID is selected by the config and may be any free valid Gym ID. Loading the
-same ID with the same integration, episode limit and final acceptance is
-idempotent. An explicitly registered `EmbodiedEnv` subclass may supply
-task-owned measured acceptance;
-the loader preserves it only when its adapter factory has the same integration
-fingerprint and episode limit. Incompatible classes, integrations and limits
-fail closed. Registration is process-local. Configuration-only IDs become
-available to `gym.make(id)` after loading their Gym config.
-
-A configured deployment may select `acceptance: {component: <yaml>}` to use
-`EmbodiedEnv` with a final physical gate. The strict component declares object
-corner containment in an articulation-link frame, an inclusive measured joint
-interval and measured hand release. Hand release resolves an existing command
-preset and uses the embodiment component's `finger_links` mapping by control
-part. Normalized thresholds and resolved bindings are checked when reloading a
-registered ID and again when constructing it. This is a deployment-owned
-declaration outside `TaskProgramCfg`. See [execution](execution.md) for success
-queries.
+same ID with the same integration and episode limit is idempotent. Reusing it
+for a different class, integration declaration, or limit fails closed; the
+loader does not use `override=True`. Registration is process-local, so callers
+must load the Gym config before calling `gym.make(id)`. Such an ID is not
+present merely because task-package discovery ran.
 
 The integration has no task-level kind. It composes a typed scene and robot
 profile with optional allowlisted live-service declarations. The built-in service
@@ -214,8 +213,8 @@ leaves currently cover antipodal parallel-jaw grasp generation, configured
 hand-over poses, articulation-link Slide lowering, and joint-position
 constraint evidence. New executable provider families require a core
 allowlisted implementation and decoder entry; never serialize dotted imports
-or arbitrary callables into this config boundary. Configuration-only Task Program
-deployments use this path without a task environment subclass.
+or arbitrary callables into this config boundary. The official Task Program
+examples use this path and have no task environment subclass.
 
 ### Configuration-owned manipulation RL
 

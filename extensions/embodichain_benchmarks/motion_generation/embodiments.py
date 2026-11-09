@@ -131,7 +131,7 @@ class YamlEmbodimentProvider:
             _resolve_embodiment_component,
         )
 
-        simulation, _, profile, _ = _resolve_embodiment_component(
+        simulation, _, profile = _resolve_embodiment_component(
             {"component": str(path), "overrides": spec.overrides}, base_dir=path.parent
         )
         if spec.initial_qpos:

@@ -50,6 +50,7 @@ class ExpansionRunCfg:
     retry_interrupted: bool = True
     source_profile: str | None = None
     collision_profile: str | None = None
+    prototype_validation_profile: str | None = None
     program: str | None = None
     batch_size: int = 8
     target_episodes: int = 8
@@ -66,6 +67,9 @@ class ExpansionRunCfg:
     render_profiles: tuple[str, ...] = ()
     observation_independent: bool = False
     motion_profile: str | None = None
+    demo_skill_duration_scale: float = 1.0
+    demo_skill_velocity_limits: tuple[float, ...] = ()
+    demo_skill_acceleration_limits: tuple[float, ...] = ()
     scene_atlas: str | None = None
     settling_steps: int = 5
     mass_scale: dict[str, tuple[float, float]] = {}
@@ -113,6 +117,35 @@ class ExpansionRunCfg:
             or type(self.export_lerobot) is not bool
         ):
             raise ValueError("seed and capture_media have invalid types")
+        if (
+            type(self.demo_skill_duration_scale) not in (float, int)
+            or not math.isfinite(self.demo_skill_duration_scale)
+            or self.demo_skill_duration_scale < 1
+        ):
+            raise ValueError(
+                "demo_skill_duration_scale must be finite and at least one"
+            )
+        if self.demo_skill_duration_scale != 1:
+            if self.motion_profile is not None:
+                raise ValueError(
+                    "DemoSkill mapped timing and spatial recipes require separate qualified jobs"
+                )
+            if (
+                not self.demo_skill_velocity_limits
+                or not self.demo_skill_acceleration_limits
+                or len(self.demo_skill_velocity_limits)
+                != len(self.demo_skill_acceleration_limits)
+                or any(
+                    not math.isfinite(value) or value <= 0
+                    for value in (
+                        *self.demo_skill_velocity_limits,
+                        *self.demo_skill_acceleration_limits,
+                    )
+                )
+            ):
+                raise ValueError(
+                    "DemoSkill retiming requires explicit positive full-joint velocity and acceleration limits"
+                )
         if self.source not in {"task_program", "real2sim"}:
             raise ValueError("source must be task_program or real2sim")
         if self.motion_source not in {None, "native", "prototype"}:
@@ -282,6 +315,7 @@ def load_expansion_job(path: str | Path) -> ExpansionRunCfg:
         "output_dir",
         "source_profile",
         "collision_profile",
+        "prototype_validation_profile",
         "program",
         "visual_profile_file",
         "motion_profile",
@@ -344,6 +378,8 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
         if not sensor_cfgs:
             raise ValueError("capture_media requires a configured native camera")
         for sensor in sensor_cfgs:
+            if sensor.sensor_type == "ContactSensor":
+                continue
             if sensor.sensor_type not in {"Camera", "StereoCamera"}:
                 raise ValueError(
                     f"native media collection has no adapter for sensor {sensor.sensor_type!r}"
@@ -375,15 +411,30 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
             "task_program collection requires an explicit collision_profile"
         )
     if cfg.collision_profile is not None:
-        from embodichain.lab.task_program.integrations.feasibility import (
-            build_feasibility_host,
+        collision_config = load_config(cfg.collision_profile)
+        if (
+            isinstance(collision_config, dict)
+            and collision_config.get("kind") == "sampled_rigid_v1"
+        ):
+            from .collision import _decode_sampled_rigid_profile
+
+            _decode_sampled_rigid_profile(collision_config)
+        else:
+            from embodichain.lab.task_program.integrations.feasibility import (
+                build_feasibility_host,
+            )
+
+            build_feasibility_host(
+                load_config(cfg.collision_profile),
+                config_directory=Path(cfg.collision_profile).parent,
+                output_directory=Path(cfg.output_dir) / "collision",
+            )
+    if cfg.prototype_validation_profile is not None:
+        from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
+            load_real2sim_tabletop_profile,
         )
 
-        build_feasibility_host(
-            load_config(cfg.collision_profile),
-            config_directory=Path(cfg.collision_profile).parent,
-            output_directory=Path(cfg.output_dir) / "collision",
-        )
+        load_real2sim_tabletop_profile(cfg.prototype_validation_profile)
     if cfg.source == "real2sim":
         from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
             load_real2sim_tabletop_profile,
@@ -425,11 +476,72 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
     payload = cfg.to_dict()
     payload.pop("output_dir")
     resolved = environment.to_dict()
+    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+    from embodichain.lab.task_program.integrations.demo_skill import (
+        _ConfiguredDemoSkillSource,
+    )
+
+    env_id = load_config(path)["id"]
+    factory = REGISTERED_ENVS[env_id].task_program_adapter_factory
+    demo_sources = tuple(
+        item
+        for item in getattr(factory, "nominal_motion_sources", ())
+        if isinstance(item, _ConfiguredDemoSkillSource)
+    )
+    for declaration in demo_sources:
+        declaration.validate_source()
+    catalog = getattr(getattr(factory, "registration", None), "catalog", None)
+    if catalog is not None:
+        required = {
+            identifier
+            for identifier, descriptor in catalog.call_catalog.descriptors.items()
+            if descriptor.target_descriptor.skill_id == "execute_demo_skill"
+        }
+        if required:
+            compiled = catalog.preflight(environment.task_program)
+            selected = {item.call_index: item for item in demo_sources}
+            for segment in compiled.iter_segments():
+                if segment.parallel_block is not None:
+                    raise ValueError(
+                        "DemoSkill source binding requires sequential calls"
+                    )
+                for call in segment.calls:
+                    if getattr(call.call, "call_id", None) in required and (
+                        call.call_index not in selected
+                        or selected[call.call_index].call_id != call.call.call_id
+                    ):
+                        raise ValueError(
+                            "every DemoSkill call occurrence requires its pinned source"
+                        )
+    if cfg.demo_skill_duration_scale != 1 and not demo_sources:
+        raise ValueError(
+            "DemoSkill retiming requires occurrence-bound DemoSkill sources"
+        )
+    for declaration in demo_sources:
+        from embodichain.data_pipeline.real2sim import load_demo_skill
+
+        artifact = load_demo_skill(declaration.asset_manifest)
+        if cfg.demo_skill_duration_scale > artifact.spec.max_duration_scale:
+            raise ValueError("job timing exceeds the pinned DemoSkill duration bounds")
+    if demo_sources and cfg.source != "task_program":
+        raise ValueError("mixed DemoSkill sources use the Task Program source owner")
+    if demo_sources:
+        from dataclasses import asdict
+
+        resolved["demo_skill_sources"] = [
+            {
+                key: value
+                for key, value in asdict(item).items()
+                if key != "asset_manifest"
+            }
+            for item in demo_sources
+        ]
     file_fields = (
         "deployment",
         "program",
         "source_profile",
         "collision_profile",
+        "prototype_validation_profile",
         "visual_profile_file",
         "motion_profile",
         "scene_atlas",

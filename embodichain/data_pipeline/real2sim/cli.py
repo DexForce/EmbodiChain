@@ -54,7 +54,21 @@ def main(argv: Sequence[str] | None = None) -> None:
         "validate", help="Verify an existing source or prototype bundle."
     )
     validate.add_argument("manifest", type=Path)
-    for command in (prepare, validate):
+    build_demo = commands.add_parser(
+        "build-demo-skill",
+        help="Build a task-specific DemoSkill from a robot demonstration.",
+    )
+    build_demo.add_argument("source", type=Path)
+    build_demo.add_argument("--spec", type=Path, required=True)
+    build_demo.add_argument("--joints", type=Path, required=True)
+    build_demo.add_argument("--control-dt", type=float, required=True)
+    build_demo.add_argument("--output", type=Path, required=True)
+    build_demo.add_argument("--original-recording", type=Path)
+    validate_demo = commands.add_parser(
+        "validate-demo-skill", help="Verify a prepared DemoSkill without simulation."
+    )
+    validate_demo.add_argument("manifest", type=Path)
+    for command in (prepare, validate, build_demo, validate_demo):
         command.add_argument(
             "--max-samples",
             type=int,
@@ -69,6 +83,51 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
     args = parser.parse_args(argv)
     try:
+        if args.operation in {"build-demo-skill", "validate-demo-skill"}:
+            from .demo_skill import build_demo_skill, decode_demo_skill_spec
+            from .demo_skill_io import (
+                load_robot_demonstration,
+                load_demo_skill,
+                save_demo_skill,
+            )
+            from embodichain.utils.utility import load_config
+
+            if args.operation == "build-demo-skill":
+                layout = json.loads(args.joints.read_text(encoding="utf-8"))
+                skill = build_demo_skill(
+                    load_robot_demonstration(
+                        args.source, max_bytes=args.max_output_bytes
+                    ),
+                    decode_demo_skill_spec(load_config(args.spec)),
+                    joints=tuple(JointSpec(**item) for item in layout),
+                    control_dt=args.control_dt,
+                    max_samples=args.max_samples,
+                    max_output_bytes=args.max_output_bytes,
+                )
+                path = save_demo_skill(
+                    skill, args.output, original_recording=args.original_recording
+                )
+            else:
+                path = args.manifest
+                skill = load_demo_skill(
+                    path,
+                    max_samples=args.max_samples,
+                    max_output_bytes=args.max_output_bytes,
+                )
+            print(
+                json.dumps(
+                    {
+                        "status": "prepared_demo_skill",
+                        "manifest": str(path),
+                        "asset_id": skill.spec.asset_id,
+                        "content_sha256": skill.content_sha256,
+                        "samples": len(skill.execution_timestamps),
+                        "source_samples": len(skill.timestamps),
+                        "physical_qualification": "not_run",
+                    }
+                )
+            )
+            return
         if args.operation == "prepare":
             layout = json.loads(args.joints.read_text(encoding="utf-8"))
             if not isinstance(layout, list):

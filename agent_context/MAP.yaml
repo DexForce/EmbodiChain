@@ -47,10 +47,11 @@ topics:
   title: Environment Framework
   aliases: [env framework, environment framework, task registration, list task, expert trajectory, 环境框架, 任务环境,
     专家轨迹]
-  keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, register_env, list-task, run-task, run-example, target_control_frequency,
+  keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, ControlTiming, resolve_control_timing, register_env, list-task, run-task, run-example, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
+    EvaluationSpec, RuleSession, evaluate_recorded_rules,
     task_instruction, resolve_demo_instruction,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
@@ -63,9 +64,11 @@ topics:
   - embodichain/cli/_example_runner.py
   - examples/README.md
   - embodichain/lab/gym/envs/objectives/
+  - embodichain/lab/evaluation/
   - embodichain/lab/scripts/evaluate_task_objective.py
   - embodichain/lab/scripts/run_task.py
   - embodichain/lab/gym/utils/gym_utils.py
+  - embodichain/lab/gym/utils/control_timing.py
   - embodichain/lab/gym/utils/_component_composition.py
   - embodichain/lab/gym/utils/registration.py
   - embodichain/lab/gym/envs/base_env.py
@@ -80,7 +83,7 @@ topics:
   watch_paths: [embodichain/lab/gym/envs/managers/observation_types.py, embodichain/lab/gym/envs/episode_context.py, embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
     embodichain/lab/gym/envs/demo.py,
     embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_task.py,
-    extensions/embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
+    extensions/embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/, embodichain/lab/evaluation/, tests/lab/evaluation/,
     embodichain/lab/scripts/evaluate_task_objective.py, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
   status: active
@@ -167,6 +170,7 @@ topics:
   - embodichain/lab/sim/sensors/contact/timeline.py
   - embodichain/lab/sim/sensors/contact/observation.py
   - embodichain/lab/sim/sensors/support_observation.py
+  - embodichain/lab/evidence.py
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
@@ -472,10 +476,14 @@ topics:
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
     joint_command_mode, InvocationPolicyBinding, BoundInvocationPolicies,
     ContactEvidenceSampler, ContactTimeline, NativeGripEvidenceFactory, SimulationSupportObservationCollector,
-    ConfiguredTaskProgramDeployment, load_configured_task_program_deployment]
+    ConfiguredTaskProgramDeployment, load_configured_task_program_deployment,
+    normalize_control_evidence, validate_control_declaration]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/
+  - embodichain/lab/task_program/language/semantic_contracts.py
+  - embodichain/lab/task_program/integrations/_configured_controls.py
+  - embodichain/lab/task_program/integrations/evidence/control_evidence.py
   - embodichain/lab/task_program/semantics/integration.py
   - embodichain/lab/task_program/semantics/calls.py
   - embodichain/lab/task_program/integrations/configured.py
@@ -498,10 +506,13 @@ topics:
   aliases: [Task Engine, task engine, 任务引擎, 任务理解, 动作语义图, 语义图可视化]
   keywords: [TaskAgent, TaskDraft, TaskCandidateSet, InstructionIntent, TaskSpecGenerator,
     SemanticTaskGraph, validate_semantic_task_graph, validate_graph_coverage,
-    render_semantic_task_graph_html, write_semantic_task_graph_html]
+    render_semantic_task_graph_html, write_semantic_task_graph_html, generate_semantic_task_graph_from_image]
   paths: [topics/task-engine/task-engine.md]
   source_of_truth:
   - embodichain/gen_sim/task_engine/__init__.py
+  - embodichain/gen_sim/task_engine/cli.py
+  - embodichain/gen_sim/task_engine/image_planning.py
+  - embodichain/gen_sim/task_engine/semantic_plan_validation.py
   - embodichain/gen_sim/task_engine/agent.py
   - embodichain/gen_sim/task_engine/interpretation.py
   - embodichain/gen_sim/task_engine/contracts.py
@@ -529,6 +540,7 @@ topics:
   - embodichain/gen_sim/task_spec/registry.py
   - embodichain/gen_sim/task_spec/evidence.py
   - embodichain/gen_sim/task_spec/evidence_report.py
+  - embodichain/gen_sim/task_spec/manipulation_evidence.py
   - embodichain/gen_sim/task_spec/condition_evidence.py
   - embodichain/gen_sim/task_spec/control_evidence.py
   - embodichain/gen_sim/task_spec/pour_evidence.py
@@ -540,13 +552,14 @@ topics:
   status: active
 - id: gen-sim
   title: Gen Sim
-  aliases: [gen sim, Scene Engine, Asset Engine, SimReady, scene generation, scene editing, scene-randomization,
+  aliases: [gen sim, GenSim model services, 模型服务解耦, Scene Engine, Asset Engine, asset-engine, SimReady Asset Pipeline, SimReady, scene generation, scene editing, scene-randomization,
     grouped scene randomization, GPU场景扩增, 批量场景扩增, 组内扩增, 组内场景扩增, intra-group augmentation, 分组场景随机化, 场景生成, 场景编辑, 生成式仿真]
-  keywords: [generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, SceneRandomizationCfg,
+  keywords: [EMBODICHAIN_MODEL_SERVICES_CONFIG, GenSimServices, GenSimServicesCfg, ServiceRegistry, model_services, generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, SceneRandomizationCfg,
     randomize_scene, prepare_scene_baseline, scene-randomization, load_layouts, preview_layouts, ingest_one_asset,
     ParserManager, SceneBlueprintPackage, analyze_image, materialize_blueprint, SessionProcessRegistry, Gradio, project_placement_evidence_binding, project_configured_placement_evidence_binding]
   paths: [topics/gen-sim/gen-sim.md]
   source_of_truth:
+  - embodichain/gen_sim/services/
   - embodichain/gen_sim/scene_engine/cli/start.py
   - embodichain/gen_sim/scene_engine/pipeline/generate.py
   - embodichain/gen_sim/scene_engine/pipeline/edit.py
@@ -561,7 +574,7 @@ topics:
   - embodichain/gen_sim/gradio_ui/app_env.py
   - embodichain/gen_sim/task_engine/evidence.py
   watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
-  related_topics: [simulation-system, data-assets, env-framework]
+  related_topics: [simulation-system, data-assets, env-framework, task-engine]
   status: active
 - id: data-assets
   title: Data Assets
@@ -597,7 +610,7 @@ topics:
     ODSFlowController, ODSFlowControllerCfg, get_flow_status, ODS 供数控制,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
     OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
-    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, Real2SimTrajectory, NormalizedReal2SimUnit, SkillMotionPrototype, TrajectoryTimeMap, DROID, DroidEpisode, export_real2sim_replay_manifest, 数据集加载, 离线加载]
+    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, RobotDemonstration, DemoSkill, DemoSkillArtifact, DemoSkillReference, DemoSkillSpec, ExecuteDemoSkill, 示教技能, Real2SimTrajectory, NormalizedReal2SimUnit, SkillMotionPrototype, TrajectoryTimeMap, DROID, DroidEpisode, export_real2sim_replay_manifest, 数据集加载, 离线加载]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py

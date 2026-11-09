@@ -79,6 +79,9 @@ from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+
     from embodichain.lab.task_program.integrations.invocation_policy import (
         BoundInvocationPolicies,
     )
@@ -1033,6 +1036,7 @@ class _SegmentLifecycle:
     actions_started: bool = False
     sink_acceptance_baseline: int | None = None
     yielded_action_count: int = 0
+    observed_step: int | None = None
     abort_started: bool = False
     abort_complete: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -1289,6 +1293,9 @@ class TaskProgramDemoBridge:
         self._sequential_workflows: dict[int, tuple[SemanticWorkflow, int]] = {}
         self._execution_trace: list[dict[str, object]] | None = None
         self._row_rejection: tuple[torch.Tensor, ControllerAction, str] | None = None
+        self._process_rejection: tuple[torch.Tensor, ControllerAction, str] | None = (
+            None
+        )
         self._row_hold: tuple[torch.Tensor, ControllerAction] | None = None
         self._pending_rejected_ids: tuple[int, ...] = ()
 
@@ -1664,6 +1671,78 @@ class TaskProgramDemoBridge:
         )
         return ControllerAction(value=value, metadata=metadata)
 
+    def _pending_evaluation_fields(self) -> tuple[str, ...] | None:
+        lifecycle = self._last_segment_lifecycle
+        if (
+            lifecycle is None
+            or lifecycle.pending_action is None
+            or lifecycle.abort_started
+            or lifecycle.observed_step == self._clock.step_index + 1
+        ):
+            return None
+        return getattr(self._validator_port, "_evaluation_fields", ())
+
+    def _segment_start_observation(self, field):
+        if (
+            self._pending_evaluation_fields() is None
+            or self._clock.step_index + 1
+            != getattr(self._validator_port, "_evaluation_start", None)
+        ):
+            return None
+        return self._validator_port._evaluation_initial.get(field)
+
+    def _observe_segment_frame(
+        self,
+        frame: ObservationFrame,
+        *,
+        episode_owner: EpisodeContext,
+        process_check: (
+            Callable[
+                [], tuple[torch.Tensor, Callable[[torch.Tensor], dict[str, object]]]
+            ]
+            | None
+        ) = None,
+        hold_qpos: Callable[[], torch.Tensor] | None = None,
+    ) -> None:
+        """Publish the observation after a yielded command's host control step."""
+        lifecycle = self._last_segment_lifecycle
+        if self._pending_evaluation_fields() is None:
+            return
+        observe = getattr(self._validator_port, "_observe_segment_frame", None)
+        step = self._clock.step_index + 1
+        if observe is not None:
+            observe(frame, step=step, episode_owner=episode_owner)
+        lifecycle.observed_step = step
+        if process_check is not None:
+            rows = self.env_ids
+            passed, report = process_check()
+            indices = getattr(self._validator_port, "_row_indices", None)
+            if indices is None:
+                indices = (
+                    rows
+                    if passed.shape != rows.shape
+                    else torch.arange(rows.numel(), device=rows.device)
+                )
+            rejected = ~passed.index_select(0, indices)
+            if self._eligible_mask is not None:
+                rejected &= self._eligible_mask
+            if bool(rejected.any()):
+                assert hold_qpos is not None
+                hold = ControllerAction(
+                    self._sink.encode_post_policy_hold(
+                        hold_qpos().index_select(0, indices)
+                    )
+                )
+                self._process_rejection = (rejected, hold, "process_constraint_failed")
+                lifecycle.metadata.setdefault("process_violations", []).append(
+                    {
+                        "step": step,
+                        "observation_revision": frame.revision,
+                        "env_ids": rows[rejected].tolist(),
+                        "conditions": report(indices[rejected]),
+                    }
+                )
+
     def _yield_and_advance(
         self,
         action: ControllerAction,
@@ -1688,6 +1767,20 @@ class TaskProgramDemoBridge:
             self._record_consumed_action(action)
             self._clock.advance_after_env_step()
             lifecycle.pending_action = None
+        process = getattr(self, "_process_rejection", None)
+        if process is not None:
+            self._process_rejection = None
+            if self._row_rejection is None:
+                self._row_rejection = process
+            else:
+                process_mask, hold, reason = process
+                external_mask, external_hold, external_reason = self._row_rejection
+                hold.value[external_mask] = external_hold.value[external_mask]
+                self._row_rejection = (
+                    process_mask | external_mask,
+                    hold,
+                    f"{reason}; {external_reason}",
+                )
         if self._row_rejection is not None:
             mask, hold, reason = self._row_rejection
             self._row_rejection = None

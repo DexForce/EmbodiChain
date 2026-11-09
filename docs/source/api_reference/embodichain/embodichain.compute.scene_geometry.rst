@@ -121,8 +121,8 @@ AABB arithmetic and group reductions
 .. automodule:: embodichain.compute.geometry.aabb
    :members:
 
-Box transforms and containment
-------------------------------
+Affine box transforms
+---------------------
 
 .. currentmodule:: embodichain.compute.geometry.transforms
 
@@ -130,7 +130,6 @@ Box transforms and containment
    :nosignatures:
 
    transform_aabbs
-   box_corners_inside_frame_bounds
 
 .. automodule:: embodichain.compute.geometry.transforms
    :members:

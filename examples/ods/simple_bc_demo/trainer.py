@@ -85,16 +85,8 @@ class _BudgetExpired(Exception):
 
 
 def _add_error_note(error: BaseException, note: str) -> None:
-    """Retain secondary errors without replacing the original on Python 3.10."""
-    add_note = getattr(error, "add_note", None)
-    if add_note is not None:
-        add_note(note)
-    else:
-        notes = getattr(error, "__notes__", None)
-        if notes is None:
-            notes = []
-            error.__notes__ = notes
-        notes.append(note)
+    """Retain secondary errors without replacing the original."""
+    error.add_note(note)
 
 
 def _timeout(args: argparse.Namespace, tracker: EfficiencyTracker) -> float:

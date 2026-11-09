@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.compute._evaluation import _within_target
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 import math
@@ -586,7 +588,7 @@ def _recorded_values(
         flags = [
             ok
             and minimum <= positions[row] <= maximum
-            and abs(observed[row] - target) <= tolerance
+            and _within_target(observed[row], target, tolerance)
             for row, ok in enumerate(available)
         ]
         masks.extend(
@@ -737,9 +739,9 @@ def _final_values(
             ],
             dtype=dtype,
         )
-        accepted = (measured - binding.condition["target"]).abs() <= binding.condition[
-            "tolerance"
-        ]
+        accepted = _within_target(
+            measured, binding.condition["target"], binding.condition["tolerance"]
+        )
         flags = [
             bool(value) and available
             for value, available in zip(accepted.tolist(), valid, strict=True)
@@ -770,8 +772,28 @@ def evaluate_condition_evidence(
         Per-environment predicate results, preserving unavailable rows. This does
         not infer program completion or certify unrelated task predicates.
     """
+    normalized, selected, predicate = _condition_selection(
+        spec, binding, program=program
+    )
+    try:
+        role = {item.name: item for item in normalized.roles}[
+            predicate.arguments["subject"]
+        ]
+        selector_error = (
+            None
+            if role.is_single_member
+            else "Complete selector-universe evidence was not provided."
+        )
+    except (KeyError, StopIteration) as error:
+        selector_error = str(error) or type(error).__name__
+    return _evaluate_condition_member(
+        selected, predicate, evidence, program=program, selector_error=selector_error
+    )
+
+
+def _condition_selection(spec, binding, *, program):
+    """Validate original normative/program identity and state-predicate semantics."""
     from .spec import TaskSpec
-    from .expressions import PredicateEvaluation, EvaluationStatus
 
     selected = ConditionEvidenceBinding.from_dict(binding)
     normalized = TaskSpec.from_dict(spec)
@@ -813,9 +835,17 @@ def evaluate_condition_evidence(
         )
         if (
             predicate.name != "object_upright" and not vertical
-        ) or predicate.arguments.get("task_type") not in {None, "E2"}:
+        ) or predicate.arguments.get("task_type") not in {None, "E1", "E2"}:
             raise ValueError(
                 "This orientation proof does not verify transfer or other task-family evidence."
+            )
+        if (
+            predicate.arguments.get("task_type") == "E1"
+            and milestone
+            and predicate.name != "object_upright"
+        ):
+            raise ValueError(
+                "The source recorded E1 orientation proof requires its upright predicate."
             )
         if selected.condition.get("axis_direction_free", False) is not vertical:
             raise ValueError("State proof has another axis-direction contract.")
@@ -825,6 +855,20 @@ def evaluate_condition_evidence(
         or predicate.arguments.get("target_state") != selected.condition["target_state"]
     ):
         raise ValueError("This endpoint proof has another task family or target state.")
+    return normalized, selected, predicate
+
+
+def _evaluate_condition_member(
+    selected: ConditionEvidenceBinding,
+    predicate: Any,
+    evidence: Mapping[str, Any],
+    *,
+    program: Mapping[str, Any],
+    selector_error: str | None = None,
+) -> tuple[PredicateEvaluation, ...]:
+    """Qualify acquired state after the caller validates its complete selector."""
+    from .expressions import PredicateEvaluation, EvaluationStatus
+
     size = len(selected.env_ids)
     flags = [False] * size
     valid = [True] * size
@@ -832,9 +876,8 @@ def evaluate_condition_evidence(
     reason = None
     refs = ()
     try:
-        roles = {role.name: role for role in normalized.roles}
-        if roles[predicate.arguments["subject"]].quantifier != "one":
-            raise ValueError("Complete selector-universe evidence was not provided.")
+        if selector_error is not None:
+            raise ValueError(selector_error)
         snapshot = json_snapshot(evidence)
         refs = (selected.binding_hash, canonical_hash(snapshot))
         if "unavailable" in snapshot:
