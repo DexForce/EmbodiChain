@@ -83,3 +83,24 @@ native and real-demonstration-driven experts through the shared engine. Its offl
 viewer pairs measured 3D playback with RGB-D, recipes, source clocks and explicit
 capability/acceptance results. Full and quick modes preserve unrun and failed cases;
 recovery and portability diagnostics keep their evidence separate from expert data.
+
+
+## Newton cable demo
+
+The cable examples require CUDA and the qualified DexSim wheel
+`0.6.0.dev11491` (DexVerse dev `505ee1b5600ca0b3d0a2c8235930e7684283d049`).
+The build is available from internal GitLab pipeline 77665: job 317267 for
+Python 3.12 or job 317266 for Python 3.11. Download the job archive and install
+its matching wheel with its declared dependencies; that pipeline did not publish
+to the package index. A source checkout alone does not update an installed wheel.
+
+```bash
+python -m pip install /path/to/dexsim_engine-0.6.0.dev11491-<python>-<abi>-manylinux_2_31_x86_64.whl
+python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
+python -m embodichain run-example sim/demo/cable_viser --num-envs 2 --port 8080 --duration 12
+```
+
+EmbodiChain defaults to DexUni when no solver is selected;
+legacy `auto`/`AutoSolverCfg` selections must migrate to `dexuni` or the concrete
+solver needed by the scene. Explicit `semi_implicit` remains required for
+Newton gradient mode.

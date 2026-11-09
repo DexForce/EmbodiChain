@@ -37,6 +37,7 @@ _AssetKind = Literal[
     "articulation",
     "soft_object",
     "cloth_object",
+    "cable_object",
 ]
 
 
@@ -128,6 +129,11 @@ class SpawnScene:
             for member in descriptor:
                 self._bind_resource_materials(member)
             return
+        render_material = getattr(descriptor, "render_material", None)
+        if isinstance(render_material, _AssetMaterialDesc):
+            _, descriptor.render_material = self._material_resources.resolve(
+                render_material
+            )
         reference = getattr(descriptor, "material_ref", None)
         if reference in definitions:
             _, descriptor.material = self._material_resources.resolve(
@@ -158,6 +164,7 @@ class SpawnScene:
         """Add a descriptor and associate it with an EmbodiChain facade."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
+        self._require_mutable_topology()
         self._bind_resource_materials(descriptor)
         self._initialize_facade_declaration(facade)
         declaration = _AssetDeclaration(
@@ -196,6 +203,7 @@ class SpawnScene:
                 "articulation": "add_articulation",
                 "soft_object": "add_soft_object",
                 "cloth_object": "add_cloth_object",
+                "cable_object": "add_cable",
             }[kind]
             declaration.descriptor = getattr(self.builder, add_name)(descriptor)
         self._assets[uid] = declaration
@@ -261,11 +269,12 @@ class SpawnScene:
         if getattr(declaration, "declaration_only", False):
             del self._assets[uid]
             return
-        if declaration.kind in {"soft_object", "cloth_object"}:
+        if declaration.kind in {"soft_object", "cloth_object", "cable_object"}:
             raise NotImplementedError(
                 "DexSim Spawn does not yet expose pending removal for "
                 f"{declaration.kind.replace('_', ' ')}."
             )
+        self._require_mutable_topology()
         if declaration.kind == "rigid_object_group":
             for member in declaration.descriptor:
                 self.builder.remove_object(member.name)
@@ -284,6 +293,16 @@ class SpawnScene:
             self._pending_material_assignments = {
                 key: materials for key, materials in pending.items() if key[0] != uid
             }
+
+    def _require_mutable_topology(self) -> None:
+        """Reject unsupported cable-scene rebuild before Builder mutation."""
+        if self.builder.is_finalized and any(
+            item.kind == "cable_object" for item in self._assets.values()
+        ):
+            raise NotImplementedError(
+                "DexSim does not support physical topology changes in a "
+                "finalized cable scene; recreate the simulation."
+            )
 
     def commit(self) -> Any:
         """Finalize once or let the current ``Scene`` consume pending changes."""

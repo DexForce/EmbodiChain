@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import torch
 
@@ -25,6 +27,25 @@ __all__ = [
     "map_source_qpos_to_state_order",
     "read_state_mimic_info",
 ]
+
+
+def _project_mimic_positions(
+    qpos: torch.Tensor,
+    mimic_ids: Sequence[int] | np.ndarray,
+    parent_ids: Sequence[int] | np.ndarray,
+    multipliers: Sequence[float] | np.ndarray,
+    offsets: Sequence[float] | np.ndarray,
+) -> torch.Tensor:
+    """Project configured positions using state-ordered mimic relations."""
+    if len(mimic_ids) == 0:
+        return qpos
+    projected = qpos.clone()
+    children = torch.as_tensor(mimic_ids, dtype=torch.long, device=qpos.device)
+    parents = torch.as_tensor(parent_ids, dtype=torch.long, device=qpos.device)
+    scales = torch.as_tensor(multipliers, dtype=qpos.dtype, device=qpos.device)
+    shifts = torch.as_tensor(offsets, dtype=qpos.dtype, device=qpos.device)
+    projected[..., children] = projected[..., parents] * scales + shifts
+    return projected
 
 
 def get_state_joint_names(entity: object) -> list[str]:
