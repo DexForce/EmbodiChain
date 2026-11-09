@@ -273,7 +273,7 @@ def _check_disabled_body_colliders(path: object, desc: ObjectDesc) -> None:
         return
     if UsdPhysics.RigidBodyAPI(prim).GetRigidBodyEnabledAttr().Get() is not False:
         return
-    children = iter(Usd.PrimRange(prim))
+    children = iter(Usd.PrimRange(prim, Usd.TraverseInstanceProxies()))
     for child in children:
         if child != prim and child.HasAPI(UsdPhysics.RigidBodyAPI):
             children.PruneChildren()
