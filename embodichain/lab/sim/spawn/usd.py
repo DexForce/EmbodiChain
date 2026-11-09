@@ -161,6 +161,7 @@ def rigid_desc_from_usd(
     scene, desc = _parse_singleton(
         path, "mesh_objects", "rigid object", prim_path=_source_prim_path(cfg)
     )
+    _check_disabled_body_colliders(path, desc)
 
     desc.name = uid
     desc.pose = _pose_from_cfg(cfg)
@@ -256,6 +257,37 @@ def articulation_desc_from_usd(
         self_collision_default=desc.enable_self_collision,
     )
     return desc, materials
+
+
+def _check_disabled_body_colliders(path: object, desc: ObjectDesc) -> None:
+    """Reject SDK parser loss instead of materializing a collision-free fixture."""
+    if desc.collisions or desc.usd is None:
+        return
+    from pxr import Usd, UsdPhysics
+
+    stage = Usd.Stage.Open(str(path))
+    if stage is None:
+        raise ValueError(f"Cannot inspect USD rigid object {path!r}.")
+    prim = stage.GetPrimAtPath(desc.usd.prim_path)
+    if not prim or not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+        return
+    if UsdPhysics.RigidBodyAPI(prim).GetRigidBodyEnabledAttr().Get() is not False:
+        return
+    children = iter(Usd.PrimRange(prim))
+    for child in children:
+        if child != prim and child.HasAPI(UsdPhysics.RigidBodyAPI):
+            children.PruneChildren()
+            continue
+        if (
+            child.HasAPI(UsdPhysics.CollisionAPI)
+            and UsdPhysics.CollisionAPI(child).GetCollisionEnabledAttr().Get()
+            is not False
+        ):
+            raise NotImplementedError(
+                f"The USD parser dropped collision pieces below disabled rigid "
+                f"body {desc.usd.prim_path!r}. Use direct compound construction "
+                "or a DexSim build that preserves static USD collider ownership."
+            )
 
 
 def _parse_singleton(

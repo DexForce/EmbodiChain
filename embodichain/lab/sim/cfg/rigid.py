@@ -243,6 +243,9 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     Positive values specify time constant and damping ratio; negative values
     specify direct stiffness and damping. Requires a DexSim build exposing
     native contact parameters; unsupported builds fail before materialization.
+    Prefer ``NewtonRigidBodyMaterialCfg`` for new declarations. These original
+    collision aliases normalize into the same material-owned values before
+    global and link-local properties merge.
     """
 
     solimp: Sequence[float] | None = None
