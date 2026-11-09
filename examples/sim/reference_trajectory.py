@@ -18,6 +18,8 @@
 Input NPZ fields: poses (T,K,L,7), link_names (L,), dt (scalar). Poses use
 world xyz+xyzw. Optional fields are tips (T,K,3), objects (T,K,7), targets
 (T,K,3), command (T,3) and velocity (T,3). No physics steps are executed.
+Camera tracking and velocity arrows use the asset's named root. A fixed view
+can replay visual links without the root; velocity arrows are omitted in that case.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import json
 from pathlib import Path
 import subprocess
 import time
+import warnings
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -57,8 +60,8 @@ __all__ = ["main"]
 COLORS = [(0.15, 0.8, 0.4), (0.2, 0.55, 1.0), (1.0, 0.55, 0.15)]
 
 
-def _root_link_index(asset_path: str, names: tuple[str, ...]) -> int:
-    """Resolve the asset root in the recording's independently ordered links."""
+def _root_link_index(asset_path: str, names: tuple[str, ...]) -> int | None:
+    """Find the asset root, which may be absent from a visual-only recording."""
     path = Path(asset_path).expanduser().resolve()
     if path.suffix.lower() == ".urdf":
         robot = ET.parse(path).getroot()
@@ -82,19 +85,22 @@ def _root_link_index(asset_path: str, names: tuple[str, ...]) -> int:
             "robot marker articulation or visual object",
         )
         root_name = obj.root_link_name if hasattr(obj, "links") else obj.name
-    if len(set(names)) != len(names):
-        raise ValueError("Recorded link_names must be unique.")
-    if root_name not in names:
-        raise ValueError(
-            f"Recorded link_names must include the robot root {root_name!r}."
-        )
-    return names.index(root_name)
+    if not names or len(set(names)) != len(names):
+        raise ValueError("Recorded link_names must be nonempty and unique.")
+    return names.index(root_name) if root_name in names else None
 
 
 def _camera_path(
-    poses: np.ndarray, offsets: np.ndarray, mode: str, root_index: int = 0
+    poses: np.ndarray, offsets: np.ndarray, mode: str, root_index: int | None = 0
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fit the whole clip once, then track XY at fixed height and distance."""
+    if root_index is None:
+        if mode == "follow_xy":
+            raise ValueError(
+                "follow_xy requires the recorded robot root; use --camera-mode fixed "
+                "for recordings containing only visual links."
+            )
+        root_index = 0
     anchors = np.zeros((len(poses), 3), dtype=np.float64)
     if mode == "follow_xy":
         anchors[:, :2] = poses[:, 0, root_index, :2]
@@ -158,11 +164,23 @@ def main() -> None:
         offsets[:, 1] = (np.arange(count) - (count - 1) / 2) * args.spacing
     try:
         root_index = _root_link_index(args.asset, names)
+        camera_eyes, camera_targets = _camera_path(
+            poses, offsets, args.camera_mode, root_index
+        )
     except ValueError as exc:
         parser.error(str(exc))
-    camera_eyes, camera_targets = _camera_path(
-        poses, offsets, args.camera_mode, root_index
-    )
+    vector_fields = [
+        (prototype, field)
+        for prototype, field in enumerate(("command", "velocity"))
+        if field in data
+    ]
+    if root_index is None and vector_fields:
+        warnings.warn(
+            "Recorded robot root is absent; command and velocity arrows are omitted. "
+            "Include the root in poses and link_names to display them.",
+            stacklevel=2,
+        )
+        vector_fields = []
     args.output.mkdir(parents=True, exist_ok=True)
     torch.set_num_threads(8)
     sim = SimulationManager(
@@ -333,11 +351,6 @@ def main() -> None:
                     objects[k].set_local_pose(torch.as_tensor(pose[None]))
             if "targets" in data:
                 targets.visualize(np.asarray(data["targets"][index]) + offsets)
-            vector_fields = [
-                (prototype, field)
-                for prototype, field in enumerate(("command", "velocity"))
-                if field in data
-            ]
             if vector_fields:
                 root = poses[index, 0, root_index]
                 vectors = np.stack(

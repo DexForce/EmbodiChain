@@ -67,5 +67,22 @@ def test_camera_uses_named_root_when_recording_and_asset_link_orders_differ(
     expected = _camera_path(poses[:, :, [1, 0]], np.zeros((1, 3)), mode)
     actual = _camera_path(poses, np.zeros((1, 3)), mode, root_index)
     np.testing.assert_allclose(actual, expected)
-    with pytest.raises(ValueError, match="must include the robot root"):
-        _root_link_index(str(asset), ("tip",))
+
+
+def test_fixed_view_accepts_visual_links_without_nonvisual_root(tmp_path):
+    asset = tmp_path / "robot.urdf"
+    asset.write_text(
+        '<robot name="robot"><link name="root"/><link name="body">'
+        '<visual><geometry><box size="1 1 1"/></geometry></visual></link>'
+        '<joint name="joint" type="fixed"><parent link="root"/><child link="body"/></joint></robot>'
+    )
+    root_index = _root_link_index(str(asset), ("body",))
+    assert root_index is None
+    poses = np.zeros((3, 1, 1, 7))
+    poses[..., 6] = 1
+    poses[:, 0, 0, 0] = [0, 1, 2]
+    eye, target = _camera_path(poses, np.zeros((1, 3)), "fixed", root_index)
+    np.testing.assert_allclose(eye, np.tile(eye[0], (3, 1)))
+    np.testing.assert_allclose(target, np.tile(target[0], (3, 1)))
+    with pytest.raises(ValueError, match="--camera-mode fixed"):
+        _camera_path(poses, np.zeros((1, 3)), "follow_xy", root_index)
