@@ -62,7 +62,11 @@ Unset USD actor type, scale, root flags and placement retain parsed source
 values. An explicit singleton `source_pose_mode` replaces, preserves or offsets
 the source transform. Singleton translation resolves a runtime-owned config
 copy, preserving caller placement intent for repeated imports and Gym
-replacement comparisons. Non-USD rigid and URDF articulation imports keep their
+replacement comparisons. Returned facade configs store resolved absolute poses
+in `config` mode, so copying them for replacement retains source offsets and
+scene placement without applying them again. Sparse pose keys preserve explicit
+zero values; only omitted pose fields retain source placement in `auto` mode.
+Non-USD rigid and URDF articulation imports keep their
 dynamic/unit-scale and fixed-root defaults respectively. Whole-scene
 `add_usd(UsdImportCfg(...))` applies sparse dictionary fields before Spawn
 declaration. Source subtree and variants belong to its `source`; namespace and

@@ -28,6 +28,7 @@ from pxr import Usd, UsdGeom, UsdPhysics
 
 from dexsim.spawn import (
     MeshObjectDesc,
+    ConstraintDesc,
     RigidBodyPhysicsDesc,
     UsdSourceDesc,
     SceneDesc,
@@ -77,7 +78,7 @@ def _manager():
     return manager
 
 
-def _source(constraint_type):
+def _source():
     base = MeshObjectDesc(
         name="base",
         usd=UsdSourceDesc(prim_path="/World/base"),
@@ -89,10 +90,7 @@ def _source(constraint_type):
         usd=UsdSourceDesc(prim_path="/World/child"),
         physics=RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC),
     )
-    constraint = constraint_type()
-    constraint.name = "joint"
-    constraint.body0 = "base"
-    constraint.body1 = "child"
+    constraint = ConstraintDesc(name="joint", body0="base", body1="child")
     scene = SceneDesc(
         mesh_objects=[base, child],
         articulations=[],
@@ -105,16 +103,9 @@ def _source(constraint_type):
 
 def test_sparse_override_keeps_actor_and_pose_and_remaps_constraint(monkeypatch):
     import dexsim.kit.usd
-    import dexsim.spawn
-    import embodichain.lab.sim.spawn.usd as usd_adapter
 
-    class ConstraintDesc:
-        pass
-
-    source = _source(ConstraintDesc)
-    monkeypatch.setattr(dexsim.spawn, "ConstraintDesc", ConstraintDesc, raising=False)
+    source = _source()
     monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: source)
-    monkeypatch.setattr(usd_adapter, "_require_usd_import_contract", lambda: None)
     manager = _manager()
 
     assets = manager.add_usd(
@@ -144,16 +135,9 @@ def test_sparse_override_keeps_actor_and_pose_and_remaps_constraint(monkeypatch)
 
 def test_unknown_override_target_is_rejected_before_declaration(monkeypatch):
     import dexsim.kit.usd
-    import dexsim.spawn
-    import embodichain.lab.sim.spawn.usd as usd_adapter
 
-    class ConstraintDesc:
-        pass
-
-    source = _source(ConstraintDesc)
-    monkeypatch.setattr(dexsim.spawn, "ConstraintDesc", ConstraintDesc, raising=False)
+    source = _source()
     monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: source)
-    monkeypatch.setattr(usd_adapter, "_require_usd_import_contract", lambda: None)
     manager = _manager()
 
     with pytest.raises(ValueError, match="missing"):
@@ -596,3 +580,53 @@ def test_visual_rename_does_not_rewrite_newton_articulation_body_names(monkeypat
     assert robot.links[0].name == "A"
     assert source.newton.body_order == ["A"]
     assert source.newton.equalities[0].object1 == "A"
+
+
+@pytest.mark.parametrize(
+    "override,preserve_source",
+    [
+        ({}, True),
+        ({"init_pos": (0, 0, 0)}, False),
+        ({"init_rot": (0, 0, 0)}, False),
+        ({"init_local_pose": np.eye(4)}, False),
+        ({"source_pose_mode": "config"}, False),
+        ({"source_pose_mode": "preserve", "init_pos": (0, 0, 0)}, True),
+    ],
+    ids=[
+        "omitted",
+        "zero-position",
+        "zero-rotation",
+        "identity-matrix",
+        "config-mode",
+        "preserve-mode",
+    ],
+)
+def test_sparse_override_preserves_explicit_zero_placement(
+    monkeypatch, override, preserve_source
+):
+    import dexsim.kit.usd
+    from scipy.spatial.transform import Rotation
+
+    authored = np.eye(4, dtype=np.float32)
+    authored[:3, :3] = Rotation.from_euler("Z", 17, degrees=True).as_matrix()
+    authored[0, 3] = 2
+    descriptor = MeshObjectDesc(
+        name="body",
+        pose=authored.copy(),
+        usd=UsdSourceDesc(prim_path="/Body"),
+        physics=RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC),
+    )
+    monkeypatch.setattr(
+        dexsim.kit.usd,
+        "parse_usd",
+        lambda *args, **kwargs: SceneDesc(mesh_objects=[descriptor]),
+    )
+    result = _manager().add_usd(
+        UsdImportCfg(
+            name="scene",
+            source=UsdSourceCfg(file_path="scene.usda"),
+            asset_cfgs={"/Body": override},
+        )
+    )
+    expected = authored if preserve_source else np.eye(4)
+    np.testing.assert_allclose(result["/Body"].cfg.init_local_pose, expected, atol=1e-6)

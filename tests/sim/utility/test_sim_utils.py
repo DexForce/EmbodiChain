@@ -80,3 +80,26 @@ def test_mesh_collision_acd_method_is_forwarded_to_dexsim() -> None:
 
     assert arena.acd_kwargs is not None
     assert arena.acd_kwargs["method"] == "vhacd"
+
+
+def test_decoded_ordinary_mesh_defaults_work_with_legacy_loader() -> None:
+    from dexsim.types import ActorType
+
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "mesh",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": _MESH_PATH,
+                "collision": {
+                    "approximation": "convex_decomposition",
+                    "max_hulls": _CONVEX_HULL_COUNT,
+                },
+            },
+        }
+    )
+    arena = _FakeArena()
+    objects = load_mesh_objects_from_cfg(cfg, [arena])
+    assert objects[0].name == "mesh_0"
+    assert cfg.to_dexsim_body_type() == ActorType.DYNAMIC
+    assert cfg.body_scale == (1.0, 1.0, 1.0)

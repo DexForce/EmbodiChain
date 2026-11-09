@@ -34,6 +34,7 @@ from dexsim.types import ActorType
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ObjectBaseCfg,
     RigidObjectCfg,
     VisualObjectCfg,
     UsdSourceCfg,
@@ -103,6 +104,20 @@ def _source_pose(
     return configured
 
 
+def _set_resolved_usd_pose(cfg: ObjectBaseCfg, pose: np.ndarray) -> None:
+    """Keep a resolved runtime config reusable as an absolute placement.
+
+    Import callers retain their original intent in their own config. The
+    returned facade config represents the effective placement, including any
+    scene transform, so reimporting it must not apply source placement again.
+    """
+    cfg.init_local_pose = pose.copy()
+    cfg.source_pose_mode = "config"
+    source = getattr(cfg, "source", None)
+    if source is not None:
+        source.pose_mode = "auto"
+
+
 def _deformable_desc_from_usd(cfg: DeformableObjectCfg):
     if cfg.source is None:
         raise ValueError("USD deformables require a source configuration.")
@@ -140,7 +155,7 @@ def _configure_deformable_usd(cfg: DeformableObjectCfg, descriptor) -> None:
         )
     descriptor.name = _required_uid(cfg.uid, "Deformable")
     descriptor.pose = _source_pose(cfg, descriptor.pose)
-    cfg.init_local_pose = descriptor.pose.copy()
+    _set_resolved_usd_pose(cfg, descriptor.pose)
     if cfg.validate_mesh:
         descriptor.validate_mesh = True
     if cfg.particle_radius is not None:
@@ -226,7 +241,7 @@ def visual_desc_from_usd(
     )
     desc.name = _required_uid(cfg.uid, "Visual object")
     desc.pose = _source_pose(cfg, desc.pose)
-    cfg.init_local_pose = desc.pose.copy()
+    _set_resolved_usd_pose(cfg, desc.pose)
     desc.per_env = per_env
     desc.physics = None
     desc.collisions = []
@@ -277,7 +292,7 @@ def _configure_rigid_usd(
 
     desc.name = uid
     desc.pose = _source_pose(cfg, desc.pose)
-    cfg.init_local_pose = desc.pose.copy()
+    _set_resolved_usd_pose(cfg, desc.pose)
     desc.per_env = per_env
     materials = _namespace_materials(desc.renders, scene.materials, uid)
 
@@ -393,7 +408,7 @@ def _configure_articulation_usd(
     cfg.uid = uid
     desc.name = uid
     desc.pose = _source_pose(cfg, desc.pose)
-    cfg.init_local_pose = desc.pose.copy()
+    _set_resolved_usd_pose(cfg, desc.pose)
     desc.per_env = per_env
     renders = [visual for link in desc.links for visual in link.visuals]
     materials = _namespace_materials(renders, scene.materials, uid)

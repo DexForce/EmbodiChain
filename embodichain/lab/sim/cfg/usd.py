@@ -66,7 +66,12 @@ class UsdImportCfg:
         | VisualObjectCfg
         | dict[str, Any],
     ] = field(default_factory=dict)
-    """Sparse overrides or typed asset configurations keyed by source prim path."""
+    """Sparse overrides or typed asset configurations keyed by source prim path.
+
+    In sparse mappings with ``auto`` placement, explicit ``init_pos`` or
+    ``init_rot`` keys select the configured pose, including zero values.
+    Omitted pose fields retain source placement.
+    """
 
     robot_cfgs: dict[str, RobotCfg] = field(default_factory=dict)
     """Robot metadata bindings; source physics and placement are preserved."""

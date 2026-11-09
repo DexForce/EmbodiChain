@@ -399,14 +399,25 @@ def test_singleton_translation_captures_resolved_reset_pose(monkeypatch, kind):
     )
     cfg = config_type(
         uid="runtime",
-        source=UsdSourceCfg(file_path="scene.usda"),
+        source=UsdSourceCfg(
+            file_path="scene.usda",
+            pose_mode="offset" if kind in ("volume", "surface") else "auto",
+        ),
+        source_pose_mode="auto" if kind in ("volume", "surface") else "offset",
+        init_pos=(1, 2, -1),
     )
-    expected = descriptor.pose.copy()
+    authored = descriptor.pose.copy()
+    expected = authored.copy()
+    expected[:3, 3] += (1, 2, -1)
     resolved, _ = translate(cfg)
     np.testing.assert_allclose(resolved.pose, expected)
     np.testing.assert_allclose(cfg.init_local_pose, expected)
     resolved.pose[0, 3] += 10
     np.testing.assert_allclose(cfg.init_local_pose, expected)
+
+    descriptor.pose = authored.copy()
+    reused, _ = translate(cfg.copy())
+    np.testing.assert_allclose(reused.pose, expected)
 
 
 def test_source_placement_option_keeps_legacy_positional_shape():

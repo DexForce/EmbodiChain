@@ -316,16 +316,9 @@ class TestUsdCUDA(BaseUsdTest):
         self.setup_simulation("cuda")
 
 
-@pytest.mark.parametrize("kind", ["rigid", "articulation"])
-@pytest.mark.parametrize("pose_mode", ["auto", "offset"])
-def test_singleton_authored_pose_survives_binding_and_reset(
-    tmp_path: Path, kind: str, pose_mode: str
-) -> None:
-    """Source placement is the native binding and reset baseline."""
+def _write_placed_usd(path: Path, kind: str) -> None:
     from pxr import Usd, UsdGeom, UsdPhysics
-    from embodichain.lab.sim.cfg import UsdSourceCfg
 
-    path = tmp_path / "placed.usda"
     stage = Usd.Stage.CreateNew(str(path))
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
@@ -352,6 +345,18 @@ def test_singleton_authored_pose_survives_binding_and_reset(
         cube.CreateSizeAttr(0.1)
         UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
     stage.GetRootLayer().Save()
+
+
+@pytest.mark.parametrize("kind", ["rigid", "articulation"])
+@pytest.mark.parametrize("pose_mode", ["auto", "offset"])
+def test_singleton_authored_pose_survives_binding_and_reset(
+    tmp_path: Path, kind: str, pose_mode: str
+) -> None:
+    """Source placement is the native binding and reset baseline."""
+    from embodichain.lab.sim.cfg import UsdSourceCfg
+
+    path = tmp_path / "placed.usda"
+    _write_placed_usd(path, kind)
     angle = math.radians(35.0)
     expected = torch.tensor(
         [
@@ -411,9 +416,63 @@ def test_singleton_authored_pose_survives_binding_and_reset(
             torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
             assert cfg.init_local_pose is None
             _check_environment(current, selected, set())
+            asset = sim.replace_rigid_object(asset.cfg.copy())
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+            asset.reset()
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
     finally:
         sim.destroy(exit_process=False)
         asset = None
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_scene_import_returned_cfg_keeps_scene_placement_on_replacement(
+    tmp_path: Path, legacy: bool
+) -> None:
+    import numpy as np
+    from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+
+    path = tmp_path / "scene.usda"
+    _write_placed_usd(path, "rigid")
+    scene_pose = np.eye(4, dtype=np.float32)
+    scene_pose[0, 3] = 1
+    expected = torch.eye(4, dtype=torch.float32).unsqueeze(0)
+    angle = math.radians(35)
+    expected[0, :3, :3] = torch.tensor(
+        [
+            [math.cos(angle), -math.sin(angle), 0],
+            [math.sin(angle), math.cos(angle), 0],
+            [0, 0, 1],
+        ]
+    )
+    expected[0, :3, 3] = torch.tensor([3, -1, 3])
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device="cpu", num_envs=1)
+    )
+    imported = asset = None
+    try:
+        if legacy:
+            imported = sim.add_usd("scene", str(path), pose=scene_pose)
+        else:
+            imported = sim.add_usd(
+                UsdImportCfg(
+                    name="scene",
+                    source=UsdSourceCfg(file_path=str(path)),
+                    pose=scene_pose,
+                )
+            )
+        asset = imported["/Asset"]
+        sim.prepare()
+        torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+        for _ in range(2):
+            asset = sim.replace_rigid_object(asset.cfg.copy())
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+            asset.reset()
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+    finally:
+        sim.destroy(exit_process=False)
+        imported = asset = None
         SimulationManager.flush_cleanup_queue()
 
 

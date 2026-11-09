@@ -63,7 +63,11 @@ class ObjectBaseCfg:
     source_pose_mode: Literal["auto", "config", "preserve", "offset"] = field(
         default="auto", kw_only=True
     )
-    """USD placement: retain an unset pose, replace it, preserve it, or offset it."""
+    """USD input placement: retain an unset pose, replace, preserve, or offset it.
+
+    Imported facades use ``"config"`` with their resolved ``init_local_pose``
+    so reusing the returned configuration preserves its effective placement.
+    """
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> ObjectBaseCfg:

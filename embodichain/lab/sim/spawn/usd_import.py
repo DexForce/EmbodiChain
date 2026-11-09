@@ -52,12 +52,13 @@ from embodichain.lab.sim.objects import (
     SurfaceDeformableObject,
 )
 from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
-from .descriptors import configure_articulation_desc
+from .descriptors import _pose_from_cfg, configure_articulation_desc
 from .usd import (
     _configure_articulation_usd,
     _configure_rigid_usd,
     _parse_usd_source,
     _source_pose,
+    _set_resolved_usd_pose,
 )
 
 if TYPE_CHECKING:
@@ -248,6 +249,8 @@ def _compile_usd_import(
             cfg = config_type.from_dict(data)
             if data.get("init_local_pose") is None:
                 cfg.init_local_pose = None
+                if {"init_pos", "init_rot"}.intersection(data):
+                    cfg.init_local_pose = _pose_from_cfg(cfg)
             if not is_deformable and "body_scale" not in data:
                 cfg.body_scale = None
             if (
@@ -406,7 +409,7 @@ def _compile_usd_import(
             facade_type = RigidObject
         if root_pose is not None:
             descriptor.pose = root_pose @ descriptor.pose
-        cfg.init_local_pose = descriptor.pose.copy()
+        _set_resolved_usd_pose(cfg, descriptor.pose)
         source.materials.update(materials)
         if isinstance(cfg, RobotCfg) and cfg.enable_sensor:
             for sensor_cfg in cfg.sensors:

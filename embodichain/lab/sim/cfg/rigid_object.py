@@ -76,13 +76,13 @@ class RigidObjectCfg(ObjectBaseCfg):
     """
 
     def __post_init__(self) -> None:
-        if self.shape is None and self.source is None:
+        self._resolve_procedural_defaults()
+
+    def _resolve_procedural_defaults(self) -> None:
+        """Resolve defaults only after ordinary geometry is assembled."""
+        if self.shape is None or self.source is not None:
             return
-        path = (
-            self.source.file_path
-            if self.source is not None
-            else getattr(self.shape, "fpath", None)
-        )
+        path = getattr(self.shape, "fpath", None)
         if path is None or not str(path).lower().endswith(
             (".usd", ".usda", ".usdc", ".usdz")
         ):
@@ -143,6 +143,7 @@ class RigidObjectCfg(ObjectBaseCfg):
                 cfg.body_scale = None
             if not {"init_pos", "init_rot", "init_local_pose"}.intersection(data):
                 cfg.init_local_pose = None
+        cfg._resolve_procedural_defaults()
         return cfg
 
     def to_dexsim_body_type(self) -> ActorType:
