@@ -1667,3 +1667,87 @@ def test_fixed_cartesian_policy_requires_explicit_interpolation_strategy() -> No
             interpolation_dt=0.02,
             cartesian_linear=True,
         )
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, float("inf"), float("nan"), True])
+def test_planning_budget_rejects_invalid_deadlines(value):
+    from embodichain.lab.sim.atomic_actions import PlanningBudget
+
+    with pytest.raises(ValueError, match="finite and positive"):
+        PlanningBudget(value)
+
+
+def test_planning_recovery_descriptor_validates_exact_tuple_and_fingerprint():
+    from embodichain.lab.sim.atomic_actions import PlanningRecovery, SkillDescriptor
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    @dataclass(frozen=True, slots=True)
+    class First(PlanningRecovery):
+        pass
+
+    @dataclass(frozen=True, slots=True)
+    class Second(PlanningRecovery):
+        pass
+
+    first = SkillDescriptor(
+        "unit", EndEffectorPoseGoal, ActionOptions, planning_recovery_type=First
+    )
+    both = replace(first, planning_recovery_type=(First, Second))
+    first.validate_planning_recovery(
+        RecoveryPolicy(planning_recovery=First("one", "unit", 1))
+    )
+    both.validate_planning_recovery(
+        RecoveryPolicy(planning_recovery=Second("two", "unit", 1))
+    )
+    with pytest.raises(TypeError, match="does not support planning recovery Second"):
+        first.validate_planning_recovery(
+            RecoveryPolicy(planning_recovery=Second("two", "unit", 1))
+        )
+    with pytest.raises(ValueError, match="cannot be used by skill"):
+        both.validate_planning_recovery(
+            RecoveryPolicy(planning_recovery=First("one", "other", 1))
+        )
+    with pytest.raises(
+        TypeError, match="does not support planning recovery PlanningRecovery"
+    ):
+        both.validate_planning_recovery(
+            RecoveryPolicy(planning_recovery=PlanningRecovery("unknown", "unit", 1))
+        )
+    assert _canonical_value(first) != _canonical_value(both)
+    assert "Second" in str(_canonical_value(both))
+    for types in ((), (First, First), (First, object)):
+        with pytest.raises(TypeError, match="distinct PlanningRecovery"):
+            replace(first, planning_recovery_type=types)
+
+
+def test_planning_recovery_rejects_nested_mutable_or_callable_data():
+    from embodichain.lab.sim.atomic_actions import PlanningRecovery
+
+    @dataclass(frozen=True, slots=True)
+    class Mutable(PlanningRecovery):
+        payload: object
+
+    for payload in ([1], (lambda: None,), (float("nan"),)):
+        with pytest.raises(TypeError, match="immutable finite"):
+            Mutable("unit", "unit", 1, payload)
+
+
+def test_cartesian_policy_distinguishes_unsampled_keyframes_from_exact_samples():
+    policy = MotionPolicy(
+        interpolation_mode="fixed_grid",
+        ik_seed_mode="sequential",
+        acceleration_limit=None,
+    )
+    inputs = dict(
+        start_qpos=torch.zeros(1, 6), control_part="arm", interpolation_dt=0.04
+    )
+    samples = policy.to_motion_gen_options(**inputs, cartesian_linear=True)
+    keyframes = policy.to_motion_gen_options(**inputs, cartesian_keyframes=True)
+    assert samples.is_linear and samples.preserve_cartesian_samples
+    assert keyframes.is_linear and not keyframes.preserve_cartesian_samples
+    with pytest.raises(ValueError, match="both samples and keyframes"):
+        policy.to_motion_gen_options(
+            **inputs, cartesian_linear=True, cartesian_keyframes=True
+        )
+    with pytest.raises(TypeError, match="cartesian_keyframes"):
+        policy.to_motion_gen_options(**inputs, cartesian_keyframes=1)

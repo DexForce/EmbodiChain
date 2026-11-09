@@ -202,7 +202,42 @@ def test_opposite_arm_tcp_is_rejected_even_when_it_is_stationary(tmp_path):
 
     with pytest.raises(ValueError, match="fixed URDF joints"):
         capture.build_parallel_jaw_hand_geometry(robot, cfg=cfg)
+    robot.get_link_pose = Mock(
+        side_effect=AssertionError("Do not read unrelated pads.")
+    )
+    with pytest.raises(ValueError, match="fixed URDF joints"):
+        capture.ordered_pad_line_world(robot, cfg=cfg)
+    robot.get_link_pose.assert_not_called()
     assert robot.reads == 0 and robot.calls == []
+
+
+def test_ordered_pad_line_reads_only_declared_poses_without_sampling(
+    tmp_path, monkeypatch
+):
+    robot, cfg = _case(tmp_path)
+    first, second = torch.eye(4).repeat(2, 1, 1), torch.eye(4).repeat(2, 1, 1)
+    first[:, :3, 3] = torch.tensor([[1, 2, 3], [2, 0, -1]])
+    second[:, :3, 3] = torch.tensor([[4, 0, 4], [1, 5, 1]])
+    poses = dict(zip(cfg.pad_link_names, (first, second), strict=True))
+    robot.get_link_pose = Mock(side_effect=lambda name, **kwargs: poses[name])
+    robot.compute_fk = Mock(
+        side_effect=AssertionError("Pad-line reading needs no FK grid.")
+    )
+    surfaces = Mock(
+        side_effect=AssertionError("Pad-line reading needs no mesh samples.")
+    )
+    monkeypatch.setattr(capture, "sample_urdf_collision_surfaces", surfaces)
+    expected = torch.tensor([[3, -2, 1], [-1, 5, 2]], dtype=torch.float32)
+    line = capture.ordered_pad_line_world(robot, cfg=cfg)
+    torch.testing.assert_close(line, expected)
+    line.zero_()
+    cfg.pad_link_names = tuple(reversed(cfg.pad_link_names))
+    torch.testing.assert_close(
+        capture.ordered_pad_line_world(robot, cfg=cfg), -expected
+    )
+    assert robot.reads == 0
+    robot.compute_fk.assert_not_called()
+    surfaces.assert_not_called()
 
 
 def test_moving_finger_tcp_is_rejected_before_surface_capture(tmp_path, monkeypatch):

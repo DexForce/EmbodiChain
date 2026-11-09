@@ -313,14 +313,12 @@ def test_materialize_edit_preserves_client_ownership_when_setup_fails(
         updated_scene_graph=graph,
     )
     image_client = _OwnedClient()
-    monkeypatch.setattr(api.ImageGenerationClient, "from_dotenv", lambda: image_client)
+    monkeypatch.setattr(api, "ImageFacade", lambda _: image_client)
 
-    def fail_geometry_setup():
+    def fail_geometry_setup(_):
         raise RuntimeError("geometry configuration unavailable")
 
-    monkeypatch.setattr(
-        api.GeometryGenerationClient, "from_dotenv", fail_geometry_setup
-    )
+    monkeypatch.setattr(api, "GeometryFacade", fail_geometry_setup)
     with pytest.raises(RuntimeError, match="geometry configuration unavailable"):
         api.materialize_edit(
             package,
@@ -384,9 +382,9 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
 
     articulated = _OwnedClient()
     monkeypatch.setattr(
-        api.ArticulatedGenerationClient,
-        "from_dotenv",
-        lambda: articulated,
+        api,
+        "ArticulationFacade",
+        lambda _: articulated,
     )
 
     def fake_generate_scene_and_refine(**kwargs):
@@ -452,8 +450,8 @@ def test_materialize_rejects_stale_observations_before_any_clients(
     def unexpected(*args, **kwargs):
         raise AssertionError("stale observations must fail before client setup")
 
-    monkeypatch.setattr(api.OpenAICompatibleVLM, "from_dotenv", unexpected)
-    monkeypatch.setattr(api.GeometryGenerationClient, "from_dotenv", unexpected)
+    monkeypatch.setattr(api, "VisionFacade", unexpected)
+    monkeypatch.setattr(api, "GeometryFacade", unexpected)
     with pytest.raises(ValueError, match="stale or invalid"):
         api.materialize_blueprint(package)
 
@@ -502,12 +500,12 @@ def test_layout_only_edit_requires_no_generation_clients(
         raise AssertionError("layout-only edits cannot depend on generation services")
 
     for client in (
-        api.OpenAICompatibleVLM,
-        api.ImageGenerationClient,
-        api.GeometryGenerationClient,
-        api.ImageSegmentationClient,
+        "VisionFacade",
+        "ImageFacade",
+        "GeometryFacade",
+        "SegmentationFacade",
     ):
-        monkeypatch.setattr(client, "from_dotenv", unexpected)
+        monkeypatch.setattr(api, client, unexpected)
     monkeypatch.setattr(api, "prepare_scene_edit_assets", unexpected)
     monkeypatch.setattr(api, "edit_layout", lambda **kwargs: kwargs["scene"])
     monkeypatch.setattr(

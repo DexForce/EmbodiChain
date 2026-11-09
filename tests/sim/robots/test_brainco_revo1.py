@@ -90,7 +90,7 @@ def local_hands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Pa
         side = "left" if "LeftHand" in reference else "right"
         return str(paths[side])
 
-    monkeypatch.setattr(revo1, "get_data_path", local_path)
+    monkeypatch.setattr(revo1.data, "get_data_path", local_path)
     return paths
 
 
@@ -160,7 +160,7 @@ def test_revo1_defaults_overrides_and_instances_are_isolated(
     def unexpected_download(reference: str) -> str:
         raise AssertionError(f"Local fpath must bypass downloads: {reference}")
 
-    monkeypatch.setattr(revo1, "get_data_path", unexpected_download)
+    monkeypatch.setattr(revo1.data, "get_data_path", unexpected_download)
     custom = resolve_robot_cfg(
         "BrainCoRevo1",
         {
@@ -242,6 +242,11 @@ class TestRevo1Simulation:
         else:
             cfg = resolve_robot_cfg("BrainCoRevo1", variant=selection)
             part = "eef"
+            source_joints = {
+                joint.get("name")
+                for joint in ET.parse(cfg.fpath).getroot().findall("joint")
+            }
+            assert set(cfg.control_parts[part]) <= source_joints, cfg.fpath
         robot = self.sim.add_robot(cfg=cfg)
         self.sim.prepare()
         initial_qpos = robot.get_qpos().clone()

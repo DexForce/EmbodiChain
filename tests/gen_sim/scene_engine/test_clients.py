@@ -23,10 +23,10 @@ from typing import Any
 
 import pytest
 
-from embodichain.gen_sim.asset_engine.clients import articulated_generation
-from embodichain.gen_sim.scene_engine.clients import geometry_generation
-from embodichain.gen_sim.scene_engine.clients import image_generation
-from embodichain.gen_sim.scene_engine.clients import image_segmentation
+from embodichain.gen_sim.services.adapters import articulated_generation
+from embodichain.gen_sim.services.adapters import geometry_generation
+from embodichain.gen_sim.services.adapters import image_generation
+from embodichain.gen_sim.services.adapters import image_segmentation
 from embodichain.gen_sim.scene_engine.llms import load_config
 
 
@@ -402,12 +402,14 @@ def test_image_generation_client_rejects_non_png_response(tmp_path: Path) -> Non
         session=session,
     )
 
-    with pytest.raises(RuntimeError, match="request failed after 1 attempts") as exc:
+    from embodichain.gen_sim.services import ServiceResponseError
+
+    with pytest.raises(ServiceResponseError, match="response is not a PNG image"):
         client.generate_image_by_prompt(
             prompt="a red mug on a wooden table",
             output_path=tmp_path / "generated.png",
         )
-    assert "response is not a PNG image" in str(exc.value.__cause__)
+    assert not (tmp_path / "generated.png").exists()
 
 
 def test_segmentation_client_posts_prompt_and_returns_rle_masks(tmp_path: Path) -> None:

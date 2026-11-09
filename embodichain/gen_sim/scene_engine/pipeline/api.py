@@ -18,6 +18,16 @@
 
 from __future__ import annotations
 
+from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
+from embodichain.gen_sim.services.compat import (
+    VisionFacade,
+    GeometryFacade,
+    ImageFacade,
+    SegmentationFacade,
+    ArticulationFacade,
+)
+
+
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
@@ -25,24 +35,14 @@ import json
 from pathlib import Path
 from typing import Any, Final
 
-from embodichain.gen_sim.asset_engine.clients.articulated_generation import (
-    ArticulatedGenerationClient,
-)
-from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
-    GeometryGenerationClient,
-)
-from embodichain.gen_sim.scene_engine.clients.image_generation import (
-    ImageGenerationClient,
-)
-from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
-    ImageSegmentationClient,
-)
+from embodichain.gen_sim.services.compat import ArticulationClient
+from embodichain.gen_sim.services.compat import GeometryClient
+from embodichain.gen_sim.services.compat import ImageClient
+from embodichain.gen_sim.services.compat import SegmentationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation import (
     prepare_scene_edit_assets,
 )
@@ -130,12 +130,14 @@ class SceneMaterialization:
     scene_config_path: Path
 
 
+@service_entry
 def analyze_image(
     image_path: str | Path,
     output_root: str | Path,
     *,
-    vlm_client: OpenAICompatibleVLM | None = None,
-    image_segmentation_client: ImageSegmentationClient | None = None,
+    vlm_client: VisionClient | None = None,
+    image_segmentation_client: SegmentationClient | None = None,
+    services: GenSimServices | None = None,
 ) -> SceneBlueprintPackage:
     """Understand an image and persist the pre-generation semantic blueprint.
 
@@ -151,8 +153,8 @@ def analyze_image(
     resolved_image = Path(image_path).expanduser().resolve()
     resolved_output = Path(output_root).expanduser().resolve()
     resolved_output.mkdir(parents=True, exist_ok=True)
-    effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
-    segmentation = image_segmentation_client or ImageSegmentationClient.from_dotenv()
+    effective_vlm = vlm_client or VisionFacade(services, "scene_understanding")
+    segmentation = image_segmentation_client or SegmentationFacade(services)
     owns_segmentation = image_segmentation_client is None
     log_info("Starting Scene Understanding")
     try:
@@ -194,12 +196,14 @@ def analyze_image(
     )
 
 
+@service_entry
 def materialize_blueprint(
     blueprint: SceneBlueprintPackage,
     *,
-    vlm_client: OpenAICompatibleVLM | None = None,
-    geometry_generation_client: GeometryGenerationClient | None = None,
-    articulated_generation_client: ArticulatedGenerationClient | None = None,
+    vlm_client: VisionClient | None = None,
+    geometry_generation_client: GeometryClient | None = None,
+    articulated_generation_client: ArticulationClient | None = None,
+    services: GenSimServices | None = None,
 ) -> SceneMaterialization:
     """Generate assets and layout for one image-derived blueprint.
 
@@ -219,15 +223,15 @@ def materialize_blueprint(
     _verify_blueprint_artifacts(blueprint)
     scene = deepcopy(blueprint.scene)
     scene_graph = deepcopy(blueprint.scene_graph)
-    effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
-    geometry = geometry_generation_client or GeometryGenerationClient.from_dotenv()
+    effective_vlm = vlm_client or VisionFacade(services, "scene_understanding")
+    geometry = geometry_generation_client or GeometryFacade(services)
     has_articulated_objects = any(item.is_articulated for item in scene.objects)
     articulated = articulated_generation_client if has_articulated_objects else None
     owns_articulated = False
     log_info("Starting Objects + Coarse Layout Generation")
     try:
         if has_articulated_objects and articulated is None:
-            articulated = ArticulatedGenerationClient.from_dotenv()
+            articulated = ArticulationFacade(services)
             owns_articulated = True
         geometry.check_health()
         if articulated is not None:
@@ -254,11 +258,13 @@ def materialize_blueprint(
     )
 
 
+@service_entry
 def analyze_edit(
     *,
     output_root: str | Path,
     edit_prompt: str,
-    vlm_client: OpenAICompatibleVLM | None = None,
+    vlm_client: VisionClient | None = None,
+    services: GenSimServices | None = None,
 ) -> SceneEditBlueprintPackage:
     """Interpret and persist one edit against an already generated scene.
 
@@ -280,7 +286,7 @@ def analyze_edit(
     scene, scene_graph = SceneExportImporter(
         output_root=resolved_output
     ).import_scene_and_graph()
-    effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
+    effective_vlm = vlm_client or VisionFacade(services, "scene_edit")
     log_info("Starting Edit Understanding")
     scene_edit_plan, updated_scene_graph = understand_scene_edit(
         scene=scene,
@@ -309,13 +315,15 @@ def analyze_edit(
     )
 
 
+@service_entry
 def materialize_edit(
     blueprint: SceneEditBlueprintPackage,
     *,
-    vlm_client: OpenAICompatibleVLM | None = None,
-    image_generation_client: ImageGenerationClient | None = None,
-    geometry_generation_client: GeometryGenerationClient | None = None,
-    image_segmentation_client: ImageSegmentationClient | None = None,
+    vlm_client: VisionClient | None = None,
+    image_generation_client: ImageClient | None = None,
+    geometry_generation_client: GeometryClient | None = None,
+    image_segmentation_client: SegmentationClient | None = None,
+    services: GenSimServices | None = None,
 ) -> SceneMaterialization:
     """Generate added assets, apply layout edits, and export the new revision.
 
@@ -334,20 +342,14 @@ def materialize_edit(
     owned_clients = []
     added_assets = []
     if any(operation.op == "add" for operation in scene_edit_plan.operations):
-        effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
+        effective_vlm = vlm_client or VisionFacade(services, "scene_edit")
         log_info("Starting Objects Preparation")
         try:
-            image_generation = (
-                image_generation_client or ImageGenerationClient.from_dotenv()
-            )
+            image_generation = image_generation_client or ImageFacade(services)
             owned_clients.append((image_generation, image_generation_client is None))
-            geometry = (
-                geometry_generation_client or GeometryGenerationClient.from_dotenv()
-            )
+            geometry = geometry_generation_client or GeometryFacade(services)
             owned_clients.append((geometry, geometry_generation_client is None))
-            segmentation = (
-                image_segmentation_client or ImageSegmentationClient.from_dotenv()
-            )
+            segmentation = image_segmentation_client or SegmentationFacade(services)
             owned_clients.append((segmentation, image_segmentation_client is None))
             for client, _ in owned_clients:
                 client.check_health()

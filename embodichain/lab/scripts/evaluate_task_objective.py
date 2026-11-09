@@ -365,10 +365,12 @@ def _run(args: argparse.Namespace) -> Path:
             if env.expert_action_spec.joint_command_mode == "position_velocity":
                 command["qvel"] = torch.zeros_like(qpos)
             for _ in range(tail_steps):
-                env.step(ControllerAction(TensorDict(command, batch_size=[1])))
-                env._demo_active_mask.fill_(True)
-                env._write_trajectory_step()
-                env._demo_active_mask.fill_(False)
+                env.step(
+                    ControllerAction(TensorDict(command, batch_size=[1])),
+                    recording_active_mask=torch.ones(
+                        1, dtype=torch.bool, device=env.device
+                    ),
+                )
         finally:
             env._demo_no_auto_reset = prior_guard
             env._demo_active_mask.copy_(prior_active)

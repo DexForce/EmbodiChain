@@ -1,5 +1,11 @@
 # Published container images
 
+> Historical qualification below includes Python 3.10 results from an earlier
+> dependency profile. This checkout requires Python 3.11 or newer;
+> the main CI uses Python 3.12.
+> The current Docker locks select DexSim 0.6.0rc1; the published image digests
+> and qualification runs below describe the earlier DexSim 0.5.1rc1 images.
+
 Source commit: `c42e8a0b0857ae00aeeb21d414d30318abb2e171`.
 Implementation: [PR #914](https://github.com/DexForce/EmbodiChain/pull/914),
 which incorporates [PR #911](https://github.com/DexForce/EmbodiChain/pull/911).

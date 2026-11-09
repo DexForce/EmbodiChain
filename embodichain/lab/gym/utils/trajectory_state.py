@@ -23,14 +23,24 @@ All seven-element root and rigid-object poses use EmbodiChain's
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias, TYPE_CHECKING
+from dataclasses import asdict
 
 import torch
 from tensordict import TensorDictBase
 
 from embodichain.utils import logger
 
-__all__ = ["capture_trajectory_state", "restore_trajectory_state"]
+if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+
+__all__ = [
+    "capture_trajectory_state",
+    "restore_trajectory_state",
+    "trajectory_observation_cfgs",
+    "export_observation_history",
+]
 
 
 class _TrajectoryEnv(Protocol):
@@ -188,3 +198,76 @@ def restore_trajectory_state(
             logger.log_warning(
                 f"Scene rigid object '{uid}' is not in the trajectory; leaving initial state."
             )
+
+
+def trajectory_observation_cfgs(
+    env: _TrajectoryEnv, uids: list[str] | None = None
+) -> dict[str, ObservationCfg]:
+    """Declare replay fields through the same raw observation functors as policy.
+
+    Args:
+        env: Host exposing robot and scene registries for schema assembly.
+        uids: Optional allow-list for non-robot entities.
+
+    Returns:
+        Recording-only add functors. No physical state is acquired here; legacy
+        trajectory field paths are export names, not another acquisition path.
+    """
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg, SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.observations import get_entity_state
+
+    result = {}
+
+    def add(prefix: str, uid: str, quantities: tuple[str, ...]) -> None:
+        for quantity in quantities:
+            field = (
+                "root_pose"
+                if quantity == "pose" and prefix != "rigid_objects"
+                else quantity
+            )
+            name = f"{prefix}/{uid}/{field}" if prefix != "robot" else f"robot/{field}"
+            result[f"recording:{name}"] = ObservationCfg(
+                func=get_entity_state,
+                mode="add",
+                name=name,
+                params={"entity_cfg": SceneEntityCfg(uid=uid), "quantity": quantity},
+                consumers=("recording",),
+            )
+
+    add("robot", env.robot.uid, ("pose", "qpos", "qvel"))
+    for uid in env.sim._articulations:
+        if uids is None or uid in uids:
+            add("articulations", uid, ("pose", "qpos", "qvel"))
+    for uid in env.sim._rigid_objects:
+        if uids is None or uid in uids:
+            add("rigid_objects", uid, ("pose", "lin_vel", "ang_vel"))
+    return result
+
+
+def export_observation_history(
+    observations: ObservationManager,
+    env_ids: list[int] | None = None,
+    *,
+    device: str | torch.device = "cpu",
+) -> dict[str, Any]:
+    """Project numeric history through its single observation schema for export.
+
+    Args:
+        observations: Manager owning the field meanings and canonical IDs.
+        env_ids: Selected original environment rows, or all rows.
+        device: Snapshot destination device.
+
+    Returns:
+        Owned history with source descriptors and alias views. Existing
+        trajectory state projections can share the same snapshot tensors.
+    """
+    snapshot = observations.snapshot_history(env_ids, device=device)
+    fields = snapshot["fields"]
+    for name, values in fields.items():
+        metadata = asdict(observations.schema[name])
+        metadata["dtype"] = str(observations.schema[name].dtype)
+        values["descriptor"] = metadata
+    snapshot["fields"] = {
+        name: fields[field_id] for name, field_id in observations.field_ids.items()
+    }
+    return snapshot

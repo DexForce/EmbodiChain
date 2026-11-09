@@ -48,6 +48,7 @@ checkout is only needed for the separate maintainer checks.
 
 | Your goal | Start here | Continue with |
 |---|---|---|
+| Interpret an instruction and photograph into an unbound semantic task graph | {doc}`/features/generative_sim/task_engine` | {doc}`scene_registry` and {doc}`robot_profiles` for runtime binding |
 | Customize a trajectory in an existing task | {doc}`quickstart` | {doc}`recipes`, then {doc}`troubleshooting` |
 | Learn the language without starting simulation | {doc}`/tutorial/task_program_python` | {doc}`architecture` |
 | Bind a new scene, robot or skill | {doc}`/tutorial/task_program` | {doc}`scene_registry`, {doc}`robot_profiles` |
@@ -73,6 +74,10 @@ Changing an `instruction` changes the description and language annotation;
 the structured calls determine the actions. A new object, robot, unregistered
 call or different motion policy needs integration/deployment work. Follow
 {doc}`/tutorial/task_program` for those changes.
+
+Task Engine produces candidate declarations and a semantic graph for inspection.
+Its image workflow requires a later scene/robot integration before Task Program
+execution; declaration coverage does not establish physical task success.
 
 For later workflows, see {doc}`/guides/offline_expert_datasets` for recording and
 consumption, {doc}`/guides/run_task` for expansion and launcher options, and

@@ -300,6 +300,7 @@ class ToppraPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.JOINT_MOVE})
+    uses_sparse_joint_waypoints = True
     preserve_plan_samples = True
     """Keep the solved native time grid through MotionGenerator normalization.
 
@@ -352,6 +353,7 @@ class ToppraPlanner(BasePlanner):
             control_part=options.control_part,
             dof=dofs,
             batch_size=b,
+            env_ids=getattr(self, "_planning_env_ids", None),
         )
 
         waypoints_tensor = torch.stack([s.qpos for s in target_states], dim=1).to(

@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
 import json
 from pathlib import Path
 
@@ -25,9 +27,7 @@ from PIL import Image, ImageDraw, ImageFont
 from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim.services.compat import VisionClient, vision_for_role
 from embodichain.gen_sim._blender_runtime import _run_blender_job
 
 _RENDER_RESOLUTION = 512
@@ -78,13 +78,13 @@ class VisualYawOptimizer:
         *,
         scene_object: SceneObject,
         baked_scale_y_up: list[float],
-        vlm_client: OpenAICompatibleVLM,
+        vlm_client: VisionClient,
         debug_output_root: str | Path,
         json_max_attempts: int = 3,
     ) -> None:
         self._scene_object = scene_object
         self._baked_scale_y_up = baked_scale_y_up
-        self._vlm_client = vlm_client
+        self._vlm_client = vision_for_role(vlm_client, "scene_asset_orientation")
         self._debug_output_root = Path(debug_output_root).expanduser().resolve()
         self._json_max_attempts = json_max_attempts
 

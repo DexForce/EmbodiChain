@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import torch
 import os
+from functools import lru_cache
 
 from tensordict import TensorDict
 from typing import TYPE_CHECKING, Literal, Union, List, Dict, Sequence
@@ -25,14 +26,180 @@ from typing import TYPE_CHECKING, Literal, Union, List, Dict, Sequence
 from embodichain.lab.sim.objects import RigidObject, Articulation, Robot
 from embodichain.lab.sim.sensors import Camera, StereoCamera
 from embodichain.lab.sim.types import EnvObs
+from embodichain.lab.gym.envs.managers.observation_types import (
+    ObservationDescriptor,
+    ObservationSample,
+)
+from ..observation_manager import _current_capture
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers.events import resolve_dict
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
 from embodichain.utils import logger
 from embodichain.utils.math import quat_from_matrix
 
+__all__ = [
+    "get_entity_state",
+    "get_object_pose",
+    "get_rigid_object_pose",
+    "get_object_body_scale",
+    "get_object_uid",
+    "get_rigid_object_velocity",
+    "normalize_robot_joint_data",
+    "get_sensor_pose_in_robot_frame",
+    "get_sensor_intrinsics",
+    "compute_semantic_mask",
+    "get_robot_eef_pose",
+    "target_position",
+    "compute_exteroception",
+    "get_rigid_object_physics_attributes",
+    "get_articulation_joint_drive",
+]
+
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+
+
+def _entity_state_descriptor(
+    uid: str, obj: object, quantity: str, values: torch.Tensor
+) -> ObservationDescriptor:
+    names = (
+        tuple(getattr(obj, "joint_names", ()))
+        if quantity in ("qpos", "qvel") and obj is not None
+        else ()
+    )
+    return _state_descriptor(
+        uid, quantity, tuple(values.shape[1:]), values.dtype, names
+    )
+
+
+@lru_cache(maxsize=1024)
+def _state_descriptor(
+    uid: str,
+    quantity: str,
+    shape: tuple[int, ...],
+    dtype: torch.dtype,
+    names: tuple[str, ...],
+) -> ObservationDescriptor:
+    # Only immutable schema values are cached; no environment or asset handle.
+    joint = quantity in ("qpos", "qvel")
+    return ObservationDescriptor(
+        uid,
+        quantity,
+        "joint" if joint else "arena",
+        "joint_order" if joint else "xyz_xyzw" if quantity == "pose" else "xyz",
+        (
+            ("joint_units/s" if quantity == "qvel" else "joint_units",)
+            if joint
+            else (
+                ("m", "unitless")
+                if quantity == "pose"
+                else ("m/s",) if quantity == "lin_vel" else ("rad/s",)
+            )
+        ),
+        shape,
+        dtype,
+        names,
+    )
+
+
+def _capture_proprioception(env: EmbodiedEnv, proprioception: TensorDict) -> None:
+    capture = _current_capture.get()
+    if capture is None:
+        return
+    for quantity in ("qpos", "qvel"):
+        if quantity not in proprioception.keys():
+            continue
+        values = proprioception[quantity]
+        descriptor = _entity_state_descriptor(
+            env.robot.uid, env.robot, quantity, values
+        )
+        capture.acquire(
+            ("entity_state", env.robot.uid, quantity),
+            lambda: ObservationSample(
+                descriptor,
+                values,
+                torch.isfinite(values).all(dim=-1),
+                (None,) * env.num_envs,
+            ),
+        )
+
+
+def get_entity_state(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfg: SceneEntityCfg,
+    quantity: Literal["pose", "qpos", "qvel", "lin_vel", "ang_vel"] = "pose",
+) -> ObservationSample:
+    """Acquire a described original state channel for any observation consumer.
+
+    A capture shares the acquisition across aliases, recording and policy pose
+    functors. Missing entities remain invalid, even though policy views retain
+    the historical zero-fill behavior. Joint channels contain the complete
+    asset-defined order, including mimic joints; selectors are rejected rather
+    than silently describing a subset as the complete state.
+
+    Args:
+        env: Environment owning the native scene.
+        obs: Existing policy observations (unused by this raw producer).
+        entity_cfg: Native entity selection without joint/body filtering.
+        quantity: State field in original simulator units and coordinates.
+
+    Returns:
+        Raw values and explicit row validity, before policy transformations.
+    """
+    if quantity not in ("pose", "qpos", "qvel", "lin_vel", "ang_vel"):
+        raise ValueError(f"Unsupported raw state quantity: {quantity!r}.")
+    if entity_cfg.joint_names is not None or entity_cfg.joint_ids != slice(None):
+        raise ValueError("Raw entity state requires the complete joint order.")
+    if entity_cfg.body_names is not None or entity_cfg.body_ids != slice(None):
+        raise ValueError(
+            "Raw entity state requires the complete entity, not selected bodies."
+        )
+    return _read_entity_state(env, entity_cfg.uid, quantity)
+
+
+def _read_entity_state(env: EmbodiedEnv, uid: str, quantity: str) -> ObservationSample:
+
+    def produce() -> ObservationSample:
+        obj = env.sim.get_asset(uid) if uid in env.sim.asset_uids else None
+        joint = quantity in ("qpos", "qvel")
+        if obj is None:
+            width = 0 if joint else 7 if quantity == "pose" else 3
+            values = torch.zeros((env.num_envs, width), device=env.device)
+            valid = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+            errors = (f"Entity {uid!r} is unavailable.",) * env.num_envs
+        else:
+            if quantity == "pose":
+                values = obj.get_local_pose(to_matrix=False)
+            elif joint:
+                values = obj.get_qpos() if quantity == "qpos" else obj.get_qvel()
+            elif getattr(obj, "is_static", False):
+                # Static velocity is exactly zero. Avoid body_state, which
+                # acquires the pose again and concatenates unused state.
+                values = torch.zeros((env.num_envs, 3), device=env.device)
+            else:
+                values = getattr(obj.body_data, quantity)
+            valid = torch.isfinite(values).reshape(env.num_envs, -1).all(dim=-1)
+            if quantity == "pose":
+                valid &= (
+                    (torch.linalg.vector_norm(values[..., 3:], dim=-1) > 0)
+                    .reshape(env.num_envs, -1)
+                    .all(dim=-1)
+                )
+            errors = (None,) * env.num_envs
+        descriptor = _entity_state_descriptor(uid, obj, quantity, values)
+        return ObservationSample(descriptor, values, valid, errors)
+
+    capture = _current_capture.get()
+    if capture is None:
+        sample = produce()
+        return ObservationSample(
+            sample.descriptor,
+            sample.values.detach().clone(),
+            sample.valid.detach().clone(),
+            sample.acquisition_errors,
+        )
+    return capture.acquire(("entity_state", uid, quantity), produce)
 
 
 def get_object_pose(
@@ -54,7 +221,7 @@ def get_object_pose(
             False, returns ``(x, y, z, qx, qy, qz, qw)``.
 
     Returns:
-        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the objects.
+        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing arena poses of the objects.
     """
 
     if entity_cfg.uid not in env.sim.asset_uids:
@@ -67,8 +234,20 @@ def get_object_pose(
                 (env.num_envs, 7), dtype=torch.float32, device=env.device
             )
 
-    obj = env.sim.get_asset(entity_cfg.uid)
+    # Ordinary policy-only queries preserve the existing native conversion.
+    # Explicit boundaries share the canonical pose with recording consumers.
+    if _current_capture.get() is not None:
+        from embodichain.utils.math import xyz_quat_to_4x4_matrix
 
+        sample = _read_entity_state(env, entity_cfg.uid, "pose")
+        return (
+            xyz_quat_to_4x4_matrix(sample.values.reshape(-1, 7)).reshape(
+                *sample.values.shape[:-1], 4, 4
+            )
+            if to_matrix
+            else sample.values.clone()
+        )
+    obj = env.sim.get_asset(entity_cfg.uid)
     return obj.get_local_pose(to_matrix=to_matrix)
 
 
@@ -78,7 +257,7 @@ def get_rigid_object_pose(
     entity_cfg: SceneEntityCfg,
     to_matrix: bool = True,
 ) -> torch.Tensor:
-    """Get the world poses of the rigid objects in the environment.
+    """Get the arena poses of the rigid objects in the environment.
 
     If the rigid object with the specified UID does not exist in the environment,
     a zero tensor will be returned.
@@ -95,7 +274,7 @@ def get_rigid_object_pose(
             False, returns ``(x, y, z, qx, qy, qz, qw)``.
 
     Returns:
-        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the rigid objects.
+        A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing arena poses of the rigid objects.
     """
 
     if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
@@ -108,8 +287,9 @@ def get_rigid_object_pose(
                 (env.num_envs, 7), dtype=torch.float32, device=env.device
             )
 
+    if _current_capture.get() is not None:
+        return get_object_pose(env, obs, entity_cfg, to_matrix=to_matrix)
     obj = env.sim.get_rigid_object(entity_cfg.uid)
-
     return obj.get_local_pose(to_matrix=to_matrix)
 
 

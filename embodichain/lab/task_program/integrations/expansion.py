@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass, replace
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
@@ -678,6 +680,12 @@ class TaskProgramMappedRetimeFactory:
                     "prototype phase permissions must contain operator sequences"
                 )
             free = FREE_PHASES.get(plan.skill_id, frozenset())
+            if source.get("demo_skill") is not None:
+                free = {
+                    name
+                    for name, kind in source["demo_skill_phase_kinds"].items()
+                    if kind == "free"
+                }
             selected = {
                 name
                 for name in segment_names
@@ -752,16 +760,22 @@ class TaskProgramMappedRetimeFactory:
                     if index < count
                 }
             )
+            if source.get("demo_skill") is not None:
+                protected = tuple(set(protected) | set(source["demo_skill_events"]))
+                spec = json.loads(source["demo_skill"]["spec"])
+                if not 1 <= self._duration_scale <= spec["max_duration_scale"]:
+                    raise ValueError("retiming exceeds the DemoSkill duration bounds")
             mapped = retime_with_time_map(
                 template,
                 duration_scale=self._duration_scale,
                 control_dt=context.require_control_dt(),
                 protected_indices=protected,
             )
-            limits = engine.robot.body_data.qpos_limits
-            if not isinstance(limits, torch.Tensor) or limits.ndim not in (2, 3):
-                raise ValueError("robot joint position limits are unavailable")
-            limits = limits[0] if limits.ndim == 3 else limits
+            from embodichain.lab.sim.atomic_actions._plan_expansion import (
+                _context_joint_limits,
+            )
+
+            limits = _context_joint_limits(engine, context)[0]
             velocity = self._velocity_limits.clone()
             acceleration = self._acceleration_limits.clone()
             if resolved.motion_policy.velocity_limit is not None:

@@ -16,6 +16,11 @@
 
 from __future__ import annotations
 
+__all__ = ["AssetParser", "ParserManager"]
+
+from embodichain.gen_sim.services.runtime import GenSimServices
+
+
 from typing import Dict, List, Optional
 from abc import ABC, abstractmethod
 from embodichain.gen_sim.asset_engine.core.asset import Asset
@@ -58,13 +63,13 @@ class ParserManager:
         "internal",
     ]
 
-    def __init__(self):
+    def __init__(self, *, services: GenSimServices | None = None) -> None:
         self._parsers: Dict[str, object] = {}
 
         self._register(
             AssetInspector(),
             GeometryParser(),
-            PhysicsParser(),
+            PhysicsParser(services=services),
             UsdParser(),
             InternalParser(),
         )
@@ -82,18 +87,37 @@ class ParserManager:
         asset: Asset,
         asset_root: Path,
         pipeline: Optional[List[str]] = None,
+        *,
+        services: GenSimServices | None = None,
     ) -> None:
         pipeline = pipeline or self.DEFAULT_PIPELINE
 
         for name in pipeline:
-            self._run(name, asset, asset_root)
+            self._run(name, asset, asset_root, services=services)
         asset.status["parsed"] = True
 
-    def parse_one(self, name: str, asset: Asset, asset_root: Path) -> None:
-        self._run(name, asset, asset_root)
+    def parse_one(
+        self,
+        name: str,
+        asset: Asset,
+        asset_root: Path,
+        *,
+        services: GenSimServices | None = None,
+    ) -> None:
+        self._run(name, asset, asset_root, services=services)
 
-    def _run(self, name: str, asset: Asset, asset_root: Path):
+    def _run(
+        self,
+        name: str,
+        asset: Asset,
+        asset_root: Path,
+        *,
+        services: GenSimServices | None = None,
+    ):
         parser = self._parsers.get(name)
         if not parser:
             raise KeyError(f"Parser not registered: {name}")
-        parser.parse(asset, asset_root)
+        if isinstance(parser, PhysicsParser):
+            parser.parse(asset, asset_root, services=services)
+        else:
+            parser.parse(asset, asset_root)

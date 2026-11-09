@@ -22,4 +22,5 @@ implementation modules group general and locomotion observations.
 from __future__ import annotations
 
 from ._common import *
+from ._common import _capture_proprioception
 from ._locomotion import *

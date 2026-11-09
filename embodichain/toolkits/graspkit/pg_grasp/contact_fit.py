@@ -31,6 +31,7 @@ import numpy as np
 import torch
 import trimesh
 
+from embodichain.compute.geometry.gripper import interpolate_hand_samples
 from embodichain.utils import logger
 
 __all__ = [
@@ -118,17 +119,7 @@ class SampledHandGeometry:
             the sampled gap range clamp to its endpoints; eligibility is checked
             separately by the contact checker.
         """
-        if widths.ndim != 1:
-            raise ValueError("Candidate gaps must be a one-dimensional tensor.")
-        gaps = self.gaps.to(widths)
-        high = torch.searchsorted(-gaps.contiguous(), -widths).clamp(1, len(gaps) - 1)
-        low = high - 1
-        alpha = ((gaps[low] - widths) / (gaps[low] - gaps[high])).clamp(0, 1)
-        body, pads = self.body.to(widths), self.pads.to(widths)
-        return (
-            torch.lerp(body[low], body[high], alpha[:, None, None]),
-            torch.lerp(pads[low], pads[high], alpha[:, None, None, None]),
-        )
+        return interpolate_hand_samples(self.body, self.pads, self.gaps, widths)
 
 
 class TriangleSurfaceQuery:

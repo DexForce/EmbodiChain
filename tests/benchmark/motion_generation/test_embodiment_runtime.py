@@ -251,9 +251,17 @@ def test_gripper_and_domain_overrides_cannot_change_component_commands(
         runner.robot_provider.configure_track(runner.suite.evaluation_tracks()[0])
 
 
-def test_official_ur5_component_uses_robot_catalog(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("domain_id", ["nominal", "object_xy"])
+def test_official_ur5_component_uses_robot_catalog_and_binds_fingers(
+    monkeypatch,
+    tmp_path: Path,
+    domain_id: str,
+) -> None:
     from embodichain.lab.sim import cfg as cfg_module
     from embodichain_robots.universal_robots import ur_robot
+    from embodichain_benchmarks.motion_generation.scenarios._grasp_contacts import (
+        contact_configuration,
+    )
 
     def local_asset(path: str) -> str:
         target = tmp_path / path
@@ -263,20 +271,29 @@ def test_official_ur5_component_uses_robot_catalog(monkeypatch, tmp_path: Path) 
 
     monkeypatch.setattr(ur_robot, "get_data_path", local_asset)
     monkeypatch.setattr(cfg_module, "get_data_path", local_asset)
-    provider = EmbodimentRobotProvider(
-        _resolve(
-            Path(
-                "embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml"
-            )
-        )
-    )
+    suite = load_suite("atomic_ur5_embodiment")
+    runner = BenchmarkRunner(suite, suite.planners, device="cpu")
+    provider = runner.robot_provider
     cfg = provider.build_cfg()
+    track = next(
+        track
+        for track in runner.suite.evaluation_tracks()
+        if track.domain.id == domain_id
+    )
+    provider.configure_track(track)
 
     assert isinstance(cfg, ur_robot.URRobotCfg)
     assert len(cfg.control_parts["arm"]) == 6
     assert cfg.control_parts["eef"] == ["gripper_finger1_joint_1"]
     assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.15)
     assert provider.gripper_config["grasp_qpos"] == [0.024]
+    assert contact_configuration(track.config) == {
+        "eef": (("gripper_finger1_link_1", "gripper_finger2_link_1"), 0.005)
+    }
+    assert track.config["gripper"] == {
+        **provider.gripper_config,
+        "finger_links": ["gripper_finger1_link_1", "gripper_finger2_link_1"],
+    }
 
 
 @pytest.mark.parametrize("component_owned", [False, True])
@@ -442,4 +459,4 @@ def test_example_has_nominal_and_position_domains() -> None:
     assert [track.domain.kind for track in tracks] == ["nominal", "robustness"]
     assert [resolve_atomic_batch_sizes(track) for track in tracks] == [[1], [2]]
     assert suite.planners[0].adapter == "curobo"
-    assert "gripper" not in suite.tracks[0].config
+    assert set(suite.tracks[0].config["gripper"]) == {"finger_links"}
