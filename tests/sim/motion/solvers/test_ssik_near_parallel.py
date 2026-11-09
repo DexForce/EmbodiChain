@@ -24,9 +24,9 @@ import sys
 from unittest.mock import patch
 
 import numpy as np
+from solver_support import checked_rotation_distance
 import pytest
 import torch
-from scipy.spatial.transform import Rotation
 
 from embodichain.lab.sim.motion.solvers import SSIKSolver, SSIKSolverCfg
 from embodichain_robots import ARX5Cfg, FlexivRizon4SCfg
@@ -72,10 +72,7 @@ def _assert_transform(target: torch.Tensor, actual: torch.Tensor) -> None:
     actual = actual.cpu().numpy()
     expected = target.cpu().double().numpy()
     translation = np.linalg.norm(actual[:, :3, 3] - expected[:, :3, 3], axis=-1)
-    rotation = (
-        Rotation.from_matrix(actual[:, :3, :3]).inv()
-        * Rotation.from_matrix(expected[:, :3, :3])
-    ).magnitude()
+    rotation = checked_rotation_distance(expected[:, :3, :3], actual[:, :3, :3])
     assert np.all(translation <= 1e-5)
     assert np.all(rotation <= 1e-5)
 

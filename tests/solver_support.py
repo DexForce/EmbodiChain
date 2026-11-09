@@ -21,11 +21,54 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.objects import Robot
+
+
+def checked_rotation_distance(expected: np.ndarray, actual: np.ndarray) -> np.ndarray:
+    """Return principal rotation errors after validating rigid rotation matrices.
+
+    Args:
+        expected: Reference matrices with trailing shape ``(3, 3)``.
+        actual: Result matrices with broadcast-compatible batch dimensions.
+
+    Returns:
+        Principal angular distances in radians, from zero through pi.
+    """
+    expected = np.asarray(expected, dtype=np.float64)
+    actual = np.asarray(actual, dtype=np.float64)
+    for rotation in (expected, actual):
+        assert np.isfinite(rotation).all()
+        np.testing.assert_allclose(
+            rotation.swapaxes(-1, -2) @ rotation,
+            np.broadcast_to(np.eye(3), rotation.shape),
+            atol=1e-5,
+            rtol=0,
+        )
+        determinant = np.sum(
+            np.cross(rotation[..., 0, :], rotation[..., 1, :]) * rotation[..., 2, :],
+            axis=-1,
+        )
+        np.testing.assert_allclose(determinant, 1.0, atol=1e-5, rtol=0)
+    relative = expected.swapaxes(-1, -2) @ actual
+    skew = np.stack(
+        (
+            relative[..., 2, 1] - relative[..., 1, 2],
+            relative[..., 0, 2] - relative[..., 2, 0],
+            relative[..., 1, 0] - relative[..., 0, 1],
+        ),
+        axis=-1,
+    )
+    return np.asarray(
+        np.arctan2(
+            np.linalg.norm(skew, axis=-1) / 2,
+            (np.trace(relative, axis1=-2, axis2=-1) - 1) / 2,
+        )
+    )
 
 
 def create_w1_solver_scene(solver_type: str) -> tuple[SimulationManager, Robot]:

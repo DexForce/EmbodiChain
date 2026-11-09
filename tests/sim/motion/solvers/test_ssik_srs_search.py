@@ -21,6 +21,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 import numpy as np
+from solver_support import checked_rotation_distance
 import pytest
 import torch
 from scipy.spatial.transform import Rotation
@@ -137,10 +138,7 @@ def _assert_pose(target: torch.Tensor, actual: torch.Tensor) -> None:
     assert np.all(
         np.linalg.norm(expected[:, :3, 3] - result[:, :3, 3], axis=-1) <= 1e-5
     )
-    angles = (
-        Rotation.from_matrix(expected[:, :3, :3]).inv()
-        * Rotation.from_matrix(result[:, :3, :3])
-    ).magnitude()
+    angles = checked_rotation_distance(expected[:, :3, :3], result[:, :3, :3])
     assert np.all(angles <= 1e-5)
 
 

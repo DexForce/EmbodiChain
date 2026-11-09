@@ -26,6 +26,7 @@ from typing import Any
 import xml.etree.ElementTree as ET
 
 import numpy as np
+from solver_support import checked_rotation_distance
 import pytest
 import pytorch_kinematics as pk
 import torch
@@ -169,42 +170,12 @@ def _pk_fk(solver: SSIKSolver, joints: torch.Tensor) -> torch.Tensor:
 
 
 def _assert_pose(target: torch.Tensor, actual: torch.Tensor) -> None:
-    """Compare rigid FK poses without projecting an invalid matrix onto SO(3)."""
+    """Compare rigid FK poses without projecting malformed rotations."""
     expected = target.detach().cpu().numpy().astype(np.float64)
     result = actual.detach().cpu().numpy().astype(np.float64)
-    expected_rotation = expected[..., :3, :3]
-    result_rotation = result[..., :3, :3]
-    for pose, rotation_matrix in (
-        (expected, expected_rotation),
-        (result, result_rotation),
-    ):
-        assert np.isfinite(pose).all()
-        np.testing.assert_allclose(
-            rotation_matrix.swapaxes(-1, -2) @ rotation_matrix,
-            np.broadcast_to(np.eye(3), rotation_matrix.shape),
-            atol=1e-5,
-            rtol=0,
-        )
-        determinant = np.sum(
-            np.cross(rotation_matrix[..., 0, :], rotation_matrix[..., 1, :])
-            * rotation_matrix[..., 2, :],
-            axis=-1,
-        )
-        np.testing.assert_allclose(determinant, 1.0, atol=1e-5, rtol=0)
-
+    assert np.isfinite(expected).all() and np.isfinite(result).all()
     translation = np.linalg.norm(expected[..., :3, 3] - result[..., :3, 3], axis=-1)
-    relative = expected_rotation.swapaxes(-1, -2) @ result_rotation
-    skew = np.stack(
-        (
-            relative[..., 2, 1] - relative[..., 1, 2],
-            relative[..., 0, 2] - relative[..., 2, 0],
-            relative[..., 1, 0] - relative[..., 0, 1],
-        ),
-        axis=-1,
-    )
-    sine = np.linalg.norm(skew, axis=-1) / 2
-    cosine = (np.trace(relative, axis1=-2, axis2=-1) - 1) / 2
-    rotation = np.arctan2(sine, cosine)
+    rotation = checked_rotation_distance(expected[..., :3, :3], result[..., :3, :3])
     assert np.all(translation <= 1e-5)
     assert np.all(rotation <= 1e-5)
 
@@ -589,9 +560,10 @@ def test_continuous_winding_rechecks_original_fk_after_float32_rounding(
     # This many turns magnifies float32 quantization: the nearest in-limit
     # output fits the step constraint but no longer closes the original goal.
     bad_pose = _pk_fk(solver, initial)
-    expected = Rotation.from_matrix(target[0, 0, :3, :3].cpu().numpy())
-    actual = Rotation.from_matrix(bad_pose[0, :3, :3].cpu().numpy())
-    assert (expected.inv() * actual).magnitude() > solver.cfg.rotation_tolerance
+    error = checked_rotation_distance(
+        target[0, 0, :3, :3].cpu().numpy(), bad_pose[0, :3, :3].cpu().numpy()
+    )
+    assert error > solver.cfg.rotation_tolerance
     valid, result = solver._select_continuous_ik_path(
         candidate[:, None, None],
         torch.ones((1, 1, 1), dtype=torch.bool, device=device),
@@ -872,7 +844,9 @@ def test_continuous_selection_retains_borrowed_cuda_inputs(drop_index: int) -> N
         script = """
 import runpy
 import sys
+from pathlib import Path
 import pytest
+sys.path.insert(0, str(Path(sys.argv[1]).parents[3]))
 namespace = runpy.run_path(sys.argv[1])
 try:
     namespace['test_continuous_selection_retains_borrowed_cuda_inputs'](int(sys.argv[2]))

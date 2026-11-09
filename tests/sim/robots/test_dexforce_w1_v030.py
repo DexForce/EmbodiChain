@@ -21,6 +21,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import numpy as np
+from solver_support import checked_rotation_distance
 import pytest
 import torch
 from scipy.spatial.transform import Rotation
@@ -85,10 +86,7 @@ def _assert_poses(
     expected = expected.detach().cpu().numpy().astype(float)
     actual = actual.detach().cpu().numpy().astype(float)
     position = np.linalg.norm(expected[:, :3, 3] - actual[:, :3, 3], axis=-1)
-    rotation = (
-        Rotation.from_matrix(expected[:, :3, :3]).inv()
-        * Rotation.from_matrix(actual[:, :3, :3])
-    ).magnitude()
+    rotation = checked_rotation_distance(expected[:, :3, :3], actual[:, :3, :3])
     assert np.all(position <= solver.cfg.position_tolerance)
     assert np.all(rotation <= solver.cfg.rotation_tolerance)
 
