@@ -1,0 +1,1224 @@
+{
+  "reference": {
+    "isaac_lab": "v3.0.0-EA",
+    "task": "Isaac-Velocity-Rough-G1"
+  },
+  "robot": {
+    "joint_names": [
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint",
+      "torso_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_pitch_joint",
+      "left_elbow_roll_joint",
+      "left_five_joint",
+      "left_six_joint",
+      "left_three_joint",
+      "left_four_joint",
+      "left_zero_joint",
+      "left_one_joint",
+      "left_two_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_pitch_joint",
+      "right_elbow_roll_joint",
+      "right_five_joint",
+      "right_six_joint",
+      "right_three_joint",
+      "right_four_joint",
+      "right_zero_joint",
+      "right_one_joint",
+      "right_two_joint"
+    ],
+    "body_names": [
+      "pelvis",
+      "left_hip_pitch_link",
+      "left_hip_roll_link",
+      "left_hip_yaw_link",
+      "left_knee_link",
+      "left_ankle_pitch_link",
+      "left_ankle_roll_link",
+      "pelvis_contour_link",
+      "right_hip_pitch_link",
+      "right_hip_roll_link",
+      "right_hip_yaw_link",
+      "right_knee_link",
+      "right_ankle_pitch_link",
+      "right_ankle_roll_link",
+      "torso_link",
+      "head_link",
+      "imu_link",
+      "left_shoulder_pitch_link",
+      "left_shoulder_roll_link",
+      "left_shoulder_yaw_link",
+      "left_elbow_pitch_link",
+      "left_elbow_roll_link",
+      "left_palm_link",
+      "left_five_link",
+      "left_six_link",
+      "left_three_link",
+      "left_four_link",
+      "left_zero_link",
+      "left_one_link",
+      "left_two_link",
+      "logo_link",
+      "right_shoulder_pitch_link",
+      "right_shoulder_roll_link",
+      "right_shoulder_yaw_link",
+      "right_elbow_pitch_link",
+      "right_elbow_roll_link",
+      "right_palm_link",
+      "right_five_link",
+      "right_six_link",
+      "right_three_link",
+      "right_four_link",
+      "right_zero_link",
+      "right_one_link",
+      "right_two_link"
+    ],
+    "default_joint_position": [
+      -0.20000000298023224,
+      0.0,
+      0.0,
+      0.41999998688697815,
+      -0.23000000417232513,
+      0.0,
+      -0.20000000298023224,
+      0.0,
+      0.0,
+      0.41999998688697815,
+      -0.23000000417232513,
+      0.0,
+      0.0,
+      0.3499999940395355,
+      0.1599999964237213,
+      0.0,
+      0.8700000047683716,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.5199999809265137,
+      0.3499999940395355,
+      -0.1599999964237213,
+      0.0,
+      0.8700000047683716,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -1.0,
+      -0.5199999809265137
+    ],
+    "action_scale": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "root_height": 0.7400000095367432,
+    "soft_joint_position_limit_factor": 0.9,
+    "stiffness": [
+      200.0,
+      150.0,
+      150.0,
+      200.0,
+      20.0,
+      20.0,
+      200.0,
+      150.0,
+      150.0,
+      200.0,
+      20.0,
+      20.0,
+      200.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0,
+      40.0
+    ],
+    "damping": [
+      5.0,
+      5.0,
+      5.0,
+      5.0,
+      2.0,
+      2.0,
+      5.0,
+      5.0,
+      5.0,
+      5.0,
+      2.0,
+      2.0,
+      5.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0
+    ],
+    "effort_limit": [
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      20.0,
+      20.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      20.0,
+      20.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0,
+      300.0
+    ],
+    "velocity_limit": [
+      32.0,
+      32.0,
+      32.0,
+      20.000001907348633,
+      53.0,
+      53.0,
+      32.0,
+      32.0,
+      32.0,
+      20.000001907348633,
+      53.0,
+      53.0,
+      32.0,
+      53.0,
+      53.0,
+      53.0,
+      53.0,
+      53.0,
+      23.0,
+      23.0,
+      23.0,
+      23.0,
+      23.0,
+      23.0,
+      23.0,
+      53.0,
+      53.0,
+      53.0,
+      53.0,
+      53.0,
+      23.0,
+      23.0,
+      23.0,
+      23.0,
+      23.0,
+      23.0,
+      23.0
+    ],
+    "armature": [
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.009999999776482582,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513,
+      0.0010000000474974513
+    ],
+    "soft_joint_pos_limits": [
+      [
+        -2.0799996852874756,
+        2.7799999713897705
+      ],
+      [
+        -0.12049996852874756,
+        2.3904995918273926
+      ],
+      [
+        -2.4749996662139893,
+        2.4749996662139893
+      ],
+      [
+        -0.19090032577514648,
+        2.4009101390838623
+      ],
+      [
+        -0.6094999313354492,
+        0.6594998836517334
+      ],
+      [
+        -0.23561996221542358,
+        0.23561996221542358
+      ],
+      [
+        -2.0799996852874756,
+        2.7799999713897705
+      ],
+      [
+        -2.3904995918273926,
+        0.12049996852874756
+      ],
+      [
+        -2.4749996662139893,
+        2.4749996662139893
+      ],
+      [
+        -0.19090032577514648,
+        2.4009101390838623
+      ],
+      [
+        -0.6094999313354492,
+        0.6594998836517334
+      ],
+      [
+        -0.23561996221542358,
+        0.23561996221542358
+      ],
+      [
+        -2.3561999797821045,
+        2.3561999797821045
+      ],
+      [
+        -2.67911958694458,
+        2.5045199394226074
+      ],
+      [
+        -1.3962149620056152,
+        2.0595147609710693
+      ],
+      [
+        -2.3561999797821045,
+        2.3561999797821045
+      ],
+      [
+        -0.04441988468170166,
+        3.238419532775879
+      ],
+      [
+        -1.8848698139190674,
+        1.8848698139190674
+      ],
+      [
+        -1.7329999208450317,
+        0.1929999589920044
+      ],
+      [
+        -1.747999906539917,
+        -0.09200000762939453
+      ],
+      [
+        -1.7329999208450317,
+        0.1929999589920044
+      ],
+      [
+        -1.747999906539917,
+        -0.09200000762939453
+      ],
+      [
+        -0.4712381362915039,
+        0.4712381362915039
+      ],
+      [
+        -0.8899999856948853,
+        1.090000033378601
+      ],
+      [
+        0.09200000762939453,
+        1.747999906539917
+      ],
+      [
+        -2.67911958694458,
+        2.5045199394226074
+      ],
+      [
+        -2.0595147609710693,
+        1.3962149620056152
+      ],
+      [
+        -2.3561999797821045,
+        2.3561999797821045
+      ],
+      [
+        -0.04441988468170166,
+        3.238419532775879
+      ],
+      [
+        -1.8848698139190674,
+        1.8848698139190674
+      ],
+      [
+        -0.1929999589920044,
+        1.7329999208450317
+      ],
+      [
+        0.09200000762939453,
+        1.747999906539917
+      ],
+      [
+        -0.1929999589920044,
+        1.7329999208450317
+      ],
+      [
+        0.09200000762939453,
+        1.747999906539917
+      ],
+      [
+        -0.4712381362915039,
+        0.4712381362915039
+      ],
+      [
+        -1.090000033378601,
+        0.8899999856948853
+      ],
+      [
+        -1.747999906539917,
+        -0.09200000762939453
+      ]
+    ]
+  },
+  "physics": {
+    "physics_dt": 0.005,
+    "control_dt": 0.02,
+    "episode_length_s": 20.0,
+    "num_substeps": 2
+  },
+  "observations": {
+    "base_lin_vel": {
+      "noise": {
+        "n_min": -0.1,
+        "n_max": 0.1
+      },
+      "clip": null,
+      "scale": null
+    },
+    "base_ang_vel": {
+      "noise": {
+        "n_min": -0.2,
+        "n_max": 0.2
+      },
+      "clip": null,
+      "scale": null
+    },
+    "projected_gravity": {
+      "noise": {
+        "n_min": -0.05,
+        "n_max": 0.05
+      },
+      "clip": null,
+      "scale": null
+    },
+    "velocity_commands": {
+      "noise": null,
+      "clip": null,
+      "scale": null
+    },
+    "joint_pos": {
+      "noise": {
+        "n_min": -0.01,
+        "n_max": 0.01
+      },
+      "clip": null,
+      "scale": null
+    },
+    "joint_vel": {
+      "noise": {
+        "n_min": -1.5,
+        "n_max": 1.5
+      },
+      "clip": null,
+      "scale": null
+    },
+    "actions": {
+      "noise": null,
+      "clip": null,
+      "scale": null
+    },
+    "height_scan": {
+      "noise": {
+        "n_min": -0.1,
+        "n_max": 0.1
+      },
+      "clip": [
+        -1.0,
+        1.0
+      ],
+      "scale": null
+    }
+  },
+  "rewards": {
+    "track_lin_vel_xy_exp": {
+      "function": "track_lin_vel_xy_yaw_frame_exp",
+      "params": {
+        "std": 0.5
+      },
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "weight": 1.0
+    },
+    "track_ang_vel_z_exp": {
+      "function": "track_ang_vel_z_world_exp",
+      "params": {
+        "std": 0.5
+      },
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "weight": 2.0
+    },
+    "ang_vel_xy_l2": {
+      "function": "ang_vel_xy_l2",
+      "params": {},
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "weight": -0.05
+    },
+    "dof_torques_l2": {
+      "function": "joint_torques_l2",
+      "params": {},
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "weight": -1.5e-07
+    },
+    "dof_acc_l2": {
+      "function": "joint_acc_l2",
+      "params": {},
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        6,
+        7,
+        8,
+        9
+      ],
+      "weight": -1.25e-07
+    },
+    "action_rate_l2": {
+      "function": "action_rate_l2",
+      "params": {},
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "weight": -0.005
+    },
+    "feet_air_time": {
+      "function": "feet_air_time_positive_biped",
+      "params": {
+        "threshold": 0.4
+      },
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "weight": 0.25
+    },
+    "flat_orientation_l2": {
+      "function": "flat_orientation_l2",
+      "params": {},
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "weight": -1.0
+    },
+    "dof_pos_limits": {
+      "function": "joint_pos_limits",
+      "params": {},
+      "joint_ids": [
+        4,
+        5,
+        10,
+        11
+      ],
+      "weight": -1.0
+    },
+    "termination_penalty": {
+      "function": "is_terminated",
+      "params": {},
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "weight": -200.0
+    },
+    "feet_slide": {
+      "function": "feet_slide",
+      "params": {},
+      "joint_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "weight": -0.1
+    },
+    "joint_deviation_hip": {
+      "function": "joint_deviation_l1",
+      "params": {},
+      "joint_ids": [
+        1,
+        2,
+        7,
+        8
+      ],
+      "weight": -0.1
+    },
+    "joint_deviation_arms": {
+      "function": "joint_deviation_l1",
+      "params": {},
+      "joint_ids": [
+        13,
+        14,
+        15,
+        16,
+        17,
+        25,
+        26,
+        27,
+        28,
+        29
+      ],
+      "weight": -0.1
+    },
+    "joint_deviation_fingers": {
+      "function": "joint_deviation_l1",
+      "params": {},
+      "joint_ids": [
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "weight": -0.05
+    },
+    "joint_deviation_torso": {
+      "function": "joint_deviation_l1",
+      "params": {},
+      "joint_ids": [
+        12
+      ],
+      "weight": -0.1
+    }
+  },
+  "commands": {
+    "twist": {
+      "resampling_time_range": [
+        10.0,
+        10.0
+      ],
+      "heading_command": true,
+      "heading_control_stiffness": 0.5,
+      "rel_standing_envs": 0.02,
+      "rel_heading_envs": 1.0,
+      "ranges": {
+        "lin_vel_x": [
+          0.0,
+          1.0
+        ],
+        "lin_vel_y": [
+          -0.0,
+          0.0
+        ],
+        "ang_vel_z": [
+          -1.0,
+          1.0
+        ],
+        "heading": [
+          -3.141592653589793,
+          3.141592653589793
+        ]
+      },
+      "vel_xy_success_threshold": 0.5,
+      "vel_yaw_success_threshold": 0.8
+    }
+  },
+  "events": {
+    "physics_material": {
+      "params": {
+        "static_friction_range": [
+          0.8,
+          0.8
+        ],
+        "dynamic_friction_range": [
+          0.6,
+          0.6
+        ],
+        "restitution_range": [
+          0.0,
+          0.0
+        ],
+        "num_buckets": 64
+      },
+      "body_names": ".*",
+      "mode": "startup",
+      "interval_range_s": null
+    },
+    "add_base_mass": {
+      "params": {
+        "mass_distribution_params": [
+          0.8,
+          1.25
+        ],
+        "operation": "scale",
+        "distribution": "log_uniform"
+      },
+      "body_names": "torso_link",
+      "mode": "startup",
+      "interval_range_s": null
+    },
+    "base_external_force_torque": {
+      "params": {
+        "force_range": [
+          0.0,
+          0.0
+        ],
+        "torque_range": [
+          -0.0,
+          0.0
+        ]
+      },
+      "body_names": "torso_link",
+      "mode": "reset",
+      "interval_range_s": null
+    },
+    "reset_base": {
+      "params": {
+        "pose_range": {
+          "x": [
+            -0.5,
+            0.5
+          ],
+          "y": [
+            -0.5,
+            0.5
+          ],
+          "yaw": [
+            -3.14,
+            3.14
+          ],
+          "z": [
+            0.0,
+            0.0
+          ]
+        },
+        "velocity_range": {
+          "x": [
+            -0.5,
+            0.5
+          ],
+          "y": [
+            -0.5,
+            0.5
+          ],
+          "z": [
+            -0.5,
+            0.5
+          ],
+          "roll": [
+            -0.5,
+            0.5
+          ],
+          "pitch": [
+            -0.5,
+            0.5
+          ],
+          "yaw": [
+            -0.5,
+            0.5
+          ]
+        }
+      },
+      "body_names": null,
+      "mode": "reset",
+      "interval_range_s": null
+    },
+    "reset_robot_joints": {
+      "params": {
+        "position_range": [
+          1.0,
+          1.0
+        ],
+        "velocity_range": [
+          0.0,
+          0.0
+        ]
+      },
+      "body_names": null,
+      "mode": "reset",
+      "interval_range_s": null
+    },
+    "push_robot": {
+      "params": {
+        "velocity_range": {
+          "x": [
+            -0.5,
+            0.5
+          ],
+          "y": [
+            -0.5,
+            0.5
+          ]
+        }
+      },
+      "body_names": null,
+      "mode": "interval",
+      "interval_range_s": [
+        10.0,
+        15.0
+      ]
+    }
+  },
+  "feet": [
+    "left_ankle_roll_link",
+    "right_ankle_roll_link"
+  ],
+  "illegal_bodies": [
+    "torso_link"
+  ]
+}
