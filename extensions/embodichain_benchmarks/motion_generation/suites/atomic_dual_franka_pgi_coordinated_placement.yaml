@@ -234,6 +234,7 @@ tracks:
       settle_steps: 100
     skills:
     - id: coordinated_placement
+      support_mesh_frame: native_glb
       sample_count: 120
       placing_height_offset_m: 0.1
       support_height_offset_m: 0.0

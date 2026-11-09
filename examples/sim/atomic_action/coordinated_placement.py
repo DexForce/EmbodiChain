@@ -64,7 +64,9 @@ from embodichain_benchmarks.motion_generation.scenarios._placement_geometry impo
     build_pan_handle_grasp_pose,
     build_support_object_target_pose,
     build_placing_object_target_pose,
-    get_pan_basin_vertices,
+)
+from embodichain_benchmarks.motion_generation.scenarios._placement_qualification import (
+    _placement_input_geometry,
 )
 from examples.sim.atomic_action.scenario import (
     add_dual_tutorial_robot,
@@ -804,25 +806,26 @@ def run_coordinated_placement_demo(
         bread_vertices.unsqueeze(0) @ bread_final_pose[:, :3, :3].transpose(1, 2)
         + bread_final_pose[:, None, :3, 3]
     )
-    basin_world = (
-        get_pan_basin_vertices(pan_vertices).unsqueeze(0)
-        @ pan_final_pose[:, :3, :3].transpose(1, 2)
-        + pan_final_pose[:, None, :3, 3]
-    )
-    bread_center_xy = 0.5 * (
-        bread_world[:, :, :2].amin(dim=1) + bread_world[:, :, :2].amax(dim=1)
-    )
     bread_bottom_z = bread_world[:, :, 2].amin(dim=1)
-    inside_basin = (
-        (bread_center_xy >= basin_world[:, :, :2].amin(dim=1) - 0.015)
-        & (bread_center_xy <= basin_world[:, :, :2].amax(dim=1) + 0.015)
-    ).all(dim=1)
+    placement = _placement_input_geometry(
+        bread_vertices,
+        bread.get_triangles(env_ids=[0])[0],
+        pan_vertices,
+        pan.get_triangles(env_ids=[0])[0],
+        bread_final_pose,
+        pan_final_pose,
+        maximum_support_gap_m=0.008,
+    )
+    supported = torch.tensor(
+        [row["qualified"] for row in placement["rows"]],
+        device=sim.device,
+    )
     raised_pan = pan_final_pose[:, 2, 3] > TABLE_TOP_Z + 0.03
     raised_bread = bread_bottom_z > TABLE_TOP_Z + 0.02
-    if not bool((inside_basin & raised_pan & raised_bread).all()):
+    if not bool((supported & raised_pan & raised_bread).all()):
         raise RuntimeError(
             "Bread must be released into the raised pan: "
-            f"inside_basin={inside_basin.tolist()}, "
+            f"mesh_evidence={placement['rows']}, "
             f"bread_bottom_z={bread_bottom_z.tolist()}, "
             f"pan_z={pan_final_pose[:, 2, 3].tolist()}."
         )
@@ -830,7 +833,7 @@ def run_coordinated_placement_demo(
         "Measured placement: "
         f"bread_bottom_z={bread_bottom_z.tolist()}, "
         f"pan_z={pan_final_pose[:, 2, 3].tolist()}, "
-        f"inside_basin={inside_basin.tolist()}"
+        f"mesh_evidence={placement['rows']}"
     )
     if wait_for_user:
         input("Press Enter to exit the simulation...")

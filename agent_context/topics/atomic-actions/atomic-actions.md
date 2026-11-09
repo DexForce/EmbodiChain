@@ -221,9 +221,19 @@ lift and release placement, and retains commanded jaw preload when reconciling
 measured arm/held-object state. A contact-blocked jaw measurement is not its
 holding command. Its mesh fixtures use
 the authored Z-up frame; shared pan geometry selects the handle and basin along
-local Y. Keep these asset-specific conventions in the scene/geometry owners.
+local Y. The three original-GLB benchmark suites instead declare
+`support_mesh_frame: native_glb`, selecting along local Z in the native Y-up
+mesh. Propagate this frame through grasp, target and footprint qualification;
+retain each suite's matching asset scale and root pose. Keep these asset-specific
+conventions in the scene/geometry owners.
 The host caches textured OBJ geometry so native renderers and NoRender load the
 same baked asset frame.
+Release checks reuse complete projected mesh-footprint coverage and sampled
+support-surface gaps. The example rejects negative sampled gaps and requires
+an interior-floor witness within 8 mm to reject overhang, penetration, hovering
+and rim-spanning outcomes while permitting curved undersides; the target-input
+audit retains its separate collision-free-proposal semantics. This is finite
+geometric evidence, not a proof of continuous 3D collision freedom or contact load.
 Keep the base-to-table height invariant when raising the fixture.
 Read held poses without resetting them at the replan boundary.
 The launcher preserves an omitted device through simulation configuration so the

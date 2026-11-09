@@ -167,7 +167,8 @@ without consumers.
 DexUni accepts ``coupling="two_way"`` with ``joint_mode="dynamic"`` to feed
 contact reactions back to articulations. Keep ``collision_cfg=None`` when
 DexUni owns collision detection. ``coupling_options`` configures the native
-feedback policy; full-surface rigid-soft contacts are unsupported in this mode.
+feedback policy. Full-surface rigid-soft feedback is supported; native validation
+owns the compatible contact modes and option combinations.
 Articulation gravity compensation and passive joint damping are configured
 separately below.
 
