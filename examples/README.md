@@ -84,7 +84,6 @@ viewer pairs measured 3D playback with RGB-D, recipes, source clocks and explici
 capability/acceptance results. Full and quick modes preserve unrun and failed cases;
 recovery and portability diagnostics keep their evidence separate from expert data.
 
-
 ## Newton cable demo
 
 The cable examples require CUDA and the qualified DexSim wheel
@@ -104,3 +103,17 @@ EmbodiChain defaults to DexUni when no solver is selected;
 legacy `auto`/`AutoSolverCfg` selections must migrate to `dexuni` or the concrete
 solver needed by the scene. Explicit `semi_implicit` remains required for
 Newton gradient mode.
+
+## Franka rope wrapping
+
+Run a single-arm floor pickup, post wrap, tightening and two-second hold with
+real finger/rope contact. The example includes its default configuration,
+reproducible asset generation and physical acceptance checks:
+
+```bash
+python -m embodichain run-example sim/demo/franka_rope_wrap \
+  --output /tmp/franka-rope-wrap-run
+```
+
+See the [Franka rope example](sim/demo/franka_rope_wrap/README.md) for asset
+preparation, CUDA/SDK requirements, plan-only execution and result semantics.
