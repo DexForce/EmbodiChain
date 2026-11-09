@@ -90,7 +90,7 @@ def validate_recipe(config: dict[str, Any]) -> None:
         ("algorithm", config["algorithm"], "apg_actor_critic"),
     ):
         name = block.get("name") if isinstance(block, dict) else None
-        if name != expected:
+        if not isinstance(name, str) or name.lower() != expected.lower():
             raise ValueError(
                 f"G1 motion training requires {path}.name={expected!r}; got {name!r}."
             )
