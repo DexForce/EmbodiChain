@@ -61,6 +61,27 @@ calibration and output semantics separately from image tensors. Gym exposes the
 snapshot through `sensor_capture_metadata`. Capability checks and publication
 ordering follow [Gaussian composition](../simulation-system/rendering.md#gaussian-composition).
 
+## Camera ground visibility
+
+`CameraCfg.ground_plane_visible` and `Camera.set_ground_plane_visibility(...,
+env_ids=...)` filter the manager-owned shared Mesh ground per camera instance;
+stereo applies the same policy to both eyes. The global manager switch remains
+a master gate. Collision, picking, Viser grids and floor embedded in scanned
+assets are separate. The manager reserves category bit 1 for its default plane.
+
+Filtering requires the DexSim Mesh-category/camera-exclusion APIs; the default
+visible configuration remains usable with older SDKs. Camera reset restores the
+configured policy for selected environments. Parent reattachment resets only
+extrinsics, preserving runtime visibility through topology changes. The ground
+category belongs to the Spawn descriptor, so rematerialization retains it.
+
+`render_camera_group` snapshots policy after rendering; `Camera.update` publishes
+that metadata only after successful image reads. Direct camera updates snapshot
+their own render. `get_capture_metadata()` returns a copy, separately from image
+TensorDict values. A policy change invalidates the camera's published metadata;
+a failed render/read cannot be presented as a new successful capture. Callers
+using `fetch_only=True` should render through the manager to obtain metadata.
+
 ## Camera attachment boundary
 
 `resolve_parent_nodes()` parses a canonical link name or
