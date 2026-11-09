@@ -1332,7 +1332,8 @@ def test_external_pick_transport_place_assemble_without_native_planning(
     torch.testing.assert_close(
         named_plan.joint_trajectory.positions, move_plan.joint_trajectory.positions
     )
-    unavailable_source = Mock()
+    unavailable_source = Source({"transport": 4}, [1, 1, 1, 1])
+    unavailable_source.instantiate = Mock()
     with pytest.raises(ValueError, match="requires object 'other'"):
         _ACTION_ENGINES[id(move)].plan(
             replace(

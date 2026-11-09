@@ -215,6 +215,7 @@ def main():
             "embodichain_robots.pollen_robotics.microduck": ["profile.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.asset_engine.configs": ["*.json"],
+            "embodichain.gen_sim.services": ["README.md", "*.example.json"],
             "embodichain.gen_sim.task_engine": [
                 "defaults.yaml",
                 "_semantic_graph_viewer.html",

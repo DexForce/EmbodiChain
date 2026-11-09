@@ -144,6 +144,8 @@ Next Steps
 ~~~~~~~~~~
 
 - :doc:`create_softbody` — Add deformable bodies to your scene
+- :doc:`/overview/sim/scene/index` — Compose reusable assemblies and prepare layouts
+- :doc:`/overview/sim/scene/workflows` — Generate, settle, measure, and restore a tabletop recipe
 - :doc:`robot` — Load and control a robot
 - :doc:`sensor` — Add cameras and capture sensor data
 - :doc:`/overview/sim/visualization/viser` — Configure browser visualization

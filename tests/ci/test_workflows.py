@@ -294,6 +294,7 @@ def test_test_job_restores_git_access_before_running_selected_tests(
         GIT_CONFIG_NOSYSTEM="1",
         GITHUB_WORKSPACE=str(repository),
         CI_NODE_BIN_DIR="",
+        XDG_RUNTIME_DIR=str(tmp_path / "xdg-runtime"),
     )
     for args in (
         ["init", "-q"],
@@ -337,6 +338,16 @@ def test_test_job_restores_git_access_before_running_selected_tests(
         ).strip()
         == revision
     )
+
+
+def test_gpu_test_job_prepares_headless_sdl_runtime() -> None:
+    job = _load_workflow("main.yml")["jobs"]["test"]
+    assert job["env"]["SDL_VIDEODRIVER"] == "dummy"
+    assert job["env"]["XDG_RUNTIME_DIR"] == "/tmp/embodichain-ci-runtime"
+    selected = next(
+        step for step in job["steps"] if step.get("name") == "Run selected tests"
+    )
+    assert 'install -d -m 0700 "$XDG_RUNTIME_DIR"' in selected["run"]
 
 
 @pytest.mark.parametrize(
