@@ -27,6 +27,10 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
+from embodichain.lab.sim._render_selection import (
+    _normalize_render_rows,
+    _select_render_values,
+)
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
 from embodichain.utils import logger, configclass
 
@@ -430,8 +434,8 @@ class Camera(BaseSensor):
 
     def _detach_from_parent_nodes(self) -> None:
         """Retain camera views while their Spawn-owned parents are rebuilt."""
-        poses = self._batch.fetch_pose(frame="arena", device=str(self.device))
-        self._scene.detach_render_objects(self._camera_handles, local_poses=poses)
+        for entity in self._entities:
+            entity.get_node().detach_parent()
         self._is_attached = False
 
     def attach_to_parent_nodes(self, parent_nodes: Sequence[object]) -> None:
@@ -453,46 +457,15 @@ class Camera(BaseSensor):
             )
         if any(node is None for node in nodes):
             raise ValueError("Camera attachment requires a parent node in every arena.")
-        poses = self._reset_poses()
-        paths = [node.path_name() for node in nodes]
-        self._scene.attach_render_objects(
-            self._camera_handles,
-            paths * self._eye_count,
-            local_poses=self._eye_poses(poses),
-        )
+        for entity, parent in zip(self._entities, nodes, strict=True):
+            entity.attach_node(parent)
+        # Extrinsics are expressed in the parent frame. Reapply them after
+        # reparenting because the camera was initially reset in Arena space.
+        self._reset_pose()
         self._is_attached = True
 
-    @property
-    def _eye_count(self) -> int:
-        """Number of native views per logical sensor row."""
-        return 1
-
-    def _eye_poses(self, poses: torch.Tensor) -> torch.Tensor:
-        """Map logical camera matrices into native view order."""
-        return poses
-
-    def _view_rows(self, env_ids: Sequence[int] | torch.Tensor | None):
-        """Keep environment selections on their input device."""
-        return env_ids
-
-    @staticmethod
-    def _pose_matrices(pose: torch.Tensor) -> torch.Tensor:
-        """Convert domain xyz+xyzw poses without a device-to-host transfer."""
-        if pose.ndim == 3 and pose.shape[1:] == (4, 4):
-            return pose
-        if pose.ndim == 2 and pose.shape[1] == 7:
-            matrix = torch.eye(4, dtype=pose.dtype, device=pose.device).repeat(
-                len(pose), 1, 1
-            )
-            matrix[:, :3, 3] = pose[:, :3]
-            matrix[:, :3, :3] = matrix_from_quat(pose[:, 3:7])
-            return matrix
-        raise ValueError(
-            f"Invalid pose shape {tuple(pose.shape)}; expected (N,7) or (N,4,4)."
-        )
-
     def set_local_pose(
-        self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor | None = None
+        self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set the local pose of the camera.
 
@@ -504,11 +477,25 @@ class Camera(BaseSensor):
                 ``(N, 7)`` vectors in ``(x, y, z, qx, qy, qz, qw)`` order.
             env_ids (Sequence[int] | None): The environment IDs to set the pose for. If None, set for all environments.
         """
-        self._batch.apply_pose(
-            self._eye_poses(self._pose_matrices(pose)),
-            rows=self._view_rows(env_ids),
-            frame="local",
-        )
+        if env_ids is None:
+            local_env_ids = range(len(self._entities))
+        else:
+            local_env_ids = env_ids
+
+        pose = pose.cpu()
+        if pose.dim() == 2 and pose.shape[1] == 7:
+            pose_matrix = torch.eye(4).unsqueeze(0).repeat(pose.shape[0], 1, 1)
+            pose_matrix[:, :3, 3] = pose[:, :3]
+            pose_matrix[:, :3, :3] = matrix_from_quat(pose[:, 3:7])
+            for i, env_idx in enumerate(local_env_ids):
+                self._entities[env_idx].set_local_pose(pose_matrix[i].numpy())
+        elif pose.dim() == 3 and pose.shape[1:] == (4, 4):
+            for i, env_idx in enumerate(local_env_ids):
+                self._entities[env_idx].set_local_pose(pose[i].numpy())
+        else:
+            logger.log_error(
+                f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
+            )
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
         """Get the local pose of the camera.
@@ -520,7 +507,12 @@ class Camera(BaseSensor):
         Returns:
             torch.Tensor: The local pose of the camera.
         """
-        poses = self._logical_poses("local")
+        poses = []
+        for entity in self._entities:
+            pose = entity.get_local_pose()
+            poses.append(torch.as_tensor(pose, dtype=torch.float32))
+
+        poses = torch.stack(poses, dim=0).to(self.device)
         if to_matrix is False:
             xyz = poses[:, :3, 3]
             quat = quat_from_matrix(poses[:, :3, :3])
@@ -537,20 +529,18 @@ class Camera(BaseSensor):
         Returns:
             A tensor representing the pose of the sensor in the arena frame.
         """
-        poses = self._logical_poses("arena")
+        poses = []
+        for i, entity in enumerate(self._entities):
+            pose = entity.get_world_pose()
+            pose[:2, 3] -= self._arenas[i].get_root_node().get_local_pose()[:2, 3]
+            poses.append(torch.as_tensor(pose, dtype=torch.float32))
+
+        poses = torch.stack(poses, dim=0).to(self.device)
         if to_matrix is False:
             xyz = poses[:, :3, 3]
             quat = quat_from_matrix(poses[:, :3, :3])
             return torch.cat((xyz, quat), dim=-1)
         return poses
-
-    def _logical_poses(self, frame: str) -> torch.Tensor:
-        """Read one owned batch of logical camera matrices."""
-        return torch.as_tensor(
-            self._batch.fetch_pose(frame=frame, device=str(self.device)),
-            dtype=torch.float32,
-            device=self.device,
-        )
 
     def destroy(self) -> None:
         """Remove render cameras before releasing their World-owned group."""
@@ -583,7 +573,7 @@ class Camera(BaseSensor):
         eye: torch.Tensor,
         target: torch.Tensor,
         up: torch.Tensor | None = None,
-        env_ids: Sequence[int] | torch.Tensor | None = None,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
         """Set the camera to look at a target point.
 
@@ -616,7 +606,11 @@ class Camera(BaseSensor):
             intrinsics (torch.Tensor): The intrinsics for the left camera with shape (4,) / (3, 3) or (N, 4) / (N, 3, 3).
             env_ids (Sequence[int] | None): The environment ids to set the intrinsics. If None, set for all environments.
         """
-        self._batch.apply_intrinsics(intrinsics, rows=env_ids)
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        broadcast_ndim = 2 if intrinsics.shape[-2:] == (3, 3) else 1
+        self._batch.apply_intrinsics(
+            _select_render_values(intrinsics, offsets, broadcast_ndim), rows=rows
+        )
 
     def get_intrinsics(self) -> torch.Tensor:
         """
@@ -631,26 +625,18 @@ class Camera(BaseSensor):
             device=self.device,
         )
 
-    def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
-        """Restore selected camera offsets and ground policy, preserving the current lens.
-
-        Args:
-            env_ids: Logical environment rows, or all rows when omitted.
-        """
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Restore configured extrinsics and ground visibility for selected views."""
         self.set_ground_plane_visibility(self.cfg.ground_plane_visible, env_ids)
         self._reset_pose(env_ids)
 
-    def _reset_pose(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
-        """Restore configured offsets while preserving the current visibility policy."""
-        poses = self._reset_poses()
-        if env_ids is not None:
-            rows = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
-            poses = poses.index_select(0, rows)
-        self.set_local_pose(poses, env_ids=env_ids)
-
-    def _reset_poses(self) -> torch.Tensor:
-        """Build configured OpenGL local matrices on the sensor device."""
+    def _reset_pose(self, env_ids: Sequence[int] | None = None) -> None:
         self.cfg: CameraCfg
+        ids = (
+            None
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        )
 
         if self.cfg.extrinsics.eye is not None:
             eye = (
@@ -676,10 +662,11 @@ class Camera(BaseSensor):
                 if self.cfg.extrinsics.up is not None
                 else None
             )
-            if up is None:
-                up = torch.tensor([0.0, 0.0, 1.0], device=self.device).expand_as(eye)
-            pose = look_at_to_pose(eye, target, up)
-            pose[:, :3, 1:3] *= -1
+            if ids is not None:
+                eye, target = eye[ids], target[ids]
+                if up is not None:
+                    up = up[ids]
+            self.look_at(eye, target, up, env_ids=env_ids)
         else:
             pose = self.cfg.extrinsics.transformation.to(self.device)
             pose = pose.unsqueeze_(0).repeat(self.num_instances, 1, 1)
@@ -689,4 +676,4 @@ class Camera(BaseSensor):
                 pose[:, :3, 1] = -pose[:, :3, 1]
                 pose[:, :3, 2] = -pose[:, :3, 2]
 
-        return pose
+            self.set_local_pose(pose if ids is None else pose[ids], env_ids=env_ids)

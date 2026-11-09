@@ -2491,9 +2491,7 @@ class SimulationManager:
             arena_names=arena_names,
         )
         try:
-            batch_lights = Light(
-                cfg=cfg, entities=handles, device=self.device, scene=scene
-            )
+            batch_lights = Light(cfg=cfg, entities=handles, scene=scene)
         except Exception:
             scene.remove_lights(handles)
             raise

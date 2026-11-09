@@ -29,10 +29,12 @@ sensors must not rediscover a singleton manager. Cameras are render features
 on both physics backends. Contact availability is a backend capability checked
 before preparation and again after DexUni's scene-based dispatch.
 
-Camera/StereoCamera state and intrinsics use Scene camera batches, preserving
-CPU/CUDA input selection order. Shared image targets already batch their view
-buffers; ordered publication keeps preceding pose/parameter writes visible to
-the next photograph. Stereo expansion and logical center poses remain sensor-owned.
+Camera/StereoCamera intrinsics use Scene camera batches, preserving CPU/CUDA
+input selection order, negative indices and last-write-wins duplicate rows.
+Pose reads/writes, look-at and extrinsics reset retain
+their per-instance native paths. Shared image targets already batch their view
+buffers; ordered publication keeps preceding parameter writes visible to the
+next photograph. Stereo calibration and logical center poses remain sensor-owned.
 
 Robot-mounted cameras are declared in `RobotCfg.sensors` with robot-local
 parent links. `SimulationManager.add_robot()` initializes them only when the

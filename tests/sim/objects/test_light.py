@@ -414,6 +414,17 @@ class TestLightTypes:
         np.testing.assert_allclose(state["position"][3], [0.2, 0.3, 2], atol=2e-6)
         np.testing.assert_allclose(state["position"][1], [-4, -5, -6])
         np.testing.assert_allclose(state["color"][3], [0.1, 0.2, 0.3])
+        for selection, expected_color in (
+            ([3, 3], color[1]),
+            ([-1, 1], color[0]),
+        ):
+            light.apply_state(
+                color=color,
+                intensity=intensity,
+                env_ids=torch.tensor(selection, device=input_device),
+            )
+            torch.testing.assert_close(light.get_color()[3], expected_color.cpu())
+        torch.testing.assert_close(light.get_color()[1], color[1].cpu())
         self.sim.remove_asset(light.uid)
         with pytest.raises(RuntimeError, match="destroyed"):
             light.set_intensity(torch.tensor(10.0))
@@ -560,3 +571,60 @@ class TestLightTypes:
             light.set_falloff(torch.tensor(100.0))
         except Exception as e:
             pytest.fail(f"set_falloff failed: {e}")
+
+
+@pytest.mark.gpu
+def test_shared_mesh_binding_preserves_legacy_selection_contract():
+    """A shared native mesh keeps the scalar API's selection and warning behavior."""
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
+    )
+    try:
+        sim.add_rigid_object(
+            RigidObjectCfg(uid="emitter", shape=CubeCfg(), body_type="static")
+        )
+        light = sim.add_light(LightCfg(uid="mesh_light", light_type="mesh"))
+        sim.prepare()
+        arena_name = sim._spawn_scene.arena_names[0]
+        mesh = sim.spawn_result.handles[f"{arena_name}/emitter"].native()
+        light.set_mesh(mesh, env_ids=[0])
+        first_binding = light._entities[0].get_render_state()["mesh_entity_id"]
+        assert first_binding >= 0
+
+        # Native sharing conflicts warn without raising; a batch must not add
+        # a stricter same-Arena ownership failure for this existing call.
+        light.set_mesh(mesh, env_ids=[2, 0])
+        assert light._entities[0].get_render_state()["mesh_entity_id"] == first_binding
+        assert light._entities[1].get_render_state()["mesh_entity_id"] == -1
+        light.set_mesh(mesh, env_ids=[])
+        light.set_mesh(mesh)
+        assert light._entities[0].get_render_state()["mesh_entity_id"] == first_binding
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.gpu
+def test_light_getters_preserve_cpu_snapshots_with_cuda_manager():
+    """Manager-created light getters keep main's device and ownership contract."""
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device="cuda:0", num_envs=3)
+    )
+    try:
+        light = sim.add_light(
+            LightCfg(uid="getter_light", color=(0.1, 0.2, 0.3), intensity=2)
+        )
+        before = light.get_color()
+        assert before.device.type == "cpu"
+        assert light.get_intensity().device.type == "cpu"
+        light.set_color(torch.tensor([0.4, 0.5, 0.6], device="cuda:0"))
+        torch.testing.assert_close(before, torch.tensor([[0.1, 0.2, 0.3]] * 3))
+        torch.testing.assert_close(
+            light.get_color(), torch.tensor([[0.4, 0.5, 0.6]] * 3)
+        )
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()

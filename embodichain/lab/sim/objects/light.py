@@ -19,11 +19,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
-from dexsim.scene import SpawnedRigidBody
 
 from embodichain.lab.sim.cfg import LightCfg
 from embodichain.lab.sim.common import BatchEntity
+from embodichain.lab.sim._render_selection import (
+    _normalize_render_rows,
+    _select_render_values,
+)
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
@@ -117,19 +121,26 @@ class Light(BatchEntity):
                 f"Position ignored for global {self.cfg.light_type!r} light."
             )
             position = None
-        self._batch.apply_state(
-            color=color,
-            intensity=intensity,
-            position=position,
-            direction=direction,
-            shadow_enabled=None if shadow_enabled is None else shadow_enabled != 0,
-            spot_inner_angle=spot_inner_angle,
-            spot_outer_angle=spot_outer_angle,
-            rect_width=rect_width,
-            rect_height=rect_height,
-            rows=env_ids,
-            frame="local",
-        )
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        fields = {
+            "color": color,
+            "intensity": intensity,
+            "position": position,
+            "direction": direction,
+            "shadow_enabled": None if shadow_enabled is None else shadow_enabled != 0,
+            "spot_inner_angle": spot_inner_angle,
+            "spot_outer_angle": spot_outer_angle,
+            "rect_width": rect_width,
+            "rect_height": rect_height,
+        }
+        fields = {
+            name: _select_render_values(
+                value, offsets, 1 if name in ("color", "position", "direction") else 0
+            )
+            for name, value in fields.items()
+            if value is not None
+        }
+        self._batch.apply_state(**fields, rows=rows, frame="local")
 
     def set_color(
         self, colors: torch.Tensor, env_ids: Sequence[int] | torch.Tensor | None = None
@@ -140,7 +151,8 @@ class Light(BatchEntity):
             colors: RGB (3,) broadcast or selected (N,3) values.
             env_ids: Selected environment rows, or all rows.
         """
-        self._batch.apply_color(colors, rows=env_ids)
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        self._batch.apply_color(_select_render_values(colors, offsets, 1), rows=rows)
 
     def set_intensity(
         self,
@@ -153,7 +165,10 @@ class Light(BatchEntity):
             intensities: A scalar, (1,), or selected (N,) values.
             env_ids: Selected environment rows, or all rows.
         """
-        self._batch.apply_intensity(intensities, rows=env_ids)
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        self._batch.apply_intensity(
+            _select_render_values(intensities, offsets, 0), rows=rows
+        )
 
     def set_falloff(
         self,
@@ -192,7 +207,10 @@ class Light(BatchEntity):
                 f"set_direction not applicable to light type {self.cfg.light_type!r}, ignoring."
             )
             return
-        self._batch.apply_direction(directions, rows=env_ids, frame="local")
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        self._batch.apply_direction(
+            _select_render_values(directions, offsets, 1), rows=rows, frame="local"
+        )
 
     def set_spot_angle(
         self,
@@ -240,40 +258,37 @@ class Light(BatchEntity):
 
     def set_mesh(
         self,
-        mesh: MeshObject | SpawnedRigidBody | Sequence[MeshObject | SpawnedRigidBody],
-        env_ids: Sequence[int] | torch.Tensor | None = None,
+        mesh: "MeshObject",
+        env_ids: Sequence[int] | None = None,
     ) -> None:
-        """Bind selected mesh lights through the Scene's resource batch.
+        """Set the mesh for mesh-type lights.
 
-        Each light needs a distinct live Scene mesh in the same Arena. A single
-        native MeshObject remains accepted for a single selected light. For
-        multiple environments, supply corresponding meshes in selection order.
+        Only applies to ``mesh`` light type. Logs a warning and no-ops for other types.
+        This is NOT tensor-batched — the same MeshObject is assigned to all targeted
+        instances.
 
         Args:
-            mesh: Scene mesh handles or native objects, one per selected light.
-            env_ids: Selected environment rows, or all rows.
+            mesh (MeshObject): The mesh object to assign to the light.
+            env_ids (Sequence[int] | None): Indices of instances to set. If None,
+                applies to all instances.
         """
         if self.cfg.light_type != "mesh":
             logger.log_warning(
-                f"set_mesh not applicable to light type {self.cfg.light_type!r}, ignoring."
+                f"set_mesh not applicable to light type "
+                f"'{self.cfg.light_type}', ignoring."
             )
             return
-        count = self.num_instances if env_ids is None else len(env_ids)
-        meshes = list(mesh) if isinstance(mesh, Sequence) else [mesh] * count
-        native_meshes = {
-            handle.get_user_id(): handle
-            for handle in self._scene.handles.values()
-            if isinstance(handle, SpawnedRigidBody)
-        }
-        handles = [
-            (
-                entry
-                if isinstance(entry, SpawnedRigidBody)
-                else native_meshes[entry.get_user_id()]
-            )
-            for entry in meshes
-        ]
-        self._batch.apply_mesh_binding(handles, rows=env_ids)
+
+        if env_ids is None:
+            target_ids = list(range(self.num_instances))
+        else:
+            target_ids = list(env_ids)
+
+        for i in target_ids:
+            try:
+                self._entities[i].set_mesh(mesh)
+            except Exception as e:
+                logger.log_error(f"set_mesh: error for instance {i}: {e}")
 
     def enable_shadow(
         self, flags: torch.Tensor, env_ids: Sequence[int] | torch.Tensor | None = None
@@ -284,7 +299,10 @@ class Light(BatchEntity):
             flags: Scalar or (N,) values; nonzero enables the shadow.
             env_ids: Selected environment rows, or all rows.
         """
-        self._batch.apply_shadow_enabled(flags != 0, rows=env_ids)
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        self._batch.apply_shadow_enabled(
+            _select_render_values(flags, offsets, 0) != 0, rows=rows
+        )
 
     @property
     def is_global(self) -> bool:
@@ -294,42 +312,157 @@ class Light(BatchEntity):
     def set_local_pose(
         self,
         pose: torch.Tensor,
-        env_ids: Sequence[int] | torch.Tensor | None = None,
+        env_ids: Sequence[int] | None = None,
         to_matrix: bool = False,
     ) -> None:
-        """Patch local translation while preserving orientation and scale.
+        """Set local pose (translation) for one or more lights.
 
         Args:
-            pose: (3,)/(N,3), or (4,4)/(N,4,4) with ``to_matrix=True``.
-            env_ids: Selected environment rows, or all rows.
-            to_matrix: Extract translation from input matrices.
+            pose (torch.Tensor):
+                - If to_matrix=False: shape (3,) or (M, 3), representing (x, y, z).
+                - If to_matrix=True: shape (4, 4) or (M, 4, 4); translation extracted automatically.
+            env_ids (Sequence[int] | None): Indices to set. If None:
+                - For vector input (3,) broadcast to all, or (M,3) with M == num_instances.
+                - For matrix input (4,4) broadcast to all, or (M,4,4) with M == num_instances.
+            to_matrix (bool): Interpret `pose` as full 4x4 matrix if True, else as vector(s).
         """
         if self.is_global:
             logger.log_warning(
-                f"set_local_pose not applicable to {self.cfg.light_type!r} light type (infinite distance, direction only). Use set_direction() instead."
+                f"set_local_pose not applicable to '{self.cfg.light_type}' light type "
+                f"(infinite distance, direction only). Use set_direction() instead."
             )
             return
+
+        if not torch.is_tensor(pose):
+            logger.log_error(
+                f"set_local_pose requires a torch.Tensor, got {type(pose)}"
+            )
+            return
+
+        cpu = pose.detach().cpu()
         if to_matrix:
-            if pose.shape[-2:] != (4, 4):
-                raise ValueError("Expected (4,4) or (N,4,4) light matrices.")
-            pose = pose[..., :3, 3]
-        self._batch.apply_position(pose, rows=env_ids, frame="local")
+            if cpu.ndim == 2 and cpu.shape == (4, 4):
+                trans = cpu[:3, 3]
+            elif cpu.ndim == 3 and cpu.shape[1:] == (4, 4):
+                trans = cpu[..., 0:3, 3]
+            else:
+                logger.log_error(
+                    f"set_local_pose matrix: expected (4,4) or (N,4,4), got {tuple(cpu.shape)}"
+                )
+                return
+        else:
+            trans = cpu  # expect (3,) or (M,3)
+
+        try:
+            self._apply_vector3(trans, env_ids, setter_name="set_location")
+        except Exception as e:
+            logger.log_error(f"set_local_pose: error while applying translation: {e}")
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
-        """Read all local matrices or translations in one batch.
+        """Get local pose of each light, either as full matrix or translation vector.
 
         Args:
-            to_matrix: Return complete (N,4,4) matrices when true.
-
+            to_matrix (bool, optional): If True, return poses as 4×4 matrices.
+                If False, return translations only as (x, y, z). Defaults to False.
         Returns:
-            Owned CPU float32 tensor, preserving the existing light API.
+            torch.Tensor:
+                - If to_matrix=True: Tensor of shape (N, 4, 4), where N == num_instances.
+                - If to_matrix=False: Tensor of shape (N, 3), containing translations.
+                On error or empty instances, returns an empty tensor with shape (0, 4, 4) or (0, 3) respectively, and logs via logger.log_error.
         """
-        values = (
-            self._batch.fetch_pose(frame="local")
-            if to_matrix
-            else self._batch.fetch_position(frame="local")
+        mats = []
+        for i in range(self.num_instances):
+            try:
+                mat = self._entities[i].get_local_pose()  # expect numpy (4,4)
+                arr = np.array(mat, dtype=np.float32)
+                if arr.shape != (4, 4):
+                    logger.log_error(
+                        f"get_local_pose: unexpected shape {arr.shape} for instance {i}"
+                    )
+                    return torch.empty(
+                        (0, 4, 4) if to_matrix else (0, 3), dtype=torch.float32
+                    )
+                mats.append(arr)
+            except Exception as e:
+                logger.log_error(f"get_local_pose: error for instance {i}: {e}")
+                return torch.empty(
+                    (0, 4, 4) if to_matrix else (0, 3), dtype=torch.float32
+                )
+
+        if not mats:
+            return torch.empty((0, 4, 4) if to_matrix else (0, 3), dtype=torch.float32)
+
+        stacked = np.stack(mats, axis=0)  # (N,4,4)
+        tensor4 = torch.from_numpy(stacked)
+        if to_matrix:
+            return tensor4
+        # else return translations
+        return tensor4[:, 0:3, 3].clone()
+
+    def _apply_vector3(
+        self,
+        tensor: torch.Tensor,
+        env_ids: Sequence[int] | None,
+        setter_name: str,
+    ) -> None:
+        """
+        Generic helper for 3-element vectors (color, location).
+        Expects tensor shape: (3,), or (M,3) with M == num_instances or M == len(env_ids).
+        env_ids: Sequence[int] | None
+        """
+        # Validate tensor type
+        if not torch.is_tensor(tensor):
+            logger.log_error(
+                f"{setter_name} requires a torch.Tensor, got {type(tensor)}"
+            )
+            return
+
+        cpu = tensor.detach().cpu()
+        # Determine target indices
+        if env_ids is None:
+            all_ids = list(range(self.num_instances))
+        else:
+            all_ids = list(env_ids)
+
+        # Cases:
+        # 1) cpu.ndim == 1 and size == 3: broadcast to all_ids
+        if cpu.ndim == 1 and cpu.shape[0] == 3:
+            arr = cpu.numpy()
+            for i in all_ids:
+                getattr(self._entities[i], setter_name)(
+                    float(arr[0]), float(arr[1]), float(arr[2])
+                )
+            return
+
+        # 2) cpu.ndim == 2 and cpu.shape == (num_instances, 3), env_ids None or full
+        if cpu.ndim == 2 and cpu.shape == (self.num_instances, 3) and env_ids is None:
+            arr_all = cpu.numpy()
+            for i in range(self.num_instances):
+                getattr(self._entities[i], setter_name)(
+                    float(arr_all[i, 0]), float(arr_all[i, 1]), float(arr_all[i, 2])
+                )
+            return
+
+        # 3) cpu.ndim == 2 and env_ids provided, cpu.shape == (len(env_ids), 3)
+        if (
+            cpu.ndim == 2
+            and env_ids is not None
+            and cpu.shape[0] == len(all_ids)
+            and cpu.shape[1] == 3
+        ):
+            arr_sel = cpu.numpy()
+            for idx, i in enumerate(all_ids):
+                getattr(self._entities[i], setter_name)(
+                    float(arr_sel[idx, 0]),
+                    float(arr_sel[idx, 1]),
+                    float(arr_sel[idx, 2]),
+                )
+            return
+
+        logger.log_error(
+            f"{setter_name}: tensor shape {tuple(cpu.shape)} is invalid for broadcasting "
+            f"(expected (3,) or ({self.num_instances},3) or ({len(all_ids)},3))."
         )
-        return torch.as_tensor(values, dtype=torch.float32)
 
     def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
         """Restore selected initial light properties with one fused write.

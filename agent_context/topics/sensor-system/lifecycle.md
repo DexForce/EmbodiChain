@@ -8,16 +8,16 @@ validation, return to the [sensor overview](sensor-system.md).
 Camera views and their shared targets belong to the existing Spawn Scene.
 `SceneBuilder.prepare_arenas()` supplies its lightweight render Scene before
 physical finalization, so camera creation must not finalize an incomplete Newton
-model. Creation/removal and parent attachment use Scene batches; image buffers
+model. Creation/removal use Scene batches; image buffers
 retain the existing environment and left-then-right eye layout.
 
-`SimulationManager.prepare()` detaches parented camera views through
-`Scene.detach_render_objects()` before committing a topology rebuild. This also
-clears retained physical-parent paths, allowing semantic resolution to retry
-after binding rather than replaying stale render-node identities. After scene
-binding, the manager resolves new parent nodes and reapplies configured
-extrinsics through `attach_to_parent_nodes()`. Preparation without topology
-changes leaves existing attachment intact.
+`SimulationManager.prepare()` detaches parented native camera views before
+committing a topology rebuild. After scene binding, the manager resolves new
+parent nodes and reapplies configured extrinsics through
+`attach_to_parent_nodes()`. Both stereo eyes follow that lifecycle; the manager
+owns semantic parent resolution rather than retaining native parent identities
+across rebuilds. Preparation without topology changes leaves existing attachment
+intact.
 
 This separates three owners: the manager schedules detachment/reattachment,
 `attachment.py` resolves semantic asset/link identity, and camera classes apply
