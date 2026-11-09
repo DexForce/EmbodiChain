@@ -495,6 +495,22 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
                 self.num_envs, dtype=torch.bool, device=self.device
             )
 
+    def _before_episode_reset(self, env_ids: torch.Tensor, **kwargs: Any) -> None:
+        super()._before_episode_reset(env_ids, **kwargs)
+        course = self._reference_terrain_course
+        if course is None:
+            return
+        eligible = self._elapsed_steps[env_ids] > 0
+        resume_reset = getattr(self, "_reference_resume_reset", None)
+        if resume_reset is not None:
+            eligible &= ~resume_reset[env_ids]
+            resume_reset[env_ids] = False
+        update_ids = env_ids[eligible]
+        if update_ids.numel():
+            course.update(
+                update_ids, self.robot.body_data.root_pose[:, :3], self.reward_command
+            )
+
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs: Any
     ) -> None:
@@ -505,17 +521,6 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
         )
         if ids.numel() == 0:
             return
-        if self._reference_terrain_course is not None:
-            resume_reset = getattr(self, "_reference_resume_reset", None)
-            update_ids = ids if resume_reset is None else ids[~resume_reset[ids]]
-            if update_ids.numel():
-                self._reference_terrain_course.update(
-                    update_ids,
-                    self.robot.body_data.root_pose[:, :3],
-                    self.reward_command,
-                )
-            if resume_reset is not None:
-                resume_reset[ids] = False
         previous_deferred = getattr(self, "_reference_events_deferred", False)
         self._reference_events_deferred = True
         try:

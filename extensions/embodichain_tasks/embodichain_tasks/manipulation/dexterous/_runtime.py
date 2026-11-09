@@ -89,7 +89,7 @@ class DexSimManipulationEnv:
         task_id: str,
         num_envs: int = 32,
         device: str = "cuda:0",
-        seed: int = 42,
+        seed: int | None = None,
         cuda_graph: bool = True,
         solver_kind: str = "mujoco_warp",
         diagnostics: bool = True,
@@ -103,13 +103,16 @@ class DexSimManipulationEnv:
         self.task_id = task_id
         self.num_envs = num_envs
         self.device = torch.device(device)
-        torch.manual_seed(seed)
+        seed = torch.initial_seed() if seed is None else seed
         if task_id in ("M1", "M2"):
             self.task = ShadowTask.from_assets(
                 Path(get_data_path("ShadowHandPen/shadow_pen.xml")).parent,
                 num_envs,
                 variant=task_id,
                 device=device,
+            )
+            self._reset_generator = torch.Generator(device=self.device).manual_seed(
+                seed
             )
             xml = Path(get_data_path("ShadowHandPen/shadow_pen.xml"))
             self.ctrl_dt, self.sim_dt = 0.04, 0.002
@@ -142,6 +145,7 @@ class DexSimManipulationEnv:
                 device=device,
                 seed=seed,
             )
+            self._reset_generator = self.task.generator
             self.ctrl_dt, self.sim_dt = 0.05, (0.005 if task_id == "M3" else 0.01)
             self.observation_dim = {"M3": 65, "M4": 57, "M5": 32}[task_id]
             self.critic_dim = {"M3": 65, "M4": 128, "M5": 105}[task_id]
@@ -575,9 +579,7 @@ class DexSimManipulationEnv:
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict, dict]:
         if seed is not None:
-            torch.manual_seed(seed)
-            if hasattr(self.task, "generator"):
-                self.task.generator.manual_seed(seed)
+            self._reset_generator.manual_seed(seed)
         ids = (
             torch.arange(self.num_envs, device=self.device)
             if not options
@@ -585,7 +587,7 @@ class DexSimManipulationEnv:
         )
         ids = torch.as_tensor(ids, dtype=torch.long, device=self.device)
         if self.task_id in ("M1", "M2"):
-            qpos, qvel, ctrl = self.task.reset(ids)
+            qpos, qvel, ctrl = self.task.reset(ids, generator=self._reset_generator)
         else:
             initial = self.task.reset(ids)
             qpos, qvel, ctrl = initial["qpos"], initial["qvel"], initial["ctrl"]

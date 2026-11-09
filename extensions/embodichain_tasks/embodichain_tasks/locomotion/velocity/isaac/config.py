@@ -49,7 +49,7 @@ def load_config(task: str) -> IsaacVelocityConfig:
     robot = data["robot"]
     dimension = len(robot["joint_names"])
     observation_dimension = 12 + 3 * dimension + (187 if dimension == 37 else 0)
-    return IsaacVelocityConfig(
+    cfg = IsaacVelocityConfig(
         data=data,
         joint_names=tuple(robot["joint_names"]),
         default_joint_position=tuple(robot["default_joint_position"]),
@@ -58,3 +58,5 @@ def load_config(task: str) -> IsaacVelocityConfig:
         actor_observation_dim=observation_dimension,
         critic_observation_dim=observation_dimension,
     )
+    cfg.validate()
+    return cfg

@@ -63,6 +63,7 @@ def env_factory(
         env.single_action_space = gym.spaces.Box(-1.0, 1.0, (1,))
         env.action_format = "tensor"
         env.elapsed_steps = torch.zeros(2, dtype=torch.long)
+        env._reset_generator = torch.Generator().manual_seed(0)
         env._episode_return = torch.zeros(2)
         env._episode_success = torch.zeros(2, dtype=torch.bool)
         env._last_observation = None
@@ -78,9 +79,10 @@ def env_factory(
         env._publish_controls = Mock()
         env._state = lambda: None
 
-        def task_reset(ids):
+        def task_reset(ids, *, generator=None):
             values = torch.zeros(len(ids), 1)
             if task_id in ("M1", "M2"):
+                assert generator is env._reset_generator
                 return values, values, values
             return dict(qpos=values, qvel=values, ctrl=values)
 
@@ -130,7 +132,10 @@ def test_partial_reset_clears_only_selected_success_and_keeps_terminal_info(
 ) -> None:
     env = env_factory(task_id)
     env._episode_success[:] = True
-    env.reset(options={"reset_ids": torch.tensor([0])})
+    trainer_rng = torch.random.get_rng_state()
+    env.reset(seed=19, options={"reset_ids": torch.tensor([0])})
+    assert env._reset_generator.initial_seed() == 19
+    assert torch.equal(torch.random.get_rng_state(), trainer_rng)
     assert env._episode_success.tolist() == [False, True]
     env.elapsed_steps[:] = torch.tensor([2, 0])
     _, _, done, _, info = env.step(torch.zeros(2, 1))
