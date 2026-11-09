@@ -185,7 +185,7 @@ def test_compiled_transition_matches_eager_values_noise_and_multistep_gradients(
         env.cfg.action_noise = 0.1
         env.reset(seed=42)
         actions = torch.full((3, 2, 1), 0.02, requires_grad=True)
-        with frozen_world_model(wm):
+        with frozen_world_model(wm), torch.device(actions.device):
             rewards = []
             for action in actions:
                 observation, reward, _, _, info = env.step(action)

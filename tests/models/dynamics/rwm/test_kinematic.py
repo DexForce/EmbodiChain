@@ -122,7 +122,8 @@ def test_weighted_time_sum_matches_explicit_objective_and_backward_keeps_first_a
         error_weights=weights,
         compile_mode="default" if compiled else None,
     )
-    result = objective.compute_loss(model, batch)
+    with torch.device(actions.device):
+        result = objective.compute_loss(model, batch)
     current, expected = state, state.new_zeros(())
     for step in range(3):
         current = model(current, actions[:, step])

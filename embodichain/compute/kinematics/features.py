@@ -38,7 +38,8 @@ def heading_rotation(rotation: torch.Tensor) -> torch.Tensor:
     yaw = torch.atan2(rotation[..., 1, 0], rotation[..., 0, 0])
     c, s = yaw.cos(), yaw.sin()
     z, o = torch.zeros_like(c), torch.ones_like(c)
-    return torch.stack((c, -s, z, s, c, z, z, z, o), -1).unflatten(-1, (3, 3))
+    heading = torch.stack((c, -s, z, s, c, z, z, z, o), -1)
+    return heading.reshape(*yaw.shape, 3, 3)
 
 
 def heading_kinematic_features(

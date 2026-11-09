@@ -257,6 +257,6 @@ class RobotWorldModelObjective:
                 actions.shape[1] if self.temporal_reduction == "mean" else 1
             )
             loss = weighted.sum() / count
-            by_step = squared.unflatten(0, actions.shape[:2])
+            by_step = squared.reshape(*actions.shape[:2], *squared.shape[1:])
             position_error = (predicted[..., :3] - target[..., :3]).norm(dim=-1).mean()
         return loss, by_step[:, 0].mean(), by_step[:, -1].mean(), position_error

@@ -278,7 +278,10 @@ def test_tracking_diagnostics_distinguish_alignment_and_failure_conditions():
 
 
 @pytest.mark.parametrize("compiled", [False, True])
-def test_rotation_error_has_correct_values_and_gradients_near_zero_and_pi(compiled):
+def test_rotation_error_has_correct_values_and_gradients_near_zero_and_pi(
+    compiled: bool,
+) -> None:
+    """Check rotation values and gradients with a default device active."""
     from embodichain_models.dynamics.rwm.robot_state import rotation_exp
 
     task, original = task_and_state()
@@ -302,15 +305,18 @@ def test_rotation_error_has_correct_values_and_gradients_near_zero_and_pi(compil
     fn = (
         torch.compile(error, backend="aot_eager", fullgraph=True) if compiled else error
     )
-    values = fn(rotation)
+    with torch.device(rotation.device):
+        values = fn(rotation)
     torch.testing.assert_close(values, angles.square(), atol=1e-12, rtol=1e-10)
     (gradient,) = torch.autograd.grad(values.sum(), (angles,))
     torch.testing.assert_close(gradient, 2 * angles.detach(), atol=1e-10, rtol=1e-10)
     half_turn = (
         2 * axis[:, None] * axis[None, :] - torch.eye(3, dtype=axis.dtype)
     ).expand(len(angles), -1, -1)
+    with torch.device(rotation.device):
+        half_turn_values = fn(half_turn)
     torch.testing.assert_close(
-        fn(half_turn), torch.full_like(angles, math.pi**2), atol=1e-12, rtol=1e-12
+        half_turn_values, torch.full_like(angles, math.pi**2), atol=1e-12, rtol=1e-12
     )
 
 

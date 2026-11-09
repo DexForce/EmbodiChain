@@ -263,7 +263,8 @@ class MotionModelEnv:
         clean_goal = self.task.goal(state, future)
         goal = clean_goal
         if noise_goal and self.cfg.goal_position_noise:
-            split = goal.unflatten(-1, (len(self.task.cfg.future_offsets), -1))
+            offsets = len(self.task.cfg.future_offsets)
+            split = goal.reshape(*goal.shape[:-1], offsets, goal.shape[-1] // offsets)
             noise = (
                 torch.rand(
                     split[..., :3].shape, device=self.device, generator=self._generator
@@ -412,7 +413,8 @@ class MotionModelEnv:
         goal = self.task.goal(state_dict, future)
         policy_goal = goal
         if goal_noise is not None:
-            split = goal.unflatten(-1, (len(self.task.cfg.future_offsets), -1))
+            offsets = len(self.task.cfg.future_offsets)
+            split = goal.reshape(*goal.shape[:-1], offsets, goal.shape[-1] // offsets)
             policy_goal = torch.cat(
                 (split[..., :3] + goal_noise, split[..., 3:]), -1
             ).flatten(-2)
