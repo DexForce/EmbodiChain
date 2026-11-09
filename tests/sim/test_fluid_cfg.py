@@ -67,9 +67,13 @@ def test_native_sph_and_yaml_mapping_use_same_solver():
     assert mapping.solver_cfg.sph_cfg == source
 
 
-def test_standalone_sph_mapping_points_to_dexuni_migration():
-    with pytest.raises(RuntimeError, match="configure DexUni with sph_cfg"):
-        NewtonPhysicsCfg(solver_cfg={"solver_type": "sph"}).to_dexsim_cfg(0)
+@pytest.mark.parametrize("as_mapping", [False, True])
+def test_direct_sph_solver_config_is_rejected(as_mapping):
+    from dexsim.engine.newton_physics import SPHSolverCfg
+
+    solver_cfg = {"solver_type": "sph"} if as_mapping else SPHSolverCfg()
+    with pytest.raises(RuntimeError, match="Unsupported Newton solver type 'sph'"):
+        NewtonPhysicsCfg(solver_cfg=solver_cfg).to_dexsim_cfg(0)
 
 
 @pytest.mark.parametrize("kind", ["box", "sphere", "cylinder"])
