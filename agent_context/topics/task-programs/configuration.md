@@ -220,6 +220,12 @@ receives projected scalar limits and numerical geometry. Search
 and collision policy retain toolkit defaults and the task allowlist. Duplicate
 explicit service ownership is rejected. See the [robot binding owner](../robot-system/robot-system.md)
 for assembly, source identity and TCP validation.
+Capability compatibility does not establish task-geometry compatibility. The
+qualified Pika and dual-Robotiq deployments under `repeated_pick_place` and
+`hand_over` select their own workspace, grasp strategy and execution policy;
+reuse their complete deployment instead of transplanting an embodiment into
+another robot's fixed-grasp integration. Their segment validators and physical
+replay checks are independent of command-generation success.
 
 `runtime_services.hand_geometries` declares explicit hand calibration by grasp
 endpoint target ID. Its `sampled_parallel_jaw` entries reference an existing
