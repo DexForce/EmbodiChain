@@ -2320,6 +2320,15 @@ class SimulationManager:
         collision.enable_collision = enabled
         if newton is not None:
             collision.newton = newton
+        # Default materializes the ground during declaration. Redeclaring also
+        # updates its native collision and render geometry before prepare().
+        self._spawn_scene.remove("default_plane")
+        self._spawn_scene.declare(
+            "rigid_object", "default_plane", self._spawn_default_plane_descriptor
+        )
+        handles = self._spawn_scene.handles("default_plane")
+        if handles:
+            self._bind_default_plane(handles[0])
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.

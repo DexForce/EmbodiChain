@@ -35,8 +35,6 @@ import open3d as o3d
 
 from embodichain.utils import logger
 
-__all__ = ["EmbodiChainDataset", "get_data_class", "get_data_path"]
-
 
 def _dataset_cache_paths(path: str, prefix: str) -> tuple[Path, Path]:
     """Resolve one cache entry and reject paths outside its configured root."""

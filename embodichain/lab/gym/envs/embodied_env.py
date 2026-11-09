@@ -1563,6 +1563,7 @@ class EmbodiedEnv(BaseEnv):
         if not getattr(self, "_demo_metadata_initialized", True) and (
             self.dataset_manager is not None
             or getattr(self, "rollout_buffer", None) is not None
+            or getattr(self, "_traj_buffer", None) is not None
         ):
             episode_metadata = self._demo_episode_metadata = _EpisodeMetadataRows(
                 self.num_envs, self._new_demo_episode_metadata(0)
