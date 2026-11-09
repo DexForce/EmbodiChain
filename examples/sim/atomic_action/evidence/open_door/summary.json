@@ -1,0 +1,18 @@
+{
+  "open-0-to-30": {
+    "initial_deg": 6.2072431721159384e-15,
+    "target_deg": 30.00000000009747,
+    "final_deg": 31.900644405354672,
+    "final_error_deg": 1.900644405257205,
+    "samples": 1327,
+    "trajectory_duration_s": 13.259997367858887
+  },
+  "close-30-to-0": {
+    "initial_deg": 30.000000834826057,
+    "target_deg": 0.0,
+    "final_deg": 0.0015149438995045123,
+    "final_error_deg": 0.0015149438995045123,
+    "samples": 1553,
+    "trajectory_duration_s": 15.519998550415039
+  }
+}

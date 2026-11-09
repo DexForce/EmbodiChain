@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
 import math
 
 from embodichain.data import get_data_path
@@ -82,9 +84,21 @@ def parse_arguments() -> argparse.Namespace:
         default=math.radians(60.0),
         help="Desired absolute hinge opening in radians (default: 60 degrees).",
     )
+    parser.add_argument(
+        "--initial_angle",
+        type=float,
+        default=None,
+        help="Optional initial hinge angle in radians, staged before planning.",
+    )
     parser.add_argument("--approach_distance", type=float, default=0.10)
     parser.add_argument("--retract_distance", type=float, default=0.10)
     parser.add_argument("--door_waypoint_count", type=int, default=50)
+    parser.add_argument(
+        "--sample_count",
+        type=int,
+        default=TRAJECTORY_SAMPLE_COUNT,
+        help="Minimum motion samples; increase to slow difficult hinge paths.",
+    )
     return parse_affordance_sampling_arguments(parser)
 
 
@@ -158,11 +172,22 @@ def run(args: argparse.Namespace) -> None:
     open_fraction = (args.open_angle - closed_position) / (
         open_position - closed_position
     )
-    handle_pose = microwave.get_link_pose(HANDLE_LINK_NAME, to_matrix=True)
     hinge_joint_index = microwave.joint_names.index(affordance.joint_name)
+    if getattr(args, "initial_angle", None) is not None:
+        if (
+            not math.isfinite(args.initial_angle)
+            or not lower_limit <= args.initial_angle <= upper_limit
+        ):
+            raise ValueError("initial_angle must lie within the finite hinge limits.")
+        # Fixture initialization only. Playback never writes the door state.
+        initial_qpos = microwave.get_qpos(target=False).clone()
+        initial_qpos[:, hinge_joint_index] = args.initial_angle
+        microwave.set_qpos(initial_qpos, target=False)
+        sim.update(step=10)
+    handle_pose = microwave.get_link_pose(HANDLE_LINK_NAME, to_matrix=True)
     hinge_position = microwave.get_qpos(target=False)[
         :, hinge_joint_index : hinge_joint_index + 1
-    ]
+    ].clone()
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "door_handle_link_pose", handle_pose)
 
@@ -206,7 +231,7 @@ def run(args: argparse.Namespace) -> None:
                 motion_policy=MotionPolicy(
                     # Contact/path segments require exact Cartesian samples.
                     strategy="ik_interp",
-                    sample_count=TRAJECTORY_SAMPLE_COUNT,
+                    sample_count=getattr(args, "sample_count", TRAJECTORY_SAMPLE_COUNT),
                 ),
                 skill_options=OpenDoorOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
@@ -248,6 +273,16 @@ def run(args: argparse.Namespace) -> None:
     ]
     if wait_for_user:
         input("Press Enter to replay OpenDoor...")
+    measured_hinge: list[list[float]] = []
+
+    def observe_hinge(index: int, count: int) -> None:
+        measured_hinge.append(
+            microwave.get_qpos(target=False)[:, hinge_joint_index]
+            .detach()
+            .cpu()
+            .tolist()
+        )
+
     replay_trajectory(
         sim,
         robot,
@@ -257,7 +292,29 @@ def run(args: argparse.Namespace) -> None:
         hold_steps=POST_TRAJECTORY_STEPS,
         look_at=[camera_position, focus_position, [0.0, 0.0, 1.0]],
         compiled=compiled,
+        on_trajectory_step=observe_hinge,
     )
+    report = {
+        "initial_hinge_rad": hinge_position[:, 0].detach().cpu().tolist(),
+        "target_hinge_rad": args.open_angle,
+        "final_hinge_rad": microwave.get_qpos(target=False)[:, hinge_joint_index]
+        .detach()
+        .cpu()
+        .tolist(),
+        "measured_hinge_rad": measured_hinge,
+        "plan_success": compiled.plan_success.detach().cpu().tolist(),
+        "physics": args.physics,
+        "renderer": args.renderer,
+        "control_dt": sim.sim_config.physics_dt,
+        "trajectory_duration_s": compiled.trajectory.duration.detach().cpu().tolist(),
+    }
+    logger.log_info(
+        f"OpenDoor observed hinge: {report['initial_hinge_rad']} -> {report['final_hinge_rad']}; target={args.open_angle}, samples={len(measured_hinge)}"
+    )
+    if args.auto_play_video_path:
+        Path(args.auto_play_video_path).with_suffix(".hinge.json").write_text(
+            json.dumps(report, indent=2) + "\n"
+        )
     if wait_for_user:
         input("Press Enter to exit the simulation...")
 

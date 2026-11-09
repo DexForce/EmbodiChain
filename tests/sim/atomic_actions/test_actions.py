@@ -5418,8 +5418,9 @@ def _door_affordance(*, opening_direction: int = 1) -> OpenDoorAffordance:
     [(24, 3, 4), (300, 30, 50)],
     ids=["compact", "microwave"],
 )
+@pytest.mark.parametrize("closing", [False, True])
 def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract(
-    sample_count: int, hand_interp_steps: int, door_waypoint_count: int
+    sample_count: int, hand_interp_steps: int, door_waypoint_count: int, closing: bool
 ) -> None:
     affordance = _door_affordance()
     semantics = ObjectSemantics(
@@ -5467,7 +5468,14 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract(
             motion_policy=MotionPolicy(sample_count=sample_count),
             skill_options=options,
         ),
-        _context(scene=_door_scene(link_pose)),
+        _context(
+            scene=_door_scene(
+                link_pose,
+                hinge_position=torch.full(
+                    (NUM_ENVS, 1), math.pi / 2 if closing else 0.0
+                ),
+            )
+        ),
     )
 
     trajectory = _joint_trajectory(plan)
@@ -5500,7 +5508,7 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract(
         torch.tensor([1.0, 0.1, 0.0]).expand(NUM_ENVS, -1),
         atol=1.0e-6,
     )
-    angle = math.pi / 6
+    angle = -math.pi / 3 if closing else math.pi / 6
     expected_retract = torch.tensor(
         [
             math.cos(angle) - options.retract_distance * math.sin(angle),
@@ -5544,24 +5552,55 @@ def test_open_door_interpolates_link_arc_and_recovers_eef_poses() -> None:
     )
 
 
-def test_open_door_uses_affordance_owned_negative_opening_direction() -> None:
+@pytest.mark.parametrize(
+    ("direction", "fraction", "positions", "expected"),
+    [
+        (-1, 0.5, [math.pi / 2, 0.0], [-math.pi / 4, math.pi / 4]),
+        (1, 0.0, [math.pi / 2, math.pi / 4], [-math.pi / 2, -math.pi / 4]),
+        (-1, 0.0, [0.0, math.pi / 4], [math.pi / 2, math.pi / 4]),
+    ],
+)
+def test_open_door_resolves_absolute_target_in_either_direction(
+    direction: int, fraction: float, positions: list[float], expected: list[float]
+) -> None:
     action = _bind_action(_motion_generator(), OpenDoor())
-    context = _context()
-
-    rotation, active, already_open, valid = action._resolve_hinge_rotation(
-        0.5,
-        torch.full((NUM_ENVS, 1), math.pi / 2),
+    rotation, active, reached, valid = action._resolve_hinge_rotation(
+        fraction,
+        torch.tensor(positions)[:, None],
         None,
         (0.0, math.pi / 2),
-        -1,
-        context,
+        direction,
+        _context(),
         tolerance=1.0e-4,
     )
-
-    assert torch.allclose(rotation, torch.full((NUM_ENVS,), -math.pi / 4))
+    assert torch.allclose(rotation, torch.tensor(expected))
     assert active.tolist() == [True, True]
-    assert already_open.tolist() == [False, False]
+    assert reached.tolist() == [False, False]
     assert valid.tolist() == [True, True]
+
+
+@pytest.mark.parametrize(
+    "positions,valid_mask",
+    [
+        ([float("nan"), 0.0], [True, False]),
+        ([0.0, math.pi / 2], [False, False]),
+    ],
+)
+def test_open_door_rejects_invalid_observations(
+    positions: list[float], valid_mask: list[bool]
+) -> None:
+    action = _bind_action(_motion_generator(), OpenDoor())
+    rotation, active, reached, valid = action._resolve_hinge_rotation(
+        0.5,
+        torch.tensor(positions)[:, None],
+        torch.tensor(valid_mask),
+        (0.0, math.pi / 2),
+        1,
+        _context(),
+        tolerance=1.0e-4,
+    )
+    assert rotation.tolist() == [0.0, 0.0]
+    assert not (active | reached | valid).any()
 
 
 def test_open_door_holds_failed_grasp_environment() -> None:
@@ -5715,9 +5754,12 @@ def test_exact_contact_path_holds_row_after_partial_ik_failure(
     )
 
 
-def test_open_door_fails_row_whose_target_would_close_hinge() -> None:
+@pytest.mark.parametrize("opening_direction", [1, -1])
+def test_open_door_accepts_mixed_opening_and_closing_rows(
+    opening_direction: int,
+) -> None:
     semantics = ObjectSemantics(
-        affordance=_door_affordance(),
+        affordance=_door_affordance(opening_direction=opening_direction),
         geometry={},
         entity_id=DOOR_ENTITY_ID,
         label="door_handle",
@@ -5748,13 +5790,18 @@ def test_open_door_fails_row_whose_target_would_close_hinge() -> None:
         context,
     )
 
-    assert plan.plan_success.tolist() == [True, False]
-    assert torch.allclose(
-        _joint_trajectory(plan).positions[1],
-        context.robot.qpos[1]
-        .unsqueeze(0)
-        .expand(_joint_trajectory(plan).waypoint_count, -1),
+    assert plan.plan_success.tolist() == [True, True]
+    trajectory = _joint_trajectory(plan)
+    assert torch.all(
+        trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
     )
+    assert torch.all(
+        trajectory.positions[:, plan.segment("release").stop - 1, ARM_DOF:] == 0.0
+    )
+    # Planning leaves the measured hinge and robot state untouched.
+    assert context.scene.articulation_joints[
+        (DOOR_ENTITY_ID, "door_hinge")
+    ].position.tolist() == [[0.0], [pytest.approx(math.pi / 2)]]
 
 
 def test_open_door_fails_rows_with_invalid_fraction_or_out_of_limit_hinge() -> None:
