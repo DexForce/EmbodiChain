@@ -438,8 +438,9 @@ def test_metrics_keep_evidence_when_native_process_aborts(
 @pytest.mark.parametrize(
     "resource_marker", ["requires_sim", "gpu"], ids=["scene-owner", "device-owner"]
 )
+@pytest.mark.parametrize("freeze_imports", [False, True])
 def test_failed_native_owner_is_released_before_next_case(
-    pytester: pytest.Pytester, resource_marker: str
+    pytester: pytest.Pytester, resource_marker: str, freeze_imports: bool
 ) -> None:
     """Traceback retention must not pin a failed test's native owners indefinitely."""
     source = Path(__file__).parents[1] / "conftest.py"
@@ -464,6 +465,9 @@ references = []
 class NativeOwner: pass
 @pytest.fixture(autouse=True)
 def user_scene_finalizer():
+    import gc, os
+    if 'EXPECTED_INITIAL_FREEZE_COUNT' in os.environ:
+        assert gc.get_freeze_count() > int(os.environ['EXPECTED_INITIAL_FREEZE_COUNT'])
     yield
     import gc
     gc.collect()
@@ -472,6 +476,7 @@ def user_scene_finalizer():
 @pytest.mark.requires_sim
 def test_failure():
     owner = NativeOwner()
+    owner.cycle = owner
     references.append(weakref.ref(owner))
     raise RuntimeError('original failure remains a failure')
 @pytest.mark.requires_sim
@@ -481,5 +486,22 @@ def test_next_case():
     pytester.makepyfile(
         program.replace("@pytest.mark.requires_sim", "@pytest.mark." + resource_marker)
     )
-    result = pytester.runpytest_subprocess("-q", "--run-gpu")
+    if freeze_imports:
+        wrapper = Path(__file__).parents[2] / "scripts/ci/pytest_no_finalize.py"
+        driver = pytester.path / "frozen_driver.py"
+        driver.write_text(f"""
+import gc, importlib.util, os
+spec = importlib.util.spec_from_file_location('native_runner', {str(wrapper)!r})
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+runner._NATIVE_IMPORTS = ()  # Isolate GC ownership from optional SDK dependencies.
+os.environ['EXPECTED_INITIAL_FREEZE_COUNT'] = str(gc.get_freeze_count())
+runner.main(['--freeze-native-imports', '-q', '--run-gpu'])
+""")
+        with pytest.MonkeyPatch.context() as environment:
+            environment.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+            result = pytester.run(sys.executable, str(driver), timeout=30)
+        assert "static import objects" in result.stdout.str()
+    else:
+        result = pytester.runpytest_subprocess("-q", "--run-gpu")
     result.assert_outcomes(passed=1, failed=1)

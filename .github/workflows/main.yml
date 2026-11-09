@@ -447,6 +447,7 @@ jobs:
             --metrics-dir "${GITHUB_WORKSPACE}/test-phase-metrics" \
             "${history_args[@]}" \
             --no-finalize-resource-lanes \
+            --freeze-native-imports \
             --lane fast \
             --lane distributed \
             --lane gpu \

@@ -60,6 +60,16 @@
         "TestManipulabilityMetricUnit::test_no_solver_hit_recomputes_aggregates_under_current_config"
       ],
       "contract": "All14case assertions remain, with unchanged robot/solver/backend/device/arena settings,100sample workloads and seed42. Only World lifetime changes; at most one scene/manager may remain inside the class, and both must return to zero when its fixture ends."
+    },
+    {
+      "owner": "tests/sim/motion/workspace/test_analyzer.py;tests/sim/motion/workspace/test_cache.py;tests/sim/motion/solvers/test_opw_solver.py",
+      "changed": "Share identical native robot topology within a module or device class, reset object state before each case, and clear all binding/fixture owners before final queue flushing.",
+      "contract": "Analysis modes/sample counts, OPW grids including65536samples, TCP/limits, backend/device, assertions and fresh per-test analyzers/cache paths remain unchanged. CLI startup cases keep independent scenes. Owned scenes stay bounded at one and return to zero at scope/session end."
+    },
+    {
+      "owner": "scripts/ci/pytest_no_finalize.py;scripts/ci/run_test_plan.py",
+      "changed": "Opt-in static dependency import freezing only inside the existing owned no-finalize process; refuse domain/test preloads and preserve normal GC for objects created afterward.",
+      "contract": "Full lifecycle GC remains enabled for domain/test objects. Existing permanent roots are retained through process exit; reusable application interpreters are unaffected. Original failed tests keep their exit codes; successful optimized exits additionally require zero nativeWorlds/managers/queue. Discovery stays unmodified and ordered execution must match it."
     }
   ],
   "measurement": "Report original, cleaned and final execution policy separately. Preserve raw failures/skips and explicitly list removed/consolidated coverage; do not add stage percentages."

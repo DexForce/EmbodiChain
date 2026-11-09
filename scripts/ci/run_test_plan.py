@@ -304,6 +304,7 @@ def _run_resource_lane(
     repository_root: Path,
     *,
     no_finalize_resource_lanes: bool = False,
+    freeze_native_imports: bool = False,
 ) -> int:
     """Discover selected nodes, then run the same ordered collection freshly."""
     with tempfile.TemporaryDirectory(prefix="embodichain-test-selection-") as directory:
@@ -331,6 +332,8 @@ def _run_resource_lane(
         narrowed.append(f"--ci-expected-collection={manifest}")
         if no_finalize_resource_lanes:
             narrowed[2] = "scripts.ci.pytest_no_finalize"
+            if freeze_native_imports:
+                narrowed.insert(3, "--freeze-native-imports")
         print(f"[CI] {lane}: selected nodes: {shlex.join(narrowed)}", flush=True)
         return subprocess.run(
             narrowed, cwd=repository_root, check=False, env=None
@@ -345,6 +348,7 @@ def run_plan(
     lanes: Sequence[str] | None = None,
     dry_run: bool = False,
     no_finalize_resource_lanes: bool = False,
+    freeze_native_imports: bool = False,
     cpu_workers: int = 4,
     metrics_dir: Path | None = None,
     cpu_duration_history: Path | None = None,
@@ -363,7 +367,12 @@ def run_plan(
     included in the reported lane time; ordered nodes and markers must match.
     ``no_finalize_resource_lanes`` returns after pytest hooks without unloading
     native libraries in GPU and simulation processes.
+    ``freeze_native_imports`` additionally excludes static dependency imports
+    from repeated cyclic GC in those owned processes. Domain/test objects stay
+    collectible; successful exits require zero native Worlds/managers/queue.
     """
+    if freeze_native_imports and not no_finalize_resource_lanes:
+        raise ValueError("freeze_native_imports requires no_finalize_resource_lanes")
     repository_root = Path(root).resolve()
     commands = build_commands(
         plan,
@@ -394,6 +403,7 @@ def run_plan(
                 command,
                 repository_root,
                 no_finalize_resource_lanes=no_finalize_resource_lanes,
+                freeze_native_imports=freeze_native_imports,
             )
         else:
             returncode = subprocess.run(
@@ -426,6 +436,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--metrics-dir", type=Path)
     parser.add_argument("--cpu-duration-history", type=Path)
     parser.add_argument(
+        "--freeze-native-imports",
+        action="store_true",
+        help="Freeze static imports only in owned --no-finalize-resource-lanes workers.",
+    )
+    parser.add_argument(
         "--no-finalize-resource-lanes",
         action="store_true",
         help="Return GPU and simulation pytest results without native teardown.",
@@ -448,6 +463,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             metrics_dir=args.metrics_dir,
             cpu_duration_history=args.cpu_duration_history,
             no_finalize_resource_lanes=args.no_finalize_resource_lanes,
+            freeze_native_imports=args.freeze_native_imports,
         )
     except (OSError, RuntimeError, ValueError) as error:
         print(f"test plan execution failed: {error}", file=sys.stderr)

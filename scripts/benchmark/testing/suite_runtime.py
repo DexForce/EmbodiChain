@@ -44,7 +44,7 @@ __all__ = ["main"]
 _ENTRY = """
 import importlib.util, inspect, json, sys
 from pathlib import Path
-root, plan_path, lane, output, workers, history = sys.argv[1:]
+root, plan_path, lane, output, workers, history, freeze_imports = sys.argv[1:]
 root=Path(root); output=Path(output)
 spec=importlib.util.spec_from_file_location('measured_runner',root/'scripts/ci/run_test_plan.py')
 runner=importlib.util.module_from_spec(spec); spec.loader.exec_module(runner)
@@ -60,8 +60,13 @@ def instrumented(plan, **kwargs):
             command.extend(['--ci-duration-history',history,'--no-loadscope-reorder'])
     return commands
 runner.build_commands=instrumented
+policy={}
+if freeze_imports=='1':
+    if 'freeze_native_imports' not in inspect.signature(runner.run_plan).parameters:
+        raise RuntimeError('This runner does not support native import freezing')
+    policy['freeze_native_imports']=True
 code=runner.run_plan(json.loads(Path(plan_path).read_text()),root=root,lanes=[lane],
-                     no_finalize_resource_lanes=True)
+                     no_finalize_resource_lanes=True,**policy)
 (output/(lane+'-exit.json')).write_text(json.dumps({'exitcode':code}))
 raise SystemExit(code)
 """
@@ -229,7 +234,14 @@ def _report(output: Path, result: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Measure requested lanes and preserve all outcomes without retries."""
+    """Measure requested lanes and preserve all outcomes without retries.
+
+    Args:
+        argv: Command arguments, or the process arguments when omitted.
+
+    Returns:
+        The first failed step's exit code, or two if measured sources changed.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--python", required=True)
@@ -242,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--label", default="measured")
     parser.add_argument("--cpu-workers", type=int, default=4)
+    parser.add_argument("--freeze-native-imports", action="store_true")
     parser.add_argument(
         "--cuda-visible-devices", default=os.environ.get("CUDA_VISIBLE_DEVICES", "0")
     )
@@ -345,6 +358,10 @@ def main(argv: list[str] | None = None) -> int:
         "plugin_sha256": hashlib.sha256(
             (support / "suite_metrics.py").read_bytes()
         ).hexdigest(),
+        "execution_policy": {
+            "cpu_workers": args.cpu_workers,
+            "freeze_native_imports": args.freeze_native_imports,
+        },
         "environment": {
             key: env.get(key)
             for key in [
@@ -374,6 +391,7 @@ def main(argv: list[str] | None = None) -> int:
                 str(output),
                 str(args.cpu_workers),
                 str(args.cpu_history.resolve()) if args.cpu_history else "",
+                "1" if args.freeze_native_imports else "0",
             ],
             root,
         )
