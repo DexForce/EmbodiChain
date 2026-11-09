@@ -41,6 +41,7 @@ from .articulation import (
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .fluid import FluidObjectCfg, FluidSpawnCfg, FluidRenderCfg
 from .source import UsdSourceCfg
+from .cable import CableAttachmentCfg, CableObjectCfg, CablePhysicsCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -127,6 +128,9 @@ __all__ = [
     "LightCfg",
     "RigidObjectCfg",
     "VisualObjectCfg",
+    "CableObjectCfg",
+    "CablePhysicsCfg",
+    "CableAttachmentCfg",
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",

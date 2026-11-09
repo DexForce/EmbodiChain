@@ -77,6 +77,7 @@ from dexsim.models import MeshObject
 from dexsim.render import LightType, Windows
 
 from embodichain.lab.sim.objects import (
+    CableObject,
     RigidObject,
     VisualObject,
     RigidObjectGroup,
@@ -99,6 +100,7 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
 from embodichain.lab.sim.cfg import (
+    CableObjectCfg,
     RenderCfg,
     PhysicsBackendCfg,
     GPUMemoryCfg,
@@ -125,6 +127,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.physics import make_physics_backend
 from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.spawn.descriptors import (
+    cable_desc_from_cfg,
     articulation_desc_from_cfg,
     configure_articulation_desc,
     rigid_desc_from_cfg,
@@ -723,6 +726,7 @@ class SimulationManager:
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._deformable_objects: Dict[str, DeformableObject] = dict()
+        self._cable_objects: dict[str, CableObject] = {}
         self._articulations: Dict[str, Articulation] = dict()
         self._robots: Dict[str, Robot] = dict()
 
@@ -1008,6 +1012,7 @@ class SimulationManager:
         uid_list.extend(list(self._rigid_object_groups.keys()))
         uid_list.extend(list(self._deformable_objects.keys()))
         uid_list.extend(list(self._fluid_objects.keys()))
+        uid_list.extend(getattr(self, "_cable_objects", {}))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
 
@@ -1077,6 +1082,7 @@ class SimulationManager:
             getattr(self, "_rigid_object_groups", {}),
             getattr(self, "_deformable_objects", {}),
             getattr(self, "_fluid_objects", {}),
+            getattr(self, "_cable_objects", {}),
             getattr(self, "_articulations", {}),
             getattr(self, "_robots", {}),
             getattr(self, "_sensors", {}),
@@ -1846,6 +1852,7 @@ class SimulationManager:
                         and sensor.cfg.extrinsics.parent is not None
                     ):
                         sensor._detach_from_parent_nodes()
+            self.physics._prepare_scene_build()
             result = scene.commit()
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
@@ -2483,13 +2490,14 @@ class SimulationManager:
         | RigidObjectGroup
         | DeformableObject
         | FluidObject
+        | CableObject
         | Articulation
         | None
     ):
         """Get an asset by its UID.
 
-        The asset can be a light, sensor, robot, visual object, rigid object, deformable, or
-        articulation.
+        The asset can be a light, sensor, robot, visual object, rigid object, deformable,
+        fluid, cable, or articulation.
 
         Args:
             uid (str): The UID of the asset.
@@ -2513,6 +2521,8 @@ class SimulationManager:
             return self._deformable_objects[uid]
         if uid in self._fluid_objects:
             return self._fluid_objects[uid]
+        if uid in getattr(self, "_cable_objects", {}):
+            return self._cable_objects[uid]
         if uid in self._articulations:
             return self._articulations[uid]
 
@@ -3015,6 +3025,10 @@ class SimulationManager:
             raise NotImplementedError(
                 "Fluid objects require a DexSim build supporting DexUniSolverCfg.sph_cfg."
             )
+        if getattr(self, "_cable_objects", {}):
+            raise NotImplementedError(
+                "Cable episode reset does not support fluid particles in the same arena."
+            )
         if getattr(self, "_deformable_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
         if self.num_envs != 1 and not getattr(
@@ -3136,6 +3150,73 @@ class SimulationManager:
             raise RuntimeError("Fluid diagnostics require prepare().")
         return self.physics.fluid_diagnostics(fluid)
 
+    def add_cable_object(self, cfg: CableObjectCfg) -> CableObject:
+        """Declare a cable before ``prepare()`` using DexSim's public Spawn API.
+
+        Args:
+            cfg: Typed cable geometry, four-mode material and visual configuration.
+
+        Returns:
+            A declared facade whose data becomes available after ``prepare()``.
+
+        Raises:
+            NotImplementedError: Backend/device/solver/gradient mode is unsupported,
+                or the physical scene has already been finalized.
+            ValueError: Required configuration or the asset UID is invalid.
+        """
+        if not isinstance(cfg, CableObjectCfg):
+            raise TypeError("Cable objects require CableObjectCfg.")
+        if not self.physics.supports_cables:
+            raise NotImplementedError("Cable objects require the Newton backend.")
+        if self.device.type != "cuda":
+            raise NotImplementedError("Cable objects require a CUDA device.")
+        if self._active_newton_solver_type != "dexuni":
+            raise NotImplementedError(
+                "Cable objects require the DexUni solver (solver_type='dexuni')."
+            )
+        if self.sim_config.physics_cfg.requires_grad:
+            raise NotImplementedError(
+                "Cable objects do not support requires_grad=True."
+            )
+        if self.spawn_result is not None:
+            raise NotImplementedError(
+                "Declare cable objects before scene finalization."
+            )
+        if self._fluid_objects or self._deformable_objects:
+            raise NotImplementedError(
+                "Cable episode reset does not support fluid or deformable particles in the same arena."
+            )
+        descriptor, materials = cable_desc_from_cfg(cfg, per_env=True)
+        if descriptor.name in self.asset_uids or descriptor.name in self._spawn_scene:
+            raise ValueError(
+                f"Scene asset uid is already declared: {descriptor.name!r}."
+            )
+        cable = CableObject(cfg, device=self.device)
+        self._spawn_scene.builder.materials.update(
+            self._spawn_scene._resolve_materials(materials)
+        )
+        self._spawn_scene.declare(
+            "cable_object", descriptor.name, descriptor, facade=cable
+        )
+        self._cable_objects[descriptor.name] = cable
+        self.notify_visualization_topology_changed()
+        return cable
+
+    def get_cable_object(self, uid: str) -> CableObject | None:
+        """Return a cable by simulation UID, or None when absent.
+
+        Args:
+            uid: Declared cable simulation UID.
+
+        Returns:
+            The existing facade, including before it is Spawn-bound.
+        """
+        return getattr(self, "_cable_objects", {}).get(uid)
+
+    def get_cable_object_uid_list(self) -> list[str]:
+        """Return cable UIDs in declaration order."""
+        return list(getattr(self, "_cable_objects", {}))
+
     def add_deformable_object(self, cfg: DeformableObjectCfg) -> DeformableObject:
         """Declare a volume or surface deformable in the scene.
 
@@ -3173,6 +3254,10 @@ class SimulationManager:
                 "Newton deformable particle sets currently require a CUDA device."
             )
         solver_type = self._active_newton_solver_type
+        if getattr(self, "_cable_objects", {}):
+            raise NotImplementedError(
+                "Cable episode reset does not support deformable particles in the same arena."
+            )
         if solver_type == "dexuni" and getattr(self, "_fluid_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
         supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
@@ -4421,6 +4506,7 @@ class SimulationManager:
 
         robot = self._robots.get(uid)
         if robot is not None and robot.cfg.enable_sensor:
+            scene._require_mutable_topology()
             for sensor_cfg in robot.cfg.sensors:
                 sensor = self._sensors.get(sensor_cfg.uid)
                 if (
@@ -4452,6 +4538,7 @@ class SimulationManager:
         self._rigid_objects.pop(uid, None)
         self._rigid_object_groups.pop(uid, None)
         self._deformable_objects.pop(uid, None)
+        getattr(self, "_cable_objects", {}).pop(uid, None)
         self._articulations.pop(uid, None)
         self._robots.pop(uid, None)
         self.notify_visualization_topology_changed()
@@ -5214,6 +5301,11 @@ class SimulationManager:
     ) -> None:
         """Reset the state of the simulated assets given the environment IDs and excluded UIDs.
 
+        Cable scenes restore creation state for every physical asset in selected
+        environments through one engine episode reset, including targets, loads
+        and supported controls. Physical exclusions are unsupported in this path;
+        runtime property/topology edits are not restored. Global time is kept.
+
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
             excluded_uids (Sequence[str] | None): List of asset UIDs to exclude from resetting. If None, reset all assets.
@@ -5222,6 +5314,21 @@ class SimulationManager:
         """
         excluded_uids = set(excluded_uids) if excluded_uids is not None else set()
         excluded_sensor_uids = set(excluded_sensor_uids or ())
+        reset_ids = self.physics._reset_scene_state(env_ids, excluded_uids)
+        if reset_ids is not None:
+            # Physical assets and solver history were reset atomically by the
+            # backend; render-only assets and sensors remain manager-owned.
+            if reset_ids:
+                for uid, visual in getattr(self, "_visual_objects", {}).items():
+                    if uid not in excluded_uids and visual.is_spawn_bound:
+                        visual.reset(reset_ids)
+                for uid, light in self._lights.items():
+                    if uid not in excluded_uids:
+                        light.reset(reset_ids)
+                for uid, sensor in self._sensors.items():
+                    if uid not in excluded_uids and uid not in excluded_sensor_uids:
+                        sensor.reset(reset_ids)
+            return
         articulation_uids = tuple(self._robots) + tuple(self._articulations)
         reset_articulation_uids = tuple(
             uid for uid in articulation_uids if uid not in excluded_uids
@@ -5462,6 +5569,7 @@ class SimulationManager:
                 "_rigid_object_groups",
                 "_deformable_objects",
                 "_fluid_objects",
+                "_cable_objects",
                 "_articulations",
                 "_robots",
             ):
@@ -5525,6 +5633,7 @@ class SimulationManager:
         _sever_wrapper_refs("_rigid_object_groups")
         _sever_wrapper_refs("_deformable_objects")
         _sever_wrapper_refs("_fluid_objects")
+        _sever_wrapper_refs("_cable_objects")
         _sever_wrapper_refs("_articulations")
         _sever_wrapper_refs("_robots")
         _sever_wrapper_refs("_sensors")

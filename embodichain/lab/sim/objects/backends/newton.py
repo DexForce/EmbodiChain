@@ -178,6 +178,22 @@ def _default_mujoco_mimic_solref(physics_dt: float, num_substeps: int) -> np.nda
     )
 
 
+def _supports_newton_mimic_compliance(result: Scene | None) -> bool:
+    """Whether the finalized solver can configure the opt-in mimic stabilizer."""
+    if result is None or result.backend != "newton":
+        return False
+    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+    backend = get_newton_backend(result.world)
+    return bool(
+        backend is not None
+        and backend.solver_type in {"mujoco_warp", "dexuni"}
+        and not backend.cfg.requires_grad
+        and not (backend.model is not None and backend.model.requires_grad)
+        and backend.mujoco_solver is not None
+    )
+
+
 def _configure_newton_mimic_compliance(
     *,
     result: Scene | None,
@@ -196,22 +212,13 @@ def _configure_newton_mimic_compliance(
     native equality rows enabled preserves mechanical force coupling; the drive
     is only a stabilizer and never mirrors measured follower state.
     """
-    if result is None or result.backend != "newton" or not mimic_ids:
+    if not mimic_ids or not _supports_newton_mimic_compliance(result):
         return False
 
     from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
     backend = get_newton_backend(result.world)
-    if (
-        backend is None
-        or backend.solver_type not in {"mujoco_warp", "dexuni"}
-        or backend.cfg.requires_grad
-        or (backend.model is not None and backend.model.requires_grad)
-    ):
-        return False
     solver = backend.mujoco_solver
-    if solver is None:
-        return False
 
     relation_names = [
         (state_joint_names[child_id], state_joint_names[parent_id])

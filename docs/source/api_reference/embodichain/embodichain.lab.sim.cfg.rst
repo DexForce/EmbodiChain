@@ -73,6 +73,9 @@ UV seams and render detail.
    LightCfg
    VisualObjectCfg
    RigidObjectCfg
+   CableObjectCfg
+   CablePhysicsCfg
+   CableAttachmentCfg
    RigidObjectGroupCfg
    RigidConstraintCfg
    URDFCfg
@@ -137,6 +140,34 @@ Constructors and ``from_dict()`` accept only the current fields. Surface-element
 properties are grouped under ``attrs.surface_props``. Volume elasticity uses
 ``youngs`` and ``poissons``. Configuration dictionaries serialize this same
 schema; no legacy aliases or field migration are provided.
+
+Cable authoring
+---------------
+
+``CableObjectCfg`` authors an ordered centreline, radius and optional material
+frames in EmbodiChain's ``xyzw`` convention. ``CablePhysicsCfg`` preserves
+unspecified four-mode coefficients as ``None`` and reuses existing collision
+and contact-material schemas. ``CableAttachmentCfg`` describes permanent
+creation-time endpoint welds. Declare cables before ``prepare()`` with explicit
+DexUni on CUDA. Segment writes and complete environment reset require a DexSim
+build exposing ``CableBatch.apply_state`` and ``Scene.reset_arenas``.
+
+.. currentmodule:: embodichain.lab.sim.cfg.cable
+
+.. autosummary::
+
+   CablePhysicsCfg
+   CableAttachmentCfg
+   CableObjectCfg
+
+.. autoclass:: CablePhysicsCfg
+   :members:
+
+.. autoclass:: CableAttachmentCfg
+   :members:
+
+.. autoclass:: CableObjectCfg
+   :members:
 
 Rendering configuration module
 ------------------------------
