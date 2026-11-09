@@ -2024,8 +2024,9 @@ def test_link_raw_contact_overrides_global_across_collision_and_material_slots(
     assert finger.solmix == pytest.approx(0.1)
 
 
+@pytest.mark.parametrize("instanced", [False, True])
 def test_rigid_usd_rejects_parser_loss_of_disabled_body_colliders(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, instanced
 ):
     from pxr import Usd, UsdGeom, UsdPhysics
     from embodichain.lab.sim.spawn import usd
@@ -2034,7 +2035,18 @@ def test_rigid_usd_rejects_parser_loss_of_disabled_body_colliders(
     stage = Usd.Stage.CreateNew(str(path))
     body = UsdGeom.Xform.Define(stage, "/Fixture").GetPrim()
     UsdPhysics.RigidBodyAPI.Apply(body).CreateRigidBodyEnabledAttr(False)
-    UsdPhysics.CollisionAPI.Apply(UsdGeom.Cube.Define(stage, "/Fixture/wall").GetPrim())
+    if instanced:
+        stage.CreateClassPrim("/Prototype")
+        UsdPhysics.CollisionAPI.Apply(
+            UsdGeom.Cube.Define(stage, "/Prototype/wall").GetPrim()
+        )
+        instance = UsdGeom.Xform.Define(stage, "/Fixture/Instance").GetPrim()
+        instance.GetReferences().AddInternalReference("/Prototype")
+        instance.SetInstanceable(True)
+    else:
+        UsdPhysics.CollisionAPI.Apply(
+            UsdGeom.Cube.Define(stage, "/Fixture/wall").GetPrim()
+        )
     stage.GetRootLayer().Save()
     # The parser's empty result cannot erase the independently authored wall.
     parsed = SimpleNamespace(collisions=[], usd=SimpleNamespace(prim_path="/Fixture"))
