@@ -92,9 +92,17 @@ DexSim global defaults.
 Newton `condim`, `contype` and `conaffinity` belong in collision descriptors
 before preparation; friction coefficients and raw MuJoCo `solref`, `solimp` and
 `solmix` belong in material properties. Explicit `solref` retains its native
-positive or direct-mode meaning. Use per-link overlays for contact intent, not
+positive or direct-mode meaning. The original collision-property aliases
+normalize into that same material map before global/link overrides merge, so
+a link-local setting wins across either spelling. Within one properties block,
+explicit material values take precedence. Use per-link overlays for contact intent, not
 finalized solver-array mutations. `has_particle_collision` is
 per-shape participation; Arena isolation remains scene-owned.
+
+Rigid USD import rejects a parsed disabled body with authored child colliders
+but no retained collision pieces. DexSim 0.6.0rc1 has this parser limitation;
+use direct compound construction until the dependency retains static-body
+collider ownership. Do not change a static fixture into a moving body to mask it.
 
 `DefaultRigidBodyPropertiesCfg.has_gravity` is Default-native configuration,
 not a portable cross-solver gravity feature; source assets need overlay mode

@@ -1982,6 +1982,68 @@ def test_grouped_link_physics_overrides_compose_after_source_resolution() -> Non
     assert finger.rigid_body.inertia is None
 
 
+@pytest.mark.parametrize("material_on_link", [False, True])
+def test_link_raw_contact_overrides_global_across_collision_and_material_slots(
+    material_on_link: bool,
+) -> None:
+    from embodichain.lab.sim.cfg import NewtonRigidBodyMaterialCfg
+
+    def properties(*, material: bool, reference: float, mixing: float):
+        values = {"solref": (reference, 1.0), "solmix": mixing}
+        return RigidBodyPhysicsCfg(
+            **{
+                "material_props" if material else "collision_props": (
+                    NewtonRigidBodyMaterialCfg(**values)
+                    if material
+                    else NewtonCollisionPropertiesCfg(**values)
+                )
+            }
+        )
+
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        attrs=properties(material=not material_on_link, reference=0.02, mixing=0.7),
+        link_attrs={
+            "fingers": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=properties(
+                    material=material_on_link, reference=0.005, mixing=0.1
+                ),
+            )
+        },
+    )
+    descriptor = _resolved_articulation_desc()
+    configure_articulation_desc(descriptor, cfg, newton_solver_type="mujoco_warp")
+    base = descriptor.get_link_desc("base").collisions[0].newton
+    finger = descriptor.get_link_desc("finger_left").collisions[0].newton
+    assert base.solref == pytest.approx((0.02, 1.0))
+    assert base.solmix == pytest.approx(0.7)
+    assert finger.solref == pytest.approx((0.005, 1.0))
+    assert finger.solmix == pytest.approx(0.1)
+
+
+def test_rigid_usd_rejects_parser_loss_of_disabled_body_colliders(
+    tmp_path, monkeypatch
+):
+    from pxr import Usd, UsdGeom, UsdPhysics
+    from embodichain.lab.sim.spawn import usd
+
+    path = tmp_path / "fixture.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    body = UsdGeom.Xform.Define(stage, "/Fixture").GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(body).CreateRigidBodyEnabledAttr(False)
+    UsdPhysics.CollisionAPI.Apply(UsdGeom.Cube.Define(stage, "/Fixture/wall").GetPrim())
+    stage.GetRootLayer().Save()
+    # The parser's empty result cannot erase the independently authored wall.
+    parsed = SimpleNamespace(collisions=[], usd=SimpleNamespace(prim_path="/Fixture"))
+    monkeypatch.setattr(usd, "_parse_singleton", lambda *args, **kwargs: (None, parsed))
+    cfg = RigidObjectCfg(uid="fixture", shape=MeshCfg(fpath=str(path)))
+    with pytest.raises(NotImplementedError, match="dropped collision pieces"):
+        usd.rigid_desc_from_usd(cfg)
+
+
 def test_global_articulation_mass_properties_can_recompute_inertia() -> None:
     cfg = ArticulationCfg(
         uid="robot",
