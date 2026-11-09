@@ -58,6 +58,7 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.lab.task_program.semantics import SceneManifest
     from embodichain.lab.sim.atomic_actions import AtomicActionEngine, SceneProvider
     from embodichain.lab.task_program.semantics import (
         EffectEvidenceProvider,
@@ -572,6 +573,23 @@ class RegisteredSemanticLowererFactory(Protocol):
 
         Returns:
             A fresh registered semantic lowerer matching the declared call.
+        """
+
+
+@runtime_checkable
+class RegisteredSemanticLowererSceneValidator(Protocol):
+    """Optional declaration-only scene preflight for a registered lowerer factory.
+
+    Existing factories need not implement this protocol. Implementations inspect
+    immutable scene metadata only and must not construct live adapters, read
+    observations or allocate simulation/planning resources.
+    """
+
+    def validate_scene_declaration(self, scene: SceneManifest) -> None:
+        """Reject unavailable or ambiguous configured references before assembly.
+
+        Args:
+            scene: Provider-free canonical scene declaration.
         """
 
 
@@ -1168,6 +1186,7 @@ __all__ = [
     "ParallelSafetyDeclaration",
     "RegisteredSemanticLowererDeclaration",
     "RegisteredSemanticLowererFactory",
+    "RegisteredSemanticLowererSceneValidator",
     "RuntimeTransportDeclaration",
     "StandardExtensionDeclarations",
     "VersionedKey",

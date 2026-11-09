@@ -112,8 +112,9 @@ class MotionGenOptions:
     start_qpos: torch.Tensor | None = None
     """Observed controlled-joint start, shape ``(B, DOF)``.
 
-    Required for ``ik_interp``. Backend pre-interpolation reads the current
-    robot state when omitted; native backend requests use backend defaults.
+    Required for ``ik_interp``. With ``is_interpolate=True``, joint-only
+    backends read the current robot state when omitted, including sparse
+    waypoint planning. Other backend requests use backend defaults.
     """
 
     control_part: str | None = None
@@ -144,8 +145,9 @@ class MotionGenOptions:
     is_linear: bool = False
     """Request Cartesian pre-interpolation for joint-only backends.
 
-    With ``ik_interp``, requires explicit ``preserve_cartesian_samples``;
-    sparse endpoint IK followed by joint interpolation is not a Cartesian line.
+    With fixed-grid sequential ``ik_interp``, unsampled keyframes are sampled
+    before IK. ``preserve_cartesian_samples=True`` instead supplies an already
+    sampled path. Other interpolation modes require that explicit sampled path.
     """
 
     preserve_cartesian_samples: bool = False
@@ -189,8 +191,49 @@ class MotionGenOptions:
     )
     """Use the current batched solver, or seed each pose from its predecessor."""
 
+    segment_sample_count_retries: tuple[int, ...] = field(default=(), kw_only=True)
+    """Ordered denser alternatives within one sampled Cartesian segment request.
+
+    These counts are independent of complete-action retries. The first count
+    also bounds eligibility of the original request, preserving the source
+    coarse-grid boundary. ``generate`` consumes them for explicit linear
+    keyframes under fixed-grid sequential IK.
+    """
+
+    segment_continuous_ik_recovery: bool = field(default=False, kw_only=True)
+    """Try unchanged-target/time continuous IK after segment samples fail.
+
+    Dense attempts advance the existing random stream. The continuous resolver
+    retains its own Torch-only fork; no outer action counter is reused.
+    """
+
     def __post_init__(self) -> None:
         """Validate backend-neutral motion generation options."""
+        segment_retries = self.segment_sample_count_retries
+        if (
+            type(segment_retries) is not tuple
+            or any(type(value) is not int or value < 2 for value in segment_retries)
+            or any(a >= b for a, b in zip(segment_retries, segment_retries[1:]))
+        ):
+            raise ValueError(
+                "segment_sample_count_retries must be a strictly increasing tuple of integer counts >=2."
+            )
+        if type(self.segment_continuous_ik_recovery) is not bool:
+            raise TypeError("segment_continuous_ik_recovery must be a boolean.")
+        if (segment_retries or self.segment_continuous_ik_recovery) and (
+            self.strategy != "ik_interp"
+            or self.interpolation_mode != "fixed_grid"
+            or self.ik_seed_mode != "sequential"
+        ):
+            raise ValueError(
+                "Cartesian segment recovery requires fixed-grid sequential ik_interp."
+            )
+        if (segment_retries or self.segment_continuous_ik_recovery) and (
+            not self.is_linear or self.preserve_cartesian_samples
+        ):
+            raise ValueError(
+                "Cartesian segment recovery requires unsampled linear keyframes."
+            )
         if self.interpolation_mode not in {"adaptive", "fixed_grid"}:
             raise ValueError("interpolation_mode must be adaptive or fixed_grid.")
         if self.ik_seed_mode not in {"batched", "sequential"}:
@@ -228,10 +271,14 @@ class MotionGenOptions:
             self.strategy == "ik_interp"
             and self.is_linear
             and not self.preserve_cartesian_samples
+            and (
+                self.interpolation_mode != "fixed_grid"
+                or self.ik_seed_mode != "sequential"
+            )
         ):
             raise ValueError(
                 "is_linear with ik_interp requires preserve_cartesian_samples=True "
-                "and explicit Cartesian path samples."
+                "or fixed-grid sequential keyframe sampling."
             )
         valid_strategies = {"motion_gen", "ik_interp"}
         if self.strategy not in valid_strategies:
@@ -277,13 +324,42 @@ class MotionGenerator:
         "curobo": (CuroboPlanner, CuroboPlannerCfg),
     }
 
-    def __init__(self, cfg: MotionGenCfg) -> None:
+    def __init__(
+        self, cfg: MotionGenCfg, *, env_ids: tuple[int, ...] | None = None
+    ) -> None:
 
         # Create planner based on planner_type
         self.planner: BasePlanner = self._create_planner(cfg.planner_cfg)
 
         self.robot = self.planner.robot
         self.device = self.robot.device
+        self._env_ids = None if env_ids is None else tuple(env_ids)
+        if self._env_ids is not None:
+            count = self.robot.get_qpos().shape[0]
+            if (
+                not self._env_ids
+                or len(set(self._env_ids)) != len(self._env_ids)
+                or any(type(i) is not int or not 0 <= i < count for i in self._env_ids)
+            ):
+                raise ValueError("env_ids must be unique physical row indices")
+            if type(self.planner).__name__ not in {
+                "ToppraPlanner",
+                "TrapezoidalPlanner",
+            }:
+                raise ValueError(
+                    "selected-row motion supports TOPPRA and trapezoidal planners only"
+                )
+            if self.collision_world_info is not None:
+                raise ValueError(
+                    "selected-row motion needs an explicitly row-aware collision planner"
+                )
+
+        self.planner._planning_env_ids = self._env_ids
+
+    def _selected_qpos(self, control_part: str | None) -> torch.Tensor:
+        value = self.robot.get_qpos(name=control_part)
+        selection = getattr(self, "_env_ids", None)
+        return value if selection is None else value[list(selection)]
 
     @property
     def collision_world_info(self) -> CollisionWorldInfo | None:
@@ -599,6 +675,8 @@ class MotionGenerator:
                 limits,
                 torch.inf,
             )
+        if getattr(self, "_env_ids", None) is not None:
+            limits = limits[list(self._env_ids)]
         if limits.shape[0] < batch_size:
             raise ValueError(
                 "Robot velocity limits do not cover the interpolation batch."
@@ -645,11 +723,13 @@ class MotionGenerator:
         cls = self._support_planner_dict[planner_type][0](cfg=planner_cfg)
         return cls
 
-    @_planning_call("planning")
+    @_planning_call("check")
     def generate(
         self,
         target_states: list[PlanState],
         options: MotionGenOptions | None = None,
+        *,
+        defer_recovery: bool = False,
     ) -> PlanResult:
         r"""Generate one normalized, environment-batched motion plan.
 
@@ -665,21 +745,53 @@ class MotionGenerator:
 
         Args:
             target_states: Batched planner waypoints.
-            options: Motion-generation strategy and runtime options.
+            options: Motion-generation strategy and runtime options. Explicit
+                linear fixed-grid sequential IK samples the supplied keyframes
+                before generation and consumes segment recovery here.
+            defer_recovery: Generate only the nominal linear path, allowing the
+                caller to inspect its failure before spending recovery attempts.
+                Valid only for unsampled linear keyframes.
 
         Returns:
             Normalized result with a per-environment success mask and joint
             positions. Failed rows hold ``start_qpos`` when it is supplied.
+            Explicit linear keyframe requests attach their local attempt receipt
+            to ``PlanResult.recovery``; ordinary requests leave it ``None``.
 
         Raises:
             ValueError: If targets or options violate the motion contract.
         """
         if not target_states:
             raise ValueError("target_states must contain at least one waypoint.")
-        options = MotionGenOptions() if options is None else deepcopy(options)
+        options = MotionGenOptions() if options is None else options
         # Options are mutable config objects; revalidate at the call boundary.
         options.__post_init__()
+        if type(defer_recovery) is not bool:
+            raise TypeError("defer_recovery must be a boolean.")
+        linear_keyframes = (
+            options.strategy == "ik_interp"
+            and options.is_linear
+            and not options.preserve_cartesian_samples
+        )
+        if linear_keyframes:
+            from ._cartesian import _generate_cartesian_motion
 
+            return _generate_cartesian_motion(
+                self, target_states, deepcopy(options), defer_recovery=defer_recovery
+            )
+        if defer_recovery:
+            raise ValueError("defer_recovery requires unsampled linear keyframes.")
+        return self._generate_once(target_states, options=options)
+
+    @_planning_call("planning")
+    def _generate_once(
+        self,
+        target_states: list[PlanState],
+        options: MotionGenOptions,
+    ) -> PlanResult:
+        """Generate and normalize one attempt; charge its host budget once."""
+        options = deepcopy(options)
+        options.__post_init__()
         move_types = {state.move_type for state in target_states}
         heterogeneous = len(move_types) > 1
         if heterogeneous and not self.supports_heterogeneous_waypoints:
@@ -812,13 +924,20 @@ class MotionGenerator:
             len(move_types) == 1
             and move_type is MoveType.JOINT_MOVE
             and owns_sparse_waypoints
+            and not options.is_linear
         )
-        should_preinterpolate = (
+        needs_joint_preparation = (
             len(move_types) == 1
             and options.is_interpolate
-            and not uses_sparse_joint_waypoints
             and not self.planner.supports_move_type(MoveType.EEF_MOVE)
             and self.planner.supports_move_type(MoveType.JOINT_MOVE)
+        )
+        # Sparse timing bypasses densification, but still needs the observed
+        # start when interpolation was requested without an explicit start.
+        if needs_joint_preparation and options.start_qpos is None:
+            options.start_qpos = self._selected_qpos(options.control_part)
+        should_preinterpolate = (
+            needs_joint_preparation and not uses_sparse_joint_waypoints
         )
 
         preparation_success = None
@@ -842,8 +961,6 @@ class MotionGenerator:
                     f"Unsupported move type for pre-interpolation: {move_type}"
                 )
 
-            if options.start_qpos is None:
-                options.start_qpos = self.robot.get_qpos(name=options.control_part)
             if options.start_qpos is not None:
                 start = options.start_qpos
                 if start.dim() == 1:
@@ -852,7 +969,14 @@ class MotionGenerator:
                     qpos_list = torch.cat([start.unsqueeze(1), qpos_list], dim=1)
                 if xpos_list is not None:
                     start_xpos = self.robot.compute_fk(
-                        qpos=start, name=options.control_part, to_matrix=True
+                        qpos=start,
+                        name=options.control_part,
+                        to_matrix=True,
+                        **(
+                            {"env_ids": self._env_ids}
+                            if getattr(self, "_env_ids", None) is not None
+                            else {}
+                        ),
                     )
                     if start_xpos.dim() == 3:
                         start_xpos = start_xpos.unsqueeze(1)
@@ -1147,6 +1271,11 @@ class MotionGenerator:
             joint_seed=joint_seed,
             name=control_part,
             **({"continuous": True} if continuous else {}),
+            **(
+                {"env_ids": self._env_ids}
+                if getattr(self, "_env_ids", None) is not None
+                else {}
+            ),
         )
         batch_size, count = poses.shape[:2]
         if isinstance(valid, torch.Tensor) and valid.shape != (batch_size, count):
@@ -1426,6 +1555,11 @@ class MotionGenerator:
             qpos=solved_keyframes[:, 0],
             name=control_part,
             to_matrix=True,
+            **(
+                {"env_ids": self._env_ids}
+                if getattr(self, "_env_ids", None) is not None
+                else {}
+            ),
         ).to(device=target_poses.device, dtype=target_poses.dtype)
         path = torch.cat([start_pose[:, None], target_poses], dim=1)
         segment_lengths = solved_keyframes.diff(dim=1).abs().amax(dim=-1)
@@ -1782,6 +1916,7 @@ class MotionGenerator:
             waypoint_indices=waypoint_indices,
             policy_waypoint_indices=result.policy_waypoint_indices,
             rejected_candidate=result.rejected_candidate,
+            recovery=result.recovery,
         )
 
     def _runtime_device(self) -> torch.device:
@@ -1859,6 +1994,11 @@ class MotionGenerator:
                 qpos=qpos_list,
                 name=control_part,
                 to_matrix=True,
+                **(
+                    {"env_ids": self._env_ids}
+                    if getattr(self, "_env_ids", None) is not None
+                    else {}
+                ),
             )
         else:
             if original_dim == 3:  # [N, 4, 4]
@@ -2088,6 +2228,11 @@ class MotionGenerator:
                 qpos=qpos_list,
                 name=control_part,
                 to_matrix=True,
+                **(
+                    {"env_ids": self._env_ids}
+                    if getattr(self, "_env_ids", None) is not None
+                    else {}
+                ),
             )  # (B, N, 4, 4)
 
         if xpos_list is None and qpos_list is None:
@@ -2109,7 +2254,7 @@ class MotionGenerator:
             qpos_seed = qpos_list[:, 0]  # (B, DOF)
         if qpos_seed is None:
             # Fallback to current robot state as seed.
-            qpos_seed = self.robot.get_qpos(name=control_part)  # (B, DOF)
+            qpos_seed = self._selected_qpos(control_part)  # (B, DOF)
         qpos_seed = qpos_seed.to(self._runtime_device())
 
         # Generate trajectory
@@ -2117,7 +2262,7 @@ class MotionGenerator:
             if sparse_cartesian:
                 # A sparse joint planner owns timing between the requested
                 # goals. Densifying a free Cartesian move would turn every IK
-                # sample into a mandatory rest point for trapezoidal timing.
+                # sample into a mandatory rest point for stopped timing.
                 total_interpolated_poses = xpos_list.to(self._runtime_device())
             else:
                 # Allocations are per environment; share their segment maxima
@@ -2157,7 +2302,14 @@ class MotionGenerator:
             # analytic IK can fail at a wrist singularity despite later poses
             # being reachable. Preserve it only for rows whose whole pose agrees.
             start_pose = self.robot.compute_fk(
-                qpos=qpos_seed, name=control_part, to_matrix=True
+                qpos=qpos_seed,
+                name=control_part,
+                to_matrix=True,
+                **(
+                    {"env_ids": self._env_ids}
+                    if getattr(self, "_env_ids", None) is not None
+                    else {}
+                ),
             )
             known_start = torch.isclose(
                 total_interpolated_poses[:, 0],
@@ -2173,7 +2325,14 @@ class MotionGenerator:
             )
             # Keep the FK consistency guard, but never remove required poses.
             fk_batch = self.robot.compute_batch_fk(
-                qpos=qpos_batch, name=control_part, to_matrix=True
+                qpos=qpos_batch,
+                name=control_part,
+                to_matrix=True,
+                **(
+                    {"env_ids": self._env_ids}
+                    if getattr(self, "_env_ids", None) is not None
+                    else {}
+                ),
             )
             pos_err = torch.linalg.vector_norm(
                 fk_batch[..., :3, 3] - total_interpolated_poses[..., :3, 3], dim=-1

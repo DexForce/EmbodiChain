@@ -94,6 +94,28 @@ def test_world_that_becomes_parallel_is_rejected_before_stepping():
     sim = Sim()
     view = SceneView(sim)
     sim.num_envs = 2
-    with pytest.raises(ValueError, match="B=1"):
+    with pytest.raises(ValueError, match="environment count changed"):
         settle_scene(view, sim.step, SettlingCfg(mode="convergence"))
     assert sim.steps == 0
+
+
+def test_partial_settling_cannot_advance_other_arenas():
+    sim = Sim(4)
+    with pytest.raises(ValueError, match="full-world"):
+        settle_scene(SceneView(sim, env_ids=(3, 1)), sim.step, SettlingCfg())
+    assert sim.steps == 0
+
+
+def test_settling_measures_all_selected_arenas():
+    sim = Sim(4)
+    for entity in sim.rigid.values():
+        entity.value[:, 7:] = 0
+    sim.articulations["drawer"].state["qvel"].zero_()
+    sim.rigid["cube"].value[3, 7] = 1.0
+    report = settle_scene(
+        SceneView(sim, env_ids=(0, 1, 2, 3)),
+        sim.step,
+        SettlingCfg(mode="convergence", max_steps=2, consecutive_steps=1),
+    )
+    assert not report.passed
+    assert report.checks[0].metrics["max_linear_speed"] == 1.0

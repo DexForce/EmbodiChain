@@ -60,7 +60,7 @@ class CuroboAdapter(PlannerAdapter):
             "atomic_action",
         }
     )
-    model_revision = "curobo-v2"
+    model_revision = "curobo-v2-fast"
     separate_prepare = True
     timing_is_solved = True
     """cuRobo optimizes the trajectory's timing under its own dynamic limits."""
@@ -184,6 +184,8 @@ class CuroboAdapter(PlannerAdapter):
             use_cuda_graph=bool(values.get("use_cuda_graph", True)),
             cuda_graph_fallback=bool(values.get("cuda_graph_fallback", True)),
             interpolation_dt=float(values.get("interpolation_dt", 0.025)),
+            graph_planner_algorithm=values.get("graph_planner_algorithm", "rrt"),
+            enable_timeopt=values.get("enable_timeopt", True),
             preserve_plan_samples=bool(values.get("preserve_plan_samples", True)),
             warmup_iterations=int(values.get("warmup_iterations", 1)),
         )

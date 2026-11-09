@@ -18,6 +18,11 @@
 
 from __future__ import annotations
 
+from embodichain.lab.task_program.language.semantic_contracts import (
+    validate_semantic_call_payload,
+)
+from .simulation.targets import _pose
+
 from dataclasses import dataclass
 import math
 from typing import TYPE_CHECKING, ClassVar
@@ -137,37 +142,6 @@ def _axis(value: tuple[float, float, float]) -> tuple[float, float, float]:
     return normalized
 
 
-def _pose(value: tuple[float, ...]) -> tuple[float, ...]:
-    """Validate and own one flattened SE(3) transform."""
-    if type(value) is not tuple or len(value) != 16:
-        raise TypeError("relative_pose must be an exact 16-value tuple.")
-    normalized = tuple(float(item) for item in value)
-    if not all(math.isfinite(item) for item in normalized):
-        raise ValueError("relative_pose must contain only finite values.")
-    pose = torch.tensor(normalized, dtype=torch.float64).reshape(4, 4)
-    if not torch.allclose(
-        pose[3],
-        torch.tensor((0.0, 0.0, 0.0, 1.0), dtype=torch.float64),
-        atol=1.0e-6,
-        rtol=0.0,
-    ):
-        raise ValueError("relative_pose must have bottom row [0, 0, 0, 1].")
-    rotation = pose[:3, :3]
-    if not torch.allclose(
-        rotation.T @ rotation,
-        torch.eye(3, dtype=torch.float64),
-        atol=1.0e-6,
-        rtol=0.0,
-    ) or not torch.isclose(
-        torch.linalg.det(rotation),
-        torch.tensor(1.0, dtype=torch.float64),
-        atol=1.0e-6,
-        rtol=0.0,
-    ):
-        raise ValueError("relative_pose must contain a proper SE(3) rotation.")
-    return normalized
-
-
 def _world_displacement(
     value: tuple[float, float, float],
 ) -> tuple[float, float, float]:
@@ -254,6 +228,14 @@ class _AxisAlignLowerer(RegisteredSemanticLowerer):
                 "Configured semantic axis alignment requires an exact "
                 "AxisAlignOptions template."
             )
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if set(arguments) != {"object"}:
             raise ValueError(f"{self.call_id} arguments must contain only 'object'.")
@@ -366,8 +348,12 @@ class _AntipodalGraspPoseGeneratorFactory:
     point_spacing: float = 0.012
     side: str | None = None
     root_from_tcp: tuple[float, ...] | None = None
+    root_from_contact_frame: tuple[float, ...] | None = None
     sample_count: int | None = None
     approach_direction_samples: int | None = None
+    approach_deviation_angle: float | None = None
+    max_candidates: int | None = None
+    center_mode: str | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
@@ -392,6 +378,10 @@ class _AntipodalGraspPoseGeneratorFactory:
             algorithm_kwargs["approach_direction_samples"] = (
                 self.approach_direction_samples
             )
+        for name in ("approach_deviation_angle", "max_candidates", "center_mode"):
+            value = getattr(self, name)
+            if value is not None:
+                algorithm_kwargs[name] = value
 
         collision_kwargs: dict[str, object] = {}
         if self.filter_ground_collision is not None:
@@ -401,6 +391,11 @@ class _AntipodalGraspPoseGeneratorFactory:
         if self.force_refresh is not None:
             annotation_kwargs["force_refresh"] = self.force_refresh
 
+        geometry_kwargs = {}
+        if self.root_from_contact_frame is not None:
+            geometry_kwargs["root_from_contact_frame"] = np.asarray(
+                self.root_from_contact_frame
+            ).reshape(4, 4)
         return AntipodalGraspPoseGenerator(
             ParallelJawGripperModelCfg(
                 model_id=self.model_id,
@@ -416,6 +411,7 @@ class _AntipodalGraspPoseGeneratorFactory:
                     if self.root_from_tcp is None
                     else np.asarray(self.root_from_tcp).reshape(4, 4)
                 ),
+                **geometry_kwargs,
             ),
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm_kwargs),
             collision_cfg=ParallelJawGraspCollisionCfg(**collision_kwargs),
@@ -468,6 +464,14 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
                 f"{self.call_id} arguments must name only the configured handle; "
                 "motion options belong to the selected policy preset."
             )
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         target_pose: torch.Tensor | SceneEntityPose
         if self._target_pose_mode == "live":
             target_pose = SceneEntityPose(self._link_entity_id)
@@ -659,6 +663,14 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
 
     def _validate_call(self, call: RegisteredSemanticCall) -> None:
         """Require the configured immutable target selector."""
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if arguments != {"target": self._target_id}:
             raise ValueError(
@@ -889,6 +901,14 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
 
     def _resolve_route(self, call: RegisteredSemanticCall) -> _RelativePlaceRoute:
         """Validate one call and return its exact configured route."""
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         allowed = {"object", "reference", "relation", "stage_id"}
         if set(arguments) - allowed or set(arguments) < {
@@ -1124,6 +1144,14 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
             raise ValueError(
                 "Configured coordinated transport must enable coordinated release."
             )
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if set(arguments) != {"object", "target"}:
             raise ValueError(
@@ -1396,6 +1424,14 @@ class _PourLowerer(RegisteredSemanticLowerer):
 
     def _validate_call(self, call: RegisteredSemanticCall) -> None:
         """Require the configured immutable held-object selector."""
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if arguments != {"object": self._object_id}:
             raise ValueError(
@@ -1501,6 +1537,14 @@ class _PushObjectLowerer(RegisteredSemanticLowerer):
                 "Configured planar pushing requires an exact PushObjectOptions "
                 "template."
             )
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
         arguments = dict(call.arguments)
         if set(arguments) != {"object", "target"}:
             raise ValueError(

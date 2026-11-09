@@ -2340,7 +2340,7 @@ def test_recording_journal_survives_restart_and_deduplicates_commits(tmp_path) -
         },
         batch_size=[2],
     )
-    assert recorder._persist_episode_payload(
+    assert recorder.persist_episode_payload(
         0, observations, torch.zeros(2, 6), episode_metadata=metadata
     )
     recorder.finalize()
@@ -2353,7 +2353,7 @@ def test_recording_journal_survives_restart_and_deduplicates_commits(tmp_path) -
     restarted._env = recorder._env
     restarted._recording_journal = RecordingJournal(root)
     restarted._save_single_episode = MagicMock()
-    assert restarted._persist_episode_payload(
+    assert restarted.persist_episode_payload(
         0, observations, torch.zeros(2, 6), episode_metadata=metadata
     )
     restarted._save_single_episode.assert_not_called()

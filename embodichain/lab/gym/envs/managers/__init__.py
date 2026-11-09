@@ -72,6 +72,7 @@ __all__ = [
     "JointPositionToLimitsAction",
     "JointVelocityAction",
     "ParallelGripperAction",
+    "RelativeEefDlsAction",
     "RelativeEefPoseAction",
     "RelativeJointPositionAction",
     "register_action_contract",

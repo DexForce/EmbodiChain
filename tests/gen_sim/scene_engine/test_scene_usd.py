@@ -186,3 +186,23 @@ def test_usd_source_texture_retains_native_orientation(tmp_path: Path) -> None:
     reader = UsdShade.Shader(texture.GetInput("st").GetConnectedSource()[0].GetPrim())
     assert reader.GetIdAttr().Get() == "UsdPrimvarReader_float2"
     assert reader.GetInput("varname").Get() == "st"
+
+
+def test_scalar_material_export_prefers_scene_linear_base_color():
+    stage = Usd.Stage.CreateInMemory()
+    native = _native_material()
+    native.get_base_color = lambda: (0.5, 0.6, 0.7)
+    linear_color = (0.21404114, 0.31854678, 0.44798842)
+    native.get_base_color_linear = lambda: linear_color
+    material = _export_material_without_texture(native, stage, Sdf.Path("/World"))
+    shader = material.ComputeSurfaceSource()[0]
+    np.testing.assert_allclose(shader.GetInput("diffuseColor").Get(), linear_color)
+
+
+def test_scalar_material_export_keeps_legacy_base_color_getter():
+    stage = Usd.Stage.CreateInMemory()
+    native = _native_material()
+    native.get_base_color = lambda: (0.1, 0.2, 0.3)
+    material = _export_material_without_texture(native, stage, Sdf.Path("/World"))
+    shader = material.ComputeSurfaceSource()[0]
+    np.testing.assert_allclose(shader.GetInput("diffuseColor").Get(), (0.1, 0.2, 0.3))

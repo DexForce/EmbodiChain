@@ -20,6 +20,10 @@
    `task_index` and segment instructions in `subtask_index` with
    `meta/subtasks.parquet`, including independent fragments. Episode sidecars
    retain the overall `instruction` and each segment's own `instruction`.
+   Original physical fields are captured once and retained by
+   [episode recording](../env-framework/env-framework.md#expert-trajectory-contract),
+   independently of policy normalization/noise. Trajectory exports add terminal
+   state and raw-channel history without resizing the legacy action stream.
 2. Recorder construction requires `1 / env.step_dt` to be an exact integer FPS. Non-integral
    simulation rates fail early.
 3. `_save_episodes()` slices only valid lengths. Segment-fragment mode creates independent

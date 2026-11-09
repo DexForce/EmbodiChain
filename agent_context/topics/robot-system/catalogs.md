@@ -47,6 +47,12 @@ providers append separate left/right hand components. Robotiq observed-aperture
 conversion remains tool-owned and does not select a robot class. PGI fixtures
 remain example/benchmark-owned. Root public class exports remain available.
 
+The `dual_franka_robotiq_arg2f_140` and `dual_ur10_robotiq_arg2f_140`
+embodiment components retain their explicit arm/tool assembly, complete hand
+joints and calibrated TCPs. Their skill profiles declare hand topology and
+GraspKit search settings. Scene placement and operation-specific physical
+overrides remain deployment inputs.
+
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps
 existing construction behavior; `default_variant` remains display metadata.
