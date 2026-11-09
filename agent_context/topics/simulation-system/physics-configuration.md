@@ -6,7 +6,7 @@ Return to the [simulation overview](simulation-system.md) for lifecycle entry.
 ## Backend, solver and device resolution
 
 `SimulationManagerCfg.physics_cfg` selects the backend by config type.
-`cfg/simulation.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
+`cfg/physics.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
 `NewtonPhysicsCfg`; do not add another backend string to the manager config.
 Gym's file-owned selector and composition rules belong to
 [environment configuration](../env-framework/configuration.md).
@@ -25,10 +25,10 @@ Newton `solver_cfg=None` preserves DexSim's scene-aware `DexUniSolverCfg`.
 DexUni resolves its ownership and contact paths from the complete Spawn scene;
 the configured solver type is exposed through `NewtonPhysicsBackend.solver_type`.
 Do not guess a solver-specific robot preset while scene ownership is unresolved.
-Gradient mode requires an explicit
-`semi_implicit` solver. Read exact solver options/defaults in
-`cfg/simulation.py` and the installed DexSim config types; do not substitute a
-hardcoded fallback when an expected DexSim API is absent.
+Gradient mode requires an explicit `semi_implicit` solver. Solver options
+are defined by `cfg/physics.py` and the installed DexSim config types.
+`mesh_bvh_constructor` selects the mesh and heightfield query acceleration
+structure. `None` keeps the native default.
 
 `collision_cfg` owns the external Newton contact pipeline. Its
 `update_interval=None` updates at the first local solver substep; positive `k`

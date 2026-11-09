@@ -1124,6 +1124,7 @@ class Articulation(BatchEntity):
         joint_ids: torch.Tensor,
         *,
         velocity: bool,
+        clamp_target_qpos: bool = True,
     ) -> None:
         """Update weak follower-drive targets for written mimic leaders.
 
@@ -1137,6 +1138,7 @@ class Articulation(BatchEntity):
             env_ids=env_ids,
             joint_ids=joint_ids,
             velocity=velocity,
+            clamp_target_qpos=clamp_target_qpos,
             mimic_ids=self.mimic_ids,
             mimic_parents=self.mimic_parents,
             mimic_multipliers=self.mimic_multipliers,
@@ -1864,6 +1866,7 @@ class Articulation(BatchEntity):
         qf: torch.Tensor | None = None,
         root_velocity: torch.Tensor | None = None,
         clear_dynamics: bool = False,
+        clamp_target_qpos: bool = True,
     ) -> None:
         """Write selected physical state in one backend operation.
 
@@ -1872,7 +1875,7 @@ class Articulation(BatchEntity):
             joint_ids: Joint columns for all supplied joint tensors.
             root_pose: Environment-local xyz + xyzw, shape (N, 7).
             qpos: Current joint positions, shape (N, J), clipped to limits.
-            target_qpos: Position targets, shape (N, J), clipped to limits.
+            target_qpos: Position targets, shape (N, J).
             qvel: Current joint velocities, shape (N, J).
             target_qvel: Velocity targets, shape (N, J).
             qf: Generalized joint efforts, shape (N, J).
@@ -1880,6 +1883,9 @@ class Articulation(BatchEntity):
             clear_dynamics: Clear velocities, forces and solver history for
                 selected environments and hold their final joint positions.
                 Explicit fields override these defaults.
+            clamp_target_qpos: Clip position targets to joint limits. Set False
+                to preserve PD targets outside the joint range. Current joint
+                position writes remain clipped; physical limits stay enabled.
 
         Unspecified positions and unselected environments retain their values.
         Scene backends validate all field shapes before changing physics state.
@@ -1910,7 +1916,7 @@ class Articulation(BatchEntity):
                 raise ValueError(
                     f"Expected {name} shape {expected}, got {tuple(value.shape)}."
                 )
-            if name in ("qpos", "target_qpos"):
+            if name == "qpos" or (name == "target_qpos" and clamp_target_qpos):
                 if limits is None:
                     limits = self.body_data.qpos_limits[local_env_ids][
                         :, local_joint_ids
@@ -1938,7 +1944,11 @@ class Articulation(BatchEntity):
         for name, velocity in (("target_qpos", False), ("target_qvel", True)):
             if name in fields:
                 self._stabilize_newton_mimic_target_write(
-                    fields[name], local_env_ids, local_joint_ids, velocity=velocity
+                    fields[name],
+                    local_env_ids,
+                    local_joint_ids,
+                    velocity=velocity,
+                    clamp_target_qpos=clamp_target_qpos,
                 )
         if (
             (root_pose is not None or qpos is not None)
@@ -1956,6 +1966,8 @@ class Articulation(BatchEntity):
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
         target: bool = True,
+        *,
+        clamp_target_qpos: bool = True,
     ) -> None:
         """Set the joint positions (qpos) or target positions for the articulation.
 
@@ -1964,6 +1976,9 @@ class Articulation(BatchEntity):
             joint_ids (Sequence[int] | None, optional): Joint indices to apply the positions. If None, applies to all joints.
             env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
             target (bool): If True, sets target positions for simulation. If False, updates current positions directly.
+            clamp_target_qpos: Clip position targets to joint limits. False
+                preserves out-of-range PD targets. Direct position writes
+                (target=False) are always clipped to joint limits.
 
         Raises:
             ValueError: If the length of `env_ids` does not match the length of `qpos`.
@@ -1971,6 +1986,7 @@ class Articulation(BatchEntity):
         self.set_state(
             env_ids=env_ids,
             joint_ids=joint_ids,
+            clamp_target_qpos=clamp_target_qpos,
             **{"target_qpos" if target else "qpos": qpos},
         )
 
@@ -2086,13 +2102,22 @@ class Articulation(BatchEntity):
         """
         env_index = self._resolve_env_ids(env_ids)
         env_list = env_index.detach().cpu().tolist()
-        names, _ = self._resolve_link_names(link_names)
+        names, link_index = self._resolve_link_names(link_names)
         mass = torch.as_tensor(mass, dtype=torch.float32, device=self.device)
         expected_shape = (len(env_list), len(names))
         if tuple(mass.shape) != expected_shape:
             raise ValueError(
                 f"Expected mass shape {expected_shape}, got {tuple(mass.shape)}."
             )
+
+        if (
+            self.is_spawn_bound
+            and self._data.is_newton_backend
+            and len(set(env_list)) == len(env_list)
+            and len(set(names)) == len(names)
+        ):
+            self._data.articulation_view.apply_link_mass(mass, env_index, link_index)
+            return
 
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
@@ -2143,6 +2168,17 @@ class Articulation(BatchEntity):
                 f"Expected inertia shape {expected_shape}, "
                 f"got {tuple(inertia.shape)}."
             )
+
+        if (
+            self.is_spawn_bound
+            and self._data.is_newton_backend
+            and len(set(env_list)) == len(env_list)
+            and len(set(names)) == len(names)
+        ):
+            self._data.articulation_view.apply_link_inertia(
+                inertia, env_index, link_index
+            )
+            return
 
         frames = (
             self.body_data.com_pose[env_index[:, None], link_index[None, :], 3:7]
@@ -2201,6 +2237,17 @@ class Articulation(BatchEntity):
                 f"Expected COM pose shape {expected_shape}, "
                 f"got {tuple(com_pose.shape)}."
             )
+
+        if (
+            self.is_spawn_bound
+            and self._data.is_newton_backend
+            and len(set(env_list)) == len(env_list)
+            and len(set(names)) == len(names)
+        ):
+            self._data.articulation_view.apply_link_com_pose(
+                com_pose, env_index, link_index
+            )
+            return
 
         inertia = (
             self.body_data.inertia[env_index[:, None], link_index[None, :]]

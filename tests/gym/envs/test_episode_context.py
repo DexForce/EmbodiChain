@@ -24,6 +24,7 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 
 
 def ready_context(count=4):
@@ -161,3 +162,69 @@ def test_nested_empty_checks_leave_current_buffers_unchanged() -> None:
             inner(accepted=True)
         outer(accepted=False)
     assert context.snapshot() == before
+
+
+@pytest.mark.parametrize("embodied", [False, True])
+def test_info_can_omit_provenance_without_disabling_episode_checks(embodied):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.base_env import BaseEnv, EnvCfg
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    assert EnvCfg().episode_context_in_info is True
+    context = ready_context()
+    env = SimpleNamespace(
+        cfg=SimpleNamespace(episode_context_in_info=True),
+        num_envs=4,
+        device=torch.device("cpu"),
+        _elapsed_steps=torch.zeros(4),
+        episode_context=context,
+        evaluate=lambda **kwargs: {},
+        compute_task_state=lambda **kwargs: (
+            torch.zeros(4, dtype=torch.bool),
+            torch.zeros(4, dtype=torch.bool),
+            {},
+        ),
+    )
+    if embodied:
+        env.termination_manager = SimpleNamespace(snapshot=lambda: {"accepted": True})
+    get_info = EmbodiedEnv.get_info if embodied else BaseEnv.get_info
+    assert "episode_context" in get_info(env)
+    env.cfg.episode_context_in_info = False
+    with context.check("layout", [1]) as finish:
+        finish(accepted=False, reasons="invalid placement")
+    info = get_info(env)
+    assert "episode_context" not in info
+    if embodied:
+        assert info["task_outcome"] == {"accepted": True}
+    assert context.filter_recordable().tolist() == [0, 2, 3]
+    assert (
+        context.snapshot([1])[0]["rejections"]["layout"]["reason"]
+        == "invalid placement"
+    )
+
+
+@pytest.mark.parametrize("value", [True, False, None])
+def test_episode_context_info_config(value: bool | None) -> None:
+    config = {
+        "id": "EpisodeContextInfo-v0",
+        "physics": "default",
+        "env": {},
+        "robot": {"uid": "ConfigOnly"},
+    }
+    if value is not None:
+        config["env"]["episode_context_in_info"] = value
+    assert config_to_cfg(config).episode_context_in_info is (
+        True if value is None else value
+    )
+
+
+@pytest.mark.parametrize("value", ["false", 0, None])
+def test_episode_context_info_rejects_non_boolean(value: object) -> None:
+    config = {
+        "id": "EpisodeContextInfo-v0",
+        "physics": "default",
+        "env": {"episode_context_in_info": value},
+        "robot": {"uid": "ConfigOnly"},
+    }
+    with pytest.raises(TypeError, match="episode_context_in_info must be a bool"):
+        config_to_cfg(config)

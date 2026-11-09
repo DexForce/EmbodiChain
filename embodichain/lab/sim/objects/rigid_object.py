@@ -472,6 +472,7 @@ class RigidObject(BatchEntity):
 
         cfg = deepcopy(self.cfg)
         self.__dict__.pop("user_ids", None)
+        self.__dict__.pop("_static_friction_batch", None)
         self._spawn_result = result
         self.body_type = cfg.body_type
         self._world = result.world
@@ -1194,6 +1195,14 @@ class RigidObject(BatchEntity):
 
         return torch.as_tensor(masses, dtype=torch.float32, device=self.device)
 
+    def _static_friction_view(self) -> SceneRigidBodyView:
+        """Create a shape-property view for Spawn bodies without dynamic state."""
+        if not hasattr(self, "_static_friction_batch"):
+            self._static_friction_batch = SceneRigidBodyView.from_entities(
+                self._spawn_result, self._entities, self.device
+            )
+        return self._static_friction_batch
+
     def set_friction(
         self, friction: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
@@ -1209,6 +1218,13 @@ class RigidObject(BatchEntity):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match friction length {len(friction)}."
             )
+
+        if self.is_spawn_bound and self._data is None:
+            ids = torch.as_tensor(local_env_ids, dtype=torch.int32, device=self.device)
+            self._static_friction_view().apply_friction(
+                friction.to(dtype=torch.float32, device=self.device).unsqueeze(-1), ids
+            )
+            return
 
         if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)
@@ -1241,13 +1257,11 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
-        if self.is_spawn_bound and self.is_static:
-            return torch.full(
-                (len(local_env_ids),),
-                float(self.cfg.attrs.to_dexsim_physical_attr().dynamic_friction),
-                dtype=torch.float32,
-                device=self.device,
-            )
+        if self.is_spawn_bound and self._data is None:
+            ids = torch.as_tensor(local_env_ids, dtype=torch.int32, device=self.device)
+            result = torch.empty((len(local_env_ids), 1), device=self.device)
+            self._static_friction_view().fetch_friction(result, ids)
+            return result.squeeze(-1)
 
         if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)

@@ -46,38 +46,20 @@ limitations are documented in {doc}`newton/dexuni`.
 
 ## Automatic solver selection
 
-Leaving `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
-DexSim resolves it when {meth}`SimulationManager.prepare` finalizes the complete
-Spawn scene:
-
-| Finalized EmbodiChain scene | Resolved configuration | Solver type |
-| :--- | :--- | :--- |
-| Independent rigid bodies only | `XPBDSolverCfg` | `xpbd` |
-| One or more articulations, without deformables | `MJWarpSolverCfg` | `mujoco_warp` |
-| Cloth or volume soft bodies, without articulations | `VBDSolverCfg` | `vbd` |
-| Articulations together with cloth or volume soft bodies | `DexUniSolverCfg` | `dexuni` |
-
-Add every initial robot and object before `prepare()` so selection sees the
-complete scene. An explicit `{"solver_type": "auto"}` or
-`{"class_type": "AutoSolverCfg"}` mapping is equivalent to leaving
-`solver_cfg` unset. After preparation, inspect `sim.physics.solver_type`; do
-not treat `physics: newton` alone as a solver qualification.
-
-For native solver feature comparisons, joint support, contact-material support,
-and algorithm details, use the
-[Newton Solver Guide](https://newton-physics.github.io/newton/stable/solvers/index.html)
-instead of inferring those properties from the table above. The table describes
-DexSim's scene routing as exposed by this EmbodiChain integration.
+Leaving `solver_cfg=None` preserves DexSim's scene-aware `DexUniSolverCfg`.
+Add the initial robots and objects before {meth}`SimulationManager.prepare`
+so DexUni can resolve solver ownership and contact handling from the complete
+Spawn scene. After preparation, `sim.physics.solver_type` reports the configured
+solver family. See {doc}`newton/dexuni` for DexUni dispatch and options.
 
 ## Explicit solver selection
 
 Choose a concrete solver when an algorithm or solver-specific parameter must be
-fixed. EmbodiChain mapping configs recognize `auto`, `dexuni`, `mujoco_warp`
+fixed. EmbodiChain mapping configs recognize `dexuni`, `mujoco_warp`
 (or `mjwarp`), `xpbd`, `semi_implicit`, `featherstone`, and `vbd`. A DexSim
 `NewtonSolverCfg` object can also be assigned directly.
 
-AutoSolver does not select a differentiable solver. `requires_grad=True`
-therefore requires an explicit `semi_implicit` configuration. See
+`requires_grad=True` requires an explicit `semi_implicit` configuration. See
 {doc}`newton/runtime_qualification` before treating a successfully decoded
 configuration as a supported runtime path.
 
@@ -126,3 +108,11 @@ and [solver tuning reference](https://newton-physics.github.io/newton/stable/con
 newton/dexuni
 newton/runtime_qualification
 ```
+
+## Mesh query acceleration
+
+`NewtonPhysicsCfg.mesh_bvh_constructor` selects the mesh BVH constructor used
+for mesh and heightfield ray queries. Its default `None` preserves the engine
+configuration. Large CUDA terrain scans can select `"cubql"`. The constructor
+changes the acceleration structure while preserving the mesh geometry and
+physical contact parameters.
