@@ -22,7 +22,6 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import numpy as np
-from solver_support import checked_rotation_distance
 import pytest
 import torch
 import warp as wp
@@ -92,7 +91,10 @@ def _assert_pose_accuracy(
     expected = target.cpu().numpy().astype(np.float64)
     result = actual.cpu().numpy().astype(np.float64)
     translation = np.linalg.norm(expected[:, :3, 3] - result[:, :3, 3], axis=-1)
-    rotation = checked_rotation_distance(expected[:, :3, :3], result[:, :3, :3])
+    rotation = (
+        Rotation.from_matrix(expected[:, :3, :3]).inv()
+        * Rotation.from_matrix(result[:, :3, :3])
+    ).magnitude()
     assert np.all(translation <= position_tolerance)
     assert np.all(rotation <= rotation_tolerance)
 

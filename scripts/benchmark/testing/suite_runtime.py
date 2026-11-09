@@ -371,6 +371,8 @@ def main(argv: list[str] | None = None) -> int:
                 "OMP_NUM_THREADS",
                 "MKL_NUM_THREADS",
                 "OPENBLAS_NUM_THREADS",
+                "CXX",
+                "TORCHINDUCTOR_CACHE_DIR",
             ]
         },
         "steps": [],

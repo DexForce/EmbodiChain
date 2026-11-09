@@ -26,7 +26,6 @@ from typing import Any
 import xml.etree.ElementTree as ET
 
 import numpy as np
-from solver_support import checked_rotation_distance
 import pytest
 import pytorch_kinematics as pk
 import torch
@@ -170,55 +169,14 @@ def _pk_fk(solver: SSIKSolver, joints: torch.Tensor) -> torch.Tensor:
 
 
 def _assert_pose(target: torch.Tensor, actual: torch.Tensor) -> None:
-    """Compare rigid FK poses without projecting malformed rotations."""
     expected = target.detach().cpu().numpy().astype(np.float64)
     result = actual.detach().cpu().numpy().astype(np.float64)
-    assert np.isfinite(expected).all() and np.isfinite(result).all()
     translation = np.linalg.norm(expected[..., :3, 3] - result[..., :3, 3], axis=-1)
-    rotation = checked_rotation_distance(expected[..., :3, :3], result[..., :3, :3])
+    expected_rotation = Rotation.from_matrix(expected[..., :3, :3])
+    result_rotation = Rotation.from_matrix(result[..., :3, :3])
+    rotation = (expected_rotation.inv() * result_rotation).magnitude()
     assert np.all(translation <= 1e-5)
     assert np.all(rotation <= 1e-5)
-
-
-@pytest.mark.parametrize(
-    "angle, matches", [(0.0, True), (1e-6, True), (2e-5, False), (np.pi, False)]
-)
-def test_pose_assertion_preserves_angles_without_svd(
-    monkeypatch: pytest.MonkeyPatch, angle: float, matches: bool
-) -> None:
-    """Legal float32 rotations need no orthogonalization or spectral solver."""
-    rotation = Rotation.from_euler("xyz", [0.2, -0.4, 0.7]).as_matrix()
-    target = torch.eye(4, dtype=torch.float32)
-    target[:3, :3] = torch.from_numpy(rotation)
-    actual = target.clone()
-    actual[:3, :3] = torch.from_numpy(
-        rotation @ Rotation.from_rotvec([0.0, 0.0, angle]).as_matrix()
-    )
-
-    def unavailable_svd(*args: Any, **kwargs: Any) -> None:
-        raise np.linalg.LinAlgError("SVD did not converge")
-
-    monkeypatch.setattr(np.linalg, "svd", unavailable_svd)
-    if matches:
-        _assert_pose(target[None], actual[None])
-    else:
-        with pytest.raises(AssertionError):
-            _assert_pose(target[None], actual[None])
-
-
-@pytest.mark.parametrize("defect", ["nonfinite-target", "scaled-output", "reflection"])
-def test_pose_assertion_rejects_nonrigid_transforms(defect: str) -> None:
-    """Normalization must not conceal a malformed target or FK result."""
-    target = torch.eye(4, dtype=torch.float32)[None]
-    actual = target.clone()
-    if defect == "nonfinite-target":
-        target[0, 0, 0] = torch.nan
-    elif defect == "scaled-output":
-        actual[0, :3, :3] *= 1.01
-    else:
-        actual[0, 0, 0] = -1
-    with pytest.raises(AssertionError):
-        _assert_pose(target, actual)
 
 
 def _assert_limits(solver: SSIKSolver, joints: torch.Tensor) -> None:
@@ -560,10 +518,9 @@ def test_continuous_winding_rechecks_original_fk_after_float32_rounding(
     # This many turns magnifies float32 quantization: the nearest in-limit
     # output fits the step constraint but no longer closes the original goal.
     bad_pose = _pk_fk(solver, initial)
-    error = checked_rotation_distance(
-        target[0, 0, :3, :3].cpu().numpy(), bad_pose[0, :3, :3].cpu().numpy()
-    )
-    assert error > solver.cfg.rotation_tolerance
+    expected = Rotation.from_matrix(target[0, 0, :3, :3].cpu().numpy())
+    actual = Rotation.from_matrix(bad_pose[0, :3, :3].cpu().numpy())
+    assert (expected.inv() * actual).magnitude() > solver.cfg.rotation_tolerance
     valid, result = solver._select_continuous_ik_path(
         candidate[:, None, None],
         torch.ones((1, 1, 1), dtype=torch.bool, device=device),
@@ -844,9 +801,7 @@ def test_continuous_selection_retains_borrowed_cuda_inputs(drop_index: int) -> N
         script = """
 import runpy
 import sys
-from pathlib import Path
 import pytest
-sys.path.insert(0, str(Path(sys.argv[1]).parents[3]))
 namespace = runpy.run_path(sys.argv[1])
 try:
     namespace['test_continuous_selection_retains_borrowed_cuda_inputs'](int(sys.argv[2]))

@@ -29,7 +29,6 @@ from unittest.mock import Mock
 import xml.etree.ElementTree as ET
 
 import numpy as np
-from solver_support import checked_rotation_distance
 import pytest
 import torch
 from scipy.spatial.transform import Rotation
@@ -91,8 +90,10 @@ def _assert_pose(target: torch.Tensor, actual: torch.Tensor) -> None:
     assert np.all(
         np.linalg.norm(actual_np[:, :3, 3] - target_np[:, :3, 3], axis=-1) <= 1e-5
     )
-    rotation = checked_rotation_distance(target_np[:, :3, :3], actual_np[:, :3, :3])
-    assert np.all(rotation <= 1e-5)
+    rotation = Rotation.from_matrix(target_np[:, :3, :3]).inv() * Rotation.from_matrix(
+        actual_np[:, :3, :3]
+    )
+    assert np.all(rotation.magnitude() <= 1e-5)
 
 
 def _sample(solver: SSIKSolver, count: int = 4) -> torch.Tensor:

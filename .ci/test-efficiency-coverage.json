@@ -46,11 +46,6 @@
       "contract": "Backend/device, arena counts, models, timesteps, controller inputs, tolerances and all physical assertions are retained. Pixel tests and standalone default-capacity regressions are unchanged. Native state observations must end with no Worlds, managers or queued cleanup."
     },
     {
-      "owner": "tests/solver_support.py;tests/sim/motion/solvers/test_ssik_solver.py;tests/sim/motion/solvers/test_ssik_near_parallel.py;tests/sim/motion/solvers/test_ssik_srs_search.py;tests/sim/motion/solvers/test_ssik_reference_models.py;tests/sim/motion/solvers/test_fep_solver.py;tests/sim/robots/test_dexforce_w1_v030.py",
-      "changed": "Centralize checked principal-angle comparison for rigid FK matrices; validate finite/SO(3) matrices and avoid redundant spectral orthogonalization across all equivalent pose-error reference helpers.",
-      "contract": "Every caller retains its original translation and angular tolerances, including configured FEP tolerances. Solver validity/limits/winding/sample/assertion contracts remain unchanged. The common test-only stabilization is identical in baseline/candidate. Both recorded failing12case prefixes and finite captures are preserved; seven existing independent angle/malformed-matrix regressions validate the shared oracle. Euler fixture construction keeps its separate reference conversion."
-    },
-    {
       "owner": "tests/sim/motion/workspace/test_manipulability.py",
       "changed": "Reuse one class-scoped native CobotMagic scene and reset object state before each analysis; keep fresh analyzers/configs and independent cache directories. Move a mock-only cache-aggregate test to the existing no_sim metric unit class.",
       "removed": [
@@ -72,5 +67,5 @@
       "contract": "Full lifecycle GC remains enabled for domain/test objects. Existing permanent roots are retained through process exit; reusable application interpreters are unaffected. Original failed tests keep their exit codes; successful optimized exits additionally require zero nativeWorlds/managers/queue. Discovery stays unmodified and ordered execution must match it."
     }
   ],
-  "measurement": "Report original, cleaned and final execution policy separately. Preserve raw failures/skips and explicitly list removed/consolidated coverage; do not add stage percentages."
+  "measurement": "Report original, cleaned and final execution policy separately. Preserve raw failures/skips and explicitly list removed/consolidated coverage; do not add stage percentages. Use the same qualified CXX compiler and JIT-cache policy for both variants and retain their environment metadata. Original solver pose-reference assertions are unchanged."
 }
