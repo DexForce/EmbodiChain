@@ -108,6 +108,20 @@ from embodichain_benchmarks.motion_generation.video import (
 )
 
 
+def _contact_trace(*, contact_distances=None, contact_target="cube", **channels):
+    """Fixture contacts are 1 mm on both fingers, independent of joint values."""
+    if contact_distances is None:
+        contact_distances = {
+            part: torch.full((*qpos.shape[:2], 2), 0.001)
+            for part, qpos in channels.get("gripper_qpos", {}).items()
+        }
+    return ReplayObservationTrace(
+        **channels,
+        gripper_contact_distances=contact_distances,
+        gripper_contact_targets={part: contact_target for part in contact_distances},
+    )
+
+
 def _atomic_case() -> BenchmarkCase:
     target = torch.eye(4).reshape(1, 1, 4, 4)
     return BenchmarkCase(
@@ -189,9 +203,13 @@ def test_atomic_case_identity_includes_simulator_batch_size() -> None:
         ),
         ("place", {}, ("place_release", "place_settle")),
         ("press", {}, ("press_actuation",)),
-        ("slide", {"direction": "pull"}, ("slide_actuation", "slide_release")),
-        ("twist", {}, ("twist_actuation", "twist_release")),
-        ("open_door", {}, ("door_actuation", "door_release")),
+        (
+            "slide",
+            {"direction": "pull"},
+            ("slide_grasp", "slide_actuation", "slide_release"),
+        ),
+        ("twist", {}, ("twist_grasp", "twist_actuation", "twist_release")),
+        ("open_door", {}, ("door_grasp", "door_actuation", "door_release")),
         ("pour", {}, ("pour_actuation", "pour_settle")),
         (
             "axis_align",
@@ -428,6 +446,7 @@ def test_move_joints_missing_terminal_observation_is_unavailable() -> None:
 def test_pick_up_provider_uses_grasp_lift_and_retention_windows() -> None:
     case = replace(
         _atomic_case(),
+        object_id="cube",
         batch_size=2,
         scenario_id="pick_up",
         skill_id="pick_up",
@@ -445,9 +464,9 @@ def test_pick_up_provider_uses_grasp_lift_and_retention_windows() -> None:
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
-            "pickup_grasp": ReplayObservationTrace(gripper_qpos={"hand": held}),
+            "pickup_grasp": _contact_trace(gripper_qpos={"hand": held}),
             "pickup_lift": ReplayObservationTrace(object_pose=lift, tcp_pose=lift),
-            "pickup_settle": ReplayObservationTrace(
+            "pickup_settle": _contact_trace(
                 object_pose=lift[-1:].repeat(2, 1, 1, 1),
                 tcp_pose=lift[-1:].repeat(2, 1, 1, 1),
                 gripper_qpos={"hand": held},
@@ -466,7 +485,7 @@ def test_pick_up_provider_uses_grasp_lift_and_retention_windows() -> None:
     assert [result.task_success for result in results] == [True, False]
     assert results[1].failure_stage == "lifted"
     assert results[0].stages[0].evidence_source == (
-        "measured_proxy:gripper_joint_state"
+        "contact_sensor:target_finger_contacts"
     )
 
 
@@ -478,6 +497,7 @@ def test_move_held_object_provider_uses_measured_transport_pose() -> None:
     poses[-1, :, 0, 3] = torch.tensor([0.005, 0.02])
     case = replace(
         _atomic_case(),
+        object_id="cube",
         batch_size=2,
         scenario_id="move_held_object",
         skill_id="move_held_object",
@@ -496,7 +516,7 @@ def test_move_held_object_provider_uses_measured_transport_pose() -> None:
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
             "held_object_transport": ReplayObservationTrace(object_pose=transport),
-            "held_object_settle": ReplayObservationTrace(
+            "held_object_settle": _contact_trace(
                 object_pose=poses,
                 gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
             ),
@@ -521,6 +541,7 @@ def test_move_held_object_requires_terminal_retention() -> None:
     poses = target.unsqueeze(0).repeat(2, 1, 1, 1)
     case = replace(
         _atomic_case(),
+        object_id="cube",
         scenario_id="move_held_object",
         skill_id="move_held_object",
         case_parameters={
@@ -538,9 +559,10 @@ def test_move_held_object_requires_terminal_retention() -> None:
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
             "held_object_transport": ReplayObservationTrace(object_pose=poses),
-            "held_object_settle": ReplayObservationTrace(
+            "held_object_settle": _contact_trace(
                 object_pose=poses,
                 gripper_qpos={"hand": torch.ones(2, 1, 1)},
+                contact_distances={"hand": torch.full((2, 1, 2), torch.inf)},
             ),
         },
     )
@@ -678,6 +700,7 @@ def test_press_provider_scores_peak_stroke_within_actuation_trace() -> None:
 def test_slide_provider_uses_actuation_and_release_windows() -> None:
     case = replace(
         _atomic_case(),
+        object_id="cube",
         batch_size=2,
         scenario_id="slide",
         skill_id="slide",
@@ -696,6 +719,9 @@ def test_slide_provider_uses_actuation_and_release_windows() -> None:
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
+            "slide_grasp": _contact_trace(
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)}
+            ),
             "slide_actuation": ReplayObservationTrace(
                 articulation_joint=torch.tensor([[0.0, 0.0], [0.1, 0.07]])
             ),
@@ -718,6 +744,7 @@ def test_slide_provider_uses_actuation_and_release_windows() -> None:
 def test_slide_rejects_opposite_joint_direction() -> None:
     case = replace(
         _atomic_case(),
+        object_id="cube",
         scenario_id="slide",
         skill_id="slide",
         case_parameters={
@@ -735,6 +762,9 @@ def test_slide_rejects_opposite_joint_direction() -> None:
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
+            "slide_grasp": _contact_trace(
+                gripper_qpos={"hand": torch.full((2, 1, 1), 0.5)}
+            ),
             "slide_actuation": ReplayObservationTrace(
                 articulation_joint=torch.tensor([[0.0], [-0.1]])
             ),
@@ -749,12 +779,13 @@ def test_slide_rejects_opposite_joint_direction() -> None:
     result = evaluator.evaluate(case, observation, (_atomic_outcome(),))[0]
 
     assert not result.task_success
-    assert result.failure_stage == "grasped"
+    assert result.failure_stage == "slid"
 
 
 def test_twist_provider_scores_executed_tcp_rotation_not_knob_angle() -> None:
     case = replace(
         _atomic_case(),
+        object_id="cube",
         batch_size=2,
         scenario_id="twist",
         skill_id="twist",
@@ -777,6 +808,9 @@ def test_twist_provider_scores_executed_tcp_rotation_not_knob_angle() -> None:
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
+            "twist_grasp": _contact_trace(
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)}
+            ),
             "twist_actuation": ReplayObservationTrace(
                 tcp_pose=tcp,
                 articulation_joint=torch.tensor([[0.0, 0.0], [0.1, 0.1]]),
@@ -799,6 +833,7 @@ def test_twist_provider_scores_executed_tcp_rotation_not_knob_angle() -> None:
 def test_twist_rejects_opposite_tcp_rotation() -> None:
     case = replace(
         _atomic_case(),
+        object_id="cube",
         scenario_id="twist",
         skill_id="twist",
         case_parameters={
@@ -818,6 +853,9 @@ def test_twist_rejects_opposite_tcp_rotation() -> None:
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
+            "twist_grasp": _contact_trace(
+                gripper_qpos={"hand": torch.full((2, 1, 1), 0.5)}
+            ),
             "twist_actuation": ReplayObservationTrace(
                 tcp_pose=tcp,
                 articulation_joint=torch.tensor([[0.0], [0.1]]),
@@ -947,6 +985,7 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
         "control_part": "eef",
         "open_qpos": [0.0],
         "grasp_qpos": [0.040],
+        "finger_links": ["gripper_finger1_link_1", "gripper_finger2_link_1"],
     }
     articulations = {
         item["id"]: item for item in suite.enabled_tracks()[0].config["articulations"]
@@ -1678,6 +1717,7 @@ def test_target_yaw_domain_requires_measured_full_rotation(skill_id: str) -> Non
     final_pose[1, 1, 1] = torch.cos(yaw)
     case = replace(
         _atomic_case(),
+        object_id="cube",
         batch_size=2,
         skill_id=skill_id,
         case_parameters={
@@ -1698,7 +1738,7 @@ def test_target_yaw_domain_requires_measured_full_rotation(skill_id: str) -> Non
             "held_object_transport": ReplayObservationTrace(
                 object_pose=target_pose.unsqueeze(0).repeat(2, 1, 1, 1)
             ),
-            "held_object_settle": ReplayObservationTrace(
+            "held_object_settle": _contact_trace(
                 object_pose=final_pose.unsqueeze(0).repeat(2, 1, 1, 1),
                 gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
             ),
@@ -2503,6 +2543,7 @@ def test_pickup_retention_tracks_the_target_object(
     holding = torch.full((2, 1, 1), 0.5)
     case = replace(
         _atomic_case(),
+        object_id="cube",
         skill_id="pick_up",
         case_parameters={"object_initial_pose": initial.tolist()},
     )
@@ -2515,12 +2556,12 @@ def test_pickup_retention_tracks_the_target_object(
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
-            "pickup_grasp": ReplayObservationTrace(gripper_qpos={"hand": holding}),
+            "pickup_grasp": _contact_trace(gripper_qpos={"hand": holding}),
             "pickup_lift": ReplayObservationTrace(
                 object_pose=torch.stack((initial, lifted)),
                 tcp_pose=torch.stack((initial, lifted)),
             ),
-            "pickup_settle": ReplayObservationTrace(
+            "pickup_settle": _contact_trace(
                 object_pose=torch.stack((lifted, final)),
                 tcp_pose=torch.stack((lifted, final_tcp)),
                 gripper_qpos={"hand": holding},
@@ -2557,6 +2598,7 @@ def test_nonfinite_grasp_evidence_is_unavailable_per_row(invalid_channel: str) -
         grasped[1, 0] = torch.nan
     case = replace(
         _atomic_case(),
+        object_id="cube",
         batch_size=2,
         skill_id="pick_up",
         case_parameters={"object_initial_pose": initial.tolist()},
@@ -2570,12 +2612,12 @@ def test_nonfinite_grasp_evidence_is_unavailable_per_row(invalid_channel: str) -
         gripper_open_qpos={"hand": opened},
         gripper_grasp_qpos={"hand": grasped},
         replay_traces={
-            "pickup_grasp": ReplayObservationTrace(gripper_qpos={"hand": holding}),
+            "pickup_grasp": _contact_trace(gripper_qpos={"hand": holding}),
             "pickup_lift": ReplayObservationTrace(
                 object_pose=torch.stack((initial, lifted)),
                 tcp_pose=torch.stack((initial, lifted)),
             ),
-            "pickup_settle": ReplayObservationTrace(
+            "pickup_settle": _contact_trace(
                 object_pose=torch.stack((lifted, lifted)),
                 tcp_pose=torch.stack((lifted, lifted)),
                 gripper_qpos={"hand": holding},
@@ -2705,6 +2747,8 @@ def test_compiled_replay_uses_scheduled_ticks_for_completion_time():
             object_rotation_peak_signed_rad=None,
             replay_traces={},
             replay_diagnostics={"samples": [{"phase": "settled"}]},
+            gripper_contact_thresholds_m={},
+            grasp_contact_metadata={},
         )
     )
     observation = runtime.execute(

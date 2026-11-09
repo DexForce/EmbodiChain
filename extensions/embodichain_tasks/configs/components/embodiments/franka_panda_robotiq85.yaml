@@ -1,4 +1,4 @@
-# Explicit assembly; signed zero preserves the qualified assembly signature.
+# Explicit calibrated Panda + Robotiq assembly.
 embodiment_id: franka_panda_robotiq85
 simulation:
   class_type: Franka
@@ -333,6 +333,7 @@ skill_profile:
       capabilities:
       - kinematics.batch_inverse
       - motion.cartesian_pose
+      - motion.joint_position
       - kinematics.forward
     - endpoint_id: grasp
       control_part: eef

@@ -205,8 +205,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
     to the observed object pose. It samples at most 1000 mesh-surface points and
     applies SVD in the current object pose to find ``obj_longest_axis``. When
     that axis is closer to world Z than to the horizontal plane, both grasp
-    approaches point toward the object horizontally and tilt downward by 45
-    degrees. Otherwise both approaches are world-Z downward.
+    the pickup approaches diagonally downward. Otherwise pickup is world-Z
+    downward. The receiver approaches diagonally from its own TCP side when
+    horizontal separation is available, keeping its wrist outside the source
+    hand's vertical envelope.
 
     For a free object, the first arm grasps the projected end of
     ``obj_longest_axis`` nearest its current TCP.  For an existing hold, that
@@ -218,10 +220,12 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
 
     After each grasp waypoint, subsequent EEF waypoints preserve that grasp
     rotation and change translation only.  The released source TCP first
-    retraces its grasp approach before lifting.  With
+    retraces its grasp approach; transfer-only execution additionally lifts it.
+    With
     ``release_at_target=True``, the receiving arm additionally moves
     horizontally at handover height, lowers to the final target pose, and
-    releases. Transfer-only mode stops with the receiving arm recorded as the
+    releases and withdraws the open receiver before settling. Transfer-only
+    mode stops with the receiving arm recorded as the
     verified holder for a later Semantic Call.
     """
 
@@ -1239,9 +1243,9 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
 
         The pickup grasp is sampled on the observed object pose, whereas the
         receiving grasp is sampled on the predicted pose after lift and middle
-        transfer. Vertical-mode approaches tilt down by 45 degrees; horizontal
-        mode approaches vertically downward. The two grasps use opposite ends
-        of the SVD-derived longest object axis.
+        transfer. Pickup is diagonal in vertical mode and downward in horizontal
+        mode; receiving approaches from its TCP side. The two grasps use opposite
+        ends of the SVD-derived longest object axis.
         """
         options = request.skill_options
         state = context
@@ -1340,8 +1344,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 receive_start_eef[:, :3, 3], middle_object_pose[:, :3, 3]
             )
         )
+        # Keep the receiver wrist outside the source hand's vertical envelope,
+        # including for horizontal objects such as a bar or a lying can.
         receive_direction = torch.where(
-            vertical_mode[:, None], receive_diagonal, vertical_down
+            receive_diagonal_valid[:, None], receive_diagonal, vertical_down
         )
         receive_direction_valid = ~vertical_mode | receive_diagonal_valid
         receive_sample = self._resolve_grasp(
@@ -1584,48 +1590,58 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         segment_lengths["receive_approach"] = receive_approach.shape[1]
         receive_grasp_qpos = receive_approach[:, -1]
 
-        source_retreat: torch.Tensor | None = None
-        if not options.release_at_target:
-            source_retreat_waypoints = self._source_retreat_waypoints(
-                handover_middle_eef,
-                receive_grasp,
-                source_fallback=handover_middle_eef,
-                destination_fallback=receive_grasp,
-                retreat_distance=options.retreat_distance,
-                lift_height=options.lift_height,
-            )
-            phase_success, source_retreat = plan_named_arm_trajectory(
-                self.motion_generator,
-                handover.arm.control_part,
-                handover_middle_qpos,
-                source_retreat_waypoints,
-                segment_lengths["source_retreat"],
-                request.motion_policy,
-                context.control_dt,
-            )
-            source_retreat_success = normalize_success_mask(
-                phase_success,
-                num_envs=self.num_envs,
-                device=self.device,
-                name="HandOver source-retreat success",
-            )
-            self._report_phase_failure(
-                context,
-                phase_name="source_retreat",
-                waypoint_names=(
+        source_retreat_waypoints = self._source_retreat_waypoints(
+            handover_middle_eef,
+            receive_grasp,
+            source_fallback=handover_middle_eef,
+            destination_fallback=receive_grasp,
+            retreat_distance=options.retreat_distance,
+            lift_height=options.lift_height,
+        )
+        if options.release_at_target:
+            # Withdrawal clears the source fingers before placement. A second
+            # world-up lift is unnecessary here and can exceed arm reach.
+            source_retreat_waypoints = source_retreat_waypoints[:, :3]
+        phase_success, source_retreat = plan_named_arm_trajectory(
+            self.motion_generator,
+            handover.arm.control_part,
+            handover_middle_qpos,
+            source_retreat_waypoints,
+            segment_lengths["source_retreat"],
+            request.motion_policy,
+            context.control_dt,
+        )
+        source_retreat_success = normalize_success_mask(
+            phase_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="HandOver source-retreat success",
+        )
+        self._report_phase_failure(
+            context,
+            phase_name="source_retreat",
+            waypoint_names=(
+                (
+                    "source_withdraw_1",
+                    "source_withdraw_2",
+                    "source_withdraw_3",
+                )
+                if options.release_at_target
+                else (
                     "source_withdraw_1",
                     "source_withdraw_2",
                     "source_withdraw_3",
                     "source_lift_1",
                     "source_lift_2",
-                ),
-                target_poses=source_retreat_waypoints,
-                start_qpos=handover_middle_qpos,
-                arm=handover.arm,
-                failed_mask=active_mask & ~source_retreat_success,
-            )
-            success &= source_retreat_success
-            segment_lengths["source_retreat"] = source_retreat.shape[1]
+                )
+            ),
+            target_poses=source_retreat_waypoints,
+            start_qpos=handover_middle_qpos,
+            arm=handover.arm,
+            failed_mask=active_mask & ~source_retreat_success,
+        )
+        success &= source_retreat_success
+        segment_lengths["source_retreat"] = source_retreat.shape[1]
 
         receive_place: torch.Tensor | None = None
         receive_final_qpos: torch.Tensor | None = None
@@ -1661,6 +1677,26 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             success &= placement_success
             segment_lengths["place"] = receive_place.shape[1]
             receive_final_qpos = receive_place[:, -1]
+            release_clearance = translate_pose_world(
+                receive_final_eef,
+                -receive_final_eef[:, :3, 2] * options.retreat_distance,
+            )
+            clear_success, receive_retreat = plan_named_arm_trajectory(
+                self.motion_generator,
+                receive.arm.control_part,
+                receive_final_qpos,
+                release_clearance[:, None],
+                segment_lengths["receive_retreat"],
+                request.motion_policy,
+                context.control_dt,
+            )
+            success &= normalize_success_mask(
+                clear_success,
+                num_envs=self.num_envs,
+                device=self.device,
+                name="HandOver release-clearance success",
+            )
+            segment_lengths["receive_retreat"] = receive_retreat.shape[1]
 
         handover_start_hand = state.last_qpos[:, list(handover.hand.joint_ids)]
         receive_start_hand = state.last_qpos[:, list(receive.hand.joint_ids)]
@@ -1771,13 +1807,24 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 receive,
             ),
         ]
+        segments.append(
+            self._assemble_segment(
+                state,
+                source_retreat,
+                repeat_qpos(receive_grasp_qpos, segment_lengths["source_retreat"]),
+                repeat_qpos(handover.hand_open_qpos, segment_lengths["source_retreat"]),
+                repeat_qpos(receive.hand_grasp_qpos, segment_lengths["source_retreat"]),
+                handover,
+                receive,
+            )
+        )
         if options.release_at_target:
             assert receive_place is not None and receive_final_qpos is not None
             segments.extend(
                 (
                     self._assemble_segment(
                         state,
-                        repeat_qpos(handover_middle_qpos, segment_lengths["place"]),
+                        repeat_qpos(source_retreat[:, -1], segment_lengths["place"]),
                         receive_place,
                         repeat_qpos(handover.hand_open_qpos, segment_lengths["place"]),
                         repeat_qpos(receive.hand_grasp_qpos, segment_lengths["place"]),
@@ -1787,7 +1834,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     self._assemble_segment(
                         state,
                         repeat_qpos(
-                            handover_middle_qpos,
+                            source_retreat[:, -1],
                             segment_lengths["receive_release"],
                         ),
                         repeat_qpos(
@@ -1808,17 +1855,19 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     ),
                 )
             )
-        elif source_retreat is not None:
+        if options.release_at_target:
             segments.append(
                 self._assemble_segment(
                     state,
-                    source_retreat,
-                    repeat_qpos(receive_grasp_qpos, segment_lengths["source_retreat"]),
                     repeat_qpos(
-                        handover.hand_open_qpos, segment_lengths["source_retreat"]
+                        source_retreat[:, -1], segment_lengths["receive_retreat"]
+                    ),
+                    receive_retreat,
+                    repeat_qpos(
+                        handover.hand_open_qpos, segment_lengths["receive_retreat"]
                     ),
                     repeat_qpos(
-                        receive.hand_grasp_qpos, segment_lengths["source_retreat"]
+                        receive.hand_open_qpos, segment_lengths["receive_retreat"]
                     ),
                     handover,
                     receive,
@@ -2177,7 +2226,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         """Split the sample budget, then add the required receive-side hold."""
         hand_count = options.hand_interp_steps
         hand_phase_count = 4 if options.release_at_target else 3
-        motion_phase_count = 4
+        motion_phase_count = 6 if options.release_at_target else 4
         motion_budget = sample_count - hand_phase_count * hand_count
         # Pickup needs start, pre-grasp and grasp samples; each of the other
         # motion phases needs at least its two endpoints.
@@ -2200,15 +2249,15 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             "receive_hold": options.hold_steps,
             "handover_release": hand_count,
         }
+        result["source_retreat"] = motion_counts[3]
         if options.release_at_target:
             result.update(
                 {
-                    "place": motion_counts[3],
+                    "place": motion_counts[4],
                     "receive_release": hand_count,
+                    "receive_retreat": motion_counts[5],
                 }
             )
-        else:
-            result["source_retreat"] = motion_counts[3]
         return result
 
     @staticmethod

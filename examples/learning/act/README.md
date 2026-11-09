@@ -158,8 +158,10 @@ have been replaced. Historical `.pt` checkpoints require retraining; use Git
 history to reproduce those models. Keep generated datasets, checkpoints,
 evaluation reports and videos in a local output directory outside the checkout.
 
-Core trainer/dataset/robot support on Python 3.10/3.11 remains independent of
+Core trainer/dataset/robot support on Python 3.11 remains independent of
 this Python 3.12 ACT workflow. The focused production tests exercise real SDK
 configuration, native training/resume, portable policy reload, normalization,
 reset and content checks without starting a simulator. GPU collection and
 learning acceptance require actual rendered rollouts.
+
+See the [LeRobot integration guide](../../../docs/source/guides/lerobot.md) for dependency profiles and the [framework comparison](../../../docs/source/guides/training_frameworks.md) for native training and RLinf alternatives.

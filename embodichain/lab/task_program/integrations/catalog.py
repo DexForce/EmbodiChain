@@ -27,6 +27,7 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
+from typing import cast
 import torch
 
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
@@ -114,19 +115,28 @@ from .extensions import (
     ParallelSafetyDeclaration,
     RegisteredSemanticLowererDeclaration,
     RegisteredSemanticLowererFactory,
+    RegisteredSemanticLowererSceneValidator,
     RuntimeTransportDeclaration,
     StandardExtensionDeclarations,
     build_standard_extension_declarations,
     validate_immutable_extension_declaration,
 )
 from .simulation import SimulationRobotSkillProfileBinding, SimulationSceneBinding
-from .simulation.policies import default_simulation_settle_presets
+from .simulation.policies import (
+    SimulationSettleMonitorCfg,
+    default_simulation_settle_presets,
+)
+from .simulation.stability import (
+    SimulationStabilityConditionCfg,
+    SimulationJointStabilityConditionCfg,
+)
 
 _CATALOG_FINGERPRINT_SCHEMA_VERSION = 4
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
 _VALIDATOR_KINDS = frozenset(
     {
         "articulation_joint_position",
+        "object_near_relative_target",
         "object_near_target",
         "object_lifted",
         "object_relative_position",
@@ -188,10 +198,30 @@ def _canonical_value(value: object) -> object:
             ),
         )
     if is_dataclass(value):
+        from embodichain.lab.sim.atomic_actions.policies import RecoveryPolicy
+
         metadata = {
             data_field.name: _canonical_value(getattr(value, data_field.name))
             for data_field in fields(value)
+            if not (
+                type(value) is RecoveryPolicy
+                and data_field.name == "planning_budget"
+                and getattr(value, data_field.name) is None
+            )
         }
+        from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+
+        from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
+
+        if (
+            type(value) is SkillDescriptor
+            and not value.supports_segment_motion_recovery
+        ):
+            metadata.pop("supports_segment_motion_recovery")
+        if type(value) is MotionPolicy and value.final_velocity_rejection == "hold":
+            metadata.pop("final_velocity_rejection")
+        if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
+            metadata.pop("retry_all_failed_plans")
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "
@@ -224,12 +254,27 @@ def _digest(payload: object) -> str:
 
 
 def _snapshot_settle_presets(
-    values: Mapping[str, DynamicSettleMonitorCfg],
-) -> Mapping[str, DynamicSettleMonitorCfg]:
+    values: Mapping[
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
+    ],
+) -> Mapping[
+    str,
+    DynamicSettleMonitorCfg
+    | SimulationStabilityConditionCfg
+    | SimulationJointStabilityConditionCfg,
+]:
     """Own one strict named settle-preset table."""
     if not isinstance(values, Mapping) or not values:
         raise ValueError("settle_presets must be a non-empty mapping.")
-    normalized: dict[str, DynamicSettleMonitorCfg] = {}
+    normalized: dict[
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
+    ] = {}
     for preset_id, preset in values.items():
         if (
             type(preset_id) is not str
@@ -240,9 +285,12 @@ def _snapshot_settle_presets(
                 "Settle preset IDs must be non-empty strings without outer "
                 "whitespace."
             )
-        if not isinstance(preset, DynamicSettleMonitorCfg):
+        if not isinstance(preset, DynamicSettleMonitorCfg) and type(preset) not in (
+            SimulationStabilityConditionCfg,
+            SimulationJointStabilityConditionCfg,
+        ):
             raise TypeError(
-                "settle_presets values must be DynamicSettleMonitorCfg values."
+                "settle_presets require dynamic monitors or typed stability conditions."
             )
         normalized[preset_id] = preset.snapshot()
     return MappingProxyType(normalized)
@@ -322,6 +370,36 @@ def _builtin_relation_grounders(
     if scene_binding.containers:
         values.append(ContainerRelationTargetGrounder())
     return tuple(values)
+
+
+def _configured_relation_grounders(
+    scene_binding: SimulationSceneBinding,
+    values: tuple[RelationTargetGrounder, ...],
+) -> tuple[RelationTargetGrounder, ...]:
+    """Remove standard grounders already materialized on a registration.
+
+    ``SimulationTaskProgramRegistration`` exposes the complete grounder tuple,
+    including the scene-derived standard entries.  Immutable registration
+    transforms commonly use :func:`dataclasses.replace`, which feeds that
+    exposed tuple back through the constructor.  Treat one exact instance of a
+    standard grounder as already installed so those transforms remain
+    idempotent while duplicate custom declarations still fail below.
+    """
+    builtins = _builtin_relation_grounders(scene_binding)
+    builtin_by_key = {
+        _relation_grounder_key(grounder): grounder for grounder in builtins
+    }
+    consumed: set[tuple[str, type[Affordance], str]] = set()
+    configured: list[RelationTargetGrounder] = []
+    for grounder in values:
+        key = _relation_grounder_key(grounder)
+        builtin = builtin_by_key.get(key)
+        if builtin is not None and type(grounder) is type(builtin):
+            if key not in consumed:
+                consumed.add(key)
+                continue
+        configured.append(grounder)
+    return tuple(configured)
 
 
 def _snapshot_relation_grounder_keys(
@@ -479,6 +557,18 @@ class TaskProgramIntegrationCatalog:
         repr=False,
         compare=False,
     )
+    pose_delta_settle_preset_ids: frozenset[str] = field(
+        default_factory=frozenset, kw_only=True
+    )
+    """Presets explicitly selecting consecutive rigid-pose measurements."""
+    rigid_settle_entity_ids: frozenset[str] = field(
+        default_factory=frozenset, kw_only=True
+    )
+    """Native rigid-object identities and affordances resolving to those objects."""
+    condition_settle_entities: Mapping[str, str] = field(
+        default_factory=dict, kw_only=True
+    )
+    """Immutable preset-to-entity binding for declared geometric conditions."""
 
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
@@ -546,6 +636,27 @@ class TaskProgramIntegrationCatalog:
         if not preset_ids:
             raise ValueError("settle_preset_ids must not be empty.")
         object.__setattr__(self, "settle_preset_ids", preset_ids)
+        for name in ("pose_delta_settle_preset_ids", "rigid_settle_entity_ids"):
+            values = frozenset(getattr(self, name))
+            for value in values:
+                _exact_identifier(value, field_name=name)
+            object.__setattr__(self, name, values)
+        if not self.pose_delta_settle_preset_ids <= preset_ids:
+            raise ValueError(
+                "Pose-delta presets must belong to the settle-preset table."
+            )
+        conditions = dict(self.condition_settle_entities)
+        if not set(conditions) <= preset_ids:
+            raise ValueError(
+                "Condition presets must belong to the settle-preset table."
+            )
+        for key, value in conditions.items():
+            _exact_identifier(key, field_name="condition preset")
+            _exact_identifier(value, field_name="condition entity")
+        object.__setattr__(
+            self, "condition_settle_entities", MappingProxyType(conditions)
+        )
+
         if (
             type(self.fingerprint) is not str
             or len(self.fingerprint) != 64
@@ -670,7 +781,6 @@ class TaskProgramIntegrationCatalog:
         path: ConfigPath,
     ) -> None:
         """Validate one registered post-policy kind and named preset."""
-        del path
         if policy.kind not in _POST_POLICY_KINDS:
             raise KeyError(
                 f"Unknown post-policy kind {policy.kind!r}; available kinds are "
@@ -681,6 +791,22 @@ class TaskProgramIntegrationCatalog:
                 f"Unknown settle preset {policy.preset!r}; available presets are "
                 f"{sorted(self.settle_preset_ids)}."
             )
+        if policy.preset in self.pose_delta_settle_preset_ids:
+            entity = self.scene.resolve(policy.entity, path=(*path, "entity"))
+            if entity.entity_id not in self.rigid_settle_entity_ids:
+                raise TaskProgramValidationError(
+                    "unsupported_pose_delta_settle_target",
+                    path,
+                    "Pose-delta settling requires an explicitly bound native rigid object.",
+                )
+        if policy.preset in self.condition_settle_entities:
+            entity = self.scene.resolve(policy.entity, path=(*path, "entity"))
+            if entity.entity_id != self.condition_settle_entities[policy.preset]:
+                raise TaskProgramValidationError(
+                    "stability_condition_target_mismatch",
+                    path,
+                    "The wait-stable entity differs from its declared condition.",
+                )
 
     def validate_validator(
         self,
@@ -707,6 +833,12 @@ class TaskProgramIntegrationCatalog:
             runtime_preset=program.integration.runtime_preset,
         )
         for segment in compiled.iter_segments():
+            for policy in segment.post_policies:
+                if (
+                    policy.cfg.preset in self.pose_delta_settle_preset_ids
+                    or policy.cfg.preset in self.condition_settle_entities
+                ):
+                    self.validate_post_policy(policy.cfg, path=policy.source_path)
             if (
                 segment.parallel_block is not None
                 and self.parallel_safety_declaration is None
@@ -942,7 +1074,12 @@ def _registration_payload(
     robot_profile_binding: SimulationRobotSkillProfileBinding,
     robot_profile: RobotSkillProfile,
     call_catalog: SemanticCallCatalog,
-    settle_presets: Mapping[str, DynamicSettleMonitorCfg],
+    settle_presets: Mapping[
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
+    ],
     relation_grounder_keys: frozenset[tuple[str, type[Affordance], str]],
     relation_grounders: tuple[RelationTargetGrounder, ...],
     handover_pose_providers: tuple[HandOverPoseProvider, ...],
@@ -1073,9 +1210,12 @@ class SimulationTaskProgramRegistration:
     call_catalog: SemanticCallCatalog = field(
         default_factory=builtin_semantic_call_catalog
     )
-    settle_presets: Mapping[str, DynamicSettleMonitorCfg] = field(
-        default_factory=default_simulation_settle_presets
-    )
+    settle_presets: Mapping[
+        str,
+        DynamicSettleMonitorCfg
+        | SimulationStabilityConditionCfg
+        | SimulationJointStabilityConditionCfg,
+    ] = field(default_factory=default_simulation_settle_presets)
     relation_grounders: tuple[RelationTargetGrounder, ...] = ()
     handover_pose_providers: tuple[HandOverPoseProvider, ...] = ()
     endpoint_adapters: tuple[ResourceEndpointAdapter, ...] = ()
@@ -1128,9 +1268,43 @@ class SimulationTaskProgramRegistration:
         if type(self.call_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
         settle_presets = _snapshot_settle_presets(self.settle_presets)
+        rigid_ids = {binding.entity_id for binding in self.scene_binding.rigid_objects}
+        reference_ids = (
+            rigid_ids
+            | {binding.entity_id for binding in self.scene_binding.articulations}
+            | {binding.entity_id for binding in self.scene_binding.links}
+        )
+        articulation_ids = {
+            binding.entity_id for binding in self.scene_binding.articulations
+        }
+        for cfg in settle_presets.values():
+            if type(cfg) is SimulationJointStabilityConditionCfg:
+                if cfg.entity not in articulation_ids:
+                    raise ValueError(
+                        "Joint stability requires an explicit articulation binding."
+                    )
+                continue
+            if type(cfg) is not SimulationStabilityConditionCfg:
+                continue
+            if cfg.entity not in rigid_ids:
+                raise ValueError(
+                    "Stability condition entities require native rigid bindings."
+                )
+            if cfg.reference is not None and cfg.reference not in reference_ids:
+                raise ValueError(
+                    "Stability condition reference is not explicitly bound."
+                )
+            if (
+                cfg.kind in {"stack", "supported_placement", "supported_region"}
+                and cfg.reference not in rigid_ids
+            ):
+                raise ValueError(
+                    "Contact support conditions require a native rigid reference."
+                )
         object.__setattr__(self, "settle_presets", settle_presets)
-        configured_relation_grounders = _snapshot_relation_grounders(
-            self.relation_grounders
+        configured_relation_grounders = _configured_relation_grounders(
+            self.scene_binding,
+            _snapshot_relation_grounders(self.relation_grounders),
         )
         relation_grounders = _snapshot_relation_grounders(
             (
@@ -1169,6 +1343,9 @@ class SimulationTaskProgramRegistration:
             self.call_catalog,
             extensions.registered_semantic_lowerers,
         )
+        for factory in self.registered_semantic_lowerer_factories:
+            if isinstance(factory, RegisteredSemanticLowererSceneValidator):
+                factory.validate_scene_declaration(scene)
         selected_handover_provider = profile.grounding_providers.get("hand_over")
         registered_handover_provider_ids = {
             _handover_pose_provider_id(provider) for provider in handover_pose_providers
@@ -1232,6 +1409,27 @@ class SimulationTaskProgramRegistration:
                 call_catalog=self.call_catalog,
                 relation_grounder_keys=relation_grounder_keys,
                 settle_preset_ids=frozenset(settle_presets),
+                condition_settle_entities={
+                    key: cfg.entity
+                    for key, cfg in settle_presets.items()
+                    if type(cfg)
+                    in (
+                        SimulationStabilityConditionCfg,
+                        SimulationJointStabilityConditionCfg,
+                    )
+                },
+                pose_delta_settle_preset_ids=frozenset(
+                    key
+                    for key, cfg in settle_presets.items()
+                    if isinstance(cfg, SimulationSettleMonitorCfg)
+                    and cfg.measurement == "pose_delta"
+                ),
+                rigid_settle_entity_ids=frozenset(
+                    binding.entity_id for binding in self.scene_binding.rigid_objects
+                )
+                | frozenset(
+                    binding.entity_id for binding in self.scene_binding.antipodal_grasps
+                ),
                 endpoint_adapter_declarations=extensions.endpoint_adapters,
                 runtime_transport_declarations=extensions.runtime_transports,
                 parallel_safety_declaration=extensions.parallel_safety,
@@ -1255,8 +1453,7 @@ class SimulationTaskProgramRegistration:
         """Return the canonical registration fingerprint."""
         return self.catalog.fingerprint
 
-    def assert_unchanged(self) -> None:
-        """Reject nested declaration drift before live component creation."""
+    def _checked_fingerprint_payload(self) -> dict[str, object]:
         scene = self.scene_binding.declare()
         profile = self.robot_profile_binding.declare()
         try:
@@ -1276,6 +1473,9 @@ class SimulationTaskProgramRegistration:
                 self.call_catalog,
                 extensions.registered_semantic_lowerers,
             )
+            for factory in self.registered_semantic_lowerer_factories:
+                if isinstance(factory, RegisteredSemanticLowererSceneValidator):
+                    factory.validate_scene_declaration(scene)
             relation_grounders = _snapshot_relation_grounders(self.relation_grounders)
             relation_grounder_keys = frozenset(
                 _relation_grounder_key(grounder) for grounder in relation_grounders
@@ -1283,27 +1483,26 @@ class SimulationTaskProgramRegistration:
             handover_pose_providers = _snapshot_handover_pose_providers(
                 self.handover_pose_providers
             )
-            current = _digest(
-                _registration_payload(
-                    scene_binding=self.scene_binding,
-                    scene=scene,
-                    robot_profile_binding=self.robot_profile_binding,
-                    robot_profile=profile,
-                    call_catalog=self.call_catalog,
-                    settle_presets=self.settle_presets,
-                    relation_grounder_keys=relation_grounder_keys,
-                    relation_grounders=relation_grounders,
-                    handover_pose_providers=handover_pose_providers,
-                    extensions=extensions,
-                    endpoint_adapters=self.endpoint_adapters,
-                    runtime_transports=self.runtime_transports,
-                    parallel_safety_factory=self.parallel_safety_factory,
-                    control_part_evidence_factory=self.control_part_evidence_factory,
-                    registered_semantic_lowerer_factories=(
-                        self.registered_semantic_lowerer_factories
-                    ),
-                )
+            payload = _registration_payload(
+                scene_binding=self.scene_binding,
+                scene=scene,
+                robot_profile_binding=self.robot_profile_binding,
+                robot_profile=profile,
+                call_catalog=self.call_catalog,
+                settle_presets=self.settle_presets,
+                relation_grounder_keys=relation_grounder_keys,
+                relation_grounders=relation_grounders,
+                handover_pose_providers=handover_pose_providers,
+                extensions=extensions,
+                endpoint_adapters=self.endpoint_adapters,
+                runtime_transports=self.runtime_transports,
+                parallel_safety_factory=self.parallel_safety_factory,
+                control_part_evidence_factory=self.control_part_evidence_factory,
+                registered_semantic_lowerer_factories=(
+                    self.registered_semantic_lowerer_factories
+                ),
             )
+            current = _digest(payload)
         except (TypeError, ValueError) as exc:
             raise IntegrationFingerprintMismatch(
                 "Task Program integration provider declaration changed after "
@@ -1314,6 +1513,37 @@ class SimulationTaskProgramRegistration:
                 "Task Program integration declaration changed after task "
                 "registration."
             )
+        return payload
+
+    def assert_unchanged(self) -> None:
+        """Reject nested declaration drift before live component creation."""
+        self._checked_fingerprint_payload()
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        """Snapshot the complete validated registration declaration as JSON data.
+
+        Returns:
+            Independently owned canonical data whose SHA-256 equals
+            :attr:`fingerprint`. Changing the returned data does not change the
+            registration or its runtime identity.
+
+        Raises:
+            IntegrationFingerprintMismatch: A registered declaration has drifted.
+        """
+        try:
+            payload = cast(
+                dict[str, object], _canonical_value(self._checked_fingerprint_payload())
+            )
+            current = _digest(payload)
+        except (TypeError, ValueError) as exc:
+            raise IntegrationFingerprintMismatch(
+                "Task Program integration declaration changed during snapshot."
+            ) from exc
+        if current != self.fingerprint:
+            raise IntegrationFingerprintMismatch(
+                "Task Program integration declaration changed during snapshot."
+            )
+        return payload
 
     @property
     def endpoint_adapter_map(

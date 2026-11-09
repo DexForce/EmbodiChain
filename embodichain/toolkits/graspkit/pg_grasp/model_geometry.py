@@ -27,7 +27,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.data import get_data_path
-from .fixed_geometry import FixedGripperCollisionGeometry
+from .fixed_geometry import FixedGripperCollisionGeometry, _rigid_transform
 
 __all__ = ["get_parallel_jaw_collision_geometry"]
 
@@ -38,6 +38,7 @@ _MODELS = (
     "tianji_marvin_gripper",
     "pika_gripper",
     "robotiq_2f85",
+    "robotiq_arg2f_140",
 )
 
 
@@ -55,6 +56,7 @@ def get_parallel_jaw_collision_geometry(
     point_spacing: float = 0.012,
     side: str | None = None,
     root_from_tcp: np.ndarray | None = None,
+    root_from_contact_frame: np.ndarray | None = None,
 ) -> FixedGripperCollisionGeometry:
     """Resolve actual open-hand collision surfaces for one supported model.
 
@@ -68,6 +70,9 @@ def get_parallel_jaw_collision_geometry(
             default TCP; deployments with a different solver calibration must
             supply that calibration. This override preserves the physical contact frame
             and collision points, including when the TCP is a virtual frame.
+        root_from_contact_frame: Optional calibrated canonical contact frame in
+            hand-root coordinates. Omission retains the registered contact frame.
+            This re-expresses collision samples without changing root-space surfaces.
 
     Returns:
         Owned collision geometry, exact source identities and the transform
@@ -99,8 +104,9 @@ def get_parallel_jaw_collision_geometry(
         default_tcp = _pose(xyz=(0, 0, 0.1034))
         canonical = default_tcp @ _pose(rz90)
         calibration = "PandaWithHand fr3_hand_tcp joint; native +Y closes"
-    elif model_id == "robotiq_2f85":
-        asset = "Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf"
+    elif model_id in {"robotiq_2f85", "robotiq_arg2f_140"}:
+        variant = "140" if model_id == "robotiq_arg2f_140" else "85"
+        asset = f"Robotiq/robotiq_arg2f_{variant}/robotiq_arg2f_{variant}.urdf"
         root = "robotiq_arg2f_base_link"
         links = (
             root,
@@ -126,11 +132,18 @@ def get_parallel_jaw_collision_geometry(
                 "right_inner_finger_joint",
             )
         }
-        default_tcp = _pose(xyz=(0, 0, 0.15))
-        canonical = default_tcp @ _pose(rz90)
-        calibration = (
-            "Robotiq 2F-85 fully open collision meshes; native Y opens, tool TCP Z=.15"
-        )
+        if variant == "140":
+            # The GenSim arm-to-hand mount is identity; its solver TCP rotates
+            # native Y closing into canonical X at root Z=.20.
+            canonical = default_tcp = _pose(rz90, (0, 0, 0.20))
+            calibration = (
+                "GenSim Robotiq 2F-140 fully open collision meshes; "
+                "native Y opens, root TCP Rz=90deg/Z=.20"
+            )
+        else:
+            default_tcp = _pose(xyz=(0, 0, 0.15))
+            canonical = default_tcp @ _pose(rz90)
+            calibration = "Robotiq 2F-85 fully open collision meshes; native Y opens, tool TCP Z=.15"
     elif model_id == "dh_pgi_140_80":
         asset = "DH_PGI_140_80/DH_PGI_140_80.urdf"
         root = "gripper_base_link_1"
@@ -186,6 +199,12 @@ def get_parallel_jaw_collision_geometry(
             "canonical contact origin Z=.13 is a configuration convention, not a measured pad centre"
         )
 
+    if root_from_contact_frame is not None:
+        canonical = _rigid_transform(
+            root_from_contact_frame,
+            error_message="root_from_contact_frame must be a proper rigid transform.",
+        )
+        calibration += "; explicit root_from_contact_frame override"
     runtime_tcp = default_tcp if root_from_tcp is None else np.asarray(root_from_tcp)
     # This registered archive relocates its URDF to the asset root while
     # retaining ../Collision in three filenames. Bind those exact known paths;

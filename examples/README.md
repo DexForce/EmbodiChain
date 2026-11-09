@@ -77,3 +77,9 @@ The [differentiable retiming showcase](learning/differentiable_toppra/README.md)
 compares a stopped duration objective with autograd optimization of free path
 nodes. Its CPU browser preview displays gradients, finite-difference checks and
 trajectories on a shared physical clock, with portable export and replay.
+
+The [Expansion Engine showcase](expansion/engine/showcase/README.md) demonstrates
+native and real-demonstration-driven experts through the shared engine. Its offline
+viewer pairs measured 3D playback with RGB-D, recipes, source clocks and explicit
+capability/acceptance results. Full and quick modes preserve unrun and failed cases;
+recovery and portability diagnostics keep their evidence separate from expert data.

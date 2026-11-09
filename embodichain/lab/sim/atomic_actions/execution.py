@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import torch
 
@@ -57,7 +57,7 @@ from .tracking import (
 
 if TYPE_CHECKING:
     from .engine import AtomicActionEngine, PlanTransform
-    from .nominal import NominalMotionSource
+    from .nominal import NominalMotionSource, MonitoredNominalMotionSource
 
 
 class ExecutionStatus(str, Enum):
@@ -301,6 +301,33 @@ class ExecutionTick:
         object.__setattr__(self, "hold_targets", tuple(hold_targets))
 
 
+@runtime_checkable
+class ExecutionPlanLifecycle(Protocol):
+    """Explicit host-owned logical-plan/adoption lifecycle, before dispatch.
+
+    Implementations may commit their own recovery state from an owned attempt.
+    They cannot replace the installed plan or infer physical success. Abort
+    notification invalidates external adoption/resources; it never steps physics
+    or replaces the runner's cancel-then-hold safe stop.
+    """
+
+    def on_plan_installed(self, attempt: ExecutionPlanAttempt) -> None:
+        """Consume an owned validated attempt before its first command.
+
+        Args:
+            attempt: Installed plan identity, masks, and independently owned data.
+        """
+        ...
+
+    def on_execution_aborted(self, reason: str) -> None:
+        """Invalidate host state once after cancellation or failure.
+
+        Args:
+            reason: Original failure or cancellation context after host safe stop.
+        """
+        ...
+
+
 class ExecutionSession:
     """Execute grounded invocations incrementally with bounded local recovery.
 
@@ -316,7 +343,9 @@ class ExecutionSession:
     waypoint cursor is batch-synchronized: a recoverable row replans the active
     cohort from the latest observation and restarts the action trajectory.
     Calls that mutate the session must be serialized by its owner; the session
-    does not provide thread synchronization.
+    does not provide thread synchronization. A rejected installation blocks
+    further ticks and revisions until the host completes its normal safe stop
+    and invalidates the lifecycle; catching that rejection cannot resume commands.
     """
 
     def __init__(
@@ -328,12 +357,22 @@ class ExecutionSession:
         eligible_mask: torch.Tensor | None = None,
         plan_transform: PlanTransform | None = None,
         nominal_source: NominalMotionSource | None = None,
+        plan_lifecycle: ExecutionPlanLifecycle | None = None,
     ) -> None:
         if not invocations:
             raise ValueError("ExecutionSession requires at least one invocation.")
         engine._validate_context(context)
         if plan_transform is not None and not callable(plan_transform):
             raise TypeError("plan_transform must be callable or None.")
+        if plan_lifecycle is not None and not isinstance(
+            plan_lifecycle, ExecutionPlanLifecycle
+        ):
+            raise TypeError(
+                "plan_lifecycle must implement ExecutionPlanLifecycle or be None."
+            )
+        self._plan_lifecycle = plan_lifecycle
+        self._plan_lifecycle_aborted = False
+        self._plan_installation_failure: str | None = None
         self._engine = engine
         self._plan_transform = plan_transform
         self._nominal_source = nominal_source
@@ -396,7 +435,13 @@ class ExecutionSession:
         )
         self._queued_events: list[ExecutionEvent] = []
         if self._status is ExecutionStatus.RUNNING:
-            self._plan_current(context, ExecutionEventKind.ACTION_PLANNED)
+            try:
+                self._plan_current(context, ExecutionEventKind.ACTION_PLANNED)
+            except Exception as error:
+                cleanup = self.abort_plan_lifecycle(str(error) or type(error).__name__)
+                if cleanup:
+                    raise RuntimeError(f"{error} {cleanup}") from error
+                raise
         else:
             self._queued_events.append(
                 self._event(
@@ -404,6 +449,46 @@ class ExecutionSession:
                     self._eligible,
                     "No environment was initially eligible for execution.",
                 )
+            )
+
+    def abort_plan_lifecycle(self, reason: str) -> str | None:
+        """Invalidate an explicit lifecycle once and stop its further execution.
+
+        The runner calls this after cancel/hold; construction-error hosts may
+        call it before any runner exists. This method never issues commands or
+        steps physics. No lifecycle retains the existing default session behavior.
+
+        Args:
+            reason: Failure or cancellation context retained by the host owner.
+
+        Returns:
+            A cleanup diagnostic if the owner raised, otherwise None. Cleanup
+            failure does not reactivate the session or permit another dispatch.
+        """
+        if self._plan_lifecycle is None or self._plan_lifecycle_aborted:
+            return None
+        self._plan_lifecycle_aborted = True
+        self._status = ExecutionStatus.FAILED
+        self._eligible.zero_()
+        self._pending.zero_()
+        self._pending_effect = None
+        self._pending_phase_effect_gate = None
+        try:
+            self._plan_lifecycle.on_execution_aborted(reason)
+        except Exception as error:
+            return f"Plan lifecycle cleanup failed: {type(error).__name__}: {error}"
+        return None
+
+    def _require_accepted_plan_installation(self) -> None:
+        """Keep failed adoption closed without preempting the host's safe stop."""
+        if (
+            self._plan_installation_failure is not None
+            and self._status is ExecutionStatus.RUNNING
+        ):
+            raise RuntimeError(
+                "Execution cannot continue after a rejected plan installation: "
+                f"{self._plan_installation_failure}. Complete the host safe stop "
+                "and invalidate the lifecycle before starting another session."
             )
 
     @property
@@ -581,6 +666,7 @@ class ExecutionSession:
             raise TypeError("invocation must be an ActionInvocation.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
+        self._require_accepted_plan_installation()
         if (
             self._pending_effect is not None
             or self._pending_phase_effect_gate is not None
@@ -607,6 +693,7 @@ class ExecutionSession:
             raise TypeError("replacement must be a ResolvedActionRequest.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
+        self._require_accepted_plan_installation()
         if (
             self._pending_effect is not None
             or self._pending_phase_effect_gate is not None
@@ -709,6 +796,14 @@ class ExecutionSession:
         return self._plan.effect_candidates.snapshot()
 
     @property
+    def nominal_motion_monitor(self) -> MonitoredNominalMotionSource | None:
+        """Return the optional source-owned measured-execution monitor."""
+        from .nominal import MonitoredNominalMotionSource
+
+        source = self._nominal_source
+        return source if isinstance(source, MonitoredNominalMotionSource) else None
+
+    @property
     def active_plan(self) -> ActionPlan:
         """Return an independently owned snapshot of the active action plan.
 
@@ -763,6 +858,7 @@ class ExecutionSession:
         Returns:
             Status, optional command, events, and current verified task state.
         """
+        self._require_accepted_plan_installation()
         self._last_commanded_plan_sample = None
         self._context = self._validated_context(context)
         events = self._drain_events()
@@ -1220,6 +1316,10 @@ class ExecutionSession:
             self._validate_destination_continuity(plan, event_kind)
         self._validate_tracking_continuity(plan, event_kind)
         self._validate_phase_effect_gates(plan)
+        monitor = self.nominal_motion_monitor
+        bind_monitor = getattr(monitor, "bind_execution_plan", None)
+        if plan.plan_success.any() and bind_monitor is not None:
+            bind_monitor(plan)
         if (
             event_kind
             not in (
@@ -1256,23 +1356,35 @@ class ExecutionSession:
         self._satisfied_phase_effect_gates.clear()
         self._reported_phase_effect_gates.clear()
         planned_mask = self._pending & plan.plan_success
-        self._plan_attempts.append(
-            ExecutionPlanAttempt(
-                attempt_generation=self._attempt_generation,
-                event_kind=event_kind,
-                planned_at=context.robot.timestamp,
-                invocation_index=self._invocation_index,
-                planned_mask=planned_mask,
-                action_retry_counts=tuple(
-                    int(value) for value in self._action_retries.detach().cpu().tolist()
-                ),
-                replan_counts=tuple(
-                    int(value) for value in self._replans.detach().cpu().tolist()
-                ),
-                request=self._requests[self._invocation_index],
-                plan=plan,
-            )
+        attempt = ExecutionPlanAttempt(
+            attempt_generation=self._attempt_generation,
+            event_kind=event_kind,
+            planned_at=context.robot.timestamp,
+            invocation_index=self._invocation_index,
+            planned_mask=planned_mask,
+            action_retry_counts=tuple(
+                int(value) for value in self._action_retries.detach().cpu().tolist()
+            ),
+            replan_counts=tuple(
+                int(value) for value in self._replans.detach().cpu().tolist()
+            ),
+            request=self._requests[self._invocation_index],
+            plan=plan,
         )
+        if self._plan_lifecycle is not None:
+            if self._plan_lifecycle_aborted:
+                raise RuntimeError(
+                    "Cannot install a plan after its lifecycle was aborted."
+                )
+            try:
+                self._plan_lifecycle.on_plan_installed(attempt.snapshot())
+            except Exception as error:
+                # The callback may already have modified its host-owned state.
+                # Neither an earlier nor the rejected plan may resume. Leave
+                # cancel/hold and the once-only abort notification to the host.
+                self._plan_installation_failure = f"{type(error).__name__}: {error}"
+                raise
+        self._plan_attempts.append(attempt)
         self._queued_events.append(
             self._event(event_kind, planned_mask, "Planned from the latest context.")
         )
@@ -2636,6 +2748,7 @@ __all__ = [
     "ExecutionEvent",
     "ExecutionEventKind",
     "ExecutionPlanAttempt",
+    "ExecutionPlanLifecycle",
     "ExecutionSession",
     "ExecutionStatus",
     "ExecutionTick",

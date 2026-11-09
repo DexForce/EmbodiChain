@@ -18,14 +18,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from copy import deepcopy
+from contextlib import contextmanager
+import time
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+import numpy as np
 import torch
 
 from embodichain.toolkits.graspkit import GraspPoseGenerator
+from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
+    ClosingContactPolicy,
+    NativeClosingQuery,
+    NativeOpeningQuery,
+    NativeQueryScope,
+    NativeRigidRestScene,
+    _neutral_identity,
+    _rigid_pose,
+)
 
 from .bindings import ActionBinding, EndpointBinding, JointPositionTarget
 from .control import ActionControlOverrides, ControlPartCommandProfile
@@ -46,7 +59,21 @@ from .tracking import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+
+
+from .grasp_geometry import GraspOpeningTarget
+
+
+def _physical_identity(
+    extra: Mapping[str, object] | None, physical: Mapping[str, object]
+) -> dict[str, object]:
+    result = _neutral_identity({} if extra is None else extra)
+    if set(result) & set(physical):
+        raise ValueError("Caller metadata cannot override captured native identity.")
+    return {**result, **physical}
 
 
 class ActionPlanningServices:
@@ -63,10 +90,34 @@ class ActionPlanningServices:
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
         tracking_runtime: TrackingRuntime | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
+        env_ids: tuple[int, ...] | None = None,
+        *,
+        hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
     ) -> None:
+        """Retain shared services and snapshot caller-owned calibration data.
+
+        Args:
+            motion_generator: Motion backend and exact owning robot.
+            control_profiles: Direct-core command profiles by control part.
+            tracking_runtime: Optional shared endpoint tracking services.
+            grasp_pose_generators: Existing grasp services by endpoint target ID.
+            env_ids: Optional ordered physical simulation rows used by planning.
+            hand_geometry_cfgs: Explicit Lab hand settings by grasp target ID;
+                copied independently without capturing geometry or reading state.
+        """
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
+        if env_ids is not None:
+            env_ids = tuple(env_ids)
+            count = self._robot.get_qpos().shape[0]
+            if (
+                not env_ids
+                or len(set(env_ids)) != len(env_ids)
+                or any(type(i) is not int or not 0 <= i < count for i in env_ids)
+            ):
+                raise ValueError("env_ids must be unique physical row indices")
+        self.env_ids = env_ids
         self._binding_owner_id = uuid4().hex
         if tracking_runtime is not None and not isinstance(
             tracking_runtime,
@@ -79,6 +130,9 @@ class ActionPlanningServices:
         )
         self._grasp_pose_generators = self._snapshot_grasp_pose_generators(
             {} if grasp_pose_generators is None else grasp_pose_generators
+        )
+        self._hand_geometry_cfgs = self._snapshot_hand_geometry_cfgs(
+            {} if hand_geometry_cfgs is None else hand_geometry_cfgs
         )
 
     @property
@@ -141,6 +195,199 @@ class ActionPlanningServices:
                 f"{target_id!r}; available targets are "
                 f"{sorted(self._grasp_pose_generators)}."
             ) from exc
+
+    @property
+    def hand_geometry_cfgs(self) -> Mapping[str, RobotHandGeometryCfg]:
+        """Return independently owned hand calibrations by grasp target ID."""
+        return MappingProxyType(deepcopy(self._hand_geometry_cfgs))
+
+    def hand_geometry_cfg(self, target_id: str) -> RobotHandGeometryCfg:
+        """Resolve an owned hand calibration without capturing robot geometry.
+
+        Args:
+            target_id: Runtime grasp endpoint target ID.
+
+        Returns:
+            An independent configuration whose pad-link order is preserved.
+            Consumers sampling an invocation's closing stroke must replace its
+            open/closed commands with the current resolved endpoint commands.
+
+        Raises:
+            KeyError: No explicit calibration is installed for the target.
+        """
+        try:
+            return deepcopy(self._hand_geometry_cfgs[target_id])
+        except KeyError as exc:
+            raise KeyError(
+                f"No hand geometry calibration is installed for endpoint target "
+                f"{target_id!r}; available targets are "
+                f"{sorted(self._hand_geometry_cfgs)}."
+            ) from exc
+
+    @contextmanager
+    def prepare_grasp_query(
+        self,
+        target_id: str,
+        simulation: SimulationManager,
+        *,
+        source_uid: str,
+        open_qpos: torch.Tensor,
+        grasp_qpos: torch.Tensor,
+        observation_qpos: torch.Tensor,
+        object_pose: torch.Tensor,
+        scope: NativeQueryScope,
+        policy: ClosingContactPolicy,
+        opening: GraspOpeningTarget | None = None,
+        include_rigid_scene: bool = False,
+        gravity_in_object: np.ndarray | None = None,
+        identity: Mapping[str, object] | None = None,
+        report_metadata: Mapping[str, object] | None = None,
+    ) -> Iterator[NativeClosingQuery]:
+        """Prepare and close a scoped exact-shape grasp query through shared services.
+
+        Args:
+            target_id: Grasp endpoint with an explicitly installed hand calibration.
+            simulation: Exact B1 Default simulation owning this service's Robot.
+            source_uid: Registered rigid target UID, selected by the caller.
+            open_qpos: Current resolved full hand-part open command, shape (1, D).
+            grasp_qpos: Current resolved close command in the same order and shape.
+            observation_qpos: Same-observation full named robot state, shape (1, J).
+            object_pose: Same-observation target-to-world pose, shape (1, 4, 4).
+            scope: Fresh preparation identity, timestamp, scene version and env0.
+            policy: Explicit geometric rules; experiment IDs are not interpreted.
+            opening: Optional same-scope, already-grounded release target.
+            include_rigid_scene: Attach ordered native rigid rest-clearance queries.
+            gravity_in_object: Explicit gravity for horizontal pad-line qualification.
+            identity: Neutral caller labels; captured physical keys are reserved.
+            report_metadata: Neutral source provenance for diagnostics only.
+
+        Yields:
+            Owned GraspKit query. Exiting the context closes all query resources,
+            including on failure or cancellation, without destroying native entities.
+
+        Raises:
+            KeyError: The grasp endpoint has no declared hand calibration.
+            ValueError: Policy, scope, geometry, ownership or backend/batch is unsupported.
+        """
+        from embodichain.lab.sim.scene._collision_backends import _require_newton
+        from embodichain.lab.sim.scene._newton_queries import _ConvexCollection
+        from embodichain.lab.sim.scene.native_hand import (
+            capture_native_hand_geometry,
+            capture_native_rigid_geometry,
+            capture_native_rigid_obstacles,
+        )
+
+        _require_newton()
+        if not isinstance(scope, NativeQueryScope):
+            raise TypeError("scope must be NativeQueryScope.")
+        if not isinstance(policy, ClosingContactPolicy):
+            raise TypeError("policy must be ClosingContactPolicy.")
+        policy = deepcopy(policy)
+        policy.__post_init__()
+        if type(include_rigid_scene) is not bool:
+            raise TypeError("include_rigid_scene must be boolean.")
+        if opening is not None and (
+            not isinstance(opening, GraspOpeningTarget)
+            or opening.scope != scope
+            or not policy.opening_check
+        ):
+            raise ValueError(
+                "Opening needs an enabled policy and the same observation scope."
+            )
+        started = time.monotonic()
+        geometry = capture_native_hand_geometry(
+            self.robot,
+            simulation,
+            source_uid=source_uid,
+            hand_geometry_cfg=self.hand_geometry_cfg(target_id),
+            open_qpos=open_qpos,
+            grasp_qpos=grasp_qpos,
+            observation_qpos=observation_qpos,
+            object_pose=object_pose,
+            include_contact_offsets=policy.contact_halo != "ignore",
+        )
+        with NativeClosingQuery(
+            geometry.parts,
+            geometry.target.meshes,
+            geometry.target.rest_offset,
+            scope=scope,
+            policy=policy,
+            collision_factory=_ConvexCollection,
+            collision_metadata=_ConvexCollection.metadata(),
+            report_metadata=report_metadata,
+            target_contact_offset=geometry.target.contact_offset,
+            gravity_in_object=gravity_in_object,
+        ) as query:
+            query.identity = _physical_identity(identity, geometry.identity)
+            query.identity.setdefault("object_id", source_uid)
+            query.object_pose_at_capture = geometry.object_pose
+            query.build_seconds = time.monotonic() - started
+            if opening is not None:
+                support = capture_native_rigid_geometry(
+                    simulation,
+                    geometry,
+                    opening.support_uid,
+                    include_contact_offsets=True,
+                )
+                if not support.meshes:
+                    raise ValueError(
+                        "Native support has no enabled physical collision shapes."
+                    )
+                query.opening_screen = NativeOpeningQuery(
+                    query,
+                    support.meshes,
+                    opening.reference_pose,
+                    opening.object_target_pose,
+                    support.rest_offset,
+                    support.contact_offset,
+                    scope=opening.scope,
+                    identity=_physical_identity(
+                        opening.identity,
+                        {
+                            "reference_simulation_uid": opening.support_uid,
+                            "native_reference_path": support.path,
+                            "native_robot_path": geometry.identity["native_robot_path"],
+                        },
+                    ),
+                )
+            if include_rigid_scene:
+                targets = capture_native_rigid_obstacles(simulation, geometry)
+                query.rigid_scene_screen = NativeRigidRestScene(
+                    geometry.parts,
+                    targets,
+                    scope=scope,
+                    collision_factory=_ConvexCollection,
+                )
+            yield query
+
+    @staticmethod
+    def _snapshot_hand_geometry_cfgs(
+        values: Mapping[str, RobotHandGeometryCfg],
+    ) -> dict[str, RobotHandGeometryCfg]:
+        if not isinstance(values, Mapping):
+            raise TypeError("hand_geometry_cfgs must be a mapping or None.")
+        if not values:
+            return {}
+        from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
+
+        configs = {}
+        for target_id, cfg in values.items():
+            if (
+                type(target_id) is not str
+                or not target_id
+                or target_id != target_id.strip()
+            ):
+                raise ValueError(
+                    "hand_geometry_cfgs keys must be non-empty strings without outer whitespace."
+                )
+            if not isinstance(cfg, RobotHandGeometryCfg):
+                raise TypeError(
+                    "hand_geometry_cfgs values must be RobotHandGeometryCfg instances."
+                )
+            owned = deepcopy(cfg)
+            owned.validate_values()
+            configs[target_id] = owned
+        return configs
 
     @staticmethod
     def _snapshot_grasp_pose_generators(
@@ -498,4 +745,4 @@ class ActionPlanningServices:
         return MappingProxyType(snapshots)
 
 
-__all__ = ["ActionPlanningServices"]
+__all__ = ["ActionPlanningServices", "GraspOpeningTarget"]

@@ -20,6 +20,8 @@ import torch
 import numpy as np
 
 from copy import deepcopy
+from contextlib import contextmanager
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Sequence
 from functools import cached_property
@@ -92,11 +94,13 @@ __all__ = ["CollisionShapeDesc", "RigidBodyData", "RigidObject", "RigidObjectCfg
 
 @dataclass
 class CollisionShapeDesc:
-    """Planner-independent snapshot of one DexSim physical collision shape.
+    """Planner-independent description of one owner-local collision shape.
 
-    Geometry values are copied from DexSim's runtime collision descriptor and
-    therefore already include its geometry scale. Consumers must not apply
-    :attr:`RigidObjectCfg.body_scale` again.
+    ``RigidObject`` snapshots copy values from DexSim's runtime collision
+    descriptor, including geometry scale. Explicit planning providers may also
+    construct input envelopes; their provenance belongs to that provider and
+    must not be confused with native cooked geometry. Consumers must not apply
+    :attr:`RigidObjectCfg.body_scale` again to either already-scaled description.
 
     Attributes:
         name: Stable shape name within the owning rigid object.
@@ -1521,6 +1525,32 @@ class RigidObject(BatchEntity):
             if wrapped is not None:
                 self._visual_material[env_idx] = wrapped
                 self._original_visual_material_inst[env_idx] = wrapped
+
+    @contextmanager
+    def preserve_visual_material(self) -> Iterator[None]:
+        """Restore exact current segmented materials after temporary appearance edits.
+
+        This preserves runtime appearance, including textures and transparency,
+        rather than replacing it with configuration defaults. Native bindings
+        must stay unchanged while the context is active.
+        """
+        entities = tuple(self._entities)
+        originals = [
+            _capture_render_materials(entity.get_render_body()) for entity in entities
+        ]
+        wrappers = list(self._visual_material)
+        shared = self.is_shared_visual_material
+        try:
+            yield
+        finally:
+            if tuple(self._entities) != entities:
+                raise RuntimeError(
+                    "Cannot restore materials after native bindings changed"
+                )
+            for entity, materials in zip(entities, originals):
+                _restore_render_materials(entity.get_render_body(), materials)
+            self._visual_material[:] = wrappers
+            self.is_shared_visual_material = shared
 
     def restore_visual_material(self, env_ids: Sequence[int] | None = None) -> None:
         """Restore the visual materials captured when the rigid object was created.

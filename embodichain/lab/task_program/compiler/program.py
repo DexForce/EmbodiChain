@@ -52,6 +52,7 @@ from ..language.schema import (
     TaskProgramIntegrationCfg,
     HandOverCfg,
     InvokeCfg,
+    ObjectNearRelativeTargetValidatorCfg,
     ObjectNearTargetValidatorCfg,
     ObjectLiftedValidatorCfg,
     ObjectRelativePositionValidatorCfg,
@@ -230,6 +231,17 @@ class _ObjectNearTargetValues:
 
 
 @dataclass(frozen=True, slots=True)
+class _ObjectNearRelativeTargetValues:
+    """Immutable live-relative object-position acceptance parameters."""
+
+    object: str
+    reference: str
+    displacement: tuple[float, float, float]
+    position_tolerance: float
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
 class _ArticulationJointPositionValues:
     """Immutable articulation-position acceptance parameters."""
 
@@ -313,6 +325,41 @@ class CompiledObjectNearTargetValidator:
         object.__setattr__(self, "cfg", _ObjectNearTargetValues(**validated.to_dict()))
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
         object.__setattr__(self, "target_pose", self.target_pose.snapshot())
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledObjectNearRelativeTargetValidator:
+    """Owned validator with canonical object and live reference identities."""
+
+    cfg: ObjectNearRelativeTargetValidatorCfg | _ObjectNearRelativeTargetValues
+    object: SceneObjectRef
+    reference: SceneObjectRef
+    source_path: ConfigPath
+
+    def __post_init__(self) -> None:
+        if type(self.cfg) not in (
+            ObjectNearRelativeTargetValidatorCfg,
+            _ObjectNearRelativeTargetValues,
+        ):
+            raise TypeError("cfg must be exactly ObjectNearRelativeTargetValidatorCfg.")
+        if type(self.object) is not SceneObjectRef:
+            raise TypeError("object must be exactly SceneObjectRef.")
+        if type(self.reference) is not SceneObjectRef:
+            raise TypeError("reference must be exactly SceneObjectRef.")
+        if type(self.source_path) is not tuple:
+            raise TypeError("source_path must be a ConfigPath tuple.")
+        validated = ObjectNearRelativeTargetValidatorCfg(
+            object=self.cfg.object,
+            reference=self.cfg.reference,
+            displacement=self.cfg.displacement,
+            position_tolerance=self.cfg.position_tolerance,
+            kind=self.cfg.kind,
+        )
+        object.__setattr__(
+            self, "cfg", _ObjectNearRelativeTargetValues(**validated.to_dict())
+        )
+        object.__setattr__(self, "object", _copy_scene_ref(self.object))
+        object.__setattr__(self, "reference", _copy_scene_ref(self.reference))
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,12 +469,14 @@ class CompiledObjectStateValidator:
 
 CompiledTaskProgramValidator: TypeAlias = (
     CompiledObjectNearTargetValidator
+    | CompiledObjectNearRelativeTargetValidator
     | CompiledArticulationJointPositionValidator
     | CompiledObjectStateValidator
 )
 _COMPILED_VALIDATOR_TYPES = (
     CompiledObjectStateValidator,
     CompiledObjectNearTargetValidator,
+    CompiledObjectNearRelativeTargetValidator,
     CompiledArticulationJointPositionValidator,
 )
 
@@ -685,6 +734,14 @@ class _ObjectNearTargetValidatorTemplate:
 
 
 @dataclass(frozen=True, slots=True)
+class _ObjectNearRelativeTargetValidatorTemplate:
+    cfg: ObjectNearRelativeTargetValidatorCfg
+    object: SceneObjectRef
+    reference: SceneObjectRef
+    source_path: ConfigPath
+
+
+@dataclass(frozen=True, slots=True)
 class _ArticulationJointPositionValidatorTemplate:
     cfg: ArticulationJointPositionValidatorCfg
     articulation: SceneArticulationRef
@@ -705,6 +762,7 @@ class _ObjectStateValidatorTemplate:
 
 _ValidatorTemplate: TypeAlias = (
     _ObjectNearTargetValidatorTemplate
+    | _ObjectNearRelativeTargetValidatorTemplate
     | _ArticulationJointPositionValidatorTemplate
     | _ObjectStateValidatorTemplate
 )
@@ -1065,6 +1123,15 @@ def _iter_segments(
                     object=validator.object,
                     target_pose=target_pose,
                     target_selection=selection,
+                    source_path=validator.source_path,
+                )
+            )
+        elif type(validator) is _ObjectNearRelativeTargetValidatorTemplate:
+            validators.append(
+                CompiledObjectNearRelativeTargetValidator(
+                    cfg=validator.cfg,
+                    object=validator.object,
+                    reference=validator.reference,
                     source_path=validator.source_path,
                 )
             )
@@ -1692,6 +1759,39 @@ class TaskProgramCompiler:
                             ),
                             object=object_ref,
                             target_id=cfg.target,
+                            source_path=validator_path,
+                        )
+                    )
+                    continue
+                if type(cfg) is ObjectNearRelativeTargetValidatorCfg:
+                    if cfg.kind != "object_near_relative_target":
+                        raise TaskProgramCompileError(
+                            "unsupported_validator",
+                            validator_path,
+                            "ObjectNearRelativeTargetValidatorCfg must use kind "
+                            "'object_near_relative_target'.",
+                        )
+                    object_ref = self._resolve_scene(
+                        cfg.object,
+                        expected_types=(SceneObjectRef,),
+                        path=(*validator_path, "object"),
+                    )
+                    reference_ref = self._resolve_scene(
+                        cfg.reference,
+                        expected_types=(SceneObjectRef,),
+                        path=(*validator_path, "reference"),
+                    )
+                    validators.append(
+                        _ObjectNearRelativeTargetValidatorTemplate(
+                            cfg=ObjectNearRelativeTargetValidatorCfg(
+                                object=cfg.object,
+                                reference=cfg.reference,
+                                displacement=cfg.displacement,
+                                position_tolerance=cfg.position_tolerance,
+                                kind=cfg.kind,
+                            ),
+                            object=object_ref,
+                            reference=reference_ref,
                             source_path=validator_path,
                         )
                     )

@@ -30,22 +30,25 @@ embodichain data download --all
 
 ---
 
-## SimReady Asset Pipeline
+## Asset Engine
 
-Convert a raw mesh asset directory into sim_ready assets for simulation.
+Prepare one existing mesh directory with the
+[Asset Engine](../features/generative_sim/asset_engine.md).
 
 ```bash
 # Run the full SimReady pipeline on a single asset directory
-embodichain simready \
+embodichain asset-engine \
     --input_dir /path/to/raw_mesh_folder \
     --output_root /path/to/output_folder \
     --category YourCategory
 ```
 
 Select the source preparation strategy in
-``embodichain/gen_sim/simready_pipeline/configs/gen_config.json`` via
+``embodichain/gen_sim/asset_engine/configs/gen_config.json`` via
 ``ingest.source_preparation.mode``. Supported modes are ``blender`` and
-``trimesh``.
+``trimesh``; the shipped configuration selects ``trimesh``. Blender cleanup in
+the later geometry stage is enabled separately by default, so this mode does
+not make the full workflow independent of Blender.
 
 ### Arguments
 
@@ -55,7 +58,43 @@ Select the source preparation strategy in
 | ``--output_root`` | *(required)* | Directory where processed assets are written |
 | ``--category`` | *(required)* | Category hint passed into the pipeline |
 
-The generated output contains the canonical source mesh under ``asset_source/``, the final SimReady mesh under ``asset_simready/``, and USD export files under ``asset_usd/`` when export succeeds.
+Each run creates a UUID directory under ``--output_root`` and an entry in
+``registry.json``. Mesh processing writes canonical source files under
+``asset_source/``, final GLB/OBJ files under ``asset_simready/``, and a USD package
+under ``asset_usd/``. With the default format configuration, a top-level ``.urdf``
+or ``.usd`` selects direct-copy mode and returns before these processing stages.
+See the [pipeline guide](../features/generative_sim/asset_engine.md) for model
+settings, format selection, metadata, and preview commands.
+
+---
+
+(cli-task-engine)=
+## Task Engine
+
+Plan a canonical Semantic Call graph from a scene photograph and a complete
+instruction, then inspect it in an offline HTML viewer:
+
+```bash
+embodichain task-engine \
+    --image /path/to/tabletop.jpg \
+    --instruction "Pick up the red cup and place it on the tray." \
+    --task-id cup_on_tray \
+    --output outputs/task_engine/cup_on_tray
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--image` | *(required)* | Existing PNG/JPEG photograph |
+| `--instruction` | *(required)* | Complete task instruction |
+| `--output` | *(required)* | Fresh output directory; existing directories are rejected |
+| `--task-id` | `image_task` | Shared task identity |
+
+Configure the shared GenSim model settings before running. The result includes
+candidates, TaskSpec, image evidence, a call-catalog snapshot, the semantic graph,
+validation and pending bindings, a run manifest, and `semantic_task_graph.html`.
+Its execution status is `not_run`; scene/robot binding and physical acceptance
+belong to a later integration. See [Task Engine](../features/generative_sim/task_engine.md)
+for configuration, artifact meanings, Python use, and the execution handoff.
 
 ---
 

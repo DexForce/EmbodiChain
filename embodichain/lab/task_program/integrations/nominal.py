@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import hashlib
-import json
+
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -33,6 +33,8 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     InstantiatedSkillMotion,
     NominalMotionSource,
+    MonitoredNominalMotionSource,
+    EffectVerificationRequest,
     PrototypeMotionProvider,
     ResolvedActionRequest,
     PlanningContext,
@@ -47,7 +49,8 @@ from embodichain.lab.task_program.semantics.calls import (
     Place,
     RegisteredSemanticCall,
 )
-from .catalog import _canonical_value
+from .demo_skill import _ConfiguredDemoSkillSource
+from ._program_identity import task_program_fingerprint as _fingerprint
 
 __all__ = ["BoundTaskProgramNominalSources", "TracingTaskProgramNominalSources"]
 
@@ -146,7 +149,9 @@ class _ConfiguredTaskProgramNominalSources:
     def __init__(
         self,
         program: CompiledTaskProgram,
-        declarations: tuple[_ConfiguredPrototypeSource, ...],
+        declarations: tuple[
+            _ConfiguredPrototypeSource | _ConfiguredDemoSkillSource, ...
+        ],
         *,
         host_collision_guard: object | None = None,
     ) -> None:
@@ -186,8 +191,17 @@ class _ConfiguredTaskProgramNominalSources:
                     "configured nominal source call index or program fingerprint does not match"
                 )
             declaration.validate_source()
-            prototype = load_prototype(declaration.prototype_manifest)
             call = calls[index]
+            if isinstance(declaration, _ConfiguredDemoSkillSource):
+                if (
+                    type(call) is not RegisteredSemanticCall
+                    or call.call_id != declaration.call_id
+                ):
+                    raise ValueError(
+                        "DemoSkill source does not match its call occurrence"
+                    )
+                continue
+            prototype = load_prototype(declaration.prototype_manifest)
             expected = (
                 "pick_up"
                 if isinstance(call, Pick)
@@ -230,6 +244,10 @@ class _ConfiguredTaskProgramNominalSources:
         if declaration is None:
             return None
         declaration.validate_source()
+        if isinstance(declaration, _ConfiguredDemoSkillSource):
+            from .simulation.demo_skill import _create_demo_skill_source
+
+            return _create_demo_skill_source(declaration, request, engine)
         prototype = load_prototype(declaration.prototype_manifest)
         return PrototypeMotionProvider(
             prototype,
@@ -277,24 +295,6 @@ class _ConfiguredTaskProgramNominalSources:
                 else self._host_collision_guard.validator.validate_refinement_support
             ),
         )
-
-
-def _fingerprint(program: CompiledTaskProgram) -> str:
-    if type(program) is not CompiledTaskProgram:
-        raise TypeError("program must be a CompiledTaskProgram")
-    payload = _canonical_value(
-        (
-            program.program_id,
-            program.instruction,
-            program.integration,
-            tuple(program.iter_segments()),
-        )
-    )
-    return hashlib.sha256(
-        json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode()
-    ).hexdigest()
 
 
 class BoundTaskProgramNominalSources:
@@ -380,12 +380,26 @@ class TracingTaskProgramNominalSources:
         self._fingerprint = _fingerprint(program)
         self._delegate = delegate
         self._motions: dict[int, InstantiatedSkillMotion] = {}
+        self._created_sources: dict[int, NominalMotionSource] = {}
         self.validate_program(program)
 
     @property
     def program_fingerprint(self) -> str:
         """Return the bound compiled-program fingerprint."""
         return self._fingerprint
+
+    @property
+    def execution_reports(self) -> Mapping[int, dict[str, object]]:
+        """Return measured source-contract reports without exposing live providers."""
+        from copy import deepcopy
+
+        return MappingProxyType(
+            {
+                index: deepcopy(source.execution_report())
+                for index, source in self._created_sources.items()
+                if callable(getattr(source, "execution_report", None))
+            }
+        )
 
     @property
     def motions(self) -> Mapping[int, InstantiatedSkillMotion]:
@@ -414,8 +428,12 @@ class TracingTaskProgramNominalSources:
         if not isinstance(source, NominalMotionSource):
             raise TypeError("delegate returned an invalid nominal source")
         owner, index = self, request.analysis_call_index
+        self._created_sources[index] = source
 
         class _TraceSource:
+            def __getattr__(self, name: str):
+                return getattr(source, name)
+
             def instantiate(
                 self, resolved: ResolvedActionRequest, context: PlanningContext
             ) -> InstantiatedSkillMotion:
@@ -431,4 +449,27 @@ class TracingTaskProgramNominalSources:
                 owner._motions[index] = replace(motion)
                 return motion
 
-        return _TraceSource()
+        if not isinstance(source, MonitoredNominalMotionSource):
+            return _TraceSource()
+
+        class _MonitoredTraceSource(_TraceSource):
+            # Python 3.12+ runtime protocols use static attribute lookup, which
+            # cannot discover protocol members forwarded by __getattr__.
+            def observe_execution(
+                self,
+                context: PlanningContext,
+                sample_index: int | None,
+                *,
+                terminal: bool,
+            ) -> None:
+                source.observe_execution(context, sample_index, terminal=terminal)
+
+            def owns_effect(self, request: EffectVerificationRequest) -> bool:
+                return source.owns_effect(request)
+
+            def verify_effect(
+                self, context: PlanningContext, request: object
+            ) -> object:
+                return source.verify_effect(context, request)
+
+        return _MonitoredTraceSource()

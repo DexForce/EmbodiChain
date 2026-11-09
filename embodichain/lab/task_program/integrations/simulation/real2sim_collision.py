@@ -51,6 +51,9 @@ if TYPE_CHECKING:
     )
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.task_program.runtime.expansion import TaskProgramPlanRequest
+    from embodichain.lab.task_program.integrations.expansion import (
+        CombinedTaskProgramExpansionFactory,
+    )
 
 __all__ = ["TabletopPrototypeCollisionValidator", "TabletopCollisionGuardFactory"]
 
@@ -145,7 +148,11 @@ class TabletopPrototypeCollisionValidator:
         contact_depth_m: float,
         base_ground_depth_m: float,
         gripper_contact: GripperContactProjectionCfg | None = None,
+        env_id: int | None = None,
     ) -> None:
+        if env_id is not None and (type(env_id) is not int or env_id < 0):
+            raise ValueError("env_id must be nonnegative")
+        self._env_id = env_id
         if not isinstance(checker, SampledRobotCollisionChecker):
             raise TypeError("checker must be a SampledRobotCollisionChecker")
         if not callable(getattr(robot, "compute_batch_fk", None)):
@@ -471,6 +478,7 @@ class TabletopPrototypeCollisionValidator:
             qpos=positions[:, :, list(endpoint.joint_ids)],
             name=endpoint.control_part,
             to_matrix=True,
+            **({"env_ids": [self._env_id]} if self._env_id is not None else {}),
         )
         if not isinstance(tcp, torch.Tensor) or tcp.shape != (
             1,
@@ -593,6 +601,7 @@ class TabletopCollisionGuardFactory:
         validator: TabletopPrototypeCollisionValidator,
         delegate: object | None = None,
         *,
+        call_indices: tuple[int, ...] | None = None,
         velocity_limits: Sequence[float] | None = None,
         acceleration_limits: Sequence[float] | None = None,
         ik_smoothing_trigger_fraction: float | None = None,
@@ -619,6 +628,16 @@ class TabletopCollisionGuardFactory:
             raise ValueError(
                 "velocity and acceleration limits must be supplied together"
             )
+        if call_indices is not None and (
+            type(call_indices) is not tuple
+            or not call_indices
+            or len(set(call_indices)) != len(call_indices)
+            or any(type(index) is not int or index < 0 for index in call_indices)
+        ):
+            raise ValueError(
+                "guard call_indices must be unique nonnegative occurrences"
+            )
+        self._call_indices = None if call_indices is None else frozenset(call_indices)
         self._velocity_limits = (
             None
             if velocity_limits is None
@@ -699,6 +718,39 @@ class TabletopCollisionGuardFactory:
 
         return MappingProxyType(dict(self._phase_samples))
 
+    def prepare_planning_context(
+        self,
+        request: TaskProgramPlanRequest,
+        context: PlanningContext,
+        *,
+        engine: AtomicActionEngine,
+    ) -> PlanningContext:
+        """Forward explicit delegate preparation without changing source ownership.
+
+        Args:
+            request: Grounded occurrence selected by the Task Program.
+            context: Source planning observation before any trajectory is built.
+            engine: Exact engine that owns planning resources.
+
+        Returns:
+            Delegate-prepared context, or the unchanged context without a delegate.
+        """
+        prepare = getattr(self.delegate, "prepare_planning_context", None)
+        return context if prepare is None else prepare(request, context, engine=engine)
+
+    @property
+    def expansion_trace_provider(self) -> CombinedTaskProgramExpansionFactory | None:
+        """Expose the existing combined recipe trace when composing that factory."""
+        from embodichain.lab.task_program.integrations.expansion import (
+            CombinedTaskProgramExpansionFactory,
+        )
+
+        return (
+            self.delegate
+            if isinstance(self.delegate, CombinedTaskProgramExpansionFactory)
+            else None
+        )
+
     def create_plan_transform(
         self, request: TaskProgramPlanRequest, *, engine: AtomicActionEngine
     ) -> PlanTransform:
@@ -708,6 +760,12 @@ class TabletopCollisionGuardFactory:
             if self.delegate is None
             else self.delegate.create_plan_transform(request, engine=engine)
         )
+
+        if (
+            self._call_indices is not None
+            and request.analysis_call_index not in self._call_indices
+        ):
+            return downstream
 
         def checked(resolved, context, plan):
             motion_metrics = None

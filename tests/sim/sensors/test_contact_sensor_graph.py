@@ -37,6 +37,8 @@ class _CudaQuery:
             ContactActorInfo(20, "arena_1/cube", None, "arena_1", 1),
         )
         self.buffer = ContactBuffer.allocate(4, str(device))
+        if hasattr(self.buffer, "quantity_valid"):
+            self.buffer.quantity_valid.fill_(True)
         self.buffer.data.zero_()
         self.buffer.data[:2, 5] = 1.0
         self.buffer.data[:2, 9] = 0.2
@@ -49,7 +51,7 @@ class _CudaQuery:
     def actor_info(self, actor_id: int) -> ContactActorInfo:
         return next(actor for actor in self.actors if actor.actor_id == actor_id)
 
-    def fetch_async(self) -> ContactBuffer:
+    def fetch_solver_report_async(self) -> ContactBuffer:
         return self.buffer
 
 
@@ -67,6 +69,7 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
         query = _CudaQuery(device)
         owner = SimpleNamespace(
             num_envs=2,
+            physics_step_index=0,
             arena_offsets=torch.zeros((2, 3), device=device),
             _spawn_scene=SimpleNamespace(
                 handles=lambda uid: tuple(
@@ -89,25 +92,30 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
         )
         sensor.begin_control_step()
 
+        def sample() -> None:
+            owner.physics_step_index += 1
+            sensor.update_physics_step(0.1)
+            sensor.update_physics_step(0.1)
+
         def assert_air_time(value: float) -> None:
             torch.testing.assert_close(
                 history.current_air_time,
                 torch.full((2, 1), value, device=device),
             )
 
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is None
         assert_air_time(0.1)
-        sensor.update_physics_step(0.1)
+        sample()
         graph = sensor._sample_graph
         assert graph is not None
         assert_air_time(0.2)
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is graph
         assert_air_time(0.3)
 
         query.buffer.device_counts[0] = 2
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is graph
         assert history.contact.all()
         assert history.found.all()
@@ -145,17 +153,116 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
 
         sensor.begin_control_step()
         history.force_threshold = 3.0
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is None
         assert not history.contact.any()
         assert not history.found.any()
         assert_air_time(0.1)
-        sensor.update_physics_step(0.1)
+        sample()
         recaptured = sensor._sample_graph
         assert recaptured is not None and recaptured is not graph
         assert_air_time(0.2)
-        sensor.update_physics_step(0.1)
+        sample()
         assert sensor._sample_graph is recaptured
         assert not history.contact.any()
         assert_air_time(0.3)
+
+        if hasattr(query.buffer, "quantity_valid"):
+            # Replay reads changed masks without recapture and never evaluates
+            # unavailable poisoned force components.
+            query.buffer.quantity_valid.zero_()
+            query.buffer.data[:2, 6:10] = float("nan")
+            sample()
+            assert sensor._sample_graph is recaptured
+            assert not history.force.any()
+            assert not sensor.get_data()["impulse_valid"].any()
+            assert not sensor.get_data()["friction_valid"].any()
+
+            # A topology refresh can replace the native mask storage. The
+            # captured pointer must be refreshed before the next sample.
+            query.buffer.quantity_valid = torch.ones_like(query.buffer.quantity_valid)
+            query.buffer.data[:2, 6:9] = 0.0
+            query.buffer.data[:2, 9] = 0.4
+            sample()
+            assert sensor._sample_graph is None
+            assert history.contact.all()
+            torch.testing.assert_close(
+                history.force,
+                torch.tensor([[[0.0, 0.0, 4.0]], [[0.0, 0.0, 4.0]]], device=device),
+            )
+            sample()
+            assert sensor._sample_graph is not None
+            assert sensor._sample_graph is not recaptured
+            assert history.contact.all()
+        # The graph writes query loss even when there are no valid contacts.
+        query.buffer.device_counts.zero_()
+        query.buffer.device_counts[1] = 3
+        sensor.begin_control_step()
+        sample()
+        assert sensor.latest_sample_dropped_contacts == 3
+        assert sensor.evidence_dropped_contacts == 3
+        query.buffer.device_counts[1] = 0
+        sample()
+        assert sensor.latest_sample_dropped_contacts == 0
+        assert sensor.evidence_dropped_contacts == 3  # Earlier interval loss survives.
     caller.synchronize()
+
+
+@pytest.mark.parametrize("history_sample", [False, True])
+def test_cached_sample_is_ready_on_another_cuda_stream(history_sample: bool) -> None:
+    """A cached update must wait for the producer's outstanding device work."""
+    wp.init()
+    device = torch.device("cuda:0")
+    query = _CudaQuery(device)
+    query.buffer.device_counts[0] = 2
+    owner = SimpleNamespace(
+        num_envs=2,
+        physics_step_index=0,
+        arena_offsets=torch.zeros((2, 3), device=device),
+        _spawn_scene=SimpleNamespace(
+            handles=lambda uid: tuple(
+                SimpleNamespace(path=actor.path) for actor in query.actors
+            )
+        ),
+        spawn_result=SimpleNamespace(create_contact_query=lambda *a, **kw: query),
+    )
+    sensor = ContactSensor(
+        ContactSensorCfg(
+            uid="contacts", rigid_uid_list=["cube"], max_contacts_per_env=2
+        ),
+        device,
+        owner=owner,
+    )
+    history = (
+        sensor.create_history("feet", torch.tensor([[10], [20]], device=device))
+        if history_sample
+        else None
+    )
+
+    def sample() -> None:
+        if history_sample:
+            sensor.update_physics_step(0.1)
+        else:
+            sensor.update()
+
+    sample()  # Compile kernels before arranging the delayed producer.
+    sensor.reset()
+    torch.cuda.synchronize(device)
+    owner.physics_step_index += 1
+    producer = torch.cuda.Stream(device=device)
+    consumer = torch.cuda.Stream(device=device)
+    with torch.cuda.stream(producer):
+        torch.cuda._sleep(200_000_000)
+        sample()
+    with torch.cuda.stream(consumer):
+        sample()
+        observed = sensor.get_data()["is_valid"].clone()
+        force = history.force.clone() if history is not None else None
+    consumer.synchronize()
+    assert observed.tolist() == [[True, False], [True, False]]
+    if force is not None:
+        torch.testing.assert_close(
+            force,
+            torch.tensor([[[0.0, 0.0, 2.0]], [[0.0, 0.0, 2.0]]], device=device),
+        )
+    producer.synchronize()

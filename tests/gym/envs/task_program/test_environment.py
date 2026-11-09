@@ -617,11 +617,13 @@ def test_nominal_sources_are_bound_to_compiled_program_identity() -> None:
     )
     config = _program()
     compiled = adapter.compile(config)
-    assert adapter.create_bridge(compiled)._validator_port is validator
+    ordinary = adapter.create_bridge(compiled)
+    assert ordinary._validator_port is validator.sessions[0]
     bindings = BoundTaskProgramNominalSources(compiled, {0: Source()})
     bridge = adapter.create_bridge(compiled, nominal_source_factory=bindings)
     assert isinstance(bridge, TaskProgramDemoBridge)
-    assert bridge._validator_port is validator.sessions[0]
+    assert bridge._validator_port is validator.sessions[1]
+    assert ordinary._validator_port is not bridge._validator_port
     config.instruction = "A different instruction for the same program."
     changed = adapter.compile(config)
     with pytest.raises(ValueError, match="do not match"):
@@ -672,10 +674,14 @@ def test_repeated_skill_occurrences_select_distinct_nominal_sources() -> None:
     )
 
 
-def test_tracing_source_factory_owns_one_instantiation_per_call() -> None:
+@pytest.mark.parametrize("monitored", [False, True])
+def test_tracing_source_factory_preserves_monitoring_and_owned_instantiation(
+    monitored: bool,
+) -> None:
     from embodichain.lab.sim.atomic_actions import (
         ActionInvocation,
         InstantiatedSkillMotion,
+        MonitoredNominalMotionSource,
         TimedTrajectory,
     )
     from embodichain.lab.task_program.integrations.nominal import (
@@ -702,16 +708,45 @@ def test_tracing_source_factory_owns_one_instantiation_per_call() -> None:
         def instantiate(self, request, context):
             return motion
 
+    observations = []
+    effect_request, effect_result = object(), object()
+
+    class MonitoredSource(Source):
+        def observe_execution(self, context, sample_index, *, terminal):
+            observations.append((context, sample_index, terminal))
+
+        def owns_effect(self, request):
+            return request is effect_request
+
+        def verify_effect(self, context, request):
+            assert request is effect_request
+            return effect_result
+
+    source = MonitoredSource() if monitored else Source()
     adapter = TaskProgramEnvironmentAdapter(_FakeEnvironmentFactory(), step_dt=_STEP_DT)
     program = adapter.compile(_program())
     binding = TracingTaskProgramNominalSources(
-        program, BoundTaskProgramNominalSources(program, {0: Source()})
+        program, BoundTaskProgramNominalSources(program, {0: source})
     )
     call = next(iter(program.iter_segments())).calls[0].call
     request = TaskProgramPlanRequest(
         "fake_pick/segment", 0, 0, call, Mock(spec=ActionInvocation)
     )
     selected = binding.create_nominal_source(request, engine=_engine(_robot_profile()))
+    assert isinstance(selected, MonitoredNominalMotionSource) is monitored
+    if monitored:
+        # Python 3.12+ runtime protocols use static lookup; __getattr__ cannot
+        # supply these protocol members even on Python 3.11 test hosts.
+        from inspect import getattr_static
+
+        for member in ("observe_execution", "owns_effect", "verify_effect"):
+            assert callable(getattr_static(selected, member))
+        context = Mock()
+        selected.observe_execution(context, 1, terminal=True)
+        assert observations == [(context, 1, True)]
+        assert selected.owns_effect(effect_request)
+        assert not selected.owns_effect(object())
+        assert selected.verify_effect(context, effect_request) is effect_result
     selected.instantiate(Mock(), Mock())
     assert binding.motions[0].unit_id == "pick"
     binding.motions[0].trajectory.positions[0, 0, 0] = 1
@@ -1126,3 +1161,230 @@ def test_factory_protocol_is_required() -> None:
     """Loose objects cannot enter the production assembly boundary."""
     with pytest.raises(TypeError, match="TaskProgramEnvironmentFactory"):
         TaskProgramEnvironmentAdapter(object(), step_dt=_STEP_DT)
+
+
+def test_adapter_close_releases_only_owned_resources_and_rejects_new_assembly():
+    factory = _FakeEnvironmentFactory()
+    closed = []
+    factory.close_runtime_resources = lambda: closed.append(True)
+    adapter = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
+    adapter.close()
+    adapter.close()
+    assert closed == [True]
+    with pytest.raises(RuntimeError, match="closed"):
+        adapter.assemble_runtime(_program().integration)
+    assert factory.calls == Counter()
+
+
+class _InvocationPolicyFactory(_FakeEnvironmentFactory):
+    """Expose declared alternative presets through the ordinary profile surface."""
+
+    def create_robot_skill_profile(self) -> RobotSkillProfile:
+        from dataclasses import replace
+
+        profile = super().create_robot_skill_profile()
+        baseline = profile.presets["safe"]
+        return replace(
+            profile,
+            presets={
+                **profile.presets,
+                "careful": SkillPolicyPreset(
+                    "careful",
+                    effect_assurance=baseline.effect_assurance,
+                    effect_monitors=baseline.effect_monitors,
+                    action_option_templates=baseline.action_option_templates,
+                    motion_policy=MotionPolicy(sample_count=81),
+                ),
+                "projected": SkillPolicyPreset(
+                    "projected",
+                    effect_assurance=EffectAssurance.PROJECTED,
+                    effect_monitors={},
+                    action_option_templates=baseline.action_option_templates,
+                ),
+            },
+        )
+
+
+def test_invocation_policy_preserves_repeat_identity_in_cached_analysis(
+    monkeypatch,
+) -> None:
+    from task_program_support import completed_runtime
+    from embodichain.lab.task_program import RepeatCfg
+    from embodichain.lab.task_program.integrations import (
+        InvocationPolicyBinding,
+        task_program_fingerprint,
+    )
+
+    factory = _InvocationPolicyFactory()
+    adapter = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
+    config = _program_with_later_segment_hooks()
+    config.program = RepeatCfg(count=2, body=config.program)
+    compiled = adapter.compile(config)
+    segments = tuple(compiled.iter_segments())
+    target_id = f"{compiled.program_id}/{segments[2].segment_id}:0"
+    binding = InvocationPolicyBinding(
+        task_program_fingerprint(compiled), target_id, "careful"
+    )
+    bridge = adapter.create_bridge(compiled, invocation_policy_bindings=(binding,))
+    assert factory.observation_samples == 0
+    completed = completed_runtime(torch.arange(_BATCH_SIZE))
+    selected = []
+    workflow_objects = []
+
+    def start_analyzed(
+        workflow, *, call_offset, execution_prefix_length, workflow_id, eligible_mask
+    ):
+        analyzed = workflow.calls[call_offset]
+        selected.append(
+            (workflow_id + ":0", analyzed.bound.preset.motion_policy.sample_count)
+        )
+        workflow_objects.append(workflow)
+        return completed.start(workflow_id=workflow_id, eligible_mask=eligible_mask)
+
+    monkeypatch.setattr(bridge._runtime, "_start_analyzed", start_analyzed)
+    for segment in bridge.iter_segments():
+        tuple(segment.actions)
+        assert segment.validator().all()
+    default_samples = MotionPolicy().sample_count
+    assert [value for _, value in selected] == [
+        default_samples,
+        default_samples,
+        81,
+        default_samples,
+    ]
+    assert selected[2][0] == target_id
+    assert len({id(workflow) for workflow in workflow_objects}) == 1
+    assert factory.observation_samples == 0
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ["fingerprint", "unknown", "duplicate", "parallel", "preset", "assurance"],
+)
+def test_invocation_policy_invalid_bindings_fail_before_observation(
+    invalid: str,
+) -> None:
+    from embodichain.lab.task_program.integrations import (
+        InvocationPolicyBinding,
+        task_program_fingerprint,
+    )
+
+    factory = _InvocationPolicyFactory()
+    adapter = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
+    config = (
+        _program_with_later_parallel_conflict() if invalid == "parallel" else _program()
+    )
+    compiled = adapter.compile(config)
+    segments = tuple(compiled.iter_segments())
+    identity = f"{compiled.program_id}/{segments[0].segment_id}:0"
+    fingerprint = task_program_fingerprint(compiled)
+    preset = "careful"
+    if invalid == "fingerprint":
+        fingerprint = "0" * 64
+    elif invalid == "unknown":
+        identity = "unknown/segment:0"
+    elif invalid == "parallel":
+        parallel = next(
+            segment for segment in segments if segment.parallel_block is not None
+        )
+        identity = f"{compiled.program_id}/{parallel.segment_id}:branch_0:0"
+    elif invalid == "preset":
+        preset = "missing"
+    elif invalid == "assurance":
+        preset = "projected"
+    binding = InvocationPolicyBinding(fingerprint, identity, preset)
+    bindings = (binding, binding) if invalid == "duplicate" else (binding,)
+    messages = {
+        "fingerprint": "fingerprint mismatch",
+        "unknown": "Unknown sequential",
+        "duplicate": "Duplicate invocation",
+        "parallel": "parallel branch",
+        "preset": "Unknown occurrence policy preset",
+        "assurance": "effect assurance",
+    }
+    with pytest.raises((ValueError, SemanticValidationError), match=messages[invalid]):
+        adapter.create_bridge(compiled, invocation_policy_bindings=bindings)
+    assert factory.calls["observation"] == 0
+    assert factory.observation_samples == 0
+    if invalid in {"fingerprint", "unknown", "duplicate", "parallel"}:
+        assert factory.calls["engine"] == 0
+
+
+def test_invocation_policy_binding_rejects_reuse_after_program_change() -> None:
+    from embodichain.lab.task_program.integrations import (
+        BoundInvocationPolicies,
+        InvocationPolicyBinding,
+        task_program_fingerprint,
+    )
+
+    adapter = TaskProgramEnvironmentAdapter(
+        _InvocationPolicyFactory(), step_dt=_STEP_DT
+    )
+    config = _program()
+    compiled = adapter.compile(config)
+    segment = next(compiled.iter_segments())
+    binding = InvocationPolicyBinding(
+        task_program_fingerprint(compiled),
+        f"{compiled.program_id}/{segment.segment_id}:0",
+        "careful",
+    )
+    policies = BoundInvocationPolicies(compiled, (binding,))
+    config.instruction = "A different program declaration."
+    changed = adapter.compile(config)
+    with pytest.raises(ValueError, match="fingerprint mismatch"):
+        policies.validate_program(changed)
+    policies.validate_program(compiled)
+    from embodichain.lab.task_program.semantics import builtin_semantic_call_catalog
+    from embodichain.lab.task_program.semantics.integration import (
+        SceneManifest,
+        SemanticIntegrationManifest,
+    )
+
+    foreign_selection = SemanticIntegrationManifest(
+        SceneManifest.from_registry(_scene_registry()),
+        _InvocationPolicyFactory().create_robot_skill_profile(),
+        builtin_semantic_call_catalog(),
+        runtime_preset=None,
+    )
+    with pytest.raises(ValueError, match="profile/preset selection"):
+        policies.validate_manifest(compiled, foreign_selection)
+
+
+def test_invocation_policy_analysis_windows_preserve_suffixes_and_reject_foreign_calls() -> (
+    None
+):
+    from dataclasses import replace
+    from embodichain.lab.task_program import RepeatCfg
+    from embodichain.lab.task_program.integrations import (
+        BoundInvocationPolicies,
+        InvocationPolicyBinding,
+        task_program_fingerprint,
+    )
+
+    adapter = TaskProgramEnvironmentAdapter(
+        _InvocationPolicyFactory(), step_dt=_STEP_DT
+    )
+    config = _program_with_later_segment_hooks()
+    config.program = RepeatCfg(count=2, body=config.program)
+    compiled = adapter.compile(config)
+    segments = tuple(compiled.iter_segments())
+    binding = InvocationPolicyBinding(
+        task_program_fingerprint(compiled),
+        f"{compiled.program_id}/{segments[2].segment_id}:0",
+        "careful",
+    )
+    policies = BoundInvocationPolicies(compiled, (binding,))
+    analysis = compiled.preflight_analyses()[0]
+    assert policies._presets_for_analysis(analysis) == (None, None, "careful", None)
+    assert policies._presets_for_analysis(
+        compiled.sequential_execution_analysis(1)
+    ) == (None, "careful", None)
+    assert policies._presets_for_analysis(
+        compiled.sequential_execution_analysis(2)
+    ) == ("careful", None)
+    other = replace(analysis, analysis_id="foreign:preflight:sequential:0-3")
+    with pytest.raises(ValueError, match="bound program window"):
+        policies._presets_for_analysis(other)
+    reordered = replace(analysis, calls=tuple(reversed(analysis.calls)))
+    with pytest.raises(ValueError, match="bound program window"):
+        policies._presets_for_analysis(reordered)

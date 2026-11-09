@@ -19,8 +19,8 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections.abc import Mapping
-from dataclasses import asdict, field, replace
+from collections.abc import Mapping, Callable
+from dataclasses import dataclass, asdict, field, replace
 import hashlib
 import json
 import math
@@ -75,6 +75,11 @@ from embodichain.utils.utility import load_config
 
 __all__ = [
     "Real2SimTabletopCollectionCfg",
+    "Real2SimAcceptanceRejected",
+    "Real2SimTabletopEpisodeEvidence",
+    "Real2SimTabletopSource",
+    "Real2SimTabletopBindings",
+    "qualify_real2sim_tabletop_episode",
     "load_real2sim_tabletop_profile",
     "install_real2sim_tabletop_owner",
 ]
@@ -479,31 +484,741 @@ def _placement_heading_check(
     return angle <= tolerance_deg + 1e-9, {"placement_yaw_error_deg": angle}
 
 
-def install_real2sim_tabletop_owner(
-    env: object, profile: Real2SimTabletopCollectionCfg, *, dataset_dir: str | Path
-) -> Real2SimRunTaskOwner:
-    """Install a configured source, collision and recorder owner on Gym.
+class Real2SimAcceptanceRejected(ValueError):
+    """Expected measured rejection; structural and runtime errors retain their type.
 
-    The source bindings come from the integration's configured runtime
-    services, never from the Task Program. Physical geometry is obtained from
-    the current scene and must match each prototype's captured identity.
+    Args:
+        validation: Complete measured checks that failed source acceptance.
     """
-    target = getattr(env, "unwrapped", env)
-    if not isinstance(profile, Real2SimTabletopCollectionCfg):
-        raise TypeError("profile must be a Real2SimTabletopCollectionCfg")
-    if (
-        target.num_envs != 1
-        or target.has_sensors
-        or target.rollout_buffer is None
-        or target._traj_buffer is None
+
+    def __init__(self, validation: ValidationResult) -> None:
+        self.validation = validation
+        super().__init__(
+            "Real2Sim measured acceptance failed: "
+            + str([(c.check_id, c.status, c.detail) for c in validation.checks])
+        )
+
+
+class Real2SimTabletopEpisodeEvidence:
+    """Owned measured evidence for one qualified source-bound physical row.
+
+    The callback computes arena-frame TCP transforms for this row. It is borrowed
+    only during qualification; it cannot reset or step the source environment.
+
+    Args:
+        qpos: Measured full-joint states with T+1 rows.
+        object_pose: Measured object xyz/xyzw poses with the same T+1 clock.
+        target_pose: Measured arena-frame target 4x4 pose.
+        joint_names: Exact full-articulation order.
+        step_dt: Authoritative control interval in seconds.
+        execution_trace: Acknowledged Task Program action references (T entries).
+        compute_batch_fk: Row-bound arena-frame batch FK callback.
+    """
+
+    def __init__(
+        self,
+        *,
+        qpos: torch.Tensor,
+        object_pose: torch.Tensor,
+        target_pose: torch.Tensor,
+        joint_names: tuple[str, ...],
+        step_dt: float,
+        execution_trace: tuple[dict[str, object], ...],
+        compute_batch_fk: Callable[..., torch.Tensor],
+    ) -> None:
+        if any(
+            not isinstance(value, torch.Tensor)
+            for value in (qpos, object_pose, target_pose)
+        ):
+            raise TypeError("tabletop measured states must be tensors")
+        if not joint_names or len(set(joint_names)) != len(joint_names):
+            raise ValueError("tabletop evidence requires unique ordered joint names")
+        if qpos.ndim != 2 or len(qpos) < 2 or qpos.shape[1] != len(joint_names):
+            raise ValueError(
+                "tabletop evidence requires T+1 full-joint measured states"
+            )
+        if object_pose.shape != (len(qpos), 7) or target_pose.shape != (4, 4):
+            raise ValueError("tabletop object/target evidence has invalid shape")
+        if len(execution_trace) != len(qpos) - 1:
+            raise ValueError(
+                "tabletop execution trace must contain T acknowledged commands"
+            )
+        if (
+            type(step_dt) not in (int, float)
+            or not math.isfinite(step_dt)
+            or step_dt <= 0
+            or not callable(compute_batch_fk)
+        ):
+            raise ValueError(
+                "tabletop evidence requires a positive clock and row-bound FK"
+            )
+        if any(
+            not bool(torch.isfinite(v).all()) for v in (qpos, object_pose, target_pose)
+        ):
+            raise ValueError("tabletop measured evidence must be finite")
+        self.qpos = qpos.detach().clone()
+        self.object_pose = object_pose.detach().clone()
+        self.target_pose = target_pose.detach().clone()
+        self.joint_names = tuple(joint_names)
+        self.step_dt = step_dt
+        self.execution_trace = tuple(dict(item) for item in execution_trace)
+        self.compute_batch_fk = compute_batch_fk
+
+
+@dataclass(frozen=True)
+class Real2SimTabletopBindings:
+    """Verified source declarations and geometry, independent of recorder or World state.
+
+    Construct through :class:`Real2SimTabletopSource` or the qualified collection
+    owner. This value retains trusted prototype/geometry handles without taking
+    ownership of the environment that prepared them.
+    """
+
+    profile: Real2SimTabletopCollectionCfg
+    prototypes: Mapping[int, Any]
+    call_indices: tuple[int, ...]
+    object_body: BoxCollisionBody
+    target_body: BoxCollisionBody
+    declarations: tuple[Any, ...]
+    joint_names: tuple[str, ...]
+
+
+class Real2SimTabletopSource:
+    """Prepared source bindings and physical qualification shared by collection hosts.
+
+    Args:
+        environment: Existing initialized environment; lifecycle stays with its owner.
+        profile: Qualified source, scene and acceptance declarations.
+        env_id: Exact physical row to bind without changing the World.
+        call_indices: Optional prototype-only occurrence subset for a mixed host.
+            The host supplies independent whole-program measured acceptance;
+            the original tabletop episode qualifier still requires its full contract.
+    """
+
+    def __init__(
+        self,
+        environment: object,
+        profile: Real2SimTabletopCollectionCfg,
+        *,
+        env_id: int = 0,
+        call_indices: tuple[int, ...] | None = None,
+    ) -> None:
+        self.profile = profile
+        self.robot = environment.robot
+        self.env_id = env_id
+        (
+            self.adapter,
+            self.declarations,
+            self.call_indices,
+            self.object_body,
+            self.target_body,
+            self.checker,
+            self.prototypes,
+            self.unique_prototypes,
+        ) = _prepare_tabletop_sources(
+            environment, profile, env_id=env_id, call_indices=call_indices
+        )
+        self.bindings = Real2SimTabletopBindings(
+            profile,
+            self.prototypes,
+            self.call_indices,
+            self.object_body,
+            self.target_body,
+            self.declarations,
+            tuple(self.robot.joint_names),
+        )
+
+    def task_space_kinematics_factory(self) -> Callable:
+        """Return the existing source-preserving kinematics adapter for this row."""
+        return _task_space_kinematics_factory(self.robot, self.env_id)
+
+    def qualify(
+        self,
+        evidence: Real2SimTabletopEpisodeEvidence,
+        *,
+        state: Mapping[str, Any],
+        output_directory: str | Path,
+        observation_fields: Mapping[str, tuple[str, str]],
+    ) -> Real2SimCaptureRequest:
+        """Validate recorded evidence and retain canonical source attachments.
+
+        Args:
+            evidence: Owned states and acknowledged trace for this physical row.
+            state: Source binding/guard state belonging to this execution.
+            output_directory: Artifact destination owned by the host.
+            observation_fields: Sink observation schema for the capture request.
+        Returns:
+            Canonical source-qualified request; no episode is committed here.
+        """
+        return qualify_real2sim_tabletop_episode(
+            evidence,
+            source=self.bindings,
+            state=state,
+            output_directory=output_directory,
+            observation_fields=observation_fields,
+        )
+
+
+def qualify_real2sim_tabletop_episode(
+    evidence: Real2SimTabletopEpisodeEvidence,
+    *,
+    source: Real2SimTabletopBindings,
+    state: Mapping[str, Any],
+    output_directory: str | Path,
+    observation_fields: Mapping[str, tuple[str, str]],
+) -> Real2SimCaptureRequest:
+    """Validate measured states and source semantics without a recorder or World owner.
+
+    Args:
+        evidence: Full measured state stream, authoritative clock and acknowledged trace.
+        source: Already verified prototype declarations and exact physical geometry.
+        state: Runtime source/guard state retained by the execution binding.
+        output_directory: Host-owned destination for source and validation attachments.
+        observation_fields: Capture-sink observation field mapping.
+    Returns:
+        Canonical capture request containing unchanged source protections and checks.
+    """
+    if evidence.joint_names != source.joint_names:
+        raise ValueError(
+            "tabletop evidence joint order differs from its qualified source"
+        )
+    profile = source.profile
+    prototypes = source.prototypes
+    call_indices = source.call_indices
+    object_body, target_body = source.object_body, source.target_body
+    declarations = source.declarations
+    length = len(evidence.qpos) - 1
+    qpos = evidence.qpos
+    objects = evidence.object_pose.detach().cpu().numpy()
+    target_pose = evidence.target_pose.detach().cpu().numpy()
+    tracer = state["tracer"]
+    delegate = state["delegate"]
+    guard = state["guard"]
+    if set(tracer.motions) != set(call_indices):
+        raise ValueError("not every configured source occurrence was executed")
+    retime_maps = (
+        {}
+        if not isinstance(delegate, TaskProgramMappedRetimeFactory)
+        else {item.call_index: item.result.time_map for item in delegate.records}
+    )
+    arrays = build_real2sim_execution_trace(
+        evidence.execution_trace,
+        tracer.motions,
+        retime_maps=retime_maps,
+    )
+    if len(arrays["step_call_index"]) != length:
+        raise ValueError("observed action trace does not cover the rollout")
+    skills = {index: prototypes[index].unit.source.skill_id for index in call_indices}
+    events = _observed_program_phases(
+        skills,
+        guard.segments,
+        arrays["step_call_index"],
+        arrays["step_plan_index"],
+    )
+    phase_starts = {(index, name): start for start, index, _, name in events}
+    call_starts = {
+        index: next(start for start, call, _, _ in events if call == index)
+        for index in call_indices
+    }
+    matrices = np.repeat(np.eye(4)[None], length + 1, axis=0)
+    matrices[:, :3, :3] = Rotation.from_quat(objects[:, 3:7]).as_matrix()
+    matrices[:, :3, 3] = objects[:, :3]
+    outcomes = []
+    held_intervals = []
+    held_start = None
+    held_endpoint = None
+    held_call = None
+    for position, index in enumerate(call_indices):
+        skill = skills[index]
+        start = call_starts[index]
+        stop = (
+            call_starts[call_indices[position + 1]]
+            if position + 1 < len(call_indices)
+            else length
+        )
+        endpoint = guard.motion_targets[index]
+        outcome = {
+            "call_index": index,
+            "skill_id": skill,
+            "start_step": start,
+            "end_step": stop,
+            "passed": True,
+        }
+        if skill == "pick_up":
+            if held_start is not None:
+                raise ValueError("a Pick cannot begin while the object is held")
+            lift = float(objects[stop, 2] - objects[start, 2])
+            outcome.update(lift_m=lift, passed=lift >= profile.minimum_lift_m)
+            held_start = phase_starts[index, "lift"]
+            held_endpoint, held_call = endpoint, index
+        else:
+            if held_start is None:
+                if position:
+                    raise ValueError("the call has no preceding held-object relation")
+                # Initial held state must still be verified by the live plan guard.
+                held_start, held_endpoint, held_call = start, endpoint, index
+            if endpoint != held_endpoint:
+                raise ValueError("a held interval cannot switch motion endpoints")
+            if skill == "place":
+                release = phase_starts[index, "release"]
+                held_intervals.append(
+                    (held_start, release, held_endpoint, held_call, index)
+                )
+                release_target = guard.semantic_release_targets.get(index)
+                if release_target is None:
+                    raise ValueError("Place is missing its verified release target")
+                xy_error = float(
+                    np.linalg.norm(objects[stop, :2] - release_target[:2, 3])
+                )
+                height_error, overhang = _support_errors(
+                    matrices[stop], target_pose, object_body, target_body
+                )
+                heading_ok, heading_metrics = _placement_heading_check(
+                    matrices[stop],
+                    release_target,
+                    profile.placement_yaw_tolerance_deg,
+                )
+                stable_start = max(phase_starts[index, "retract"], stop - 19)
+                drift = float(
+                    np.linalg.norm(objects[stop, :3] - objects[stable_start, :3])
+                )
+                outcome.update(
+                    expected_object_xy=release_target[:2, 3].tolist(),
+                    placement_xy_error_m=xy_error,
+                    height_error_m=height_error,
+                    support_overhang_m=overhang,
+                    stability_start_step=stable_start,
+                    drift_m=drift,
+                    **heading_metrics,
+                    passed=(
+                        xy_error <= profile.placement_xy_tolerance_m
+                        and height_error <= profile.placement_height_tolerance_m
+                        and overhang <= profile.contact_depth_m
+                        and drift <= profile.maximum_drift_m
+                        and heading_ok
+                    ),
+                )
+                if profile.placement_yaw_tolerance_deg is not None:
+                    outcome["expected_object_heading_xy"] = release_target[
+                        :2, 0
+                    ].tolist()
+                held_start = held_endpoint = held_call = None
+            elif skill != "move_held_object":
+                raise ValueError("unsupported source-backed tabletop skill")
+        outcomes.append(outcome)
+    if held_start is not None:
+        held_intervals.append(
+            (held_start, length, held_endpoint, held_call, call_indices[-1])
+        )
+    held_checks = []
+    for start, stop, endpoint, first_call, last_call in held_intervals:
+        if not 0 <= start < stop <= length:
+            raise ValueError("observed held-object interval is invalid")
+        control_part, joint_ids = endpoint
+        tcp = (
+            evidence.compute_batch_fk(
+                qpos=qpos[None, start : stop + 1, list(joint_ids)],
+                name=control_part,
+                to_matrix=True,
+            )[0]
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        translation, rotation = _held_pose_errors(objects[start : stop + 1], tcp)
+        held_checks.append(
+            {
+                "first_call_index": first_call,
+                "last_call_index": last_call,
+                "start_step": start,
+                "end_step": stop,
+                "held_translation_drift_m": translation,
+                "held_rotation_drift_deg": rotation,
+                "passed": (
+                    translation <= profile.held_translation_tolerance_m
+                    and rotation <= profile.held_rotation_tolerance_deg
+                ),
+            }
+        )
+    metrics = {}
+    for name, aggregate in (
+        ("lift_m", min),
+        ("placement_xy_error_m", max),
+        ("height_error_m", max),
+        ("support_overhang_m", max),
+        ("drift_m", max),
+        ("placement_yaw_error_deg", max),
     ):
-        raise ValueError(
-            "Real2Sim tabletop collection needs B=1, no sensors and both recording buffers"
+        values = [item[name] for item in outcomes if name in item]
+        if values:
+            metrics[name] = aggregate(values)
+    for name in ("held_translation_drift_m", "held_rotation_drift_deg"):
+        if held_checks:
+            metrics[name] = max(item[name] for item in held_checks)
+    task_ok = all(item["passed"] for item in (*outcomes, *held_checks))
+    validator = state["validator"]
+    phases = tuple(
+        validator.phase_policy(
+            skill,
+            phase,
+            0 if i == 0 else start,
+            events[i + 1][0] if i + 1 < len(events) else length + 1,
+            object_supported_by_target=(
+                skill == "pick_up"
+                and all(
+                    value <= profile.contact_depth_m
+                    for value in _support_errors(
+                        matrices[call_starts[index]],
+                        target_pose,
+                        object_body,
+                        target_body,
+                    )
+                )
+            ),
         )
-    if target.dataset_manager is not None:
-        raise ValueError(
-            "tabletop owner currently requires an exclusively owned LeRobot recorder"
+        for i, (start, index, skill, phase) in enumerate(events)
+    )
+    observed = validator.validate_observed(
+        qpos, object_poses=matrices, target_pose=target_pose, phases=phases
+    )
+    expected_reports = len(call_indices) * (1 if delegate is None else 2)
+    reports = validator.reports
+    collision_ok = len(reports) == expected_reports and all(
+        report.accepted for _, report in reports
+    )
+    motion_metrics = state["guard"].motion_metrics
+    motion_ok = set(motion_metrics) == set(call_indices) and all(
+        max(item.values(), default=float("inf")) <= 1.0 + 1e-6
+        for item in motion_metrics.values()
+    )
+    phase_validation = []
+    is_retime = isinstance(state["delegate"], TaskProgramMappedRetimeFactory)
+    duration_scale = 1.15 if state["recipe"] == "time_115" else 1.30
+    for index, samples in state["guard"].phase_samples.items():
+        permissions = {
+            item.name: item.allowed_operators for item in prototypes[index].unit.phases
+        }
+        for name, source_count, final_count in samples:
+            skill = prototypes[index].unit.source.skill_id
+            retimed = (
+                is_retime
+                and "retime" in permissions.get(name, ())
+                and (
+                    profile.retime_phase_allowlist is None
+                    or name in profile.retime_phase_allowlist.get(skill, ())
+                )
+            )
+            expected_count = (
+                math.ceil((source_count - 1) * duration_scale - 1e-9) + 1
+                if retimed
+                else source_count
+            )
+            phase_validation.append(
+                {
+                    "call_index": index,
+                    "phase": name,
+                    "source_samples": source_count,
+                    "final_samples": final_count,
+                    "expected_samples": expected_count,
+                    "retimed": retimed,
+                    "passed": final_count == expected_count,
+                }
+            )
+    phases_ok = set(state["guard"].phase_samples) == set(call_indices) and all(
+        item["passed"] for item in phase_validation
+    )
+    validation = ValidationResult(
+        (
+            ValidationCheck(
+                "geometry",
+                "passed",
+                "prototype and physical geometry identities match",
+            ),
+            ValidationCheck(
+                "motion_limits",
+                "passed" if motion_ok else "failed",
+                "sampled full-joint velocity and acceleration",
+            ),
+            ValidationCheck(
+                "phase_mapping",
+                "passed" if phases_ok else "failed",
+                "semantic phase durations and sample mapping",
+            ),
+            ValidationCheck(
+                "plan_collision",
+                "passed" if collision_ok else "failed",
+                "sampled plans with gripper contact projection",
+            ),
+            ValidationCheck(
+                "observed_collision",
+                "passed" if observed.accepted else "failed",
+                str(observed.reason or "sampled actual states"),
+            ),
+            ValidationCheck(
+                "task",
+                "passed" if task_ok else "failed",
+                metrics=metrics,
+            ),
         )
+    )
+    if not validation.accepted:
+        raise Real2SimAcceptanceRejected(validation)
+    variant = state["variant"]
+    payload = {
+        "program": tracer.program_fingerprint,
+        "layout": variant.variant_id,
+        "recipe": state["recipe"],
+        "seed": profile.seed,
+        "prototypes": [item.prototype_sha256 for item in declarations],
+    }
+    if any(item.refinement is not None for item in declarations):
+        payload["refinement"] = [
+            None if item.refinement is None else item.refinement.fingerprint
+            for item in declarations
+        ]
+    if profile.retime_phase_allowlist is not None:
+        payload["retime_phase_allowlist"] = profile.retime_phase_allowlist
+    candidate = (
+        "candidate:"
+        + hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    trace_dir = Path(output_directory) / "meta" / "real2sim" / "host-traces"
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    trace = trace_dir / (
+        hashlib.sha256(
+            (candidate + ":" + str(state["attempt_id"])).encode()
+        ).hexdigest()
+        + ".npz"
+    )
+    with trace.open("xb") as stream:
+        np.savez_compressed(stream, **arrays)
+        stream.flush()
+        os.fsync(stream.fileno())
+    observed_path = trace.with_name(trace.stem + "-observed.npz")
+    with observed_path.open("xb") as stream:
+        np.savez_compressed(
+            stream,
+            object_pose=objects,
+            target_pose=target_pose,
+            timestamps=np.arange(length + 1, dtype=np.float64) * evidence.step_dt,
+        )
+        stream.flush()
+        os.fsync(stream.fileno())
+    bundles, calls = {}, []
+    variants = (
+        {} if delegate is None else {item.call_index: item for item in delegate.records}
+    )
+    for item in declarations:
+        index, root = item.call_index, Path(item.prototype_manifest).parent
+        motion = tracer.motions[index]
+        if motion.authority in {"eef_pose", "hybrid"} and (
+            motion.fk_position_error_m is None or motion.fk_rotation_error_rad is None
+        ):
+            raise ValueError("Cartesian prototype is missing numerical FK residuals")
+        bundles[str(index)] = {
+            "prototype_manifest": _artifact(root / "prototype.json"),
+            "normalized_arrays": _artifact(root / "normalized.npz"),
+            "source_manifest": _artifact(root / "source" / "trajectory.json"),
+            "source_arrays": _artifact(root / "source" / "trajectory.npz"),
+        }
+        bundles[str(index)].update(profile.source_artifacts.get(index, {}))
+        call = {
+            "call_index": index,
+            "source_bundle": str(index),
+            "geometry_family_id": variant.variant_id,
+            "source_sample_offset": motion.source_sample_offset,
+            "operator": "nominal",
+            "prototype_sha256": item.prototype_sha256,
+            "source_id": motion.source_id,
+            "source_revision": motion.source_revision,
+            "source_unit_id": motion.unit_id,
+            "source_origin": motion.origin,
+            "authority": motion.authority,
+            "pose_origin": motion.pose_origin,
+            "object_supported_regrasp": motion.object_supported_regrasp,
+            "semantic_anchor_position_correction_m": motion.semantic_anchor_position_correction_m,
+            "semantic_anchor_rotation_correction_rad": motion.semantic_anchor_rotation_correction_rad,
+            "ik_smoothing_iterations": motion.ik_smoothing_iterations,
+            "ik_hold_smoothing_iterations": motion.ik_hold_smoothing_iterations,
+            "ik_smoothing_trigger_fraction": guard.ik_smoothing_trigger_fraction,
+            "fk_position_error_m": motion.fk_position_error_m,
+            "fk_rotation_error_rad": motion.fk_rotation_error_rad,
+        }
+        if motion.refinement_report:
+            call["refinement"] = dict(motion.refinement_report)
+        if isinstance(delegate, TaskProgramSameGridExpansionFactory):
+            record = variants[index]
+            call.update(
+                operator=record.operator,
+                seed=record.seed,
+                candidate_id=record.candidate_id,
+                variant_ordinal=record.variant_ordinal,
+                attempted=record.attempted,
+                rejected=dict(record.rejected),
+                locked_joint_indices=record.locked_joint_indices,
+                locked_joint_names=[
+                    evidence.joint_names[index] for index in record.locked_joint_indices
+                ],
+                motion_headroom_fraction=record.motion_headroom_fraction,
+            )
+        elif isinstance(delegate, TaskProgramMappedRetimeFactory):
+            record = variants[index]
+            call.update(operator="retime", duration_scale=record.duration_scale)
+        calls.append(call)
+    first = prototypes[call_indices[0]].unit.source
+    origins = {prototype.unit.source.origin for prototype in prototypes.values()}
+    identity = CandidateIdentity(
+        variant.variant_id,
+        state["preparation"].initial_state_id,
+        candidate,
+        variant.variant_id,
+        first.source_id,
+        first.source_revision,
+        "real2sim_program_episode",
+        attempt_id=state["attempt_id"],
+    )
+    return Real2SimCaptureRequest(
+        identity,
+        validation,
+        f"episode:{candidate}:{state['attempt_id']}",
+        f"commit:{candidate}:{state['attempt_id']}",
+        observation_fields,
+        "joint_position",
+        {
+            "origin": first.origin if len(origins) == 1 else "mixed",
+            "gripper_contact": profile.gripper_contact.to_dict(),
+            "retime_phase_allowlist": profile.retime_phase_allowlist,
+            "acceleration_limit_origin": profile.acceleration_limit_origin,
+            "acceleration_limits": profile.acceleration_limits,
+            "velocity_limit_origin": profile.velocity_limit_origin,
+            "velocity_limits": profile.velocity_limits,
+            "sampled_motion_limits": {
+                str(index): dict(value) for index, value in motion_metrics.items()
+            },
+            "phase_duration_validation": phase_validation,
+            "task_call_validation": outcomes,
+            "held_interval_validation": held_checks,
+            "layout": state["layout"],
+            "layout_parameters": state["layout_parameters"],
+            "scene_variant": {
+                "variant_id": variant.variant_id,
+                "parent_scene_id": variant.parent_scene_id,
+                "seed": variant.seed,
+                "ordinal": variant.ordinal,
+                "pose_changes": [
+                    {"entity_uid": item.entity_uid, "arena_pose": item.arena_pose}
+                    for item in variant.pose_changes
+                ],
+            },
+            "scene_initial_state": state["preparation"].metadata,
+            "recipe": state["recipe"],
+            "sampled_plan_collisions": [
+                {"unit_id": unit, **asdict(check)} for unit, check in reports
+            ],
+            "sampled_observed_collision": asdict(observed),
+            "real2sim_observed_geometry": _artifact(observed_path),
+            "real2sim_source_artifacts": bundles,
+            "real2sim_lineage": {
+                "scene_revision": profile.scene_revision,
+                "program_fingerprint": tracer.program_fingerprint,
+                "trace": _artifact(trace),
+                "calls": calls,
+            },
+        },
+    )
+
+
+def _capture_tabletop_episode(
+    environment: object,
+    result: object,
+    *,
+    profile: Real2SimTabletopCollectionCfg,
+    state: dict[str, Any],
+    prototypes: dict,
+    call_indices: tuple[int, ...],
+    object_body: BoxCollisionBody,
+    target_body: BoxCollisionBody,
+    observations: dict,
+    recorder: object,
+    declarations: tuple,
+) -> Real2SimCaptureRequest:
+    """Compatibility adapter for the original B=1 recorder-owned collection path."""
+    length = int(environment._traj_steps[0].item())
+    if length != result.length or environment._traj_buffer.shape[1] <= length:
+        raise ValueError("realized state stream is incomplete")
+    states = environment._traj_buffer["states"]
+    evidence = Real2SimTabletopEpisodeEvidence(
+        qpos=states["robot", "qpos"][0, : length + 1],
+        object_pose=states["rigid_objects", profile.object_uid, "pose"][
+            0, : length + 1
+        ],
+        target_pose=environment.sim.get_rigid_object(profile.target_uid).get_local_pose(
+            to_matrix=True
+        )[0],
+        joint_names=tuple(environment.robot.joint_names),
+        step_dt=environment.step_dt,
+        execution_trace=environment._active_task_program_bridge.execution_trace,
+        compute_batch_fk=environment.robot.compute_batch_fk,
+    )
+    bindings = Real2SimTabletopBindings(
+        profile,
+        prototypes,
+        call_indices,
+        object_body,
+        target_body,
+        declarations,
+        tuple(environment.robot.joint_names),
+    )
+    return qualify_real2sim_tabletop_episode(
+        evidence,
+        source=bindings,
+        state=state,
+        output_directory=recorder.dataset_full_path,
+        observation_fields=observations,
+    )
+
+
+def _task_space_kinematics_factory(robot, env_id: int = 0):
+    """Build source-preserving arm kinematics for one physical arena."""
+
+    def kinematics_factory(resolved, context, template):
+        endpoint = resolved.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        if tuple(template.controlled_joint_indices) != tuple(endpoint.joint_ids):
+            raise ValueError("task-space profile requires the complete active arm")
+        solver = robot.get_solver(endpoint.control_part)
+        base = robot.get_link_pose(
+            link_name=solver.root_link_name, env_ids=[env_id], to_matrix=True
+        )[0]
+        tcp = torch.as_tensor(solver.tcp_xpos, dtype=base.dtype, device=base.device)
+
+        def kinematics(q):
+            q_device = q.to(base.device)
+            pose = base[None] @ solver.get_fk(q_device)
+            jac = solver.get_jacobian(q_device, locations=tcp[:3, 3])
+            jac = torch.cat(
+                (base[:3, :3] @ jac[:, :3], base[:3, :3] @ jac[:, 3:]), dim=1
+            )
+            return pose.to(q), jac.to(q)
+
+        return kinematics
+
+    return kinematics_factory
+
+
+def _prepare_tabletop_sources(
+    target: object,
+    profile: Real2SimTabletopCollectionCfg,
+    *,
+    env_id: int = 0,
+    call_indices: tuple[int, ...] | None = None,
+) -> tuple:
+    """Resolve pinned sources and exact geometry for one physical arena."""
+    if type(env_id) is not int or not 0 <= env_id < target.num_envs:
+        raise ValueError("env_id must select a physical arena")
     adapter = target._task_program_adapter
     declarations = tuple(
         sorted(
@@ -511,6 +1226,21 @@ def install_real2sim_tabletop_owner(
             key=lambda item: item.call_index,
         )
     )
+    if call_indices is not None:
+        selected = set(call_indices)
+        if len(selected) != len(call_indices):
+            raise ValueError("prototype source occurrences must be unique")
+        declarations = tuple(
+            item for item in declarations if item.call_index in selected
+        )
+        if {item.call_index for item in declarations} != selected:
+            raise ValueError("prototype source occurrence is not configured")
+    from embodichain.lab.task_program.integrations.nominal import (
+        _ConfiguredPrototypeSource,
+    )
+
+    if not all(isinstance(item, _ConfiguredPrototypeSource) for item in declarations):
+        raise TypeError("tabletop bindings require explicit prototype call occurrences")
     call_indices = tuple(item.call_index for item in declarations)
     if not call_indices or len(set(call_indices)) != len(call_indices):
         raise ValueError(
@@ -569,7 +1299,7 @@ def install_real2sim_tabletop_owner(
         target.robot.cfg.fpath,
         joint_names=target.robot.joint_names,
         bodies=(object_body, target_body, PlaneCollisionBody("ground", np.eye(4))),
-        world_from_base=target.robot.get_local_pose(to_matrix=True)[0]
+        world_from_base=target.robot.get_local_pose(to_matrix=True)[env_id]
         .detach()
         .cpu()
         .numpy(),
@@ -615,6 +1345,53 @@ def install_real2sim_tabletop_owner(
                 artifacts["original_recording"]["path"],
                 source,
             )
+    return (
+        adapter,
+        declarations,
+        call_indices,
+        object_body,
+        target_body,
+        checker,
+        prototypes,
+        unique_prototypes,
+    )
+
+
+def install_real2sim_tabletop_owner(
+    env: object, profile: Real2SimTabletopCollectionCfg, *, dataset_dir: str | Path
+) -> Real2SimRunTaskOwner:
+    """Install a configured source, collision and recorder owner on Gym.
+
+    The source bindings come from the integration's configured runtime
+    services, never from the Task Program. Physical geometry is obtained from
+    the current scene and must match each prototype's captured identity.
+    """
+    target = getattr(env, "unwrapped", env)
+    if not isinstance(profile, Real2SimTabletopCollectionCfg):
+        raise TypeError("profile must be a Real2SimTabletopCollectionCfg")
+    if (
+        target.num_envs != 1
+        or target.has_sensors
+        or target.rollout_buffer is None
+        or target._traj_buffer is None
+    ):
+        raise ValueError(
+            "Real2Sim tabletop collection needs B=1, no sensors and both recording buffers"
+        )
+    if target.dataset_manager is not None:
+        raise ValueError(
+            "tabletop owner currently requires an exclusively owned LeRobot recorder"
+        )
+    (
+        adapter,
+        declarations,
+        call_indices,
+        object_body,
+        target_body,
+        checker,
+        prototypes,
+        unique_prototypes,
+    ) = _prepare_tabletop_sources(target, profile)
     recorder = LeRobotRecorder(
         DatasetFunctorCfg(
             func=LeRobotRecorder,
@@ -741,34 +1518,7 @@ def install_real2sim_tabletop_owner(
             )
         elif recipe != "nominal":
 
-            def kinematics_factory(resolved, context, template):
-                endpoint = resolved.binding.endpoint(
-                    "primary", "motion"
-                ).require_target(JointPositionTarget)
-                if tuple(template.controlled_joint_indices) != tuple(
-                    endpoint.joint_ids
-                ):
-                    raise ValueError(
-                        "task-space profile requires the complete active arm"
-                    )
-                solver = environment.robot.get_solver(endpoint.control_part)
-                base = environment.robot.get_link_pose(
-                    link_name=solver.root_link_name, env_ids=[0], to_matrix=True
-                )[0]
-                tcp = torch.as_tensor(
-                    solver.tcp_xpos, dtype=base.dtype, device=base.device
-                )
-
-                def kinematics(q):
-                    q_device = q.to(base.device)
-                    pose = base[None] @ solver.get_fk(q_device)
-                    jac = solver.get_jacobian(q_device, locations=tcp[:3, 3])
-                    jac = torch.cat(
-                        (base[:3, :3] @ jac[:, :3], base[:3, :3] @ jac[:, 3:]), dim=1
-                    )
-                    return pose.to(q), jac.to(q)
-
-                return kinematics
+            kinematics_factory = _task_space_kinematics_factory(environment.robot)
 
             delegate = TaskProgramSameGridExpansionFactory(
                 operator=(
@@ -819,482 +1569,18 @@ def install_real2sim_tabletop_owner(
         return segments
 
     def capture(environment, result):
-        length = int(environment._traj_steps[0].item())
-        if length != result.length or environment._traj_buffer.shape[1] <= length:
-            raise ValueError("realized state stream is incomplete")
-        states = environment._traj_buffer["states"]
-        qpos = states["robot", "qpos"][0, : length + 1]
-        objects = (
-            states["rigid_objects", profile.object_uid, "pose"][0, : length + 1]
-            .detach()
-            .cpu()
-            .numpy()
-        )
-        target_pose = (
-            environment.sim.get_rigid_object(profile.target_uid)
-            .get_local_pose(to_matrix=True)[0]
-            .detach()
-            .cpu()
-            .numpy()
-        )
-        tracer = state["tracer"]
-        delegate = state["delegate"]
-        guard = state["guard"]
-        if set(tracer.motions) != set(call_indices):
-            raise ValueError("not every configured source occurrence was executed")
-        retime_maps = (
-            {}
-            if not isinstance(delegate, TaskProgramMappedRetimeFactory)
-            else {item.call_index: item.result.time_map for item in delegate.records}
-        )
-        arrays = build_real2sim_execution_trace(
-            environment._active_task_program_bridge.execution_trace,
-            tracer.motions,
-            retime_maps=retime_maps,
-        )
-        if len(arrays["step_call_index"]) != length:
-            raise ValueError("observed action trace does not cover the rollout")
-        skills = {
-            index: prototypes[index].unit.source.skill_id for index in call_indices
-        }
-        events = _observed_program_phases(
-            skills,
-            guard.segments,
-            arrays["step_call_index"],
-            arrays["step_plan_index"],
-        )
-        phase_starts = {(index, name): start for start, index, _, name in events}
-        call_starts = {
-            index: next(start for start, call, _, _ in events if call == index)
-            for index in call_indices
-        }
-        matrices = np.repeat(np.eye(4)[None], length + 1, axis=0)
-        matrices[:, :3, :3] = Rotation.from_quat(objects[:, 3:7]).as_matrix()
-        matrices[:, :3, 3] = objects[:, :3]
-        outcomes = []
-        held_intervals = []
-        held_start = None
-        held_endpoint = None
-        held_call = None
-        for position, index in enumerate(call_indices):
-            skill = skills[index]
-            start = call_starts[index]
-            stop = (
-                call_starts[call_indices[position + 1]]
-                if position + 1 < len(call_indices)
-                else length
-            )
-            endpoint = guard.motion_targets[index]
-            outcome = {
-                "call_index": index,
-                "skill_id": skill,
-                "start_step": start,
-                "end_step": stop,
-                "passed": True,
-            }
-            if skill == "pick_up":
-                if held_start is not None:
-                    raise ValueError("a Pick cannot begin while the object is held")
-                lift = float(objects[stop, 2] - objects[start, 2])
-                outcome.update(lift_m=lift, passed=lift >= profile.minimum_lift_m)
-                held_start = phase_starts[index, "lift"]
-                held_endpoint, held_call = endpoint, index
-            else:
-                if held_start is None:
-                    if position:
-                        raise ValueError(
-                            "the call has no preceding held-object relation"
-                        )
-                    # Initial held state must still be verified by the live plan guard.
-                    held_start, held_endpoint, held_call = start, endpoint, index
-                if endpoint != held_endpoint:
-                    raise ValueError("a held interval cannot switch motion endpoints")
-                if skill == "place":
-                    release = phase_starts[index, "release"]
-                    held_intervals.append(
-                        (held_start, release, held_endpoint, held_call, index)
-                    )
-                    release_target = guard.semantic_release_targets.get(index)
-                    if release_target is None:
-                        raise ValueError("Place is missing its verified release target")
-                    xy_error = float(
-                        np.linalg.norm(objects[stop, :2] - release_target[:2, 3])
-                    )
-                    height_error, overhang = _support_errors(
-                        matrices[stop], target_pose, object_body, target_body
-                    )
-                    heading_ok, heading_metrics = _placement_heading_check(
-                        matrices[stop],
-                        release_target,
-                        profile.placement_yaw_tolerance_deg,
-                    )
-                    stable_start = max(phase_starts[index, "retract"], stop - 19)
-                    drift = float(
-                        np.linalg.norm(objects[stop, :3] - objects[stable_start, :3])
-                    )
-                    outcome.update(
-                        expected_object_xy=release_target[:2, 3].tolist(),
-                        placement_xy_error_m=xy_error,
-                        height_error_m=height_error,
-                        support_overhang_m=overhang,
-                        stability_start_step=stable_start,
-                        drift_m=drift,
-                        **heading_metrics,
-                        passed=(
-                            xy_error <= profile.placement_xy_tolerance_m
-                            and height_error <= profile.placement_height_tolerance_m
-                            and overhang <= profile.contact_depth_m
-                            and drift <= profile.maximum_drift_m
-                            and heading_ok
-                        ),
-                    )
-                    if profile.placement_yaw_tolerance_deg is not None:
-                        outcome["expected_object_heading_xy"] = release_target[
-                            :2, 0
-                        ].tolist()
-                    held_start = held_endpoint = held_call = None
-                elif skill != "move_held_object":
-                    raise ValueError("unsupported source-backed tabletop skill")
-            outcomes.append(outcome)
-        if held_start is not None:
-            held_intervals.append(
-                (held_start, length, held_endpoint, held_call, call_indices[-1])
-            )
-        held_checks = []
-        for start, stop, endpoint, first_call, last_call in held_intervals:
-            if not 0 <= start < stop <= length:
-                raise ValueError("observed held-object interval is invalid")
-            control_part, joint_ids = endpoint
-            tcp = (
-                environment.robot.compute_batch_fk(
-                    qpos=qpos[None, start : stop + 1, list(joint_ids)],
-                    name=control_part,
-                    to_matrix=True,
-                )[0]
-                .detach()
-                .cpu()
-                .numpy()
-            )
-            translation, rotation = _held_pose_errors(objects[start : stop + 1], tcp)
-            held_checks.append(
-                {
-                    "first_call_index": first_call,
-                    "last_call_index": last_call,
-                    "start_step": start,
-                    "end_step": stop,
-                    "held_translation_drift_m": translation,
-                    "held_rotation_drift_deg": rotation,
-                    "passed": (
-                        translation <= profile.held_translation_tolerance_m
-                        and rotation <= profile.held_rotation_tolerance_deg
-                    ),
-                }
-            )
-        metrics = {}
-        for name, aggregate in (
-            ("lift_m", min),
-            ("placement_xy_error_m", max),
-            ("height_error_m", max),
-            ("support_overhang_m", max),
-            ("drift_m", max),
-            ("placement_yaw_error_deg", max),
-        ):
-            values = [item[name] for item in outcomes if name in item]
-            if values:
-                metrics[name] = aggregate(values)
-        for name in ("held_translation_drift_m", "held_rotation_drift_deg"):
-            if held_checks:
-                metrics[name] = max(item[name] for item in held_checks)
-        task_ok = all(item["passed"] for item in (*outcomes, *held_checks))
-        validator = state["validator"]
-        phases = tuple(
-            validator.phase_policy(
-                skill,
-                phase,
-                0 if i == 0 else start,
-                events[i + 1][0] if i + 1 < len(events) else length + 1,
-                object_supported_by_target=(
-                    skill == "pick_up"
-                    and all(
-                        value <= profile.contact_depth_m
-                        for value in _support_errors(
-                            matrices[call_starts[index]],
-                            target_pose,
-                            object_body,
-                            target_body,
-                        )
-                    )
-                ),
-            )
-            for i, (start, index, skill, phase) in enumerate(events)
-        )
-        observed = validator.validate_observed(
-            qpos, object_poses=matrices, target_pose=target_pose, phases=phases
-        )
-        expected_reports = len(call_indices) * (1 if delegate is None else 2)
-        reports = validator.reports
-        collision_ok = len(reports) == expected_reports and all(
-            report.accepted for _, report in reports
-        )
-        motion_metrics = state["guard"].motion_metrics
-        motion_ok = set(motion_metrics) == set(call_indices) and all(
-            max(item.values(), default=float("inf")) <= 1.0 + 1e-6
-            for item in motion_metrics.values()
-        )
-        phase_validation = []
-        is_retime = isinstance(state["delegate"], TaskProgramMappedRetimeFactory)
-        duration_scale = 1.15 if state["recipe"] == "time_115" else 1.30
-        for index, samples in state["guard"].phase_samples.items():
-            permissions = {
-                item.name: item.allowed_operators
-                for item in prototypes[index].unit.phases
-            }
-            for name, source_count, final_count in samples:
-                skill = prototypes[index].unit.source.skill_id
-                retimed = (
-                    is_retime
-                    and "retime" in permissions.get(name, ())
-                    and (
-                        profile.retime_phase_allowlist is None
-                        or name in profile.retime_phase_allowlist.get(skill, ())
-                    )
-                )
-                expected_count = (
-                    math.ceil((source_count - 1) * duration_scale - 1e-9) + 1
-                    if retimed
-                    else source_count
-                )
-                phase_validation.append(
-                    {
-                        "call_index": index,
-                        "phase": name,
-                        "source_samples": source_count,
-                        "final_samples": final_count,
-                        "expected_samples": expected_count,
-                        "retimed": retimed,
-                        "passed": final_count == expected_count,
-                    }
-                )
-        phases_ok = set(state["guard"].phase_samples) == set(call_indices) and all(
-            item["passed"] for item in phase_validation
-        )
-        validation = ValidationResult(
-            (
-                ValidationCheck(
-                    "geometry",
-                    "passed",
-                    "prototype and physical geometry identities match",
-                ),
-                ValidationCheck(
-                    "motion_limits",
-                    "passed" if motion_ok else "failed",
-                    "sampled full-joint velocity and acceleration",
-                ),
-                ValidationCheck(
-                    "phase_mapping",
-                    "passed" if phases_ok else "failed",
-                    "semantic phase durations and sample mapping",
-                ),
-                ValidationCheck(
-                    "plan_collision",
-                    "passed" if collision_ok else "failed",
-                    "sampled plans with gripper contact projection",
-                ),
-                ValidationCheck(
-                    "observed_collision",
-                    "passed" if observed.accepted else "failed",
-                    str(observed.reason or "sampled actual states"),
-                ),
-                ValidationCheck(
-                    "task",
-                    "passed" if task_ok else "failed",
-                    metrics=metrics,
-                ),
-            )
-        )
-        if not validation.accepted:
-            raise ValueError(
-                "Real2Sim measured acceptance failed: "
-                + str(
-                    [
-                        (item.check_id, item.status, item.detail)
-                        for item in validation.checks
-                    ]
-                )
-            )
-        variant = state["variant"]
-        payload = {
-            "program": tracer.program_fingerprint,
-            "layout": variant.variant_id,
-            "recipe": state["recipe"],
-            "seed": profile.seed,
-            "prototypes": [item.prototype_sha256 for item in declarations],
-        }
-        if any(item.refinement is not None for item in declarations):
-            payload["refinement"] = [
-                None if item.refinement is None else item.refinement.fingerprint
-                for item in declarations
-            ]
-        if profile.retime_phase_allowlist is not None:
-            payload["retime_phase_allowlist"] = profile.retime_phase_allowlist
-        candidate = (
-            "candidate:"
-            + hashlib.sha256(
-                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest()
-        )
-        trace_dir = (
-            Path(recorder.dataset_full_path) / "meta" / "real2sim" / "host-traces"
-        )
-        trace_dir.mkdir(parents=True, exist_ok=True)
-        trace = trace_dir / (
-            hashlib.sha256(
-                (candidate + ":" + str(state["attempt_id"])).encode()
-            ).hexdigest()
-            + ".npz"
-        )
-        with trace.open("xb") as stream:
-            np.savez_compressed(stream, **arrays)
-            stream.flush()
-            os.fsync(stream.fileno())
-        observed_path = trace.with_name(trace.stem + "-observed.npz")
-        with observed_path.open("xb") as stream:
-            np.savez_compressed(
-                stream,
-                object_pose=objects,
-                target_pose=target_pose,
-                timestamps=np.arange(length + 1, dtype=np.float64)
-                * environment.step_dt,
-            )
-            stream.flush()
-            os.fsync(stream.fileno())
-        bundles, calls = {}, []
-        variants = (
-            {}
-            if delegate is None
-            else {item.call_index: item for item in delegate.records}
-        )
-        for item in declarations:
-            index, root = item.call_index, Path(item.prototype_manifest).parent
-            motion = tracer.motions[index]
-            if motion.authority in {"eef_pose", "hybrid"} and (
-                motion.fk_position_error_m is None
-                or motion.fk_rotation_error_rad is None
-            ):
-                raise ValueError(
-                    "Cartesian prototype is missing numerical FK residuals"
-                )
-            bundles[str(index)] = {
-                "prototype_manifest": _artifact(root / "prototype.json"),
-                "normalized_arrays": _artifact(root / "normalized.npz"),
-                "source_manifest": _artifact(root / "source" / "trajectory.json"),
-                "source_arrays": _artifact(root / "source" / "trajectory.npz"),
-            }
-            bundles[str(index)].update(profile.source_artifacts.get(index, {}))
-            call = {
-                "call_index": index,
-                "source_bundle": str(index),
-                "geometry_family_id": variant.variant_id,
-                "source_sample_offset": motion.source_sample_offset,
-                "operator": "nominal",
-                "prototype_sha256": item.prototype_sha256,
-                "source_id": motion.source_id,
-                "source_revision": motion.source_revision,
-                "source_unit_id": motion.unit_id,
-                "source_origin": motion.origin,
-                "authority": motion.authority,
-                "pose_origin": motion.pose_origin,
-                "object_supported_regrasp": motion.object_supported_regrasp,
-                "semantic_anchor_position_correction_m": motion.semantic_anchor_position_correction_m,
-                "semantic_anchor_rotation_correction_rad": motion.semantic_anchor_rotation_correction_rad,
-                "ik_smoothing_iterations": motion.ik_smoothing_iterations,
-                "ik_hold_smoothing_iterations": motion.ik_hold_smoothing_iterations,
-                "ik_smoothing_trigger_fraction": guard.ik_smoothing_trigger_fraction,
-                "fk_position_error_m": motion.fk_position_error_m,
-                "fk_rotation_error_rad": motion.fk_rotation_error_rad,
-            }
-            if motion.refinement_report:
-                call["refinement"] = dict(motion.refinement_report)
-            if isinstance(delegate, TaskProgramSameGridExpansionFactory):
-                record = variants[index]
-                call.update(
-                    operator=record.operator,
-                    seed=record.seed,
-                    candidate_id=record.candidate_id,
-                    variant_ordinal=record.variant_ordinal,
-                    attempted=record.attempted,
-                    rejected=dict(record.rejected),
-                    locked_joint_indices=record.locked_joint_indices,
-                    locked_joint_names=[
-                        environment.robot.joint_names[index]
-                        for index in record.locked_joint_indices
-                    ],
-                    motion_headroom_fraction=record.motion_headroom_fraction,
-                )
-            elif isinstance(delegate, TaskProgramMappedRetimeFactory):
-                record = variants[index]
-                call.update(operator="retime", duration_scale=record.duration_scale)
-            calls.append(call)
-        first = prototypes[call_indices[0]].unit.source
-        origins = {prototype.unit.source.origin for prototype in prototypes.values()}
-        identity = CandidateIdentity(
-            variant.variant_id,
-            state["preparation"].initial_state_id,
-            candidate,
-            variant.variant_id,
-            first.source_id,
-            first.source_revision,
-            "real2sim_program_episode",
-            attempt_id=state["attempt_id"],
-        )
-        return Real2SimCaptureRequest(
-            identity,
-            validation,
-            f"episode:{candidate}:{state['attempt_id']}",
-            f"commit:{candidate}:{state['attempt_id']}",
-            observations,
-            "joint_position",
-            {
-                "origin": first.origin if len(origins) == 1 else "mixed",
-                "gripper_contact": profile.gripper_contact.to_dict(),
-                "retime_phase_allowlist": profile.retime_phase_allowlist,
-                "acceleration_limit_origin": profile.acceleration_limit_origin,
-                "acceleration_limits": profile.acceleration_limits,
-                "velocity_limit_origin": profile.velocity_limit_origin,
-                "velocity_limits": profile.velocity_limits,
-                "sampled_motion_limits": {
-                    str(index): dict(value) for index, value in motion_metrics.items()
-                },
-                "phase_duration_validation": phase_validation,
-                "task_call_validation": outcomes,
-                "held_interval_validation": held_checks,
-                "layout": state["layout"],
-                "layout_parameters": state["layout_parameters"],
-                "scene_variant": {
-                    "variant_id": variant.variant_id,
-                    "parent_scene_id": variant.parent_scene_id,
-                    "seed": variant.seed,
-                    "ordinal": variant.ordinal,
-                    "pose_changes": [
-                        {"entity_uid": item.entity_uid, "arena_pose": item.arena_pose}
-                        for item in variant.pose_changes
-                    ],
-                },
-                "scene_initial_state": state["preparation"].metadata,
-                "recipe": state["recipe"],
-                "sampled_plan_collisions": [
-                    {"unit_id": unit, **asdict(check)} for unit, check in reports
-                ],
-                "sampled_observed_collision": asdict(observed),
-                "real2sim_observed_geometry": _artifact(observed_path),
-                "real2sim_source_artifacts": bundles,
-                "real2sim_lineage": {
-                    "scene_revision": profile.scene_revision,
-                    "program_fingerprint": tracer.program_fingerprint,
-                    "trace": _artifact(trace),
-                    "calls": calls,
-                },
-            },
+        return _capture_tabletop_episode(
+            environment,
+            result,
+            profile=profile,
+            state=state,
+            prototypes=prototypes,
+            call_indices=call_indices,
+            object_body=object_body,
+            target_body=target_body,
+            observations=observations,
+            recorder=recorder,
+            declarations=declarations,
         )
 
     def record_failed_attempt(environment, result, error):

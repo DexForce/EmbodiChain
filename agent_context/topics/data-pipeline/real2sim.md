@@ -3,6 +3,44 @@
 `data_pipeline.real2sim` owns source units, explicit joint/frame/time conversion,
 event maps, frozen reference prototypes and hash-checked JSON/NPZ bundles.
 
+## Task-specific demonstration skills
+
+`demo_skill.py` owns `RobotDemonstration`, `DemoSkillSpec`, and immutable
+`DemoSkillArtifact` / `DemoSkillReference` values. `demo_skill_io.py` persists
+bounded, hash-checked bundles. `real2sim build-demo-skill|validate-demo-skill`
+prepares or verifies assets without simulation. These recordings need no standard
+skill label; existing `Real2SimTrajectory` and prototype formats remain strict.
+
+Raw observed joints, actual submitted commands and explicitly adapted nominal
+references have separate ownership. A reference retains raw-frame brackets,
+hard events and a source mask for generated connections; it cannot widen source
+phase permissions. Preparation establishes no physical-success credit. A skill
+requires declared measured terminal predicates, and missing contact evidence
+cannot establish no-contact. Asset time maps hash their complete typed fields,
+independent of NumPy print options. Prepared assets using the prior printed
+representation require rebuilding and updated pinned integration digests. Qpos replay freezes scene references within explicit
+entry tolerances; XY/yaw transfer requires calibrated TCP poses, unchanged physical
+geometry, compatible authority and declared displacement limits.
+
+`atomic_actions.ExecuteDemoSkill` consumes `DemoSkillMotionProvider` through the
+ordinary nominal-source interface. Its optional per-observation monitor runs
+before the next runner command and owns only evidence, not task-state commits.
+The terminal effect boundary commits verified held-state changes only after
+host approval; absent host results remain pending even if the source accepts. Free entry
+connections require explicit permission and independent full-plan collision
+validation; contact entry never gains an automatic approach. Source phases and
+events are monitoring/edit boundaries, not independent recovery boundaries.
+
+Configured registered calls use the allowlisted `demo_skill` lowerer and
+occurrence-bound `demo_skill` source declarations, sealed to asset content and
+compiled-program identity. Native calls remain unbound. The Expansion Engine
+owns qualified collection; its source adapter retains standard prototype guards
+for explicitly selected occurrences when a program mixes source families.
+See `examples/expansion/demo_skill/` for migration of the existing real DROID
+carton case, with original state and prepared nominal commands stored separately.
+
+## Standard manipulation prototypes
+
 Normalization preflights output sample count and estimated numeric working
 memory before allocating its grid or casting event indices. Preparation,
 prototype readers and CLI accept caller-owned budgets; bundle metadata cannot
@@ -40,7 +78,13 @@ observation while lift displacement stays gravity-aligned. Place aligns the
 source release anchor to the current semantic target and records the correction.
 An optional planner collision check is reported separately from task acceptance.
 The tabletop host requires source robot, object and target geometry hashes to
-match live physical assets. Older source bundles without hashes remain valid
+match live physical assets. Robot identity uses named joint/kinematic and
+collision descriptions plus mesh contents, excluding assembly timestamps,
+cache paths and visuals. `data_pipeline.real2sim._geometry` owns the versioned
+digest and independently pinned legacy-reference aliases; aliases must never
+be inferred from the live model or written into immutable source bundles.
+Other legacy robot digests still require exact original URDF/mesh bytes.
+Older source bundles without hashes remain valid
 for explicit diagnostics but cannot use the qualified tabletop owner. In EEF
 phases, numerical IK jitter can be smoothed only if the TCP error tube and
 motion limits remain satisfied. Contact
@@ -170,3 +214,14 @@ Focused coverage: `tests/data_pipeline/test_real2sim_normalize.py`,
 `tests/sim/motion/expansion/test_mapped_timing.py`, and matching Atomic Action
 and Task Program source-binding tests. Synthetic fixtures establish software
 contracts, not real-data physical qualification.
+
+## Batched offline collection
+
+The original qualified tabletop owner retains its B=1/no-sensor contract.
+[Expansion Engine](../expansion-engine/expansion-engine.md) provides a separate
+World owner that binds each source runtime to one physical row and merges actual
+commands into one batched step. It reuses the same source preparation and measured
+qualification through `Real2SimTabletopSource` and explicit measured
+`Real2SimTabletopEpisodeEvidence`; the original owner adapts into the same interface.
+It adds bounded native camera media, frozen artifacts
+and LeRobot export. Source permissions and contact protections are unchanged.

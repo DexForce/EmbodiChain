@@ -10,8 +10,10 @@
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
 | Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
-| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact_sensor.py` |
-| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/_warp/contact.py` |
+| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact/sensor.py` |
+| Joint and contact acquisition windows | `embodichain/lab/sim/sensors/contact/observation.py` |
+| Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
+| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
 
 Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
 a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`
@@ -25,7 +27,7 @@ Create sensors through `SimulationManager.add_sensor()`. The explicit manager
 owns the World, ordered Arenas, preparation and semantic parent resolution;
 sensors must not rediscover a singleton manager. Cameras are render features
 on both physics backends. Contact availability is a backend capability checked
-before preparation and again after Newton AutoSolver selection.
+before preparation and again after DexUni's scene-based dispatch.
 
 Robot-mounted cameras are declared in `RobotCfg.sensors` with robot-local
 parent links. `SimulationManager.add_robot()` initializes them only when the

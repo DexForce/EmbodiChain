@@ -37,6 +37,9 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import VisualizationCfg
+from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
+    _read_revolute_qpos_limits,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
     UsdSceneBinding,
@@ -95,7 +98,7 @@ def _mesh_collision_cfg(max_convex_hull_num: object) -> MeshCollisionCfg:
     return MeshCollisionCfg(
         approximation="convex_decomposition",
         max_hulls=hull_count,
-        acd_method="vhacd",
+        acd_method="visacd",
     )
 
 
@@ -645,6 +648,7 @@ def _add_articulations(
             usdc_path = runtime_path
         if entry.get("fix_base", True) is not True:
             raise ValueError(f"Articulation entry {uid!r} must set fix_base=true.")
+        joint_limits = _read_revolute_qpos_limits(usdc_path) or None
         articulations.append(
             sim.add_articulation(
                 ArticulationCfg(
@@ -660,6 +664,8 @@ def _add_articulations(
                     ),
                     root_props=ArticulationRootPropertiesCfg(fixed_base=True),
                     build_pk_chain=False,
+                    asset_physics_mode="overlay" if joint_limits else "preserve",
+                    qpos_limits=joint_limits,
                 )
             )
         )
@@ -950,7 +956,11 @@ def _export_material_without_texture(
     material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
     _set_safe_material_input(
         source_material=source_material,
-        getter_name="get_base_color",
+        getter_name=(
+            "get_base_color_linear"
+            if callable(getattr(source_material, "get_base_color_linear", None))
+            else "get_base_color"
+        ),
         shader=shader,
         input_name="diffuseColor",
         value_type=Sdf.ValueTypeNames.Color3f,

@@ -28,7 +28,7 @@ test('browse subsystem views and restore a module with its documentation', async
     ['simulation', 'Simulation', 'Gizmo', 'FIG. 03'],
     ['simulation', 'Simulation', 'Object backend views', 'FIG. 03'],
     ['data-learning', 'Data & Learning', 'LeRobot recording', 'FIG. 04'],
-    ['generation-tooling', 'Generation & Toolkits', 'SimReady pipeline', 'FIG. 05'],
+    ['generation-tooling', 'Generation & Toolkits', 'Asset Engine', 'FIG. 05'],
     ['toolkits', 'Toolkits', 'Antipodal grasp generator', 'FIG. 06'],
     ['toolkits', 'Toolkits', 'URDF connections', 'FIG. 06'],
     ['toolkits', 'Toolkits', 'URDF collision processor', 'FIG. 06'],
@@ -131,7 +131,8 @@ test('reading view keeps text legible and local focus survives navigation', asyn
   await expect(
     page.getByRole('button', { name: 'Direct neighbours only', exact: true }),
   ).toBeDisabled();
-  await page.getByRole('button', { name: 'Select Trajectory augmentation', exact: true }).click();
+  const session = snapshot.nodes.find((node) => node.id === 'augmentation')!;
+  await page.getByRole('button', { name: `Select ${session.label}`, exact: true }).click();
   await expect(page.getByText('Relationships not yet mapped in this view.')).toBeVisible();
 });
 

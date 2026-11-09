@@ -7,6 +7,7 @@
 | Public simulation facade | `embodichain/lab/sim/__init__.py` |
 | World, registries, readiness and stepping | `embodichain/lab/sim/sim_manager.py` → `SimulationManager`, `SimulationManagerCfg` |
 | Declaration, source resolution and binding | `embodichain/lab/sim/spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` |
+| Fresh static USD reads and owned authored link meshes | `embodichain/lab/sim/spawn/source_geometry.py` |
 | Manager-level backend hooks and capabilities | `embodichain/lab/sim/physics/` |
 | Object-level Scene batch adapters | `embodichain/lab/sim/objects/backends/scene.py`, `newton.py` |
 | Object, renderer and physics configuration | `embodichain/lab/sim/cfg/` (`cfg/__init__.py` is the public facade) |
@@ -65,7 +66,14 @@ that state. Flat-PLY point opacity/SH overrides create immutable resource varian
 at birth; selecting prepared elements changes appearance without uploading point
 arrays each frame. Variants remain separately resident and share only within
 their clone group; modifying points with an existing LoD sidecar is rejected.
-Gaussian USD loading remains deferred to qualified DexSim 0.6.0 support.
+Gaussian USD loading remains deferred until its import path is separately validated.
+
+`objects/backends/collision.py` owns physical collision descriptors and strict
+cooked convex/box snapshots through `capture_physical_collision_geometry`.
+Strict snapshots preserve float64 geometry and requested native body offsets;
+ordinary descriptor getters keep their existing precision and shape support.
+[Scene services](../scene-services/scene-services.md) assemble observed frames and
+native ownership around those values without duplicating SDK geometry reads.
 
 `spawn/_usd_assets.py` materializes package textures into `SpawnScene`-owned
 files. They survive topology rebuilds and are deleted after native Scene closure;
@@ -76,6 +84,16 @@ into manager declarations. Scene replication and collision isolation belong
 to Spawn, not per-object collision-group calculations. Backend differences
 belong in physics hooks/capabilities or object adapters, not task-side native
 access. Contact sensors use the finalized Scene's `ContactQuery` boundary.
+
+`spawn.source_geometry` owns `UsdSourceSnapshot`, `read_usd_source` and
+`LinkMesh` for Object source adapters and static Scene consumers. Reads use fresh
+anonymous USD layers and recheck captured bytes. Explicit snapshots can be
+shared within one assembly; there is no process-wide source cache. Polygon
+inputs and fan-triangulated owner-local meshes preserve order and apply the
+deployment scale once. Source meshes retain their input identity and do not
+certify native cooked shapes. Current poses, effective joint limits and physical
+collision shapes remain Object/Articulation queries; control-role interpretation
+and stricter surface qualification remain Scene services.
 
 [Scene services](../scene-services/scene-services.md) compose existing configs,
 propose layouts and read/change physical state through these owners. They do
@@ -101,6 +119,18 @@ state, or physics use. `BaseEnv` supplies it between scene setup and dependent
 initialization; standalone callers supply it explicitly. `update()` also
 prepares defensively. See [lifecycle](lifecycle.md) for retries, replacement,
 reset ordering, runtime controls and teardown.
+
+`simulation_time` is a read-only manager-relative clock: successful `update()`
+substeps add their actual durations before `after_substep` callbacks. Explicit
+warmup updates count; preparation/render synchronization at zero duration does
+not advance time, and object/environment reset does not rewind it. A fresh
+manager starts at zero. Episode-relative Task Program clocks can have an offset;
+physical evidence must validate that mapping instead of mixing timestamp domains.
+
+`physics_step_index` counts completed manager substeps before each
+`after_substep` callback, including runs without rendering. Reads, selected
+resets and topology rebuilds leave it unchanged. Consumers that cache
+topology-dependent state must also validate their binding, not only this count.
 
 ## Quaternion and pose convention
 

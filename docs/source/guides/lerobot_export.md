@@ -9,8 +9,12 @@ in the SDK's existing environment:
 
 | Component | Python | LeRobot dependency |
 | --- | --- | --- |
-| EmbodiChain collection | `>=3.10` | `>=0.4.4,<0.5` |
+| EmbodiChain collection (older profile) | 3.10 / 3.11 | `==0.4.4` |
+| EmbodiChain collection / ACT (newer profile) | 3.12 workflow | `lerobot[training]==0.6.1` |
 | Standalone exporter | `>=3.12` | `lerobot[dataset]==0.6.1` |
+
+For official ACT training and simulation evaluation, see {doc}`lerobot`.
+Export is a data interoperability workflow, not a training launcher.
 
 The exporter lives under `tools/lerobot_export/` and does not import or install
 EmbodiChain. Its separate environment avoids changing the simulator's Python
