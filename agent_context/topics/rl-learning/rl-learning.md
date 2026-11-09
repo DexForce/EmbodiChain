@@ -88,13 +88,19 @@ Select this path with `trainer.learning_env`, either as a registered name or
 as a mapping with `name` and `cfg`.
 
 `build_learning_env()` resolves factories registered with
-`@register_learning_env`. A learning environment implements the
-`LearningVecEnv` protocol. Differentiable algorithms additionally require
-`DifferentiableVecEnv.detach_state()` as the truncated-backpropagation
+`@register_learning_env`. Online workflows may supply `resources` to
+`build_learning_policy_runtime`: the objects are passed by reference to the selected
+environment factory, and keys cannot also appear in its scalar configuration.
+Custom registered policies may implement `from_config(config, *, obs_space,
+action_space, device)` to own their configuration and space validation. A learning environment implements the
+`LearningEnvProtocol` protocol. The former `LearningVecEnv`,
+`DifferentiableVecEnv` and `ScheduledDifferentiableVecEnv` names remain exact
+aliases for downstream import compatibility. Differentiable algorithms additionally require
+`DifferentiableEnvProtocol.detach_state()` as the truncated-backpropagation
 boundary.
 
 Variable-horizon APG environments may also implement
-`ScheduledDifferentiableVecEnv.prepare_differentiable_rollout()`. Its
+`ScheduledDifferentiableEnvProtocol.prepare_differentiable_rollout()`. Its
 `DifferentiableRolloutSpec` selects the next reset's complete horizon,
 per-environment objective scale, and scalar rollout metadata.
 
@@ -137,10 +143,10 @@ RolloutKind.DIFFERENTIABLE
   → DifferentiableTrainer
   → DifferentiableCollector
   → graph-connected DifferentiableRollout segments
-  → APG update
+  → APG or APGActorCritic update
 ```
 
-PPO and GRPO use `STANDARD`. APG uses `DIFFERENTIABLE`.
+PPO and GRPO use `STANDARD`. APG and APGActorCritic use `DIFFERENTIABLE`.
 `get_trainer_class()` centralizes this selection for lightweight learning
 environments.
 
@@ -156,12 +162,24 @@ environment-provided horizon, mask post-terminal rewards, and accumulate full
 trajectory gradients before one optimizer step. Read the training detail for
 the complete-rollout safety and normalization contracts.
 
+`apg_actor_critic` adds terminal-value gradients, detached lambda-return critic
+regression and a separate critic optimizer. Actor/critic parameter groups must
+be disjoint. Time truncations require the full pre-reset observation batch in
+`info["terminal_observation"]`; hard termination suppresses bootstrap. Optional
+soft continuation retains its input derivative. Task-data validity masks are
+detached. See the field contract in `DifferentiableEnvProtocol` and
+`DifferentiableTransition`. Normalizer updates belong between optimizer updates.
+
+`DifferentiableTrainer.update_once()` provides the collection/update boundary
+for online model learning, recording counters and training metrics. The outer
+workflow owns evaluation and persistence when using this single-update API.
+
 ## Component Ownership
 
 | Component | Owner |
 |-----------|-------|
 | Algorithm base, rollout kind, optimizer scheduling | `algo/base.py`, `utils/optimizer.py` |
-| PPO, GRPO, APG implementations | `algo/ppo.py`, `algo/grpo.py`, `algo/apg.py` |
+| Algorithm implementations | `algo/ppo.py`, `algo/grpo.py`, `algo/apg.py`, `algo/apg_actor_critic.py` |
 | Standard rollout storage and views | `buffer/` |
 | Standard and differentiable collection | `collector/` |
 | Policy interface, actor-critic, actor-only, policy builder | `learning/rl/policies/` |
@@ -226,6 +244,14 @@ registry remain in `learning/rl/policies`; their consumers import from
 import from `embodichain.learning.models`. See [learning layers](../learning-layers/learning-layers.md)
 for differentiable IK ownership. Root exports load on demand; importing a
 lightweight APG component must not eagerly load the simulator-backed Trainer.
+
+APG Actor-Critic can call `policy.update_critic_normalization()` after actor
+backward and before constructing detached lambda targets. Set
+`update_critic_normalization=True` for that contract; the default leaves critic
+statistics unchanged. Actor collection and backward keep critic parameters and
+statistics fixed while preserving derivatives through critic inputs. Statistics
+include weighted current states and valid bootstrap successors absent from the
+next current-state row; complete-rollout post-terminal suffixes are excluded.
 
 ## Invariants
 

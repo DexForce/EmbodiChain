@@ -1,0 +1,44 @@
+trainer:
+  exp_name: g1_motion_ppo_smoke
+  gym_config: extensions/embodichain_tasks/configs/tasks/locomotion/tracking/g1_motion/env.newton.yaml
+  seed: 0
+  device: cuda:0
+  headless: true
+  num_envs: 32
+  iterations: 20
+  buffer_size: 16
+  enable_eval: false
+  save_frequency_updates: 20
+  use_wandb: false
+policy:
+  name: actor_critic
+  actor_obs_normalization: true
+  critic_obs_normalization: true
+  obs_groups:
+    actor: [policy]
+    critic: [critic]
+  actor:
+    type: mlp
+    network_cfg:
+      hidden_sizes: [256, 128]
+      activation: elu
+  critic:
+    type: mlp
+    network_cfg:
+      hidden_sizes: [256, 128]
+      activation: elu
+  initial_action_std: 0.2
+algorithm:
+  name: ppo
+  cfg:
+    optimizer:
+      name: adam
+      learning_rate: 0.0003
+    n_epochs: 2
+    batch_size: 256
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_coef: 0.2
+    ent_coef: 0.0
+    vf_coef: 1.0
+    max_grad_norm: 1.0
