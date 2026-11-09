@@ -66,7 +66,7 @@ vendor level for shared archives. The legacy `robot_assets`, `w1_assets`,
 `so101_assets` and migrated `locomotion_assets` names forward to the same class objects.
 Discovery excludes these imported aliases so IDs register once. Keep class names,
 asset IDs, URLs, digests and cache prefixes stable across ownership moves.
-All eleven EEF asset classes also live in vendor/model `assets.py` modules
+EEF asset classes live in vendor/model `assets.py` modules
 in `embodichain_robots`, registered once under category `eef` by the same
 catalog. Their former `embodichain.data.assets.eef_assets` module and aggregate
 class exports are removed; use the canonical modules or `get_data_class()`.

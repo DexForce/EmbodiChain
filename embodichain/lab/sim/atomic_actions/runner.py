@@ -428,6 +428,7 @@ class ExecutionRunner:
         self._message: str | None = None
         self._effect_context: PlanningContext | None = None
         self._effect_tick: ExecutionTick | None = None
+        self._external_effect_attempt: tuple[int, int] | None = None
         self._armed_targets: dict[tuple[str, str], RuntimeEndpointTarget] = {}
         self._pending_revision: ResolvedActionRequest | None = None
 
@@ -566,7 +567,9 @@ class ExecutionRunner:
         Args:
             effect_result: Optional correlated effect result. If this call
                 occurs before the next cycle is due, it is not consumed and
-                must be supplied again on a later call.
+                must be supplied again on a later call. A monitored nominal
+                source must also approve this result. Once an explicit result
+                is supplied, unresolved rows continue waiting for a host update.
             effect_verifier: Optional synchronous verifier for the current
                 pending request. It runs after a fresh due-cycle observation
                 and before the session consumes the result. It is not called
@@ -720,14 +723,118 @@ class ExecutionRunner:
                 context=context,
             )
 
+        motion_monitor = self._session.nominal_motion_monitor
+        if motion_monitor is not None:
+            try:
+                reference = self._session.last_commanded_plan_sample
+                motion_monitor.observe_execution(
+                    context,
+                    None if reference is None else reference[1],
+                    terminal=self._session.pending_effect is not None,
+                )
+            except Exception as exc:
+                return self._fail(
+                    f"Nominal motion contract failed: {type(exc).__name__}: {exc}",
+                    context=context,
+                )
+
         pending_effect = self._session.pending_effect
         if (
             pending_effect is not None
-            and (effect_verifier is not None or physical_effect_verifier is not None)
+            and (
+                effect_verifier is not None
+                or physical_effect_verifier is not None
+                or (
+                    motion_monitor is not None
+                    and motion_monitor.owns_effect(pending_effect)
+                )
+            )
             and context.robot.timestamp <= pending_effect.deadline
         ):
             try:
-                if physical_effect_verifier is not None:
+                if motion_monitor is not None and motion_monitor.owns_effect(
+                    pending_effect
+                ):
+                    own = motion_monitor.verify_effect(context, pending_effect)
+                    if type(own) is not EffectVerificationResult:
+                        raise TypeError(
+                            "nominal verifier returned an invalid effect result"
+                        )
+                    if own.verification_id != pending_effect.verification_id:
+                        raise ValueError(
+                            "nominal effect result does not match the pending boundary"
+                        )
+                    # A host decision and the source contract are independent
+                    # approvals. Keep the host's identity, outcomes and recovery
+                    # masks whether it supplies a value or a callback.
+                    semantic = effect_result
+                    attempt = (
+                        pending_effect.invocation_index,
+                        pending_effect.attempt_generation,
+                    )
+                    if semantic is not None:
+                        self._external_effect_attempt = attempt
+                    elif not pending_effect.expected_effects.is_empty:
+                        if physical_effect_verifier is not None:
+                            assert evidence is not None
+                            semantic = physical_effect_verifier(
+                                context, evidence, pending_effect
+                            )
+                        elif effect_verifier is not None:
+                            semantic = effect_verifier(context, pending_effect)
+                        if (
+                            physical_effect_verifier is not None
+                            or effect_verifier is not None
+                        ) and type(semantic) is not EffectVerificationResult:
+                            raise TypeError(
+                                "semantic verifier returned an invalid effect result"
+                            )
+                    if semantic is None and (
+                        not pending_effect.expected_effects.is_empty
+                        or self._external_effect_attempt == attempt
+                    ):
+                        # Symbolic effects always require host approval. Once a
+                        # host claims even an effectless boundary, absent updates
+                        # must not silently become source-only approvals.
+                        unresolved = torch.zeros_like(pending_effect.env_mask)
+                        semantic = EffectVerificationResult(
+                            verification_id=pending_effect.verification_id,
+                            success_mask=unresolved,
+                            failure_mask=unresolved,
+                            invalidation_mask=unresolved,
+                            retry_mask=unresolved,
+                        )
+                    if semantic is None:
+                        effect_result = own
+                    else:
+                        if type(semantic) is not EffectVerificationResult:
+                            raise TypeError(
+                                "semantic verifier returned an invalid effect result"
+                            )
+                        if semantic.verification_id != pending_effect.verification_id:
+                            raise ValueError(
+                                "external effect result does not match the pending boundary"
+                            )
+                        if (
+                            semantic.success_mask.shape != own.success_mask.shape
+                            or semantic.success_mask.device != own.success_mask.device
+                        ):
+                            raise ValueError(
+                                "source and external effect masks must share shape and device"
+                            )
+                        failed = own.failure_mask | semantic.failure_mask
+                        effect_result = replace(
+                            semantic,
+                            success_mask=own.success_mask
+                            & semantic.success_mask
+                            & ~failed,
+                            failure_mask=failed,
+                            invalidation_mask=own.invalidation_mask
+                            | semantic.invalidation_mask,
+                            retry_mask=(own.retry_mask | semantic.retry_mask) & failed,
+                        )
+
+                elif physical_effect_verifier is not None:
                     assert evidence is not None
                     effect_result = physical_effect_verifier(
                         context,
@@ -971,6 +1078,10 @@ class ExecutionRunner:
         else:
             self._status = RunnerStatus.FAILED
             self._message = f"{reason} Safe stop acknowledgement failed."
+        cleanup = self._session.abort_plan_lifecycle(reason)
+        if cleanup:
+            self._status = RunnerStatus.FAILED
+            self._message = f"{self._message} {cleanup}"
         self._clear_effect_boundary()
         self._pending_revision = None
         self._next_step_at = self._clock_now()
@@ -1112,6 +1223,7 @@ class ExecutionRunner:
         """Clear a remembered external effect-verification boundary."""
         self._effect_context = None
         self._effect_tick = None
+        self._external_effect_attempt = None
 
     def _clock_now(self) -> float:
         """Read and validate the injected monotonic clock."""
@@ -1310,7 +1422,8 @@ class ExecutionRunner:
         records = list(dispatches or ())
         records.extend(self._safe_stop(context))
         self._status = RunnerStatus.FAILED
-        self._message = message
+        cleanup = self._session.abort_plan_lifecycle(message)
+        self._message = message if cleanup is None else f"{message} {cleanup}"
         self._clear_effect_boundary()
         self._pending_revision = None
         self._next_step_at = self._clock_now()

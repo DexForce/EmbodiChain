@@ -76,6 +76,26 @@ def _pose(x: float, y: float = 0.0, z: float = 0.0) -> torch.Tensor:
     return pose
 
 
+def _contact_trace(
+    *, contact_distances=None, contact_target="object", contact_targets=None, **channels
+):
+    """Fixture contacts are 1 mm on both fingers, independent of joint values."""
+    if contact_distances is None:
+        contact_distances = {
+            part: torch.full((*qpos.shape[:2], 2), 0.001)
+            for part, qpos in channels.get("gripper_qpos", {}).items()
+        }
+    return ReplayObservationTrace(
+        **channels,
+        gripper_contact_distances=contact_distances,
+        gripper_contact_targets=(
+            contact_targets
+            if contact_targets is not None
+            else {part: contact_target for part in contact_distances}
+        ),
+    )
+
+
 def _case(skill_id: str, **parameters: object) -> BenchmarkCase:
     return BenchmarkCase(
         suite_version="test_v1",
@@ -174,14 +194,14 @@ def test_hand_over_physical_evaluator_uses_phase_local_observations(
             "right_hand": torch.tensor([1.0]),
         },
         replay_traces={
-            "handover_pickup": ReplayObservationTrace(
+            "handover_pickup": _contact_trace(
                 gripper_qpos={"left_hand": holding, "right_hand": released}
             ),
-            "handover_transfer": ReplayObservationTrace(
+            "handover_transfer": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": holding, "right_hand": holding},
             ),
-            "handover_exchange": ReplayObservationTrace(
+            "handover_exchange": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": released, "right_hand": holding},
             ),
@@ -234,14 +254,14 @@ def test_hand_over_requires_receiver_release_at_terminal_target() -> None:
             "right_hand": torch.tensor([1.0]),
         },
         replay_traces={
-            "handover_pickup": ReplayObservationTrace(
+            "handover_pickup": _contact_trace(
                 gripper_qpos={"left_hand": holding, "right_hand": released}
             ),
-            "handover_transfer": ReplayObservationTrace(
+            "handover_transfer": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": holding, "right_hand": holding},
             ),
-            "handover_exchange": ReplayObservationTrace(
+            "handover_exchange": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": released, "right_hand": holding},
             ),
@@ -264,22 +284,22 @@ def test_hand_over_requires_receiver_release_at_terminal_target() -> None:
 
 
 @pytest.mark.parametrize(
-    ("offset", "yaw", "left_qpos", "right_qpos", "failure_stage"),
+    ("offset", "yaw", "left_distance", "right_distance", "failure_stage"),
     [
-        (0.005, 0.0, 0.02, 0.02, None),
-        (0.02, 0.0, 0.02, 0.02, "moved"),
-        (0.0, math.pi / 2, 0.02, 0.02, "moved"),
-        (0.0, 0.0, 0.02, 0.026, "dual_grasped"),
-        (0.0, 0.0, 0.0255, 0.02, "dual_grasped"),
-        (0.0, 0.0, 0.0, 0.02, "dual_grasped"),
-        (0.0, 0.0, None, 0.02, "dual_grasped"),
+        (0.005, 0.0, 0.001, 0.001, None),
+        (0.02, 0.0, 0.001, 0.001, "moved"),
+        (0.0, math.pi / 2, 0.001, 0.001, "moved"),
+        (0.0, 0.0, 0.001, float("inf"), "dual_grasped"),
+        (0.0, 0.0, 0.005, 0.001, "dual_grasped"),
+        (0.0, 0.0, float("inf"), 0.001, "dual_grasped"),
+        (0.0, 0.0, None, 0.001, "dual_grasped"),
     ],
 )
 def test_coordinated_pickment_evaluator_uses_all_physical_stages(
     offset: float,
     yaw: float,
-    left_qpos: float | None,
-    right_qpos: float,
+    left_distance: float | None,
+    right_distance: float,
     failure_stage: str | None,
 ) -> None:
     initial = _pose(0.0).unsqueeze(0)
@@ -289,9 +309,11 @@ def test_coordinated_pickment_evaluator_uses_all_physical_stages(
     final[:, 0, 3] += offset
     final[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, yaw]))
     move = torch.stack((lift[-1], final))
-    grippers = {"right_hand": torch.full((2, 1, 1), right_qpos)}
-    if left_qpos is not None:
-        grippers["left_hand"] = torch.full((2, 1, 1), left_qpos)
+    grippers = {"right_hand": torch.full((2, 1, 1), 0.02)}
+    contacts = {"right_hand": torch.full((2, 1, 2), right_distance)}
+    if left_distance is not None:
+        grippers["left_hand"] = torch.full((2, 1, 1), 0.02)
+        contacts["left_hand"] = torch.full((2, 1, 2), left_distance)
     case = _case(
         "coordinated_pickment",
         control_parts={
@@ -311,12 +333,15 @@ def test_coordinated_pickment_evaluator_uses_all_physical_stages(
             "right_hand": torch.tensor([0.026]),
         },
         replay_traces={
-            "dual_pick_grasp": ReplayObservationTrace(gripper_qpos=grippers),
+            "dual_pick_grasp": _contact_trace(
+                gripper_qpos=grippers, contact_distances=contacts
+            ),
             "dual_pick_lift": ReplayObservationTrace(object_pose=lift),
             "dual_pick_move": ReplayObservationTrace(object_pose=move),
-            "dual_pick_settle": ReplayObservationTrace(
+            "dual_pick_settle": _contact_trace(
                 object_pose=final.unsqueeze(0).repeat(2, 1, 1, 1),
                 gripper_qpos=grippers,
+                contact_distances=contacts,
             ),
         },
     )
@@ -364,12 +389,12 @@ def test_coordinated_pickment_rechecks_target_after_settle() -> None:
             "right_hand": torch.tensor([1.0]),
         },
         replay_traces={
-            "dual_pick_grasp": ReplayObservationTrace(
+            "dual_pick_grasp": _contact_trace(
                 gripper_qpos={"left_hand": holding, "right_hand": holding}
             ),
             "dual_pick_lift": ReplayObservationTrace(object_pose=lift),
             "dual_pick_move": ReplayObservationTrace(object_pose=move),
-            "dual_pick_settle": ReplayObservationTrace(
+            "dual_pick_settle": _contact_trace(
                 object_pose=settled_wrong,
                 gripper_qpos={"left_hand": holding, "right_hand": holding},
             ),
@@ -445,11 +470,12 @@ def test_coordinated_placement_evaluator_uses_named_support_pose_trace(
                 object_pose=pose_trace,
                 scene_object_poses=support_traces,
             ),
-            "coordinated_place_release": ReplayObservationTrace(
+            "coordinated_place_release": _contact_trace(
+                contact_targets={"left_hand": "object", "right_hand": "support"},
                 gripper_qpos={
                     "left_hand": placing_released,
                     "right_hand": support_held,
-                }
+                },
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=pose_trace,
@@ -522,11 +548,12 @@ def test_coordinated_placement_alignment_uses_world_height_offsets() -> None:
                 object_pose=aligned_placing_trace,
                 scene_object_poses={"support": aligned_support_trace},
             ),
-            "coordinated_place_release": ReplayObservationTrace(
+            "coordinated_place_release": _contact_trace(
+                contact_targets={"left_hand": "object", "right_hand": "support"},
                 gripper_qpos={
                     "left_hand": placing_released,
                     "right_hand": support_held,
-                }
+                },
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=resting_placing_trace,
@@ -586,11 +613,12 @@ def test_coordinated_placement_rechecks_relative_target_after_release() -> None:
                 object_pose=aligned_trace,
                 scene_object_poses={"support": support_trace},
             ),
-            "coordinated_place_release": ReplayObservationTrace(
+            "coordinated_place_release": _contact_trace(
+                contact_targets={"left_hand": "object", "right_hand": "support"},
                 gripper_qpos={
                     "left_hand": placing_released,
                     "right_hand": support_held,
-                }
+                },
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=settled_wrong,
@@ -836,7 +864,7 @@ class _EndpointRobot:
 
 
 def _prepared_endpoint_case(batch=8, failure=None):
-    suite = load_suite("atomic_dual_franka_pgi_hand_over")
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     scenario = AtomicSkillScenario()
     scenario.robot = robot = _EndpointRobot(batch, failure)
     scenario.control_part = "left_arm"
@@ -906,7 +934,7 @@ def test_dual_case_does_not_freeze_when_only_the_primary_arm_is_qualified(failur
 def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
     """Prepare real case/endpoint qualification around a CPU reference result."""
     batch = 8
-    suite = load_suite("atomic_dual_franka_pgi_hand_over")
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     scenario = AtomicSkillScenario()
     scenario.robot = robot = _EndpointRobot(batch, endpoint_failure)
     scenario.control_part = "left_arm"
@@ -1540,19 +1568,85 @@ def test_dual_arm_provider_builds_both_arms_and_grippers():
     assert create_robot_provider(suite.robot).control_part == "left_arm"
 
 
+def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_path):
+    """Qualify both hands and limited closure against the real assembled URDF."""
+    from embodichain.utils.string import resolve_matching_names
+
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    cfg = create_robot_provider(suite.robot).build_cfg()
+    cfg.urdf_cfg.fpath = str(tmp_path / "franka_robotiq.urdf")
+    tree = ET.parse(cfg.urdf_cfg.assemble_urdf())
+    joints = {
+        joint.get("name"): joint
+        for joint in tree.findall("joint")
+        if joint.get("type") != "fixed"
+    }
+    links = [link.get("name") for link in tree.findall("link")]
+    assert len(joints) == len(cfg.init_qpos) == 26
+    assert cfg.init_qpos[-12:] == [0.0] * 12
+    for side in ("left", "right"):
+        assert Path(cfg.urdf_cfg.components[f"{side}_hand"]["urdf_path"]).name == (
+            "robotiq_arg2f_140.urdf"
+        )
+        np.testing.assert_allclose(
+            cfg.solver_cfg[f"{side}_arm"].tcp,
+            [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.20], [0, 0, 0, 1]],
+        )
+    declared_contacts = set()
+    for gripper in suite.enabled_tracks()[0].config["grippers"]:
+        part = gripper["control_part"]
+        names = cfg.control_parts[part]
+        assert len(names) == 6
+        limits = [
+            [float(joints[name].find("limit").get(key)) for key in ("lower", "upper")]
+            for name in names
+        ]
+        robot = Mock(device=CPU)
+        robot.get_qpos_limits.return_value = torch.tensor([limits])
+        _, opened, closed = AtomicSkillScenario._resolve_gripper(robot, gripper)
+        torch.testing.assert_close(opened, torch.zeros(6))
+        assert float(closed[0]) == pytest.approx(0.45)
+        assert joints[names[0]].find("mimic") is None
+        for name, command in zip(names[1:], closed[1:], strict=True):
+            mimic = joints[name].find("mimic")
+            assert mimic.get("joint") == names[0]
+            assert float(command) == pytest.approx(
+                float(closed[0]) * float(mimic.get("multiplier"))
+                + float(mimic.get("offset", "0"))
+            )
+        assert len(gripper["finger_links"]) == 2
+        assert set(gripper["finger_links"]) <= set(links)
+        declared_contacts.update(gripper["finger_links"])
+    assert len(declared_contacts) == 4
+    assert (
+        set(
+            resolve_matching_names(
+                cfg.link_attrs["newton_gripper_contacts"].link_names_expr, links
+            )[1]
+        )
+        == declared_contacts
+    )
+    for rules in (
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
+    ):
+        resolve_matching_names(list(rules), list(joints))
+
+
 def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_path):
     """Check actual assembled geometry/kinematics, including the native mimic."""
     from embodichain.utils.string import resolve_matching_names
     from embodichain_robots import FrankaPandaCfg
 
-    suite = load_suite("atomic_dual_franka_pgi_hand_over")
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     values = {
         **suite.robot.config,
         "gripper_type": "panda_hand",
         "uid": "native_panda_dual_test",
         "urdf_name": "native_panda_dual_test",
     }
-    values.pop("tcp_z")
+    values.pop("tcp_z", None)
     cfg = create_robot_provider(replace(suite.robot, config=values)).build_cfg()
     assert Path(cfg.urdf_cfg.fpath).name == "native_panda_dual_test.urdf"
     cfg.urdf_cfg.fpath = str(tmp_path / "native_panda_dual.urdf")
@@ -1657,9 +1751,9 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
 def test_native_panda_dual_rejects_incompatible_arm_or_tool_override(
     overrides, message
 ):
-    suite = load_suite("atomic_dual_franka_pgi_hand_over")
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     values = {**suite.robot.config, "gripper_type": "panda_hand"}
-    values.pop("tcp_z")
+    values.pop("tcp_z", None)
     values.update(overrides)
     with pytest.raises(ValueError, match=message):
         create_robot_provider(replace(suite.robot, config=values)).build_cfg()
@@ -1770,18 +1864,21 @@ def test_dual_arm_suites_plan_with_toppra_and_declare_both_grippers(
 @pytest.mark.parametrize("skill_id", ["hand_over", "coordinated_placement"])
 def test_franka_dual_suites_use_independent_seven_joint_arms(skill_id: str) -> None:
     """Decode the published suites through their production robot provider."""
-    suite = load_suite(f"atomic_dual_franka_pgi_{skill_id}")
+    suite = load_suite(
+        "atomic_dual_franka_robotiq_hand_over"
+        if skill_id == "hand_over"
+        else "atomic_dual_franka_pgi_coordinated_placement"
+    )
     cfg = create_robot_provider(suite.robot).build_cfg()
     for part in ("left_arm", "right_arm"):
         assert len(cfg.control_parts[part]) == 7
         assert cfg.solver_cfg[part].root_link_name.startswith(part.split("_")[0])
     assert set(cfg.control_parts["left_arm"]).isdisjoint(cfg.control_parts["right_arm"])
-    assert {spec.id for spec in suite.planners if spec.enabled} == {
-        "toppra",
-        "curobo",
-        "nmg",
-        "nmg_retimed",
-    }
+    assert {spec.id for spec in suite.planners if spec.enabled} == (
+        {"toppra"}
+        if skill_id == "hand_over"
+        else {"toppra", "curobo", "nmg", "nmg_retimed"}
+    )
     track = suite.enabled_tracks()[0]
     assert [skill["id"] for skill in track.config["skills"]] == [skill_id]
     assert track.config["batch_sizes"] == [1]

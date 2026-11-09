@@ -78,6 +78,7 @@ from ..contracts import ExecutionObservation
 from .atomic_grasps import _AntipodalGraspSearchError
 from .atomic_policy import benchmark_motion_policy
 from .atomic_evaluation import (
+    _grasp_stage_evidence,
     gripper_holding,
     gripper_released,
     merge_stage_evidence_batches,
@@ -116,21 +117,12 @@ class _OpenDoorEvaluator:
                 "open_door", tuple({} for _ in range(case.batch_size))
             )
         joint = actuation.articulation_joint
-        displacement = joint[-1] - joint[0]
-        grasped = displacement.abs() > float(
-            case.case_parameters.get("contact_minimum_joint_delta", 1.0e-5)
-        )
         opened_error = (
             joint[-1] - float(case.case_parameters["target_joint_position"])
         ).abs()
         batches: list[Sequence[Mapping[str, StageEvidence]]] = [
-            stage_evidence_batch(
-                valid_mask=trace_validity(actuation, observation=observation),
-                stage_id="grasped",
-                window="grasp_end",
-                measurements={"grasp_established": grasped},
-                method="hinge_motion_proxy",
-                source="measured_proxy",
+            _grasp_stage_evidence(
+                case, observation, replay_trace(observation, "door_grasp")
             ),
             stage_evidence_batch(
                 valid_mask=trace_validity(actuation, observation=observation),
@@ -207,7 +199,9 @@ class _PourEvaluator:
                 )
         if settle is not None and settle.object_pose is not None:
             part = next(iter(observation.gripper_open_qpos), "")
-            retained = gripper_holding(settle, observation, part)
+            retained = gripper_holding(
+                settle, observation, part, object_id=case.object_id
+            )
             min_height = minimum_height_above_initial_support(settle, case)
             initial = torch.as_tensor(
                 case.case_parameters["object_initial_pose"],
@@ -235,15 +229,17 @@ class _PourEvaluator:
                 if retained is not None:
                     batches.append(
                         stage_evidence_batch(
-                            valid_mask=trace_validity(settle, observation=observation),
+                            valid_mask=trace_validity(
+                                settle, observation=observation, contact_parts=(part,)
+                            ),
                             stage_id="held",
                             window="terminal_settle",
                             measurements={
                                 "object_retained": retained,
                                 "min_height_above_support_m": min_height,
                             },
-                            method="gripper_and_object_settle_trace",
-                            source="measured_proxy",
+                            method="target_finger_contacts_and_state",
+                            source="contact_sensor",
                         )
                     )
         evidence = (
@@ -299,16 +295,20 @@ class _AxisAlignEvaluator:
         part = next(iter(observation.gripper_open_qpos), "")
         batches: list[Sequence[Mapping[str, StageEvidence]]] = []
         if grasp is not None:
-            established = gripper_holding(grasp, observation, part)
+            established = gripper_holding(
+                grasp, observation, part, object_id=case.object_id
+            )
             if established is not None:
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(grasp, observation=observation),
+                        valid_mask=trace_validity(
+                            grasp, observation=observation, contact_parts=(part,)
+                        ),
                         stage_id="grasped",
                         window="grasp_end",
                         measurements={"grasp_established": established},
-                        method="gripper_joint_state",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         batches.append(
@@ -327,7 +327,9 @@ class _AxisAlignEvaluator:
         if settle is not None:
             min_height = minimum_height_above_initial_support(settle, case)
             part = next(iter(observation.gripper_open_qpos), "")
-            retained = gripper_holding(settle, observation, part)
+            retained = gripper_holding(
+                settle, observation, part, object_id=case.object_id
+            )
             if settle.object_pose is not None and min_height is not None:
                 final_pose = settle.object_pose[-1]
                 final_axis = torch.nn.functional.normalize(
@@ -357,15 +359,17 @@ class _AxisAlignEvaluator:
                 if retained is not None:
                     batches.append(
                         stage_evidence_batch(
-                            valid_mask=trace_validity(settle, observation=observation),
+                            valid_mask=trace_validity(
+                                settle, observation=observation, contact_parts=(part,)
+                            ),
                             stage_id="held",
                             window="terminal_settle",
                             measurements={
                                 "object_retained": retained,
                                 "min_height_above_support_m": min_height,
                             },
-                            method="gripper_and_object_settle_trace",
-                            source="measured_proxy",
+                            method="target_finger_contacts_and_state",
+                            source="contact_sensor",
                         )
                     )
         return evaluate_skill_stage_batch(
@@ -912,7 +916,14 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
         del case
         actuation = compiled.segment(0, "open")
         release = compiled.segment(0, "release")
+        close = compiled.segment(0, "close")
         return (
+            ReplayObservationWindow(
+                "door_grasp",
+                close.start,
+                close.stop,
+                frozenset({"gripper_contact", "gripper_qpos"}),
+            ),
             ReplayObservationWindow(
                 "door_actuation",
                 actuation.start,
@@ -1365,7 +1376,7 @@ class _PourCases(AtomicSkillCaseProvider):
                 "pour_settle",
                 waypoint_count,
                 waypoint_count,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
                 include_settle=True,
             ),
         )
@@ -1902,7 +1913,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 "axis_align_grasp",
                 close.start,
                 close.stop,
-                frozenset({"gripper_qpos"}),
+                frozenset({"gripper_contact", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "axis_align_actuation",
@@ -1914,7 +1925,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 "axis_align_settle",
                 waypoint_count,
                 waypoint_count,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
                 include_settle=True,
             ),
         )

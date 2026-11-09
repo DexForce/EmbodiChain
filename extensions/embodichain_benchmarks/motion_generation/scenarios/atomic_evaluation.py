@@ -173,6 +173,7 @@ def stage_evidence_batch(
 def trace_validity(
     *traces: ReplayObservationTrace,
     observation: ExecutionObservation,
+    contact_parts: Sequence[str] = (),
 ) -> torch.Tensor:
     """Preserve row-local raw-data validity before deriving boolean proxies."""
     valid = None
@@ -191,6 +192,16 @@ def trace_validity(
         for value in values:
             rows = torch.isfinite(value).movedim(1, 0).flatten(start_dim=1).all(dim=1)
             valid = rows if valid is None else valid & rows
+        for part in contact_parts:
+            distances = trace.gripper_contact_distances.get(part)
+            if distances is not None:
+                rows = (
+                    (torch.isfinite(distances) | torch.isposinf(distances))
+                    .movedim(1, 0)
+                    .flatten(start_dim=1)
+                    .all(dim=1)
+                )
+                valid = rows if valid is None else valid & rows
         for part in trace.gripper_qpos:
             for commands in (
                 observation.gripper_open_qpos,
@@ -273,21 +284,54 @@ def gripper_holding(
     observation: ExecutionObservation,
     part: str,
     *,
-    gap: float = 1.0e-3,
+    object_id: str | None,
 ) -> torch.Tensor | None:
-    """Return whether the final sample stopped between open and grasp commands."""
-    qpos = trace.gripper_qpos.get(part)
-    open_qpos = observation.gripper_open_qpos.get(part)
-    grasp_qpos = observation.gripper_grasp_qpos.get(part)
-    if qpos is None or open_qpos is None or grasp_qpos is None:
+    """Require every finger to contact the target at the final sample.
+
+    Args:
+        trace: Synchronized replay samples, already filtered by target actor.
+        observation: Per-gripper separation thresholds in metres.
+        part: Explicit grasp control part.
+        object_id: Expected physical target; a different target is absent evidence.
+
+    Returns:
+        One boolean per environment, or None when no matching evidence exists.
+        Callers use :func:`trace_validity` with ``contact_parts`` to distinguish
+        unavailable rows from a valid query reporting no contact.
+    """
+    distances = trace.gripper_contact_distances.get(part)
+    if distances is None or trace.gripper_contact_targets.get(part) != object_id:
         return None
-    final = qpos[-1]
-    open_qpos = open_qpos.to(device=final.device, dtype=final.dtype)
-    grasp_qpos = grasp_qpos.to(device=final.device, dtype=final.dtype)
-    direction = torch.sign(grasp_qpos - open_qpos)
-    closed = (final - open_qpos) * direction
-    remaining = (grasp_qpos - final) * direction
-    return ((closed >= gap) & (remaining >= gap)).all(dim=-1)
+    threshold = observation.gripper_contact_thresholds_m.get(
+        part, TOLERANCES["grasp_contact_distance_m"]
+    )
+    return (distances[-1] < threshold).all(dim=-1)
+
+
+def _grasp_stage_evidence(
+    case: BenchmarkCase,
+    observation: ExecutionObservation,
+    trace: ReplayObservationTrace | None,
+) -> tuple[Mapping[str, StageEvidence], ...]:
+    """Evaluate a dedicated grasp-end contact window for an articulated target."""
+    part = next(iter(observation.gripper_open_qpos), "")
+    held = (
+        None
+        if trace is None
+        else gripper_holding(trace, observation, part, object_id=case.object_id)
+    )
+    if held is None:
+        return tuple({} for _ in range(case.batch_size))
+    return stage_evidence_batch(
+        stage_id="grasped",
+        window="grasp_end",
+        measurements={"grasp_established": held},
+        method="target_finger_contacts",
+        source="contact_sensor",
+        valid_mask=trace_validity(
+            trace, observation=observation, contact_parts=(part,)
+        ),
+    )
 
 
 def pose_rotation_error(actual: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -313,16 +357,20 @@ class PickUpEvaluator:
         part = next(iter(observation.gripper_open_qpos), "")
         batches: list[Sequence[Mapping[str, StageEvidence]]] = []
         if grasp is not None:
-            established = gripper_holding(grasp, observation, part)
+            established = gripper_holding(
+                grasp, observation, part, object_id=case.object_id
+            )
             if established is not None:
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(grasp, observation=observation),
+                        valid_mask=trace_validity(
+                            grasp, observation=observation, contact_parts=(part,)
+                        ),
                         stage_id="grasped",
                         window="grasp_end",
                         measurements={"grasp_established": established},
-                        method="gripper_joint_state",
-                        source="measured_proxy",
+                        method="target_finger_contacts",
+                        source="contact_sensor",
                     )
                 )
         if lift is not None and lift.object_pose is not None:
@@ -347,7 +395,9 @@ class PickUpEvaluator:
                     )
                 )
         if settle is not None:
-            retained = gripper_holding(settle, observation, part)
+            retained = gripper_holding(
+                settle, observation, part, object_id=case.object_id
+            )
             min_height = minimum_height_above_initial_support(settle, case)
             if (
                 retained is not None
@@ -379,7 +429,7 @@ class PickUpEvaluator:
                 batches.append(
                     stage_evidence_batch(
                         valid_mask=trace_validity(
-                            settle, lift, observation=observation
+                            settle, lift, observation=observation, contact_parts=(part,)
                         ),
                         stage_id="held",
                         window="terminal_settle",
@@ -390,8 +440,8 @@ class PickUpEvaluator:
                             "relative_rotation_drift_rad": rotation_drift,
                             "remaining_lift_m": lift_remaining,
                         },
-                        method="gripper_and_object_settle_trace",
-                        source="measured_proxy",
+                        method="finger_contacts_and_object_settle_trace",
+                        source="contact_sensor",
                     )
                 )
         evidence = (
@@ -450,20 +500,24 @@ class MoveHeldObjectEvaluator:
             )
         if settle is not None:
             part = next(iter(observation.gripper_open_qpos), "")
-            retained = gripper_holding(settle, observation, part)
+            retained = gripper_holding(
+                settle, observation, part, object_id=case.object_id
+            )
             min_height = minimum_height_above_initial_support(settle, case)
             if retained is not None and min_height is not None:
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(settle, observation=observation),
+                        valid_mask=trace_validity(
+                            settle, observation=observation, contact_parts=(part,)
+                        ),
                         stage_id="held",
                         window="terminal_settle",
                         measurements={
                             "object_retained": retained,
                             "min_height_above_support_m": min_height,
                         },
-                        method="gripper_and_object_settle_trace",
-                        source="measured_proxy",
+                        method="finger_contacts_and_object_settle_trace",
+                        source="contact_sensor",
                     )
                 )
         evidence = (
@@ -605,7 +659,7 @@ class PressEvaluator:
 
 
 class SlideEvaluator:
-    """Evaluate grasp proxy, drawer travel, and release at their phase windows."""
+    """Evaluate finger contacts, drawer travel, and release at their phase windows."""
 
     def evaluate(
         self,
@@ -626,18 +680,10 @@ class SlideEvaluator:
         requested_displacement = effect_sign * float(
             case.case_parameters["translation_distance_m"]
         )
-        grasped = displacement * effect_sign > float(
-            case.case_parameters.get("contact_minimum_joint_delta", 1.0e-5)
-        )
         travel_error = (displacement - requested_displacement).abs()
         batches: list[Sequence[Mapping[str, StageEvidence]]] = [
-            stage_evidence_batch(
-                valid_mask=trace_validity(actuation, observation=observation),
-                stage_id="grasped",
-                window="grasp_end",
-                measurements={"grasp_established": grasped},
-                method="target_joint_motion_proxy",
-                source="measured_proxy",
+            _grasp_stage_evidence(
+                case, observation, replay_trace(observation, "slide_grasp")
             ),
             stage_evidence_batch(
                 valid_mask=trace_validity(actuation, observation=observation),
@@ -686,10 +732,6 @@ class TwistEvaluator:
             return evaluate_skill_stage_batch(
                 "twist", tuple({} for _ in range(case.batch_size))
             )
-        joint = actuation.articulation_joint
-        grasped = (joint[-1] - joint[0]).abs() > float(
-            case.case_parameters.get("contact_minimum_joint_delta", 1.0e-5)
-        )
         tcp = actuation.tcp_pose
         target_pose = case_pose(case, "twist_target_pose", device=tcp.device).to(
             dtype=tcp.dtype
@@ -704,13 +746,8 @@ class TwistEvaluator:
         )
         error = (executed - float(case.case_parameters["twist_angle_rad"])).abs()
         batches: list[Sequence[Mapping[str, StageEvidence]]] = [
-            stage_evidence_batch(
-                valid_mask=trace_validity(actuation, observation=observation),
-                stage_id="grasped",
-                window="grasp_end",
-                measurements={"grasp_established": grasped},
-                method="target_joint_motion_proxy",
-                source="measured_proxy",
+            _grasp_stage_evidence(
+                case, observation, replay_trace(observation, "twist_grasp")
             ),
             stage_evidence_batch(
                 valid_mask=trace_validity(actuation, observation=observation),

@@ -543,6 +543,7 @@ def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
         _advance_physics=lambda: None,
         _update_sim_state=lambda **kwargs: None,
         _update_physical_objective=lambda: None,
+        _capture_observation=lambda **kwargs: SimpleNamespace(policy=observation),
         get_obs=lambda **kwargs: observation,
         get_info=lambda **kwargs: info,
         get_reward=lambda **kwargs: torch.ones(3),

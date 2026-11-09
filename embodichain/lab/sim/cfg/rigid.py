@@ -260,6 +260,12 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     can allocate the corresponding constraint storage.
     """
 
+    contype: int | None = None
+    """MuJoCo collision-type bitmask; None preserves the source value."""
+
+    conaffinity: int | None = None
+    """MuJoCo collision-affinity bitmask; None preserves the source value."""
+
     has_particle_collision: bool | None = None
     """Whether Newton particles collide with this shape.
 
@@ -368,6 +374,19 @@ class NewtonRigidBodyMaterialCfg(RigidBodyMaterialCfg):
 
     kd: float | None = None
     """Normal contact damping coefficient."""
+
+    solref: tuple[float, float] | None = None
+    """Raw MuJoCo contact reference, overriding stiffness/damping conversion.
+
+    Both positive time-constant/damping-ratio and non-positive direct modes
+    retain their native meaning. Unsupported solvers reject explicit values.
+    """
+
+    solimp: tuple[float, float, float, float, float] | None = None
+    """Raw MuJoCo contact impedance; None preserves the source value."""
+
+    solmix: float | None = None
+    """MuJoCo weight for mixing contact parameters between colliding shapes."""
 
     kf: float | None = None
     """Tangential/friction damping coefficient."""

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass, replace
 import json
 from types import MethodType, SimpleNamespace
 from typing import Any, ClassVar
@@ -205,7 +205,7 @@ class _CountingJointProvider:
         }
 
 
-def _shared_scene_provider() -> tuple[
+def _shared_scene_provider(*, runtime_scope_guard=None) -> tuple[
     SharedTickSceneProvider,
     _CountingEntityProvider,
     _CountingJointProvider,
@@ -225,7 +225,9 @@ def _shared_scene_provider() -> tuple[
     delegate = registry.make_scene_provider(batch_size=_BATCH_SIZE)
     full_env_ids = torch.arange(_BATCH_SIZE, dtype=torch.long)
     return (
-        SharedTickSceneProvider(delegate, full_env_ids),
+        SharedTickSceneProvider(
+            delegate, full_env_ids, runtime_scope_guard=runtime_scope_guard
+        ),
         entity_provider,
         joint_provider,
     )
@@ -1429,7 +1431,8 @@ def test_simulation_observation_owns_gym_control_cadence() -> None:
     assert context.control_dt == pytest.approx(_STEP_DT)
 
 
-def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock() -> None:
+@pytest.mark.parametrize("scoped", [False, True])
+def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock(scoped) -> None:
     """Reusing a compiled program must not reuse a previous scene's tick cache."""
     adapter, _, robot, cube = _evidence_adapter_runtime()
     compiled = adapter.compile(
@@ -1439,14 +1442,39 @@ def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock() -> None:
             program=InvokeCfg(call=PickCfg(object="cube")),
         )
     )
-    first_bridge = adapter.create_bridge(compiled)
+    epoch = [0]
+
+    def guard(expected):
+        def validate():
+            if epoch[0] != expected:
+                raise ValueError("runtime scope replaced")
+
+        return validate
+
+    first_bridge = adapter.create_bridge(
+        compiled, **({"runtime_scope_guard": guard(0)} if scoped else {})
+    )
+    first_policy = first_bridge._post_policy_port
+    assert first_policy.observation_clock is first_bridge.clock
     first_runtime = first_bridge._runtime
     first_provider = first_runtime.observation_provider
     initial = first_provider.observe(TaskState.empty(_BATCH_SIZE, robot.device))
     initial_pose = initial.scene.entities["cube"].pose.clone()
 
     cube.pose[:, 0, 3] = 0.35  # Layout changes between episodes, before stepping.
-    second_bridge = adapter.create_bridge(compiled)
+    epoch[0] = 1
+    second_bridge = adapter.create_bridge(
+        compiled, **({"runtime_scope_guard": guard(1)} if scoped else {})
+    )
+    if scoped:
+        with pytest.raises(ValueError, match="runtime scope replaced"):
+            first_provider.current_qpos(initial.env_ids)
+
+    second_policy = second_bridge._post_policy_port
+    assert first_policy is not second_policy
+    assert second_policy.observation_clock is second_bridge.clock
+    with pytest.raises(ValueError, match="another runtime/session clock"):
+        first_policy.observation_clock
     second_runtime = second_bridge._runtime
     second_provider = second_runtime.observation_provider
     refreshed = second_provider.observe(TaskState.empty(_BATCH_SIZE, robot.device))
@@ -1507,8 +1535,9 @@ def test_mllm_and_config_share_invocations_and_verified_results(
 
 
 @pytest.mark.parametrize("capture_root_pose", [False, True])
+@pytest.mark.parametrize("env_ids", [None, (2, 0), (1,)])
 def test_simulation_root_capture_is_explicit_and_owns_the_same_tick_snapshot(
-    monkeypatch: pytest.MonkeyPatch, capture_root_pose: bool
+    monkeypatch: pytest.MonkeyPatch, capture_root_pose: bool, env_ids
 ) -> None:
     factory, robot = _factory(capture_root_pose=capture_root_pose)
     root_pose = torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
@@ -1520,33 +1549,39 @@ def test_simulation_root_capture_is_explicit_and_owns_the_same_tick_snapshot(
         return root_pose
 
     monkeypatch.setattr(robot, "get_local_pose", get_local_pose, raising=False)
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    selected = list(range(_BATCH_SIZE)) if env_ids is None else list(env_ids)
     observation = factory.create_planning_observation_provider(
         scene_registry=factory.create_scene_registry(),
-        engine=factory.create_atomic_action_engine(
-            factory.create_robot_skill_profile()
-        ),
+        engine=engine,
         clock=EnvironmentStepClock(_STEP_DT),
     )
-    context = observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+    context = observation.observe(TaskState.empty(len(selected), robot.device))
     assert context.robot.timestamp == context.scene.timestamp == 0.0
     assert reads == ([True] if capture_root_pose else [])
     if capture_root_pose:
-        assert torch.equal(context.robot.root_pose, root_pose)
+        assert torch.equal(context.robot.root_pose, root_pose[selected])
         root_pose[:, 0, 3].add_(3.0)
-        assert context.robot.root_pose[:, 0, 3].tolist() == [0.0, 1.0, 2.0]
+        assert context.robot.root_pose[:, 0, 3].tolist() == [float(i) for i in selected]
     else:
         assert context.robot.root_pose is None
 
 
 @pytest.mark.parametrize("hold_qpos_source", ["observed", "drive_target"])
+@pytest.mark.parametrize("env_ids", [None, (2, 0)])
 def test_simulation_factory_builds_shared_observation_and_evidence_ports(
-    monkeypatch: pytest.MonkeyPatch, hold_qpos_source: str
+    monkeypatch: pytest.MonkeyPatch, hold_qpos_source: str, env_ids
 ) -> None:
     """Observation and both built-in evidence providers share one scene source."""
     factory, robot = _factory(hold_qpos_source=hold_qpos_source)
     registry = factory.create_scene_registry()
     profile = factory.create_robot_skill_profile()
     engine = factory.create_atomic_action_engine(profile)
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    selected = list(range(_BATCH_SIZE)) if env_ids is None else list(env_ids)
     clock = EnvironmentStepClock(_STEP_DT)
 
     observation = factory.create_planning_observation_provider(
@@ -1555,7 +1590,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
         clock=clock,
     )
     assert type(observation) is SimulationPlanningObservationProvider
-    context = observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+    context = observation.observe(TaskState.empty(len(selected), robot.device))
     providers = tuple(
         factory.create_effect_evidence_providers(
             scene_registry=registry,
@@ -1565,7 +1600,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
     )
     assert context.robot.timestamp == pytest.approx(0.0)
     assert context.control_dt == pytest.approx(_STEP_DT)
-    assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos)
+    assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos[selected])
     reads = []
     original_get_qpos = robot.get_qpos
 
@@ -1577,10 +1612,14 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
     robot.target_qpos.fill_(0.25)
     assert torch.equal(
         observation.hold_qpos(context.env_ids),
-        robot.target_qpos if hold_qpos_source == "drive_target" else context.robot.qpos,
+        (
+            robot.target_qpos[selected]
+            if hold_qpos_source == "drive_target"
+            else context.robot.qpos
+        ),
     )
     robot.target_qpos[:, 0] = torch.tensor([0.0, 1.0, 2.0])
-    selected_hold = observation.hold_qpos(context.env_ids[[2, 0]])
+    selected_hold = observation.hold_qpos(torch.tensor([2, 0]))
     assert selected_hold[:, 0].tolist() == (
         [2.0, 0.0] if hold_qpos_source == "drive_target" else [0.0, 0.0]
     )
@@ -1589,10 +1628,6 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
     assert reads == ([True, True] if hold_qpos_source == "drive_target" else [])
     monkeypatch.setattr(robot, "get_qpos", original_get_qpos)
     assert len(providers) == 2
-    assert all(
-        getattr(provider, "_scene_provider") is observation.scene_provider
-        for provider in providers
-    )
     expectation = HeldObjectStateExpectation(
         expectation_id="held-cube",
         relation=HeldObjectRelation.ATTACHED,
@@ -1624,7 +1659,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
         ),
     )[query.evidence_id]
     assert type(evidence) is BinaryEffectEvidenceBatch
-    assert evidence.valid.tolist() == [False] * _BATCH_SIZE
+    assert evidence.valid.tolist() == [False] * len(selected)
     assert all(error is not None for error in evidence.acquisition_errors)
 
 
@@ -1639,7 +1674,10 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert factory.segment_policy_port is not None
 
 
-def test_simulation_factory_preserves_owned_hand_calibration_across_engines() -> None:
+@pytest.mark.parametrize("env_ids", [None, (2,)])
+def test_simulation_factory_preserves_owned_hand_calibration_across_engines(
+    env_ids,
+) -> None:
     from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
 
     robot = _EvidenceRobot()
@@ -1659,12 +1697,20 @@ def test_simulation_factory_preserves_owned_hand_calibration_across_engines() ->
         pad_max_edge=0.004,
         max_subdivisions=10,
     )
+
+    def generator_factory():
+        generator = _motion_generator(robot)
+        generator._env_ids = env_ids
+        return generator
+
     factory = SimulationTaskProgramFactory.from_environment(
         environment,
         registration=registration,
-        motion_generator_factory=lambda: _motion_generator(robot),
+        motion_generator_factory=generator_factory,
         hand_geometry_cfgs={"hand": cfg},
     )
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
     cfg.pad_link_names = ("changed", "input")
     profile = factory.create_robot_skill_profile()
     engines = [factory.create_atomic_action_engine(profile) for _ in range(2)]
@@ -2151,3 +2197,408 @@ def test_factory_planner_config_uses_owner_without_mutating_input(
     assert captured[0].robot_uid == robot.uid
     assert captured[0] is not supplied
     assert supplied.sim_instance_id == 0
+
+
+def test_closed_factory_rejects_new_observation_and_assembly_without_native_reads(
+    monkeypatch,
+):
+    factory, robot = _factory()
+    registry = factory.create_scene_registry()
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    observation = factory.create_planning_observation_provider(
+        scene_registry=registry, engine=engine, clock=EnvironmentStepClock(_STEP_DT)
+    )
+    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    observation.observe(state)
+    factory.close_runtime_resources()
+    factory.close_runtime_resources()
+    monkeypatch.setattr(
+        robot,
+        "get_qpos",
+        lambda *args, **kwargs: pytest.fail(
+            "closed observation must not touch the native robot"
+        ),
+    )
+    with pytest.raises(RuntimeError, match="closed"):
+        observation.observe(state)
+    with pytest.raises(RuntimeError, match="closed"):
+        observation.current_qpos(torch.arange(_BATCH_SIZE, device=robot.device))
+    with pytest.raises(RuntimeError, match="closed"):
+        factory.create_scene_registry()
+    with pytest.raises(RuntimeError, match="closed"):
+        factory.create_adapter()
+
+
+@pytest.mark.parametrize("accessor", ["root_pose", "drive_target"])
+def test_factory_closed_during_read_cannot_publish_without_optional_scope_guard(
+    monkeypatch, accessor
+):
+    factory, robot = _factory(
+        capture_root_pose=accessor == "root_pose", hold_qpos_source="drive_target"
+    )
+    observation = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=factory.create_atomic_action_engine(
+            factory.create_robot_skill_profile()
+        ),
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    state = TaskState.empty(_BATCH_SIZE, robot.device)
+    if accessor == "root_pose":
+
+        def get_local_pose(*, to_matrix):
+            assert to_matrix
+            factory.close_runtime_resources()
+            return torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
+
+        monkeypatch.setattr(robot, "get_local_pose", get_local_pose, raising=False)
+        with pytest.raises(RuntimeError, match="closed"):
+            observation.observe(state)
+    else:
+        observation.observe(state)
+        original = robot.get_qpos
+
+        def get_qpos(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if kwargs.get("target") is True:
+                factory.close_runtime_resources()
+            return result
+
+        monkeypatch.setattr(robot, "get_qpos", get_qpos)
+        with pytest.raises(RuntimeError, match="closed"):
+            observation.hold_qpos(torch.arange(_BATCH_SIZE, device=robot.device))
+
+
+def test_support_bridges_reject_overlap_without_rebinding_and_allow_closed_iteration(
+    monkeypatch,
+):
+    from embodichain.lab.sim.sensors import support_observation
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+        SupportSensorDeclarationCfg,
+    )
+
+    robot = _EvidenceRobot()
+    cube, table = _RigidObject(), _RigidObject()
+    cube.uid, table.uid = "cube_native", "table_native"
+    sim = _Simulation(robot, {cube.uid: cube, table.uid: table})
+    sensors, clocks = {}, []
+    sim.get_sensor = sensors.get
+
+    class Registry:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def acquire(self, *args, sensor_cfg, **kwargs):
+            sensor = SimpleNamespace(cfg=sensor_cfg)
+            sensors[sensor_cfg.uid] = sensor
+            return SimpleNamespace(sensor=sensor, bind_clock=clocks.append)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(support_observation, "SupportObservationRegistry", Registry)
+    profile = _evidence_profile_binding()
+    profile = replace(
+        profile,
+        presets=tuple(
+            SkillPolicyPreset(
+                preset.preset_id,
+                action_option_templates=preset.action_option_templates,
+                motion_policy=preset.motion_policy,
+                effect_assurance=EffectAssurance.PROJECTED,
+            )
+            for preset in profile.presets
+        ),
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            registry_id="evidence_scene",
+            rigid_objects=(
+                SimulationRigidObjectBinding(
+                    entity_id="cube",
+                    simulation_uid=cube.uid,
+                    default_grasp_affordance="cube_grasp",
+                ),
+                SimulationRigidObjectBinding(
+                    entity_id="table", simulation_uid=table.uid
+                ),
+            ),
+            antipodal_grasps=(
+                AntipodalGraspAffordanceBinding(
+                    entity_id="cube_grasp",
+                    object_id="cube",
+                    native_name="body",
+                    revision="1",
+                ),
+            ),
+        ),
+        profile,
+        settle_presets={
+            "support": SimulationStabilityConditionCfg(
+                entity="cube",
+                kind="stack",
+                reference="table",
+                local_axis=(0, 0, 1),
+                reference_axis=(0, 0, 1),
+                reference_half_extents=(1, 1),
+                support_contract_revision=1,
+                support_sensor=SupportSensorDeclarationCfg(uid="support"),
+            )
+        },
+    )
+    factory = SimulationTaskProgramFactory(
+        sim,
+        robot,
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+        sensor_suite=sensors,
+    )
+    adapter = factory.create_adapter()
+    program = adapter.compile(
+        TaskProgramCfg(
+            program_id="support_owner",
+            integration=_evidence_integration(),
+            program=InvokeCfg(call=PickCfg(object="cube")),
+        )
+    )
+    first = adapter.create_bridge(program)
+    with pytest.raises(RuntimeError, match="active.*bridge"):
+        adapter.create_bridge(program)
+    assert clocks == [first.clock]
+    segments = first.iter_segments()
+    untouched = next(segments)
+    segments.close()
+    assert (
+        not first.execution_finished
+    )  # The outstanding lazy segment still owns its clock.
+    with pytest.raises(RuntimeError, match="active.*bridge"):
+        adapter.create_bridge(program)
+    action = first._runtime.engine.actions["pick_up"]
+    monkeypatch.setattr(action, "_plan", MethodType(_pick_evidence_plan, action))
+    for command in untouched.actions:
+        robot.qpos = command.value.clone()
+    untouched.validator()
+    assert first.execution_finished
+    second = adapter.create_bridge(program)
+    assert clocks == [first.clock, second.clock]
+    assert first.clock is not second.clock
+    adapter.close()
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_returned_effect_providers_and_live_scene_reject_reads_after_close(
+    monkeypatch, registered
+):
+    from embodichain.lab.task_program.semantics.effects import (
+        ArticulationJointStateExpectation,
+        JointStateEffectClause,
+    )
+    from embodichain.lab.task_program.semantics.evidence import JointStateEvidenceQuery
+    from embodichain.lab.task_program.semantics.scene import (
+        ArticulationJointEvidenceAddress,
+        SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID,
+        SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION,
+    )
+
+    if registered:
+        adapter, assembly, robot, _ = _evidence_adapter_runtime()
+        factory = adapter._factory
+        registry, engine, observation = (
+            assembly.scene_registry,
+            assembly.engine,
+            assembly.observation_provider,
+        )
+    else:
+        factory, robot = _factory(hold_qpos_source="drive_target")
+        registry = factory.create_scene_registry()
+        engine = factory.create_atomic_action_engine(
+            factory.create_robot_skill_profile()
+        )
+        observation = factory.create_planning_observation_provider(
+            scene_registry=registry, engine=engine, clock=EnvironmentStepClock(_STEP_DT)
+        )
+    providers = tuple(
+        factory.create_effect_evidence_providers(
+            scene_registry=registry, engine=engine, observation_provider=observation
+        )
+    )
+    live_scene = observation.scene_provider
+    expectation = HeldObjectStateExpectation(
+        expectation_id="held",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id="cube",
+        slot_id="primary",
+        resource_id="manipulator",
+        task_state_key="held",
+    )
+    control_query = BinaryEffectEvidenceQuery(
+        BinaryEffectClause(
+            clause_id="constraint",
+            expectation_id="held",
+            source=EffectEvidenceSourceRef(
+                CONTROL_PART_EVIDENCE_PROVIDER_ID,
+                CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+                ControlPartEvidenceAddress("arm", CONSTRAINT_EFFECT_CHANNEL),
+            ),
+            evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+            expected=True,
+        ),
+        expectation,
+    )
+    target = torch.tensor([0.4])
+    joint_query = JointStateEvidenceQuery(
+        JointStateEffectClause(
+            "joint",
+            "joint",
+            EffectEvidenceSourceRef(
+                SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID,
+                SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION,
+                ArticulationJointEvidenceAddress("drawer", "slide"),
+            ),
+            target,
+        ),
+        ArticulationJointStateExpectation("joint", "drawer", "slide", target),
+    )
+    context = EffectEvidenceCollectionContext(
+        timestamp=0.0, observation_revision=0, env_ids=torch.arange(_BATCH_SIZE)
+    )
+    factory.close_runtime_resources()
+    monkeypatch.setattr(
+        robot,
+        "get_qpos",
+        lambda *args, **kwargs: pytest.fail("closed provider read native robot"),
+    )
+    for provider, query in zip(providers, (control_query, joint_query), strict=True):
+        with pytest.raises(RuntimeError, match="closed"):
+            provider.collect((query,), context)
+    with pytest.raises(RuntimeError, match="closed"):
+        live_scene.snapshot(timestamp=1.0, env_ids=context.env_ids)
+    with pytest.raises(RuntimeError, match="closed"):
+        observation.hold_qpos(context.env_ids)
+
+
+@pytest.mark.parametrize("accessor", ["observe", "current_qpos", "hold_qpos", "scene"])
+@pytest.mark.parametrize("env_ids", [None, (2, 0)])
+def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_access(
+    monkeypatch, accessor, env_ids
+):
+    factory, robot = _factory(hold_qpos_source="drive_target")
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    if env_ids is not None:
+        factory = factory.for_env_ids(env_ids)
+    registry = factory.create_scene_registry()
+    epoch = [0]
+
+    def guard():
+        if epoch[0] != 0:
+            raise ValueError("runtime scope replaced")
+
+    observation = factory.create_planning_observation_provider(
+        scene_registry=registry,
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+        runtime_scope_guard=guard,
+    )
+    state = TaskState.empty(
+        _BATCH_SIZE if env_ids is None else len(env_ids), robot.device
+    )
+    context = observation.observe(state)
+    # A separate factory and provider retain their own valid scope.
+    other_factory, other_robot = _factory()
+    other = other_factory.create_planning_observation_provider(
+        scene_registry=other_factory.create_scene_registry(),
+        engine=other_factory.create_atomic_action_engine(
+            other_factory.create_robot_skill_profile()
+        ),
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    epoch[0] = 1
+    monkeypatch.setattr(
+        robot, "get_qpos", lambda *a, **kw: pytest.fail("stale scope read robot")
+    )
+    with pytest.raises(ValueError, match="runtime scope replaced"):
+        if accessor == "observe":
+            observation.observe(state)
+        elif accessor == "scene":
+            observation.scene_provider.snapshot(timestamp=0.0, env_ids=context.env_ids)
+        else:
+            getattr(observation, accessor)(context.env_ids)
+    torch.testing.assert_close(
+        other.observe(TaskState.empty(_BATCH_SIZE, robot.device)).robot.qpos,
+        other_robot.qpos,
+    )
+    factory.close_runtime_resources()
+    other_factory.close_runtime_resources()
+
+
+def test_runtime_scope_changed_during_root_capture_cannot_publish_context(monkeypatch):
+    factory, robot = _factory(capture_root_pose=True)
+    epoch = [0]
+
+    def guard():
+        if epoch[0] != 0:
+            raise ValueError("runtime scope changed during acquisition")
+
+    observation = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=factory.create_atomic_action_engine(
+            factory.create_robot_skill_profile()
+        ),
+        clock=EnvironmentStepClock(_STEP_DT),
+        runtime_scope_guard=guard,
+    )
+
+    def replaced(*, to_matrix):
+        assert to_matrix
+        epoch[0] = 1
+        return torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
+
+    monkeypatch.setattr(robot, "get_local_pose", replaced, raising=False)
+    with pytest.raises(ValueError, match="during acquisition"):
+        observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+    factory.close_runtime_resources()
+
+
+def test_shared_scene_scope_changed_during_acquisition_cannot_publish_snapshot(
+    monkeypatch,
+):
+    epoch = [0]
+
+    def guard():
+        if epoch[0] != 0:
+            raise ValueError("runtime scene scope changed")
+
+    provider, entity, joints = _shared_scene_provider(runtime_scope_guard=guard)
+    original = entity.observe
+
+    def replaced(**kwargs):
+        value = original(**kwargs)
+        epoch[0] = 1
+        return value
+
+    monkeypatch.setattr(entity, "observe", replaced)
+    with pytest.raises(ValueError, match="runtime scene scope changed"):
+        provider.snapshot(timestamp=0.0, env_ids=torch.arange(_BATCH_SIZE))
+    assert len(entity.calls) == len(joints.calls) == 1
+
+
+def test_adapter_rejects_noncallable_scope_before_live_assembly(monkeypatch):
+    factory, _ = _factory()
+    adapter = factory.create_adapter()
+    monkeypatch.setattr(
+        factory,
+        "create_scene_registry",
+        lambda: pytest.fail("invalid scope assembled scene"),
+    )
+    with pytest.raises(TypeError, match="runtime_scope_guard"):
+        adapter.assemble_runtime(
+            TaskProgramIntegrationCfg(
+                robot_profile="robot_profile",
+                scene_registry="scene",
+                runtime_preset="safe",
+            ),
+            runtime_scope_guard=object(),
+        )
+    adapter.close()

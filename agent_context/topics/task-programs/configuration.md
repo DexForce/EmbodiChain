@@ -79,6 +79,22 @@ factories, and registered-call lowerers. Adapter creation calls
 Reconstructing a registration with `dataclasses.replace` does not duplicate its
 scene-derived standard grounders; duplicate custom grounders remain errors.
 
+`runtime_services.settle_presets` is the closed serialized route to this same
+registration-owned table. Omission retains the existing dynamic presets; an
+explicit table owns its complete named selection. Components may contribute
+disjoint names, but duplicate ownership is rejected. Ordinary monitor fields
+retain `DynamicSettleMonitorCfg`; explicit `measurement` selects
+`SimulationSettleMonitorCfg`. A declared condition `kind` selects
+`SimulationStabilityConditionCfg`, with normalized owned geometry and timing.
+The explicit `joint_position_and_stability` kind selects
+`SimulationJointStabilityConditionCfg` and requires a canonical articulation,
+exact native joint, target and tolerance. These are policy parameters, not
+static articulation geometry or names inferred by an engine. Its optional invalid
+row policy and bounded raw retention belong to execution, and participate in the
+registration fingerprint; ``to_condition_dict()`` keeps only normative values.
+Support conditions include an explicit sensor UID/capacity declaration. The
+scene binding supplies native pair UIDs, and the full definition is fingerprinted.
+
 Configured environments use runnable `task.<embodiment>.yaml` deployments with
 three typed selections: `environment.component`,
 `task_program.{program,integration,execution_policy}`, and
@@ -162,6 +178,24 @@ the closed decoder in `configured.py` owns accepted options and route fields.
 Relative Place resolves a live reference plus world-axis displacement and
 requires the verified held-object transform. Coordinated transport must select
 the real primitive's release mode. Do not install frontend skill replacements.
+`move_held_object` additionally accepts an explicit `routes` declaration instead
+of its legacy single-target fields. Each route binds a canonical object, target
+ID and an inert absolute or scene-relative pose. These declarations live in
+`simulation/targets.py` and `simulation/transport.py`; lowering only constructs
+typed goals, retained-attachment effects and lookahead targets. It does not read
+live poses, select motion policy or replace the shared Atomic Skill. The original
+single-target decoder/factory and effect behavior remain unchanged. Mixed forms
+and duplicate target IDs are rejected. The optional
+`RegisteredSemanticLowererSceneValidator` contract lets an immutable factory
+preflight its references against `SceneManifest` before runtime assembly; routed
+transport uses it for canonical object/reference checks.
+The routed-2 factory uses named transport goals and verified retention-only
+phases: grounding checks the exact object and every eligible input-hold row,
+then guards `transport` and requests terminal attachment verification. Projected
+presets reject this contract before motion planning or dispatch. The legacy
+single-target factory keeps its existing effectless behavior and identity.
+
+
 Container affordances may declare a local-z release clearance while retaining
 their original semantic target for final acceptance.
 
@@ -270,3 +304,8 @@ closed role/relation contract without contacting providers. Offline asset
 materialization owns selection and emits a new bound deployment before ordinary
 compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
 for supported adaptations, provenance and integrity boundaries.
+
+Embodiment grasp services may explicitly select `approach_deviation_angle`,
+`max_candidates` and `center_mode` (`bounds` or `centroid`). Omitted fields
+retain toolkit defaults and the prior integration fingerprint. These numerical
+search declarations do not change contact/effect evidence requirements.

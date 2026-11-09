@@ -839,6 +839,39 @@ def test_newton_contact_dimension_survives_config_and_descriptor(condim: int) ->
     assert descriptor.collisions[0].newton.condim == condim
 
 
+@pytest.mark.parametrize("solref", [(0.02, 1.0), (-1000.0, -20.0)])
+def test_newton_raw_contact_parameters_survive_config_and_descriptor(
+    solref: tuple[float, float],
+) -> None:
+    solimp = (0.9, 0.95, 0.001, 0.5, 2.0)
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "cube",
+            "shape": {"shape_type": "Cube", "size": [0.1, 0.1, 0.1]},
+            "attrs": {
+                "collision_props": {"contype": 2, "conaffinity": 4},
+                "material_props": {
+                    "backend": "newton",
+                    "solref": list(solref),
+                    "solimp": list(solimp),
+                    "solmix": 0.5,
+                },
+            },
+        }
+    )
+    descriptor, _ = rigid_desc_from_cfg(
+        RigidObjectCfg.from_dict(cfg.to_dict()), newton_solver_type="mujoco_warp"
+    )
+    native = descriptor.collisions[0].newton
+    assert native.contype == 2
+    assert native.conaffinity == 4
+    assert native.solref == pytest.approx(solref)
+    assert native.solimp == pytest.approx(solimp)
+    assert native.solmix == pytest.approx(0.5)
+    assert NewtonCollisionPropertiesCfg().contype is None
+    assert NewtonRigidBodyMaterialCfg().solref is None
+
+
 def test_procedural_rigid_collision_defaults_compile_to_both_backends() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
@@ -1657,7 +1690,7 @@ def test_non_mode_aware_newton_position_fallback_is_explicit() -> None:
         configure_articulation_desc(descriptor, cfg, newton_solver_type="xpbd")
 
 
-def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
+def test_dexuni_solver_consumes_position_mode_without_warning() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
@@ -1672,7 +1705,7 @@ def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        configure_articulation_desc(descriptor, cfg, newton_solver_type="auto")
+        configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
 
     assert not caught
 

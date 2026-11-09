@@ -7,9 +7,10 @@
 1. `scene-engine` CLI validates that an input image exists and has an accepted suffix, and
    that edit-only mode has an existing output root (`scene_engine/cli/start.py`). With both
    image and edit prompt it generates first, then edits.
-2. Generation creates VLM, segmentation, geometry, and conditionally articulation clients.
-   Segmentation, geometry, and articulation sessions are health-checked and closed in
-   `finally` blocks; the VLM client has no explicit close in this function (`generate.py`).
+2. Generation borrows or owns a `GenSimServices` run. Its role-bound facades create
+   only required services, health-check once and release owned transports when the
+   run ends. Explicit staged-API clients take precedence and remain caller-owned.
+   Configuration and adapter ownership live under `services/`, not the pipelines.
 3. Scene understanding produces the table/object model and scene graph; geometry and optional
    articulation stages materialize assets; refinement updates placement.
    `SceneExporter.export()` is the durable generation boundary.
@@ -28,7 +29,7 @@
    `preview-scene --usd-file` imports it directly. The manifest and native
    GLTF/USDC files remain legacy compatibility data. It represents a scene,
    not a complete `EmbodiedEnv` deployment.
-6. The general SimReady CLI is a separate ingest path. `asset_engine/cli/start.py` sets
+6. The Asset Engine CLI is a separate ingest path. `asset_engine/cli/start.py` sets
    `PYOPENGL_PLATFORM=egl`, builds `JsonStore` and `ParserManager`, then calls
    `ingest_one_asset()`.
 7. Ingest accepts mesh formats for canonicalization and `.urdf`/`.usd` for direct copy. Both
@@ -36,6 +37,9 @@
    copies raw input and saves immediately; only the unified mesh branch normalizes the mesh,
    injects semantic/user extras, runs parser capabilities, and then saves asset/registry JSON
    (`ingest.py`).
+   `GeometryParser` measures the canonical OBJ; `PhysicsParser._simready_process`
+   separately rereads the archived `identity.source_file` for final normalization.
+   Source topology statistics therefore do not describe the final exported mesh.
 8. Gradio copies only existing uploaded files into a UUID run root using basename-safe
    destinations. A session-token-owned subprocess performs conversion; its merged output is
    streamed through a queue; success requires exit code zero and a produced
@@ -54,15 +58,22 @@
   not make deletion the first mutation.
 - The Scene Engine's internal SimReady processor fixes table physics as kinematic and object
   physics as dynamic; it is distinct from the general asset-ingest pipeline.
-- Parser capabilities should be idempotent. `ParserManager` records completed stages; new
-  parsers must respect that resume model.
+- Parser capabilities should be idempotent. `ParserManager` runs the selected sequence
+  and records `status.parsed` after completion; it does not skip recorded stages.
+  The CLI creates a new UUID for each invocation rather than resuming by source hash.
 - Gradio remote access requires complete basic auth. Allowed paths are explicit; `.git` and
   dotenv files are blocked; the artifact root cannot be the repository or its ancestor
   (`app_env.py`).
 - One `SessionProcessRegistry` slot belongs to one session. Starting a replacement terminates
   the previous process; reset affects only that session. App shutdown terminates process
   groups and discovered descendants (`app_processes.py`).
-- Environment loading is non-destructive: values already present in the process environment win.
+- Service configuration has explicit legacy and opt-in paths. Without the JSON
+  `model_services` section, previous per-owner selection rules remain. Explicit
+  profiles resolve only their environment references, with process values before
+  `EMBODICHAIN_ENV_FILE`/default dotenv. See the [service guide](../../../embodichain/gen_sim/services/README.md).
+- Generation submission timeouts with unknown acceptance are not resubmitted.
+  Transport/polling budgets belong to adapters; semantic repair belongs to callers.
+  Service audit sidecars remain outside sealed deployment bundles.
 
 ### Common failures and recommended change sites
 

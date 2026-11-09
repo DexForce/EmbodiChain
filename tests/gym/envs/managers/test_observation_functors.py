@@ -16,6 +16,9 @@
 """Tests for observation functors."""
 
 from __future__ import annotations
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 import pytest
 import torch
@@ -983,3 +986,355 @@ class TestComputeSemanticMask:
         # All envs have identical mask data, so results should match
         for i in range(1, num_envs):
             assert result[i].equal(result[0])
+
+
+def test_raw_pose_is_acquired_once_before_policy_noise_and_shared_by_aliases():
+    from embodichain.lab.gym.envs.managers import (
+        ObservationCfg,
+        ObservationManager,
+        SceneEntityCfg,
+    )
+    from embodichain.lab.gym.envs.managers.observations import (
+        get_entity_state,
+        get_object_pose,
+    )
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_manager import (
+        _ObservationCapture,
+    )
+    from tensordict import TensorDict
+
+    env = MockEnv(num_envs=2)
+    context = EpisodeContext(2)
+    context._begin_episode([0, 1])
+    context._finish_initialization([0, 1])
+    getter = Mock(wraps=env.test_object.get_local_pose)
+    env.test_object.get_local_pose = getter
+    draws = []
+
+    def noise(env, data):
+        value = torch.rand_like(data)
+        draws.append(value.clone())
+        data.add_(value)
+        return data
+
+    entity = SceneEntityCfg(uid="test_cube")
+    manager = ObservationManager(
+        {
+            "pose": ObservationCfg(
+                func=get_entity_state,
+                mode="add",
+                name="cube_pose",
+                params={"entity_cfg": entity},
+                consumers=("policy", "recording"),
+            ),
+            "matrix": ObservationCfg(
+                func=get_object_pose,
+                mode="add",
+                name="cube_matrix",
+                params={"entity_cfg": entity},
+            ),
+            "alias": ObservationCfg(
+                func=get_entity_state,
+                mode="add",
+                name="scene/cube/pose",
+                params={"entity_cfg": entity},
+                consumers=("recording",),
+            ),
+            "noise": ObservationCfg(func=noise, mode="modify", name="cube_pose"),
+        },
+        env,
+    )
+    torch.manual_seed(19)
+    expected_noise = torch.rand(2, 7)
+    expected_next = torch.rand(1)
+    torch.manual_seed(19)
+    with _ObservationCapture(
+        context.episode_ids, 0.0, episode_owner=context
+    ) as capture:
+        obs = manager.compute(TensorDict({}, batch_size=[2]))
+    frame = capture.finish(obs)
+    assert getter.call_count == 1
+    raw = torch.zeros(2, 7)
+    raw[:, 6] = 1
+    torch.testing.assert_close(obs["cube_pose"], raw + expected_noise)
+    torch.testing.assert_close(torch.rand(1), expected_next)
+    torch.testing.assert_close(frame.fields["cube_pose"].values, raw)
+    assert "scene" not in obs.keys()
+    # Alias names select the same described raw acquisition and storage.
+    assert frame.fields["cube_pose"] is frame.fields["scene/cube/pose"]
+    env.episode_context = context
+    manager._env._rollout_storage = getattr(manager._env, "_rollout_storage", None)
+    if manager._env._rollout_storage is None:
+        manager._env._rollout_storage = TensorDict(
+            {}, batch_size=[len(manager._env.episode_context.episode_ids)]
+        )
+    _init_raw_rollout(
+        manager._env._rollout_storage,
+        manager._env.episode_context,
+        **dict(fields={}, actions=torch.zeros(2, 1, 1)),
+    )
+    manager.bind_rollout_storage(manager._env._rollout_storage)
+    env.observation_manager = manager
+    recording = manager
+    EmbodiedEnv._record_initial_observation(recording._env, frame, [0, 1])
+    snapshot = recording.read_history(
+        [0, 0], fields=["scene/cube/pose"], episode_ids=[0, 0]
+    )
+    torch.testing.assert_close(snapshot.values["scene/cube/pose"], raw)
+    # A mutation in the same simulation tick requires another acquisition.
+    env.test_object._pose[:, 0, 3] = 3
+    with _ObservationCapture(
+        context.episode_ids, 0.0, episode_owner=context
+    ) as next_capture:
+        next_obs = manager.compute(TensorDict({}, batch_size=[2]))
+    next_frame = next_capture.finish(next_obs)
+    assert getter.call_count == 2
+    assert next_frame.revision != frame.revision
+    assert next_frame.fields["cube_pose"].values[:, 0].tolist() == [3.0, 3.0]
+    assert recording._env._rollout_storage["raw_steps"].tolist() == [0, 0]
+
+
+def test_raw_observation_missing_entity_has_validity_and_policy_tensor_is_not_evidence():
+    from embodichain.lab.gym.envs.managers import (
+        ObservationCfg,
+        ObservationManager,
+        SceneEntityCfg,
+    )
+    from embodichain.lab.gym.envs.managers.observations import get_entity_state
+    from tensordict import TensorDict
+
+    env = MockEnv(num_envs=2)
+    missing = get_entity_state(env, {}, SceneEntityCfg(uid="missing"))
+    assert missing.values.shape == (2, 7)
+    assert not missing.valid.any()
+    assert all("unavailable" in error for error in missing.acquisition_errors)
+
+    def policy_value(env, obs):
+        return torch.zeros(2, 7)
+
+    manager = ObservationManager(
+        {
+            "unqualified": ObservationCfg(
+                func=policy_value,
+                mode="add",
+                name="pretend_pose",
+                consumers=("recording",),
+            ),
+        },
+        env,
+    )
+    with pytest.raises(TypeError, match="has no physical identity"):
+        manager.compute(TensorDict({}, batch_size=[2]))
+
+
+def test_replay_functors_share_full_robot_proprioception_before_policy_selection():
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from tensordict import TensorDict
+    from embodichain.lab.gym.envs.base_env import BaseEnv
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers import ObservationCfg, ObservationManager
+    from embodichain.lab.gym.utils.trajectory_state import trajectory_observation_cfgs
+
+    env = MockEnv(num_envs=2, num_joints=3)
+    env.robot.uid, env.robot.dof = "robot", 3
+    env.sim.asset_uids.append("robot")
+    env.sim._articulations = {}
+    env.active_joint_ids = [2, 0]
+    env.robot._qpos[:] = torch.tensor([1.0, 2.0, 3.0])
+    env.robot.get_local_pose = lambda to_matrix=False: torch.tensor(
+        [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]
+    ).repeat(2, 1)
+    env.robot.get_proprioception = lambda: TensorDict(
+        {"qpos": env.robot._qpos, "qvel": env.robot._qvel, "qf": torch.zeros(2, 3)},
+        batch_size=[2],
+    )
+    env.robot.get_qpos = Mock(wraps=env.robot.get_qpos)
+    env.robot.get_qvel = Mock(wraps=env.robot.get_qvel)
+    env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
+    env.episode_context = EpisodeContext(2)
+    env.episode_context._begin_episode([0, 1])
+    env.episode_context._finish_initialization([0, 1])
+
+    def transform(env, data):
+        return data.add_(10.0)
+
+    cfg = {"policy": ObservationCfg(func=transform, name="robot/qpos")}
+    cfg.update(trajectory_observation_cfgs(env, uids=[]))
+    env.observation_manager = ObservationManager(cfg, env)
+    env._get_sensor_obs = lambda **kwargs: {}
+    env._extend_obs = lambda obs, **kwargs: env.observation_manager.compute(obs)
+    env.get_obs = lambda **kwargs: BaseEnv.get_obs(env, **kwargs)
+    frame = BaseEnv._capture_observation(env)
+    torch.testing.assert_close(
+        frame.policy["robot", "qpos"], torch.tensor([[13.0, 11.0], [13.0, 11.0]])
+    )
+    torch.testing.assert_close(
+        frame.fields["robot/qpos"].values,
+        torch.tensor([[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]]),
+    )
+    assert frame.fields["robot/qpos"].descriptor.joint_names == tuple(
+        env.robot.joint_names
+    )
+    env.robot.get_qpos.assert_not_called()
+    env.robot.get_qvel.assert_not_called()
+
+
+@pytest.mark.parametrize("is_static", [False, True])
+def test_raw_velocity_does_not_reacquire_pose_or_build_a_body_state(is_static):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.managers.observation_manager import (
+        _ObservationCapture,
+    )
+    from embodichain.lab.gym.envs.managers import SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.observations import get_entity_state
+
+    class Body(MockRigidObject):
+        @property
+        def body_state(self):
+            pytest.fail("Velocity acquisition must not fetch pose again.")
+
+    env = MockEnv(num_envs=2)
+    body = Body("test_cube", 2)
+    body.is_static = is_static
+    body.body_data = SimpleNamespace(
+        lin_vel=torch.ones(2, 3), ang_vel=torch.full((2, 3), 2.0)
+    )
+    env.sim._rigid_objects["test_cube"] = body
+    getter = Mock(wraps=body.get_local_pose)
+    body.get_local_pose = getter
+    with _ObservationCapture((0, 0)):
+        pose = get_entity_state(env, {}, SceneEntityCfg(uid="test_cube"))
+        linear = get_entity_state(
+            env, {}, SceneEntityCfg(uid="test_cube"), quantity="lin_vel"
+        )
+        angular = get_entity_state(
+            env, {}, SceneEntityCfg(uid="test_cube"), quantity="ang_vel"
+        )
+    getter.assert_called_once_with(to_matrix=False)
+    torch.testing.assert_close(
+        linear.values, torch.full((2, 3), 0.0 if is_static else 1.0)
+    )
+    torch.testing.assert_close(
+        angular.values, torch.full((2, 3), 0.0 if is_static else 2.0)
+    )
+    assert pose.descriptor.coordinate_frame == "arena"
+
+
+@pytest.mark.parametrize("to_matrix", [False, True])
+def test_pose_observations_keep_group_shape_inside_a_recording_boundary(to_matrix):
+    from embodichain.lab.gym.envs.managers import SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.observations import get_object_pose
+    from embodichain.lab.gym.envs.managers.observation_manager import (
+        _ObservationCapture,
+    )
+
+    env = MockEnv(num_envs=2)
+    poses = torch.zeros(2, 3, 7)
+    poses[..., 6] = 1.0
+    poses[..., 0] = torch.tensor([1.0, 2.0, 3.0])
+    getter = Mock(side_effect=lambda to_matrix=False: poses.clone())
+    env.test_object.get_local_pose = getter
+    with _ObservationCapture((0, 0)):
+        result = get_object_pose(
+            env, {}, SceneEntityCfg(uid="test_cube"), to_matrix=to_matrix
+        )
+    if to_matrix:
+        expected = torch.eye(4).repeat(2, 3, 1, 1)
+        expected[..., 0, 3] = torch.tensor([1.0, 2.0, 3.0])
+        torch.testing.assert_close(result, expected)
+    else:
+        torch.testing.assert_close(result, poses)
+    getter.assert_called_once_with(to_matrix=False)
+
+
+@pytest.mark.parametrize("as_string", [False, True])
+def test_manager_binds_required_recording_source_once_after_callable_resolution(
+    as_string,
+):
+    from embodichain.lab.gym.envs.managers import (
+        ObservationCfg,
+        ObservationManager,
+        SceneEntityCfg,
+    )
+    from embodichain.lab.gym.envs.managers.observations import get_entity_state
+    from embodichain.lab.gym.envs.managers.observation_manager import (
+        _ObservationCapture,
+    )
+    from tensordict import TensorDict
+
+    env = MockEnv(num_envs=2)
+    source = (
+        "embodichain.lab.gym.envs.managers.observations:get_entity_state"
+        if as_string
+        else get_entity_state
+    )
+    cfg = ObservationCfg(
+        func=source,
+        mode="add",
+        name="scene/cube/pose",
+        params={"entity_cfg": SceneEntityCfg(uid="test_cube")},
+        consumers=("recording",),
+    )
+    required = ObservationCfg(
+        func=get_entity_state,
+        mode="add",
+        name="scene/cube/pose",
+        params={"entity_cfg": SceneEntityCfg(uid="test_cube"), "quantity": "pose"},
+        consumers=("recording",),
+    )
+    manager = ObservationManager(
+        {"cube": cfg}, env, recording={"recording:cube": required}
+    )
+    getter = Mock(wraps=env.test_object.get_local_pose)
+    env.test_object.get_local_pose = getter
+    with _ObservationCapture((0, 0)) as capture:
+        manager.compute(TensorDict({}, batch_size=[2]))
+    assert manager.active_functors["add"] == ["cube"]
+    getter.assert_called_once_with(to_matrix=False)
+    assert capture.fields["scene/cube/pose"].descriptor.entity_uid == "test_cube"
+    conflicting = ObservationCfg(
+        func=get_entity_state,
+        mode="add",
+        name="scene/cube/pose",
+        params={"entity_cfg": SceneEntityCfg(uid="target")},
+        consumers=("recording",),
+    )
+    with pytest.raises(ValueError, match="conflicts with the replay schema"):
+        ObservationManager(
+            {"cube": conflicting}, env, recording={"recording:cube": required}
+        )
+
+
+def test_stateful_observation_manager_reset_clears_only_selected_rows() -> None:
+    from types import SimpleNamespace
+    from tensordict import TensorDict
+    from embodichain.lab.gym.envs.managers import ObservationCfg, ObservationManager
+    from embodichain.lab.gym.envs.managers.manager_base import Functor
+
+    class Counter(Functor):
+        def __init__(self, cfg, env):
+            super().__init__(cfg, env)
+            self.value = torch.zeros(env.num_envs)
+
+        def __call__(self, env, obs):
+            self.value += 1
+            return self.value.clone()
+
+        def reset(self, env_ids=None):
+            self.value[slice(None) if env_ids is None else env_ids] = 0
+
+    env = SimpleNamespace(num_envs=2, device=torch.device("cpu"))
+    manager = ObservationManager(
+        {
+            "counter": ObservationCfg(
+                func=Counter, mode="add", name="trace/count", params={}
+            )
+        },
+        env,
+    )
+    manager.compute(TensorDict({}, batch_size=[2]))
+    manager.reset([0])
+    value = manager.compute(TensorDict({}, batch_size=[2]))
+    torch.testing.assert_close(value["trace"]["count"], torch.tensor([1.0, 2.0]))

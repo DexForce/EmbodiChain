@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
 import json
 from pathlib import Path
 import re
@@ -25,9 +27,7 @@ from typing import Any
 
 from PIL import Image
 
-from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
-    ImageSegmentationClient,
-)
+from embodichain.gen_sim.services.compat import SegmentationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneGraph,
@@ -35,9 +35,7 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
     TABLE_OBJECT_ID,
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
     MaskCandidate,
     build_mask_candidates,
@@ -256,8 +254,8 @@ def understand_scene(
     image_path: str | Path,
     output_root: str | Path,
     *,
-    vlm_client: OpenAICompatibleVLM,
-    image_segmentation_client: ImageSegmentationClient,
+    vlm_client: VisionClient,
+    image_segmentation_client: SegmentationClient,
     json_max_attempts: int = 3,
 ) -> tuple[Scene, SceneGraph]:
 
@@ -311,7 +309,7 @@ def _initialize_scene_graph_from_segmented_scene(
     scene: Scene,
     *,
     asset_mask_id_overlay_path: str | Path,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     json_max_attempts: int = 3,
 ) -> SceneGraph:
     """Build the initial image-observed support graph for segmented assets."""
@@ -353,7 +351,7 @@ def _query_initial_scene_graph(
     *,
     scene_info: dict[str, object],
     asset_mask_id_overlay_path: Path,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     json_max_attempts: int,
 ) -> SceneGraph:
     """Return one validated image-observed support graph."""
@@ -458,7 +456,7 @@ def _analyze_image_objects(
     *,
     scene: Scene,
     image_path: str | Path,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     json_max_attempts: int = 3,
 ) -> None:
     """Analyze one image and update ``scene`` with validated semantic objects."""
@@ -629,8 +627,8 @@ def _segment_scene(
     image_path: str | Path,
     stage_output_root: str | Path,
     scene: Scene,
-    vlm_client: OpenAICompatibleVLM,
-    image_segmentation_client: ImageSegmentationClient,
+    vlm_client: VisionClient,
+    image_segmentation_client: SegmentationClient,
 ) -> Path:
     """Add validated masks and return an asset-only ID overlay image."""
     debug_output_root = (
@@ -726,8 +724,8 @@ def _segment_table(
     masks_output_root: str | Path,
     scene: Scene,
     *,
-    vlm_client: OpenAICompatibleVLM,
-    image_segmentation_client: ImageSegmentationClient,
+    vlm_client: VisionClient,
+    image_segmentation_client: SegmentationClient,
 ) -> None:
     """Segment the table. (Now it only supports segment the complete tabletop)"""
     if scene.table is None:
@@ -796,7 +794,7 @@ def _validate_table_candidates_with_vlm(
     table: SceneObject,
     candidates: list[MaskCandidate],
     candidates_image_path: Path,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     json_max_attempts: int = 3,
 ) -> int | None:
 
@@ -877,8 +875,8 @@ def _segment_assets(
     masks_output_root: str | Path,
     scene: Scene,
     *,
-    vlm_client: OpenAICompatibleVLM,
-    image_segmentation_client: ImageSegmentationClient,
+    vlm_client: VisionClient,
+    image_segmentation_client: SegmentationClient,
 ) -> None:
 
     # Group the assets by their categories.
@@ -948,7 +946,7 @@ def _validate_asset_candidates_with_vlm(
     assets: list[SceneObject],
     candidates: list[MaskCandidate],
     candidates_image_path: Path,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     json_max_attempts: int = 3,
 ) -> dict[str, int] | None:
     """Ask the VLM for a complete one-to-one asset-to-candidate assignment."""

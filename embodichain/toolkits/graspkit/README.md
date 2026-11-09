@@ -28,6 +28,11 @@ retain their separate configuration objects. Marvin requires an explicit
 `side="left"` or `side="right"` because its two hands have different meshes.
 A runtime TCP calibration can be supplied explicitly with `root_from_tcp`;
 this changes the returned TCP poses without moving the physical geometry.
+`root_from_contact_frame` independently calibrates the canonical grasp origin and
+axes in the hand root. It re-expresses surface samples and candidate poses while
+preserving the URDF geometry. Configured grasp services accept the same field;
+keep it with the embodiment's grasp calibration rather than using a TCP offset
+to stand in for contact calibration.
 
 For a custom hand, construct `FixedGripperCollisionGeometry.from_urdf` with
 its root/TCP, collision links, actual open joint positions, canonical-to-TCP
@@ -67,6 +72,26 @@ collision, swept paths or physical grasp success.
 
 These are contact-pair eligibility bounds. The actual URDF/open-state geometry
 owns collision checking.
+
+## Explicit geometry and opening views
+
+`pg_grasp.opening.OpeningEnvelopeGraspPoseGenerator` wraps an existing service
+and requires the complete object mesh to fit the opening after ordinary
+ranking. `pg_grasp.constraints.ConstrainedGraspPoseGenerator` additionally
+applies an immutable geometry-digest-bound region or release-plane declaration.
+Both retain the delegate's order and infinite-cost failure padding. They are
+explicit alternatives and do not change the ordinary generator's defaults.
+`NominalHandEnvelope` holds caller-declared heuristic dimensions, independently
+of actual hand geometry and physical release evidence.
+
+`pg_grasp.preshape` uses an explicit captured whole-hand sweep and table height
+for the original bounded handle candidate screening and cross-axis fallback.
+`pg_grasp.proposals.unqualified_center_proposals` retains prepared contact pairs,
+direction draws, NMS and ranking, deferring final-TCP/command qualification to
+the caller. Required ground filtering is rejected by this explicit proposal
+path rather than bypassed. These numerical entries import without Lab, Task
+Engine or a target-decomposition backend; the `pg_grasp` facade loads concrete backends
+only when requested.
 
 ## Explicit contact refinement
 

@@ -1,0 +1,21 @@
+{
+  "producer_pr": 1081,
+  "producer_head": "2c9ae4709e1493105d8c502dfc7a05b804e31083",
+  "fixture_input_adapter_source": "existing 79f test builders only; no production implementation or returned facts changed",
+  "fixture_input_adapter_sha256": {
+    "_full_control_program": "f20ba7eb56be990a5d07314104576005893f86cabeba9b6f73e8efa8e8740468",
+    "_raw_press_observation": "1d70b922d34ec3551361d3942b13c6cc0ff70dc2953117fb6a0d0cebff07cd7a"
+  },
+  "source": "actual public ControlOperationRuntime/SimulationSegmentPolicyPort/SimulationControlObservationCollector APIs; source numeric tests provide native-shaped inputs",
+  "cases": [
+    "press_parent",
+    "twist_parent"
+  ],
+  "sha256_uncompressed": "7d6a39f6042fbf489d5620704c4eb40842d1940711e62f4ab4d61811c4329b7e",
+  "uncompressed_bytes": 1719583,
+  "compressed_bytes": 48472,
+  "native_sim_robot_construction": false,
+  "normative_or_task_engine_import": false,
+  "physical_qualification": false,
+  "twist_fixture_input": "opaque episode literal set to actual initialized native episode 0 before calling unchanged real producer; no returned facts modified"
+}
