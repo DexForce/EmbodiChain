@@ -1354,6 +1354,7 @@ def test_empty_link_property_selection_is_noop(method: str) -> None:
 
 
 def test_spawn_static_friction_uses_live_batch_and_selected_rows(monkeypatch):
+    from embodichain.lab.sim.objects import rigid_object as rigid_module
     from embodichain.lab.sim.objects.rigid_object import RigidObject
 
     values = torch.tensor([[0.3], [0.6], [0.9]])
@@ -1368,7 +1369,7 @@ def test_spawn_static_friction_uses_live_batch_and_selected_rows(monkeypatch):
     factory = Mock(return_value=View())
     monkeypatch.setattr(SceneRigidBodyView, "from_entities", factory)
     rigid = RigidObject.__new__(RigidObject)
-    rigid._spawn_result = object()
+    rigid._spawn_result = SimpleNamespace(backend="newton")
     rigid._entities = [object(), object(), object()]
     rigid._data = None
     rigid.device = torch.device("cpu")
@@ -1381,11 +1382,11 @@ def test_spawn_static_friction_uses_live_batch_and_selected_rows(monkeypatch):
     assert factory.call_count == 1
 
     # Rebinding a facade after a topology rebuild replaces its native batch.
-    from embodichain.lab.sim.objects import rigid_object as rigid_module
     from embodichain.lab.sim.common import BatchEntity
 
     class RebuiltScene:
         world = object()
+        backend = "newton"
 
     monkeypatch.setattr(rigid_module, "Scene", RebuiltScene)
     monkeypatch.setattr(BatchEntity, "__init__", lambda *args, **kwargs: None)

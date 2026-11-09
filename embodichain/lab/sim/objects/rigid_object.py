@@ -37,6 +37,7 @@ from embodichain.lab.sim.objects.backends import (
 )
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
 from embodichain.lab.sim.objects.backends.rigid_physics import (
+    _set_default_spawn_friction,
     apply_legacy_physical_attr,
     can_use_newton_entity_dynamics_fallback,
     get_legacy_damping,
@@ -1220,6 +1221,10 @@ class RigidObject(BatchEntity):
             )
 
         if self.is_spawn_bound and self._data is None:
+            if self._spawn_result.backend != "newton":
+                for env_id, value in zip(local_env_ids, friction.tolist()):
+                    _set_default_spawn_friction(self._entities[env_id], float(value))
+                return
             ids = torch.as_tensor(local_env_ids, dtype=torch.int32, device=self.device)
             self._static_friction_view().apply_friction(
                 friction.to(dtype=torch.float32, device=self.device).unsqueeze(-1), ids
@@ -1258,6 +1263,15 @@ class RigidObject(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         if self.is_spawn_bound and self._data is None:
+            if self._spawn_result.backend != "newton":
+                return torch.tensor(
+                    [
+                        self._entities[env_id].get_physical_attr().dynamic_friction
+                        for env_id in local_env_ids
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
             ids = torch.as_tensor(local_env_ids, dtype=torch.int32, device=self.device)
             result = torch.empty((len(local_env_ids), 1), device=self.device)
             self._static_friction_view().fetch_friction(result, ids)

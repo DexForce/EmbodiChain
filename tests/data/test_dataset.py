@@ -34,6 +34,13 @@ PROCESS_JOIN_TIMEOUT_SECONDS = 5.0
 PROCESS_START_TIMEOUT_SECONDS = 60.0
 
 
+@pytest.mark.no_sim
+def test_default_data_modules_remains_a_public_export() -> None:
+    from embodichain.data import DEFAULT_DATA_MODULES
+
+    assert DEFAULT_DATA_MODULES is dataset_module.DEFAULT_DATA_MODULES
+
+
 def _check_cache(
     root: Path, prefix: str = "TestAsset", expected: str = "valid"
 ) -> None:

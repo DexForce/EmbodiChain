@@ -1793,13 +1793,20 @@ def test_legacy_metadata_reports_consistent_episode_success() -> None:
 
 
 @pytest.mark.parametrize("seed", (None, 0, 12))
-def test_demo_metadata_exposes_the_effective_environment_seed(seed: int | None) -> None:
+@pytest.mark.parametrize("recorder", ("rollout", "trajectory"))
+def test_demo_metadata_exposes_the_effective_environment_seed(
+    seed: int | None, recorder: str
+) -> None:
     """Finalizing an episode retains its seed after the next reset reseeds."""
     env = _RolloutWriterStub()
     env.cfg = SimpleNamespace(
         seed=seed, events=None, observations=None, rewards=None, dataset=None
     )
     env.dataset_manager = None
+    if recorder == "trajectory":
+        env._traj_buffer = env.rollout_buffer
+        env.rollout_buffer = None
+        env._demo_steps = env.rollout_steps.clone()
     env._demo_metadata_initialized = False
     env._demo_episode_metadata = [{} for _ in range(env.num_envs)]
     env._new_demo_episode_metadata = MethodType(
@@ -1815,6 +1822,7 @@ def test_demo_metadata_exposes_the_effective_environment_seed(seed: int | None) 
     assert EmbodiedEnv.get_demo_episode_metadata(env, 0)["seed"] == seed
 
     env.rollout_buffer = None
+    env._traj_buffer = None
     env._demo_metadata_initialized = False
     env._demo_episode_metadata = [{} for _ in range(env.num_envs)]
     env._new_demo_episode_metadata = Mock(side_effect=AssertionError("unused metadata"))
