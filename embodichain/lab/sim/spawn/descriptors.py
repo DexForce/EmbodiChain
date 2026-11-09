@@ -86,6 +86,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import (
     CubeCfg,
+    CylinderCfg,
     MeshCfg,
     MeshCollisionCfg,
     SphereCfg,
@@ -2007,6 +2008,20 @@ def _compile_geometry(
             raise ValueError("CubeCfg.size must contain three positive values.")
         return GeometryDesc.cube(size), CollisionApproximation.NONE, 1, "coacd"
 
+    if isinstance(shape, CylinderCfg):
+        if (
+            not math.isfinite(shape.radius)
+            or not math.isfinite(shape.height)
+            or min(shape.radius, shape.height) <= 0
+        ):
+            raise ValueError("Cylinder radius and height must be finite and positive.")
+        return (
+            GeometryDesc.cylinder(shape.radius, shape.height / 2),
+            CollisionApproximation.NONE,
+            1,
+            "coacd",
+        )
+
     if isinstance(shape, SphereCfg):
         if shape.radius <= 0:
             raise ValueError("SphereCfg.radius must be positive.")
@@ -2019,7 +2034,7 @@ def _compile_geometry(
 
     raise NotImplementedError(
         f"RigidObjectCfg shape {type(shape).__name__!r} is not supported by "
-        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, and SphereCfg."
+        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, CylinderCfg, and SphereCfg."
     )
 
 

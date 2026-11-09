@@ -128,6 +128,7 @@ version = { file = ["VERSION"] }
 
 [tool.setuptools]
 include-package-data = false
+license-files = ["LICEN[CS]E*", "COPYING*", "NOTICE*", "AUTHORS*", "licenses/*.txt"]
 
 [tool.black]
 

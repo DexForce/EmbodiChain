@@ -2834,6 +2834,20 @@ embodichain.lab.sim.atomic_actions.requirements
    SkillEndpointRequirement
    SkillResourceSlot
 
+embodichain.lab.sim.atomic_actions.primitives.grasp_cable
+---------------------------------------------------------
+
+Plan a contact-only pinch, close and lift. The caller measures actual lift and
+slip after execution; the plan creates no rigid attachment.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives.grasp_cable
+
+.. autosummary::
+
+   CableGraspGoal
+   GraspCableOptions
+   GraspCable
+
 embodichain.lab.sim.atomic_actions.runner
 -----------------------------------------
 
@@ -4276,6 +4290,29 @@ Differentiable lightweight point-mass task and learning-environment registration
 
    PointMassEnv
 
+embodichain_robots
+-----------------
+
+Official robot configurations are loaded lazily from the bundled catalog.
+The YAM preset uses a prepared external asset cache for simulation and FK.
+
+.. currentmodule:: embodichain_robots
+
+.. autosummary::
+
+   YamI2rtCfg
+
+embodichain_robots.i2rt.yam.cfg
+-------------------------
+
+YAM dual-arm defaults, including independent finger drives and local FK chains.
+
+.. currentmodule:: embodichain_robots.i2rt.yam.cfg
+
+.. autosummary::
+
+   YamI2rtCfg
+
 embodichain_tasks.configs
 -------------------------
 
@@ -4284,6 +4321,19 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+embodichain_tasks.manipulation.cable.route_the_cable
+----------------------------------------------------
+
+Two-spool routing task with lazy expert stages and measured cable geometry.
+Intermediate grasp validators reject excessive slip before continuing.
+
+.. currentmodule:: embodichain_tasks.manipulation.cable.route_the_cable
+
+.. autosummary::
+
+   RouteTheCableEnv
+   measure_route
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
@@ -4834,3 +4884,30 @@ Offline held-object adapters validate exact execution and acquisition identities
 .. autofunction:: held_observation_request
 
 .. autofunction:: resolve_hold_observation_condition
+
+Cable material geometry
+-----------------------
+
+Pure tensor helpers observe ordered segment endpoints and stable cable material
+coordinates. Slip compares the same material point in the moving tool frame.
+
+.. currentmodule:: embodichain.compute.geometry.cable
+
+.. autosummary::
+
+   sample_cable_material
+   cable_endpoints
+   cable_grasp_slip
+
+.. automodule:: embodichain.compute.geometry.cable
+   :members: sample_cable_material, cable_endpoints, cable_grasp_slip
+
+I2RT YAM model and assets
+-------------------------
+
+The model package loads configuration lazily; asset discovery can import the
+versioned dataset independently of robot construction.
+
+.. autoclass:: embodichain_robots.i2rt.yam.YamI2rtCfg
+.. autoclass:: embodichain_robots.i2rt.yam.cfg.YamI2rtCfg
+.. autoclass:: embodichain_robots.i2rt.yam.assets.YamI2rt

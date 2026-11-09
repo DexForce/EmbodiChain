@@ -1,0 +1,14 @@
+id: RouteTheCable-YAM-v1
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../../components/embodiments/yam_i2rt.yaml
+headless: true
+render_cfg:
+  renderer: no-render
+enable_entity_gizmo: false
+visualization:
+  allow_commands: false
+collection:
+  target_episodes: 1
+  max_attempts: 1
