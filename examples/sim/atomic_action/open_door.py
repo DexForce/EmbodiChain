@@ -36,6 +36,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
     RigidBodyPhysicsCfg,
 )
@@ -94,6 +95,7 @@ def create_microwave(sim: SimulationManager) -> Articulation:
         uid="microwave",
         fpath=get_data_path(MICROWAVE_ASSET),
         asset_physics_mode="overlay",
+        root_props=ArticulationRootPropertiesCfg(fixed_base=True),
         init_pos=MICROWAVE_POSITION,
         init_rot=MICROWAVE_ORIENTATION,
         joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),

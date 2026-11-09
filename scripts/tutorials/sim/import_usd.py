@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import time
-import numpy as np
 from embodichain.cli.sim import add_sim_args_to_parser
 
 
@@ -41,6 +40,8 @@ if __name__ == "__main__":
     # Parse before importing optional simulation/planning dependencies.
     _cli_args = build_parser().parse_args()
 
+
+import numpy as np
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
