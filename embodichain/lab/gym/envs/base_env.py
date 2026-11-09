@@ -810,7 +810,7 @@ class BaseEnv(gym.Env):
         evaluate = self.evaluate(**kwargs)
         if evaluate:
             info.update(evaluate)
-        if self.cfg.episode_context_in_info:
+        if getattr(self.cfg, "episode_context_in_info", True):
             info["episode_context"] = self.episode_context.snapshot()
         return info
 
@@ -1029,7 +1029,10 @@ class BaseEnv(gym.Env):
                 self._record_initial_observation(observation_frame, reset_ids)
                 with self._profiler.section("get_info"):
                     info = self.get_info(**options)
-                if self.cfg.episode_context_in_info and "episode_context" not in info:
+                if (
+                    getattr(self.cfg, "episode_context_in_info", True)
+                    and "episode_context" not in info
+                ):
                     info["episode_context"] = context.snapshot()
             except BaseException as error:
                 context._abort_initialization(reset_ids, error)

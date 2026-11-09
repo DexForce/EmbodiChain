@@ -2736,7 +2736,7 @@ class EmbodiedEnv(BaseEnv):
         outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             info["task_outcome"] = outcome.snapshot()
-        if self.cfg.episode_context_in_info:
+        if getattr(self.cfg, "episode_context_in_info", True):
             info["episode_context"] = self.episode_context.snapshot()
         return info
 
