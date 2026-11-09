@@ -65,7 +65,7 @@ def test_unexpected_qualification_errors_remain_fatal(tmp_path, error):
     def fail(**kwargs):
         raise error
 
-    services[0].qualify = fail
+    services[0].qualify_episode = fail
     with pytest.raises(type(error), match=str(error)):
         GymEpisodeAssembler(ctx).assemble(assignments, collector, services, result, {})
 
@@ -140,14 +140,10 @@ def _assembly_case(root, failed_row):
             return SimpleNamespace(
                 metadata={},
                 validation=ValidationResult((ValidationCheck("prototype", "passed"),)),
+                source_episode_uuids=("source-episode",),
             )
 
-        unit = SimpleNamespace(
-            unit=SimpleNamespace(
-                source=SimpleNamespace(source_id="original", source_revision="v1")
-            )
-        )
-        services[i] = SimpleNamespace(qualify=qualify, prototypes={0: unit})
+        services[i] = SimpleNamespace(qualify_episode=qualify)
     result = SimpleNamespace(
         env_ids=(0, 1),
         segments=((), ()),

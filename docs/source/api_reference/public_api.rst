@@ -354,8 +354,14 @@ Simulation-independent camera dimensions used to reconstruct recording features 
 
    RecordedCamera
 
+.. _simready_asset_api:
+
 embodichain.gen_sim.asset_engine.cli.start
 -----------------------------------------------
+
+Single-directory entry point for the :doc:`/features/generative_sim/asset_engine`.
+Mesh inputs run normalization and parser
+stages; configured direct-copy formats preserve raw files without those stages.
 
 .. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
 
@@ -391,8 +397,10 @@ of returned articulation artifacts before publication.
 embodichain.gen_sim.asset_engine.configs
 ----------------------------------------
 
-Read Asset Engine settings from the shared GenSim dotenv file. Legacy Scene
-Engine articulation keys remain accepted as aliases.
+Read articulated-asset service settings from the shared GenSim dotenv file.
+Legacy Scene Engine articulation keys remain accepted as aliases. These service
+settings are separate from the general mesh pipeline's ``OPENAI_*`` and JSON
+configuration; see :doc:`/features/generative_sim/asset_engine`.
 
 .. currentmodule:: embodichain.gen_sim.asset_engine.configs
 
@@ -403,7 +411,7 @@ Engine articulation keys remain accepted as aliases.
 embodichain.gen_sim.asset_engine.configs.environment
 ----------------------------------------------------
 
-Resolves requested Asset Engine dotenv keys and reports missing configuration
+Resolves requested asset-service dotenv keys and reports missing configuration
 without mutating process environment variables.
 
 .. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
@@ -427,7 +435,7 @@ updates their USDC path and scale metadata after normalization.
 embodichain.gen_sim.asset_engine.pipeline.articulation
 ------------------------------------------------------
 
-Materializes functional articulated records through the Asset Engine client.
+Materializes functional articulated records through the articulated-asset client.
 Records provide source observations and coarse scales; the owning scene pipeline
 continues to control layout and export.
 
@@ -623,6 +631,35 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.asset_engine.parser.base
+--------------------------------------------
+
+Parser capability dispatch and optional run-scoped model-service injection.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.parser.base
+
+.. autosummary::
+
+   AssetParser
+   ParserManager
+
+.. autoclass:: AssetParser
+
+.. autoclass:: ParserManager
+
+embodichain.gen_sim.asset_engine.pipeline.ingest
+------------------------------------------------
+
+Asset ingestion with optional borrowed model services and unchanged parser ownership.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.ingest
+
+.. autosummary::
+
+   ingest_one_asset
+
+.. autofunction:: ingest_one_asset
+
 embodichain.gen_sim.scene_engine.asset_normalization
 -----------------------------------------------------
 
@@ -658,6 +695,22 @@ baseline and saves successful candidates with a completion manifest.
 .. autosummary::
 
    main
+
+embodichain.gen_sim.scene_engine.cli.start
+------------------------------------------
+
+Scene generation and editing command dispatch sharing one model-service run.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.cli.start
+
+.. autosummary::
+
+   cli_scene_engine
+   main
+
+.. autofunction:: cli_scene_engine
+
+.. autofunction:: main
 
 embodichain.gen_sim.scene_engine.configs.environment
 ----------------------------------------------------
@@ -913,6 +966,111 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 .. autosummary::
 
    save_layouts
+
+embodichain.gen_sim.services
+----------------------------
+
+Run-scoped, replaceable model capabilities, explicit role configuration,
+provider-independent artifacts and classified failures. Contracts import lazily;
+semantic and physical validation remain with the consuming owners.
+
+.. currentmodule:: embodichain.gen_sim.services
+
+.. autosummary::
+
+   GenSimServicesCfg
+   load_services_config
+   GenSimServices
+   ServiceRegistry
+   TextPart
+   ImagePart
+   ChatMessage
+   ChatRequest
+   ChatResponse
+   ImageGenerationRequest
+   ImageArtifact
+   SegmentationRequest
+   SegmentationResult
+   GeometryRequest
+   ReconstructedObject
+   GeometryResult
+   ArticulationRequest
+   ArticulationResult
+   ChatService
+   ImageGenerationService
+   SegmentationService
+   GeometryReconstructionService
+   ArticulationService
+   ArticulationJobService
+   ServiceError
+   ServiceConfigurationError
+   CapabilityError
+   ServiceTimeout
+   ServiceTransportError
+   ServiceResponseError
+   SubmissionUnknown
+
+.. autoclass:: GenSimServicesCfg
+
+.. autofunction:: load_services_config
+
+.. autoclass:: GenSimServices
+
+.. autoclass:: ServiceRegistry
+
+.. autoclass:: TextPart
+
+.. autoclass:: ImagePart
+
+.. autoclass:: ChatMessage
+
+.. autoclass:: ChatRequest
+
+.. autoclass:: ChatResponse
+
+.. autoclass:: ImageGenerationRequest
+
+.. autoclass:: ImageArtifact
+
+.. autoclass:: SegmentationRequest
+
+.. autoclass:: SegmentationResult
+
+.. autoclass:: GeometryRequest
+
+.. autoclass:: ReconstructedObject
+
+.. autoclass:: GeometryResult
+
+.. autoclass:: ArticulationRequest
+
+.. autoclass:: ArticulationResult
+
+.. autoclass:: ChatService
+
+.. autoclass:: ImageGenerationService
+
+.. autoclass:: SegmentationService
+
+.. autoclass:: GeometryReconstructionService
+
+.. autoclass:: ArticulationService
+
+.. autoclass:: ArticulationJobService
+
+.. autoclass:: ServiceError
+
+.. autoclass:: ServiceConfigurationError
+
+.. autoclass:: CapabilityError
+
+.. autoclass:: ServiceTimeout
+
+.. autoclass:: ServiceTransportError
+
+.. autoclass:: ServiceResponseError
+
+.. autoclass:: SubmissionUnknown
 
 embodichain.gen_sim.task_engine.evidence
 ----------------------------------------
@@ -1673,52 +1831,6 @@ Adapt legacy phase-aligned geometry, timing and measured manipulability to the c
 .. autosummary::
 
    TrajectorySessionCoverage
-
-embodichain.lab.sim.scene.operations
-----------------------------------
-
-.. currentmodule:: embodichain.lab.sim.scene.operations
-
-``apply_changes_batch`` accepts an environment-indexed change set for each row
-of a scene view. It preflights every row before any mutation, then batches writes
-by entity. Neighboring rows remain untouched; no operation steps physics.
-
-.. autosummary::
-
-   apply_changes_batch
-
-.. currentmodule:: embodichain.lab.sim.scene
-
-.. autosummary::
-
-   apply_changes_batch
-
-.. autosummary::
-
-   restore_render_state
-
-embodichain.lab.sim.scene.physics
--------------------------------
-
-.. currentmodule:: embodichain.lab.sim.scene.physics
-
-Capture and restore measured mass, principal inertia and friction for explicitly
-selected dynamic rigid bodies on Default or Newton. Applying a mass scale also
-scales inertia from the original baseline, so repeated application does not
-accumulate. Every parameter is preflighted before writes; actual backend readback
-must match the request. These operations do not step physics or verify task success.
-Native failures may leave partial changes, requiring the host to stop execution.
-
-.. autosummary::
-
-   RigidPhysicsState
-   capture_rigid_physics
-   apply_rigid_physics
-   restore_rigid_physics
-
-.. autosummary::
-
-   capture_physics_properties
 
 embodichain.lab.sim.motion.planners.curobo.payload
 --------------------------------------------------
@@ -5059,3 +5171,152 @@ Offline runtime adapters validate exact raw acquisition and execution identities
 .. autofunction:: held_observation_request
 
 .. autofunction:: resolve_hold_observation_condition
+
+
+embodichain.data_pipeline.real2sim.demo_skill
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Task-specific demonstration contracts preserve raw observed state, submitted commands, manually confirmed interaction events and source mappings. Prepared assets require measured execution qualification before they can count as successful episodes.
+
+.. currentmodule:: embodichain.data_pipeline.real2sim.demo_skill
+
+.. autosummary::
+
+   RobotDemonstration
+   DemoSkillRole
+   DemoSkillPhase
+   DemoSkillEvent
+   DemoSkillConstraint
+   DemoSkillSpec
+   DemoSkillArtifact
+   DemoSkillReference
+   build_demo_skill
+   decode_demo_skill_spec
+   retarget_demo_skill
+
+.. autoclass:: RobotDemonstration
+   :members:
+
+.. autoclass:: DemoSkillRole
+   :members:
+
+.. autoclass:: DemoSkillPhase
+   :members:
+
+.. autoclass:: DemoSkillEvent
+   :members:
+
+.. autoclass:: DemoSkillConstraint
+   :members:
+
+.. autoclass:: DemoSkillSpec
+   :members:
+
+.. autoclass:: DemoSkillArtifact
+   :members:
+
+.. autoclass:: DemoSkillReference
+   :members:
+
+.. autofunction:: build_demo_skill
+
+.. autofunction:: decode_demo_skill_spec
+
+.. autofunction:: retarget_demo_skill
+
+
+embodichain.data_pipeline.real2sim.demo_skill_io
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Portable, bounded JSON/NPZ bundles retain the raw recording separately from explicitly adapted nominal references. Loading verifies content identity and reconstructs preparation without simulation.
+
+.. currentmodule:: embodichain.data_pipeline.real2sim.demo_skill_io
+
+.. autosummary::
+
+   save_robot_demonstration
+   load_robot_demonstration
+   save_demo_skill
+   load_demo_skill
+
+.. autofunction:: save_robot_demonstration
+
+.. autofunction:: load_robot_demonstration
+
+.. autofunction:: save_demo_skill
+
+.. autofunction:: load_demo_skill
+
+
+embodichain.lab.sim.atomic_actions.demo_skill
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Scene grounding and per-observation monitoring for one demonstration invocation. Evidence must match the physical row and observation timestamp; absent contact or task evidence cannot establish success.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.demo_skill
+
+.. autosummary::
+
+   DemoSkillObservation
+   DemoSkillEvidenceProvider
+   DemoSkillMonitor
+   DemoSkillMotionProvider
+
+.. autoclass:: DemoSkillObservation
+   :members:
+
+.. autoclass:: DemoSkillEvidenceProvider
+   :members:
+
+.. autoclass:: DemoSkillMonitor
+   :members:
+
+.. autoclass:: DemoSkillMotionProvider
+   :members:
+
+
+embodichain.lab.sim.atomic_actions.primitives.execute_demo_skill
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+One Atomic Skill executes a pinned demonstration asset through the ordinary planning, command, tracking and effect-verification lifecycle. Logical roles are resolved through the selected robot profile and scene integration.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives.execute_demo_skill
+
+.. autosummary::
+
+   DemoSkillGoal
+   ExecuteDemoSkill
+
+.. autoclass:: DemoSkillGoal
+   :members:
+
+.. autoclass:: ExecuteDemoSkill
+   :members:
+
+Image semantic planning
+-----------------------
+
+See :doc:`/features/generative_sim/task_engine` for the image-to-graph workflow
+and :doc:`embodichain/embodichain.gen_sim.task_engine` for the curated image
+planning and CLI API entries. Plans use the full canonical call catalog and
+retain explicit pending bindings before runtime scene/robot integration.
+
+Deferred image semantic planning
+--------------------------------
+
+Image-plan validation is documented in
+:doc:`embodichain/embodichain.gen_sim.task_engine`. Semantic validity remains
+independent of physical acceptance and runtime readiness.
+
+Semantic Call planning catalog
+------------------------------
+
+The following declarations are JSON-only and import without a simulator. They
+are shared by the image planner and configured Semantic Call lowerers; live
+lowering still validates calibrated scene and route bindings.
+
+.. currentmodule:: embodichain.lab.task_program.language.semantic_contracts
+
+.. autofunction:: semantic_planning_catalog
+
+.. autofunction:: validate_semantic_call_payload

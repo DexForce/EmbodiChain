@@ -14,6 +14,11 @@ The graph describes selected static relationships. It is not a runtime trace,
 an execution sequence, or a complete dependency inventory. Reviewed semantic
 relationships and extracted import declarations are labeled separately.
 
+For scene composition, layout generation, and physical preparation, read
+[Scene Services](../sim/scene/index.md). Its
+[integration map](../sim/scene/integrations.md) connects the shared services to
+GenSim, Gym reset events, Task Program, and the Expansion Engine.
+
 Each registered project-context topic and top-level production package has a
 module entry. This is an entry-point coverage measure: internal implementations
 and relationships are still selected, and an unconnected module may be consumed

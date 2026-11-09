@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
+
+
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
@@ -74,16 +77,21 @@ class TaskAgent:
         *,
         caller: InstructionCaller | None = None,
         interpreter: DraftInterpreter = interpret_instruction_draft,
+        services: GenSimServices | None = None,
     ) -> None:
+        self._services = services
         self._caller = caller
         self._interpreter = interpreter
 
+    @service_entry
     def generate(
         self,
         task_id: str,
         instruction: str,
         model: str | None = None,
         candidate_count: int = 3,
+        *,
+        services: GenSimServices | None = None,
     ) -> TaskCandidateSet:
         """Generate candidates concurrently and retain votes after deduplication."""
         normalized_task_id = str(task_id).strip()
@@ -97,6 +105,14 @@ class TaskAgent:
         ):
             raise ValueError("candidate_count must be a positive integer.")
 
+        services = self._services or services
+        from functools import partial
+
+        interpreter = (
+            partial(self._interpreter, services=services)
+            if self._interpreter is interpret_instruction_draft
+            else self._interpreter
+        )
         attempts: list[_CandidateAttempt] = []
         with ThreadPoolExecutor(
             max_workers=candidate_count,
@@ -104,7 +120,7 @@ class TaskAgent:
         ) as executor:
             futures = {
                 executor.submit(
-                    self._interpreter,
+                    interpreter,
                     normalized_instruction,
                     model=model,
                     caller=self._caller,

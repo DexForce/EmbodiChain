@@ -23,8 +23,13 @@ not register a Gym environment, instantiate simulation, or execute a program.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from embodichain.lab.task_program.language.schema import TaskProgramCfg
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
 
@@ -57,10 +62,13 @@ class ConfiguredTaskProgramIntegration:
 class ConfiguredTaskProgramDeployment:
     """Resolved component metadata for one configured deployment.
 
+    An inline program is retained as an owned declaration; file selections keep
+    their resolved path. ``program_source`` returns the selected representation.
+
     Attributes:
         integration_id: Task integration identifier from the selected component.
         program_id: Program identifier declared by that integration.
-        program_path: Resolved file path for subsequent Task Program loading.
+        program_path: Resolved file path, or None for an inline program.
         selection: Trusted scene, robot-profile and execution-preset selection.
         integration: Validated registration and lazy live adapter factory.
         scene_binding (dict): Independently owned semantic scene declaration.
@@ -70,11 +78,42 @@ class ConfiguredTaskProgramDeployment:
 
     integration_id: str
     program_id: str
-    program_path: Path
+    program_path: Path | None
     selection: TaskProgramIntegrationCfg
     integration: ConfiguredTaskProgramIntegration
     scene_binding: dict[str, object]
     planner_config: dict[str, object] | None
+    program_declaration: dict[str, Any] | None = None
+
+    @property
+    def program_source(self) -> Path | dict[str, Any]:
+        """Return a file path or owned inline program for strict decoding.
+
+        Returns:
+            pathlib.Path | dict: The selected immutable-file reference or a fresh
+            declaration dictionary whose values remain under the strict decoder.
+        """
+        if self.program_path is not None:
+            return self.program_path
+        if self.program_declaration is None:
+            raise ValueError("Configured deployment has no program source.")
+        return deepcopy(self.program_declaration)
+
+    def load_program(self) -> TaskProgramCfg:
+        """Decode and preflight the selected program without live runtime creation."""
+        from ._configured_composition import _load_deployment_program
+
+        registration = self.integration.registration
+        registration.assert_unchanged()
+        program = _load_deployment_program(
+            self.program_source, selection=self.selection, catalog=registration.catalog
+        )
+        if program.program_id != self.program_id:
+            raise ValueError(
+                "Configured deployment requires the integration's program_id."
+            )
+        registration.catalog.preflight(program)
+        return program
 
 
 def load_configured_task_program_deployment(

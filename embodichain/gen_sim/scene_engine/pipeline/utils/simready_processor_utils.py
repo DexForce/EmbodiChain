@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
 import json
 from pathlib import Path
 
@@ -26,9 +28,7 @@ import trimesh
 
 from embodichain.gen_sim._blender_runtime import _run_blender_job
 
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim.services.compat import VisionClient, vision_for_role
 
 _VLM_SYSTEM_PROMPT = """You inspect one isolated 3D object from elevated oblique and top views.
 The object is temporarily visual-normalized and placed on a small neutral
@@ -244,7 +244,7 @@ def query_vlm_object_pose_and_target_size(
     scene_object_description: str,
     needed_layout: str,
     rendered_views_path: str | Path,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     debug_output_path: str | Path | None = None,
     json_max_attempts: int = 3,
 ) -> dict[str, object]:
@@ -253,7 +253,7 @@ def query_vlm_object_pose_and_target_size(
         raise ValueError("json_max_attempts must be at least 1.")
     last_validation_error: ValueError | None = None
     for _ in range(json_max_attempts):
-        response_text = vlm_client.complete(
+        response_text = vision_for_role(vlm_client, "scene_asset_dimensions").complete(
             system_prompt=_VLM_SYSTEM_PROMPT,
             user_prompt=(
                 f"Object description:\n{scene_object_description}\n\n"
@@ -301,7 +301,7 @@ def query_vlm_pose_switch_candidate(
     scene_object_description: str,
     needed_layout: str,
     rendered_candidates_path: str | Path,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     debug_output_path: str | Path | None = None,
     json_max_attempts: int = 3,
 ) -> tuple[float, str]:
@@ -310,7 +310,7 @@ def query_vlm_pose_switch_candidate(
         raise ValueError("json_max_attempts must be at least 1.")
     last_validation_error: ValueError | None = None
     for _ in range(json_max_attempts):
-        response_text = vlm_client.complete(
+        response_text = vision_for_role(vlm_client, "scene_asset_orientation").complete(
             system_prompt=_VLM_POSE_CANDIDATE_SYSTEM_PROMPT,
             user_prompt=(
                 f"Object description:\n{scene_object_description}\n\n"

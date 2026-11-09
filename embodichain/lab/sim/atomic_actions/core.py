@@ -674,7 +674,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         context: PlanningContext,
         source: NominalMotionSource,
         *,
-        segments: tuple[str, ...],
+        segments: tuple[str, ...] | None,
     ) -> InstantiatedSkillMotion:
         """Validate a single-slot external reference before skill assembly."""
         from .nominal import InstantiatedSkillMotion
@@ -700,7 +700,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         if not isinstance(motion, InstantiatedSkillMotion):
             raise TypeError("nominal source must return a InstantiatedSkillMotion")
         timed = motion.trajectory
-        if tuple(motion.segment_lengths) != segments:
+        if segments is not None and tuple(motion.segment_lengths) != segments:
             raise ValueError(f"external motion requires ordered segments {segments}")
         if tuple(self.robot.joint_names) != motion.joint_names:
             raise ValueError("external motion joint layout does not match the robot")
@@ -752,7 +752,10 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                         timed.positions[:, :, child], expected, atol=1e-5, rtol=0
                     ):
                         raise ValueError(
-                            "external motion violates robot mimic constraints"
+                            "external motion violates robot mimic constraints: "
+                            f"{self.robot.joint_names[child]} <- {self.robot.joint_names[parent]} "
+                            f"multiplier={multiplier} offset={offset} "
+                            f"max_error={float((timed.positions[:,:,child]-expected).abs().max()):.6g}"
                         )
                     owned.add(child)
                     pending.remove(item)
