@@ -134,6 +134,7 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
 )
 from embodichain.lab.task_program.semantics.profiles import (
     EffectAssurance,
+    ReleaseGateEvidence,
     ResourceClaim,
     WorkflowRecoveryPolicy,
 )
@@ -658,6 +659,7 @@ class _Compiler(SemanticCallCompiler):
                 ),
                 preset=SimpleNamespace(
                     preset_id="runtime_test_preset",
+                    release_gate_evidence=ReleaseGateEvidence.TERMINAL_CLAUSES,
                     motion_policy=invocation.motion_policy,
                     recovery_policy=invocation.recovery_policy,
                     runner_cfg=self._runner_cfg,
@@ -847,6 +849,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
                 ),
                 preset=SimpleNamespace(
                     preset_id="runtime_test_recovery_preset",
+                    release_gate_evidence=ReleaseGateEvidence.TERMINAL_CLAUSES,
                     motion_policy=motion_policy,
                     tracking_policy=tracking_policy,
                     recovery_policy=recovery_policy,

@@ -21,17 +21,119 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 import torch
 
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc, RigidBodyShape
 from ._validation import _owned_b1_pose, _owned_batch_pose
 
+if TYPE_CHECKING:
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
 __all__ = [
     "CollisionObjectSnapshot",
+    "SimulationCollisionShapeReader",
     "read_articulation_link_boxes",
     "snapshot_collision_sources",
 ]
+
+
+class SimulationCollisionShapeReader:
+    """Read an explicitly selected B1 rigid collision roster without live poses.
+
+    Args:
+        simulation: Borrowed simulation owning the selected bodies.
+        rigid_objects: Ordered logical collision IDs mapped to native rigid UIDs.
+        articulation_links: Must be empty for this rigid-only capability.
+
+    The reader preserves actual shape types, local frames, component order and
+    already-applied scale. It owns neither a world pose nor a planning backend.
+    A host must validate the actual native observation stamp around acquisition.
+    """
+
+    def __init__(
+        self,
+        simulation: SimulationManager,
+        *,
+        rigid_objects: Mapping[str, str],
+        articulation_links: Mapping[str, tuple[str, str]],
+    ) -> None:
+        if not isinstance(rigid_objects, Mapping) or not isinstance(
+            articulation_links, Mapping
+        ):
+            raise TypeError("Collision source rosters must be mappings.")
+        if articulation_links:
+            raise ValueError(
+                "Observed rigid collision sources do not support articulation links."
+            )
+        self._simulation = simulation
+        self._rigid: dict[str, str] = {}
+        self._owners: dict[str, object] = {}
+        for key, uid in rigid_objects.items():
+            if any(
+                type(value) is not str or not value or value != value.strip()
+                for value in (key, uid)
+            ):
+                raise ValueError("Collision source IDs must be exact nonempty strings.")
+            body = simulation.get_rigid_object(uid)
+            if body is None or body.num_instances != 1:
+                raise ValueError("Collision sources require bound B1 rigid objects.")
+            self._rigid[key] = uid
+            self._owners[uid] = body
+        if len(set(self._rigid.values())) != len(self._rigid):
+            raise ValueError("A native rigid object must occur only once in the world.")
+
+    @property
+    def entity_ids(self) -> tuple[str, ...]:
+        """Return the complete declared collision-source order."""
+        return tuple(self._rigid)
+
+    @property
+    def provenance(self) -> Mapping[str, str]:
+        """Return owned source-route labels, not collision certificates."""
+        return MappingProxyType(
+            {key: "rigid_collision_descriptors" for key in self._rigid}
+        )
+
+    def capture(
+        self, *, excluded_entity_ids: tuple[str, ...] = ()
+    ) -> dict[str, tuple[CollisionShapeDesc, ...]]:
+        """Read the selected shapes after applying all explicit exclusions.
+
+        Args:
+            excluded_entity_ids: Logical IDs omitted before any shape read.
+
+        Returns:
+            Ordered borrowed descriptors for immediate owned snapshot assembly.
+
+        Raises:
+            ValueError: Ownership, batch or complete geometry is unavailable.
+        """
+        if type(excluded_entity_ids) is not tuple or any(
+            type(key) is not str or not key or key != key.strip()
+            for key in excluded_entity_ids
+        ):
+            raise ValueError(
+                "Excluded collision IDs must be an exact identifier tuple."
+            )
+        result = {}
+        for key, uid in self._rigid.items():
+            if key in excluded_entity_ids:
+                continue
+            body = self._simulation.get_rigid_object(uid)
+            if body is not self._owners[uid] or body.num_instances != 1:
+                raise ValueError(
+                    "Rigid collision source ownership changed; rebind the reader."
+                )
+            shapes = tuple(body.get_collision_shapes())
+            if not shapes or not all(
+                isinstance(shape, CollisionShapeDesc) for shape in shapes
+            ):
+                raise ValueError("Declared rigid collision shapes are incomplete.")
+            result[key] = shapes
+        return result
 
 
 def _copy_shape(shape: CollisionShapeDesc) -> CollisionShapeDesc:

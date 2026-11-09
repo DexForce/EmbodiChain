@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from embodichain.lab.task_program.language.schema import TaskProgramCfg
+    from .invocation_policy import InvocationPolicyBinding
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
 
@@ -74,6 +75,7 @@ class ConfiguredTaskProgramDeployment:
         scene_binding (dict): Independently owned semantic scene declaration.
         planner_config (dict | None): Independently owned planner declaration,
             when selected.
+        invocation_policy_bindings: Owned exact sequential occurrence selections.
     """
 
     integration_id: str
@@ -84,6 +86,20 @@ class ConfiguredTaskProgramDeployment:
     scene_binding: dict[str, object]
     planner_config: dict[str, object] | None
     program_declaration: dict[str, Any] | None = None
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Keep configured occurrence selections immutable and independently owned."""
+        if type(self.invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
+        if self.invocation_policy_bindings:
+            from .invocation_policy import _snapshot_invocation_policy_bindings
+
+            object.__setattr__(
+                self,
+                "invocation_policy_bindings",
+                _snapshot_invocation_policy_bindings(self.invocation_policy_bindings),
+            )
 
     @property
     def program_source(self) -> Path | dict[str, Any]:
@@ -112,7 +128,14 @@ class ConfiguredTaskProgramDeployment:
             raise ValueError(
                 "Configured deployment requires the integration's program_id."
             )
-        registration.catalog.preflight(program)
+        registration.catalog.preflight(
+            program,
+            **(
+                {"invocation_policy_bindings": self.invocation_policy_bindings}
+                if self.invocation_policy_bindings
+                else {}
+            ),
+        )
         return program
 
 

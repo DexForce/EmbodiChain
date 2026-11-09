@@ -59,6 +59,11 @@ physical-shape support. Triangle mesh and SDF inputs return unsupported rather
 than being silently convexified.
 
 ``NewtonCollisionChecker`` owns an independent query model and scratch state.
+Its ``contact_query`` and ``contact_pairs`` methods expose a separate zero-offset
+native predicate without the feasibility check's tolerance. ``NativeContactResult``
+retains native signed separation, capped clearance bounds and conversion
+uncertainty; a threshold crossing remains unavailable. This capability still
+rejects actual triangle meshes and does not infer a convex collider from them.
 It does not step physics or mutate the host's positions, filters or clock.
 Robot/environment, self, inter-arm and held-object queries use stage-local
 permissions. Shape/pair/contact budgets are bounded, and overflow or nonfinite
@@ -169,6 +174,7 @@ Implementation modules
 .. autosummary::
 
    CollisionBody
+   NativeContactResult
    NewtonCollisionChecker
    UnsupportedFeasibilityError
 

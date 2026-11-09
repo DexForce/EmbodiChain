@@ -18,9 +18,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
+from typing import TypeVar
 
-__all__ = ["resolve_config_path"]
+__all__ = ["resolve_config_path", "resolve_local_resource_paths"]
+
+_ConfigValue = TypeVar("_ConfigValue")
 
 
 def resolve_config_path(
@@ -94,3 +98,51 @@ def resolve_config_path(
     from embodichain_tasks.configs import get_config_path
 
     return get_config_path(relative_path)
+
+
+def resolve_local_resource_paths(
+    value: _ConfigValue, *, base_dir: str | Path
+) -> _ConfigValue:
+    """Own a declaration and resolve its explicit local resource files.
+
+    Only string values under ``fpath``, ``urdf_path`` or ``xml_path`` prefixed
+    with ``./`` or ``../`` select owner-relative files. Bare registry references,
+    absolute strings and Path values keep their existing meaning. Dictionaries
+    and lists are traversed with the existing rules; other containers are copied
+    without adding resource interpretation. This performs no registry, network
+    or SDK lookup.
+
+    Args:
+        value: Declaration to copy, retaining its container types.
+        base_dir: Directory of the component or deployment declaring the files.
+
+    Returns:
+        Independent declaration with explicit local resource strings resolved to
+        absolute file paths. The input remains unchanged, including on failure.
+
+    Raises:
+        FileNotFoundError: An explicit owner-relative resource is not a file.
+    """
+    owned = deepcopy(value)
+    owner = Path(base_dir).expanduser()
+
+    def resolve(current: object) -> None:
+        if isinstance(current, dict):
+            for key, child in current.items():
+                if (
+                    key in {"fpath", "urdf_path", "xml_path"}
+                    and isinstance(child, str)
+                    and child.startswith(("./", "../"))
+                ):
+                    selected = (owner / child).resolve()
+                    if not selected.is_file():
+                        raise FileNotFoundError(selected)
+                    current[key] = str(selected)
+                else:
+                    resolve(child)
+        elif isinstance(current, list):
+            for child in current:
+                resolve(child)
+
+    resolve(owned)
+    return owned

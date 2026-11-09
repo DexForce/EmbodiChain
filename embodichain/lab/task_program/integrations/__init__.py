@@ -60,6 +60,7 @@ __all__ = [
     "RegisteredSemanticLowererDeclaration",
     "RegisteredSemanticLowererFactory",
     "RegisteredSemanticLowererSceneValidator",
+    "RegisteredSemanticLowererCallValidator",
     "RigidizedArticulationAntipodalGraspBinding",
     "RuntimeTransportDeclaration",
     "SimulationArticulationBinding",
@@ -156,6 +157,10 @@ _EXPORTS = {
     "RegisteredSemanticLowererFactory": (
         ".extensions",
         "RegisteredSemanticLowererFactory",
+    ),
+    "RegisteredSemanticLowererCallValidator": (
+        ".extensions",
+        "RegisteredSemanticLowererCallValidator",
     ),
     "RegisteredSemanticLowererSceneValidator": (
         ".extensions",

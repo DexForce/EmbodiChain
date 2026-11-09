@@ -27,7 +27,7 @@ from embodichain.lab.sim.motion.motion_generator import (
     MotionGenOptions,
     MotionGenerator,
 )
-from _cartesian_segment_fixture import segment_fixture, real_segment_fixture
+from ._cartesian_segment_fixture import segment_fixture, real_segment_fixture
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.lab.sim.motion._budget import _planning_budget_scope
 

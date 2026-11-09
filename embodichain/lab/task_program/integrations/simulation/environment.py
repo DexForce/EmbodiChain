@@ -36,12 +36,17 @@ from copy import deepcopy
 from dataclasses import dataclass, fields
 import math
 from weakref import ReferenceType, ref
+from uuid import uuid4
 from types import MappingProxyType
 from typing import Literal, Protocol, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
+from embodichain.lab.sim.evidence import (
+    PhysicalEvidenceRequest,
+    PhysicalEvidenceBatch,
+    PhysicalObservationStamp,
+)
 from embodichain.lab.sim.atomic_actions.grip_evidence import GripEvidenceObservationPort
 
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
@@ -103,6 +108,7 @@ from .policies import SimulationSegmentPolicyPort
 from .stability import SimulationStabilityConditionCfg
 
 if TYPE_CHECKING:
+    from ..invocation_policy import InvocationPolicyBinding
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryCfg
@@ -120,6 +126,46 @@ class _RuntimeOwner:
     def require_open(self) -> None:
         if self.closed:
             raise RuntimeError("Simulation Task Program runtime resources are closed.")
+
+
+class _OwnedFreeMotionQuery:
+    def __init__(self, query, owner: _RuntimeOwner) -> None:
+        self._query, self._owner = query, owner
+        self.robot = query.robot
+
+    def inspect(self, positions: torch.Tensor, *, control_part: str):
+        self._owner.require_open()
+        result = self._query.inspect(positions, control_part=control_part)
+        self._owner.require_open()
+        return result
+
+
+class _OwnedJointPrefixPlanner:
+    def __init__(self, planner, owner: _RuntimeOwner) -> None:
+        self._planner, self._owner = planner, owner
+        self.robot = planner.robot
+
+    def plan(
+        self,
+        *,
+        context: PlanningContext,
+        control_part: str,
+        start_qpos: torch.Tensor,
+        target_qpos: torch.Tensor,
+        full_qpos: torch.Tensor,
+        control_dt: float,
+    ):
+        self._owner.require_open()
+        result = self._planner.plan(
+            context=context,
+            control_part=control_part,
+            start_qpos=start_qpos,
+            target_qpos=target_qpos,
+            full_qpos=full_qpos,
+            control_dt=control_dt,
+        )
+        self._owner.require_open()
+        return result
 
 
 def _runtime_scope_validator(
@@ -535,6 +581,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         runtime_scope_guard: Callable[[], None] | None = None,
         capture_root_pose: bool = False,
         hold_qpos_source: Literal["observed", "drive_target"] = "observed",
+        world_stamp_reader: Callable[[], PhysicalObservationStamp] | None = None,
     ) -> None:
         if type(scene_provider) is not SharedTickSceneProvider:
             raise TypeError("scene_provider must be exactly SharedTickSceneProvider.")
@@ -568,6 +615,9 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             raise ValueError("env_ids and robot qpos must share a device.")
         if torch.unique(env_ids).numel() != env_ids.numel():
             raise ValueError("env_ids must be unique.")
+        if world_stamp_reader is not None and not callable(world_stamp_reader):
+            raise TypeError("world_stamp_reader must be callable or None.")
+        self._world_stamp_reader = world_stamp_reader
         self._robot = robot
         self._world_batch_size = qpos.shape[0]
         self._scene_provider = scene_provider
@@ -673,6 +723,9 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
     def _capture(self, task_state: TaskState) -> PlanningContext:
         """Capture one synchronized robot and scene observation."""
         self.validate_runtime_scope()
+        world_stamp = (
+            None if self._world_stamp_reader is None else self._world_stamp_reader()
+        )
         qpos = _full_robot_tensor(self._robot, "get_qpos", required=True)
         assert qpos is not None
         if (
@@ -705,7 +758,15 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             if not isinstance(root_pose, torch.Tensor):
                 raise TypeError("Robot root observation must be a tensor.")
             root_pose = root_pose.to(qpos)
+        if (
+            self._world_stamp_reader is not None
+            and self._world_stamp_reader() != world_stamp
+        ):
+            raise RuntimeError(
+                "Native world source changed during planning observation."
+            )
         context = PlanningContext(
+            world_source_stamp=world_stamp,
             robot=RobotObservation(
                 timestamp=timestamp,
                 qpos=qpos.index_select(0, self._env_ids),
@@ -778,18 +839,36 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         translation_threshold: float = 1.0e-4,
         rotation_threshold: float = 1.0e-3,
         sensor_suite: MutableMapping[str, object] | None = None,
-        capture_root_pose: bool = False,
-        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
+        capture_root_pose: bool | None = None,
+        hold_qpos_source: Literal["observed", "drive_target"] | None = None,
     ) -> None:
         if type(registration) is not SimulationTaskProgramRegistration:
             raise TypeError(
                 "registration must be exactly SimulationTaskProgramRegistration."
             )
+        registration.assert_unchanged()
+        declared_services = registration.planning_services
+        if declared_services is not None:
+            if capture_root_pose is not None or hold_qpos_source is not None:
+                raise ValueError(
+                    "Registered planning services own observation settings; remove constructor overrides."
+                )
+            declared_services = declared_services.snapshot()
+            declared_services.validate_num_envs(simulation.num_envs)
+            declared_services.validate_physics(simulation.physics_backend)
+            capture_root_pose = declared_services.capture_root_pose
+            hold_qpos_source = declared_services.hold_qpos_source
+        else:
+            capture_root_pose = (
+                False if capture_root_pose is None else capture_root_pose
+            )
+            hold_qpos_source = (
+                "observed" if hold_qpos_source is None else hold_qpos_source
+            )
         if type(capture_root_pose) is not bool:
             raise TypeError("capture_root_pose must be a bool.")
         if hold_qpos_source not in ("observed", "drive_target"):
             raise ValueError("hold_qpos_source must be observed or drive_target.")
-        registration.assert_unchanged()
         selected_scene_binding = registration.scene_binding
         selected_profile_binding = registration.robot_profile_binding
         selected_endpoint_adapters = dict(registration.endpoint_adapter_map)
@@ -860,6 +939,12 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             field_name="rotation_threshold",
         )
         self._owner_token = _RuntimeOwner()
+        self._capture_native_revision = (
+            declared_services is not None and declared_services.capture_native_revision
+        )
+        self._observation_source_id = (
+            uuid4().hex if self._capture_native_revision else None
+        )
         self._capture_root_pose = capture_root_pose
         self._hold_qpos_source = hold_qpos_source
 
@@ -980,8 +1065,16 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             motion_generator_factory=self._motion_generator_factory,
             grasp_pose_generators=self._grasp_pose_generators,
             hand_geometry_cfgs=self._hand_geometry_cfgs,
-            capture_root_pose=self._capture_root_pose,
-            hold_qpos_source=self._hold_qpos_source,
+            capture_root_pose=(
+                None
+                if self._registration.planning_services is not None
+                else self._capture_root_pose
+            ),
+            hold_qpos_source=(
+                None
+                if self._registration.planning_services is not None
+                else self._hold_qpos_source
+            ),
             translation_threshold=self._translation_threshold,
             rotation_threshold=self._rotation_threshold,
             sensor_suite=self._sensor_suite,
@@ -1020,8 +1113,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
         translation_threshold: float = 1.0e-4,
         rotation_threshold: float = 1.0e-3,
-        capture_root_pose: bool = False,
-        hold_qpos_source: Literal["observed", "drive_target"] = "observed",
+        capture_root_pose: bool | None = None,
+        hold_qpos_source: Literal["observed", "drive_target"] | None = None,
     ) -> SimulationTaskProgramFactory:
         """Create a registered factory from the standard Gym environment surface."""
         simulation = getattr(environment, "sim", None)
@@ -1143,6 +1236,70 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise ValueError(
                 "Motion generator must own the exact robot selected by the factory."
             )
+        free_motion_query = joint_prefix = place_scene = None
+        services = self._registration.planning_services
+        if services is not None and services.free_motion_query == "discrete_mesh":
+            from embodichain.lab.sim.motion.mesh_collision import (
+                SimulationFreeMotionQuery,
+            )
+
+            free_motion_query = _OwnedFreeMotionQuery(
+                SimulationFreeMotionQuery(self._robot, self._simulation),
+                self._owner_token,
+            )
+        if services is not None and services.observed_curobo is not None:
+            from embodichain.lab.sim.atomic_actions.curobo_queries import (
+                CuroboJointPrefixPlanner,
+            )
+            from embodichain.lab.sim.scene.collision_sources import (
+                SimulationCollisionShapeReader,
+            )
+            from embodichain.lab.sim.motion.planners.curobo.observed import (
+                ObservedCuroboQueryFactory,
+            )
+            from .collision_observation import SimulationCollisionObservationProvider
+
+            declared = services.observed_curobo.snapshot()
+            roster = services.collision_roster.snapshot()
+            shapes = SimulationCollisionShapeReader(
+                self._simulation,
+                rigid_objects=dict(roster.rigid_objects),
+                articulation_links={},
+            )
+            cfg = CuroboPlannerCfg(
+                robot_uid=self._robot.uid,
+                sim_instance_id=self._simulation.instance_id,
+                world=CuroboWorldCfg(max_voxel_count=declared.max_voxel_count),
+                use_cuda_graph=declared.use_cuda_graph,
+                warmup_iterations=declared.warmup_iterations,
+                preserve_plan_samples=declared.preserve_plan_samples,
+                interpolation_dt=self._step_dt,
+                cuda_device=declared.cuda_device,
+                graph_planner_algorithm=declared.graph_planner_algorithm,
+                enable_timeopt=declared.enable_timeopt,
+                fit_graph_seed_to_bspline=declared.fit_graph_seed_to_bspline,
+            )
+            queries = ObservedCuroboQueryFactory(
+                self._robot,
+                cfg,
+                shapes,
+                native_revision_reader=lambda: self.world_source_stamp().revision,
+            )
+            world = SimulationCollisionObservationProvider(
+                self._simulation, roster, self.world_source_stamp
+            )
+            joint_prefix = _OwnedJointPrefixPlanner(
+                CuroboJointPrefixPlanner(queries, world), self._owner_token
+            )
+        if services is not None and services.place_scene_bindings:
+            from .place_scene import SimulationPlaceSceneProvider
+
+            place_scene = SimulationPlaceSceneProvider(
+                self._simulation,
+                rigid_uids=dict(services.collision_roster.rigid_objects),
+                bindings=services.place_scene_bindings,
+                require_open=self._owner_token.require_open,
+            )
         from embodichain.lab.sim.profiler import Profiler
 
         profiler = getattr(self._simulation, "profiler", None)
@@ -1159,9 +1316,30 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             grasp_pose_generators=self._grasp_pose_generators,
             **profiling,
             hand_geometry_cfgs=self._hand_geometry_cfgs,
+            free_motion_query=free_motion_query,
+            joint_prefix_planner=joint_prefix,
+            place_scene_provider=place_scene,
         )
         self._registration.validate_engine(engine)
         return engine
+
+    def world_source_stamp(self) -> PhysicalObservationStamp:
+        """Read actual Default contact revision and simulation time for this owner.
+
+        Returns:
+            Source UUID, actual native revision and manager time; no scene version is invented.
+        """
+        self._owner_token.require_open()
+        if self._observation_source_id is None:
+            raise ValueError("Native observation capture was not declared.")
+        from embodichain.lab.sim.sensors.contact.sampling import native_contact_revision
+
+        return PhysicalObservationStamp(
+            self._observation_source_id,
+            "default.contacts",
+            native_contact_revision(self._simulation),
+            self._simulation.simulation_time,
+        )
 
     def create_planning_observation_provider(
         self,
@@ -1207,6 +1385,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             runtime_scope_guard=runtime_scope_guard,
             capture_root_pose=self._capture_root_pose,
             hold_qpos_source=self._hold_qpos_source,
+            world_stamp_reader=(
+                self.world_source_stamp if self._capture_native_revision else None
+            ),
         )
 
     def create_effect_evidence_providers(
@@ -1305,8 +1486,14 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             )
         return validator
 
-    def create_adapter(self) -> TaskProgramEnvironmentAdapter:
+    def create_adapter(
+        self,
+        *,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+    ) -> TaskProgramEnvironmentAdapter:
         """Create the exact Gym adapter with shared simulation policy ports."""
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
         self._owner_token.require_open()
         try:
             return TaskProgramEnvironmentAdapter(
@@ -1314,6 +1501,11 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 step_dt=self._step_dt,
                 joint_command_mode=self._joint_command_mode,
                 registration=self._registration,
+                **(
+                    {"invocation_policy_bindings": invocation_policy_bindings}
+                    if invocation_policy_bindings
+                    else {}
+                ),
             )
         except Exception:
             self.close_runtime_resources()
@@ -1423,6 +1615,8 @@ class SimulationTaskProgramAdapterFactory:
             calibration settings. No geometry is captured by these factories.
         planner_config: Optional execution-policy planner declaration. The live
             factory supplies the selected robot and simulation instance values.
+        invocation_policy_bindings: Immutable configured occurrence selections
+            passed to each freshly constructed adapter.
     """
 
     _registration: SimulationTaskProgramRegistration
@@ -1432,6 +1626,7 @@ class SimulationTaskProgramAdapterFactory:
     ]
     _planner_config: Mapping[str, object] | None
     _hand_geometry_cfg_factories: Mapping[str, Callable[[], RobotHandGeometryCfg]]
+    _invocation_policy_bindings: tuple[InvocationPolicyBinding, ...]
 
     def __init__(
         self,
@@ -1444,6 +1639,7 @@ class SimulationTaskProgramAdapterFactory:
             Mapping[str, Callable[[], RobotHandGeometryCfg]] | None
         ) = None,
         planner_config: Mapping[str, object] | None = None,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
     ) -> None:
         if type(registration) is not SimulationTaskProgramRegistration:
             raise TypeError(
@@ -1456,6 +1652,17 @@ class SimulationTaskProgramAdapterFactory:
             raise TypeError("grasp_pose_generator_factories must be a mapping or None.")
         if planner_config is not None and not isinstance(planner_config, Mapping):
             raise TypeError("planner_config must be a mapping or None.")
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
+        if invocation_policy_bindings:
+            from ..invocation_policy import _snapshot_invocation_policy_bindings
+
+            invocation_policy_bindings = _snapshot_invocation_policy_bindings(
+                invocation_policy_bindings
+            )
+        object.__setattr__(
+            self, "_invocation_policy_bindings", invocation_policy_bindings
+        )
         factories: dict[str, Callable[[], GraspPoseGenerator]] = {}
         for target_id, factory in (grasp_pose_generator_factories or {}).items():
             if (
@@ -1552,6 +1759,8 @@ class SimulationTaskProgramAdapterFactory:
             kwargs["hand_geometry_cfgs"] = geometry_cfgs
         if self._planner_config is not None:
             kwargs["planner_config"] = self._planner_config
+        if self._invocation_policy_bindings:
+            kwargs["invocation_policy_bindings"] = self._invocation_policy_bindings
         return create_simulation_task_program_adapter(environment, **kwargs)
 
 
@@ -1566,6 +1775,7 @@ def create_simulation_task_program_adapter(
     hand_geometry_cfgs: Mapping[str, RobotHandGeometryCfg] | None = None,
     translation_threshold: float = 1.0e-4,
     rotation_threshold: float = 1.0e-3,
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
 ) -> TaskProgramEnvironmentAdapter:
     """Create a complete production adapter from one standard Gym environment.
 
@@ -1586,10 +1796,19 @@ def create_simulation_task_program_adapter(
         hand_geometry_cfgs: Explicit hand calibrations keyed by grasp endpoint target ID.
         translation_threshold: Scene translation revision threshold.
         rotation_threshold: Scene rotation revision threshold.
+        invocation_policy_bindings: Immutable configured occurrence selections.
 
     Returns:
         Complete production Task Program environment adapter.
     """
+    if type(invocation_policy_bindings) is not tuple:
+        raise TypeError("invocation_policy_bindings must be an exact tuple.")
+    if invocation_policy_bindings:
+        from ..invocation_policy import _snapshot_invocation_policy_bindings
+
+        invocation_policy_bindings = _snapshot_invocation_policy_bindings(
+            invocation_policy_bindings
+        )
     factory = SimulationTaskProgramFactory.from_environment(
         environment,
         registration=registration,
@@ -1601,7 +1820,13 @@ def create_simulation_task_program_adapter(
         translation_threshold=translation_threshold,
         rotation_threshold=rotation_threshold,
     )
-    return factory.create_adapter()
+    return factory.create_adapter(
+        **(
+            {"invocation_policy_bindings": invocation_policy_bindings}
+            if invocation_policy_bindings
+            else {}
+        )
+    )
 
 
 __all__: list[str] = []

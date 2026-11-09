@@ -54,6 +54,7 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
         "registered_semantic_lowerers",
         "control_part_evidence",
         "settle_presets",
+        "planning_services",
     }
 )
 _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
@@ -251,6 +252,16 @@ def _merge_runtime_services(
         if skill_profile_values or task_values:
             result[field_name] = [*skill_profile_values, *task_values]
 
+    profile_planning = skill_profile.get("planning_services")
+    task_planning = task.get("planning_services")
+    if profile_planning is not None and task_planning is not None:
+        raise ValueError(
+            "planning_services must be owned by exactly one skill profile or task component."
+        )
+    planning = task_planning if task_planning is not None else profile_planning
+    if planning is not None:
+        result["planning_services"] = deepcopy(planning)
+
     skill_profile_evidence = skill_profile.get("control_part_evidence")
     task_evidence = task.get("control_part_evidence")
     if skill_profile_evidence is not None and task_evidence is not None:
@@ -343,7 +354,14 @@ def _resolve_execution_policy(
                     "effect_assurance",
                 }
             ),
-            optional=frozenset({"required_planner", "planner"}),
+            optional=frozenset(
+                {
+                    "required_planner",
+                    "planner",
+                    "release_gate_evidence",
+                    "invocation_presets",
+                }
+            ),
         )
     )
     _identifier(policy["policy_id"], path="execution policy.policy_id")
@@ -361,6 +379,42 @@ def _resolve_execution_policy(
     # contracts, planner, tracking and effect assurance remain component-owned.
     _decode_motion_policy(policy["motion"], path="execution policy.motion")
     _decode_recovery_policy(policy["recovery"], path="execution policy.recovery")
+    if "invocation_presets" in policy:
+        values = _owned_sequence(
+            policy["invocation_presets"], path="execution policy.invocation_presets"
+        )
+        if not values:
+            raise ValueError("execution policy.invocation_presets must be nonempty.")
+        seen = {_identifier(policy["preset_id"], path="execution policy.preset_id")}
+        named = []
+        for index, item in enumerate(values):
+            item_path = f"execution policy.invocation_presets[{index}]"
+            declaration = _mapping(
+                item,
+                path=item_path,
+                required=frozenset(
+                    {
+                        "preset_id",
+                        "motion",
+                        "tracking",
+                        "recovery",
+                        "workflow_recovery",
+                        "runner",
+                        "effect_assurance",
+                    }
+                ),
+                optional=frozenset({"release_gate_evidence", "required_planner"}),
+            )
+            name = _identifier(declaration["preset_id"], path=f"{item_path}.preset_id")
+            if name in seen:
+                raise ValueError(f"Duplicate invocation preset {name!r}.")
+            seen.add(name)
+            _decode_motion_policy(declaration["motion"], path=f"{item_path}.motion")
+            _decode_recovery_policy(
+                declaration["recovery"], path=f"{item_path}.recovery"
+            )
+            named.append(deepcopy(dict(declaration)))
+        policy["invocation_presets"] = named
     if "planner" in policy:
         policy["planner"] = _decode_planner_config(
             policy["planner"],
@@ -427,7 +481,9 @@ def _resolve_task_program_components(
                 "profile",
             }
         ),
-        optional=frozenset({"runtime_services", "asset_requirements"}),
+        optional=frozenset(
+            {"runtime_services", "asset_requirements", "invocation_policy_bindings"}
+        ),
     )
     integration = deepcopy(dict(integration))
     if "runtime_services" in integration:
@@ -563,10 +619,21 @@ def _compose_integration_payload(
         "effect_assurance": deepcopy(policy["effect_assurance"]),
         "effect_monitors": deepcopy(profile["effect_monitors"]),
     }
+    if "release_gate_evidence" in policy:
+        preset["release_gate_evidence"] = deepcopy(policy["release_gate_evidence"])
     if "planner" in policy:
         preset["required_planner"] = deepcopy(policy["planner"]["type"])
     elif "required_planner" in policy:
         preset["required_planner"] = deepcopy(policy["required_planner"])
+
+    presets = [preset]
+    for declared in policy.get("invocation_presets", ()):
+        named = deepcopy(dict(declared))
+        named["action_options"] = deepcopy(profile["action_options"])
+        named["effect_monitors"] = deepcopy(profile["effect_monitors"])
+        if "required_planner" not in named and "required_planner" in preset:
+            named["required_planner"] = preset["required_planner"]
+        presets.append(named)
 
     scene_payload = {
         key: deepcopy(value) for key, value in scene.items() if key != "contract_id"
@@ -576,7 +643,7 @@ def _compose_integration_payload(
         "resources": deepcopy(skill_profile["resources"]),
         "command_presets": deepcopy(skill_profile["command_presets"]),
         "defaults": deepcopy(profile["defaults"]),
-        "presets": [preset],
+        "presets": presets,
         "default_preset": None,
         "skill_presets": deepcopy(profile.get("skill_presets", {})),
         "grounding_providers": deepcopy(profile.get("grounding_providers", {})),
@@ -591,6 +658,10 @@ def _compose_integration_payload(
     }
     if runtime_services:
         payload["runtime_services"] = runtime_services
+    if "invocation_policy_bindings" in task:
+        payload["invocation_policy_bindings"] = deepcopy(
+            task["invocation_policy_bindings"]
+        )
     return payload
 
 
@@ -656,7 +727,11 @@ def _load_configured_task_program_deployment(
         ),
     )
     factory = cast(_ConfiguredTaskProgramAdapterFactory, integration.adapter_factory)
-    if factory.nominal_motion_sources or isinstance(program_path, Mapping):
+    if (
+        factory.nominal_motion_sources
+        or factory.invocation_policy_bindings
+        or isinstance(program_path, Mapping)
+    ):
         from .nominal import _ConfiguredTaskProgramNominalSources
 
         catalog = integration.registration.catalog
@@ -667,7 +742,14 @@ def _load_configured_task_program_deployment(
             raise ValueError(
                 "configured nominal sources require the integration's program_id"
             )
-        compiled = catalog.preflight(program)
+        compiled = catalog.preflight(
+            program,
+            **(
+                {"invocation_policy_bindings": factory.invocation_policy_bindings}
+                if factory.invocation_policy_bindings
+                else {}
+            ),
+        )
         if factory.nominal_motion_sources:
             _ConfiguredTaskProgramNominalSources(
                 compiled, factory.nominal_motion_sources
@@ -683,6 +765,7 @@ def _load_configured_task_program_deployment(
         integration=integration,
         scene_binding=deepcopy(dict(scene_binding)),
         planner_config=planner_config,
+        invocation_policy_bindings=factory.invocation_policy_bindings,
     )
 
 

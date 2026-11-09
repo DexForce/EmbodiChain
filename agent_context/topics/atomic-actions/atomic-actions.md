@@ -61,15 +61,35 @@ only the failed-phase trigger and contact-roll alternative. Robot's
 not implement this recovery's velocity window, perturbation order or RNG scope
 and is not an interchangeable recovery backend. Final emitted full-robot velocity
 qualification remains rejection-only; no transformed plan triggers another search.
-The configured decoder accepts only the fixed `press_bounded` revision-one
-declaration. `validate_press_extra_distance` validates declaration-owned extra
+The configured decoder accepts fixed revision-one `press_bounded`,
+`pick_bounded` and `place_bounded` declarations; each remains bound to its exact
+skill. `validate_press_extra_distance` validates declaration-owned extra
 travel without changing skill defaults or deciding measured Press success.
+
+Ordinary Pick/Place migration behavior is explicit. `PickUpOptions` selects
+ordinary adaptive sampling, Cartesian segments, full-object opening clearance
+and qualified approach requirements; inactive values retain the existing path.
+The opening view delegates to GraspKit after ranking instead of replacing its
+sampler. `PickPlanningRecovery` retains four candidate paths and two contact
+refinements with joint-prefix then cuRobo fallback. `PlaceOptions` selects
+required-waypoint checks and approach-only scene monitoring;
+`PlacePlanningRecovery` retains its fixed waypoint/clearance budget. Missing
+selected ports and unsupported batch/option combinations reject. These options
+are not implemented by AxisAlign, which rejects nondefault inherited choices.
+Motion owns the opt-in post-normalization velocity mask and its independent
+pre-mask kinematic-success snapshot; neither is a physical effect certificate.
 
 `SkillDescriptor.supports_segment_motion_recovery` is read-only and derived
 from the actual Atomic validation override. A copied class marker does not
 advertise a handler. Semantic preflight rejects unsupported segment policy
 before acquisition; the default false field is omitted from canonical descriptor
 metadata, while true capabilities participate in the effective fingerprint.
+
+`ActionOptions.validate_motion_policy()` performs pure option/policy checks for
+the actually selected preset before state acquisition. Pick/Place reuse their
+Cartesian-mode restrictions there; runtime retains environment-row, batch and
+geometry validation. Semantic linking and direct Atomic requests call the same
+hook, which allocates no solver or skill and adds no canonical data field.
 
 `MotionPolicy` separates whole-action sample retries, segment recovery and a
 final full-robot speed gate. The complete builder retains exact request/engine
@@ -113,6 +133,13 @@ captures geometry. Consumers retain declared pad-link order and replace closing
 commands with the current resolved endpoint commands, including invocation
 overrides. [Robot geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
 defines the capture boundary. Task Program declarations do not enter Atomic APIs.
+
+The engine can borrow explicit `free_motion_query`, `joint_prefix_planner` and
+`place_scene_provider` ports through `ActionPlanningServices`. Query and prefix
+services must own its exact robot; construction does not call them. The skill
+rejects a missing selected capability. `planning_probes.PlaceSceneInputs` owns
+copied envelopes and declared floor/support roles; neither it nor a planning
+clearance result is physical effect evidence.
 
 `ActionPlanningServices.prepare_grasp_query()` resolves the declared hand
 calibration by target ID and binds Scene capture to GraspKit's typed geometric
@@ -191,6 +218,7 @@ skill or alternate registry is installed by these query builders.
 | Runner and transports | `runner.py`, `transports.py`, `tracking.py` |
 | Engine and built-in registration | `engine.py`, `primitives/`, `__init__.py` |
 | Simulation ports | `sim_adapter.py` |
+| Exact observed joint-prefix adapter | `curobo_queries.py`; [snapshot lifetime and frame contract](../motion-planning/collision-worlds.md#observed-query-snapshots) |
 | Task Program semantic declarations | `embodichain/lab/task_program/semantics/` |
 | Task Program lowering/execution | `embodichain/lab/task_program/compiler/`, `runtime/` |
 | Gym lifecycle bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |

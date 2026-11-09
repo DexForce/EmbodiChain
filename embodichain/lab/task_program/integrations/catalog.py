@@ -18,6 +18,13 @@
 
 from __future__ import annotations
 
+from .simulation.planning_services import SimulationPlanningServicesCfg
+from embodichain.lab.task_program.semantics.integration import (
+    SemanticDiagnostic,
+    SemanticValidationError,
+)
+
+from copy import deepcopy
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
@@ -27,8 +34,11 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
-from typing import cast
+from typing import TYPE_CHECKING, cast
 import torch
+
+if TYPE_CHECKING:
+    from .invocation_policy import InvocationPolicyBinding
 
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import (
@@ -58,6 +68,7 @@ from embodichain.lab.task_program.semantics import (
     BoundRobotSkillProfile,
     EffectEvidenceProvider,
     Place,
+    ReleaseGateEvidence,
     RobotSkillProfile,
     RegisteredSemanticCall,
     ResourceEndpoint,
@@ -70,6 +81,7 @@ from embodichain.lab.task_program.semantics import (
     SceneRegistry,
     SemanticCallCatalog,
     SemanticIntegrationManifest,
+    SkillPolicyPreset,
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.task_program.compiler.lowering import (
@@ -116,6 +128,8 @@ from .extensions import (
     RegisteredSemanticLowererDeclaration,
     RegisteredSemanticLowererFactory,
     RegisteredSemanticLowererSceneValidator,
+    RegisteredSemanticLowererCallValidator,
+    validate_immutable_extension_declaration,
     RuntimeTransportDeclaration,
     StandardExtensionDeclarations,
     build_standard_extension_declarations,
@@ -210,6 +224,16 @@ def _canonical_value(value: object) -> object:
             )
         }
         from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+        from embodichain.lab.sim.atomic_actions.primitives.axis_align import (
+            AxisAlignOptions,
+        )
+        from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
+        from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
+
+        from ._configured_services import _CoordinatedTransportRoute
+
+        if type(value) is _CoordinatedTransportRoute and value.relation is None:
+            metadata.pop("relation")
 
         from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
 
@@ -220,8 +244,36 @@ def _canonical_value(value: object) -> object:
             metadata.pop("supports_segment_motion_recovery")
         if type(value) is MotionPolicy and value.final_velocity_rejection == "hold":
             metadata.pop("final_velocity_rejection")
+        if type(value) is MotionPolicy and value.mask_generation_overspeed is False:
+            metadata.pop("mask_generation_overspeed")
+        if type(value) in (PickUpOptions, AxisAlignOptions):
+            for name, default in (
+                ("adaptive_grasp", "none"),
+                ("linear_segments", False),
+                ("full_opening_clearance", False),
+                ("require_qualified_approach", False),
+                ("qualify_downstream_targets", True),
+            ):
+                if (
+                    type(getattr(value, name)) is type(default)
+                    and getattr(value, name) == default
+                ):
+                    metadata.pop(name)
+        if type(value) is PlaceOptions:
+            for name in (
+                "linear_segments",
+                "qualify_required_waypoints",
+                "monitor_scene_until_approach",
+            ):
+                if getattr(value, name) is False:
+                    metadata.pop(name)
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
+        if (
+            type(value) is SkillPolicyPreset
+            and value.release_gate_evidence is ReleaseGateEvidence.TERMINAL_CLAUSES
+        ):
+            metadata.pop("release_gate_evidence")
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "
@@ -570,6 +622,11 @@ class TaskProgramIntegrationCatalog:
     )
     """Immutable preset-to-entity binding for declared geometric conditions."""
 
+    registered_call_validators: Mapping[str, RegisteredSemanticLowererCallValidator] = (
+        field(default_factory=dict, kw_only=True, repr=False, compare=False)
+    )
+    """Pure admission owned by the exact registered immutable lowerer factories."""
+
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
             value = getattr(self, field_name)
@@ -629,6 +686,26 @@ class TaskProgramIntegrationCatalog:
             self,
             "registered_semantic_lowerer_declarations",
             extensions.registered_semantic_lowerers,
+        )
+        validators = {}
+        for call_id, validator in self.registered_call_validators.items():
+            declaration = self.registered_semantic_lowerer_declarations.get(call_id)
+            if (
+                declaration is None
+                or type(validator) is not declaration.factory_type
+                or not isinstance(validator, RegisteredSemanticLowererCallValidator)
+                or validator.call_id != call_id
+                or validator.revision != declaration.revision
+            ):
+                raise TypeError(
+                    "Call validators must be exact registered lowerer factories."
+                )
+            validate_immutable_extension_declaration(
+                validator, field_name="registered_call_validators"
+            )
+            validators[call_id] = deepcopy(validator)
+        object.__setattr__(
+            self, "registered_call_validators", MappingProxyType(validators)
         )
         if self.robot_profile.profile_id != self.robot_profile_id:
             raise ValueError("robot_profile_id must match robot_profile.profile_id.")
@@ -822,8 +899,24 @@ class TaskProgramIntegrationCatalog:
                 f"{sorted(_VALIDATOR_KINDS)}."
             )
 
-    def preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
-        """Compile and statically link every expanded semantic call."""
+    def preflight(
+        self,
+        program: TaskProgramCfg,
+        *,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+    ) -> CompiledTaskProgram:
+        """Compile and statically link every expanded semantic call.
+
+        Args:
+            program: Provider-free program using this catalog's integration.
+            invocation_policy_bindings: Exact immutable selections for sequential
+                occurrences; omitted calls retain their normal policy resolution.
+
+        Returns:
+            Unmodified compiled program, after validating the selected presets.
+        """
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
         self.validate_integration(program.integration, path=("integration",))
         compiled = TaskProgramCompiler(self.scene).compile(program)
         manifest = SemanticIntegrationManifest(
@@ -832,6 +925,15 @@ class TaskProgramIntegrationCatalog:
             call_catalog=self.call_catalog,
             runtime_preset=program.integration.runtime_preset,
         )
+        selected_presets: dict[str, str] = {}
+        if invocation_policy_bindings:
+            from .invocation_policy import BoundInvocationPolicies
+
+            policies = BoundInvocationPolicies(compiled, invocation_policy_bindings)
+            policies.validate_manifest(compiled, manifest)
+            selected_presets = {
+                item.invocation_id: item.preset_id for item in policies.bindings
+            }
         for segment in compiled.iter_segments():
             for policy in segment.post_policies:
                 if (
@@ -850,7 +952,33 @@ class TaskProgramIntegrationCatalog:
                     "physical safety-validator factory.",
                 )
             for call in segment.calls:
-                linked = manifest.link_call(call.call, path=call.source_path)
+                if type(call.call) is RegisteredSemanticCall:
+                    validator = self.registered_call_validators.get(call.call.call_id)
+                    if validator is not None:
+                        try:
+                            validator.validate_call_declaration(call.call)
+                        except (ValueError, KeyError, TypeError) as error:
+                            raise SemanticValidationError(
+                                SemanticDiagnostic(
+                                    "registered_call_declaration_mismatch",
+                                    call.source_path,
+                                    str(error),
+                                )
+                            ) from error
+                linked = manifest.link_call(
+                    call.call,
+                    path=call.source_path,
+                    **(
+                        {
+                            "preset_id": selected_presets.get(
+                                f"{compiled.program_id}/{segment.segment_id}:"
+                                f"{call.segment_call_index}"
+                            )
+                        }
+                        if invocation_policy_bindings
+                        else {}
+                    ),
+                )
                 if type(linked.call) is Place and linked.call.at is None:
                     destination = linked.affordances.get("destination")
                     if destination is None:
@@ -1089,9 +1217,10 @@ def _registration_payload(
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
+    planning_services: SimulationPlanningServicesCfg | None = None,
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
-    return {
+    payload = {
         "schema_version": _CATALOG_FINGERPRINT_SCHEMA_VERSION,
         "scene_binding": scene_binding,
         "scene_manifest": scene.entries,
@@ -1200,6 +1329,10 @@ def _registration_payload(
         "validator_kinds": _VALIDATOR_KINDS,
     }
 
+    if planning_services is not None:
+        payload["planning_services"] = planning_services.snapshot()
+    return payload
+
 
 @dataclass(frozen=True, slots=True)
 class SimulationTaskProgramRegistration:
@@ -1225,6 +1358,9 @@ class SimulationTaskProgramRegistration:
     registered_semantic_lowerer_factories: tuple[
         RegisteredSemanticLowererFactory, ...
     ] = ()
+    planning_services: SimulationPlanningServicesCfg | None = field(
+        default=None, kw_only=True
+    )
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1258,6 +1394,14 @@ class SimulationTaskProgramRegistration:
     )
 
     def __post_init__(self) -> None:
+        if self.planning_services is not None:
+            if type(self.planning_services) is not SimulationPlanningServicesCfg:
+                raise TypeError(
+                    "planning_services must be SimulationPlanningServicesCfg or None."
+                )
+            object.__setattr__(
+                self, "planning_services", self.planning_services.snapshot()
+            )
         if type(self.scene_binding) is not SimulationSceneBinding:
             raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
         if type(self.robot_profile_binding) is not SimulationRobotSkillProfileBinding:
@@ -1396,6 +1540,7 @@ class SimulationTaskProgramRegistration:
                 registered_semantic_lowerer_factories=(
                     self.registered_semantic_lowerer_factories
                 ),
+                planning_services=self.planning_services,
             )
         )
         object.__setattr__(
@@ -1439,6 +1584,11 @@ class SimulationTaskProgramRegistration:
                 ),
                 fingerprint=fingerprint,
                 _required_skills=required_skills,
+                registered_call_validators={
+                    factory.call_id: factory
+                    for factory in self.registered_semantic_lowerer_factories
+                    if isinstance(factory, RegisteredSemanticLowererCallValidator)
+                },
             ),
         )
         object.__setattr__(self, "_parallel_safety_validator_history", [])
@@ -1501,6 +1651,7 @@ class SimulationTaskProgramRegistration:
                 registered_semantic_lowerer_factories=(
                     self.registered_semantic_lowerer_factories
                 ),
+                planning_services=self.planning_services,
             )
             current = _digest(payload)
         except (TypeError, ValueError) as exc:

@@ -103,7 +103,9 @@ from embodichain.lab.sim.atomic_actions import (
     MoveHeldObjectOptions,
     MoveJointsOptions,
     PickUpOptions,
+    PickPlanningRecovery,
     PlaceOptions,
+    PlacePlanningRecovery,
     PourOptions,
     PressOptions,
     PressPlanningRecovery,
@@ -119,6 +121,7 @@ from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
 from embodichain.lab.task_program.semantics import (
     EffectAssurance,
     EffectMonitorRef,
+    ReleaseGateEvidence,
     RegisteredSemanticCall,
     SceneCollisionRole,
     SceneCollisionWorldMode,
@@ -134,7 +137,10 @@ from embodichain.toolkits.graspkit import (
 )
 
 if TYPE_CHECKING:
+    from .simulation.planning_services import SimulationPlanningServicesCfg
     from .environment import TaskProgramEnvironmentAdapter
+    from .simulation.grip_evidence import NativeGripEvidenceFactory
+    from .invocation_policy import InvocationPolicyBinding
 
 __all__: list[str] = []
 
@@ -1058,6 +1064,13 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "contact_frame_to_eef",
                 "tool_calibrations",
                 "target_axis",
+                "adaptive_grasp",
+                "linear_segments",
+                "full_opening_clearance",
+                "require_qualified_approach",
+                "qualify_downstream_targets",
+                "qualify_required_waypoints",
+                "monitor_scene_until_approach",
             }
         ),
     )
@@ -1082,11 +1095,37 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
                     *(("approach_along_grasp_axis",) if kind == "pick_up" else ()),
+                    *(
+                        (
+                            "adaptive_grasp",
+                            "linear_segments",
+                            "full_opening_clearance",
+                            "require_qualified_approach",
+                            "qualify_downstream_targets",
+                        )
+                        if kind == "pick_up"
+                        else ()
+                    ),
                     *(("target_axis",) if kind == "axis_align" else ()),
                 }
             ),
         )
         kwargs: dict[str, object] = {}
+        if kind == "pick_up":
+            if "adaptive_grasp" in config:
+                kwargs["adaptive_grasp"] = _identifier(
+                    config["adaptive_grasp"], path=f"{path}.adaptive_grasp"
+                )
+            for field_name in (
+                "linear_segments",
+                "full_opening_clearance",
+                "require_qualified_approach",
+                "qualify_downstream_targets",
+            ):
+                if field_name in config:
+                    kwargs[field_name] = _boolean(
+                        config[field_name], path=f"{path}.{field_name}"
+                    )
         if "approach_along_grasp_axis" in config:
             kwargs["approach_along_grasp_axis"] = _boolean(
                 config["approach_along_grasp_axis"],
@@ -1206,10 +1245,22 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
                     "preserve_current_object_orientation",
+                    "linear_segments",
+                    "qualify_required_waypoints",
+                    "monitor_scene_until_approach",
                 }
             ),
         )
         kwargs = {}
+        for field_name in (
+            "linear_segments",
+            "qualify_required_waypoints",
+            "monitor_scene_until_approach",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _boolean(
+                    config[field_name], path=f"{path}.{field_name}"
+                )
         if "hand_interp_steps" in config:
             kwargs["hand_interp_steps"] = _integer(
                 config["hand_interp_steps"],
@@ -1680,6 +1731,7 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "segment_continuous_ik_recovery",
                 "require_final_velocity",
                 "final_velocity_rejection",
+                "mask_generation_overspeed",
             }
         ),
     )
@@ -1703,6 +1755,10 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         "require_final_velocity": _boolean(
             config.get("require_final_velocity", False),
             path=f"{path}.require_final_velocity",
+        ),
+        "mask_generation_overspeed": _boolean(
+            config.get("mask_generation_overspeed", False),
+            path=f"{path}.mask_generation_overspeed",
         ),
         "sample_count_retries": tuple(
             _integer(item, path=f"{path}.sample_count_retries[{index}]", minimum=2)
@@ -1961,7 +2017,12 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
             optional=frozenset(),
         )
         kind = _identifier(declaration["kind"], path=f"{declaration_path}.kind")
-        if kind != "press_bounded":
+        recovery_types = {
+            "press_bounded": PressPlanningRecovery,
+            "pick_bounded": PickPlanningRecovery,
+            "place_bounded": PlacePlanningRecovery,
+        }
+        if kind not in recovery_types:
             raise ValueError(f"Unsupported {declaration_path}.kind {kind!r}.")
         if (
             _integer(
@@ -1970,7 +2031,7 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
             != 1
         ):
             raise ValueError(f"Unsupported {declaration_path}.revision.")
-        kwargs["planning_recovery"] = PressPlanningRecovery()
+        kwargs["planning_recovery"] = recovery_types[kind]()
     return RecoveryPolicy(**kwargs)
 
 
@@ -2058,7 +2119,7 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
                 "effect_monitors",
             }
         ),
-        optional=frozenset({"required_planner"}),
+        optional=frozenset({"required_planner", "release_gate_evidence"}),
     )
     action_options_value = config["action_options"]
     if not isinstance(action_options_value, Mapping):
@@ -2094,6 +2155,13 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
             config["effect_assurance"],
             EffectAssurance,
             path=f"{path}.effect_assurance",
+        ),
+        release_gate_evidence=_enum(
+            config.get(
+                "release_gate_evidence", ReleaseGateEvidence.TERMINAL_CLAUSES.value
+            ),
+            ReleaseGateEvidence,
+            path=f"{path}.release_gate_evidence",
         ),
         motion_policy=motion_policy,
         tracking_policy=_decode_tracking_policy(
@@ -2667,6 +2735,7 @@ def _decode_registered_lowerer(
                     {
                         "reference_entity_id",
                         "relative_pose",
+                        "relation",
                         "world_displacement",
                     }
                 ),
@@ -2674,7 +2743,22 @@ def _decode_registered_lowerer(
             has_reference = "reference_entity_id" in route
             has_pose = "relative_pose" in route
             has_displacement = "world_displacement" in route
-            if has_reference != has_pose or has_reference == has_displacement:
+            relation = (
+                _identifier(route["relation"], path=f"{route_path}.relation")
+                if "relation" in route
+                else None
+            )
+            if relation is not None:
+                if (
+                    relation != "on"
+                    or not has_reference
+                    or not has_displacement
+                    or has_pose
+                ):
+                    raise ValueError(
+                        f"{route_path} on requires reference_entity_id and world_displacement, without relative_pose."
+                    )
+            elif has_reference != has_pose or has_reference == has_displacement:
                 raise ValueError(
                     f"{route_path} must declare exactly one of "
                     "reference_entity_id with relative_pose or "
@@ -2682,6 +2766,7 @@ def _decode_registered_lowerer(
                 )
             routes.append(
                 _CoordinatedTransportRoute(
+                    relation=relation,
                     object_id=_identifier(
                         route["object_id"], path=f"{route_path}.object_id"
                     ),
@@ -2863,8 +2948,138 @@ def _decode_control_part_evidence(
     value: object,
     *,
     path: str,
-) -> _JointPositionConstraintEvidenceProviderFactory:
+) -> _JointPositionConstraintEvidenceProviderFactory | NativeGripEvidenceFactory:
     """Decode one allowlisted control-part evidence provider factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "native_grip":
+        from embodichain.lab.sim.atomic_actions.grip_evidence import (
+            DriverOpeningBinding,
+        )
+        from .simulation.grip_evidence import (
+            NativeGripEvidenceCfg,
+            NativeGripEvidenceFactory,
+        )
+
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset(
+                {"kind", "sensor_uid", "object_bindings", "pad_bindings"}
+            ),
+            optional=frozenset(
+                {
+                    "algorithm_revision",
+                    "opening_bindings",
+                    "max_contacts_per_env",
+                    "trace_capacity",
+                }
+            ),
+        )
+        _identifier(config["kind"], path=f"{path}.kind")
+        objects = []
+        for index, item in enumerate(
+            _sequence(config["object_bindings"], path=f"{path}.object_bindings")
+        ):
+            item_path = f"{path}.object_bindings[{index}]"
+            pair = _sequence(item, path=item_path)
+            if len(pair) != 2:
+                raise ValueError(f"{item_path} requires one object identity/UID pair.")
+            objects.append(
+                (
+                    _identifier(pair[0], path=f"{item_path}[0]"),
+                    _identifier(pair[1], path=f"{item_path}[1]"),
+                )
+            )
+        pads = []
+        for index, item in enumerate(
+            _sequence(config["pad_bindings"], path=f"{path}.pad_bindings")
+        ):
+            item_path = f"{path}.pad_bindings[{index}]"
+            pair = _sequence(item, path=item_path)
+            if len(pair) != 2:
+                raise ValueError(f"{item_path} requires one control-part/pad pair.")
+            names = _identifier_tuple(pair[1], path=f"{item_path}[1]")
+            if len(names) != 2:
+                raise ValueError(f"{item_path} requires two explicit pad links.")
+            pads.append(
+                (_identifier(pair[0], path=f"{item_path}[0]"), (names[0], names[1]))
+            )
+        opening = []
+        for index, item in enumerate(
+            _sequence(
+                config.get("opening_bindings", ()), path=f"{path}.opening_bindings"
+            )
+        ):
+            item_path = f"{path}.opening_bindings[{index}]"
+            declaration = _mapping(
+                item,
+                path=item_path,
+                required=frozenset(
+                    {
+                        "control_part",
+                        "joint_names",
+                        "driver_indices",
+                        "open_qpos",
+                        "tolerance",
+                    }
+                ),
+            )
+            names = _identifier_tuple(
+                declaration["joint_names"], path=f"{item_path}.joint_names"
+            )
+            opening.append(
+                DriverOpeningBinding(
+                    control_part=_identifier(
+                        declaration["control_part"], path=f"{item_path}.control_part"
+                    ),
+                    joint_names=names,
+                    driver_indices=tuple(
+                        _integer(
+                            driver, path=f"{item_path}.driver_indices[{i}]", minimum=0
+                        )
+                        for i, driver in enumerate(
+                            _sequence(
+                                declaration["driver_indices"],
+                                path=f"{item_path}.driver_indices",
+                            )
+                        )
+                    ),
+                    open_qpos=_finite_tuple(
+                        declaration["open_qpos"],
+                        path=f"{item_path}.open_qpos",
+                        expected_length=len(names),
+                    ),
+                    tolerance=_real(
+                        declaration["tolerance"],
+                        path=f"{item_path}.tolerance",
+                        minimum=0.0,
+                        strict_minimum=True,
+                    ),
+                )
+            )
+        return NativeGripEvidenceFactory(
+            NativeGripEvidenceCfg(
+                sensor_uid=_identifier(config["sensor_uid"], path=f"{path}.sensor_uid"),
+                object_bindings=tuple(objects),
+                pad_bindings=tuple(pads),
+                algorithm_revision=_integer(
+                    config.get("algorithm_revision", 1),
+                    path=f"{path}.algorithm_revision",
+                    minimum=1,
+                    maximum=2,
+                ),
+                opening_bindings=tuple(opening),
+                max_contacts_per_env=_integer(
+                    config.get("max_contacts_per_env", 1024),
+                    path=f"{path}.max_contacts_per_env",
+                    minimum=1,
+                ),
+                trace_capacity=_integer(
+                    config.get("trace_capacity", 4096),
+                    path=f"{path}.trace_capacity",
+                    minimum=1,
+                ),
+            )
+        )
     config = _mapping(
         value,
         path=path,
@@ -2882,7 +3097,7 @@ def _decode_control_part_evidence(
     if kind != "joint_position_constraint":
         raise ValueError(
             f"Unsupported {path}.kind {kind!r}; supported kinds are "
-            "['joint_position_constraint']."
+            "['joint_position_constraint', 'native_grip']."
         )
     return _JointPositionConstraintEvidenceProviderFactory(
         control_parts=_identifier_tuple(
@@ -2903,6 +3118,155 @@ def _decode_control_part_evidence(
             path=f"{path}.minimum_displacement",
             minimum=0.0,
             strict_minimum=True,
+        ),
+    )
+
+
+def _decode_planning_services(value: object, *, path: str):
+    from .simulation.planning_services import (
+        CollisionSceneRosterCfg,
+        ObservedCuroboServicesCfg,
+        SimulationPlanningServicesCfg,
+    )
+    from .simulation.place_scene import PlaceSceneBinding
+
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"kind"}),
+        optional=frozenset(
+            {
+                "revision",
+                "free_motion_query",
+                "collision_roster",
+                "place_scene_bindings",
+                "observed_curobo",
+                "capture_root_pose",
+                "capture_native_revision",
+                "hold_qpos_source",
+            }
+        ),
+    )
+    roster = None
+    if config.get("collision_roster") is not None:
+        p = f"{path}.collision_roster"
+        raw = _mapping(
+            config["collision_roster"],
+            path=p,
+            required=frozenset(),
+            optional=frozenset({"rigid_objects", "articulation_links"}),
+        )
+        roster = CollisionSceneRosterCfg(
+            **{
+                name: tuple(
+                    tuple(
+                        _identifier(v, path=f"{p}.{name}")
+                        for v in _sequence(row, path=f"{p}.{name}")
+                    )
+                    for row in _sequence(raw.get(name, ()), path=f"{p}.{name}")
+                )
+                for name in ("rigid_objects", "articulation_links")
+            }
+        )
+    bindings = []
+    for index, value in enumerate(
+        _sequence(
+            config.get("place_scene_bindings", ()), path=f"{path}.place_scene_bindings"
+        )
+    ):
+        p = f"{path}.place_scene_bindings[{index}]"
+        raw = _mapping(
+            value,
+            path=p,
+            required=frozenset({"invocation_id", "floor_entity_id"}),
+            optional=frozenset({"support_owner_id"}),
+        )
+        bindings.append(
+            PlaceSceneBinding(
+                invocation_id=_identifier(
+                    raw["invocation_id"], path=f"{p}.invocation_id"
+                ),
+                floor_entity_id=_identifier(
+                    raw["floor_entity_id"], path=f"{p}.floor_entity_id"
+                ),
+                support_owner_id=_optional_identifier(
+                    raw.get("support_owner_id"), path=f"{p}.support_owner_id"
+                ),
+            )
+        )
+    observed = None
+    if config.get("observed_curobo") is not None:
+        p = f"{path}.observed_curobo"
+        raw = _mapping(
+            config["observed_curobo"],
+            path=p,
+            required=frozenset(),
+            optional=frozenset(
+                {
+                    "cuda_device",
+                    "max_voxel_count",
+                    "graph_planner_algorithm",
+                    "enable_timeopt",
+                    "fit_graph_seed_to_bspline",
+                    "use_cuda_graph",
+                    "warmup_iterations",
+                    "preserve_plan_samples",
+                }
+            ),
+        )
+        observed = ObservedCuroboServicesCfg(
+            cuda_device=_optional_identifier(
+                raw.get("cuda_device"), path=f"{p}.cuda_device"
+            ),
+            max_voxel_count=_integer(
+                raw.get("max_voxel_count", 4_000_000),
+                path=f"{p}.max_voxel_count",
+                minimum=1,
+            ),
+            graph_planner_algorithm=_identifier(
+                raw.get("graph_planner_algorithm", "rrt"),
+                path=f"{p}.graph_planner_algorithm",
+            ),
+            enable_timeopt=_boolean(
+                raw.get("enable_timeopt", True), path=f"{p}.enable_timeopt"
+            ),
+            fit_graph_seed_to_bspline=_boolean(
+                raw.get("fit_graph_seed_to_bspline", True),
+                path=f"{p}.fit_graph_seed_to_bspline",
+            ),
+            use_cuda_graph=_boolean(
+                raw.get("use_cuda_graph", False), path=f"{p}.use_cuda_graph"
+            ),
+            warmup_iterations=_integer(
+                raw.get("warmup_iterations", 0),
+                path=f"{p}.warmup_iterations",
+                minimum=0,
+            ),
+            preserve_plan_samples=_boolean(
+                raw.get("preserve_plan_samples", True),
+                path=f"{p}.preserve_plan_samples",
+            ),
+        )
+    return SimulationPlanningServicesCfg(
+        kind=_identifier(config["kind"], path=f"{path}.kind"),
+        revision=_integer(
+            config.get("revision", 1), path=f"{path}.revision", minimum=1
+        ),
+        free_motion_query=_identifier(
+            config.get("free_motion_query", "none"), path=f"{path}.free_motion_query"
+        ),
+        collision_roster=roster,
+        place_scene_bindings=tuple(bindings),
+        observed_curobo=observed,
+        capture_root_pose=_boolean(
+            config.get("capture_root_pose", False), path=f"{path}.capture_root_pose"
+        ),
+        capture_native_revision=_boolean(
+            config.get("capture_native_revision", False),
+            path=f"{path}.capture_native_revision",
+        ),
+        hold_qpos_source=_identifier(
+            config.get("hold_qpos_source", "observed"), path=f"{path}.hold_qpos_source"
         ),
     )
 
@@ -2928,7 +3292,12 @@ class _DecodedRuntimeServices:
         | _RelativePlaceLowererFactory,
         ...,
     ] = ()
-    control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
+    control_part_evidence: (
+        _JointPositionConstraintEvidenceProviderFactory
+        | NativeGripEvidenceFactory
+        | None
+    ) = None
+    planning_services: SimulationPlanningServicesCfg | None = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
     settle_presets: (
         tuple[
@@ -3047,6 +3416,7 @@ def _decode_runtime_services(
                 "control_part_evidence",
                 "nominal_motion_sources",
                 "settle_presets",
+                "planning_services",
             }
         ),
     )
@@ -3260,6 +3630,13 @@ def _decode_runtime_services(
     if len({item.call_index for item in nominal}) != len(nominal):
         raise ValueError(f"{path}.nominal_motion_sources has duplicate call indices")
     return _DecodedRuntimeServices(
+        planning_services=(
+            None
+            if config.get("planning_services") is None
+            else _decode_planning_services(
+                config["planning_services"], path=f"{path}.planning_services"
+            )
+        ),
         grasp_pose_generators=generators,
         hand_geometries=hand_geometries,
         handover_pose_providers=handover,
@@ -3276,6 +3653,37 @@ def _decode_runtime_services(
     )
 
 
+def _decode_invocation_policy_bindings(
+    value: object, *, path: str
+) -> tuple[InvocationPolicyBinding, ...]:
+    """Decode the existing exact occurrence-binding contract without live state."""
+    from .invocation_policy import (
+        InvocationPolicyBinding,
+        _snapshot_invocation_policy_bindings,
+    )
+
+    values = _sequence(value, path=path)
+    if not values:
+        raise ValueError(f"{path} must be nonempty when declared.")
+    bindings = []
+    for index, item in enumerate(values):
+        item_path = f"{path}[{index}]"
+        declaration = _mapping(
+            item,
+            path=item_path,
+            required=frozenset({"program_fingerprint", "invocation_id", "preset_id"}),
+        )
+        bindings.append(
+            InvocationPolicyBinding(
+                **{
+                    key: _identifier(nested, path=f"{item_path}.{key}")
+                    for key, nested in declaration.items()
+                }
+            )
+        )
+    return _snapshot_invocation_policy_bindings(tuple(bindings))
+
+
 @dataclass(frozen=True, slots=True)
 class _ConfiguredTaskProgramAdapterFactory:
     """Expose one config identity while delegating live adapter construction."""
@@ -3283,6 +3691,7 @@ class _ConfiguredTaskProgramAdapterFactory:
     delegate: SimulationTaskProgramAdapterFactory
     integration_fingerprint: str
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = ()
 
     @property
     def registration(self) -> SimulationTaskProgramRegistration:
@@ -3317,7 +3726,15 @@ def _decode_configured_task_program_integration(
         value,
         path=path,
         required=frozenset({"scene", "robot_profile"}),
-        optional=frozenset({"runtime_services"}),
+        optional=frozenset({"runtime_services", "invocation_policy_bindings"}),
+    )
+    bindings = (
+        _decode_invocation_policy_bindings(
+            config["invocation_policy_bindings"],
+            path=f"{path}.invocation_policy_bindings",
+        )
+        if "invocation_policy_bindings" in config
+        else ()
     )
     scene_binding = _decode_scene(config["scene"])
     robot_profile_binding = _decode_robot_profile(config["robot_profile"])
@@ -3335,6 +3752,7 @@ def _decode_configured_task_program_integration(
             )
         )
     registration = SimulationTaskProgramRegistration(
+        planning_services=services.planning_services,
         scene_binding=scene_binding,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
@@ -3366,6 +3784,10 @@ def _decode_configured_task_program_integration(
         "grasp_pose_generators": grasp_fingerprint,
         "planner_config": deepcopy(planner_config),
     }
+    if bindings:
+        fingerprint_payload["invocation_policy_bindings"] = [
+            asdict(item) for item in bindings
+        ]
     if services.hand_geometries:
         fingerprint_payload["hand_geometries"] = tuple(
             {"target_id": target_id, "factory": asdict(factory)}
@@ -3394,11 +3816,13 @@ def _decode_configured_task_program_integration(
         grasp_pose_generator_factories=dict(services.grasp_pose_generators),
         hand_geometry_cfg_factories=dict(services.hand_geometries),
         planner_config=planner_config,
+        **({"invocation_policy_bindings": bindings} if bindings else {}),
     )
     adapter_factory = _ConfiguredTaskProgramAdapterFactory(
         delegate=delegate,
         integration_fingerprint=integration_fingerprint,
         nominal_motion_sources=services.nominal_motion_sources,
+        invocation_policy_bindings=bindings,
     )
     return _ConfiguredTaskProgramIntegration(
         registration=registration,

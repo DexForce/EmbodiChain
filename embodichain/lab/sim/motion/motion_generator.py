@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from embodichain.lab.sim.motion._budget import _planning_call
 
+import json
 import math
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -55,7 +56,10 @@ from embodichain.compute.trajectory.interpolation import (
     _minimum_jerk_progress,
     interpolate_minimum_jerk,
 )
-from embodichain.compute.trajectory.limits import joint_velocity_validity
+from embodichain.compute.trajectory.limits import (
+    joint_velocity_diagnostics,
+    joint_velocity_validity,
+)
 from embodichain.utils import logger, configclass
 from embodichain.utils.math import (
     axis_angle_from_quat,
@@ -191,6 +195,15 @@ class MotionGenOptions:
     )
     """Use the current batched solver, or seed each pose from its predecessor."""
 
+    mask_generation_overspeed: bool = field(default=False, kw_only=True)
+    """Mask overspeed rows after normalization without changing their samples.
+
+    With an explicit ``control_part``, intersect ordered runtime and authored
+    URDF speed caps. The interval tolerance is ``1e-5`` joint units. Rejected
+    rows retain positions, timing, derivatives and candidate metadata; this
+    neither retimes a path nor certifies acceleration or collision freedom.
+    """
+
     segment_sample_count_retries: tuple[int, ...] = field(default=(), kw_only=True)
     """Ordered denser alternatives within one sampled Cartesian segment request.
 
@@ -209,6 +222,8 @@ class MotionGenOptions:
 
     def __post_init__(self) -> None:
         """Validate backend-neutral motion generation options."""
+        if type(self.mask_generation_overspeed) is not bool:
+            raise TypeError("mask_generation_overspeed must be a boolean.")
         segment_retries = self.segment_sample_count_retries
         if (
             type(segment_retries) is not tuple
@@ -755,6 +770,8 @@ class MotionGenerator:
         Returns:
             Normalized result with a per-environment success mask and joint
             positions. Failed rows hold ``start_qpos`` when it is supplied.
+            An explicit ``mask_generation_overspeed`` rejects normalized rows
+            without replacing their positions or timing with a hold.
             Explicit linear keyframe requests attach their local attempt receipt
             to ``PlanResult.recovery``; ordinary requests leave it ``None``.
 
@@ -808,8 +825,11 @@ class MotionGenerator:
             raw_result = self._generate_ik_interpolation(target_states, options)
         else:
             raw_result = self._generate_with_planner(target_states, options)
+        # The explicit post-normalization mask replaces this earlier fixed-grid
+        # rejection so a new failure cannot be normalized into a misleading hold.
         if (
             options.interpolation_mode == "fixed_grid"
+            and not options.mask_generation_overspeed
             and raw_result.positions is not None
         ):
             limits = authored_joint_velocity_limits(
@@ -1902,6 +1922,29 @@ class MotionGenerator:
                 velocities[:, :-1] = velocities[:, :-1].masked_fill(stationary, 0.0)
                 velocities[:, 1:] = velocities[:, 1:].masked_fill(stationary, 0.0)
 
+        generation_success_before_velocity = None
+        if options.mask_generation_overspeed and options.control_part is not None:
+            generation_success_before_velocity = success
+            limits = authored_joint_velocity_limits(
+                self.robot, options.control_part
+            ).to(positions)
+            if getattr(self, "_env_ids", None) is not None:
+                limits = limits[list(self._env_ids)]
+            valid = joint_velocity_validity(positions, dt, limits)
+            if (success & ~valid).any():
+                logger.log_warning(
+                    "MotionGenerator motion exceeds declared joint velocity limits; "
+                    "rejecting affected rows."
+                )
+                logger.log_warning(
+                    "MotionGenerator velocity diagnostics: "
+                    + json.dumps(
+                        joint_velocity_diagnostics(positions, dt, limits),
+                        allow_nan=False,
+                    )
+                )
+            success = success & valid
+
         return PlanResult(
             success=success,
             xpos_list=None if resampled else result.xpos_list,
@@ -1917,6 +1960,7 @@ class MotionGenerator:
             policy_waypoint_indices=result.policy_waypoint_indices,
             rejected_candidate=result.rejected_candidate,
             recovery=result.recovery,
+            generation_success_before_velocity=generation_success_before_velocity,
         )
 
     def _runtime_device(self) -> torch.device:

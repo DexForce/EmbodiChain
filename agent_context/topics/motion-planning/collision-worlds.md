@@ -12,6 +12,7 @@ binding. Return to [motion planning](motion-planning.md) for other entry points.
 | cuRobo world config, cache and updates | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` |
 | Collision-shape descriptors to native scene | `embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py` |
 | Owned observed query/payload values and scoped motion factory | `embodichain/lab/sim/motion/planners/curobo/payload.py` |
+| B1 complete observed world and trusted revision checks | `embodichain/lab/sim/motion/planners/curobo/observed.py` |
 | Registry/provider agreement | `embodichain/lab/task_program/semantics/scene.py` → `SceneRegistry` |
 
 ## Logical identity survives geometry expansion
@@ -54,6 +55,20 @@ cuRobo goal/scene adapters alone convert `xyzw` to native `wxyz`, exactly once;
 homogeneous dynamic-pose matrices need no quaternion conversion until then.
 
 ## Observed query snapshots
+
+`ObservedCuroboQueryFactory` composes B1 geometry-only readers, explicit world
+observations and captured full joint/root state. A live host supplies its trusted
+`native_revision_reader`; the factory checks the original stamp before geometry
+capture and after owning the projected snapshots. None adds no native reads for
+immutable numeric inputs. Both the declared root identity and materialized
+cuRobo whole-robot root must agree. Shape capture reads no poses; backend close
+never destroys the borrowed Robot or world.
+
+`atomic_actions.curobo_queries.CuroboJointPrefixPlanner` adapts that factory to
+the exact observed joint goal and caller cadence under the original Torch-only
+random scope. It owns neither candidate/recovery selection nor a second world
+roster. Planner settings remain explicit: the shared fit-graph-seed default stays
+True, while a caller can select False without changing other calls.
 
 `CuroboQuerySnapshot` owns full observed joint positions and an explicit
 `world_to_base` transform. Its optional `CuroboPayload` owns object identity,

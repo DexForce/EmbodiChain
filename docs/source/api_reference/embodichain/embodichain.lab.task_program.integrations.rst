@@ -368,8 +368,19 @@ An ``InvocationPolicyBinding`` selects an existing named profile preset for one
 sequential execution occurrence, identified by the complete compiled-program
 fingerprint and ``program_id/segment_id:segment_call_index``. Pass a tuple of these
 declarations to ``TaskProgramEnvironmentAdapter.create_bridge`` through its
-``invocation_policy_bindings`` keyword. Normal calls use their existing policies
-when the tuple is empty.
+``invocation_policy_bindings`` keyword. An unconfigured adapter keeps normal
+policy selection when the tuple is empty.
+
+Configured execution policies may add complete ``invocation_presets`` entries;
+they do not patch or inherit another preset. Action options and effect monitors
+remain integration-profile-owned. The integration's
+``invocation_policy_bindings`` field is decoded to the same existing typed tuple,
+returned on ``ConfiguredTaskProgramDeployment`` and included in the effective
+integration identity. Static catalog preflight links those exact selections.
+The factory passes them as adapter construction defaults, so standard Gym bridge
+creation uses the sealed tuple. Empty per-bridge arguments cannot clear it;
+conflicting explicit bindings reject before runtime assembly. Omitting both
+authoring fields preserves the original single-preset payload and lazy path.
 
 The adapter validates identities and selections before execution. The compiler
 links and analyzes selected presets before constructing the final Atomic
@@ -383,7 +394,7 @@ preset selection.
 Bindings targeting parallel branches are explicitly rejected. Unbound parallel
 calls remain supported. The compiled-program fingerprint uses the same format as
 nominal motion sources; it includes the instruction and integration selection.
-These declarations do not add YAML fields, execute providers, or mutate an engine.
+These declarations do not change program bytes, execute providers, or mutate an engine.
 ``validate_manifest`` checks profile identity, runtime-preset selection and each
 selected call's policy contract. A scene manifest carries entity metadata rather
 than the host's scene-registry selection ID; the standard adapter validates that
@@ -467,16 +478,27 @@ missing or ambiguous references against the immutable scene manifest during
 registration. The routed transport factory uses this optional contract;
 existing factories remain valid and keep their fingerprints. Implementations
 must not construct resources or read live state during this preflight.
+``RegisteredSemanticLowererCallValidator`` similarly validates compiled call
+arguments against the exact registered immutable factory declaration during
+catalog preflight. Its identity is the factory's type, revision and sealed
+fields; it adds no executable configuration or live observation callback.
+Coordinated ``relation=on`` routes require a matching reference and world-frame
+displacement. They retain the object's orientation from that lowering and
+resolve the reference position anew, without rotating the world displacement.
 
 .. currentmodule:: embodichain.lab.task_program.integrations
 
 .. autosummary::
 
    RegisteredSemanticLowererSceneValidator
+   RegisteredSemanticLowererCallValidator
 
 .. currentmodule:: embodichain.lab.task_program.integrations.extensions
 
 .. autoclass:: RegisteredSemanticLowererSceneValidator
+   :members:
+
+.. autoclass:: RegisteredSemanticLowererCallValidator
    :members:
 
 

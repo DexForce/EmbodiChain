@@ -69,6 +69,17 @@ ordinary batch IK and reject continuous requests before solving.
     :inherited-members:
     :show-inheritance:
 
+Emitted-pose validation
+-----------------------
+
+``pose_validation_tolerances`` reads an iterative solver's current position and
+rotation budgets before considering the original UR analytic validation budget.
+Unsupported solvers and nonpositive or nonfinite budgets fail explicitly. This
+reads validation parameters without solving IK, allocating solver buffers or
+changing physical acceptance thresholds.
+
+.. autofunction:: embodichain.lab.sim.motion.solvers.tolerances.pose_validation_tolerances
+
 PyTorch Solver
 --------------
 

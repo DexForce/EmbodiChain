@@ -15,6 +15,8 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 import torch
@@ -43,6 +45,27 @@ UR5_DH_PARAMETERS = {
     "d5": 0.09465,
     "d6": 0.0823,
 }
+
+
+def test_emitted_pose_tolerances_preserve_solver_resolution_priority() -> None:
+    from embodichain.lab.sim.motion.solvers import URSolver
+    from embodichain.lab.sim.motion.solvers.tolerances import (
+        pose_validation_tolerances,
+    )
+
+    # No solver initialization or FK is needed to read a validation budget.
+    ur = object.__new__(URSolver)
+    assert pose_validation_tolerances(ur) == (5e-4, 5e-4)
+    ur.get_iteration_params = lambda: {"pos_eps": 0.002, "rot_eps": 0.003}
+    assert pose_validation_tolerances(ur) == (0.002, 0.003)
+    for invalid in (0.0, float("nan")):
+        solver = SimpleNamespace(
+            get_iteration_params=lambda: {"pos_eps": invalid, "rot_eps": 0.003}
+        )
+        with pytest.raises(ValueError, match="finite and positive"):
+            pose_validation_tolerances(solver)
+    with pytest.raises(ValueError, match="unavailable"):
+        pose_validation_tolerances(object())
 
 
 @pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])

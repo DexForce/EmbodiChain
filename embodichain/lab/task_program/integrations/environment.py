@@ -334,6 +334,8 @@ class TaskProgramEnvironmentAdapter:
         post_policy_port: Optional environment post-policy executor.
         validator_port: Optional environment segment validator.
         parallel_safety_validator: Optional authoritative parallel safety gate.
+        invocation_policy_bindings: Immutable configured defaults for exact
+            program occurrences; conflicting per-bridge selections are rejected.
 
     A call to :meth:`compile` snapshots only scene identities.  A call to
     :meth:`assemble_runtime` creates a fresh live runtime, which makes reset and
@@ -361,6 +363,7 @@ class TaskProgramEnvironmentAdapter:
         post_policy_port: SegmentPostPolicyPort | None = None,
         validator_port: SegmentValidatorPort | None = None,
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
+        invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
     ) -> None:
         if not isinstance(factory, TaskProgramEnvironmentFactory):
             raise TypeError("factory must implement TaskProgramEnvironmentFactory.")
@@ -507,6 +510,15 @@ class TaskProgramEnvironmentAdapter:
                 "ParallelCommandSafetyValidator or be None."
             )
 
+        if type(invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be an exact tuple.")
+        if invocation_policy_bindings:
+            from .invocation_policy import _snapshot_invocation_policy_bindings
+
+            invocation_policy_bindings = _snapshot_invocation_policy_bindings(
+                invocation_policy_bindings
+            )
+        self._configured_invocation_policy_bindings = invocation_policy_bindings
         self._factory = factory
         self._closed = False
         self._configured_nominal_sources: tuple[object, ...] = ()
@@ -593,7 +605,16 @@ class TaskProgramEnvironmentAdapter:
             raise TypeError("program must be exactly TaskProgramCfg.")
         self._validate_selection(program.integration)
         if self._integration_catalog is not None:
-            return self._integration_catalog.preflight(program)
+            return self._integration_catalog.preflight(
+                program,
+                **(
+                    {
+                        "invocation_policy_bindings": self._configured_invocation_policy_bindings
+                    }
+                    if self._configured_invocation_policy_bindings
+                    else {}
+                ),
+            )
         registry = self._create_scene_registry()
         return TaskProgramCompiler.from_scene_registry(registry).compile(program)
 
@@ -937,7 +958,15 @@ class TaskProgramEnvironmentAdapter:
         select = getattr(self._factory, "for_env_ids", None)
         if not callable(select):
             raise ValueError("environment factory does not support row selection")
-        adapter = select(env_ids).create_adapter()
+        adapter = select(env_ids).create_adapter(
+            **(
+                {
+                    "invocation_policy_bindings": self._configured_invocation_policy_bindings
+                }
+                if self._configured_invocation_policy_bindings
+                else {}
+            )
+        )
         adapter._set_configured_nominal_sources(self._configured_nominal_sources)
         return adapter
 
@@ -972,6 +1001,16 @@ class TaskProgramEnvironmentAdapter:
             raise TypeError("program must be exactly CompiledTaskProgram.")
         if type(invocation_policy_bindings) is not tuple:
             raise TypeError("invocation_policy_bindings must be an exact tuple.")
+        if self._configured_invocation_policy_bindings:
+            if (
+                invocation_policy_bindings
+                and invocation_policy_bindings
+                != self._configured_invocation_policy_bindings
+            ):
+                raise ValueError(
+                    "Explicit bindings conflict with configured invocation policies."
+                )
+            invocation_policy_bindings = self._configured_invocation_policy_bindings
         policies = None
         if invocation_policy_bindings:
             from .invocation_policy import BoundInvocationPolicies
@@ -1051,7 +1090,11 @@ class TaskProgramEnvironmentAdapter:
         else:
             expansion = None
         if expansion_profile is not None:
-            self._program_skill_ids(program, semantic.compiler)
+            self._program_skill_ids(
+                program,
+                semantic.compiler,
+                **({"invocation_policies": policies} if policies is not None else {}),
+            )
         if expansion is not None and plan_transform_factory is not None:
             raise ValueError(
                 "an Expansion Profile and an explicit plan transform cannot both own a bridge"
@@ -1097,14 +1140,27 @@ class TaskProgramEnvironmentAdapter:
     def _program_skill_ids(
         program: CompiledTaskProgram,
         compiler: SemanticCallCompiler,
+        *,
+        invocation_policies: BoundInvocationPolicies | None = None,
     ) -> frozenset[str]:
         """Return every Atomic skill selected by compiled program calls."""
         skill_ids: set[str] = set()
         for analysis in program.preflight_analyses():
+            preset_ids = (
+                invocation_policies._presets_for_analysis(analysis)
+                if invocation_policies is not None
+                and analysis.kind != "parallel_branch"
+                else None
+            )
             for call_index, call in enumerate(analysis.calls):
                 bound = compiler.integration.link_call(
                     call,
                     path=(*analysis.source_path, call_index, "call"),
+                    **(
+                        {"preset_id": preset_ids[call_index]}
+                        if preset_ids is not None
+                        else {}
+                    ),
                 )
                 skill_ids.add(bound.linked.descriptor.skill_id)
         return frozenset(skill_ids)

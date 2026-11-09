@@ -23,7 +23,7 @@ from embodichain.lab.task_program.language.semantic_contracts import (
 )
 from .simulation.targets import _pose
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import TYPE_CHECKING, ClassVar
 
@@ -105,6 +105,7 @@ from embodichain.lab.task_program.compiler.lowering import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.lab.task_program.semantics import SceneManifest
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 __all__: list[str] = []
@@ -1036,6 +1037,8 @@ class _CoordinatedTransportRoute:
     relative_pose: tuple[float, ...] | None = None
     world_displacement: tuple[float, float, float] | None = None
 
+    relation: str | None = field(default=None, kw_only=True)
+
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
@@ -1050,14 +1053,23 @@ class _CoordinatedTransportRoute:
         has_reference = self.reference_entity_id is not None
         has_pose = self.relative_pose is not None
         has_displacement = self.world_displacement is not None
-        if has_reference != has_pose or has_reference == has_displacement:
+        if self.relation is not None:
+            if (
+                self.relation != "on"
+                or not has_reference
+                or not has_displacement
+                or has_pose
+            ):
+                raise ValueError(
+                    "Coordinated on requires reference_entity_id and world_displacement, without relative_pose."
+                )
+        elif has_reference != has_pose or has_reference == has_displacement:
             raise ValueError(
                 "Coordinated transport route must declare exactly one of "
                 "reference_entity_id with relative_pose or world_displacement."
             )
         if has_reference:
             assert self.reference_entity_id is not None
-            assert self.relative_pose is not None
             object.__setattr__(
                 self,
                 "reference_entity_id",
@@ -1066,8 +1078,9 @@ class _CoordinatedTransportRoute:
                     field_name="reference_entity_id",
                 ),
             )
+        if has_pose:
             object.__setattr__(self, "relative_pose", _pose(self.relative_pose))
-        else:
+        if has_displacement:
             assert self.world_displacement is not None
             object.__setattr__(
                 self,
@@ -1153,7 +1166,10 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
             }
         )
         arguments = dict(call.arguments)
-        if set(arguments) != {"object", "target"}:
+        if set(arguments) not in (
+            {"object", "target"},
+            {"object", "target", "reference", "relation"},
+        ):
             raise ValueError(
                 f"{self.call_id} arguments must contain only 'object' and 'target'."
             )
@@ -1164,6 +1180,18 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
                 f"{self.call_id} does not declare object-target route {route!r}."
             )
         route_cfg, semantics = resolved
+        if route_cfg.relation is not None:
+            if (
+                arguments.get("reference") != route_cfg.reference_entity_id
+                or arguments.get("relation") != route_cfg.relation
+            ):
+                raise ValueError(
+                    "Coordinated placement must match its configured support relation."
+                )
+        elif "reference" in arguments:
+            raise ValueError(
+                "Coordinated placement has no configured support relation."
+            )
         if route_cfg.world_displacement is not None:
             try:
                 observed = context.scene.entities[route_cfg.object_id]
@@ -1193,7 +1221,14 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
                 dtype=object_target_pose.dtype,
                 device=object_target_pose.device,
             )
-            object_target_pose[:, :3, 3] += displacement
+            if route_cfg.relation == "on":
+                object_target_pose = SceneEntityPose(
+                    route_cfg.reference_entity_id,
+                    world_displacement=displacement,
+                    world_orientation=object_pose[:, :3, :3],
+                )
+            else:
+                object_target_pose[:, :3, 3] += displacement
         else:
             assert route_cfg.reference_entity_id is not None
             assert route_cfg.relative_pose is not None
@@ -1252,6 +1287,46 @@ class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
             raise ValueError("Coordinated transport routes must be unique.")
         object.__setattr__(self, "routes", tuple(normalized))
 
+    def validate_scene_declaration(self, scene: SceneManifest) -> None:
+        """Validate all on-route anchors before any live assembly."""
+        for route in self.routes:
+            if route.relation == "on":
+                scene.lookup(route.reference_entity_id)
+
+    def validate_call_declaration(self, call: RegisteredSemanticCall) -> None:
+        """Require the selected call to retain its declared support relation."""
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": dict(call.arguments),
+                "resources": dict(call.resources),
+            }
+        )
+        route = next(
+            (
+                item
+                for item in self.routes
+                if (item.object_id, item.target_id)
+                == (call.arguments.get("object"), call.arguments.get("target"))
+            ),
+            None,
+        )
+        if route is None:
+            raise ValueError(
+                "Coordinated call does not select a declared object-target route."
+            )
+        if route.relation == "on":
+            if (
+                call.arguments.get("reference") != route.reference_entity_id
+                or call.arguments.get("relation") != "on"
+            ):
+                raise ValueError(
+                    "Coordinated call must match its configured support reference/relation."
+                )
+        elif "reference" in call.arguments or "relation" in call.arguments:
+            raise ValueError("Coordinated call has no configured support relation.")
+
     def create(
         self,
         *,
@@ -1283,6 +1358,14 @@ class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
                         object_id=object_ref.entity_id,
                         target_id=route.target_id,
                         world_displacement=route.world_displacement,
+                        reference_entity_id=(
+                            scene_registry.lookup(
+                                route.reference_entity_id
+                            ).ref.entity_id
+                            if route.relation is not None
+                            else None
+                        ),
+                        relation=route.relation,
                     )
                 )
             else:

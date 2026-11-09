@@ -61,6 +61,13 @@ changing numerical convergence settings. Shared quaternion conventions belong
 to [simulation](../simulation-system/simulation-system.md); external adapters
 own any conversion.
 
+`solvers.tolerances.pose_validation_tolerances()` reads existing iterative
+solver budgets before the original analytic UR fallback; unsupported solvers
+and invalid budgets fail explicitly. This helper starts no solve or buffer
+allocation. `compute.geometry.pose_checks.sampled_pose_path_matches()` compares
+already-emitted FK samples with the source residual margins, separately from
+solver convergence and physical task acceptance.
+
 `BaseSolver.get_fk_batch()` and `get_ik_batch()` flatten and restore arbitrary
 leading batch axes. FK returns `(..., 4, 4)`; nearest IK returns boolean success
 `(...)` and qpos `(..., dof)` without a candidate axis. Robot broadcasts root

@@ -58,6 +58,26 @@ def test_staging_pose_validation_keeps_dtype_and_rejects_nonrigid_inputs(dtype):
             as_rigid_matrix(invalid)
 
 
+def test_sampled_pose_path_keeps_source_residual_margins_and_rejects_unknown() -> None:
+    from embodichain.compute.geometry.pose_checks import sampled_pose_path_matches
+
+    desired = torch.eye(4, dtype=torch.float64).repeat(1, 3, 1, 1)
+    actual = desired.clone()
+    actual[0, -1, 0, 3] = 0.1000009
+    assert sampled_pose_path_matches(actual, desired, 0.1, 0.01)
+    actual[0, -1, 0, 3] = 0.1000011
+    assert not sampled_pose_path_matches(actual, desired, 0.1, 0.01)
+    actual[0, -1, 0, 3] = 0.0
+    for angle, expected in ((0.020009, True), (0.020011, False)):
+        cosine, sine = math.cos(angle), math.sin(angle)
+        actual[0, -1, :2, :2] = actual.new_tensor([[cosine, -sine], [sine, cosine]])
+        assert sampled_pose_path_matches(actual, desired, 0.1, 0.01) is expected
+    actual[0, -1, 0, 3] = float("nan")
+    assert not sampled_pose_path_matches(actual, desired, 0.1, 0.01)
+    assert not sampled_pose_path_matches(desired[:, :2], desired, 0.1, 0.01)
+    assert torch.equal(desired, torch.eye(4, dtype=desired.dtype).repeat(1, 3, 1, 1))
+
+
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_axis_contact_frames_preserve_tie_reference_roll_and_source_dtype(dtype):
     target = torch.eye(4, dtype=dtype)[None]

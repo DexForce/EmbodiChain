@@ -1155,3 +1155,27 @@ def test_segment_recovery_without_handler_is_rejected_by_static_preflight():
         integration.link_call(Pick(object=SceneObjectRef("cube")))
     assert failure.value.diagnostic.code == "incompatible_motion_policy"
     assert provider.calls == 0
+
+
+def test_linear_pick_segment_recovery_links_without_acquiring_state():
+    registry, provider = _scene_registry(with_default=True)
+    options = _action_option_templates()
+    options["pick"] = PickUpOptions(linear_segments=True)
+    integration = _semantic_integration(
+        registry,
+        preset=_preset(
+            "default",
+            action_option_templates=options,
+            motion_policy=MotionPolicy(
+                strategy="ik_interp",
+                interpolation_mode="fixed_grid",
+                ik_seed_mode="sequential",
+                acceleration_limit=None,
+                dynamic_collision_mode="off",
+                segment_sample_count_retries=(4, 6),
+            ),
+        ),
+    )
+    linked = integration.link_call(Pick(object=SceneObjectRef("cube")))
+    assert linked.preset_id == "default"
+    assert provider.calls == 0

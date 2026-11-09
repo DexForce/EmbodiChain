@@ -97,6 +97,17 @@ class EffectAssurance(str, Enum):
     PROJECTED = "projected"
 
 
+class ReleaseGateEvidence(str, Enum):
+    """Evidence retained at an already declared detached phase boundary.
+
+    ``NON_POSE_CLAUSES`` removes only pose clauses at that boundary, retaining
+    binary, scalar and all other evidence. Terminal verification is unchanged.
+    """
+
+    TERMINAL_CLAUSES = "terminal_clauses"
+    NON_POSE_CLAUSES = "non_pose_clauses"
+
+
 _SOLVER_BACKED_CAPABILITIES = frozenset(
     {
         BATCH_INVERSE_KINEMATICS_CAPABILITY,
@@ -958,6 +969,8 @@ class SkillPolicyPreset:
     required_planner: str | None
     """Optional planner backend required by this preset."""
     effect_assurance: EffectAssurance
+    release_gate_evidence: ReleaseGateEvidence
+    """Phase-only evidence projection; complete terminal evidence is preserved."""
     _motion_policy: MotionPolicy
     _tracking_policy: TrackingPolicy
     _recovery_policy: RecoveryPolicy
@@ -979,6 +992,7 @@ class SkillPolicyPreset:
         workflow_recovery_policy: WorkflowRecoveryPolicy | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
         required_planner: str | None = None,
+        release_gate_evidence: ReleaseGateEvidence = ReleaseGateEvidence.TERMINAL_CLAUSES,
     ) -> None:
         """Own one policy bundle without exposing mutable nested configuration."""
         _validate_identifier(preset_id, field_name="SkillPolicyPreset.preset_id")
@@ -989,6 +1003,13 @@ class SkillPolicyPreset:
             )
         if not isinstance(effect_assurance, EffectAssurance):
             raise TypeError("effect_assurance must be an EffectAssurance.")
+        if not isinstance(release_gate_evidence, ReleaseGateEvidence):
+            raise TypeError("release_gate_evidence must be a ReleaseGateEvidence.")
+        if (
+            effect_assurance is EffectAssurance.PROJECTED
+            and release_gate_evidence is not ReleaseGateEvidence.TERMINAL_CLAUSES
+        ):
+            raise ValueError("Non-pose release gates require verified assurance.")
         selected_motion = MotionPolicy() if motion_policy is None else motion_policy
         selected_tracking = (
             TrackingPolicy.joint_position()
@@ -1048,6 +1069,7 @@ class SkillPolicyPreset:
         object.__setattr__(self, "preset_id", preset_id)
         object.__setattr__(self, "required_planner", required_planner)
         object.__setattr__(self, "effect_assurance", effect_assurance)
+        object.__setattr__(self, "release_gate_evidence", release_gate_evidence)
         object.__setattr__(self, "_motion_policy", deepcopy(selected_motion))
         object.__setattr__(self, "_tracking_policy", deepcopy(selected_tracking))
         object.__setattr__(self, "_recovery_policy", deepcopy(selected_recovery))
@@ -1141,6 +1163,7 @@ class SkillPolicyPreset:
         return SkillPolicyPreset(
             preset_id=self.preset_id,
             effect_assurance=self.effect_assurance,
+            release_gate_evidence=self.release_gate_evidence,
             motion_policy=self.motion_policy,
             tracking_policy=self.tracking_policy,
             recovery_policy=self.recovery_policy,
@@ -2433,6 +2456,7 @@ __all__ = [
     "EffectAssurance",
     "EndpointResolution",
     "ProfileValidationError",
+    "ReleaseGateEvidence",
     "ResourceEndpoint",
     "ResourceEndpointAdapter",
     "ResolvedRobotResource",

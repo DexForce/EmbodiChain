@@ -28,6 +28,7 @@ from typing import Any, TYPE_CHECKING
 import yaml
 
 from embodichain.gen_sim.task_spec import TaskSpec, canonical_hash
+from embodichain.utils.config_paths import resolve_local_resource_paths
 from .bundle_identity import _REQUIRED_FILES, create_bundle_identity
 from .bundle_spec import bundle_task_spec_payload, decode_bundle_task_spec
 from .bundle_inputs import (
@@ -141,16 +142,8 @@ class LoadedTaskProgramBundle:
         return config["id"], cfg
 
 
-def _preflight(
-    files: Mapping[str, bytes],
-    base_dir: Path,
-) -> tuple[
-    ResolvedGymComponents,
-    ConfiguredTaskProgramDeployment,
-    CompiledTaskProgram,
-    TaskSpec | None,
-]:
-    # This validates source declarations, not an old bundle conversion format.
+def _validate_source_files(files: Mapping[str, bytes]) -> None:
+    """Reject unsupported source layouts before resolving resource paths."""
     if "integration_fingerprint.json" in files:
         raise ValueError(
             "Prepare from source declarations, not an existing runtime envelope."
@@ -167,6 +160,19 @@ def _preflight(
         raise TypeError(
             "Bundle source declarations require string paths and exact bytes."
         )
+
+
+def _preflight(
+    files: Mapping[str, bytes],
+    base_dir: Path,
+) -> tuple[
+    ResolvedGymComponents,
+    ConfiguredTaskProgramDeployment,
+    CompiledTaskProgram,
+    TaskSpec | None,
+]:
+    # This validates source declarations, not an old bundle conversion format.
+    _validate_source_files(files)
     parsed = {name: _decode(files[name], name) for name in _REQUIRED_FILES}
     declaration = parsed["task_program_deployment.yaml"]
     selectors = declaration.get("task_program")
@@ -214,7 +220,8 @@ def _preflight(
     )
     physical.validate_scene_bindings(deployment.scene_binding)
     program = deployment.integration.registration.catalog.preflight(
-        deployment.load_program()
+        deployment.load_program(),
+        invocation_policy_bindings=deployment.invocation_policy_bindings,
     )
     spec = decode_bundle_task_spec(parsed["task_spec.json"])
     graph = validate_semantic_task_graph(parsed["semantic_task_graph.json"])
@@ -265,6 +272,31 @@ def _verify_identity(
             )
 
 
+def _materialize_physical_resources(files: dict[str, bytes], *, base_dir: Path) -> None:
+    """Seal the public physical owner's selected, materialized declarations."""
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    sources = {
+        name: _decode(data, name)
+        for name, data in files.items()
+        if name.endswith((".yaml", ".yml"))
+    }
+    deployment_name = "task_program_deployment.yaml"
+    deployment = resolve_local_resource_paths(
+        sources[deployment_name], base_dir=base_dir
+    )
+    physical = resolve_gym_components(
+        deployment, base_dir=base_dir, component_sources=sources
+    )
+    materialized = {deployment_name: deployment}
+    for path, component in physical.materialized_component_sources.items():
+        name = path.relative_to(base_dir).as_posix()
+        materialized[name] = component
+    for name, declaration in materialized.items():
+        if declaration != sources[name]:
+            files[name] = yaml.safe_dump(declaration, sort_keys=False).encode()
+
+
 def prepare_configured_bundle(
     files: Mapping[str, bytes],
     *,
@@ -275,10 +307,12 @@ def prepare_configured_bundle(
 ) -> BundleSnapshot:
     """Preflight pure owner declarations, then seal their identity without writing.
 
-    Source files use the canonical Task Engine bundle layout. Owner-relative
-    external resource files resolve from base_dir; callers supply independently
-    checked input digests. This entry validates graph projection and runtime
-    capabilities, not physical success or TaskSpec certificate readiness.
+    Source files use the canonical Task Engine bundle layout. Explicit relative
+    physical resources are resolved from each declaration's owner beneath
+    base_dir before sealing, so publication does not change their location.
+    Callers supply independently checked input digests. This entry validates
+    graph projection and runtime capabilities, not physical success or TaskSpec
+    certificate readiness.
 
     Args:
         files: Canonical source declaration bytes and optional audit artifacts.
@@ -309,7 +343,10 @@ def prepare_configured_bundle(
     owned[SOURCE_INPUT_PROVENANCE_FILE] = _provenance_bytes(
         provenance, external_input_digests
     )
-    _, deployment, program, spec = _preflight(owned, Path(base_dir))
+    _validate_source_files(owned)
+    source_owner = Path(base_dir).expanduser().resolve()
+    _materialize_physical_resources(owned, base_dir=source_owner)
+    _, deployment, program, spec = _preflight(owned, source_owner)
     identity = create_bundle_identity(
         **_identity_fields(deployment, program, spec),
         implementation_revisions=implementation_revisions,

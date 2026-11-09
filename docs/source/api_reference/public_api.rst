@@ -1832,6 +1832,36 @@ Adapt legacy phase-aligned geometry, timing and measured manipulability to the c
 
    TrajectorySessionCoverage
 
+embodichain.lab.sim.motion.planners.curobo.observed
+---------------------------------------------------
+
+The B1 observed-query factory composes explicit shape sources, an owned complete
+world observation and full named joint state through one world-to-root transform.
+The generated whole-robot URDF root is checked independently of the active arm.
+Live hosts supply a trusted native revision getter; it must match the supplied
+world stamp before shape acquisition and after immutable snapshot assembly.
+``None`` retains the numeric/immutable-reader path without native revision reads.
+The factory reads no live poses, changes no borrowed robot, and closes the
+standard backend on exit or failure. Geometry scope and native planning success
+remain separate from execution and measured task acceptance.
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.observed
+
+.. autosummary::
+
+   CollisionShapeReader
+   CuroboWorldObservation
+   ObservedCuroboQueryFactory
+
+.. autoclass:: CollisionShapeReader
+   :members:
+
+.. autoclass:: CuroboWorldObservation
+   :members:
+
+.. autoclass:: ObservedCuroboQueryFactory
+   :members:
+
 embodichain.lab.sim.motion.planners.curobo.payload
 --------------------------------------------------
 
@@ -2107,6 +2137,18 @@ Target-specific paired-pad observations using explicit semantic/native object
 bindings and control-part/pad-link declarations. NativeGripEvidenceFactory uses
 the public control-part provider injection API and preserves its provider ID and
 revision. Each provider owns its observer and bounded raw-query trace.
+
+Configured deployments select this factory with
+``runtime_services.control_part_evidence.kind: native_grip``. The closed
+declaration requires ``sensor_uid``, ``object_bindings`` pairs of semantic and
+native object IDs, and ``pad_bindings`` pairs of control parts and two exact pad
+links. Optional ``algorithm_revision``, ``opening_bindings``,
+``max_contacts_per_env`` and ``trace_capacity`` retain the configuration defaults
+when omitted. Each opening binding declares ``control_part``, ``joint_names``,
+``driver_indices``, ``open_qpos`` and ``tolerance``; revision 2 requires this
+calibration for every declared hand. One skill profile or task integration owns
+the provider. Existing ``joint_position_constraint`` declarations keep their
+original behavior. Decoding creates no sensors or live evidence provider.
 
 ``capture_grip_observation`` performs one requested bilateral observation and
 returns an owned batch plus the exact query snapshot. The standard simulation
@@ -2791,6 +2833,29 @@ finalization transforms once and cannot replace the logical recovery proposal.
 .. autoclass:: CompletePlanBuilder
    :members:
 
+
+embodichain.lab.sim.atomic_actions.curobo_queries
+-------------------------------------------------
+
+The Atomic prefix adapter retains the caller's exact joint endpoint, complete
+passive locks and command cadence. It uses the shared observed factory and the
+original Torch-only CPU/planning-device RNG boundary; Python and NumPy streams
+are not reset. It selects no recovery branch and introduces no retries, target
+perturbations or implicit planner tuning. The world provider owns actual native
+stamp acquisition and the caller owns subsequent path qualification.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.curobo_queries
+
+.. autosummary::
+
+   CuroboJointPrefixPlanner
+   CuroboWorldObservationProvider
+
+.. autoclass:: CuroboJointPrefixPlanner
+   :members:
+
+.. autoclass:: CuroboWorldObservationProvider
+   :members:
 
 embodichain.lab.sim.atomic_actions.effects
 ------------------------------------------
@@ -3537,6 +3602,7 @@ embodichain.lab.task_program.semantics.profiles
    EffectAssurance
    EndpointResolution
    ProfileValidationError
+   ReleaseGateEvidence
    ResourceEndpoint
    ResourceEndpointAdapter
    ResolvedRobotResource

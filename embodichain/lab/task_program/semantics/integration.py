@@ -783,6 +783,18 @@ class SemanticIntegrationManifest:
                     tuple(preset.action_option_templates),
                 )
             )
+        try:
+            preset.action_option_templates[descriptor.call_id].validate_motion_policy(
+                preset.motion_policy
+            )
+        except (TypeError, ValueError) as error:
+            raise SemanticValidationError(
+                SemanticDiagnostic(
+                    "incompatible_motion_policy",
+                    (*path, "preset", "motion"),
+                    str(error),
+                )
+            ) from error
         return LinkedSemanticCall(
             call=normalized_call,
             descriptor=descriptor,

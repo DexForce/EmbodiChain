@@ -23,6 +23,9 @@ embodichain.lab.sim.atomic_actions
       ActionOptions
       MotionPolicy
       RecoveryPolicy
+      JointPrefixPlanner
+      PlaceSceneInputs
+      PlaceSceneProvider
       RobotObservation
       TaskState
       SceneSnapshot
@@ -229,6 +232,14 @@ Standard capability identifiers
 Planning and state
 ------------------
 
+Ordinary manipulation can explicitly select adaptive Pick sampling, complete
+opening-envelope filtering and qualified Cartesian approaches through typed
+options. ``PickPlanningRecovery`` and ``PlacePlanningRecovery`` use the existing
+complete-request budget and original bounded alternative order. Inactive options
+preserve shared defaults; an unsupported selected service or option combination
+is rejected. The planning services return geometric evidence, while execution
+and physical-effect validation retain their separate contracts.
+
 .. autoclass:: ActionBinding
    :members:
 
@@ -332,6 +343,20 @@ Engine and execution
 
 .. autoclass:: AtomicActionEngine
    :members:
+
+Explicit planning services
+--------------------------
+
+``AtomicActionEngine`` can borrow a same-robot free-motion query and joint-prefix
+planner, plus a placement-geometry provider. Constructing the engine does not
+execute these services. Skills must reject a selected capability when its port
+is missing. ``PlaceSceneInputs`` owns its geometry and explicit floor/support
+roles; these envelopes are planning inputs rather than physical contact evidence.
+
+.. automodule:: embodichain.lab.sim.atomic_actions.planning_probes
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
 
 .. autodata:: PlanTransform
 

@@ -233,6 +233,164 @@ def _integration_payload(task_name: str) -> dict[str, object]:
     )
 
 
+@pytest.mark.parametrize("revision", [1, 2])
+def test_configured_native_grip_is_closed_owned_and_fingerprinted(
+    monkeypatch: pytest.MonkeyPatch, revision: int
+) -> None:
+    """Configuration selects the public native factory without acquiring evidence."""
+    from embodichain.lab.task_program.integrations.simulation.grip_evidence import (
+        NativeGripEvidenceFactory,
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Decoding must not create a native evidence provider")
+
+    monkeypatch.setattr(NativeGripEvidenceFactory, "create", forbidden)
+    original = _integration_payload("rubiks_cube_pick_place")
+    assert (
+        _decode_configured_task_program_integration(
+            original
+        ).registration.control_part_evidence_factory
+        is None
+    )
+    declaration = {
+        "kind": "native_grip",
+        "sensor_uid": "configured_contacts",
+        "object_bindings": [["rubiks_cube", "rubiks_cube"]],
+        "pad_bindings": [["eef", ["first_pad", "second_pad"]]],
+    }
+    if revision == 2:
+        declaration.update(
+            algorithm_revision=2,
+            opening_bindings=[
+                {
+                    "control_part": "eef",
+                    "joint_names": ["driving_joint", "compliant_joint"],
+                    "driver_indices": [0],
+                    "open_qpos": [0.0, 0.0],
+                    "tolerance": 0.01,
+                }
+            ],
+        )
+    payload = deepcopy(original)
+    payload.setdefault("runtime_services", {})["control_part_evidence"] = declaration
+    configured = _decode_configured_task_program_integration(payload)
+    factory = configured.registration.control_part_evidence_factory
+    assert type(factory) is NativeGripEvidenceFactory
+    assert factory.object_bindings == (("rubiks_cube", "rubiks_cube"),)
+    assert factory.pad_bindings == (("eef", ("first_pad", "second_pad")),)
+    assert factory.algorithm_revision == revision
+    assert factory.max_contacts_per_env == 1024 and factory.trace_capacity == 4096
+    assert len(factory.opening_bindings) == (1 if revision == 2 else 0)
+    if revision == 2:
+        assert factory.opening_bindings[0].driver_indices == (0,)
+        assert factory.opening_bindings[0].joint_names == (
+            "driving_joint",
+            "compliant_joint",
+        )
+    before = configured.registration.fingerprint_payload()
+    changed = deepcopy(payload)
+    changed["runtime_services"]["control_part_evidence"]["max_contacts_per_env"] = 1025
+    assert _decode_configured_task_program_integration(
+        changed
+    ).integration_fingerprint != (configured.integration_fingerprint)
+    invalid = deepcopy(payload)
+    invalid["runtime_services"]["control_part_evidence"]["private_observer"] = "hidden"
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _decode_configured_task_program_integration(invalid)
+    invalid = deepcopy(payload)
+    invalid["runtime_services"]["control_part_evidence"]["object_bindings"] = [
+        ["rubiks_cube"]
+    ]
+    with pytest.raises(ValueError, match="identity/UID pair"):
+        _decode_configured_task_program_integration(invalid)
+    if revision == 2:
+        invalid = deepcopy(payload)
+        invalid["runtime_services"]["control_part_evidence"].pop("opening_bindings")
+        with pytest.raises(ValueError, match="opening bindings"):
+            _decode_configured_task_program_integration(invalid)
+        invalid = deepcopy(payload)
+        invalid["runtime_services"]["control_part_evidence"]["opening_bindings"][0][
+            "guessed_driver"
+        ] = True
+        with pytest.raises(ValueError, match="unsupported fields"):
+            _decode_configured_task_program_integration(invalid)
+    declaration["object_bindings"][0][1] = "changed_after_decode"
+    declaration["pad_bindings"][0][1][0] = "changed_after_decode"
+    assert configured.registration.fingerprint_payload() == before
+
+    joint = deepcopy(original)
+    joint.setdefault("runtime_services", {})["control_part_evidence"] = {
+        "kind": "joint_position_constraint",
+        "control_parts": ["eef"],
+        "open_qpos": [0.0],
+        "minimum_displacement": 0.01,
+    }
+    joint_factory = _decode_configured_task_program_integration(
+        joint
+    ).registration.control_part_evidence_factory
+    assert joint_factory.control_parts == ("eef",)
+    assert joint_factory.open_qpos == (0.0,)
+    assert joint_factory.minimum_displacement == 0.01
+
+
+def test_configured_release_gate_evidence_defaults_and_active_identity() -> None:
+    """The default keeps the full declaration; an explicit verified choice is sealed."""
+    from embodichain.lab.task_program.semantics import ReleaseGateEvidence
+
+    payload = _integration_payload("hand_over")
+    omitted = _decode_configured_task_program_integration(payload)
+    explicit = deepcopy(payload)
+    explicit["robot_profile"]["presets"][0][
+        "release_gate_evidence"
+    ] = "terminal_clauses"
+    default = _decode_configured_task_program_integration(explicit)
+    assert default.registration.fingerprint_payload() == (
+        omitted.registration.fingerprint_payload()
+    )
+    assert default.integration_fingerprint == omitted.integration_fingerprint
+    active = deepcopy(payload)
+    active["robot_profile"]["presets"][0]["release_gate_evidence"] = "non_pose_clauses"
+    selected = _decode_configured_task_program_integration(active)
+    assert (
+        selected.registration.robot_profile_binding.presets[0].release_gate_evidence
+        is ReleaseGateEvidence.NON_POSE_CLAUSES
+    )
+    assert selected.integration_fingerprint != omitted.integration_fingerprint
+    invalid = deepcopy(active)
+    invalid["robot_profile"]["presets"][0]["release_gate_evidence"] = "unknown"
+    with pytest.raises(ValueError, match="release_gate_evidence"):
+        _decode_configured_task_program_integration(invalid)
+    projected = _integration_payload("rubiks_cube_pick_place")
+    projected["robot_profile"]["presets"][0][
+        "release_gate_evidence"
+    ] = "non_pose_clauses"
+    with pytest.raises(ValueError, match="verified assurance"):
+        _decode_configured_task_program_integration(projected)
+
+    # The component-owned scalar must reach the same typed preset through the
+    # public deployment composition path, rather than only the payload decoder.
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    physical = _physical_components(path, config)
+    references = deepcopy(physical.config["task_program"])
+    _, _, policy = _resolve_task_program_components(references, base_dir=path.parent)
+    policy["release_gate_evidence"] = "non_pose_clauses"
+    references["execution_policy"] = {"inline": policy}
+    deployment = load_configured_task_program_deployment(
+        task_program=references,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    assert (
+        deployment.integration.registration.robot_profile_binding.presets[
+            0
+        ].release_gate_evidence
+        is ReleaseGateEvidence.NON_POSE_CLAUSES
+    )
+    deployment.load_program()
+
+
 def _deployment_from_path(path: Path) -> ConfiguredTaskProgramDeployment:
     """Return one fully composed production deployment."""
     config = load_config(path)
@@ -243,6 +401,207 @@ def _deployment_from_path(path: Path) -> ConfiguredTaskProgramDeployment:
         skill_profile=physical.embodiment_skill_profile,
         base_dir=path.parent,
     )
+
+
+def test_complete_occurrence_presets_are_owned_sealed_and_preflighted() -> None:
+    """Two explicit policies preserve the program and reject stale selections."""
+    from embodichain.lab.task_program.integrations import task_program_fingerprint
+
+    path = _config_path("rubiks_cube_pick_place")
+    physical = _physical_components(path, _gym_config("rubiks_cube_pick_place"))
+    refs = physical.config["task_program"]
+    program_path, integration, policy = _resolve_task_program_components(
+        refs, base_dir=path.parent
+    )
+    declaration = {
+        "program": {"inline": load_config(program_path)},
+        "integration": {"inline": deepcopy(integration)},
+        "execution_policy": {"inline": deepcopy(policy)},
+    }
+
+    def load(values):
+        return load_configured_task_program_deployment(
+            task_program=values,
+            skill_profile=physical.embodiment_skill_profile,
+            base_dir=path.parent,
+        )
+
+    baseline = load(declaration)
+    program = baseline.integration.registration.catalog.preflight(
+        baseline.load_program()
+    )
+    fingerprint = task_program_fingerprint(program)
+    segments = tuple(program.iter_segments())
+    authored = deepcopy(declaration)
+    named = []
+    for preset_id, count in (("first_policy", 61), ("second_policy", 81)):
+        value = {
+            key: deepcopy(policy[key])
+            for key in (
+                "motion",
+                "tracking",
+                "recovery",
+                "workflow_recovery",
+                "runner",
+                "effect_assurance",
+            )
+        }
+        value["preset_id"] = preset_id
+        value["motion"]["sample_count"] = count
+        named.append(value)
+    authored["execution_policy"]["inline"]["invocation_presets"] = named
+    bindings = [
+        {
+            "program_fingerprint": fingerprint,
+            "invocation_id": f"{program.program_id}/{segment.segment_id}:0",
+            "preset_id": name,
+        }
+        for segment, name in zip(segments[:2], ("first_policy", "second_policy"))
+    ]
+    authored["integration"]["inline"]["invocation_policy_bindings"] = bindings
+    selected = load(authored)
+    compiled = selected.integration.registration.catalog.preflight(
+        selected.load_program(),
+        invocation_policy_bindings=selected.invocation_policy_bindings,
+    )
+    assert task_program_fingerprint(compiled) == fingerprint
+    assert len(selected.invocation_policy_bindings) == 2
+    assert [binding.preset_id for binding in selected.invocation_policy_bindings] == [
+        "first_policy",
+        "second_policy",
+    ]
+    presets = {
+        value.preset_id: value
+        for value in selected.integration.registration.robot_profile_binding.presets
+    }
+    assert presets["first_policy"].motion_policy.sample_count == 61
+    assert presets["second_policy"].motion_policy.sample_count == 81
+    assert (
+        selected.integration.integration_fingerprint
+        != baseline.integration.integration_fingerprint
+    )
+    changed = deepcopy(authored)
+    changed["integration"]["inline"]["invocation_policy_bindings"][0][
+        "preset_id"
+    ] = "second_policy"
+    assert (
+        load(changed).integration.integration_fingerprint
+        != selected.integration.integration_fingerprint
+    )
+    bindings[0]["preset_id"] = "mutated_caller_copy"
+    named[0]["motion"]["sample_count"] = 999
+    assert selected.invocation_policy_bindings[0].preset_id == "first_policy"
+    assert presets["first_policy"].motion_policy.sample_count == 61
+    assert (
+        task_program_fingerprint(
+            selected.integration.registration.catalog.preflight(
+                selected.load_program(),
+                invocation_policy_bindings=selected.invocation_policy_bindings,
+            )
+        )
+        == fingerprint
+    )
+
+    # Each invalid authored form uses an untouched snapshot, before live assembly.
+    pristine = deepcopy(changed)
+    for invalid in ("preset", "duplicate", "fingerprint", "incomplete"):
+        candidate = deepcopy(pristine)
+        values = candidate["integration"]["inline"]["invocation_policy_bindings"]
+        if invalid == "preset":
+            values[0]["preset_id"] = "unknown_policy"
+        elif invalid == "duplicate":
+            values.append(deepcopy(values[0]))
+        elif invalid == "fingerprint":
+            values[0]["program_fingerprint"] = "0" * 64
+        else:
+            candidate["execution_policy"]["inline"]["invocation_presets"][0].pop(
+                "runner"
+            )
+        with pytest.raises((ValueError, KeyError)):
+            load(candidate)
+
+
+@pytest.mark.parametrize("inline", [False, True])
+def test_gym_final_preflight_uses_configured_occurrence_policies(
+    tmp_path: Path,
+    registered_test_ids: list[str],
+    inline: bool,
+) -> None:
+    """File and inline deployments must retain their selected valid recovery."""
+    import yaml
+    from embodichain.lab.task_program.integrations import task_program_fingerprint
+    from embodichain.lab.task_program.semantics import SemanticValidationError
+
+    path = _config_path("rubiks_cube_pick_place")
+    config = _gym_config("rubiks_cube_pick_place")
+    physical = _physical_components(path, config)
+    program_path, integration, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    baseline = load_configured_task_program_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    compiled = baseline.integration.registration.catalog.preflight(
+        baseline.load_program()
+    )
+    neutral = {
+        key: deepcopy(policy[key])
+        for key in (
+            "motion",
+            "tracking",
+            "recovery",
+            "workflow_recovery",
+            "runner",
+            "effect_assurance",
+        )
+    }
+    neutral["preset_id"] = "selected_neutral"
+    policy["recovery"]["planning_recovery"] = {"kind": "place_bounded", "revision": 1}
+    policy["invocation_presets"] = [neutral]
+    integration["invocation_policy_bindings"] = [
+        {
+            "program_fingerprint": task_program_fingerprint(compiled),
+            "invocation_id": f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}",
+            "preset_id": "selected_neutral",
+        }
+        for segment in compiled.iter_segments()
+        for call in segment.calls
+    ]
+    if inline:
+        selected = {
+            "program": {"inline": load_config(program_path)},
+            "integration": {"inline": integration},
+            "execution_policy": {"inline": policy},
+        }
+    else:
+        integration_path, policy_path = (
+            tmp_path / "integration.yaml",
+            tmp_path / "policy.yaml",
+        )
+        integration_path.write_text(yaml.safe_dump(integration))
+        policy_path.write_text(yaml.safe_dump(policy))
+        selected = {
+            "program": str(program_path),
+            "integration": str(integration_path),
+            "execution_policy": str(policy_path),
+        }
+    deployment = load_configured_task_program_deployment(
+        task_program=selected,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    # All occurrences select the neutral policy; the unused base Place recovery
+    # is incompatible with Pick and cannot be consulted by a later pass.
+    with pytest.raises(SemanticValidationError, match="Planning recovery"):
+        deployment.integration.registration.catalog.preflight(deployment.load_program())
+    identity = f"{_TEST_ENV_ID}-selected-{inline}"
+    registered_test_ids.append(identity)
+    config["id"] = identity
+    config["task_program"] = selected
+    cfg = config_to_cfg(config, source_path=path)
+    assert cfg.task_program.program_id == compiled.program_id
 
 
 def _tableware_config_path(task_name: str) -> Path:
@@ -1553,6 +1912,281 @@ def test_coordinated_transport_config_decodes_world_displacement() -> None:
     )
 
     assert factory.routes[0].world_displacement == (-0.16, 0.0, 0.0)
+
+
+def _coordinated_on_declaration() -> dict[str, object]:
+    return {
+        "kind": "coordinated_transport",
+        "routes": [
+            {
+                "object_id": "tray",
+                "target_id": "tray_target",
+                "reference_entity_id": "table",
+                "relation": "on",
+                "world_displacement": [0.05, 0.0, 0.06],
+            }
+        ],
+    }
+
+
+def test_coordinated_on_preserves_world_axes_and_fresh_object_orientation() -> None:
+    """A rotated reference anchors translation without rotating the offset."""
+    factory = _decode_registered_lowerer(_coordinated_on_declaration(), path="lowerers")
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, label="tray", entity_id="tray"
+    )
+    from embodichain.lab.task_program.semantics import (
+        SceneObjectRef,
+        SceneAffordanceRef,
+    )
+
+    robot = object()
+    registry = SimpleNamespace(
+        resolve=lambda *args, **kwargs: SceneObjectRef("tray"),
+        resolve_affordance=lambda *args, **kwargs: SceneAffordanceRef("tray_grasp"),
+        lookup=lambda identifier: SimpleNamespace(ref=SceneObjectRef(identifier)),
+        object_semantics=lambda *args, **kwargs: semantics,
+    )
+    lowerer = factory.create(
+        simulation=None,
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    call = RegisteredSemanticCall(
+        call_id=factory.call_id,
+        arguments={
+            "object": "tray",
+            "target": "tray_target",
+            "reference": "table",
+            "relation": "on",
+        },
+    )
+    for angle_sign in (1.0, -1.0):
+        obj, ref = torch.eye(4).unsqueeze(0), torch.eye(4).unsqueeze(0)
+        obj[:, :3, :3] = torch.tensor(
+            [[0.0, -angle_sign, 0.0], [angle_sign, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        )
+        obj[:, :3, 3] = torch.tensor([9.0, 8.0, 7.0])
+        ref[:, :3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+        ref[:, :3, 3] = torch.tensor([angle_sign, 2.0, 0.5])
+        qpos = torch.zeros((1, 1))
+        context = PlanningContext(
+            robot=RobotObservation(timestamp=1.0, qpos=qpos, qvel=qpos.clone()),
+            task=TaskState(batch_size=1, device="cpu"),
+            scene=SceneSnapshot(
+                timestamp=1.0,
+                version=1,
+                entities={"tray": EntityState(obj), "table": EntityState(ref)},
+            ),
+            env_ids=torch.tensor([0]),
+        )
+        result = lowerer.lower(
+            call,
+            context=context,
+            bound=None,
+            option_template=CoordinatedPickmentOptions(release=True),
+        )
+        target = resolve_pose_goal(
+            result.goal.object_target_pose, context, name="target"
+        )
+        torch.testing.assert_close(
+            target[:, :3, 3], torch.tensor([[angle_sign + 0.05, 2.0, 0.56]])
+        )
+        torch.testing.assert_close(target[:, :3, :3], obj[:, :3, :3])
+        assert result.registered_effect.effect_kind is SemanticEffectKind.RELEASE
+        assert tuple(x.slot_id for x in result.registered_effect.held_objects) == (
+            "left",
+            "right",
+        )
+        shifted_ref = ref.clone()
+        shifted_ref[:, :3, 3] += torch.tensor([0.2, 0.3, 0.4])
+        later = PlanningContext(
+            robot=context.robot,
+            task=context.task,
+            scene=SceneSnapshot(
+                timestamp=1.0,
+                version=2,
+                entities={
+                    "tray": EntityState(torch.eye(4).unsqueeze(0)),
+                    "table": EntityState(shifted_ref),
+                },
+            ),
+            env_ids=context.env_ids,
+        )
+        retained = resolve_pose_goal(
+            result.goal.object_target_pose, later, name="target"
+        )
+        torch.testing.assert_close(
+            retained[:, :3, 3], torch.tensor([[angle_sign + 0.25, 2.3, 0.96]])
+        )
+        torch.testing.assert_close(retained[:, :3, :3], obj[:, :3, :3])
+        for changed in ({"reference": "other"}, {"relation": "above"}):
+            with pytest.raises(ValueError):
+                lowerer.lower(
+                    RegisteredSemanticCall(
+                        call_id=factory.call_id,
+                        arguments={**dict(call.arguments), **changed},
+                    ),
+                    context=context,
+                    bound=None,
+                    option_template=CoordinatedPickmentOptions(release=True),
+                )
+
+
+@pytest.mark.parametrize(
+    "mutation", ["relation", "missing_reference", "missing_displacement", "mixed_pose"]
+)
+def test_coordinated_on_rejects_incomplete_or_mixed_routes(mutation: str) -> None:
+    raw = _coordinated_on_declaration()
+    route = raw["routes"][0]
+    if mutation == "relation":
+        route["relation"] = "above"
+    elif mutation == "missing_reference":
+        route.pop("reference_entity_id")
+    elif mutation == "missing_displacement":
+        route.pop("world_displacement")
+    else:
+        route["relative_pose"] = torch.eye(4).reshape(-1).tolist()
+    with pytest.raises(ValueError):
+        _decode_registered_lowerer(raw, path="lowerers")
+
+
+def test_coordinated_on_payload_is_closed_and_relation_fields_are_paired() -> None:
+    from embodichain.lab.task_program.language.semantic_contracts import (
+        validate_semantic_call_payload,
+    )
+
+    raw = {
+        "kind": "registered",
+        "call_id": "simulation.coordinated_transport",
+        "arguments": {
+            "object": "tray",
+            "target": "tray_target",
+            "reference": "table",
+            "relation": "on",
+        },
+        "resources": {"left": "left", "right": "right"},
+    }
+    validate_semantic_call_payload(raw)
+    for field in ("reference", "relation"):
+        invalid = deepcopy(raw)
+        invalid["arguments"].pop(field)
+        with pytest.raises(ValueError):
+            validate_semantic_call_payload(invalid)
+
+
+def test_coordinated_on_rejects_mismatched_calls_during_public_preflight() -> None:
+    from embodichain.lab.task_program import decode_task_program
+    from embodichain.lab.task_program.semantics import SemanticValidationError
+
+    # The scene is independent of embodiment; use a real coordinated-capable profile.
+    coordinated_profile = load_config(
+        _REPOSITORY_ROOT
+        / "extensions/embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml"
+    )["skill_profile"]
+    path = _config_path("hand_over")
+    physical = _physical_components(path, _gym_config("hand_over"))
+    _, integration, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    integration["program_id"] = "coordinated_preflight"
+    integration["profile"]["action_options"]["simulation.coordinated_transport"] = {
+        "kind": "coordinated_pickment",
+        "release": True,
+    }
+    integration["profile"]["effect_monitors"]["simulation.coordinated_transport"] = (
+        deepcopy(integration["profile"]["effect_monitors"]["hand_over"])
+    )
+    route = {
+        "object_id": "can",
+        "target_id": "transport_target",
+        "reference_entity_id": "support_surface",
+        "relation": "on",
+        "world_displacement": [0.05, 0.0, 0.06],
+    }
+    integration["runtime_services"]["registered_semantic_lowerers"] = [
+        {"kind": "coordinated_transport", "routes": [route]}
+    ]
+    call = {
+        "kind": "registered",
+        "call_id": "simulation.coordinated_transport",
+        "arguments": {
+            "object": "can",
+            "target": "transport_target",
+            "reference": "support_surface",
+            "relation": "on",
+        },
+        "resources": {"left": "left", "right": "right"},
+    }
+    program = {
+        "program_id": "coordinated_preflight",
+        "targets": {},
+        "program": {
+            "kind": "sequence",
+            "items": [
+                {
+                    "kind": "segment",
+                    "name": "release",
+                    "steps": {"kind": "invoke", "call": call},
+                }
+            ],
+        },
+    }
+
+    def load(raw_program, raw_integration):
+        return load_configured_task_program_deployment(
+            task_program={
+                "program": {"inline": raw_program},
+                "integration": {"inline": raw_integration},
+                "execution_policy": {"inline": policy},
+            },
+            skill_profile=coordinated_profile,
+            base_dir=path.parent,
+        )
+
+    deployment = load(program, integration)
+    compiled = deployment.integration.registration.catalog.preflight(
+        deployment.load_program()
+    )
+    assert compiled.program_id == "coordinated_preflight"
+    altered = deepcopy(integration)
+    altered["runtime_services"]["registered_semantic_lowerers"][0]["routes"][0][
+        "world_displacement"
+    ][0] = 0.07
+    assert (
+        load(program, altered).integration.integration_fingerprint
+        != deployment.integration.integration_fingerprint
+    )
+    for change in (
+        {"reference": "can"},
+        {"relation": "above"},
+        {"target": "unknown_target"},
+    ):
+        bad = deepcopy(program)
+        bad["program"]["items"][0]["steps"]["call"]["arguments"].update(change)
+        with pytest.raises(SemanticValidationError) as error:
+            deployment.integration.registration.catalog.preflight(
+                decode_task_program(
+                    {
+                        **bad,
+                        "integration": {
+                            "scene_registry": deployment.selection.scene_registry,
+                            "robot_profile": deployment.selection.robot_profile,
+                            "runtime_preset": deployment.selection.runtime_preset,
+                        },
+                    }
+                )
+            )
+        assert error.value.diagnostic.code == "registered_call_declaration_mismatch"
+        with pytest.raises(SemanticValidationError):
+            load(bad, integration)
+    unknown = deepcopy(integration)
+    unknown["runtime_services"]["registered_semantic_lowerers"][0]["routes"][0][
+        "reference_entity_id"
+    ] = "missing_scene_reference"
+    with pytest.raises(SemanticValidationError):
+        load(program, unknown)
 
 
 def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
@@ -3335,6 +3969,65 @@ def test_generic_planning_budget_decodes_without_source_recovery_factories():
         )
 
 
+def test_ordinary_planning_declarations_are_explicit_closed_and_keep_fixed_budgets():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_action_options,
+        _decode_recovery_policy,
+    )
+    from embodichain.lab.sim.atomic_actions import (
+        PickPlanningRecovery,
+        PlacePlanningRecovery,
+    )
+
+    pick = _decode_action_options(
+        {
+            "kind": "pick_up",
+            "adaptive_grasp": "ordinary",
+            "full_opening_clearance": True,
+        },
+        path="pick",
+    )
+    assert pick.adaptive_grasp == "ordinary" and pick.full_opening_clearance
+    place = _decode_action_options(
+        {"kind": "place", "linear_segments": True, "qualify_required_waypoints": True},
+        path="place",
+    )
+    assert place.linear_segments and place.qualify_required_waypoints
+    for kind, expected in (
+        ("pick_bounded", PickPlanningRecovery()),
+        ("place_bounded", PlacePlanningRecovery()),
+    ):
+        policy = _decode_recovery_policy(
+            {
+                "max_replans": 0,
+                "max_action_retries": 0,
+                "planning_recovery": {"kind": kind, "revision": 1},
+            },
+            path="recovery",
+        )
+        assert policy.planning_recovery == expected
+    assert PickPlanningRecovery().max_candidate_paths == 4
+    assert PickPlanningRecovery().max_contact_refinements == 2
+    assert PlacePlanningRecovery().max_complete_plans == 10
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _decode_recovery_policy(
+            {
+                "max_replans": 0,
+                "max_action_retries": 0,
+                "planning_recovery": {
+                    "kind": "pick_bounded",
+                    "revision": 1,
+                    "max_candidate_paths": 5,
+                },
+            },
+            path="recovery",
+        )
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _decode_action_options(
+            {"kind": "axis_align", "adaptive_grasp": "ordinary"}, path="axis"
+        )
+
+
 def test_configured_joint_stability_owns_target_and_requires_articulation():
     from embodichain.lab.task_program.integrations.simulation.stability import (
         SimulationJointStabilityConditionCfg,
@@ -3492,21 +4185,29 @@ def test_final_velocity_rejection_representation_is_explicit_and_default_identit
     from embodichain.lab.sim.atomic_actions import MotionPolicy
 
     assert "final_velocity_rejection" not in _canonical_value(MotionPolicy())["fields"]
+    assert "mask_generation_overspeed" not in _canonical_value(MotionPolicy())["fields"]
     selected = _decode_motion_policy(
         {
             "sample_count": 50,
             "require_final_velocity": True,
             "final_velocity_rejection": "mask_only",
+            "mask_generation_overspeed": True,
         },
         path="motion",
     )
     assert (
         selected.final_velocity_rejection == "mask_only"
         and selected.require_final_velocity
+        and selected.mask_generation_overspeed
     )
     assert (
         _canonical_value(selected)["fields"]["final_velocity_rejection"] == "mask_only"
     )
+    assert _canonical_value(selected)["fields"]["mask_generation_overspeed"] is True
+    with pytest.raises(TypeError, match="mask_generation_overspeed"):
+        _decode_motion_policy(
+            {"sample_count": 50, "mask_generation_overspeed": "true"}, path="motion"
+        )
     with pytest.raises((TypeError, ValueError)):
         _decode_motion_policy(
             {"sample_count": 50, "final_velocity_rejection": "unknown"}, path="motion"
@@ -3537,6 +4238,8 @@ def test_physical_component_snapshot_matches_files_without_component_reads(
         selected[owner] = {"component": str(component)}
         if "overrides" in declaration:
             selected[owner]["overrides"] = deepcopy(declaration["overrides"])
+    unused_component = path.parent / "unused.yaml"
+    sources[str(unused_component)] = {"fpath": "./missing-unselected.usda"}
     original = deepcopy(sources)
     physical_only = deepcopy(selected)
     physical_only.pop("task_program")
@@ -3551,6 +4254,9 @@ def test_physical_component_snapshot_matches_files_without_component_reads(
         selected, base_dir=path.parent, component_sources=sources
     )
     assert actual == expected
+    assert set(actual.materialized_component_sources) == {
+        Path(name) for name in original if Path(name) != unused_component
+    }
     actual_cfg = config_to_cfg(
         physical_only, source_path=path, component_sources=sources
     )
@@ -3565,6 +4271,11 @@ def test_physical_component_snapshot_matches_files_without_component_reads(
     assert sources == original
     sources[next(iter(sources))].clear()
     assert actual == expected
+    expected_sources = deepcopy(expected.materialized_component_sources)
+    actual.materialized_component_sources[
+        next(iter(actual.materialized_component_sources))
+    ].clear()
+    assert expected.materialized_component_sources == expected_sources
     missing = dict(original)
     missing.pop(next(iter(missing)))
     with pytest.raises(ValueError, match="absent from"):

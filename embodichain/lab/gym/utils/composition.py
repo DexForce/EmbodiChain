@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 __all__ = ["ResolvedGymComponents", "resolve_gym_components"]
@@ -37,6 +37,10 @@ class ResolvedGymComponents:
         embodiment_skill_profile: Optional detached profile for the public Task
             Program deployment composer.
         scene_config: Optional physical scene projection for semantic binding checks.
+        materialized_component_sources: Actually selected component owner paths
+            and independent declaration snapshots with their physical local
+            resources resolved. Unselected sources and semantic profiles are not
+            materialized. This retains component declarations, not expanded config.
 
     Resolver calls own their nested data independently. The mappings remain
     mutable for explicit declaration assembly; this is not a sealed identity.
@@ -47,6 +51,9 @@ class ResolvedGymComponents:
     scene_selected: bool
     embodiment_skill_profile: dict[str, object] | None
     scene_config: dict[str, object] | None
+    materialized_component_sources: dict[Path, dict[str, object]] = field(
+        default_factory=dict
+    )
 
     def validate_scene_bindings(self, binding: Mapping[str, object]) -> None:
         """Check semantic native roots against the resolved physical scene.

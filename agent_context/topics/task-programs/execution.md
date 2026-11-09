@@ -27,7 +27,12 @@ settings own that call; unselected calls retain the host's runner override and
 normal preset resolution. Re-grounding an original call retains its selection
 and occurrence ID; derived workflow-recovery calls use their own identity and
 normal policy selection. These are typed integration declarations, not new
-Task Program language fields or configured-loader extensions.
+Task Program language fields.
+Configured factories pass their immutable occurrence bindings to the adapter
+constructor. Standard Gym bridge creation uses those defaults automatically;
+an empty per-bridge tuple cannot clear them, and conflicting explicit selections
+are rejected before runtime assembly. The configured authoring fields and their
+identity belong to the [configuration owner](configuration.md#semantic-integration).
 The manifest check owns profile/preset validation. Scene registry IDs belong to
 the host selection, not `SceneManifest`; the standard adapter checks them, while
 a host constructing `TaskProgramDemoBridge` directly must validate scene ownership.
@@ -43,6 +48,15 @@ Every `SkillPolicyPreset` explicitly selects one authority:
 
 Projected execution proves the intended trajectory path completed; it does not
 prove physical task success.
+
+`SkillPolicyPreset.release_gate_evidence` selects evidence for existing detached
+phase gates. The default `ReleaseGateEvidence.TERMINAL_CLAUSES` keeps the complete
+terminal clauses. Explicit `NON_POSE_CLAUSES` removes only `PoseRelationClause`
+from those gates; binary, scalar and other non-pose clauses remain. An empty
+result is rejected. Attached gates and the full terminal effect retain their
+original evidence, thresholds and timing. The option creates no gate for a
+terminal-only lowerer, and projected presets reject a non-default selection.
+Named invocation presets retain the same occurrence ownership rules above.
 
 Keep these boundaries separate:
 

@@ -138,6 +138,7 @@ from .requirements import (
     SkillResourceSlot,
 )
 from .runtime import ActionPlanningServices, GraspOpeningTarget
+from .planning_probes import JointPrefixPlanner, PlaceSceneInputs, PlaceSceneProvider
 from .runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
@@ -217,9 +218,11 @@ from .primitives import (
     OpenDoorOptions,
     PickUp,
     PickUpOptions,
+    PickPlanningRecovery,
     Place,
     PlaceGoal,
     PlaceOptions,
+    PlacePlanningRecovery,
     Pour,
     PourGoal,
     PourOptions,
@@ -299,6 +302,9 @@ __all__ = [
     "ActionPlan",
     "ActionPlanningServices",
     "GraspOpeningTarget",
+    "JointPrefixPlanner",
+    "PlaceSceneInputs",
+    "PlaceSceneProvider",
     "Affordance",
     "AffordancePoseCandidates",
     "AffordanceSample",
@@ -426,9 +432,11 @@ __all__ = [
     "PARK_COMMAND",
     "PickUp",
     "PickUpOptions",
+    "PickPlanningRecovery",
     "Place",
     "PlaceGoal",
     "PlaceOptions",
+    "PlacePlanningRecovery",
     "Pour",
     "PourGoal",
     "PourOptions",

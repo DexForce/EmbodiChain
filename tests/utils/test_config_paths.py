@@ -18,12 +18,16 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from embodichain.utils import resolve_config_path as exported_resolve_config_path
-from embodichain.utils.config_paths import resolve_config_path
+from embodichain.utils.config_paths import (
+    resolve_config_path,
+    resolve_local_resource_paths,
+)
 
 
 def test_resolve_config_path_preserves_existing_path(tmp_path: Path) -> None:
@@ -131,3 +135,44 @@ def test_owned_official_config_rejects_escape_even_when_cwd_target_exists(
 
     with pytest.raises(ValueError, match="stay within the package"):
         resolve_config_path(f"{prefix}/../VERSION", base_dir=tmp_path / "deployment")
+
+
+def test_local_resource_paths_keep_their_owner_without_changing_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = tmp_path / "components"
+    owner.mkdir()
+    asset = tmp_path / "robot.urdf"
+    asset.write_text("<robot name='path-test'/>")
+    local = owner / "scene.usda"
+    local.write_text("#usda 1.0\n")
+    declaration = {
+        "robot": {"urdf_path": "../robot.urdf"},
+        "scene": [{"fpath": "./scene.usda"}],
+        "sensor": {"xml_path": "../robot.urdf"},
+        "registry": {"fpath": "Robot/model.urdf"},
+        "absolute": {"urdf_path": str(asset)},
+        "label": "../ordinary-text",
+    }
+    before = deepcopy(declaration)
+    # Resolution must not depend on the caller's CWD or mutate its declaration.
+    monkeypatch.chdir(tmp_path)
+    resolved = resolve_local_resource_paths(declaration, base_dir=owner)
+    assert resolved == {
+        "robot": {"urdf_path": str(asset)},
+        "scene": [{"fpath": str(local)}],
+        "sensor": {"xml_path": str(asset)},
+        "registry": {"fpath": "Robot/model.urdf"},
+        "absolute": {"urdf_path": str(asset)},
+        "label": "../ordinary-text",
+    }
+    assert declaration == before
+    resolved["registry"]["fpath"] = "changed"
+    assert declaration == before
+
+
+def test_local_resource_paths_reject_missing_owned_file(tmp_path: Path) -> None:
+    declaration = {"fpath": "./missing.usda"}
+    with pytest.raises(FileNotFoundError):
+        resolve_local_resource_paths(declaration, base_dir=tmp_path)
+    assert declaration == {"fpath": "./missing.usda"}

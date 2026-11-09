@@ -121,6 +121,13 @@ class MotionPolicy:
     retains its own Torch-only fork; no outer action counter is reused.
     """
 
+    mask_generation_overspeed: bool = field(default=False, kw_only=True)
+    """Mask normalized motion-generation rows using ordered authored/runtime caps.
+
+    This opt-in check retains generated positions and timing and does not
+    replace the separate complete-action velocity gate.
+    """
+
     require_final_velocity: bool = field(default=False, kw_only=True)
     """Require authored/runtime speed validity of final full-robot commands.
 
@@ -143,6 +150,8 @@ class MotionPolicy:
     """
 
     def __post_init__(self) -> None:
+        if type(self.mask_generation_overspeed) is not bool:
+            raise TypeError("mask_generation_overspeed must be a boolean.")
         if self.final_velocity_rejection not in {"hold", "mask_only"}:
             raise ValueError("final_velocity_rejection must be hold or mask_only.")
         segment_retries = self.segment_sample_count_retries
@@ -304,6 +313,7 @@ class MotionPolicy:
             cartesian_path_sampler=cartesian_path_sampler,
             interpolation_mode=self.interpolation_mode,
             ik_seed_mode=self.ik_seed_mode,
+            mask_generation_overspeed=self.mask_generation_overspeed,
             segment_sample_count_retries=self.segment_sample_count_retries,
             segment_continuous_ik_recovery=self.segment_continuous_ik_recovery,
         )

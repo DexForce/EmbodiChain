@@ -234,12 +234,24 @@ Task Program bundles
 
 Prepare already-authored scene, embodiment, program, integration, policy,
 TaskSpec and graph declarations with ``prepare_configured_bundle``. Preparation
-performs static component and program preflight, then seals a detached snapshot.
+resolves explicit local resources in the physical deployment and consumes the
+shared component resolver's ``materialized_component_sources`` for every
+selected environment, scene and embodiment owner, including custom component
+filenames. These snapshots use
+:func:`embodichain.utils.config_paths.resolve_local_resource_paths` and retain
+semantic profile values. Preparation performs static preflight and seals the
+resolved bytes in a detached snapshot; unselected component bytes remain intact.
+The caller's source bytes remain unchanged. Changed declaration bytes receive
+a new bundle identity; historical bundles are not rewritten.
 ``write_bundle_atomic`` publishes it without replacing an existing bundle.
 ``load_configured_bundle`` verifies the caller's independently acquired input
 hashes and implementation revisions before returning lazy deployment factories.
 The caller owns asset enumeration and supplies the current revision/input
 contract; these APIs do not generate assets, plan motion or start simulation.
+Resources remain external: absolute references retain their declared local
+locations, while content hashes remain caller-owned. Publication neither copies
+assets nor discovers dependencies, and does not make those resources portable
+between machines.
 
 .. automodule:: embodichain.gen_sim.task_engine.bundle_deployment
    :members:

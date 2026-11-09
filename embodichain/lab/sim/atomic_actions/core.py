@@ -513,6 +513,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Skill {self.skill_id!r} expects options "
                 f"{self.OptionsType.__name__}, got {type(options).__name__}."
             )
+        options.validate_motion_policy(invocation.motion_policy)
         return ResolvedActionRequest(
             skill_id=invocation.skill_id,
             goal=invocation.goal,
@@ -552,6 +553,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Skill {self.skill_id!r} received incompatible options "
                 f"{type(request.skill_options).__name__}."
             )
+        request.skill_options.validate_motion_policy(request.motion_policy)
         contract = type(self).__dict__.get("binding_contract")
         if contract is None:
             raise ValueError(

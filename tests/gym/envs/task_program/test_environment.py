@@ -1205,8 +1205,106 @@ class _InvocationPolicyFactory(_FakeEnvironmentFactory):
         )
 
 
+@pytest.mark.parametrize("entry", ["compile", "expansion"])
+def test_configured_occurrence_selection_reaches_all_static_adapter_links(
+    monkeypatch,
+    entry: str,
+) -> None:
+    """A valid selected policy cannot be rejected through an unused base policy."""
+    from dataclasses import replace
+    from embodichain.lab.task_program.integrations import (
+        InvocationPolicyBinding,
+        task_program_fingerprint,
+    )
+    from embodichain.lab.task_program.semantics.integration import SceneManifest
+
+    factory = _InvocationPolicyFactory()
+    config = _program()
+    compiled = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT).compile(config)
+    identity = f"{compiled.program_id}/{next(compiled.iter_segments()).segment_id}:0"
+    binding = InvocationPolicyBinding(
+        task_program_fingerprint(compiled), identity, "careful"
+    )
+    profile = factory.create_robot_skill_profile()
+    base = profile.presets["safe"]
+    base_options = dict(base.action_option_templates)
+    base_options.pop("pick")
+    profile = replace(
+        profile,
+        presets={
+            **profile.presets,
+            "safe": SkillPolicyPreset(
+                "safe",
+                effect_assurance=base.effect_assurance,
+                effect_monitors=base.effect_monitors,
+                action_option_templates=base_options,
+            ),
+        },
+    )
+    monkeypatch.setattr(factory, "create_robot_skill_profile", lambda: profile)
+    from hashlib import sha256
+    from embodichain.lab.task_program.integrations import TaskProgramIntegrationCatalog
+    from embodichain.lab.task_program.integrations.extensions import (
+        build_standard_extension_declarations,
+    )
+    from embodichain.lab.task_program.semantics import builtin_semantic_call_catalog
+
+    # Use the same public constructor as a standard registration, so endpoint
+    # types, runtime targets and transport IDs form one complete declaration.
+    extensions = build_standard_extension_declarations(
+        profile=profile,
+        endpoint_adapters=(),
+        runtime_transports=(),
+        parallel_safety_factory=None,
+    )
+    calls = builtin_semantic_call_catalog()
+    catalog = TaskProgramIntegrationCatalog(
+        scene_registry_id=factory.scene_registry_id,
+        robot_profile_id=factory.robot_profile_id,
+        scene=SceneManifest.from_registry(factory.create_scene_registry()),
+        robot_profile=profile,
+        call_catalog=calls,
+        relation_grounder_keys=frozenset(),
+        settle_preset_ids=frozenset({"rigid_object"}),
+        endpoint_adapter_declarations=extensions.endpoint_adapters,
+        runtime_transport_declarations=extensions.runtime_transports,
+        parallel_safety_declaration=extensions.parallel_safety,
+        control_part_evidence_declaration=extensions.control_part_evidence,
+        registered_semantic_lowerer_declarations=extensions.registered_semantic_lowerers,
+        fingerprint=sha256(b"selected-adapter-links-fixture").hexdigest(),
+        _required_skills={
+            descriptor.skill_id: descriptor.target_descriptor
+            for descriptor in calls.descriptors.values()
+            if descriptor.target_descriptor is not None
+        },
+    )
+    with pytest.raises(SemanticValidationError, match="no action-option template"):
+        catalog.preflight(config)
+    assert task_program_fingerprint(
+        catalog.preflight(config, invocation_policy_bindings=(binding,))
+    ) == task_program_fingerprint(compiled)
+    adapter = TaskProgramEnvironmentAdapter(
+        factory,
+        step_dt=_STEP_DT,
+        integration_catalog=catalog,
+        invocation_policy_bindings=(binding,),
+    )
+    if entry == "compile":
+        assert (
+            task_program_fingerprint(adapter.compile(config))
+            == binding.program_fingerprint
+        )
+    else:
+        bridge = adapter.create_bridge(compiled, expansion_profile=_expansion_profile())
+        assert isinstance(bridge, TaskProgramDemoBridge)
+    assert factory.observation_samples == 0
+    adapter.close()
+
+
+@pytest.mark.parametrize("configured_defaults", [False, True])
 def test_invocation_policy_preserves_repeat_identity_in_cached_analysis(
     monkeypatch,
+    configured_defaults: bool,
 ) -> None:
     from task_program_support import completed_runtime
     from embodichain.lab.task_program import RepeatCfg
@@ -1225,7 +1323,34 @@ def test_invocation_policy_preserves_repeat_identity_in_cached_analysis(
     binding = InvocationPolicyBinding(
         task_program_fingerprint(compiled), target_id, "careful"
     )
-    bridge = adapter.create_bridge(compiled, invocation_policy_bindings=(binding,))
+    if configured_defaults:
+        from types import SimpleNamespace
+
+        adapter = TaskProgramEnvironmentAdapter(
+            factory, step_dt=_STEP_DT, invocation_policy_bindings=(binding,)
+        )
+        conflicting = InvocationPolicyBinding(
+            binding.program_fingerprint, binding.invocation_id, "projected"
+        )
+        with pytest.raises(ValueError, match="configured invocation"):
+            adapter.create_bridge(compiled, invocation_policy_bindings=(conflicting,))
+        # Row selection creates a fresh adapter, while retaining the same
+        # sealed occurrence choices through the ordinary Gym bridge path.
+        monkeypatch.setattr(
+            factory,
+            "for_env_ids",
+            lambda env_ids: SimpleNamespace(
+                create_adapter=lambda **kwargs: TaskProgramEnvironmentAdapter(
+                    factory, step_dt=_STEP_DT, **kwargs
+                )
+            ),
+            raising=False,
+        )
+        adapter = adapter.for_env_ids((0, 1))
+        host = SimpleNamespace(_checked_task_program_adapter=lambda: adapter)
+        bridge = EmbodiedEnv.create_task_program_bridge(host, compiled)
+    else:
+        bridge = adapter.create_bridge(compiled, invocation_policy_bindings=(binding,))
     assert factory.observation_samples == 0
     completed = completed_runtime(torch.arange(_BATCH_SIZE))
     selected = []

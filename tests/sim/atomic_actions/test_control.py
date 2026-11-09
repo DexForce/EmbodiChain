@@ -26,14 +26,79 @@ import torch
 from embodichain.lab.sim.atomic_actions import (
     ActionControlOverrides,
     ActionPlanningServices,
+    AtomicActionEngine,
     ControlCommand,
     ControlPartCommandProfile,
     DisjointSlotEndpoints,
     JointPositionCommand,
+    PlaceSceneInputs,
     SkillBindingContract,
     SkillEndpointRequirement,
     SkillResourceSlot,
 )
+
+
+def test_engine_borrows_explicit_planning_ports_from_its_exact_robot():
+    """Direct Atomic calls receive ports without planning or native allocation."""
+    services = _services()
+    generator = services.motion_generator
+
+    class Prefix:
+        robot = generator.robot
+        plan = Mock(side_effect=AssertionError("Construction must not plan"))
+
+    class Query:
+        robot = generator.robot
+        inspect = Mock(side_effect=AssertionError("Construction must not query"))
+
+    class Placement:
+        prepare = Mock(side_effect=AssertionError("Construction must not capture"))
+
+    prefix, query, placement = Prefix(), Query(), Placement()
+    engine = AtomicActionEngine(
+        generator,
+        load_builtins=False,
+        free_motion_query=query,
+        joint_prefix_planner=prefix,
+        place_scene_provider=placement,
+    )
+    assert engine.planning_services.free_motion_query is query
+    assert engine.planning_services.joint_prefix_planner is prefix
+    assert engine.planning_services.place_scene_provider is placement
+    prefix.plan.assert_not_called()
+    query.inspect.assert_not_called()
+    placement.prepare.assert_not_called()
+    for name, port in (("free_motion_query", query), ("joint_prefix_planner", prefix)):
+        port.robot = Mock()
+        with pytest.raises(ValueError, match="exact robot"):
+            AtomicActionEngine(generator, load_builtins=False, **{name: port})
+        port.robot = generator.robot
+    with pytest.raises(TypeError, match="place_scene_provider"):
+        AtomicActionEngine(
+            generator, load_builtins=False, place_scene_provider=object()
+        )
+
+
+def test_place_scene_inputs_keep_owned_geometry_and_explicit_support_roles():
+    from embodichain.lab.sim.scene import SceneMeshSnapshot
+
+    vertices = torch.zeros(1, 2, 3)
+    source = SceneMeshSnapshot({"floor": vertices, "support": vertices + 1})
+    inputs = PlaceSceneInputs(
+        geometry=source, floor_entity_id="floor", support_owner_id="support"
+    )
+    before = inputs.geometry["floor"].clone()
+    source["floor"].fill_(2)
+    assert torch.equal(inputs.geometry["floor"], before)
+    copied = inputs.snapshot()
+    copied.geometry["floor"].fill_(3)
+    assert torch.equal(inputs.geometry["floor"], before)
+    with pytest.raises(ValueError, match="floor"):
+        PlaceSceneInputs(geometry=source, floor_entity_id="unknown")
+    with pytest.raises(ValueError, match="support"):
+        PlaceSceneInputs(
+            geometry=source, floor_entity_id="floor", support_owner_id="unknown"
+        )
 
 
 class _BrokenSnapshotCommand(ControlCommand):

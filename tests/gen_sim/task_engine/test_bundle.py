@@ -286,3 +286,90 @@ def test_static_deployment_roundtrip_without_live_resources(tmp_path, monkeypatc
     env_id, config = loaded.configure_environment()
     assert env_id == "TaskProgramRubiksCubePickPlace-v1"
     assert config.task_program.program_id == "rubiks_cube_pick_place"
+
+
+@pytest.mark.parametrize("custom_component", [False, True])
+def test_relative_physical_resource_retains_its_owner_after_publication(
+    tmp_path, monkeypatch, custom_component
+):
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.task_program.integrations import (
+        SimulationTaskProgramAdapterFactory,
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Static bundle touched a live resource")
+
+    monkeypatch.setattr(SimulationManager, "__init__", forbidden)
+    monkeypatch.setattr(Robot, "__init__", forbidden)
+    monkeypatch.setattr(
+        SimulationTaskProgramAdapterFactory, "create_adapter", forbidden
+    )
+    files, _ = _configured_files()
+    owner = tmp_path / "source"
+    owner.mkdir()
+    asset = tmp_path / "assets/robot.urdf"
+    asset.parent.mkdir()
+    asset.write_bytes(
+        (
+            Path(__file__).parents[3] / "tests/fixtures/kinematics/seven_dof.urdf"
+        ).read_bytes()
+    )
+    component = yaml.safe_load(files["components/embodiment.yaml"])
+    component["simulation"]["urdf_cfg"]["components"][0][
+        "urdf_path"
+    ] = "../../assets/robot.urdf"
+    component_name = (
+        "components/custom_robot.yaml"
+        if custom_component
+        else "components/embodiment.yaml"
+    )
+    files[component_name] = yaml.safe_dump(component).encode()
+    if custom_component:
+        deployment = yaml.safe_load(files["task_program_deployment.yaml"])
+        deployment["embodiment"]["component"] = component_name
+        files["task_program_deployment.yaml"] = yaml.safe_dump(deployment).encode()
+        # Unselected declarations must not acquire dependencies during sealing.
+        unused = yaml.safe_load(files["components/embodiment.yaml"])
+        unused["simulation"]["urdf_cfg"]["components"][0][
+            "urdf_path"
+        ] = "./missing-unselected.urdf"
+        files["components/embodiment.yaml"] = yaml.safe_dump(unused).encode()
+    original = deepcopy(files)
+    inputs = {str(asset): hashlib.sha256(asset.read_bytes()).hexdigest()}
+    revisions = {"application": "test"}
+    snapshot = prepare_configured_bundle(
+        files,
+        base_dir=owner,
+        external_input_digests=inputs,
+        implementation_revisions=revisions,
+    )
+    assert files == original
+    materialized = yaml.safe_load(snapshot.files[component_name])
+    assert materialized["simulation"]["urdf_cfg"]["components"][0]["urdf_path"] == str(
+        asset
+    )
+    if custom_component:
+        assert (
+            snapshot.files["components/embodiment.yaml"]
+            == original["components/embodiment.yaml"]
+        )
+    root = write_bundle_atomic(tmp_path / "published/bundle", snapshot)
+    owner.rename(tmp_path / "moved-source")
+    loaded = load_configured_bundle(
+        root, external_input_digests=inputs, implementation_revisions=revisions
+    )
+    assert loaded.physical.config["robot"]["urdf_cfg"]["components"][0][
+        "urdf_path"
+    ] == str(asset)
+    assert loaded.snapshot.identity.digest == snapshot.identity.digest
+    _, config = loaded.configure_environment()
+    assert config.robot.urdf_cfg.components["hand"]["urdf_path"] == str(asset)
+    resealed = prepare_configured_bundle(
+        snapshot.files,
+        base_dir=tmp_path / "unrelated-owner",
+        external_input_digests=inputs,
+        implementation_revisions=revisions,
+    )
+    assert resealed.identity.digest == snapshot.identity.digest

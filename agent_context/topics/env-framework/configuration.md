@@ -72,6 +72,13 @@ Both `resolve_gym_components` and `config_to_cfg` accept optional
 owned declarations. Snapshot mode reads no component files and rejects missing
 or duplicate resolved selections; relative asset paths retain their component
 owner. Callers verify snapshot provenance and external assets separately.
+
+The result's `materialized_component_sources` maps the actual selected absolute
+owner paths to detached resource-resolved component declarations. It preserves
+component structure and semantic profile values; bundle builders consume this
+public result for snapshot materialization, leaving selection rules with Lab.
+Unselected components are not materialized.
+
 `ResolvedGymComponents.validate_scene_bindings` checks semantic native roots
 against the expanded physical scene without runtime construction.
 
@@ -323,7 +330,13 @@ a same-named Python package for a task that has only one Python entry point.
 
 Mesh `fpath`, `urdf_path`, and `xml_path` values prefixed with `./` or `../`
 resolve from the physical environment, scene, or embodiment component that
-declares them. Inline resources resolve from the deployment file. Bare dataset
-identifiers retain the existing data registry behavior and are not probed against
-the current working directory. Asset-batch materialization uses this boundary;
+declares them. Inline resources resolve from the deployment file. Shared
+`utils.config_paths.resolve_local_resource_paths()` owns this rule and returns
+a detached declaration, traversing dictionaries and lists. Explicit local files
+must exist; absolute strings and other values keep their existing interpretation.
+Bare dataset identifiers retain the data registry behavior and are not probed
+against the current working directory. Lab physical composition reuses this
+helper; [Task Engine snapshots](../task-engine/task-engine.md#configured-bundle-snapshots)
+apply it before sealing, so publication does not rebase those resources.
+Asset-batch materialization uses this boundary;
 see [asset generalization](../asset-generalization/asset-generalization.md).

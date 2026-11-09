@@ -17,6 +17,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
 | Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
+| Explicit numeric input-envelope clearance | `embodichain/lab/sim/scene/convex_clearance.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
@@ -36,6 +37,12 @@ to the [sensor integration](../sensor-system/contact-history.md). Its `landing.p
 CPU routines additionally consume Trimesh meshes and Shapely polygons for
 triangle-union floor and silhouette measurements. Scene CPU strategies own
 support selection, polygon search, greedy packing and SciPy SLSQP optimization.
+
+`convex_input_clearance` queries explicitly declared convex input envelopes,
+preserving ordered frames and the caller's original clearance. It separates
+canonical-bound culling from native query receipts and closes all owned query
+resources. This numeric-envelope contract must not be used to relabel actual
+MESH geometry as cooked convex or to certify physical contact.
 
 Pure grasp samples, release clearances, ordered footprint proposals, source-axis
 adaptation, held-object alignment targets and distal staging also live in
@@ -92,6 +99,11 @@ planner roles are metadata: `none` does not remove a selected physical input.
 Connected nonconvex inputs remain unavailable in this capture path. The separate
 `collision_sources.py` link-box adapter retains its conservative component AABB
 policy; it is not a native cooked-shape/contact oracle.
+Its public `SimulationCollisionShapeReader` reads an explicit B1 rigid roster
+without poses, preserves descriptor order/type and applies exclusions before
+geometry reads. It rejects replaced owners, empty shapes and unsupported
+articulation selections. Observed cuRobo composition supplies the timestamp/root
+and trusted native-revision boundary separately.
 `snapshot_collision_sources()` combines common shape descriptors and explicitly
 supplied same-observation poses through `world_to_frame`. Batched inputs require
 matching pose/transform batch axes and equal projected obstacle poses; otherwise

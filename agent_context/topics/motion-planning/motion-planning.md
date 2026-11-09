@@ -62,6 +62,14 @@ capped intervals under the query precision policy. A threshold inside an interva
 remains unavailable, never a fabricated contact or free path. CPU comparisons
 remain separate from GPU and physical-task qualification.
 
+`motion.mesh_collision` owns B1 Default complete native-part motion queries.
+It consumes public cooked descriptors and full named-joint FK, retains measured
+mimic states, and composes the world root once. `robot_collision_query_scope`
+owns robot-only query lifetimes; full-scene queries capture fresh rigid inputs.
+Unsupported MESH, disabled/incomplete geometry and uncertain contact results
+remain unavailable. Callers own sample selection and execution; the query never
+steps simulation or certifies continuous collision freedom or a physical effect.
+
 ## Timing and batch boundary
 
 Planning is environment-batched: waypoint qpos is `(B, dof)`, TCP transforms
@@ -88,9 +96,17 @@ intersects runtime speeds with every controlled joint's authored URDF cap, and
 rejects overspeed rows without retiming. `ik_seed_mode="sequential"` preserves
 previous-valid-posture seeds, callback order and RNG consumption; batched IK and
 adaptive timing remain defaults. Non-default modes require `ik_interp`.
-Failed execution rows hold their start. `PlanResult.rejected_candidate` retains
+Ordinary failed execution rows hold their start. `PlanResult.rejected_candidate` retains
 owned original positions, intervals and rejected-row identities for retries and
 audit; checking the zero-speed hold is not evidence that the candidate passed.
+
+Explicit `mask_generation_overspeed` on `MotionGenOptions` or `MotionPolicy`
+checks normalized controlled-part samples using the same ordered authored/runtime
+caps and interval tolerance. It only masks success, retaining new rejected
+proposals and timing. `PlanResult.generation_success_before_velocity` owns the
+pre-mask normalized success; `None` is unavailable, not an independent IK result.
+The default is disabled and the separate complete-action velocity gate remains
+unchanged.
 
 `compute.trajectory.interpolation.interpolate_velocity_grid` allocates fixed
 B=1 joint-edge intervals from explicit speed caps. It preserves ordered mandatory

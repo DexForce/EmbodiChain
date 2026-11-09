@@ -119,6 +119,16 @@ class AxisAlignOptions(PickUpOptions):
     def __post_init__(self) -> None:
         PickUpOptions.__post_init__(self)
         if (
+            self.adaptive_grasp != "none"
+            or self.linear_segments
+            or self.full_opening_clearance
+            or self.require_qualified_approach
+            or not self.qualify_downstream_targets
+        ):
+            raise ValueError(
+                "AxisAlign does not implement ordinary Pick planning options."
+            )
+        if (
             not isinstance(self.target_axis, torch.Tensor)
             or self.target_axis.dim() not in (1, 2)
             or self.target_axis.shape[-1] != 3

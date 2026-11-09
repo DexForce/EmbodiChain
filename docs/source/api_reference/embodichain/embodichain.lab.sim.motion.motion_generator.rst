@@ -32,6 +32,21 @@ Motion Generator
     :members:
     :exclude-members: __init__, copy, replace, to_dict, validate
 
+Explicit generation velocity mask
+---------------------------------
+
+``mask_generation_overspeed=True`` with an explicit ``control_part`` checks the
+normalized joint samples against ordered runtime/authored speed caps using the
+existing ``1e-5`` interval tolerance. It only masks success: new rejections keep
+their normalized positions, arrival intervals, derivatives and candidate data.
+Previously failed rows retain normal failure normalization. The default is
+``False`` and keeps the existing fixed-grid rejection and hold behavior.
+
+``PlanResult.generation_success_before_velocity`` owns the normalized boolean
+``(B,)`` success snapshot preceding this check. ``None`` means unavailable; it
+does not imply IK success or physical acceptance. ``MotionPolicy`` forwards the
+same explicit option without replacing complete-action velocity qualification.
+
 Explicit linear keyframes and bounded recovery
 ----------------------------------------------
 
