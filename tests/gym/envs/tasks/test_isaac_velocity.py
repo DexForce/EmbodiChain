@@ -23,6 +23,7 @@ from contextlib import nullcontext
 from copy import copy
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -325,7 +326,7 @@ def test_contact_transition_keeps_elapsed_air_and_contact_time() -> None:
 
 @pytest.mark.no_sim
 def test_ground_replacement_updates_declared_geometry() -> None:
-    """A shallow scene declaration must retain the modified ground descriptors."""
+    """Ground redeclaration must retain the modified render and collision geometry."""
     original = GeometryDesc.plane(10.0)
     descriptor = ObjectDesc(
         name="ground",
@@ -335,6 +336,10 @@ def test_ground_replacement_updates_declared_geometry() -> None:
     declared = copy(descriptor)
     sim = object.__new__(SimulationManager)
     sim._spawn_default_plane_descriptor = descriptor
+    scene = Mock()
+    scene.builder.is_finalized = False
+    scene.handles.return_value = ()
+    sim._spawn_scene = scene
     mesh = GeometryDesc.mesh(
         vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 1]], dtype=np.float32),
         triangles=np.array([[0, 1, 2]], dtype=np.int32),
@@ -343,6 +348,8 @@ def test_ground_replacement_updates_declared_geometry() -> None:
         convert_to_heightfield=True, heightfield_resolution=0.1
     )
     sim.configure_ground_plane_collision(newton=collision, geometry=mesh)
+    scene.remove.assert_called_once_with("default_plane")
+    scene.declare.assert_called_once_with("rigid_object", "default_plane", descriptor)
     assert declared.collisions[0].geometry_type == mesh.geometry_type
     assert declared.collisions[0].newton is collision
     np.testing.assert_array_equal(declared.collisions[0].vertices, mesh.vertices)
