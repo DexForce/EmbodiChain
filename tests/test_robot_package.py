@@ -91,6 +91,11 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
             "package_data": {
                 "": ["profile.json"],
                 "embodichain_robots": ["README.md", "**/README.md"],
+                "embodichain_robots.agibot.g2": [
+                    "g2.urdf",
+                    "source.lock.json",
+                    "LICENSE",
+                ],
             },
             "script_name": "setup.py",
         }
@@ -105,6 +110,11 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "embodichain_robots/__init__.py",
         "embodichain_robots/_catalog.py",
         "embodichain_robots/_asset_catalog.py",
+        "embodichain_robots/agibot/g2/cfg.py",
+        "embodichain_robots/agibot/g2/assets.py",
+        "embodichain_robots/agibot/g2/g2.urdf",
+        "embodichain_robots/agibot/g2/source.lock.json",
+        "embodichain_robots/agibot/g2/LICENSE",
         "embodichain_robots/_locomotion.py",
         "embodichain_robots/locomotion_profiles.py",
         "embodichain_robots/franka/assets.py",

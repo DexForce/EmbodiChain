@@ -207,6 +207,12 @@ def main():
                 "_ssik_artifacts/*.json",
                 "_ssik_artifacts/LICENSE.txt",
             ],
+            "embodichain_robots.agibot.g2": [
+                "g2.urdf",
+                "source.lock.json",
+                "LICENSE",
+                "preview.png",
+            ],
             "embodichain_robots.unitree.go1": ["profile.json"],
             "embodichain_robots.unitree.go2": ["profile.json"],
             "embodichain_robots.unitree.g1": ["profile.json"],

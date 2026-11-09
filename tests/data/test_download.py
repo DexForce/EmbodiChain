@@ -55,8 +55,9 @@ def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
 
     registry = download.get_registry()
     for name, spec in ROBOT_ASSETS.items():
-        if spec["category"] == "eef":
-            continue  # EEF imports deliberately have no legacy compatibility surface.
+        if spec["category"] == "eef" or name == "AgibotG2":
+            # EEFs and new model-owned assets have no legacy import surface.
+            continue
         module, _, symbol = spec["class_path"].partition(":")
         canonical = getattr(import_module(module), symbol)
         legacy = (
@@ -231,6 +232,7 @@ def test_robot_asset_listing_includes_locomotion_and_existing_robots(capsys) -> 
         "CartPole",
         "FlexivRizon4S",
         "SO101FollowerAssets",
+        "AgibotG2",
     }.issubset(names)
     assert names == sorted(set(names))
     assert all(not name.startswith("_") for name in names)

@@ -21,6 +21,7 @@ from __future__ import annotations
 from itertools import product
 
 _CONFIG_CLASSES = {
+    "AgibotG2": "embodichain_robots.agibot.g2:AgibotG2Cfg",
     "UnitreeGo1": "embodichain_robots.unitree.go1:UnitreeGo1Cfg",
     "UnitreeGo2": "embodichain_robots.unitree.go2:UnitreeGo2Cfg",
     "UnitreeG1": "embodichain_robots.unitree.g1:UnitreeG1Cfg",
@@ -43,6 +44,19 @@ _CONFIG_CLASSES = {
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "AgibotG2": {
+        "dof": 32,
+        "control_parts": {
+            "torso": 5,
+            "head": 3,
+            "chassis_steering": 4,
+            "chassis_wheels": 4,
+            "left_arm": 7,
+            "right_arm": 7,
+            "left_eef": 8,
+            "right_eef": 8,
+        },
+    },
     "UnitreeGo1": {"dof": 12, "control_parts": {"locomotion": 12}},
     "UnitreeGo2": {"dof": 12, "control_parts": {"locomotion": 12}},
     "UnitreeG1": {"dof": 29, "control_parts": {"locomotion": 29}},
@@ -102,6 +116,19 @@ _DEFAULT_CONTROL_INFO = {
 }
 
 _MIMIC_JOINTS = {
+    "AgibotG2": {
+        f"idx{offset+index}_gripper_{side}_{name}": f"idx{offset+1}_gripper_{side}_inner_joint1"
+        for side, offset in (("l", 30), ("r", 70))
+        for index, name in (
+            (2, "inner_joint3"),
+            (3, "inner_joint4"),
+            (9, "inner_joint0"),
+            (11, "outer_joint1"),
+            (12, "outer_joint3"),
+            (13, "outer_joint4"),
+            (19, "outer_joint0"),
+        )
+    },
     "AlohaMini": {},
     "TianjiMarvin": {
         "LEFT_HAND_FINGER_2": "LEFT_HAND_FINGER_1",
@@ -121,6 +148,12 @@ _MIMIC_JOINTS = {
     "URRobot": {},
 }
 _CONTROL_PART_MIMICS = {
+    "AgibotG2": {
+        f"{side}_eef": tuple(
+            joint for joint in _MIMIC_JOINTS["AgibotG2"] if f"gripper_{label}_" in joint
+        )
+        for side, label in (("left", "l"), ("right", "r"))
+    },
     "TianjiMarvin": {
         "left_eef": ("LEFT_HAND_FINGER_2",),
         "right_eef": ("RIGHT_HAND_FINGER_2",),
@@ -131,6 +164,7 @@ _CONTROL_PART_MIMICS = {
 }
 
 _CLASSIFICATION = {
+    "AgibotG2": ("agibot", "wheeled_humanoid", 2),
     "UnitreeGo1": ("unitree", "quadruped", 0),
     "UnitreeGo2": ("unitree", "quadruped", 0),
     "UnitreeG1": ("unitree", "bipedal_humanoid", 2),

@@ -19,6 +19,10 @@
 from __future__ import annotations
 
 ROBOT_ASSETS = {
+    "AgibotG2": {
+        "class_path": "embodichain_robots.agibot.g2.assets:AgibotG2",
+        "category": "robot",
+    },
     "UnitreeGo1Locomotion": {
         "class_path": "embodichain_robots.unitree.go1.assets:UnitreeGo1Locomotion",
         "category": "robot",
