@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
 import json
 import re
 
@@ -33,9 +35,7 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
     TABLE_REGIONS,
     TableRegion,
 )
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim.services.compat import VisionClient
 
 _ADD_CATEGORY_PATTERN = re.compile(r"[a-z][a-z0-9_]*")
 
@@ -174,7 +174,7 @@ def understand_scene_edit(
     scene: Scene,
     scene_graph: SceneGraph,
     edit_prompt: str,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     json_max_attempts: int = 3,
 ) -> tuple[SceneEditPlan, SceneGraph]:
     """Understand one text edit instruction for an existing scene."""
@@ -332,7 +332,7 @@ def _vlm_understand_scene_edit(
     scene: Scene,
     edit_prompt: str,
     simplified_scene_info: dict[str, object],
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     json_max_attempts: int,
 ) -> list[SceneEditOperation]:
     """Return parsed edit operations from the VLM with assigned add IDs."""

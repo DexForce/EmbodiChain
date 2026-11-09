@@ -1,0 +1,81 @@
+/*
+Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+/* Shared color/interaction surface; domain models and layout stay with each app. */
+.graph-ui {
+  --bg: #171d24;
+  --panel: #1d252e;
+  --panel-raised: #242e38;
+  --panel-hover: #2b3744;
+  --canvas: #171d24;
+  --text: #e3e7ed;
+  --muted: #a6b2c0;
+  --subtle: #8b9aad;
+  --line: #3a4653;
+  --accent: #a7bfd9;
+  --accent-bg: #2b3c50;
+  --code: #19212a;
+}
+.graph-ui[data-theme="light"] {
+  --bg: #faf9f6;
+  --panel: #fdfcf9;
+  --panel-raised: #f3f2ee;
+  --panel-hover: #eeefef;
+  --canvas: #faf9f6;
+  --text: #263340;
+  --muted: #596574;
+  --subtle: #697481;
+  --line: #d7dadb;
+  --accent: #375b7b;
+  --accent-bg: #eaf0f5;
+  --code: #f0f1ef;
+}
+.graph-ui-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: 0 2px 12px #172c4010;
+}
+.graph-ui-controls button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 4px 7px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.graph-ui-controls button:hover {
+  background: var(--panel-hover);
+}
+.graph-ui-controls .reading-size {
+  min-width: 48px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.graph-ui-controls i {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+}

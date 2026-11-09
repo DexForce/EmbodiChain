@@ -368,3 +368,24 @@ def test_spec_identity_ignores_evidence_ids_and_observation_keys() -> None:
         ),
     )
     assert first.semantic_hash == second.semantic_hash
+
+
+@pytest.mark.parametrize(
+    ("quantifier", "count", "single"),
+    [("one", 0, True), ("count", 1, True), ("count", 2, False), ("all", 0, False)],
+)
+def test_single_member_query_preserves_authored_cardinality(
+    quantifier: str, count: int, single: bool
+) -> None:
+    role = RoleSpec("object", quantifier=quantifier, count=count)
+    spec = TaskSpec(roles=(role,), goal=(Predicate("exists", observation="exists"),))
+    original = spec.to_dict()
+    assert role.is_single_member is single
+    assert spec.to_dict() == original
+    assert "is_single_member" not in original["roles"][0]
+    assert TaskSpec.from_dict(original).semantic_hash == spec.semantic_hash
+    if quantifier == "count":
+        one = replace(spec, roles=(RoleSpec("object"),))
+        assert original["roles"][0]["cardinality"] == "count"
+        assert original["roles"][0]["count"] == count
+        assert one.semantic_hash != spec.semantic_hash

@@ -130,8 +130,9 @@ Backend-owned random generators are not reset per trial, so stochastic solver
 outcomes may vary with case order or sharding even though frozen inputs match.
 
 The suite resources are installed with the package, so callers can run from
-any directory. Robot assets and optional cuRobo, TOPPRA or ONNX Runtime
-dependencies follow their normal installation and asset-resolution rules.
+any directory. Robot assets and optional cuRobo or ONNX Runtime dependencies
+follow their normal installation and asset-resolution rules. TOPPRA uses the
+in-tree implementation and needs no separate `toppra` package.
 
 ### Native Panda hand
 
@@ -151,6 +152,12 @@ hand's geometry, including its 0.08 m maximum opening. Single-arm declarations
 use `gripper.control_part: eef`; dual declarations use the `grippers` list.
 Omitting these new selectors retains the existing PGI fixture behavior.
 
+Physical grasp scoring also requires explicit `finger_links`, one collision
+link per finger. Native Panda uses `[fr3_leftfinger, fr3_rightfinger]`; mounted
+dual hands use their actual assembled link names. Custom control-part names
+remain valid. Component-backed tracks may supply only these benchmark contact
+settings in `config.gripper`; the component still owns the command presets.
+
 GraspKit returns sampled poses already converted once to the declared runtime
 TCP; see its [frame contract](../../../embodichain/toolkits/graspkit/README.md#frames-and-collision-scope).
 The Placement provider converts its explicitly authored canonical top/handle
@@ -163,6 +170,42 @@ Explicit Placement top/handle grasps still need native-hand input and physical
 qualification; matching TCP kinematics alone does not certify a successful grasp
 or task. Existing PGI suites and their generic services remain available.
 
+### Franka handover with Robotiq 2F-140
+
+`atomic_dual_franka_robotiq_hand_over` mounts
+`Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf` on both Franka arms through
+`robot.config.gripper_type: robotiq_2f_140`. It replaces the removed
+`atomic_dual_franka_pgi_hand_over` suite and enables TOPPRA by default.
+Run it directly in an installed EmbodiChain environment, without NMG or Pixi:
+
+```bash
+embodichain benchmark motion-generation \
+  --suite atomic_dual_franka_robotiq_hand_over \
+  --algorithms toppra --device cuda \
+  --num-trials 1 --warmup-trials 0 --no-headless
+```
+
+Each hand exposes its six authored linkage joints in explicit command order.
+Opening commands are six zeros; closing commands are
+`[0.45, -0.45, 0.45, -0.45, -0.45, 0.45]` on both hands, matching the URDF mimic
+multipliers. This limits the commanded closure to `0.45 rad` within the authored
+`0.7 rad` range to reduce squeezing the can. Suite version `v6` requires fresh
+frozen inputs.
+Contact scoring uses the two actual inner finger pads on each assembled hand,
+with the standard 5 mm separation threshold.
+
+The suite sets `robot.config.tcp_z: 0.20` on both arms, reducing the
+flange-relative solver TCP from `Z=0.21 m` while retaining `Rz(90 degrees)`.
+`grasp_model: robotiq_arg2f_140` supplies the complete open-hand collision
+geometry; preparation and replay pass the solver TCP to GraspKit so its
+registered `Z=0.20 m` contact frame maps to the runtime tool point once.
+TCP calibration alone preserves the physical contact location. The handover
+skill also sets `grasp_depth_offset_m: 0.01` to move the actual contact centre
+1 cm toward the hand (root Z `0.20` to `0.19 m`) for both pickup and receiving
+grasps. Collision surfaces are rebuilt in that contact frame before candidate
+filtering; the resulting TCP poses and depth setting are frozen with the case.
+The new hand and suite identity require newly generated frozen inputs.
+
 | Suite | Use |
 | --- | --- |
 | [`motion_panda_free_space_smoke`](./suites/motion_panda_free_space_smoke.yaml) | Small Panda EEF/joint planning check |
@@ -173,7 +216,8 @@ or task. Existing PGI suites and their generic services remain available.
 | [`atomic_franka_pgi_door_pour_align_push`](./suites/atomic_franka_pgi_door_pour_align_push.yaml) | OpenDoor, Pour, AxisAlign and PushObject |
 | [`atomic_franka_pgi_spatial_generalization`](./suites/atomic_franka_pgi_spatial_generalization.yaml) | Ten task-level skills across nominal, pose and primitive-geometry domains |
 | [`atomic_dual_ur5_pgi_hand_over`](./suites/atomic_dual_ur5_pgi_hand_over.yaml), [`atomic_dual_ur5_pgi_coordinated_pickment`](./suites/atomic_dual_ur5_pgi_coordinated_pickment.yaml), [`atomic_dual_ur5_pgi_coordinated_placement`](./suites/atomic_dual_ur5_pgi_coordinated_placement.yaml) | Dual UR5 + PGI physical skills with TOPPRA |
-| [`atomic_dual_franka_pgi_hand_over`](./suites/atomic_dual_franka_pgi_hand_over.yaml), [`atomic_dual_franka_pgi_coordinated_placement`](./suites/atomic_dual_franka_pgi_coordinated_placement.yaml) | Nominal B=1 dual Franka + PGI development fixtures with TOPPRA, cuRobo and paired raw/retimed NMG |
+| [`atomic_dual_franka_robotiq_hand_over`](./suites/atomic_dual_franka_robotiq_hand_over.yaml) | Nominal B=1 dual Franka + Robotiq 2F-140 handover with TOPPRA |
+| [`atomic_dual_franka_pgi_coordinated_placement`](./suites/atomic_dual_franka_pgi_coordinated_placement.yaml) | Nominal B=1 dual Franka + PGI placement fixture with TOPPRA, cuRobo and paired raw/retimed NMG |
 | [`atomic_dual_ur5_pgi_hand_over_spatial_generalization`](./suites/atomic_dual_ur5_pgi_hand_over_spatial_generalization.yaml), [`atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization`](./suites/atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization.yaml), [`atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization`](./suites/atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization.yaml) | Dual-arm pose, task-frame and composed domains |
 | [`atomic_ur5_embodiment`](./suites/atomic_ur5_embodiment.yaml) | Component-defined UR5 embodiment with nominal/object-XY PickUp domains |
 
@@ -557,15 +601,38 @@ With the Atomic control period, TOPPRA enables
 are conservatively extended onto the exact control grid before composition.
 Shared goals remain explicit, row prefixes merge before terminal padding, and
 `MotionGenerator` preserves solved native samples. This retains stops for gripper
-holds. Non-Atomic calls keep the default continuous spline; NMG's request and
+holds. Free Cartesian moves send only the observed start and requested goal
+knots through IK to TOPPRA, avoiding a separate stop at every spatial
+interpolation sample. Explicit Cartesian-line requests keep their dense path
+samples. Non-Atomic calls keep the default continuous spline; NMG's request and
 rollout budget are unchanged. Phase sample counts remain lower bounds, with
 physical execution and independent compiled timing checks determining the result.
 
-The physical standard is `atomic-skill-v2`. Pour checks peak rotation, lift and
+The physical standard is `atomic-skill-v3`. Grasp and retention stages require
+every configured finger to have a valid contact with its target object at the
+same observation time. The minimum signed contact separation for each finger
+must be strictly below `gripper.contact_distance_threshold_m` (default **0.005 m**).
+Penetrating contacts have negative separation; a valid query with no matching
+contact is a miss. Joint position alone cannot establish a grasp. The dedicated
+close window supplies grasp-end evidence, while retention uses the final sample
+of its declared window. Contacts from different times cannot be combined.
+Articulated targets use their configured `target_link`; coordinated placement
+uses the support object's identity for the supporting gripper.
+
+Replay records compact per-finger distances alongside the existing synchronized
+channels. Missing finger/actor bindings, unsupported contact geometry and
+truncated contact buffers produce unavailable evidence, rather than a measured
+miss or joint-state fallback. `physics.grasp_contact_max_contacts_per_env`
+defaults to 256; query overflow conservatively invalidates all affected rows.
+Trial `metadata.grasp_contacts` retains bindings, thresholds and unavailable
+reasons. These measurements are independent of optional replay diagnostics.
+The new physical protocol and contact settings change scoring fingerprints;
+preserve earlier artifacts and reevaluate under the new identity.
+
+Pour checks peak rotation, lift and
 retention, plus return to the initial **full orientation** during terminal settle
 within the existing rotation tolerance. Catalogues intending upright-object tilt
-must choose a horizontal object-local axis. Preserve v1 artifacts and use new
-protocol identities for this changed success definition.
+must choose a horizontal object-local axis.
 
 Reference preparation first uses exact sequential IK, then may use bounded
 search inside the original position/rotation arrival region for rejected rows.

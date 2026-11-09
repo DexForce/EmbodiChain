@@ -119,6 +119,7 @@ def test_scene_engine_cli_forwards_validated_paths(
         image_path: Path,
         output_root: Path,
         scene_z_rotation_degrees: float,
+        services=None,
     ) -> None:
         captured["image_path"] = image_path
         captured["output_root"] = output_root
@@ -181,7 +182,7 @@ def test_scene_engine_cli_edits_existing_output_without_an_image(
 ) -> None:
     captured: dict[str, object] = {}
 
-    def edit_scene(*, output_root: Path, edit_prompt: str) -> None:
+    def edit_scene(*, output_root: Path, edit_prompt: str, services=None) -> None:
         captured["output_root"] = output_root
         captured["edit_prompt"] = edit_prompt
 
@@ -209,10 +210,11 @@ def test_scene_engine_cli_generates_then_edits_when_both_inputs_exist(
         image_path: Path,
         output_root: Path,
         scene_z_rotation_degrees: float,
+        services=None,
     ) -> None:
         call_order.append("generate")
 
-    def edit_scene(*, output_root: Path, edit_prompt: str) -> None:
+    def edit_scene(*, output_root: Path, edit_prompt: str, services=None) -> None:
         call_order.append("edit")
 
     monkeypatch.setattr(start, "generate_scene_from_image", generate_scene)

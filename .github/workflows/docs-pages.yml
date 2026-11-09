@@ -206,6 +206,14 @@ jobs:
           restore-keys: |
             docs-full-site-${{ github.repository }}-
 
+      - name: Install wget for published docs merge
+        shell: bash
+        run: |
+          if ! command -v wget >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends wget
+          fi
+
       - name: Merge versions from live GitHub Pages
         shell: bash
         run: |

@@ -27,7 +27,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.data import get_data_path
-from .fixed_geometry import FixedGripperCollisionGeometry
+from .fixed_geometry import FixedGripperCollisionGeometry, _rigid_transform
 
 __all__ = ["get_parallel_jaw_collision_geometry"]
 
@@ -56,6 +56,7 @@ def get_parallel_jaw_collision_geometry(
     point_spacing: float = 0.012,
     side: str | None = None,
     root_from_tcp: np.ndarray | None = None,
+    root_from_contact_frame: np.ndarray | None = None,
 ) -> FixedGripperCollisionGeometry:
     """Resolve actual open-hand collision surfaces for one supported model.
 
@@ -69,6 +70,9 @@ def get_parallel_jaw_collision_geometry(
             default TCP; deployments with a different solver calibration must
             supply that calibration. This override preserves the physical contact frame
             and collision points, including when the TCP is a virtual frame.
+        root_from_contact_frame: Optional calibrated canonical contact frame in
+            hand-root coordinates. Omission retains the registered contact frame.
+            This re-expresses collision samples without changing root-space surfaces.
 
     Returns:
         Owned collision geometry, exact source identities and the transform
@@ -195,6 +199,12 @@ def get_parallel_jaw_collision_geometry(
             "canonical contact origin Z=.13 is a configuration convention, not a measured pad centre"
         )
 
+    if root_from_contact_frame is not None:
+        canonical = _rigid_transform(
+            root_from_contact_frame,
+            error_message="root_from_contact_frame must be a proper rigid transform.",
+        )
+        calibration += "; explicit root_from_contact_frame override"
     runtime_tcp = default_tcp if root_from_tcp is None else np.asarray(root_from_tcp)
     # This registered archive relocates its URDF to the asset root while
     # retaining ../Collision in three filenames. Bind those exact known paths;

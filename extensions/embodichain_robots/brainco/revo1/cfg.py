@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 
-from embodichain.data import get_data_path
+import embodichain.data as data
 from embodichain.lab.sim.cfg import (
     ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
@@ -83,7 +83,7 @@ class BrainCoRevo1Cfg(RobotCfg):
         self.side = init_dict.get("side", self.side)
         spec = get_side_spec(self.side)
         self.uid = f"BrainCoRevo1{self.side.title()}"
-        self.fpath = init_dict.get("fpath") or get_data_path(spec.urdf_path)
+        self.fpath = init_dict.get("fpath") or data.get_data_path(spec.urdf_path)
         self.init_pos = [0.0, 0.0, 0.3]
         self.control_parts = {"eef": list(spec.joint_names)}
         self.init_qpos = None

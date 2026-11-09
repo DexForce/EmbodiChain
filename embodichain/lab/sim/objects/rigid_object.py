@@ -20,6 +20,8 @@ import torch
 import numpy as np
 
 from copy import deepcopy
+from contextlib import contextmanager
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Sequence
 from functools import cached_property
@@ -1516,6 +1518,32 @@ class RigidObject(BatchEntity):
             if wrapped is not None:
                 self._visual_material[env_idx] = wrapped
                 self._original_visual_material_inst[env_idx] = wrapped
+
+    @contextmanager
+    def preserve_visual_material(self) -> Iterator[None]:
+        """Restore exact current segmented materials after temporary appearance edits.
+
+        This preserves runtime appearance, including textures and transparency,
+        rather than replacing it with configuration defaults. Native bindings
+        must stay unchanged while the context is active.
+        """
+        entities = tuple(self._entities)
+        originals = [
+            _capture_render_materials(entity.get_render_body()) for entity in entities
+        ]
+        wrappers = list(self._visual_material)
+        shared = self.is_shared_visual_material
+        try:
+            yield
+        finally:
+            if tuple(self._entities) != entities:
+                raise RuntimeError(
+                    "Cannot restore materials after native bindings changed"
+                )
+            for entity, materials in zip(entities, originals):
+                _restore_render_materials(entity.get_render_body(), materials)
+            self._visual_material[:] = wrappers
+            self.is_shared_visual_material = shared
 
     def restore_visual_material(self, env_ids: Sequence[int] | None = None) -> None:
         """Restore the visual materials captured when the rigid object was created.

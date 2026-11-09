@@ -51,13 +51,21 @@ def main() -> None:
             {doc["docname"] for node in data["nodes"] for doc in node["documentation"]}
         )
         for docname in docnames:
-            path = source / (docname + ".rst")
+            suffix = (
+                ".md"
+                if (ROOT / "docs/source" / (docname + ".md")).is_file()
+                else ".rst"
+            )
+            path = source / (docname + suffix)
             path.parent.mkdir(parents=True, exist_ok=True)
             title = docname.rsplit("/", 1)[-1]
             path.write_text(
-                title
+                (
+                    "# " + title + "\n"
+                    if suffix == ".md"
+                    else title + "\n" + "=" * len(title)
+                )
                 + "\n"
-                + "=" * len(title)
                 + "\n\nDocumentation target for architecture link verification.\n"
             )
         (source / "index.rst").write_text(

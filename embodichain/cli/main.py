@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="expansion",
+        target="embodichain.cli.expansion:main",
+        help="Preflight, collect, resume and inspect expert expansion jobs.",
+    ),
+    Command(
         name="train-sl",
         target="embodichain.learning.sl.workflow:cli",
         help="Train a supervised policy or dynamics recipe from YAML or JSON.",
@@ -48,9 +53,14 @@ COMMANDS = (
         help="List and download EmbodiChain data assets.",
     ),
     Command(
-        name="simready",
+        name="asset-engine",
         target="embodichain.gen_sim.asset_engine.cli.start:main",
         help="Convert a raw asset directory into a SimReady asset.",
+    ),
+    Command(
+        name="task-engine",
+        target="embodichain.gen_sim.task_engine.cli:main",
+        help="Generate an image-grounded semantic task graph without simulation.",
     ),
     Command(
         name="scene-engine",

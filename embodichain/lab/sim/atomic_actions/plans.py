@@ -20,13 +20,16 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 import torch
 
-from embodichain.lab.sim.motion.planners.utils import normalize_success_mask
+from embodichain.lab.sim.motion.planners.utils import (
+    RejectedMotionCandidate,
+    normalize_success_mask,
+)
 
 from .effects import StateDelta
 from .policies import RecoveryPolicy
@@ -418,6 +421,34 @@ class PlannerDiagnostics:
             )
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class PlanQualification:
+    """Read-only final-plan qualification that may only reject planning rows.
+
+    Args:
+        valid_mask: Boolean ``(B,)`` mask on the plan device. The engine intersects
+            it with existing success; a true value cannot revive a failed row.
+        diagnostics: Optional qualification diagnostics. They never replace the
+            plan's trajectory, timing, goals, commands or symbolic effects.
+    """
+
+    valid_mask: torch.Tensor
+    diagnostics: PlannerDiagnostics | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.valid_mask, torch.Tensor)
+            or self.valid_mask.dtype != torch.bool
+            or self.valid_mask.ndim != 1
+        ):
+            raise ValueError("Qualification valid_mask must be a boolean (B,) tensor.")
+        if self.diagnostics is not None and not isinstance(
+            self.diagnostics, PlannerDiagnostics
+        ):
+            raise TypeError("Qualification diagnostics must be PlannerDiagnostics.")
+        object.__setattr__(self, "valid_mask", self.valid_mask.detach().clone())
+
+
 @dataclass(frozen=True, slots=True)
 class EffectVerificationRequirement:
     """Explicit physical-effect verification independent of symbolic state.
@@ -483,6 +514,65 @@ class TrajectorySegment:
         return self.start <= waypoint_index < self.stop
 
 
+def _require_immutable_recovery_value(value: object) -> None:
+    """Reject live objects and mutable containers in a planning proposal."""
+    if value is None or type(value) in (str, bool, int):
+        return
+    if type(value) is float and math.isfinite(value):
+        return
+    if type(value) is tuple:
+        for item in value:
+            _require_immutable_recovery_value(item)
+        return
+    if is_dataclass(value) and not isinstance(value, type):
+        if not value.__dataclass_params__.frozen:
+            raise TypeError("Planning recovery outcomes require immutable values.")
+        for item in fields(value):
+            _require_immutable_recovery_value(getattr(value, item.name))
+        return
+    raise TypeError("Planning recovery outcomes require immutable finite data values.")
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningRecoveryOutcome:
+    """Immutable logical-planning proposal, never physical-effect evidence.
+
+    Args:
+        skill_id: Exact skill producing this proposal.
+        invocation_id: Exact invocation whose planning attempt produced it.
+        invocation_revision: Revision of that invocation.
+        plan_id: Fresh opaque identity for this particular planning attempt.
+
+    Host integrations explicitly commit supported outcomes after a real planning
+    attempt, including a failed plan when its skill contract requires that.
+    Inspecting or snapshotting a plan never commits the proposal. Concrete
+    outcomes own their operation/episode/environment scope and compare-and-set
+    cursor version; no live cursor or callback belongs in this value.
+    """
+
+    skill_id: str
+    invocation_id: str
+    invocation_revision: int
+    plan_id: str
+
+    def __post_init__(self) -> None:
+        for name in ("skill_id", "invocation_id", "plan_id"):
+            value = getattr(self, name)
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(f"{name} must be an exact non-empty identifier.")
+        if type(self.invocation_revision) is not int or self.invocation_revision < 0:
+            raise ValueError("invocation_revision must be a non-negative integer.")
+        _require_immutable_recovery_value(self)
+
+    def snapshot(self) -> PlanningRecoveryOutcome:
+        """Return an independently owned proposal without committing it.
+
+        Returns:
+            Detached immutable proposal retaining its exact invocation identity.
+        """
+        return deepcopy(self)
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class ActionPlan:
     """Scene-bound planning result for one grounded atomic action invocation.
@@ -528,10 +618,45 @@ class ActionPlan:
     effect_verification: EffectVerificationRequirement | None = None
     invocation_id: str | None = None
     invocation_revision: int = 0
+    rejected_candidate: RejectedMotionCandidate | None = field(
+        default=None, kw_only=True
+    )
+    """Owned original full-robot samples for rows rejected from this exact plan.
+
+    The batch, device, full robot columns and time grid match joint_trajectory.
+    Rejected rows cannot become successful; this value records planned evidence
+    and is never an executable replacement or physical-effect certificate.
+    """
+    planning_recovery_outcome: PlanningRecoveryOutcome | None = field(
+        default=None, kw_only=True
+    )
+    """Optional typed proposal for explicit host-owned planning-state commit.
+
+    A failed plan may still carry a logical selection outcome. Preview callers
+    discard it or commit only to an independently owned preview cursor.
+    """
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:
             raise ValueError("ActionPlan.skill_id must be non-empty.")
+        outcome = self.planning_recovery_outcome
+        if outcome is not None:
+            if not isinstance(outcome, PlanningRecoveryOutcome):
+                raise TypeError("planning_recovery_outcome must be typed or None.")
+            if not isinstance(self.recovery_policy, RecoveryPolicy):
+                raise TypeError("recovery_policy must be a RecoveryPolicy.")
+            self.recovery_policy.validate_skill(self.skill_id)
+            if (
+                outcome.skill_id != self.skill_id
+                or outcome.invocation_id != self.invocation_id
+                or outcome.invocation_revision != self.invocation_revision
+            ):
+                raise ValueError(
+                    "Planning recovery outcome does not identify this plan."
+                )
+            if self.recovery_policy.planning_recovery is None:
+                raise ValueError("Planning recovery outcome requires a selected rule.")
+            object.__setattr__(self, "planning_recovery_outcome", outcome.snapshot())
         if (
             not isinstance(self.invocation_revision, int)
             or self.invocation_revision < 0
@@ -609,6 +734,42 @@ class ActionPlan:
                 )
             if self.joint_trajectory.positions.device != self.commands.device:
                 raise ValueError("joint_trajectory and commands must share a device.")
+        rejected = self.rejected_candidate
+        if rejected is not None:
+            trajectory = self.joint_trajectory
+            if not isinstance(rejected, RejectedMotionCandidate):
+                raise TypeError(
+                    "rejected_candidate must be RejectedMotionCandidate or None."
+                )
+            if (
+                trajectory is None
+                or rejected.positions.shape != trajectory.positions.shape
+                or rejected.positions.dtype != trajectory.positions.dtype
+                or rejected.positions.device != trajectory.positions.device
+                or rejected.dt.dtype != trajectory.dt.dtype
+                or not torch.equal(rejected.dt, trajectory.dt)
+            ):
+                raise ValueError(
+                    "Rejected full-robot candidate must match this plan's batch, device, DOF and time grid."
+                )
+            if (rejected.env_mask & self.plan_success).any():
+                raise ValueError(
+                    "A rejected candidate row cannot be a successful plan row."
+                )
+            if any(
+                (rejected.env_mask & frame.active_mask).any()
+                for frame in self.commands.frames
+            ):
+                raise ValueError(
+                    "Rejected candidate rows cannot contain active commands."
+                )
+            object.__setattr__(
+                self,
+                "rejected_candidate",
+                RejectedMotionCandidate(
+                    rejected.positions, rejected.dt, rejected.env_mask
+                ),
+            )
         required_channels = {
             metric.channel_id
             for metric in (
@@ -907,6 +1068,8 @@ class ActionPlan:
             effect_verification=self.effect_verification,
             invocation_id=self.invocation_id,
             invocation_revision=self.invocation_revision,
+            rejected_candidate=self.rejected_candidate,
+            planning_recovery_outcome=self.planning_recovery_outcome,
         )
 
     @property
@@ -998,7 +1161,9 @@ __all__ = [
     "CompiledTrajectory",
     "EffectVerificationRequirement",
     "PlannerDiagnostics",
+    "PlanQualification",
     "PlanningFailure",
+    "PlanningRecoveryOutcome",
     "TimedTrajectory",
     "TrajectorySegment",
     "normalize_success_mask",

@@ -148,7 +148,10 @@ class ContactSensor(BaseSensor):
 
     The sensor preserves every backend-emitted contact row that passes the
     backend's positive-impulse filter. Geometry-only Newton solvers retain all
-    candidate contact rows. Repeated updates within one completed physics step
+    candidate rigid-contact rows. Mixed DexUni reports preserve measured
+    MuJoCo rows alongside geometry-only rows. Inspect ``impulse_valid`` and
+    ``friction_valid`` per row before interpreting the reported quantities.
+    Repeated updates within one completed physics step
     reuse the sample, unless the query's topology changes or the sensor resets.
     """
 
@@ -160,6 +163,8 @@ class ContactSensor(BaseSensor):
         "distance",
         "user_ids",
         "is_valid",
+        "impulse_valid",
+        "friction_valid",
     ]
 
     def __init__(
@@ -189,6 +194,7 @@ class ContactSensor(BaseSensor):
         self.device = device
         self.cfg = config
         self._query: ContactQuery | None = None
+        self._empty_contact_buffer: ContactBuffer | None = None
         self._metadata_actor_table: tuple[ContactActorInfo, ...] | None = None
         self._metadata_selected_ids: tuple[int, ...] | None = None
 
@@ -333,6 +339,16 @@ class ContactSensor(BaseSensor):
                     dtype=torch.bool,
                     device=device,
                 ),
+                "impulse_valid": torch.zeros(
+                    (num_envs, config.max_contacts_per_env),
+                    dtype=torch.bool,
+                    device=device,
+                ),
+                "friction_valid": torch.zeros(
+                    (num_envs, config.max_contacts_per_env),
+                    dtype=torch.bool,
+                    device=device,
+                ),
             },
             batch_size=[num_envs, config.max_contacts_per_env],
             device=device,
@@ -376,30 +392,34 @@ class ContactSensor(BaseSensor):
         Repeated calls reuse the scattered data and establish readiness on the
         caller's CUDA stream. Resetting sensor buffers permits a fresh read of
         the current backend snapshot without advancing contact history. This
-        does not recompute contacts after physical state writes: backend rules
-        still determine whether a solved contact snapshot is available.
+        does not recompute contacts after physical state writes. A report
+        invalidated by physics reset yields invalid rows until the next solve.
+        Call outside caller-owned CUDA capture; graphs may consume get_data().
 
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
 
+        self._require_eager_sampling()
         self._wait_for_sample()
-        capturing = (
-            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
-        )
-        key = None if capturing else self._contact_sample_key()
-        if not capturing and key == self._last_update_key:
+        key = self._contact_sample_key()
+        if key == self._last_update_key:
             return
         buffer = self._fetch_contacts()
         if not self.requires_substep_update:
             self._query_dropped_count.copy_(buffer.dropped_count_device)
             self._scatter_dropped_count.copy_(self._sample_scatter_dropped_count)
         self._last_update_key = key
-        self._last_contact_buffer = None if capturing else buffer
-        if capturing:
-            self._last_history_key = None
-        else:
-            self._record_sample_stream()
+        self._last_contact_buffer = buffer
+        self._record_sample_stream()
+
+    def _require_eager_sampling(self) -> None:
+        if self.device.type == "cuda" and torch.cuda.is_current_stream_capturing():
+            raise RuntimeError(
+                "Contact sampling must run outside external CUDA capture. "
+                "Sample eagerly before capture/replay, establish stream "
+                "dependencies, and consume get_data() buffers inside the graph."
+            )
 
     def _contact_sample_key(self) -> tuple[int, int, int]:
         """Consult public query metadata so topology refreshes cannot be skipped."""
@@ -431,10 +451,25 @@ class ContactSensor(BaseSensor):
 
     def _read_contacts(self) -> ContactBuffer:
         assert self._query is not None
-        if self.device.type == "cuda":
-            buffer = self._query.fetch_async()
-        else:
-            buffer = self._query.fetch()
+        try:
+            if self.device.type == "cuda":
+                buffer = self._query.fetch_solver_report_async()
+            else:
+                buffer = self._query.fetch_solver_report()
+        except RuntimeError as error:
+            # DexSim 0.6 has no public report-availability flag or dedicated
+            # exception. Only this reset-time state is an empty observation;
+            # unrelated query and device failures must still reach the caller.
+            if str(error) != (
+                "Contact state is unavailable after reset until the next World.update"
+            ):
+                raise
+            if self._empty_contact_buffer is None:
+                from dexsim.scene import ContactBuffer
+
+                self._empty_contact_buffer = ContactBuffer.allocate(1, self.device)
+            buffer = self._empty_contact_buffer
+        if self.device.type == "cpu":
             buffer.device_counts[0] = buffer.count
             buffer.device_counts[1] = buffer.dropped_count
         self._sync_filter_actor_metadata()
@@ -449,8 +484,11 @@ class ContactSensor(BaseSensor):
             kernel = scatter_contact_rows_with_loss
         assert self._num_contacts_per_env is not None
         self._num_contacts_per_env.zero_()
-        self._data_buffer["is_valid"].zero_()
+        for name in ("is_valid", "impulse_valid", "friction_valid"):
+            self._data_buffer[name].zero_()
         self._sample_scatter_dropped_count.zero_()
+        quantity_valid = getattr(buffer, "quantity_valid", None)
+        capabilities = self.contact_capabilities
         wp.launch(
             kernel=kernel,
             dim=buffer.capacity,
@@ -474,10 +512,33 @@ class ContactSensor(BaseSensor):
                 ],
                 wp.from_torch(buffer.device_counts),
                 wp.from_torch(self._latest_loss_counters),
+                wp.from_torch(
+                    quantity_valid
+                    if quantity_valid is not None
+                    else self._data_buffer["is_valid"]
+                ),
+                quantity_valid is not None,
+                capabilities.impulse,
+                capabilities.friction,
+                wp.from_torch(self._data_buffer["impulse_valid"]),
+                wp.from_torch(self._data_buffer["friction_valid"]),
             ],
             device=str(self.device),
             stream=current_warp_stream(self.device),
         )
+
+    @property
+    def dropped_contacts_mask(self) -> torch.Tensor:
+        """Return environments whose contact evidence may have been truncated.
+
+        Per-environment scatter overflow invalidates only that environment.
+        Native query overflow has no environment attribution, so it invalidates
+        every environment. The device-local result requires no host read.
+
+        Returns:
+            A new boolean tensor with one entry per environment.
+        """
+        return (self._scatter_dropped_count > 0) | (self._query_dropped_count > 0)
 
     @property
     def dropped_contacts(self) -> int:
@@ -564,11 +625,17 @@ class ContactSensor(BaseSensor):
 
         Returns:
             Batched contact data. ``position`` is in the Arena frame;
-            ``normal`` points from actor 0 toward actor 1; ``friction`` and
-            ``impulse`` are impulses; ``distance`` is signed separation;
+            ``normal`` points from actor 0 toward actor 1; ``friction`` is
+            tangential impulse on actor 0; ``impulse`` preserves the native
+            scalar magnitude (total for Default CPU, normal otherwise);
+            ``distance`` is signed separation;
             ``user_ids`` contains backend-neutral contact actor IDs; and
             ``is_valid`` marks rows populated by the latest update. Values in
             invalid rows are unspecified and may come from an earlier update.
+            ``impulse_valid`` and ``friction_valid`` mark measured quantities
+            per row; unavailable values are placeholders, not measured zeros.
+            These flags may be true even when the aggregate capability is false
+            for a mixed DexUni report.
         """
         return self._data_buffer
 
@@ -666,15 +733,28 @@ class ContactSensor(BaseSensor):
             raise TypeError("observer must implement ContactSamplingObserver.")
         self._sampling_observers[name] = observer
 
-    def remove_sampling_observer(self, name: str) -> ContactSamplingObserver:
+    def remove_sampling_observer(
+        self,
+        name: str,
+        *,
+        expected: ContactSamplingObserver | None = None,
+    ) -> ContactSamplingObserver:
         """Detach a registered observer without changing contact histories.
 
         Args:
             name: Previously registered observer name.
+            expected: Optional exact owner. A different current owner is retained.
 
         Returns:
             The detached observer; the caller retains its recorded data.
+
+        Raises:
+            ValueError: The current observer differs from ``expected``.
+            KeyError: No observer is registered under this name.
         """
+        current = self._sampling_observers[name]
+        if expected is not None and current is not expected:
+            raise ValueError("Sampling observer belongs to a different owner.")
         return self._sampling_observers.pop(name)
 
     @property
@@ -703,18 +783,11 @@ class ContactSensor(BaseSensor):
         """
         if dt <= 0:
             raise ValueError("Contact sampling dt must be positive.")
+        self._require_eager_sampling()
         self._wait_for_sample()
-        # Capturing records future work; Python cache keys cannot track replay.
-        capturing = (
-            self.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
-        )
         observers = self._sampling_observers
-        if observers and capturing:
-            raise RuntimeError(
-                "Contact sampling observers require calls outside external CUDA capture."
-            )
-        key = None if capturing else self._contact_sample_key()
-        if not capturing and key == self._last_history_key:
+        key = self._contact_sample_key()
+        if key == self._last_history_key:
             return
         # Keep the default history-only path free of observer snapshots and
         # generator allocation. Capture a stable subscription set only when used.
@@ -726,28 +799,42 @@ class ContactSensor(BaseSensor):
             )
         buffer = (
             self._last_contact_buffer
-            if not capturing and key == self._last_update_key
+            if key == self._last_update_key
             else self._read_contacts()
         )
         assert buffer is not None
         self._sample_physics_contacts(buffer, dt)
         self._last_update_key = key
         self._last_history_key = key
-        self._last_contact_buffer = None if capturing else buffer
-        if not capturing:
-            self._record_sample_stream()
+        self._last_contact_buffer = buffer
+        self._record_sample_stream()
         if tokens is not None:
             for observer, token in tokens:
                 observer.after_sample(dt, token)
 
     def _sample_physics_contacts(self, buffer: ContactBuffer, dt: float) -> None:
         """Run the reduction on the existing caller/capture stream boundary."""
-        if self.device.type != "cuda" or torch.cuda.is_current_stream_capturing():
-            self._sample_contacts(buffer, dt)
+        impulse_dt = dt
+        if (
+            self._histories
+            and getattr(getattr(self._sim, "physics", None), "name", None) == "newton"
+        ):
+            from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+            backend = get_newton_backend(self._sim._world)
+            # Newton reports the last internal solver substep's impulse, not
+            # the impulse integrated over the whole World.update interval.
+            impulse_dt = dt / max(int(backend.cfg.num_substeps), 1)
+        if self.device.type != "cuda":
+            self._sample_contacts(buffer, dt, impulse_dt)
             return
         key = (
             id(buffer),
+            id(getattr(buffer, "quantity_valid", None)),
+            self.contact_capabilities.impulse,
+            self.contact_capabilities.friction,
             dt,
+            impulse_dt,
             self.cfg.max_contacts_per_env,
             tuple(
                 (
@@ -775,22 +862,30 @@ class ContactSensor(BaseSensor):
                 self._sample_graph_key = key
                 # This real sample also compiles/warms every kernel. Do not
                 # execute history updates twice while preparing capture.
-                self._sample_contacts(buffer, dt)
+                self._sample_contacts(buffer, dt, impulse_dt)
             else:
                 if self._sample_graph is None:
                     with wp.ScopedCapture(stream=self._sample_stream) as capture:
-                        self._sample_contacts(buffer, dt)
+                        self._sample_contacts(buffer, dt, impulse_dt)
                     self._sample_graph = capture.graph
                 wp.capture_launch(self._sample_graph, stream=self._sample_stream)
         if not same_stream:
             caller.wait_stream(self._sample_torch_stream)
 
-    def _sample_contacts(self, buffer: ContactBuffer, dt: float) -> None:
+    def _sample_contacts(
+        self, buffer: ContactBuffer, dt: float, impulse_dt: float
+    ) -> None:
         self._scatter_contacts(buffer)
         self._query_dropped_count.add_(buffer.dropped_count_device)
         self._scatter_dropped_count.add_(self._sample_scatter_dropped_count)
         for history in self._histories.values():
-            history._update_from_query(buffer, dt)
+            history._update_from_query(
+                buffer,
+                dt,
+                impulse_dt=impulse_dt,
+                impulse_available=self.contact_capabilities.impulse,
+                friction_available=self.contact_capabilities.friction,
+            )
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear contact samples and histories only for the selected rows.
@@ -813,6 +908,8 @@ class ContactSensor(BaseSensor):
         self._wait_for_sample()
         for value in (
             self._data_buffer["is_valid"],
+            self._data_buffer["impulse_valid"],
+            self._data_buffer["friction_valid"],
             self._num_contacts_per_env,
             self._scatter_dropped_count,
             self._sample_scatter_dropped_count,
@@ -863,6 +960,12 @@ class ContactSensor(BaseSensor):
             "distance": self._data_buffer["distance"][env_ids_tensor].flatten(0, 1),
             "user_ids": self._data_buffer["user_ids"][env_ids_tensor].flatten(0, 1),
             "is_valid": self._data_buffer["is_valid"][env_ids_tensor].flatten(0, 1),
+            "impulse_valid": self._data_buffer["impulse_valid"][env_ids_tensor].flatten(
+                0, 1
+            ),
+            "friction_valid": self._data_buffer["friction_valid"][
+                env_ids_tensor
+            ].flatten(0, 1),
         }
 
         # Create valid mask (only slots up to _num_contacts_per_env are valid)
@@ -901,6 +1004,12 @@ class ContactSensor(BaseSensor):
                         (0, 2), dtype=torch.int32, device=self.device
                     ),
                     "is_valid": torch.empty((0,), dtype=torch.bool, device=self.device),
+                    "impulse_valid": torch.empty(
+                        (0,), dtype=torch.bool, device=self.device
+                    ),
+                    "friction_valid": torch.empty(
+                        (0,), dtype=torch.bool, device=self.device
+                    ),
                 },
                 batch_size=[0],
                 device=self.device,

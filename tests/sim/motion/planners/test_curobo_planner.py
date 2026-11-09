@@ -30,6 +30,7 @@ import math
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -44,6 +45,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanner,
     CuroboPlannerCfg as CuroboPlannerCfgDirect,
     CuroboWorldCfg,
+    _CuroboBackend,
     _CuroboProfile,
     _configure_curobo_logging,
     _matrix_to_position_quaternion,
@@ -141,12 +143,13 @@ def test_missing_curobo_is_actionable(monkeypatch):
     "failure_module",
     [
         None,
+        "curobo.trajectory_timeopt",
         "curobo.motion_planner",
         "curobo.batch_motion_planner",
         "curobo.collision_checking",
         "curobo.types",
         "curobo.scene",
-        "curobo._src.cost.tool_pose_criteria",
+        "curobo._src.runtime",
     ],
 )
 def test_curobo_import_preserves_caller_precision(
@@ -266,6 +269,7 @@ def test_cspace_planning_uses_direct_seed_before_graph_seed(
     )
     planner.device = torch.device("cpu")
     planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(Runtime=SimpleNamespace(cuda_graphs=True))
     monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(
         planner,
@@ -327,6 +331,7 @@ def test_pose_planning_uses_direct_seed_before_graph_seed(
     )
     planner.device = torch.device("cpu")
     planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(Runtime=SimpleNamespace(cuda_graphs=True))
     monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(
         planner,
@@ -371,7 +376,9 @@ def test_partial_pose_native_costs_reset_and_unused_targets_are_sanitized(monkey
     planner.cfg = SimpleNamespace(max_attempts=1, max_planning_time=None)
     planner.device = planner._curobo_device = torch.device("cpu")
     planner._bindings = SimpleNamespace(
-        ToolPoseCriteria=lambda **values: values, DeviceCfg=lambda **values: values
+        ToolPoseCriteria=lambda **values: values,
+        DeviceCfg=lambda **values: values,
+        Runtime=SimpleNamespace(cuda_graphs=True),
     )
     backend = SimpleNamespace(
         planner=SimpleNamespace(
@@ -641,15 +648,54 @@ def test_curobo_planner_class_is_lazy_import_safe():
     assert "curobo" not in sys.modules
 
 
-def test_backend_disables_curobo_self_collision(monkeypatch):
+@pytest.mark.parametrize(
+    (
+        "batch_size",
+        "algorithm",
+        "enable_timeopt",
+        "use_graph",
+        "effective_algorithm",
+        "expected_lanes",
+    ),
+    [
+        (1, "rrt", True, True, "rrt", 8),
+        (2, "prm", False, False, "prm", None),
+        (17, "rrt", False, True, "rrt", 256),
+        (1, "rrt", True, False, "rrt", 8),
+    ],
+)
+def test_backend_forwards_fast_settings_and_disables_self_collision(
+    monkeypatch,
+    batch_size,
+    algorithm,
+    enable_timeopt,
+    use_graph,
+    effective_algorithm,
+    expected_lanes,
+):
     create_kwargs = {}
+    cost_manager = SimpleNamespace(disable_self_collision=Mock())
+    graph_rollout = SimpleNamespace(get_cost_manager_configs=lambda: [cost_manager])
 
     class FakeMotionPlannerCfg:
         @staticmethod
         def create(**kwargs):
             create_kwargs.update(kwargs)
+            assert runtime.cuda_graphs is use_graph
             return SimpleNamespace(
-                trajopt_solver_config=SimpleNamespace(interpolation_dt=None)
+                trajopt_solver_config=SimpleNamespace(
+                    interpolation_dt=None,
+                    num_seeds=8,
+                    robot_config=SimpleNamespace(
+                        dynamics=SimpleNamespace(gravity=None)
+                    ),
+                ),
+                **{
+                    f"{effective_algorithm}_graph_planner_config": SimpleNamespace(
+                        resources_config=SimpleNamespace(rollout_config=graph_rollout),
+                        planner_config=SimpleNamespace(max_batched_lanes=128),
+                    )
+                },
             )
 
     class FakeMotionPlanner:
@@ -659,13 +705,17 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
             self.cfg = cfg
 
     planner = CuroboPlanner.__new__(CuroboPlanner)
-    planner.cfg = SimpleNamespace(
-        world=SimpleNamespace(multi_env=False),
-        collision_activation_distance=0.01,
-        interpolation_dt=0.025,
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        graph_planner_algorithm=algorithm,
+        enable_timeopt=enable_timeopt,
+        interpolation_dt=0.01,
     )
     planner._curobo_device = torch.device("cuda:0")
+    planner._timeopt_gravity = lambda backend: (0.0, 0.0, 0.0)
+    runtime = SimpleNamespace(cuda_graphs=True)
     planner._bindings = SimpleNamespace(
+        Runtime=runtime,
         MotionPlannerCfg=FakeMotionPlannerCfg,
         DeviceCfg=lambda device: device,
         MotionPlanner=FakeMotionPlanner,
@@ -685,20 +735,39 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
     }
     monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
 
-    planner._build_backend(
+    backend = planner._build_backend(
         control_part="arm",
-        batch_size=1,
+        batch_size=batch_size,
         profile=_CuroboProfile(
             robot_config_path="robot.yml",
             sim_to_curobo_joint_names={"joint": "joint"},
         ),
         sim_joint_names=["joint"],
         scene_model=None,
-        use_cuda_graph=False,
+        use_cuda_graph=use_graph,
         planning_mode=MoveType.EEF_MOVE,
     )
 
     assert create_kwargs["self_collision_check"] is False
+    assert create_kwargs["max_batch_size"] == batch_size
+    assert create_kwargs["graph_planner_algorithm"] == effective_algorithm
+    assert backend.graph_planner_algorithm == effective_algorithm
+    assert create_kwargs["use_cuda_graph"] is use_graph
+    assert runtime.cuda_graphs is True
+    assert create_kwargs["enable_timeopt"] is enable_timeopt
+    assert create_kwargs["interpolation_dt"] == 0.01
+    cost_manager.disable_self_collision.assert_called_once()
+    if enable_timeopt:
+        assert create_kwargs["robot"]["robot_cfg"]["load_dynamics"] is True
+        assert (
+            backend.planner.cfg.trajopt_solver_config.robot_config.dynamics.gravity
+            == [0.0, 0.0, 0.0]
+        )
+    if expected_lanes is not None:
+        assert (
+            backend.planner.cfg.rrt_graph_planner_config.planner_config.max_batched_lanes
+            == expected_lanes
+        )
     assert create_kwargs["robot"]["robot_cfg"]["kinematics"] == {
         "source": "robot.yml",
         "self_collision_buffer": {},
@@ -722,6 +791,136 @@ def test_multi_env_scene_model_clones_scene_dictionaries_independently():
     assert copies[0] is not copies[1]
     copies[0]["voxel"]["block"]["feature_tensor"].zero_()
     assert torch.all(copies[1]["voxel"]["block"]["feature_tensor"] == 1.0)
+
+
+@pytest.mark.parametrize(
+    ("world_gravity", "tilted", "observed", "expected"),
+    [
+        ([0, 0, -9.81], False, False, [0, 0, -9.81]),
+        ([0, 0, 0], True, False, [0, 0, 0]),
+        ([0, 0, -9.81], True, False, [9.81, 0, 0]),
+        ([0, 0, -9.81], True, True, [9.81, 0, 0]),
+    ],
+)
+def test_timeopt_gravity_uses_physics_and_the_planning_frame(
+    monkeypatch, world_gravity, tilted, observed, expected
+):
+    from embodichain.lab.sim import SimulationManager
+
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot", sim_instance_id=3)
+    planner._curobo_device = torch.device("cpu")
+    world_to_base = torch.eye(4)[None]
+    if tilted:
+        # Inverse of a +90 degree world rotation about Y.
+        world_to_base[0, :3, :3] = torch.tensor(
+            [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+        )
+    pose = torch.linalg.inv(world_to_base)
+    planner.robot = SimpleNamespace(get_link_pose=Mock(return_value=pose))
+    if observed:
+        planner._query_snapshot = SimpleNamespace(
+            full_qpos=torch.zeros(1, 1),
+            world_to_base=world_to_base,
+        )
+        planner.robot.get_link_pose.side_effect = AssertionError("live pose reread")
+    manager = SimpleNamespace(
+        sim_config=SimpleNamespace(physics_cfg=SimpleNamespace(gravity=world_gravity))
+    )
+    getter = Mock(return_value=manager)
+    monkeypatch.setattr(SimulationManager, "get_instance", getter)
+    backend = _CuroboBackend(
+        planner=None,
+        control_part="arm",
+        sim_joint_names=["joint"],
+        tool_frame="tool",
+        profile=_CuroboProfile(
+            "robot.yml", {"joint": "joint"}, sim_base_link_name="base"
+        ),
+        batch_size=1,
+        use_cuda_graph=False,
+        planning_mode=MoveType.JOINT_MOVE,
+    )
+    assert planner._timeopt_gravity(backend) == pytest.approx(expected)
+    getter.assert_called_once_with(3)
+
+    # A single native solver cannot use contradictory per-row gravity.
+    if tilted:
+        planner._query_snapshot = SimpleNamespace(
+            full_qpos=torch.zeros(2, 1),
+            world_to_base=torch.cat([world_to_base, torch.eye(4)[None]]),
+        )
+        backend.batch_size = 2
+        if world_gravity == [0, 0, 0]:
+            assert planner._timeopt_gravity(backend) == (0.0, 0.0, 0.0)
+        else:
+            with pytest.raises(ValueError, match="entire batch"):
+                planner._timeopt_gravity(backend)
+
+
+@pytest.mark.parametrize(("batch_size", "seeds", "lanes"), [(1, 4, 4), (8, 2, 16)])
+def test_warmup_covers_rrt_seed_lanes_and_graph_seed_fitting(
+    monkeypatch, batch_size, seeds, lanes
+):
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner._curobo_device = torch.device("cpu")
+    planner._synchronize_device = Mock()
+    planner._bindings = SimpleNamespace(
+        Runtime=SimpleNamespace(cuda_graphs=True),
+        JointState=SimpleNamespace(
+            from_position=lambda position, **kwargs: SimpleNamespace(
+                position=position,
+                clone=lambda: SimpleNamespace(position=position.clone()),
+            )
+        ),
+    )
+    native = SimpleNamespace(
+        default_joint_state=SimpleNamespace(position=torch.zeros(1)),
+        joint_names=["joint"],
+        ik_solver=SimpleNamespace(config=SimpleNamespace(exit_early=True)),
+        trajopt_solver=SimpleNamespace(config=SimpleNamespace(num_seeds=seeds)),
+        plan_cspace=Mock(),
+        reset_seed=Mock(),
+        graph_planner=Mock(),
+        graph_seed_fitter=Mock(),
+    )
+    backend = SimpleNamespace(
+        planner=native,
+        batch_size=batch_size,
+        use_cuda_graph=True,
+        planning_mode=MoveType.JOINT_MOVE,
+        graph_planner_algorithm="rrt",
+    )
+    monkeypatch.setattr(torch.cuda, "device", lambda *args: nullcontext())
+    planner._warmup_backend(backend)
+    native.graph_planner.warmup.assert_called_once_with(
+        num_warmup_iterations=1, max_batch_size=lanes
+    )
+    native.graph_seed_fitter.warmup.assert_called_once_with()
+    assert native.ik_solver.config.exit_early is True
+
+
+def test_changing_gravity_rebuilds_a_cached_backend():
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner.robot = SimpleNamespace(cfg=SimpleNamespace(fpath="robot.urdf"))
+    planner._robot_yaml_cache_key = Mock(return_value="same geometry and limits")
+    planner._timeopt_gravity = Mock(return_value=(0.0, 0.0, 0.0))
+    cached = SimpleNamespace(
+        planner=Mock(),
+        motion_limits_key="same geometry and limits",
+        gravity=(0.0, 0.0, 0.0),
+    )
+    key = ("arm", 1, False, MoveType.EEF_MOVE)
+    planner._backend_cache = {key: cached}
+    assert planner._get_backend("arm", 1) is cached
+    planner._timeopt_gravity.return_value = (0.0, 0.0, -9.81)
+    planner._materialize_profile = Mock(side_effect=RuntimeError("rebuild"))
+    with pytest.raises(RuntimeError, match="rebuild"):
+        planner._get_backend("arm", 1)
+    cached.planner.close.assert_called_once()
+    assert key not in planner._backend_cache
 
 
 def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_path):
@@ -752,7 +951,8 @@ def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_pa
     assert "self_collision_ignore" not in persisted["robot_cfg"]["kinematics"]
 
 
-def test_disable_self_collision_reaches_all_curobo_rollouts():
+@pytest.mark.parametrize("algorithm", ["prm", "rrt"])
+def test_disable_self_collision_reaches_all_curobo_rollouts(algorithm):
     class FakeCostCfg:
         def __init__(self):
             self.disable_calls = 0
@@ -785,7 +985,11 @@ def test_disable_self_collision_reaches_all_curobo_rollouts():
                 optimizer_rollout_configs=[trajopt_optimizer],
             )
         ),
-        graph_planner_config=SimpleNamespace(rollout_config=graph_rollout),
+        **{
+            f"{algorithm}_graph_planner_config": SimpleNamespace(
+                resources_config=SimpleNamespace(rollout_config=graph_rollout)
+            )
+        },
     )
 
     CuroboPlanner._disable_curobo_self_collision_rollouts(planner_cfg)
@@ -843,6 +1047,41 @@ def test_graph_capture_mode_rejects_unknown_value():
     with pytest.raises(ValueError, match="capture_error_mode"):
         with _torch_cuda_graph_capture_mode("unsafe"):
             pass
+
+
+def test_lazy_planning_capture_is_coordinated_and_released_on_error(monkeypatch):
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner._curobo_device = torch.device("cpu")
+    planner._synchronize_device = Mock()
+    planner._bindings = SimpleNamespace(Runtime=SimpleNamespace(cuda_graphs=True))
+    coordinator = Mock()
+    coordinator.acquire_for_capture.return_value = True
+    monkeypatch.setattr(
+        "embodichain.lab.sim.motion.planners.curobo.curobo_planner._get_capture_coordinator",
+        lambda: coordinator,
+    )
+    with pytest.raises(RuntimeError, match="native planning error"):
+        with planner._planning_capture_scope(SimpleNamespace(use_cuda_graph=True)):
+            coordinator.acquire_for_capture.assert_called_once()
+            coordinator.release_for_capture.assert_not_called()
+            raise RuntimeError("native planning error")
+    coordinator.release_for_capture.assert_called_once()
+    assert planner._synchronize_device.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("previous", "enabled"), [(True, False), (True, True), (False, True)]
+)
+def test_native_graph_mode_restores_runtime_flags_on_failure(previous, enabled):
+    planner = object.__new__(CuroboPlanner)
+    runtime = SimpleNamespace(cuda_graphs=previous)
+    planner._bindings = SimpleNamespace(Runtime=runtime)
+    with pytest.raises(RuntimeError, match="native error"):
+        with planner._native_graph_mode(enabled):
+            assert runtime.cuda_graphs is (previous and enabled)
+            raise RuntimeError("native error")
+    assert runtime.cuda_graphs is previous
 
 
 # Robot YAML generation
