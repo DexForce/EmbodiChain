@@ -5,8 +5,60 @@ This package provides task understanding and declaration validation independentl
 of simulation. TaskSpec owns normative identity and evaluation; shared Task
 Program, Atomic Skill and Motion modules own execution.
 
+Start with :doc:`/features/generative_sim/task_engine` for configuration, CLI
+usage, artifacts, pending bindings, offline display, and runtime handoff.
+
 .. automodule:: embodichain.gen_sim.task_engine
    :members:
+
+Image semantic planning
+-----------------------
+
+Interpret a photograph and the complete instruction into a catalog-constrained
+Semantic Call graph. The result retains source provenance, task requirements,
+visual evidence, raw attempts, and pending runtime bindings. Grounding and
+planning each allow one diagnostic repair; failed generation exposes available
+audit artifacts through ``SemanticPlanningError.artifacts``.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.image_planning
+
+.. autosummary::
+
+   generate_semantic_task_graph_from_image
+   SemanticPlanningError
+
+.. autofunction:: generate_semantic_task_graph_from_image
+
+.. autoclass:: SemanticPlanningError
+   :members:
+
+.. currentmodule:: embodichain.gen_sim.task_engine.cli
+
+.. autosummary::
+
+   main
+
+.. autofunction:: main
+
+Image-plan validation
+---------------------
+
+Recompute canonical-call, topology, symbolic state, source-clause, identity, and
+runtime-binding checks from explicit declarations. ``semantic_status`` and
+``visual_status`` remain separate; image plans retain
+``execution_ready=False`` and runtime evidence ``not_run``. This semantic-only
+validation does not replace grounded declaration coverage or physical checks.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_plan_validation
+
+.. autosummary::
+
+   validate_semantic_plan
+   semantic_plan_rules
+
+.. autofunction:: validate_semantic_plan
+
+.. autofunction:: semantic_plan_rules
 
 Task understanding and candidates
 ---------------------------------

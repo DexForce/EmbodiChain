@@ -25,7 +25,7 @@ from typing import Any
 
 from embodichain.utils.logger import log_info
 
-from ..clients.articulated_generation import ArticulatedGenerationClient
+from embodichain.gen_sim.services.compat import ArticulationClient
 from ..utils.articulated_usdc_utils import (
     _canonicalize_articulated_usdc_bottom_center,
 )
@@ -38,7 +38,7 @@ def generate_articulated_usdcs(
     asset_objects: Sequence[Any],
     output_root: str | Path,
     coarse_scales_y_up_by_id: Mapping[str, list[float]],
-    articulated_generation_client: ArticulatedGenerationClient | None,
+    articulated_generation_client: ArticulationClient | None,
     canonicalize_fn: Callable[
         [str | Path], Path
     ] = _canonicalize_articulated_usdc_bottom_center,

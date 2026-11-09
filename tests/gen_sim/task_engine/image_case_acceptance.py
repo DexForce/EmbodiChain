@@ -39,6 +39,7 @@ def check_image_case(case: str, artifacts: dict[str, Any]) -> list[str]:
     graph = artifacts["semantic_task_graph"]
     source = artifacts["semantic_graph_validation"]["source"]
     nodes = {n["id"]: n for n in graph["nodes"]}
+    annotations = source["annotations"]
     instruction = graph["instruction"]
     failures = []
     for check in expected:
@@ -54,12 +55,24 @@ def check_image_case(case: str, artifacts: dict[str, Any]) -> list[str]:
                 stop = start + len(requirement["quote"])
                 if min(end, stop) > max(pos, start):
                     selected.update(requirement["node_ids"])
+        # Source quotes can be split into a subject/acquisition clause and its
+        # subsequent producing call. Follow the same source step AND subject;
+        # an unrelated object's action must never satisfy this obligation.
+        selected_subjects = {
+            (nodes[nid]["task_instance_id"], annotations[nid]["object"])
+            for nid in selected
+        }
+        selected.update(
+            nid
+            for nid, node in nodes.items()
+            if (node["task_instance_id"], annotations[nid]["object"])
+            in selected_subjects
+        )
         actual = {
             nodes[n]["call"].get("call_id", nodes[n]["call"]["kind"]) for n in selected
         }
         if not actual & set(check["call_alternatives"]):
             failures.append("Missing original obligation: " + check["label"])
-    annotations = source["annotations"]
     if "原位" in instruction:
         restored = [
             nid
@@ -87,6 +100,8 @@ def check_image_case(case: str, artifacts: dict[str, Any]) -> list[str]:
             annotations[n["id"]]["reference"]
             for n in nodes.values()
             if annotations[n["id"]]["relation"] == "inside"
+            and n["call"].get("call_id", n["call"]["kind"])
+            in {"place", "simulation.place_relative"}
         }
         if len(targets) != 1:
             failures.append(

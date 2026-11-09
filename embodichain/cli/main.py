@@ -53,7 +53,7 @@ COMMANDS = (
         help="List and download EmbodiChain data assets.",
     ),
     Command(
-        name="simready",
+        name="asset-engine",
         target="embodichain.gen_sim.asset_engine.cli.start:main",
         help="Convert a raw asset directory into a SimReady asset.",
     ),

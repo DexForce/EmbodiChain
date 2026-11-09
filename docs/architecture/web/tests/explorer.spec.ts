@@ -28,7 +28,7 @@ test('browse subsystem views and restore a module with its documentation', async
     ['simulation', 'Simulation', 'Gizmo', 'FIG. 03'],
     ['simulation', 'Simulation', 'Object backend views', 'FIG. 03'],
     ['data-learning', 'Data & Learning', 'LeRobot recording', 'FIG. 04'],
-    ['generation-tooling', 'Generation & Toolkits', 'SimReady pipeline', 'FIG. 05'],
+    ['generation-tooling', 'Generation & Toolkits', 'Asset Engine', 'FIG. 05'],
     ['toolkits', 'Toolkits', 'Antipodal grasp generator', 'FIG. 06'],
     ['toolkits', 'Toolkits', 'URDF connections', 'FIG. 06'],
     ['toolkits', 'Toolkits', 'URDF collision processor', 'FIG. 06'],

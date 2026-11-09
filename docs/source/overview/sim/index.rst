@@ -87,6 +87,12 @@ Core components
      - Configure with the types in ``embodichain.lab.sim.cfg``. Dynamic state
        and control views are batched by arena and become metadata-complete after
        preparation.
+   * - Scene services
+     - Reusable configuration composition, geometric layouts, selected-row
+       physical state and pose changes, and measured preparation checks.
+     - Use ``embodichain.lab.sim.scene`` and its ``expansion``/``feasibility``
+       subpackages. The manager owns native resources; hosts own stepping,
+       task acceptance, and persistence. See :doc:`scene/index`.
    * - Sensors
      - Camera, stereo-camera, and contact observations, including image
        modalities, disparity, segmentation, and contact query data.
@@ -374,6 +380,8 @@ Choosing where to start
      - :doc:`sim_manager` and :doc:`sim_manager/physics/index`
    * - Configure rigid objects, articulations, robots, deformables, or USD
      - :doc:`sim_assets` and the object pages underneath it
+   * - Compose assemblies, propose layouts, or restore prepared scene state
+     - :doc:`scene/index` and :doc:`scene/workflows`
    * - Add RGB, depth, stereo, segmentation, or contact observations
      - :doc:`sensors/index`
    * - Inspect or manipulate a scene through a native window or browser
@@ -415,6 +423,7 @@ See Also
 
    sim_manager.md
    sim_assets.md
+   scene/index
    sensors/index
    visualization/index
    motion/index

@@ -16,6 +16,12 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
+from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
+from embodichain.gen_sim.services.compat import chat_from_legacy_messages
+
+
 import json
 import re
 from copy import deepcopy
@@ -27,8 +33,6 @@ from embodichain.gen_sim.asset_engine.parser.base import AssetParser
 from embodichain.gen_sim.asset_engine.utils.simready_utils import (
     process_mesh,
     delete_rendered_pngs,
-    client,
-    DEPLOYMENT,
     get_chat_completion_content,
 )
 
@@ -229,13 +233,18 @@ class PhysicsParser(AssetParser):
 
     name = "physics"
 
-    def __init__(self):
+    def __init__(self, *, services: GenSimServices | None = None) -> None:
         super().__init__()
+        self._services = services
 
-    def parse(self, asset: Asset, asset_root: Path) -> None:
+    @service_entry
+    def parse(
+        self, asset: Asset, asset_root: Path, *, services: GenSimServices | None = None
+    ) -> None:
+        services = self._services or services
         self._ensure_sections(asset)
-        self._simready_process(asset, asset_root)
-        self._infer_physics(asset)
+        self._simready_process(asset, asset_root, services=services)
+        self._infer_physics(asset, services=services)
         self._ensure_properties(asset)
         self._update_simulation_status(asset)
 
@@ -249,7 +258,9 @@ class PhysicsParser(AssetParser):
         asset.simulation["sim_ready"].setdefault("sim_ready_path", None)
         asset.simulation.setdefault("blockers", [])
 
-    def _simready_process(self, asset: Asset, asset_root: Path) -> None:
+    def _simready_process(
+        self, asset: Asset, asset_root: Path, *, services: GenSimServices
+    ) -> None:
 
         # mesh_path = asset_root / asset.asset_data.get("path")
         archive_dir = asset_root / "asset_archive"
@@ -264,6 +275,7 @@ class PhysicsParser(AssetParser):
             extra_text=str(asset.ingest_info["extra_info"].get("simready_info", "")),
             out_dir=out_path,
             res=int(SIMREADY_FINALIZE_CONFIG.get("render_resolution", 1024)),
+            services=services,
         )
         print(result)
         semantics_generated = {}
@@ -287,7 +299,7 @@ class PhysicsParser(AssetParser):
         asset.simulation["sim_ready"]["sim_ready_path"] = str(rel_path)
         return
 
-    def _infer_physics(self, asset: Asset) -> None:
+    def _infer_physics(self, asset: Asset, *, services: GenSimServices) -> None:
         if asset.physics.get("mode"):
             return
 
@@ -298,7 +310,7 @@ class PhysicsParser(AssetParser):
         ).strip()
 
         try:
-            result = self._call_LLM(description)
+            result = self._call_LLM(description, services=services)
 
             mode = result["mode"]
             if mode not in ALLOWED_MODES:
@@ -328,7 +340,9 @@ class PhysicsParser(AssetParser):
             asset.physics["source"] = "default"
             asset.physics["confidence"] = 0.0
 
-    def _call_LLM(self, description: str) -> Dict[str, Any]:
+    def _call_LLM(
+        self, description: str, *, services: GenSimServices
+    ) -> Dict[str, Any]:
         if not description:
             raise ValueError("Missing semantics description for physics inference")
 
@@ -348,8 +362,9 @@ class PhysicsParser(AssetParser):
             - If evidence for articulation is weak, prefer rigid.
             """
 
-        resp = client.chat.completions.create(
-            model=DEPLOYMENT,
+        resp = chat_from_legacy_messages(
+            services=services,
+            role="asset_physics",
             temperature=0.0,
             messages=[
                 {"role": "system", "content": PHYSICS_SYSTEM_PROMPT},
