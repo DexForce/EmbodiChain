@@ -8,8 +8,16 @@ and calibrated robot distribution.
 
 ## Runtime
 
-Use the project's supported Python 3.11 / Torch 2.7 environment and install
-this PR. The measured profile pins Torch 2.7.1+cu128, Newton 1.7.0,
+Current main uses Python 3.12 and DexSim 0.6.0rc1. The synchronized tasks passed
+two-environment reset, three control steps and selected-row reset checks on
+that profile (default robot assets for peg, explicit nominal assets for gear
+and nut). Full training and the 8192-episode success-rate evaluation have not
+been repeated on the new profile.
+
+The results below describe the pre-sync split at commit
+`5401a00ce26beee81be2248629e3d993b27f618d`. Use that source revision and an
+isolated Python 3.11 / Torch 2.7 environment to reconstruct its historical
+measurements. The measured profile pins Torch 2.7.1+cu128, Newton 1.7.0,
 MuJoCo 3.15.0, MuJoCo Warp 3.15.0 and Warp 1.17.0 on an RTX 5090.
 Use an isolated environment for these pins; do not upgrade a shared training
 runtime. FFmpeg and a native display are needed for preview recording.
@@ -21,10 +29,12 @@ historical contact patch and binary hashes described in the bundle's evidence
 and [dependency notes](../../../scripts/patches/README.md).
 The unextended `dexsim_engine==0.5.1rc1` wheel alone is insufficient for raw
 contact parameters. SDK binaries are not redistributed with the model.
-Current dev integration is tracked separately by
+The earlier dev integration was tracked separately by
 [Dexverse Draft MR !1562](http://192.168.3.16/Engine/dexverse/-/merge_requests/1562);
-it has not completed native release qualification. A new SDK/solver profile
-requires a new evaluation and must not inherit the historical result.
+its status does not qualify a different native release. Current direct-compound
+smoke checks use the installed 0.6.0rc1 package without the historical overlay.
+A new SDK/solver profile requires a new evaluation and must not inherit the
+historical result.
 
 Create the version-guarded MuJoCo Warp capacity overlay before a fresh process:
 

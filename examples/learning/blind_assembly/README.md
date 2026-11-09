@@ -6,6 +6,9 @@ privileged state and contact labels are training-only inputs.
 
 A pinned checkpoint, frozen physical resources and native replay evidence are
 available through [the reproduction guide](REPRODUCING.md) and `model.json`.
+Those measured replay results use a pinned historical source/SDK profile. The
+current Python 3.12 / DexSim 0.6.0rc1 task lifecycle has separate smoke checks;
+the historical success rates do not qualify its learning performance.
 
 ## Training and evaluation
 
