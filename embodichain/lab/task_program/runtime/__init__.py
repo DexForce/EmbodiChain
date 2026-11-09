@@ -28,7 +28,14 @@ from .parallel import ParallelTimingPolicy
 from .parallel_executor import ParallelSemanticExecutor
 from .results import SemanticExecutionResult, SemanticExecutionStatus
 
+from .lifecycle import (
+    TaskProgramPlanLifecycleFactory,
+    CompositeTaskProgramPlanLifecycleFactory,
+)
+
 __all__ = [
+    "TaskProgramPlanLifecycleFactory",
+    "CompositeTaskProgramPlanLifecycleFactory",
     "ParallelSemanticExecutor",
     "ParallelTimingPolicy",
     "SemanticCallExecutor",

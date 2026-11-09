@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import replace
 
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
@@ -171,6 +172,32 @@ def normalize_trajectory(
     """
     if not isinstance(source, Real2SimTrajectory):
         raise TypeError("source must be a Real2SimTrajectory")
+    values = _normalize_recording(
+        source,
+        source.phases,
+        joints=joints,
+        control_dt=control_dt,
+        event_tolerance_s=event_tolerance_s,
+        mimic_tolerance=mimic_tolerance,
+        max_samples=max_samples,
+        max_output_bytes=max_output_bytes,
+    )
+    return NormalizedReal2SimUnit(**values)
+
+
+def _normalize_recording(
+    source: object,
+    phases: Sequence,
+    *,
+    joints: Sequence[JointSpec],
+    control_dt: float,
+    event_indices: Sequence[int] = (),
+    event_tolerance_s: float = 1e-6,
+    mimic_tolerance: float = 1e-6,
+    max_samples: int = _DEFAULT_MAX_SAMPLES,
+    max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES,
+) -> dict:
+    """Shared numeric conversion; callers validate recording and phase types."""
     for value, name, positive in (
         (control_dt, "control_dt", True),
         (event_tolerance_s, "event_tolerance_s", False),
@@ -239,9 +266,14 @@ def normalize_trajectory(
             else "reference_assumption"
         )
     corrections.append(f"initial state source: {initial_state_origin}")
-    events = np.array(
-        [phase.start for phase in source.phases] + [len(times) - 1], dtype=np.int64
-    )
+    phase_events = [phase.start for phase in phases] + [len(times) - 1]
+    if len(set(phase_events)) != len(phase_events):
+        raise ValueError("each phase and its final event must be representable")
+    if any(
+        type(index) is not int or not 0 <= index < len(times) for index in event_indices
+    ):
+        raise ValueError("hard event indices must address source samples")
+    events = np.array(sorted(set(phase_events) | set(event_indices)), dtype=np.int64)
     if len(np.unique(events)) != len(events):
         raise ValueError("each phase and its final event must be representable")
     retained = np.ones(len(times), dtype=bool)
@@ -296,20 +328,11 @@ def normalize_trajectory(
     left[event_grid] = np.searchsorted(source_indices, events)
     right[event_grid] = left[event_grid]
     weight[event_grid] = 0
+    phase_grid = event_grid[np.searchsorted(events, phase_events)]
     result_phases = []
-    for idx, phase in enumerate(source.phases):
-        stop = int(event_grid[idx + 1]) if idx + 1 < len(source.phases) else count
-        result_phases.append(
-            PhaseAnnotation(
-                phase.name,
-                int(event_grid[idx]),
-                stop,
-                phase.kind,
-                phase.reference,
-                phase.allowed_operators,
-                phase.authority,
-            )
-        )
+    for idx, phase in enumerate(phases):
+        stop = int(phase_grid[idx + 1]) if idx + 1 < len(phases) else count
+        result_phases.append(replace(phase, start=int(phase_grid[idx]), stop=stop))
 
     world_tcp = None
     if source.eef_poses is not None:
@@ -337,7 +360,7 @@ def normalize_trajectory(
         transforms[event_grid, :3, 3] = translation[left[event_grid]]
         world_tcp = frame @ transforms @ tool
     for name in ("object_pose", "target_pose"):
-        value = getattr(source, name)
+        value = getattr(source, name, None)
         if value is not None:
             _rigid(value, name)
     time_map = TrajectoryTimeMap(
@@ -351,7 +374,7 @@ def normalize_trajectory(
     report = NormalizationReport(
         indices, tuple(corrections), time_map, initial_state_origin
     )
-    return NormalizedReal2SimUnit(
+    return dict(
         source=source,
         joint_names=tuple(joint.name for joint in joints),
         qpos=result_qpos,

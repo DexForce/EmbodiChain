@@ -258,6 +258,13 @@ Simulation bindings
 .. autoclass:: SimulationTaskProgramFactory
    :members:
 
+``capture_root_pose=True`` includes an owned arena-local robot root transform
+in each synchronized planning observation. The default leaves it unset and
+does not query root poses. ``hold_qpos_source="observed"`` preserves the default
+captured-position holds without another robot read. Explicit ``drive_target``
+mode reads controller targets for unaddressed joints; safe stops still use
+measured positions from their planning context.
+
 .. autoclass:: SimulationTaskProgramAdapterFactory
    :members:
 
@@ -277,6 +284,29 @@ Simulation bindings
 
 Implementation module exports
 -----------------------------
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.policies
+
+``SimulationSettleMonitorCfg`` adds an explicit measurement mode to the existing
+dynamic settle thresholds and cadence. Use it in a registration's
+``settle_presets`` table. ``pose_delta`` requires an explicitly bound native
+rigid object and the authoritative control ``step_dt``; provider-free catalog
+preflight rejects articulation targets. The first observation has no previous
+pose and remains unresolved. Inactive rows and timeout behavior retain the
+shared monitor contract.
+
+Plain ``DynamicSettleMonitorCfg`` values and the built-in preset table keep
+reported velocities and their existing identity/metadata. Names such as
+``contained_rigid_object`` do not select measurement behavior or install a preset.
+Configured JSON declarations must be decoded by their integration owner; this
+type does not register a second deployment configuration source.
+
+.. autosummary::
+
+   SimulationSettleMonitorCfg
+
+.. autoclass:: SimulationSettleMonitorCfg
+   :members:
 
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.parallel_safety
 
@@ -373,3 +403,96 @@ selection, and hosts constructing a bridge directly retain that responsibility.
    :members: validate_program, validate_manifest
 
 .. autofunction:: task_program_fingerprint
+
+Configured transport targets
+----------------------------
+
+Named ``move_held_object`` routes declare canonical carried-object identities
+and absolute or scene-relative target poses. They lower to the shared
+``MoveHeldObject`` goal, retain attachment semantics and expose corresponding
+Pick lookahead targets. Lowering reads no live state and performs no IK or
+planning. Existing single-target configurations keep their factory and effect
+contract. The route form is mutually exclusive with the legacy selector fields.
+
+The routed-2 contract supplies the route's exact ``object_id`` through
+``HeldObjectPoseGoal``. Grounding requires the selected resource to hold that
+object in every eligible row before planning. A verified monitor is required;
+projected presets reject before dispatch. The existing verified input relation
+is guarded during ``transport`` without a new acquisition gate. Named transport
+plans additionally request terminal retained-attachment verification. Observed
+loss invalidates only the affected resource rows; unresolved terminal evidence
+cannot complete those rows successfully. The legacy single-target form keeps its
+original effectless default and registration fingerprint.
+
+.. code-block:: yaml
+
+   kind: move_held_object
+   routes:
+     - object_id: bottle
+       target_id: over_cup
+       pose:
+         kind: scene_entity
+         entity_id: cup
+
+The optional ``relative_pose`` uses a flattened entity-local SE(3) matrix;
+``world_orientation`` optionally supplies a world-frame 3x3 rotation. Absolute
+poses use ``kind: pose``, ``position`` and ``quaternion_xyzw``. Every conversion
+owns its runtime tensors; declarations remain immutable and fingerprinted.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.targets
+
+.. autoclass:: AbsolutePoseTarget
+   :members:
+
+.. autoclass:: SceneEntityTarget
+   :members:
+
+.. autodata:: ConfiguredPoseTarget
+
+.. autofunction:: resolve_pose_target
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.transport
+
+.. autoclass:: HeldObjectTransportRoute
+   :members:
+
+.. autoclass:: RoutedMoveHeldObjectLowererFactory
+   :members:
+
+Declaration-only lowerer validation
+----------------------------------
+
+Factories may implement ``RegisteredSemanticLowererSceneValidator`` to reject
+missing or ambiguous references against the immutable scene manifest during
+registration. The routed transport factory uses this optional contract;
+existing factories remain valid and keep their fingerprints. Implementations
+must not construct resources or read live state during this preflight.
+
+.. currentmodule:: embodichain.lab.task_program.integrations
+
+.. autosummary::
+
+   RegisteredSemanticLowererSceneValidator
+
+.. currentmodule:: embodichain.lab.task_program.integrations.extensions
+
+.. autoclass:: RegisteredSemanticLowererSceneValidator
+   :members:
+
+
+Explicit runtime observation scope
+----------------------------------
+
+``TaskProgramEnvironmentAdapter.assemble_runtime`` and ``create_bridge`` accept
+an optional ``runtime_scope_guard`` for a host-owned session, episode or physical
+owner epoch. The standard factory forwards it to the planning observation port
+and shared scene cache. ``validate_runtime_scope()`` checks factory lifetime and
+this explicit authority without acquiring robot/sensor state or stepping physics.
+A scope change during acquisition rejects the result. Cached qpos also rejects
+closed factory resources; a live factory does not imply that a previous bridge
+still has authority.
+
+The default ``None`` keeps legacy custom factory calls unchanged: no new keyword
+is passed to them. Explicit scope requests require a factory supporting the
+optional keyword. The validator must not acquire observations or mutate physical
+state. Control-service construction and evidence collection remain separate.

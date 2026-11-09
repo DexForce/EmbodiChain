@@ -30,7 +30,7 @@ properties must be committed to its immutable model.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import MISSING, dataclass, field, fields, replace
 import math
 import hashlib
@@ -55,6 +55,7 @@ from dexsim.spawn import (
     MaterialDesc,
     NewtonCollisionDesc,
     NewtonJointDesc,
+    NewtonParticleContactMaterialDesc,
     ObjectDesc,
     RenderDesc,
     RigidBodyPhysicsDesc,
@@ -502,6 +503,17 @@ def _mesh_geometry_from_cfg(shape: MeshCfg, *, segment_name: str) -> GeometryDes
     )
 
 
+def _particle_contact_material(
+    value: Mapping[str, float] | None,
+) -> NewtonParticleContactMaterialDesc | None:
+    """Validate and lower a deformable's DexUni contact material."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError("Deformable contact_material must be a mapping.")
+    return NewtonParticleContactMaterialDesc(**dict(value))
+
+
 def volume_deformable_desc_from_cfg(
     cfg: VolumeDeformableObjectCfg,
     *,
@@ -544,6 +556,7 @@ def volume_deformable_desc_from_cfg(
         ),
         physics=SoftBodyPhysicsDesc(
             volume_density=density,
+            contact_material=_particle_contact_material(attrs.contact_material),
             k_mu=youngs / (2.0 * (1.0 + poissons)),
             k_lambda=(youngs * poissons / ((1.0 + poissons) * (1.0 - 2.0 * poissons))),
             k_damp=float(attrs.elasticity_damping),
@@ -636,6 +649,7 @@ def surface_deformable_desc_from_cfg(
         visual_binding_mode=cfg.visual_binding_mode,
         physics=ClothPhysicsDesc(
             surface_density=density,
+            contact_material=_particle_contact_material(attrs.contact_material),
             add_springs=bool(attrs.add_springs),
             spring_ke=attrs.spring_ke,
             spring_kd=attrs.spring_kd,
@@ -1225,7 +1239,7 @@ def _compile_joint_properties(
         if newton_solver_type is None
         else newton_solver_type.replace("-", "_").lower()
     )
-    if normalized_solver not in {None, "auto", "mujoco_warp", "mjwarp"} and any(
+    if normalized_solver not in {None, "dexuni", "mujoco_warp", "mjwarp"} and any(
         mode == 1 for mode in joint_target_modes.values()
     ):
         warnings.warn(

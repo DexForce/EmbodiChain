@@ -32,7 +32,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Callable, Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
-from tensordict import TensorDict
+from tensordict import TensorDict, TensorDictBase
 
 from embodichain.lab.sim.types import Device, Array
 from embodichain.lab.sim.objects import Robot
@@ -603,6 +603,7 @@ def config_to_cfg(
     *,
     source_path: str | os.PathLike[str] | None = None,
     task_program_path_override: str | os.PathLike[str] | None = None,
+    component_sources: Mapping[str, Mapping[str, object]] | None = None,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -635,6 +636,9 @@ def config_to_cfg(
         task_program_path_override: Optional explicit program path. This is
             selected instead of the Gym-config path and resolves from the
             process working directory.
+        component_sources: Optional verified physical component snapshot passed
+            to the public component resolver. Selected component files are not
+            reopened; external asset resolution keeps its existing owner rules.
 
     Returns:
         EmbodiedEnvCfg: A configuration object for initializing the environment.
@@ -718,7 +722,9 @@ def config_to_cfg(
     base_dir = (
         Path.cwd() if source_path is None else Path(source_path).expanduser().parent
     )
-    component_resolution = _resolve_gym_components(config, base_dir=base_dir)
+    component_resolution = _resolve_gym_components(
+        config, base_dir=base_dir, component_sources=component_sources
+    )
     config = component_resolution.config
     if "objective" in config:
         from embodichain.lab.gym.envs.objectives.config import load_objective_component
@@ -755,6 +761,7 @@ def config_to_cfg(
     configured_task_program_selection = None
     configured_task_program_id: str | None = None
     configured_task_program_path: Path | None = None
+    configured_task_program_deployment = None
     if "task_program" in config:
         if not component_resolution.embodiment_selected:
             raise ValueError(
@@ -789,6 +796,7 @@ def config_to_cfg(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,
         )
+        configured_task_program_deployment = deployment
         configured_task_program_integration = deployment.integration
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
@@ -798,23 +806,31 @@ def config_to_cfg(
 
     if (
         task_program_path_override is not None
-        or configured_task_program_path is not None
+        or configured_task_program_deployment is not None
     ):
-        if task_program_path_override is not None:
+        inline_deployment = (
+            task_program_path_override is None
+            and configured_task_program_deployment is not None
+            and configured_task_program_deployment.program_path is None
+        )
+        if inline_deployment:
+            task_program_path_text = None
+        elif task_program_path_override is not None:
             task_program_path = task_program_path_override
             if not isinstance(task_program_path, (str, os.PathLike)):
                 raise TypeError("task_program_path must be a string or path.")
         else:
             assert configured_task_program_path is not None
             task_program_path = configured_task_program_path
-        task_program_path_text = os.fspath(task_program_path)
-        if not task_program_path_text or (
-            task_program_path_text != task_program_path_text.strip()
-        ):
-            raise ValueError(
-                "task_program_path must be a non-empty string without outer "
-                "whitespace."
-            )
+        if not inline_deployment:
+            task_program_path_text = os.fspath(task_program_path)
+            if not task_program_path_text or (
+                task_program_path_text != task_program_path_text.strip()
+            ):
+                raise ValueError(
+                    "task_program_path must be a non-empty string without outer "
+                    "whitespace."
+                )
         from embodichain.lab.task_program.language.loader import (
             load_task_program,
         )
@@ -827,11 +843,16 @@ def config_to_cfg(
             registration = configured_task_program_integration.registration
         if registration is not None:
             registration.assert_unchanged()
-        task_program = load_task_program(
-            task_program_path_text,
-            integration=configured_task_program_selection,
-            validation_context=(None if registration is None else registration.catalog),
-        )
+        if inline_deployment:
+            task_program = configured_task_program_deployment.load_program()
+        else:
+            task_program = load_task_program(
+                task_program_path_text,
+                integration=configured_task_program_selection,
+                validation_context=(
+                    None if registration is None else registration.catalog
+                ),
+            )
         if (
             configured_task_program_id is not None
             and task_program.program_id != configured_task_program_id
@@ -1073,11 +1094,28 @@ def config_to_cfg(
                 raise_if_not_found=True,
             )
 
+            consumers = obs_params_modified.get("consumers", ("policy",))
+            if (
+                not isinstance(consumers, (list, tuple))
+                or not consumers
+                or any(
+                    not isinstance(value, str) or value not in {"policy", "recording"}
+                    for value in consumers
+                )
+                or len(set(consumers)) != len(consumers)
+            ):
+                raise ValueError(f"Invalid observation consumers for {obs_name!r}.")
+            if obs_params_modified["mode"] == "modify" and tuple(consumers) != (
+                "policy",
+            ):
+                raise ValueError("Modify functors apply only to policy observations.")
             observation = ObservationCfg(
                 func=obs_func,
                 mode=obs_params_modified["mode"],
                 name=obs_params_modified["name"],
                 params=obs_params_modified["params"],
+                consumers=tuple(consumers),
+                extra=obs_params_modified.get("extra", {}),
             )
 
             setattr(env_cfg.observations, obs_name, observation)
@@ -1983,7 +2021,9 @@ def init_rollout_buffer_from_config(
     if "observations" in env_config:
         for obs_name, obs_params in env_config["observations"].items():
             obs_mode = obs_params.get("mode", "modify")
-            if obs_mode == "add":
+            if obs_mode == "add" and "policy" in obs_params.get(
+                "consumers", ("policy",)
+            ):
                 obs_extra = obs_params.get("extra", {})
                 shape = obs_extra.get("shape", None)
                 if shape is not None:
@@ -2362,3 +2402,491 @@ def load_trajectory(trajectory: str | os.PathLike[str] | dict) -> dict:
         )
 
     return data
+
+
+# Raw observations are fields of the existing rollout store. These operations
+# deliberately keep their state in that TensorDict, not in a second manager.
+def _init_raw_rollout(
+    storage: TensorDictBase,
+    context: Any,
+    fields: Mapping[str, torch.Tensor],
+    actions: torch.Tensor,
+) -> None:
+    count, capacity = actions.shape[:2]
+    if len(context.episode_ids) != count or tuple(storage.batch_size) != (count,):
+        raise ValueError("Raw rollout rows must match their episode owner.")
+    if "raw_obs" in storage.keys():
+        raise ValueError("Raw rollout observations are already initialized.")
+    if storage.device not in (None, actions.device):
+        raise ValueError("Raw rollout storage has another device policy.")
+    for values in fields.values():
+        if (
+            tuple(values.shape[:2]) != (count, capacity + 1)
+            or values.device != actions.device
+        ):
+            raise ValueError(
+                "Raw observations require T+1 state slots on the action device."
+            )
+    storage["raw_actions"] = actions
+    storage["raw_obs"] = TensorDict(
+        dict(fields), batch_size=[count, capacity + 1], device=actions.device
+    )
+    storage["raw_valid"] = TensorDict(
+        {}, batch_size=[count, capacity + 1], device=actions.device
+    )
+    storage["raw_steps"] = torch.zeros(count, dtype=torch.long, device=actions.device)
+    storage["raw_revision"] = torch.full(
+        (count, capacity + 1), -1, dtype=torch.long, device=actions.device
+    )
+    storage["raw_timestamp"] = torch.full(
+        (count, capacity + 1), float("nan"), dtype=torch.float64, device=actions.device
+    )
+    storage.set_non_tensor("raw_acquisition_errors", {})
+    storage.set_non_tensor(
+        "raw_state",
+        {
+            "context": context,
+            "episodes": (-1,) * count,
+            "latest_revision": -1,
+            "closed": False,
+            "layout": None,
+        },
+    )
+
+
+def _raw_rollout_state(storage: TensorDictBase | None, context: Any) -> dict[str, Any]:
+    if storage is None or "raw_state" not in storage.keys():
+        raise RuntimeError("Raw rollout observations are unavailable.")
+    state = storage.get_non_tensor("raw_state")
+    if state["closed"]:
+        raise RuntimeError("Raw observations are unavailable after close.")
+    if state["context"] is not context:
+        raise ValueError("Raw rollout belongs to another episode owner.")
+    return state
+
+
+def _write_raw_rollout(
+    storage, context, frame, *, field_ids=(), env_ids=None, action=None, active=None
+) -> None:
+    state = _raw_rollout_state(storage, context)
+    if frame.episode_owner is not context:
+        raise ValueError("Observation frame belongs to another episode owner.")
+    if frame.episode_ids != context.episode_ids:
+        raise ValueError("Observation frame belongs to another episode.")
+    if frame.revision < 0 or frame.clock_domain not in (
+        "simulation_time",
+        "unavailable",
+    ):
+        raise ValueError("Raw rollout requires an explicit observation boundary.")
+    actions = storage["raw_actions"]
+    steps, revisions, timestamps = (
+        storage["raw_steps"],
+        storage["raw_revision"],
+        storage["raw_timestamp"],
+    )
+    count, capacity = actions.shape[:2]
+    device = actions.device
+    if action is None:
+        values, valid = storage["raw_obs"], storage["raw_valid"]
+        errors = storage.get_non_tensor("raw_acquisition_errors")
+        if state["layout"] is None:
+            if values.keys() - set(field_ids):
+                raise ValueError(
+                    "Observation boundary is missing required rollout fields."
+                )
+            layout = []
+            for name in field_ids:
+                sample = frame.fields[name]
+                if name not in values.keys():
+                    values[name] = torch.zeros(
+                        (count, capacity + 1, *sample.values.shape[1:]),
+                        dtype=sample.values.dtype,
+                        device=device,
+                    )
+                valid[name] = torch.zeros(
+                    (count, capacity + 1), dtype=torch.bool, device=device
+                )
+                errors[name] = {}
+                layout.append(
+                    (
+                        name,
+                        values[name],
+                        valid[name],
+                        errors[name],
+                        (count, *values[name].shape[2:]),
+                        values[name].dtype,
+                    )
+                )
+            state["layout"] = tuple(layout)
+        ids = context._ids(env_ids).to(device)
+        rows = set(ids.cpu().tolist())
+        if not all(row["initialized"] for row in context.snapshot(sorted(rows))):
+            raise ValueError("Raw rollout requires initialized episode rows.")
+    else:
+        if tuple(action.shape) != (count, *actions.shape[2:]):
+            raise ValueError("Action does not match the raw rollout layout.")
+        mask = steps < capacity
+        if active is not None:
+            if active.shape != (count,) or active.dtype != torch.bool:
+                raise ValueError("Raw recording selection requires one bool per row.")
+            mask &= active.to(device)
+        ids = mask.nonzero(as_tuple=False).flatten()
+        if not ids.numel():
+            return
+        if state["episodes"] != frame.episode_ids:
+            for row in ids.cpu().tolist():
+                if state["episodes"][row] < 0:
+                    raise ValueError("Raw rollout requires an initial observation.")
+                if state["episodes"][row] != frame.episode_ids[row]:
+                    raise ValueError("Raw rollout belongs to another episode.")
+    if state["layout"] is None:
+        raise RuntimeError("Raw rollout fields have not been initialized.")
+    for name, target, _, _, shape, dtype in state["layout"]:
+        sample = frame.fields[name].values
+        if sample.shape != shape or sample.device != device or sample.dtype != dtype:
+            raise ValueError(f"Raw rollout values differ from storage for {name!r}.")
+    if action is None:
+        epochs = list(state["episodes"])
+        for row in rows:
+            epochs[row] = frame.episode_ids[row]
+        state["episodes"] = tuple(epochs)
+        steps[ids] = 0
+        revisions[ids] = -1
+        timestamps[ids] = float("nan")
+        for _, _, availability, reasons, _, _ in state["layout"]:
+            availability[ids] = False
+            for key in list(reasons):
+                if key[0] in rows:
+                    del reasons[key]
+        slots = steps[ids]
+    else:
+        slots = steps[ids] + 1
+        if frame.revision <= state["latest_revision"] and bool(
+            (revisions[ids, slots - 1] >= frame.revision).any()
+        ):
+            raise ValueError("Each transition requires a new observation acquisition.")
+    selected_rows = selected_slots = None
+    for name, target, availability, reasons, _, _ in state["layout"]:
+        sample = frame.fields[name]
+        target[ids, slots] = sample.values[ids]
+        availability[ids, slots] = sample.valid[ids]
+        if any(error is not None for error in sample.acquisition_errors):
+            if selected_rows is None:
+                selected_rows, selected_slots = ids.cpu().tolist(), slots.cpu().tolist()
+            for row, slot in zip(selected_rows, selected_slots, strict=True):
+                if sample.acquisition_errors[row] is not None:
+                    reasons[row, slot] = sample.acquisition_errors[row]
+    revisions[ids, slots] = frame.revision
+    timestamps[ids, slots] = (
+        frame.timestamp if frame.timestamp is not None else float("nan")
+    )
+    if action is not None:
+        actions[ids, slots - 1] = action[ids].to(device)
+        steps[ids] += 1
+    state["latest_revision"] = max(state["latest_revision"], frame.revision)
+
+
+def _read_raw_rollout(
+    storage,
+    context,
+    frame_indices=None,
+    *,
+    fields=None,
+    episode_ids=None,
+    env_ids=None,
+    device="cpu",
+):
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationHistorySnapshot,
+    )
+
+    state = _raw_rollout_state(storage, context)
+    ids = context._ids(env_ids).to(storage["raw_actions"].device)
+    rows = tuple(ids.cpu().tolist())
+    episodes = (
+        tuple(state["episodes"][row] for row in rows)
+        if episode_ids is None
+        else tuple(episode_ids)
+    )
+    if (
+        not rows
+        or len(episodes) != len(rows)
+        or any(type(episode) is not int or episode < 0 for episode in episodes)
+    ):
+        raise ValueError("Raw rollout queries require exact episode IDs per row.")
+
+    def check():
+        _raw_rollout_state(storage, context)
+        current = context.snapshot(rows)
+        if (
+            tuple(row["episode"] for row in current) != episodes
+            or not all(row["initialized"] for row in current)
+            or tuple(state["episodes"][row] for row in rows) != episodes
+        ):
+            raise ValueError(
+                "Raw observations belong to another or uninitialized episode."
+            )
+
+    check()
+    lengths = storage["raw_steps"][ids].detach().cpu()
+    errors = storage.get_non_tensor("raw_acquisition_errors")
+    if frame_indices is None:
+        size = int(lengths.max()) + 1
+        revisions = storage["raw_revision"][ids, :size].detach().to(device)
+        timestamps = storage["raw_timestamp"][ids, :size].detach().to(device)
+        written = revisions >= 0
+        exported = {}
+        for name, values, valid, reasons, _, _ in state["layout"] or ():
+            data = values[ids, :size].detach().to(device)
+            data.masked_fill_(
+                ~written.reshape(*written.shape, *((1,) * (data.ndim - 2))), 0
+            )
+            availability = valid[ids, :size].detach().to(device) & written
+            cpu_valid = availability.cpu().tolist()
+            exported[name] = {
+                "values": data,
+                "valid": availability,
+                "acquisition_errors": [
+                    {
+                        slot: reasons.get(
+                            (row, slot),
+                            "Raw observation acquisition is unavailable or nonfinite.",
+                        )
+                        for slot in range(int(lengths[index]) + 1)
+                        if not cpu_valid[index][slot]
+                    }
+                    for index, row in enumerate(rows)
+                ],
+            }
+        check()
+        return {
+            "schema_version": 1,
+            "env_ids": rows,
+            "episode_ids": episodes,
+            "lengths": lengths,
+            "revisions": revisions,
+            "timestamps": timestamps,
+            "clock_domain": (
+                "simulation_time"
+                if bool(torch.isfinite(timestamps[written]).all())
+                else "unavailable"
+            ),
+            "timestamp_valid": torch.isfinite(timestamps) & written,
+            "fields": exported,
+        }
+    frames, names = tuple(frame_indices), tuple(fields or ())
+    capacity = storage["raw_actions"].shape[1]
+    if (
+        len(frames) != len(rows)
+        or any(
+            type(frame) is not int or frame < 0 or frame > capacity for frame in frames
+        )
+        or not names
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError("Raw rollout queries require exact fields and frames per row.")
+    slots = torch.tensor(frames, dtype=torch.long, device=ids.device)
+    if bool((slots > storage["raw_steps"][ids]).any()) or bool(
+        (storage["raw_revision"][ids, slots] < 0).any()
+    ):
+        raise ValueError("The requested boundary is not fully recorded.")
+    values, validity, reasons = {}, {}, {}
+    for name in names:
+        valid = storage["raw_valid"][name][ids, slots].detach().cpu()
+        values[name] = storage["raw_obs"][name][ids, slots].detach().cpu()
+        validity[name] = valid
+        reasons[name] = tuple(
+            (
+                None
+                if ok
+                else errors[name].get(
+                    (row, slot),
+                    "Raw observation acquisition is unavailable or nonfinite.",
+                )
+            )
+            for row, slot, ok in zip(rows, frames, valid.tolist(), strict=True)
+        )
+    revisions = tuple(storage["raw_revision"][ids, slots].cpu().tolist())
+    times = tuple(
+        None if value != value else value
+        for value in storage["raw_timestamp"][ids, slots].cpu().tolist()
+    )
+    check()
+    return ObservationHistorySnapshot(
+        values,
+        validity,
+        reasons,
+        rows,
+        episodes,
+        frames,
+        revisions,
+        times,
+        "simulation_time" if all(time is not None for time in times) else "unavailable",
+    )
+
+
+def _read_raw_rollout_step_counts(
+    storage: TensorDictBase | None,
+    context: Any,
+    *,
+    episode_ids: Sequence[int],
+    env_ids: Sequence[int] | None = None,
+) -> tuple[int, ...]:
+    """Copy completed boundaries from the raw owner without copying field history."""
+    state = _raw_rollout_state(storage, context)
+    ids = context._ids(env_ids).to(storage["raw_actions"].device)
+    rows, episodes = tuple(ids.cpu().tolist()), tuple(episode_ids)
+    if (
+        not rows
+        or len(episodes) != len(rows)
+        or any(type(value) is not int or value < 0 for value in episodes)
+    ):
+        raise ValueError("Raw history boundaries require exact episode IDs per row.")
+
+    def check() -> None:
+        _raw_rollout_state(storage, context)
+        current = context.snapshot(rows)
+        _raw_rollout_state(storage, context)
+        if (
+            tuple(row["episode"] for row in current) != episodes
+            or not all(row["initialized"] for row in current)
+            or tuple(state["episodes"][row] for row in rows) != episodes
+        ):
+            raise ValueError(
+                "Raw observations belong to another or uninitialized episode."
+            )
+
+    check()
+    counts = tuple(storage["raw_steps"][ids].detach().cpu().tolist())
+    capacity = storage["raw_actions"].shape[1]
+    if any(type(value) is not int or not 0 <= value <= capacity for value in counts):
+        raise ValueError("Raw history completed boundaries exceed their storage.")
+    slots = torch.tensor(counts, dtype=torch.long, device=ids.device)
+    if bool((storage["raw_revision"][ids, slots] < 0).any()):
+        raise ValueError("The requested boundary is not fully recorded.")
+    check()
+    return counts
+
+
+def _read_raw_rollout_window(
+    storage: TensorDictBase | None,
+    context: Any,
+    start_frames: Sequence[int],
+    end_frames: Sequence[int],
+    *,
+    fields: Sequence[str],
+    episode_ids: Sequence[int],
+    env_ids: Sequence[int] | None = None,
+    device: str | torch.device = "cpu",
+) -> dict[str, Any]:
+    """Copy selected inclusive slices from the existing raw observation owner."""
+    state = _raw_rollout_state(storage, context)
+    ids = context._ids(env_ids).to(storage["raw_actions"].device)
+    rows = tuple(ids.cpu().tolist())
+    starts, ends, episodes, names = (
+        tuple(start_frames),
+        tuple(end_frames),
+        tuple(episode_ids),
+        tuple(fields),
+    )
+    capacity = storage["raw_actions"].shape[1]
+    if (
+        not rows
+        or any(len(values) != len(rows) for values in (starts, ends, episodes))
+        or any(
+            type(value) is not int or value < 0
+            for values in (starts, ends, episodes)
+            for value in values
+        )
+        or any(
+            start > end or end > capacity
+            for start, end in zip(starts, ends, strict=True)
+        )
+        or not names
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError(
+            "Raw history windows require exact fields and inclusive boundaries per row."
+        )
+
+    def check() -> None:
+        _raw_rollout_state(storage, context)
+        current = context.snapshot(rows)
+        _raw_rollout_state(storage, context)
+        if (
+            tuple(row["episode"] for row in current) != episodes
+            or not all(row["initialized"] for row in current)
+            or tuple(state["episodes"][row] for row in rows) != episodes
+        ):
+            raise ValueError(
+                "Raw observations belong to another or uninitialized episode."
+            )
+
+    check()
+    completed = storage["raw_steps"][ids].detach().cpu().tolist()
+    if any(end > complete for end, complete in zip(ends, completed, strict=True)):
+        raise ValueError("The requested window is not fully recorded.")
+    selections = tuple(
+        slice(start, end + 1) for start, end in zip(starts, ends, strict=True)
+    )
+    revisions, timestamps = [], []
+    for row, slots in zip(rows, selections, strict=True):
+        revision = (
+            storage["raw_revision"][row, slots].detach().to(device=device, copy=True)
+        )
+        if bool((revision < 0).any()):
+            raise ValueError("The requested window is not fully recorded.")
+        revisions.append(revision)
+        timestamps.append(
+            storage["raw_timestamp"][row, slots].detach().to(device=device, copy=True)
+        )
+    errors = storage.get_non_tensor("raw_acquisition_errors")
+    result = {}
+    for name in names:
+        values, validity, reasons = [], [], []
+        for row, start, slots in zip(rows, starts, selections, strict=True):
+            values.append(
+                storage["raw_obs"][name][row, slots]
+                .detach()
+                .to(device=device, copy=True)
+            )
+            valid = (
+                storage["raw_valid"][name][row, slots]
+                .detach()
+                .to(device=device, copy=True)
+            )
+            validity.append(valid)
+            row_errors: list[str | None] = [None] * valid.numel()
+            for offset in (~valid).nonzero(as_tuple=False).flatten().cpu().tolist():
+                row_errors[offset] = errors[name].get(
+                    (row, start + offset),
+                    "Raw observation acquisition is unavailable or nonfinite.",
+                )
+            reasons.append(tuple(row_errors))
+        result[name] = {
+            "values": tuple(values),
+            "valid": tuple(validity),
+            "acquisition_errors": tuple(reasons),
+        }
+    check()
+    timestamp_valid = tuple(torch.isfinite(times) for times in timestamps)
+    return {
+        "fields": result,
+        "env_ids": rows,
+        "episode_ids": episodes,
+        "start_frames": starts,
+        "end_frames": ends,
+        "revisions": tuple(revisions),
+        "timestamps": tuple(timestamps),
+        "timestamp_valid": timestamp_valid,
+        "clock_domain": (
+            "simulation_time"
+            if all(bool(valid.all()) for valid in timestamp_valid)
+            else "unavailable"
+        ),
+    }
+
+
+def _close_raw_rollout(storage: TensorDictBase | None) -> None:
+    if storage is not None and "raw_state" in storage.keys():
+        storage.get_non_tensor("raw_state")["closed"] = True

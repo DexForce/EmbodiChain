@@ -39,6 +39,14 @@ Manufacturers
      - :doc:`Revo 1 <brainco/revo1>`
      - ``BrainCoRevo1Cfg``
      - Standalone left/right hand with six joint commands and four source mimic followers.
+   * - :doc:`Wuji Technology <wuji/index>`
+     - :doc:`Wuji Hand <wuji/hand>`
+     - ``WujiHandCfg``
+     - Standalone left/right hand with 20 independent source joints.
+   * - :doc:`Sharpa Robotics <sharpa/index>`
+     - :doc:`Sharpa Wave 01 <sharpa/wave>`
+     - ``SharpaWaveCfg``
+     - Standalone left/right hand with 22 independent source joints.
    * - :doc:`DexForce <dexforce/index>`
      - :doc:`Dexforce W1 <dexforce/w1>`
      - ``DexforceW1Cfg``
@@ -97,6 +105,8 @@ Manufacturers
    anybotics/index
    arx/index
    brainco/index
+   sharpa/index
+   wuji/index
    changingtek/index
    dh_robotics/index
    inspire/index
@@ -114,12 +124,13 @@ Manufacturers
 End-effector Assets
 -------------------
 
-Hands and grippers share the manufacturer/model organization above. Only
-BrainCo Revo 1 currently adds a standalone hand preset; the other entries
-provide source assets for caller-owned assembly. ``eef`` is a control-group
+Hands and grippers share the manufacturer/model organization above.
+BrainCo Revo 1, Sharpa Wave 01 and Wuji Hand provide standalone hand presets;
+asset-only
+entries provide source assets for caller-owned assembly. ``eef`` is a control-group
 convention and does not identify grasping capabilities.
 
-See :doc:`end_effectors` for all 11 asset IDs, canonical imports, migration
+See :doc:`end_effectors` for the asset IDs, canonical imports, migration
 instructions, provenance boundaries and rendered source-model illustrations.
 
 .. list-table::
@@ -135,6 +146,12 @@ instructions, provenance boundaries and rendered source-model illustrations.
      - Gripper asset; host-owned mounting.
    * - :doc:`BrainCo <brainco/index>`
      - :doc:`Revo 1 <brainco/revo1>`
+     - Left/right assets and standalone preset.
+   * - :doc:`Wuji Technology <wuji/index>`
+     - :doc:`Wuji Hand <wuji/hand>`
+     - Left/right assets and standalone preset.
+   * - :doc:`Sharpa Robotics <sharpa/index>`
+     - :doc:`Sharpa Wave 01 <sharpa/wave>`
      - Left/right assets and standalone preset.
    * - :doc:`ChangingTek <changingtek/index>`
      - :doc:`CTM2F110 <changingtek/ctm2f110>`

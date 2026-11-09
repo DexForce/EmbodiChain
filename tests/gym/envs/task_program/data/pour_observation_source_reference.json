@@ -1,0 +1,2264 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "kind": "provider-free B0 unit fixtures; not native physics qualification",
+  "common": {
+    "spec": {
+      "schema_version": "task_spec/v0.1",
+      "canonicalization_version": "task_spec_c14n/v1",
+      "roles": [
+        {
+          "id": "role_001",
+          "kind": "object",
+          "cardinality": "one",
+          "affordances": [
+            "graspable",
+            "pourable"
+          ],
+          "properties": {},
+          "source_structure": "rigid_object"
+        },
+        {
+          "id": "role_002",
+          "kind": "target",
+          "cardinality": "one",
+          "affordances": [
+            "container"
+          ],
+          "properties": {},
+          "source_structure": "rigid_object"
+        }
+      ],
+      "init": [],
+      "goal": [
+        {
+          "id": "goal_001",
+          "predicate": "pour_motion",
+          "operator": "eq",
+          "expected": true,
+          "subject": "role_001",
+          "reference": "role_002",
+          "relation": "above",
+          "arguments": {
+            "required_arm": "left_arm",
+            "task_type": "E3"
+          }
+        }
+      ],
+      "invariants": [],
+      "temporal": [],
+      "milestones": [
+        {
+          "id": "step_01",
+          "achieve": [
+            {
+              "id": "milestone:step_01:0",
+              "predicate": "pour_motion",
+              "operator": "eq",
+              "expected": true,
+              "subject": "role_001",
+              "reference": "role_002",
+              "relation": "above",
+              "arguments": {
+                "required_arm": "left_arm",
+                "task_type": "E3"
+              }
+            }
+          ]
+        }
+      ],
+      "requirements": [
+        {
+          "consumer": "asset",
+          "key": "role_001",
+          "value": {
+            "affordances": [
+              "graspable",
+              "pourable"
+            ],
+            "attributes": {},
+            "source_structure": "rigid_object"
+          }
+        },
+        {
+          "consumer": "asset",
+          "key": "role_002",
+          "value": {
+            "affordances": [
+              "container"
+            ],
+            "attributes": {},
+            "source_structure": "rigid_object"
+          }
+        },
+        {
+          "consumer": "embodiment",
+          "key": "required_arms",
+          "value": [
+            "left_arm"
+          ]
+        },
+        {
+          "consumer": "expansion",
+          "key": "lineage_key",
+          "value": "task_spec.semantic_hash"
+        },
+        {
+          "consumer": "scene",
+          "key": "role_001",
+          "value": {
+            "initial_state": {},
+            "kind": "object"
+          }
+        },
+        {
+          "consumer": "scene",
+          "key": "role_002",
+          "value": {
+            "initial_state": {},
+            "kind": "target"
+          }
+        },
+        {
+          "consumer": "task_program",
+          "key": "goal_predicates",
+          "value": [
+            "pour_motion"
+          ]
+        }
+      ],
+      "task_id": "demo",
+      "instruction": "Validated multi-stage task",
+      "metadata": {
+        "candidate_id": "candidate_01",
+        "generator": "embodichain.gen_sim.task_engine",
+        "goal_sources": {
+          "goal_001": [
+            "step_01"
+          ]
+        },
+        "instruction_coverage": "validated_draft_only",
+        "legacy_semantic_hash": "14cda18dbd1a5a2d4151daa14aed58c97c12de2cb770f76ac18e898546d8bde7",
+        "milestone_sources": {
+          "step_01": "step_01"
+        },
+        "role_references": {
+          "role_001": [
+            "step_01.object"
+          ],
+          "role_002": [
+            "step_01.target"
+          ]
+        },
+        "step_roles": {
+          "step_01": {
+            "object": "role_001",
+            "target": "role_002"
+          }
+        },
+        "task_candidate_schema": "action_engine_task_draft_v1",
+        "terminal_goal_policy": "explicit_state_slots/v1"
+      },
+      "semantic_hash": "b2f312bfc06f0c638000ab4a68f063a5c9295f50d721ffb4dba8989719cb7a05"
+    },
+    "graph": {
+      "schema_version": "semantic_task_graph/v1",
+      "task_id": "demo",
+      "instruction": "Validated multi-stage task",
+      "planner_route": "offline",
+      "integration_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+      "targets": {
+        "step_01_return_target": {
+          "kind": "cyclic_pose",
+          "values": [
+            {
+              "position": [
+                0.0,
+                0.0,
+                0.7
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          ]
+        }
+      },
+      "nodes": [
+        {
+          "id": "step_01__call_01",
+          "call": {
+            "kind": "pick",
+            "object": "cube",
+            "resources": {
+              "primary": "left"
+            }
+          },
+          "depends_on": [],
+          "task_instance_id": "step_01",
+          "task_type": "E3",
+          "role": "primary"
+        },
+        {
+          "id": "step_01__call_02",
+          "call": {
+            "kind": "registered",
+            "call_id": "simulation.move_held_object",
+            "arguments": {
+              "object": "cube",
+              "target": "step_01_pour_target",
+              "reference": "region"
+            },
+            "resources": {
+              "primary": "left"
+            }
+          },
+          "depends_on": [
+            "step_01__call_01"
+          ],
+          "task_instance_id": "step_01",
+          "task_type": "E3",
+          "role": "primary"
+        },
+        {
+          "id": "step_01__call_03",
+          "call": {
+            "kind": "registered",
+            "call_id": "simulation.pour",
+            "arguments": {
+              "object": "cube"
+            },
+            "resources": {
+              "primary": "left"
+            }
+          },
+          "depends_on": [
+            "step_01__call_02"
+          ],
+          "task_instance_id": "step_01",
+          "task_type": "E3",
+          "role": "primary"
+        },
+        {
+          "id": "step_01__call_04",
+          "call": {
+            "kind": "registered",
+            "call_id": "simulation.move_held_object",
+            "arguments": {
+              "object": "cube",
+              "target": "step_01_return_target"
+            },
+            "resources": {
+              "primary": "left"
+            }
+          },
+          "depends_on": [
+            "step_01__call_03"
+          ],
+          "task_instance_id": "step_01",
+          "task_type": "E3",
+          "role": "primary"
+        },
+        {
+          "id": "step_01__call_05",
+          "call": {
+            "kind": "place",
+            "object": "cube",
+            "at": {
+              "kind": "target_ref",
+              "target": "step_01_return_target"
+            },
+            "resources": {
+              "primary": "left"
+            }
+          },
+          "depends_on": [
+            "step_01__call_04"
+          ],
+          "task_instance_id": "step_01",
+          "task_type": "E3",
+          "role": "primary"
+        },
+        {
+          "id": "step_01__call_06",
+          "call": {
+            "kind": "registered",
+            "call_id": "simulation.park",
+            "arguments": {},
+            "resources": {
+              "primary": "left"
+            }
+          },
+          "depends_on": [
+            "step_01__call_05"
+          ],
+          "task_instance_id": "step_01",
+          "task_type": "E3",
+          "role": "cleanup"
+        }
+      ],
+      "task_groups": [
+        {
+          "id": "step_01",
+          "task_type": "E3",
+          "node_ids": [
+            "step_01__call_01",
+            "step_01__call_02",
+            "step_01__call_03",
+            "step_01__call_04",
+            "step_01__call_05",
+            "step_01__call_06"
+          ],
+          "depends_on": [],
+          "success": {
+            "kind": "semantic_task_term",
+            "step_id": "step_01",
+            "type": "pour_motion"
+          }
+        }
+      ],
+      "success": {
+        "kind": "all_task_groups",
+        "source": {
+          "schema_version": "action_engine_success_spec_v1",
+          "task_id": "demo",
+          "op": "all",
+          "terms": [
+            {
+              "step_id": "step_01",
+              "type": "pour_motion"
+            }
+          ]
+        }
+      }
+    },
+    "validation": {
+      "task_spec_digest": "78b39e1a7afa2949a849bb2681724a2097e6b9e0834206d9cd0abf9081cd05e4",
+      "graph_digest": "60aaaedbec29a85fd28c927a1de3cca92c741ecc47fb98db42f7035d4d0004b6",
+      "program_digest": "38a51308280f68ca1d91210f385b3c09d2170073b2b1409be5d7baefc33687d9",
+      "constraints_digest": "38aec62d7a048379cdf03d48624f38b2c43a5ef3113f1708687a2773bc87fbd3",
+      "coverage": {
+        "status": "covered",
+        "issues": [],
+        "roles": {
+          "role_001": [
+            {
+              "uid": "cube",
+              "part_id": null
+            }
+          ],
+          "role_002": [
+            {
+              "uid": "region",
+              "part_id": null
+            }
+          ]
+        },
+        "goals": [
+          {
+            "id": "goal_001",
+            "predicate": {
+              "id": "goal_001",
+              "predicate": "pour_motion",
+              "arguments": {
+                "reference": "role_002",
+                "relation": "above",
+                "required_arm": "left_arm",
+                "subject": "role_001",
+                "task_type": "E3"
+              },
+              "operator": "eq",
+              "expected": true,
+              "observation": null
+            },
+            "source_steps": [
+              "step_01"
+            ],
+            "groups": [
+              "step_01"
+            ],
+            "status": "declared"
+          }
+        ],
+        "milestones": [
+          {
+            "id": "step_01",
+            "source_step": "step_01",
+            "groups": [
+              "step_01"
+            ],
+            "members": [
+              {
+                "group_id": "step_01",
+                "object_uid": "cube",
+                "object_part_id": null
+              }
+            ]
+          }
+        ],
+        "lineage": {
+          "step_01": [
+            {
+              "group_id": "step_01",
+              "object_uid": "cube",
+              "object_part_id": null
+            }
+          ]
+        },
+        "runtime_evidence_status": "not_run",
+        "instruction_coverage": "validated_draft_only"
+      }
+    },
+    "program": {
+      "program_id": "pour-test",
+      "program": {
+        "items": [
+          {
+            "name": "step_01__call_01",
+            "steps": {
+              "call": {
+                "kind": "pick",
+                "object": "cube",
+                "resources": {
+                  "primary": "left"
+                }
+              }
+            },
+            "post": []
+          },
+          {
+            "name": "step_01__call_02",
+            "steps": {
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.move_held_object",
+                "arguments": {
+                  "object": "cube",
+                  "target": "step_01_pour_target",
+                  "reference": "region"
+                },
+                "resources": {
+                  "primary": "left"
+                }
+              }
+            },
+            "post": []
+          },
+          {
+            "name": "step_01__call_03",
+            "steps": {
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.pour",
+                "arguments": {
+                  "object": "cube"
+                },
+                "resources": {
+                  "primary": "left"
+                }
+              }
+            },
+            "post": []
+          },
+          {
+            "name": "step_01__call_04",
+            "steps": {
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.move_held_object",
+                "arguments": {
+                  "object": "cube",
+                  "target": "step_01_return_target"
+                },
+                "resources": {
+                  "primary": "left"
+                }
+              }
+            },
+            "post": []
+          },
+          {
+            "name": "step_01__call_05",
+            "steps": {
+              "call": {
+                "kind": "place",
+                "object": "cube",
+                "at": {
+                  "kind": "target_ref",
+                  "target": "step_01_return_target"
+                },
+                "resources": {
+                  "primary": "left"
+                }
+              }
+            },
+            "post": []
+          },
+          {
+            "name": "step_01__call_06",
+            "steps": {
+              "call": {
+                "kind": "registered",
+                "call_id": "simulation.park",
+                "arguments": {},
+                "resources": {
+                  "primary": "left"
+                }
+              }
+            },
+            "post": []
+          }
+        ]
+      }
+    },
+    "runtime": {
+      "segments": [
+        {
+          "name": "step_01__call_01",
+          "active": [
+            true
+          ],
+          "successes": [
+            true
+          ],
+          "start_steps": [
+            0
+          ],
+          "end_steps": [
+            5
+          ],
+          "metadata": {
+            "task_program_id": "pour-test",
+            "program_segment_id": "pour-test:segment:$.program.items[0]",
+            "program_segment_source_path": [
+              "program",
+              "items",
+              0
+            ],
+            "validation": {
+              "accepted_mask": [
+                true
+              ]
+            },
+            "post_policies": [],
+            "runtime": {
+              "env_ids": [
+                0
+              ],
+              "task_state": {
+                "batch_size": 1,
+                "held_objects": [],
+                "coordinated_held_objects": []
+              },
+              "calls": [
+                {
+                  "semantic_id": "pick",
+                  "skill_id": "pour",
+                  "invocation_id": "pour-test/pour-test:segment:$.program.items[0]:0",
+                  "invocation_revision": 0,
+                  "status": "completed",
+                  "command_count": 5,
+                  "effects": []
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__call_02",
+          "active": [
+            true
+          ],
+          "successes": [
+            true
+          ],
+          "start_steps": [
+            5
+          ],
+          "end_steps": [
+            10
+          ],
+          "metadata": {
+            "task_program_id": "pour-test",
+            "program_segment_id": "pour-test:segment:$.program.items[1]",
+            "program_segment_source_path": [
+              "program",
+              "items",
+              1
+            ],
+            "validation": {
+              "accepted_mask": [
+                true
+              ]
+            },
+            "post_policies": [],
+            "runtime": {
+              "env_ids": [
+                0
+              ],
+              "task_state": {
+                "batch_size": 1,
+                "held_objects": [],
+                "coordinated_held_objects": []
+              },
+              "calls": [
+                {
+                  "semantic_id": "simulation.move_held_object",
+                  "skill_id": "pour",
+                  "invocation_id": "pour-test/pour-test:segment:$.program.items[1]:0",
+                  "invocation_revision": 0,
+                  "status": "completed",
+                  "command_count": 5,
+                  "effects": []
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__call_03",
+          "active": [
+            true
+          ],
+          "successes": [
+            true
+          ],
+          "start_steps": [
+            10
+          ],
+          "end_steps": [
+            15
+          ],
+          "metadata": {
+            "task_program_id": "pour-test",
+            "program_segment_id": "pour-test:segment:$.program.items[2]",
+            "program_segment_source_path": [
+              "program",
+              "items",
+              2
+            ],
+            "validation": {
+              "accepted_mask": [
+                true
+              ]
+            },
+            "post_policies": [],
+            "runtime": {
+              "env_ids": [
+                0
+              ],
+              "task_state": {
+                "batch_size": 1,
+                "held_objects": [],
+                "coordinated_held_objects": []
+              },
+              "calls": [
+                {
+                  "semantic_id": "simulation.pour",
+                  "skill_id": "pour",
+                  "invocation_id": "pour-test/pour-test:segment:$.program.items[2]:0",
+                  "invocation_revision": 0,
+                  "status": "completed",
+                  "command_count": 5,
+                  "effects": []
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__call_04",
+          "active": [
+            true
+          ],
+          "successes": [
+            true
+          ],
+          "start_steps": [
+            15
+          ],
+          "end_steps": [
+            20
+          ],
+          "metadata": {
+            "task_program_id": "pour-test",
+            "program_segment_id": "pour-test:segment:$.program.items[3]",
+            "program_segment_source_path": [
+              "program",
+              "items",
+              3
+            ],
+            "validation": {
+              "accepted_mask": [
+                true
+              ]
+            },
+            "post_policies": [],
+            "runtime": {
+              "env_ids": [
+                0
+              ],
+              "task_state": {
+                "batch_size": 1,
+                "held_objects": [],
+                "coordinated_held_objects": []
+              },
+              "calls": [
+                {
+                  "semantic_id": "simulation.move_held_object",
+                  "skill_id": "pour",
+                  "invocation_id": "pour-test/pour-test:segment:$.program.items[3]:0",
+                  "invocation_revision": 0,
+                  "status": "completed",
+                  "command_count": 5,
+                  "effects": []
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__call_05",
+          "active": [
+            true
+          ],
+          "successes": [
+            true
+          ],
+          "start_steps": [
+            20
+          ],
+          "end_steps": [
+            25
+          ],
+          "metadata": {
+            "task_program_id": "pour-test",
+            "program_segment_id": "pour-test:segment:$.program.items[4]",
+            "program_segment_source_path": [
+              "program",
+              "items",
+              4
+            ],
+            "validation": {
+              "accepted_mask": [
+                true
+              ]
+            },
+            "post_policies": [],
+            "runtime": {
+              "env_ids": [
+                0
+              ],
+              "task_state": {
+                "batch_size": 1,
+                "held_objects": [],
+                "coordinated_held_objects": []
+              },
+              "calls": [
+                {
+                  "semantic_id": "place",
+                  "skill_id": "pour",
+                  "invocation_id": "pour-test/pour-test:segment:$.program.items[4]:0",
+                  "invocation_revision": 0,
+                  "status": "completed",
+                  "command_count": 5,
+                  "effects": [
+                    {
+                      "boundary": {
+                        "kind": "terminal"
+                      },
+                      "timestamp": 0.08,
+                      "observation_revision": 2,
+                      "effect_spec": {
+                        "effect_kind": "release",
+                        "invocation_id": "pour-test/pour-test:segment:$.program.items[4]:0",
+                        "invocation_revision": 0,
+                        "env_ids": [
+                          0
+                        ],
+                        "state_expectations": [
+                          {
+                            "expectation_id": "source",
+                            "relation": "detached",
+                            "object_id": "cube",
+                            "resource_id": "left"
+                          }
+                        ],
+                        "clauses": [
+                          {
+                            "clause_id": "source.constraint",
+                            "expectation_id": "source",
+                            "expected": false,
+                            "evidence_kind": "constraint"
+                          },
+                          {
+                            "clause_id": "source.pose",
+                            "expectation_id": "source",
+                            "expectation": "separated"
+                          }
+                        ]
+                      },
+                      "decision": {
+                        "success_mask": [
+                          true
+                        ]
+                      },
+                      "evidence": {
+                        "source.constraint": {
+                          "values": [
+                            false
+                          ],
+                          "valid_mask": [
+                            true
+                          ],
+                          "env_ids": [
+                            0
+                          ],
+                          "timestamp": 0.08,
+                          "observation_revision": 2
+                        },
+                        "source.pose": {
+                          "object_to_endpoint": [
+                            [
+                              [
+                                1.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              [
+                                0.0,
+                                1.0,
+                                0.0,
+                                0.0
+                              ],
+                              [
+                                0.0,
+                                0.0,
+                                1.0,
+                                0.0
+                              ],
+                              [
+                                0.0,
+                                0.0,
+                                0.0,
+                                1.0
+                              ]
+                            ]
+                          ],
+                          "valid_mask": [
+                            true
+                          ],
+                          "env_ids": [
+                            0
+                          ],
+                          "timestamp": 0.08,
+                          "observation_revision": 2
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "step_01__call_06",
+          "active": [
+            true
+          ],
+          "successes": [
+            true
+          ],
+          "start_steps": [
+            25
+          ],
+          "end_steps": [
+            30
+          ],
+          "metadata": {
+            "task_program_id": "pour-test",
+            "program_segment_id": "pour-test:segment:$.program.items[5]",
+            "program_segment_source_path": [
+              "program",
+              "items",
+              5
+            ],
+            "validation": {
+              "accepted_mask": [
+                true
+              ]
+            },
+            "post_policies": [],
+            "runtime": {
+              "env_ids": [
+                0
+              ],
+              "task_state": {
+                "batch_size": 1,
+                "held_objects": [],
+                "coordinated_held_objects": []
+              },
+              "calls": [
+                {
+                  "semantic_id": "simulation.park",
+                  "skill_id": "pour",
+                  "invocation_id": "pour-test/pour-test:segment:$.program.items[5]:0",
+                  "invocation_revision": 0,
+                  "status": "completed",
+                  "command_count": 5,
+                  "effects": []
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "meshes": {
+      "cube": {
+        "native_uid": "cube",
+        "vertices": [
+          [
+            [
+              -0.03999999910593033,
+              -0.03999999910593033,
+              -0.03999999910593033
+            ],
+            [
+              -0.03999999910593033,
+              -0.03999999910593033,
+              0.03999999910593033
+            ],
+            [
+              -0.03999999910593033,
+              0.03999999910593033,
+              -0.03999999910593033
+            ],
+            [
+              -0.03999999910593033,
+              0.03999999910593033,
+              0.03999999910593033
+            ],
+            [
+              0.03999999910593033,
+              -0.03999999910593033,
+              -0.03999999910593033
+            ],
+            [
+              0.03999999910593033,
+              -0.03999999910593033,
+              0.03999999910593033
+            ],
+            [
+              0.03999999910593033,
+              0.03999999910593033,
+              -0.03999999910593033
+            ],
+            [
+              0.03999999910593033,
+              0.03999999910593033,
+              0.03999999910593033
+            ]
+          ]
+        ],
+        "triangles": [
+          [
+            [
+              1,
+              3,
+              0
+            ],
+            [
+              4,
+              1,
+              0
+            ],
+            [
+              0,
+              3,
+              2
+            ],
+            [
+              2,
+              4,
+              0
+            ],
+            [
+              1,
+              7,
+              3
+            ],
+            [
+              5,
+              1,
+              4
+            ],
+            [
+              5,
+              7,
+              1
+            ],
+            [
+              3,
+              7,
+              2
+            ],
+            [
+              6,
+              4,
+              2
+            ],
+            [
+              2,
+              7,
+              6
+            ],
+            [
+              6,
+              5,
+              4
+            ],
+            [
+              7,
+              5,
+              6
+            ]
+          ]
+        ]
+      },
+      "region": {
+        "native_uid": "region",
+        "vertices": [
+          [
+            [
+              -0.25,
+              -0.15000000596046448,
+              -0.004999999888241291
+            ],
+            [
+              -0.25,
+              -0.15000000596046448,
+              0.004999999888241291
+            ],
+            [
+              -0.25,
+              0.15000000596046448,
+              -0.004999999888241291
+            ],
+            [
+              -0.25,
+              0.15000000596046448,
+              0.004999999888241291
+            ],
+            [
+              0.25,
+              -0.15000000596046448,
+              -0.004999999888241291
+            ],
+            [
+              0.25,
+              -0.15000000596046448,
+              0.004999999888241291
+            ],
+            [
+              0.25,
+              0.15000000596046448,
+              -0.004999999888241291
+            ],
+            [
+              0.25,
+              0.15000000596046448,
+              0.004999999888241291
+            ]
+          ]
+        ],
+        "triangles": [
+          [
+            [
+              1,
+              3,
+              0
+            ],
+            [
+              4,
+              1,
+              0
+            ],
+            [
+              0,
+              3,
+              2
+            ],
+            [
+              2,
+              4,
+              0
+            ],
+            [
+              1,
+              7,
+              3
+            ],
+            [
+              5,
+              1,
+              4
+            ],
+            [
+              5,
+              7,
+              1
+            ],
+            [
+              3,
+              7,
+              2
+            ],
+            [
+              6,
+              4,
+              2
+            ],
+            [
+              2,
+              7,
+              6
+            ],
+            [
+              6,
+              5,
+              4
+            ],
+            [
+              7,
+              5,
+              6
+            ]
+          ]
+        ]
+      }
+    },
+    "written_steps": [
+      30
+    ],
+    "poses": {
+      "cube": [
+        [
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            -0.019999999552965164,
+            0.0,
+            0.36535897850990295,
+            0.0,
+            0.258819043636322,
+            0.0,
+            0.9659258127212524
+          ],
+          [
+            -0.03464101627469063,
+            0.0,
+            0.3799999952316284,
+            0.0,
+            0.5,
+            0.0,
+            0.8660253882408142
+          ],
+          [
+            -0.03464101627469063,
+            0.0,
+            0.3799999952316284,
+            0.0,
+            0.5,
+            0.0,
+            0.8660253882408142
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      ],
+      "region": [
+        [
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "nominal",
+      "record": {
+        "group_id": "step_01",
+        "uid": "cube",
+        "part_id": null,
+        "accepted": [
+          true
+        ],
+        "measurements": {
+          "scope": "measured_pour_motion",
+          "criterion": "measured_tilt_restore/v1",
+          "fluid_transfer_verified": false,
+          "reference_uid": "region",
+          "pour_node_id": "step_01__call_03",
+          "invocation_id": "pour-test/pour-test:segment:$.program.items[2]:0",
+          "invocation_revision": 0,
+          "boundary_frames": [
+            30
+          ],
+          "start_frames": [
+            10
+          ],
+          "end_frames": [
+            15
+          ],
+          "peak_frames": [
+            12
+          ],
+          "minimum_tilt_rad": 0.5235987755982988,
+          "maximum_restore_error_rad": 0.2617993877991494,
+          "rows": [
+            {
+              "maximum_tilt_rad": 1.0471975803375244,
+              "restore_error_rad": 0.0,
+              "anchor_world_m": [
+                0.0,
+                0.0,
+                0.4000000059604645
+              ],
+              "receiver_projection_distance_m": 0.0,
+              "receiver_top_clearance_m": 0.39500001072883606,
+              "above_receiver": true,
+              "released": true
+            }
+          ]
+        }
+      },
+      "source_pose_window": {
+        "native_uid": "cube",
+        "start_frame": 10,
+        "values": [
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            -0.019999999552965164,
+            0.0,
+            0.36535897850990295,
+            0.0,
+            0.258819043636322,
+            0.0,
+            0.9659258127212524
+          ],
+          [
+            -0.03464101627469063,
+            0.0,
+            0.3799999952316284,
+            0.0,
+            0.5,
+            0.0,
+            0.8660253882408142
+          ],
+          [
+            -0.03464101627469063,
+            0.0,
+            0.3799999952316284,
+            0.0,
+            0.5,
+            0.0,
+            0.8660253882408142
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "insufficient_tilt",
+      "record": {
+        "group_id": "step_01",
+        "uid": "cube",
+        "part_id": null,
+        "accepted": [
+          false
+        ],
+        "measurements": {
+          "scope": "measured_pour_motion",
+          "criterion": "measured_tilt_restore/v1",
+          "fluid_transfer_verified": false,
+          "reference_uid": "region",
+          "pour_node_id": "step_01__call_03",
+          "invocation_id": "pour-test/pour-test:segment:$.program.items[2]:0",
+          "invocation_revision": 0,
+          "boundary_frames": [
+            30
+          ],
+          "start_frames": [
+            10
+          ],
+          "end_frames": [
+            15
+          ],
+          "peak_frames": [
+            12
+          ],
+          "minimum_tilt_rad": 0.5235987755982988,
+          "maximum_restore_error_rad": 0.2617993877991494,
+          "rows": [
+            {
+              "maximum_tilt_rad": 0.3490658700466156,
+              "restore_error_rad": 0.0,
+              "anchor_world_m": [
+                0.0,
+                0.0,
+                0.4000000059604645
+              ],
+              "receiver_projection_distance_m": 0.0,
+              "receiver_top_clearance_m": 0.39500001072883606,
+              "above_receiver": true,
+              "released": true
+            }
+          ]
+        }
+      },
+      "source_pose_window": {
+        "native_uid": "cube",
+        "start_frame": 10,
+        "values": [
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            -0.006945927161723375,
+            0.0,
+            0.36060768365859985,
+            0.0,
+            0.08715574443340302,
+            0.0,
+            0.9961947202682495
+          ],
+          [
+            -0.013680805452167988,
+            0.0,
+            0.36241230368614197,
+            0.0,
+            0.1736481785774231,
+            0.0,
+            0.9848077297210693
+          ],
+          [
+            -0.013680805452167988,
+            0.0,
+            0.36241230368614197,
+            0.0,
+            0.1736481785774231,
+            0.0,
+            0.9848077297210693
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "not_restored",
+      "record": {
+        "group_id": "step_01",
+        "uid": "cube",
+        "part_id": null,
+        "accepted": [
+          false
+        ],
+        "measurements": {
+          "scope": "measured_pour_motion",
+          "criterion": "measured_tilt_restore/v1",
+          "fluid_transfer_verified": false,
+          "reference_uid": "region",
+          "pour_node_id": "step_01__call_03",
+          "invocation_id": "pour-test/pour-test:segment:$.program.items[2]:0",
+          "invocation_revision": 0,
+          "boundary_frames": [
+            30
+          ],
+          "start_frames": [
+            10
+          ],
+          "end_frames": [
+            15
+          ],
+          "peak_frames": [
+            12
+          ],
+          "minimum_tilt_rad": 0.5235987755982988,
+          "maximum_restore_error_rad": 0.2617993877991494,
+          "rows": [
+            {
+              "maximum_tilt_rad": 1.0471975803375244,
+              "restore_error_rad": 0.4363323748111725,
+              "anchor_world_m": [
+                0.0,
+                0.0,
+                0.4000000059604645
+              ],
+              "receiver_projection_distance_m": 0.0,
+              "receiver_top_clearance_m": 0.39500001072883606,
+              "above_receiver": true,
+              "released": true
+            }
+          ]
+        }
+      },
+      "source_pose_window": {
+        "native_uid": "cube",
+        "start_frame": 10,
+        "values": [
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            -0.019999999552965164,
+            0.0,
+            0.36535897850990295,
+            0.0,
+            0.258819043636322,
+            0.0,
+            0.9659258127212524
+          ],
+          [
+            -0.03464101627469063,
+            0.0,
+            0.3799999952316284,
+            0.0,
+            0.5,
+            0.0,
+            0.8660253882408142
+          ],
+          [
+            -0.03464101627469063,
+            0.0,
+            0.3799999952316284,
+            0.0,
+            0.5,
+            0.0,
+            0.8660253882408142
+          ],
+          [
+            -0.01690473034977913,
+            0.0,
+            0.3637476861476898,
+            0.0,
+            0.2164396196603775,
+            0.0,
+            0.9762960076332092
+          ],
+          [
+            -0.01690473034977913,
+            0.0,
+            0.3637476861476898,
+            0.0,
+            0.2164396196603775,
+            0.0,
+            0.9762960076332092
+          ]
+        ]
+      }
+    },
+    {
+      "name": "outside_receiver",
+      "record": {
+        "group_id": "step_01",
+        "uid": "cube",
+        "part_id": null,
+        "accepted": [
+          false
+        ],
+        "measurements": {
+          "scope": "measured_pour_motion",
+          "criterion": "measured_tilt_restore/v1",
+          "fluid_transfer_verified": false,
+          "reference_uid": "region",
+          "pour_node_id": "step_01__call_03",
+          "invocation_id": "pour-test/pour-test:segment:$.program.items[2]:0",
+          "invocation_revision": 0,
+          "boundary_frames": [
+            30
+          ],
+          "start_frames": [
+            10
+          ],
+          "end_frames": [
+            15
+          ],
+          "peak_frames": [
+            12
+          ],
+          "minimum_tilt_rad": 0.5235987755982988,
+          "maximum_restore_error_rad": 0.2617993877991494,
+          "rows": [
+            {
+              "maximum_tilt_rad": 1.0471975803375244,
+              "restore_error_rad": 0.0,
+              "anchor_world_m": [
+                2.0,
+                0.0,
+                0.4000000059604645
+              ],
+              "receiver_projection_distance_m": 1.75,
+              "receiver_top_clearance_m": 0.39500001072883606,
+              "above_receiver": false,
+              "released": true
+            }
+          ]
+        }
+      },
+      "source_pose_window": {
+        "native_uid": "cube",
+        "start_frame": 10,
+        "values": [
+          [
+            2.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            1.9800000190734863,
+            0.0,
+            0.36535897850990295,
+            0.0,
+            0.258819043636322,
+            0.0,
+            0.9659258127212524
+          ],
+          [
+            1.9653589725494385,
+            0.0,
+            0.3799999952316284,
+            0.0,
+            0.5,
+            0.0,
+            0.8660253882408142
+          ],
+          [
+            1.9653589725494385,
+            0.0,
+            0.3799999952316284,
+            0.0,
+            0.5,
+            0.0,
+            0.8660253882408142
+          ],
+          [
+            2.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            2.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "yaw_only",
+      "record": {
+        "group_id": "step_01",
+        "uid": "cube",
+        "part_id": null,
+        "accepted": [
+          false
+        ],
+        "measurements": {
+          "scope": "measured_pour_motion",
+          "criterion": "measured_tilt_restore/v1",
+          "fluid_transfer_verified": false,
+          "reference_uid": "region",
+          "pour_node_id": "step_01__call_03",
+          "invocation_id": "pour-test/pour-test:segment:$.program.items[2]:0",
+          "invocation_revision": 0,
+          "boundary_frames": [
+            30
+          ],
+          "start_frames": [
+            10
+          ],
+          "end_frames": [
+            15
+          ],
+          "peak_frames": [
+            10
+          ],
+          "minimum_tilt_rad": 0.5235987755982988,
+          "maximum_restore_error_rad": 0.2617993877991494,
+          "rows": [
+            {
+              "maximum_tilt_rad": 0.0,
+              "restore_error_rad": 0.0,
+              "anchor_world_m": [
+                0.0,
+                0.0,
+                0.4000000059604645
+              ],
+              "receiver_projection_distance_m": 0.0,
+              "receiver_top_clearance_m": 0.39500001072883606,
+              "above_receiver": true,
+              "released": true
+            }
+          ]
+        }
+      },
+      "source_pose_window": {
+        "native_uid": "cube",
+        "start_frame": 10,
+        "values": [
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.258819043636322,
+            0.9659258127212524
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.5,
+            0.8660253882408142
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.5,
+            0.8660253882408142
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.36000001430511475,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    }
+  ]
+}

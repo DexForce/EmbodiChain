@@ -25,7 +25,7 @@ from pathlib import Path
 import torch
 
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc, RigidBodyShape
-from ._validation import _owned_b1_pose
+from ._validation import _owned_b1_pose, _owned_batch_pose
 
 __all__ = [
     "CollisionObjectSnapshot",
@@ -154,9 +154,14 @@ def snapshot_collision_sources(
 
     Args:
         shapes: Canonical obstacle identity to owner-local, already-scaled shapes.
+            A batched capture declares identical geometry in all environments.
         observed_poses: Same-observation world poses for exactly those obstacles.
-        world_to_frame: Explicit world-to-consumer transform, shape ``(1, 4, 4)``.
-            For cuRobo this must match the transform used for goals and payload.
+        world_to_frame: Explicit world-to-consumer transforms, shape ``(B, 4, 4)``.
+            Each obstacle pose must have the same batch. Projected poses must
+            agree across rows (absolute tolerance 1e-5, zero relative tolerance).
+            The returned B=1 providers describe that shared world; no row is
+            silently selected from different layouts. For cuRobo these transforms
+            must match the query snapshot.
         provenance: Optional neutral description of each input geometry route.
 
     Returns:
@@ -164,19 +169,28 @@ def snapshot_collision_sources(
         getter is called, no scale is reapplied, and mapping order is preserved.
 
     Raises:
-        ValueError: If pose coverage or the B=1 transform is invalid.
+        ValueError: If poses are invalid, batches differ, or projected worlds differ.
     """
     if set(shapes) != set(observed_poses):
         raise ValueError(
             "Collision source shapes and observed poses must have equal IDs."
         )
-    world_to_frame = _owned_b1_pose(world_to_frame, "world_to_frame")
+    world_to_frame = _owned_batch_pose(world_to_frame, "world_to_frame")
     result = {}
     for uid, values in shapes.items():
-        pose = _owned_b1_pose(observed_poses[uid], f"scene_pose:{uid}")
+        pose = _owned_batch_pose(observed_poses[uid], f"scene_pose:{uid}")
+        if pose.shape != world_to_frame.shape:
+            raise ValueError("Collision pose batch must match world_to_frame.")
+        projected = world_to_frame @ pose.to(world_to_frame)
+        if not torch.allclose(
+            projected, projected[:1].expand_as(projected), atol=1e-5, rtol=0
+        ):
+            raise ValueError(
+                "Observed collision worlds must be identical in the planning frame."
+            )
         result[uid] = CollisionObjectSnapshot(
             tuple(values),
-            world_to_frame @ pose.to(world_to_frame),
+            projected[:1],
             provenance=(provenance or {}).get(uid, "provided_collision_descriptors"),
         )
     return result

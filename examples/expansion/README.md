@@ -65,3 +65,5 @@ failures stop collection because the backend does not provide rollback.
 
 The primitive Cube baseline remains a separate, direct-configuration example.
 Its primitive shapes do not require asset catalogs.
+
+- [DemoSkill](demo_skill/README.md): task-specific real-demonstration assets, mixed/whole Task Program calls and qualified offline expansion.

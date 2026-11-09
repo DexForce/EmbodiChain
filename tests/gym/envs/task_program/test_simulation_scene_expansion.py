@@ -237,7 +237,9 @@ class _Environment(EmbodiedEnv):
             )
         }
         self.observation_manager = SimpleNamespace(
-            reset=lambda **k: self.events.append("observation_reset")
+            has_raw_channels=False,
+            has_history=False,
+            reset=lambda **k: self.events.append("observation_reset"),
         )
         self.rollout_buffer = TensorDict(
             {"obs": torch.zeros(1, 4, 1)}, batch_size=[1, 4]
@@ -685,10 +687,11 @@ def test_initial_validator_reads_contacts_without_replaying_history() -> None:
         selected_actor_ids=(4,),
         actors=(actor,),
         actor_info=lambda actor_id: actor,
-        fetch=lambda: buffer,
+        fetch_solver_report=lambda: buffer,
     )
     owner = SimpleNamespace(
         num_envs=1,
+        physics_step_index=0,
         spawn_result=SimpleNamespace(
             create_contact_query=lambda targets, **kwargs: query
         ),

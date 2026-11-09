@@ -84,3 +84,9 @@ include it, then change selected environment policies and reset one camera row.
 It saves RGB mosaics, depth arrays and capture-policy metadata. This requires the
 DexSim camera render-category API; the default camera configuration continues to
 work with older SDKs. Ground hidden in a camera still supports the falling box.
+
+The [Expansion Engine showcase](expansion/engine/showcase/README.md) demonstrates
+native and real-demonstration-driven experts through the shared engine. Its offline
+viewer pairs measured 3D playback with RGB-D, recipes, source clocks and explicit
+capability/acceptance results. Full and quick modes preserve unrun and failed cases;
+recovery and portability diagnostics keep their evidence separate from expert data.

@@ -14,16 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Parallel-jaw grasp APIs with optional backends loaded on demand."""
+
 from __future__ import annotations
 
-from ..pose_generator import *
-from .antipodal_sampler import *
-from .collision_checker import *
-from .gripper_collision_checker import *
-from .fixed_geometry import *
-from .model_geometry import *
-from .pose_generator import *
-from .regions import for_axis_region, select_supported_end
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "for_axis_region",
@@ -45,3 +41,40 @@ __all__ = [
     "ParallelJawGraspCollisionCfg",
     "ParallelJawGripperModelCfg",
 ]
+
+
+# Include the explicit-import names previously exposed by the star imports,
+# while retaining the public star-import contract above.
+_EXPORT_MODULES = {
+    "GraspPoseGenerator": "..pose_generator",
+    "ParallelJawGraspPoseGenerator": "..pose_generator",
+    "ParallelJawGripperModelCfg": "..pose_generator",
+    "get_parallel_jaw_gripper_model": "..pose_generator",
+    "AntipodalSamplerCfg": ".antipodal_sampler",
+    "AntipodalSampler": ".antipodal_sampler",
+    "ConvexCollisionCheckerCfg": ".collision_checker",
+    "ConvexCollisionChecker": ".collision_checker",
+    "GripperCollisionCfg": ".gripper_collision_checker",
+    "GripperCollisionChecker": ".gripper_collision_checker",
+    "FixedGripperCollisionGeometry": ".fixed_geometry",
+    "get_parallel_jaw_collision_geometry": ".model_geometry",
+    "AntipodalGraspPoseGenerator": ".pose_generator",
+    "AntipodalGraspPoseGeneratorCfg": ".pose_generator",
+    "GraspRegionSelector": ".pose_generator",
+    "GraspAnnotationCfg": ".pose_generator",
+    "ParallelJawGraspCollisionCfg": ".pose_generator",
+    "for_axis_region": ".regions",
+    "select_supported_end": ".regions",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _EXPORT_MODULES:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(_EXPORT_MODULES[name], __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | _EXPORT_MODULES.keys())

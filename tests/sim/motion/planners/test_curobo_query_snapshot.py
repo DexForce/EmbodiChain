@@ -367,7 +367,7 @@ def test_query_capabilities_reject_unsupported_lifetimes_before_native_use(monke
         planner.validate_joint_trajectory(torch.zeros(1, 2, 1), control_part="arm")
     with pytest.raises(NotImplementedError, match="immutable"):
         planner.update_dynamic_obstacles({"x": torch.eye(4)[None]})
-    with pytest.raises(ValueError, match="B=1"):
+    with pytest.raises(ValueError, match="batch"):
         planner._validate_query_backend("arm", 2)
     planner.close()
     with pytest.raises(RuntimeError, match="closed"):
@@ -474,3 +474,109 @@ def test_owned_factory_detaches_and_closes_when_the_caller_raises(monkeypatch):
         "metrics",
     ]
     assert closed == ["closed"]
+
+
+@pytest.mark.parametrize("observed", [False, True])
+@pytest.mark.parametrize("contract", ["start", "world_capability"])
+def test_public_query_facade_uses_coherent_default_start_and_world_capability(
+    monkeypatch, observed, contract
+):
+    robot, _ = _cpu_constructor(monkeypatch)
+    live_reads = []
+
+    def live_qpos(*, name):
+        live_reads.append(name)
+        return torch.tensor([[0.7]])
+
+    robot.get_qpos = live_qpos
+    starts = []
+    monkeypatch.setattr(cp.CuroboPlanner, "_get_backend", lambda *args: _backend())
+
+    def segments(self, targets, start, backends, options, pose):
+        starts.append(start.clone())
+        samples = torch.stack((start[0], targets[0].qpos[0]))
+        return self._assemble_result(
+            [[samples]],
+            [[torch.tensor([0.0, 0.04])]],
+            start,
+            torch.tensor([True]),
+            1,
+            1,
+        )
+
+    monkeypatch.setattr(cp.CuroboPlanner, "_plan_segments", segments)
+    snapshot = _snapshot(payload=False) if observed else None
+    with curobo_motion_generator(_cfg(), query_snapshot=snapshot) as generator:
+        if contract == "world_capability":
+            assert generator.supports_dynamic_collision_world is (not observed)
+            return
+        result = generator.generate(
+            [PlanState.from_qpos(torch.tensor([[0.9]]))],
+            MotionGenOptions(control_part="arm"),
+        )
+        torch.testing.assert_close(
+            result.positions[:, 0], torch.tensor([[0.1 if observed else 0.7]])
+        )
+    torch.testing.assert_close(starts[0], torch.tensor([[0.1 if observed else 0.7]]))
+    assert live_reads == ([] if observed else ["arm"])
+
+
+def test_observed_batch_snapshot_frames_locks_and_rejections(monkeypatch):
+    """Batch observations own their rows; model locks cannot silently use row zero."""
+    from embodichain.lab.sim.motion.planners.curobo.payload import _query_robot_config
+
+    robot, _ = _cpu_constructor(monkeypatch)
+    robot.num_instances = 2
+    q = torch.tensor([[0.1, 0.9], [0.2, 0.9]])
+    frames = torch.eye(4).repeat(2, 1, 1)
+    frames[1, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    frames[1, 0, 3] = 3
+    snapshot = CuroboQuerySnapshot(full_qpos=q, world_to_base=frames)
+    planner = cp.CuroboPlanner(_cfg(), query_snapshot=snapshot)
+    try:
+        planner._validate_query_backend("arm", 2)
+        goals = torch.eye(4).repeat(2, 1, 1)
+        goals[:, 0, 3] = 1
+        projected = planner._sim_world_to_curobo_base_pose(goals, _backend())
+        torch.testing.assert_close(projected, frames @ goals)
+        assert _query_robot_config(_CONFIG, snapshot, robot.joint_names)["robot_cfg"][
+            "kinematics"
+        ]["lock_joints"] == {"passive": pytest.approx(0.9)}
+        q[1, 1] = 0.8
+        frames[1, 0, 3] = 9
+        assert snapshot.full_qpos[1, 1] == pytest.approx(0.9)
+        assert snapshot.world_to_base[1, 0, 3] == 3
+        with pytest.raises(ValueError, match="passive joint locks"):
+            _query_robot_config(
+                _CONFIG, replace(snapshot, full_qpos=q), robot.joint_names
+            )
+        with pytest.raises(ValueError, match="row order"):
+            replace(snapshot, env_ids=(1, 0))
+        with pytest.raises(ValueError, match="payload"):
+            replace(snapshot, payload=_snapshot().payload)
+        with pytest.raises(ValueError, match="batch"):
+            replace(snapshot, world_to_base=frames[:1])
+        invalid = frames.clone()
+        invalid[1, 0, 0] = 2
+        with pytest.raises(ValueError, match="rigid"):
+            replace(snapshot, world_to_base=invalid)
+        robot.num_instances = 4
+        with pytest.raises(ValueError, match="num_instances"):
+            planner._validate_query_backend("arm", 2)
+    finally:
+        planner.close()
+
+
+def test_shared_world_snapshot_checks_every_projected_row():
+    """Environment offsets cancel in a shared world; a different layout must fail."""
+    frames = torch.eye(4).repeat(2, 1, 1)
+    frames[1, 0, 3] = -4
+    poses = torch.eye(4).repeat(2, 1, 1)
+    poses[1, 0, 3] = 4
+    world = snapshot_collision_sources({"box": ()}, {"box": poses}, frames)
+    torch.testing.assert_close(world["box"].pose, torch.eye(4)[None])
+    poses[1, 1, 3] = 0.2
+    with pytest.raises(ValueError, match="worlds must be identical"):
+        snapshot_collision_sources({"box": ()}, {"box": poses}, frames)
