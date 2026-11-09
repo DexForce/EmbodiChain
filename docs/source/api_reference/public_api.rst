@@ -1,5 +1,6 @@
 Public API Supplement
-==============
+=====================
+
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -31,6 +32,17 @@ Offline job preflight, run, resume and verified inspection commands.
 .. autosummary::
 
    main
+
+embodichain.compute.geometry.particles
+--------------------------------------
+
+Deterministic lattice sampling for primitive, revolved and closed mesh fill volumes.
+
+.. autosummary::
+
+   embodichain.compute.geometry.particles.sample_volume_particles
+
+.. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
 
 embodichain.compute.geometry.shading
 ------------------------------------
@@ -1821,6 +1833,23 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.sim.cfg.fluid
+-----------------------------
+
+Fixed-count fluid sources, physical properties and native particle or surface display.
+
+.. autosummary::
+
+   embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+   embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+   embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
 embodichain.lab.sim.motion.expansion.session_coverage
 -----------------------------------------------------
 
@@ -1858,6 +1887,20 @@ separate checker does not own those attachments.
    CuroboPayload
    CuroboQuerySnapshot
    curobo_motion_generator
+
+embodichain.lab.sim.objects.fluid
+---------------------------------
+
+Scene-owned fluid state snapshots, explicit writes and initial-state restoration.
+
+.. autosummary::
+
+   embodichain.lab.sim.objects.fluid.FluidObject
+   embodichain.lab.sim.objects.fluid.FluidObjectData
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObject
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObjectData
 
 embodichain.lab.sim.scene.collision_sources
 -------------------------------------------

@@ -202,3 +202,10 @@ builds and installed dependencies. It does not rerun the full GPU, media and
 Blender behavior checks in `docker/validate.sh`. The candidates were exported
 locally; published image tags and the historical native qualification above
 were not promoted or reused as evidence for DexSim 0.6.0rc1.
+
+The concurrent fluid update `e14fc4e78d4074ec448b4042fc09ea926bffd179` was
+preserved during integration. Its dependency-relevant inputs (`pyproject.toml`,
+`VERSION`, `setup.py`, Dockerfile, installer, profiles and locks) are unchanged
+from the qualified snapshot. Post-integration checks passed 46 regressions,
+Black (2312 files unchanged), context validation and API coverage (4449/4449).
+The container results above do not qualify the added fluid runtime behavior.
