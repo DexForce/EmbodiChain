@@ -221,7 +221,8 @@ def _report(output: Path, result: dict[str, Any]) -> None:
             f"| 1 | {result['label']} | {rate} | {result['seconds']:.3f} |",
             "",
             "Fresh process wall time includes startup, collection, native discovery, tests, cleanup and exits. "
-            "The preexisting CI no-finalize wrapper is identical across variants; test finalizers and pytest hooks run. "
+            "Native lanes use the owned CI no-finalize process; test finalizers and pytest hooks still run. "
+            "The import-freeze policy for each sample is recorded in result.json. "
             "Failed lanes are retained and later lanes still execute. Single samples do not establish stable speedups. "
             "Asset/JIT caches are retained. Process RSS high-water marks are in raw metrics; retained deltas, "
             "native-child memory and GPU allocator peaks were not measured. Module-level collection skips/errors are separate from runnable items. In-run metrics aggregation and progress writes are included in outer wall time. Success rate covers selected pytest "
