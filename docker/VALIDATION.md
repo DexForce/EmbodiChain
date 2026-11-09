@@ -2,7 +2,8 @@
 
 > Historical qualification below includes Python 3.10 results from an earlier
 > dependency profile. This checkout requires Python 3.11 or newer;
-> the main CI uses Python 3.12.
+> the main CI explicitly activates Python 3.11 in the dual-profile image;
+> the public image and the internal image's interactive default use Python 3.12.
 > The current Docker locks select DexSim 0.6.0rc1; the published image digests
 > and qualification runs below describe the earlier DexSim 0.5.1rc1 images.
 

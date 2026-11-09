@@ -11,6 +11,12 @@ profiles introduced by [PR #911](https://github.com/DexForce/EmbodiChain/pull/91
 RigidFormer extra dependencies and model weights are not preinstalled. Models,
 task assets and remote service credentials remain runtime inputs.
 
+This checkout's profiles select DexSim 0.6.0rc1 and Newton 1.7.0. The published
+tags and image digests recorded in [VALIDATION.md](VALIDATION.md) describe the
+earlier DexSim 0.5.1rc1 runtime. Build and qualify a source-commit candidate for
+the current profiles before promoting a replacement; the historical image
+qualification does not validate the new dependency set.
+
 ## Install and run
 
 Use a Linux amd64 host with an NVIDIA driver compatible with CUDA 12.8,
@@ -79,6 +85,9 @@ see [VALIDATION.md](VALIDATION.md) for digests and CI evidence.
 Run on a Linux amd64 Docker host with NVIDIA Container Toolkit, an appropriate
 NVIDIA driver, and access to PyPI, PyTorch's `cu128` index, conda-forge and the
 public DexSim wheel server (`pyp.open3dv.site:2345`). BuildKit is required.
+The Miniforge installer uses a fixed release and SHA256. If its versioned
+download name fails, the build retries the official alias within that same
+release and checks the same SHA256 before execution.
 
 ```bash
 bash docker/build.sh --verify
@@ -190,7 +199,8 @@ free to install their own Torch/codec profile.
 ## CI rollout and rollback
 
 CI defaults to the published internal `v4-py311-py312` image
-and activates `py312`. The image reference and activation command are explicit
+and explicitly activates `py311`. The image's interactive default remains
+`py312`. The image reference and activation command are explicit
 in the existing workflows/shared action; the existing job graph, triggers,
 test selection and installation commands are preserved. The SDK compatibility
 matrix selects Python 3.11 and 3.12 independently of this default.
