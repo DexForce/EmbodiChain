@@ -36,10 +36,12 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
     build_trajectory_buffer,
     config_to_cfg,
+    convert_observation_to_space,
     DEFAULT_MANAGER_MODULES,
     load_trajectory,
     merge_args_with_gym_config,
     init_rollout_buffer_from_config,
+    init_rollout_buffer_from_gym_space,
 )
 from embodichain_robots import URRobotCfg
 from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
@@ -328,6 +330,38 @@ def test_config_to_cfg_applies_explicit_cpu_to_newton() -> None:
     cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
     assert cfg.sim_cfg.device == "cpu"
+
+
+def test_expert_rollout_payloads_use_validity_and_preserve_rgbd_dtypes() -> None:
+    """Only written frames are valid, including after episode row reuse."""
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    observation = TensorDict(
+        {
+            "rgb": torch.arange(96, dtype=torch.uint8).reshape(2, 3, 4, 4),
+            "depth": torch.full((2, 3, 4), 0.375, dtype=torch.float32),
+        },
+        batch_size=[2],
+    )
+    buffer = init_rollout_buffer_from_gym_space(
+        convert_observation_to_space(observation),
+        gymnasium.spaces.Box(-1, 1, shape=(2, 1), dtype=np.float32),
+        max_episode_steps=4,
+        num_envs=2,
+    )
+    assert buffer.batch_size == torch.Size([2, 4])
+    assert not buffer["valid"].any()
+    assert (buffer["episode_step"] == -1).all()
+    buffer["obs"][:, 0] = observation
+    buffer["valid"][:, 0] = True
+    torch.testing.assert_close(buffer["obs", "rgb"][:, 0], observation["rgb"])
+    torch.testing.assert_close(buffer["obs", "depth"][:, 0], observation["depth"])
+
+    env = SimpleNamespace(rollout_buffer=buffer)
+    EmbodiedEnv._clear_expert_rollout_rows(env, torch.tensor([0]))
+    assert not buffer["valid"][0].any()
+    assert buffer["valid"][1].tolist() == [True, False, False, False]
+    torch.testing.assert_close(buffer["obs", "depth"][1, 0], observation["depth"][1])
 
 
 class TestInitRolloutBufferFromConfig:
@@ -2608,6 +2642,58 @@ def test_launcher_omissions_preserve_runtime_configuration() -> None:
     assert merge_args_with_gym_config(args, config) == config
 
 
+def test_configured_real2sim_profile_resolves_from_task_before_dataset_override(
+    tmp_path, monkeypatch
+) -> None:
+    """The launch selector survives parsing without becoming an EnvCfg field."""
+    path = tmp_path / "deployment/task.yaml"
+    path.parent.mkdir()
+    save_config(
+        path,
+        {
+            "id": "ConfiguredSource-v0",
+            "physics": "default",
+            "real2sim": {"profile": "profiles/collection.yaml"},
+            "env": {"dataset": {}},
+        },
+    )
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym-config", str(path)])
+    args.expansion_dataset_dir = str(tmp_path / "data")
+    observed = {}
+
+    def parse(config, **kwargs):
+        observed.update(config)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("embodichain.lab.gym.utils.gym_utils.config_to_cfg", parse)
+    monkeypatch.chdir(tmp_path)
+    _, resolved, _ = build_env_cfg_from_args(args)
+    assert resolved["real2sim"]["profile"] == str(
+        path.parent / "profiles/collection.yaml"
+    )
+    assert resolved["env"]["dataset"] == {}
+    assert "real2sim" not in observed
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [None, {}, {"profile": ""}, {"profile": "a.yaml", "provider": "arbitrary"}],
+)
+def test_configured_real2sim_rejects_invalid_launch_selection(
+    tmp_path, binding
+) -> None:
+    path = tmp_path / "task.yaml"
+    save_config(
+        path, {"id": "InvalidSource-v0", "physics": "default", "real2sim": binding}
+    )
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    with pytest.raises(ValueError, match="real2sim"):
+        build_env_cfg_from_args(parser.parse_args(["--gym-config", str(path)]))
+
+
 def test_launcher_explicit_runtime_overrides_win() -> None:
     parser = argparse.ArgumentParser()
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
@@ -2692,3 +2778,55 @@ def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
         assert isinstance(asset.source, UsdSourceCfg)
         assert asset.source.file_path == str(tmp_path / "scene.usda")
         assert asset.source.source_prim_path == "/World/Asset"
+
+
+def test_recording_only_observation_does_not_expand_policy_rollout_schema():
+    config = {
+        "sensor": [],
+        "env": {
+            "observations": {
+                "pose": {
+                    "mode": "add",
+                    "name": "private_pose",
+                    "consumers": ["recording"],
+                    "extra": {"shape": [7]},
+                },
+            }
+        },
+    }
+    buffer = init_rollout_buffer_from_config(
+        config=config, max_episode_steps=2, batch_size=1, state_dim=3, device="cpu"
+    )
+    assert "private_pose" not in buffer["obs"]
+
+
+@pytest.mark.parametrize(
+    "consumers",
+    [["recording"], "recording", ["evidence"], ["unknown"], ["policy", "policy"]],
+)
+def test_configured_observation_consumers_decode_and_validate(consumers):
+    config = {
+        "id": "RawObservation-v1",
+        "physics": "default",
+        "robot": {"uid": "robot"},
+        "env": {
+            "observations": {
+                "pose": {
+                    "func": "get_entity_state",
+                    "mode": "add",
+                    "name": "cube_pose",
+                    "consumers": consumers,
+                    "params": {"entity_cfg": {"uid": "cube"}},
+                    "extra": {"shape": [7]},
+                },
+            }
+        },
+    }
+    if consumers == ["recording"]:
+        cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+        assert cfg.observations.pose.consumers == ("recording",)
+        assert cfg.observations.pose.extra == {"shape": [7]}
+        assert cfg.observations.pose.params["entity_cfg"].uid == "cube"
+    else:
+        with pytest.raises(ValueError, match="Invalid observation consumers"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)

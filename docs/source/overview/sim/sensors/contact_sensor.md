@@ -139,7 +139,10 @@ may be left over from an earlier update.
 - **`filter_by_user_ids(item_user_ids, env_ids=None)`**: Filter contact report by contact actor IDs. The method name is retained for compatibility. Optionally filter by specific environment IDs.
 - **`set_contact_point_visibility(visible, rgba, point_size, env_ids=None)`**: Enable/disable visualization of contact points with customizable color and size. Optionally visualize only specific environments.
 
-Newton MuJoCo-Warp exposes contact forces, so both impulse fields are available. Other supported Newton rigid solvers currently expose contact geometry with zero-valued impulse fields. MuJoCo CPU mode does not expose device contact buffers, and DexUni does not currently publish rigid contacts through `ContactQuery`; those modes are therefore unsupported by this sensor.
+Newton MuJoCo-Warp and DexUni's MuJoCo-owned rows expose normal and friction
+impulses. DexUni can mix these with VBD geometry-only rows; inspect
+`impulse_valid` and `friction_valid` before interpreting forces. MuJoCo CPU mode
+does not expose device contact buffers.
 
 Default Direct GPU reports static counterparts with actor ID `-1` because its raw contact buffer does not expose their object identity. To monitor a dynamic body or articulation link against arbitrary static geometry, select the dynamic/link object and set `filter_need_both_actor=False`. Default CPU and Newton can identify registered static shapes.
 
@@ -158,6 +161,46 @@ Contact fetching and actor metadata refresh still run before sampling. DexSim
 owns its snapshot and query graphs; the sensor consumes the current query
 buffer and its device-resident count. Results are ordered onto the caller's
 Torch stream. CPU sampling uses the same reductions without capture.
+
+Newton reports impulses from the final internal solver substep. History force
+conversion uses the actual World-step duration divided by the active backend's
+`num_substeps`; contact and air-time clocks use the full World-step duration.
+Standalone `ContactHistory.update(data, dt, impulse_dt=...)` accepts both durations.
+
+### Caller-owned CUDA Graphs
+
+Call `contact_sensor.update()` or `update_physics_step(dt)` outside caller-owned
+CUDA Graph capture. These methods reject capture before querying DexSim, whose
+native snapshots may wait on events from uncaptured work. The sensor's internal
+reduction graph above remains supported.
+
+Capture computations that consume the preallocated `get_data()` tensors. Before
+each replay, advance physics, sample eagerly and order the graph's stream after
+the sampling stream. Replay alone neither refreshes contacts nor advances history.
+
+```python
+import torch
+
+contact_sensor.update()  # Eager warmup after a completed physics step.
+stream = torch.cuda.Stream(device=contact_sensor.device)
+load = torch.empty_like(contact_sensor.get_data()["impulse"])
+stream.wait_stream(torch.cuda.current_stream(contact_sensor.device))
+graph = torch.cuda.CUDAGraph()
+with torch.cuda.graph(graph, stream=stream):
+    data = contact_sensor.get_data()
+    load.copy_(torch.where(data["is_valid"], data["impulse"], 0.0))
+
+sim.update(step=1)
+contact_sensor.update()  # Refresh the same buffers before every replay.
+stream.wait_stream(torch.cuda.current_stream(contact_sensor.device))
+with torch.cuda.stream(stream):
+    graph.replay()
+```
+
+After a physics reset invalidates the solved report, observation reads return
+invalid rows until a new solve. Resetting only the sensor buffers still permits
+a fresh read of an existing valid report. Values outside valid rows remain
+unspecified; a reset-time empty observation is not measured absence of contact.
 
 The physics loop, simulation clock and rendering callbacks remain outside the
 sensor graph. Window, offscreen and browser visualization retain their existing

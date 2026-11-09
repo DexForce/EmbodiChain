@@ -454,9 +454,9 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
 @pytest.mark.no_sim
 @pytest.mark.parametrize(
     "solver_mapping",
-    [{}, {"solver_type": "auto"}, {"class_type": "AutoSolverCfg"}],
+    [None, {}],
 )
-def test_newton_physics_cfg_accepts_automatic_dexuni_mapping(solver_mapping) -> None:
+def test_newton_physics_cfg_preserves_automatic_dexuni_defaults(solver_mapping) -> None:
     from dexsim.engine.newton_physics import DexUniSolverCfg
 
     cfg = NewtonPhysicsCfg(solver_cfg=solver_mapping)
@@ -464,6 +464,32 @@ def test_newton_physics_cfg_accepts_automatic_dexuni_mapping(solver_mapping) -> 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
     assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
+    assert dexsim_cfg.solver_cfg.contact_mode == "auto"
+    assert dexsim_cfg.solver_cfg.mujoco_articulations is None
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "solver_mapping",
+    [
+        {"solver_type": "unknown_solver"},
+        {"class_type": "UnknownSolverCfg"},
+    ],
+)
+def test_newton_physics_cfg_rejects_unknown_solver_names(solver_mapping) -> None:
+    with pytest.raises(RuntimeError, match="Unsupported Newton solver type"):
+        NewtonPhysicsCfg(solver_cfg=solver_mapping).to_dexsim_cfg(gpu_id=0)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "field,value", [("iterations", 8), ("step_rigid_bodies", False)]
+)
+def test_dexuni_rejects_legacy_flat_options(field, value) -> None:
+    with pytest.raises(TypeError, match=field):
+        NewtonPhysicsCfg(
+            solver_cfg={"solver_type": "dexuni", field: value}
+        ).to_dexsim_cfg(gpu_id=0)
 
 
 @pytest.mark.no_sim
@@ -481,6 +507,7 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
         solver_cfg={
             config_key: solver_name,
             "joint_mode": "kinematic",
+            "contact_mode": "auto",
             "vbd_options": {"iterations": 12},
         }
     )
@@ -490,6 +517,8 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
     assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
     assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
     assert dexsim_cfg.solver_cfg.joint_mode == "kinematic"
+    assert dexsim_cfg.solver_cfg.contact_mode == "auto"
+    assert dexsim_cfg.solver_cfg.mujoco_articulations is None
     assert dexsim_cfg.solver_cfg.vbd_options["iterations"] == 12
 
 
@@ -508,7 +537,6 @@ def test_newton_physics_cfg_directly_accepts_dexsim_solver_cfg_object() -> None:
 
 
 @pytest.mark.no_sim
-@pytest.mark.usefixtures("requires_dexuni_two_way")
 def test_newton_physics_cfg_forwards_two_way_coupling() -> None:
     cfg = NewtonPhysicsCfg(
         collision_cfg=None,
@@ -545,7 +573,6 @@ def test_newton_physics_cfg_forwards_two_way_coupling() -> None:
         ({"coupling_options": {"unknown": 1.0}}, "Unsupported"),
     ],
 )
-@pytest.mark.usefixtures("requires_dexuni_two_way")
 def test_newton_physics_cfg_preserves_native_two_way_validation(options, error) -> None:
     cfg = NewtonPhysicsCfg(
         solver_cfg={"solver_type": "dexuni", "coupling": "two_way", **options}
@@ -555,7 +582,6 @@ def test_newton_physics_cfg_preserves_native_two_way_validation(options, error) 
 
 
 @pytest.mark.no_sim
-@pytest.mark.usefixtures("requires_dexuni_two_way")
 def test_two_way_full_surface_options_are_forwarded_to_native() -> None:
     cfg = NewtonPhysicsCfg(
         solver_cfg={

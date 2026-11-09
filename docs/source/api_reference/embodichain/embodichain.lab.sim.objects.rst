@@ -351,6 +351,22 @@ Collision, control, and lifecycle adapters
 
 .. autofunction:: collision_shapes_from_entity
 
+Strict physical snapshots additionally preserve float64 cooked convex/box meshes
+and the original body rest/contact offsets. The host supplies the resolved source
+address. Disabled collision yields empty geometry, which does not establish
+clearance. This path does not fall back to authored descriptors or widen the
+ordinary collision descriptor API's supported shapes.
+
+.. autosummary::
+
+    PhysicalCollisionGeometry
+    capture_physical_collision_geometry
+
+.. autoclass:: PhysicalCollisionGeometry
+   :members:
+
+.. autofunction:: capture_physical_collision_geometry
+
 .. currentmodule:: embodichain.lab.sim.objects.backends.controls
 
 .. autosummary::

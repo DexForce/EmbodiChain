@@ -239,7 +239,7 @@ def settle_scene(
     """Run caller-owned physics steps and measure optional velocity convergence.
 
     Args:
-        view: B=1 scene; no temporary simulation is created here.
+        view: Full-world scene selection; no temporary simulation is created here.
         step: Host callback advancing the supplied number of physics substeps.
         cfg: Fixed-step or convergence policy. This advances the whole world.
     Returns:
@@ -247,6 +247,10 @@ def settle_scene(
     """
     cfg.__post_init__()
     view.check_topology()
+    if set(view.env_ids) != set(range(view._num_envs)):
+        raise ValueError(
+            "Settling requires a full-world selection because physics advances every row"
+        )
     if cfg.mode == "fixed_steps":
         if cfg.max_steps:
             step(cfg.max_steps)
@@ -278,7 +282,7 @@ def settle_scene(
     for index in range(cfg.max_steps):
         step(1)
         snapshot = capture_state(view)
-        rows = snapshot.batches[0]
+        rows = tuple(row for batch in snapshot.batches for row in batch)
         if not rows:
             return SceneCheckReport(
                 (

@@ -98,8 +98,8 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
             num_substeps=NUM_SUBSTEPS,
             solver_cfg={
                 "solver_type": "dexuni",
-                # DexUni keeps solver-specific expert options in namespaced
-                # mappings.  The kinematic trajectory owns the robot joints.
+                # The registered trajectory updates the robot kinematically at
+                # every Newton substep; DexUni only needs to solve the soft body.
                 "joint_mode": "kinematic",
                 "contact_mode": "soft",
                 "vbd_options": {
@@ -112,9 +112,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
                     "rigid_body_particle_contact_buffer_size": 512,
                     "rigid_contact_k_start": SOFT_CONTACT_KE,
                 },
-                "collision_options": {
-                    "soft_contact_margin": SOFT_CONTACT_MARGIN,
-                },
+                "collision_options": {"soft_contact_margin": SOFT_CONTACT_MARGIN},
             },
             # DexUni owns its particle-shape contacts and collision detection.
             collision_cfg=None,

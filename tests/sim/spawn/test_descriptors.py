@@ -648,6 +648,39 @@ def test_newton_contact_dimension_survives_config_and_descriptor(condim: int) ->
     assert descriptor.collisions[0].newton.condim == condim
 
 
+@pytest.mark.parametrize("solref", [(0.02, 1.0), (-1000.0, -20.0)])
+def test_newton_raw_contact_parameters_survive_config_and_descriptor(
+    solref: tuple[float, float],
+) -> None:
+    solimp = (0.9, 0.95, 0.001, 0.5, 2.0)
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "cube",
+            "shape": {"shape_type": "Cube", "size": [0.1, 0.1, 0.1]},
+            "attrs": {
+                "collision_props": {"contype": 2, "conaffinity": 4},
+                "material_props": {
+                    "backend": "newton",
+                    "solref": list(solref),
+                    "solimp": list(solimp),
+                    "solmix": 0.5,
+                },
+            },
+        }
+    )
+    descriptor, _ = rigid_desc_from_cfg(
+        RigidObjectCfg.from_dict(cfg.to_dict()), newton_solver_type="mujoco_warp"
+    )
+    native = descriptor.collisions[0].newton
+    assert native.contype == 2
+    assert native.conaffinity == 4
+    assert native.solref == pytest.approx(solref)
+    assert native.solimp == pytest.approx(solimp)
+    assert native.solmix == pytest.approx(0.5)
+    assert NewtonCollisionPropertiesCfg().contype is None
+    assert NewtonRigidBodyMaterialCfg().solref is None
+
+
 def test_procedural_rigid_collision_defaults_compile_to_both_backends() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
@@ -1192,137 +1225,6 @@ def test_usd_articulation_forwards_gravity_compensation(monkeypatch, mode) -> No
     assert descriptor.newton_gravity_compensation == 0.5
 
 
-_NEWTON_CREATION_ROOT_PROPS = {
-    "newton_kinematic": True,
-    "newton_sleep_policy": "never",
-    "newton_shape_collision": False,
-    "newton_shape_collision_links": ["base_link"],
-    "newton_particle_collision_links": ["base_link", "tool"],
-    "newton_mesh_approximation": {"method": "convex_hull", "link_names": ["tool"]},
-}
-
-
-@pytest.mark.parametrize("mode", ["preserve", "overlay"])
-def test_articulation_newton_creation_options_are_forwarded(mode) -> None:
-    from dexsim.spawn import NewtonMeshApproximationDesc, NewtonSleepPolicy
-
-    cfg = ArticulationCfg.from_dict(
-        {
-            "uid": "robot",
-            "fpath": "robot.urdf",
-            "asset_physics_mode": mode,
-            "root_props": _NEWTON_CREATION_ROOT_PROPS,
-        }
-    )
-    descriptor = articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
-    resolved = _resolved_articulation_desc()
-    configure_articulation_desc(resolved, cfg, newton_solver_type="dexuni")
-
-    for desc in (descriptor, resolved):
-        assert desc.newton_kinematic is True
-        assert desc.newton_sleep_policy is NewtonSleepPolicy.NEVER
-        assert desc.newton_shape_collision is False
-        assert desc.newton_shape_collision_links == ("base_link",)
-        assert desc.newton_particle_collision_links == ("base_link", "tool")
-        assert isinstance(desc.newton_mesh_approximation, NewtonMeshApproximationDesc)
-        assert desc.newton_mesh_approximation.link_names == ("tool",)
-
-
-@pytest.mark.parametrize("mode", ["preserve", "overlay"])
-@pytest.mark.parametrize("native_geometry", [False, True])
-@pytest.mark.parametrize("value", [None, False, True])
-def test_articulation_sdf_request_is_authored_before_source_resolution(
-    value: bool | None,
-    mode: str,
-    native_geometry: bool,
-) -> None:
-    """Preserve concave import intent without introducing contact overrides."""
-    cfg = ArticulationCfg(
-        uid="robot",
-        fpath="robot.urdf",
-        asset_physics_mode=mode,
-        root_props=ArticulationRootPropertiesCfg(newton_force_sdf=value),
-    )
-    restored = ArticulationCfg.from_dict(cfg.to_dict())
-    descriptor = articulation_desc_from_cfg(restored, newton_solver_type="dexuni")
-    if value is None:
-        assert descriptor.newton_collision is None
-    else:
-        assert descriptor.newton_collision.force_sdf is value
-        assert descriptor.newton_collision.ke is None
-        assert descriptor.newton_collision.margin is None
-    resolved = _resolved_articulation_desc()
-    if native_geometry:
-        resolved.urdf_path = "robot.urdf"
-        for link in resolved.links:
-            link.collisions.clear()
-    configure_articulation_desc(resolved, restored, newton_solver_type="dexuni")
-    if value is not None:
-        for link in resolved.links:
-            for collision in link.collisions:
-                assert collision.newton.force_sdf is value
-
-
-def test_articulation_sdf_request_rejects_default_backend() -> None:
-    """Do not silently apply a Newton source option under Default physics."""
-    cfg = ArticulationCfg(
-        fpath="robot.urdf",
-        root_props=ArticulationRootPropertiesCfg(newton_force_sdf=True),
-    )
-    with pytest.raises(ValueError, match="newton_force_sdf.*Newton"):
-        articulation_desc_from_cfg(cfg)
-
-
-def test_articulation_sdf_request_rejects_truthy_strings() -> None:
-    """Require a boolean rather than treating the text 'false' as enabled."""
-    cfg = ArticulationCfg(
-        fpath="robot.urdf",
-        root_props=ArticulationRootPropertiesCfg(newton_force_sdf="false"),
-    )
-    with pytest.raises(TypeError, match="newton_force_sdf.*boolean"):
-        articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
-
-
-def test_articulation_unset_newton_creation_options_keep_dexsim_defaults() -> None:
-    descriptor = articulation_desc_from_cfg(
-        ArticulationCfg(), source_path="robot.urdf", newton_solver_type="dexuni"
-    )
-    defaults = ArticulationDesc(name="defaults", path="robot.urdf")
-    for name in (
-        "newton_kinematic",
-        "newton_sleep_policy",
-        "newton_shape_collision",
-        "newton_shape_collision_links",
-        "newton_particle_collision_links",
-        "newton_mesh_approximation",
-    ):
-        assert getattr(descriptor, name) == getattr(defaults, name), name
-
-
-@pytest.mark.parametrize("name", sorted(_NEWTON_CREATION_ROOT_PROPS))
-def test_articulation_newton_creation_options_reject_default_backend(name) -> None:
-    cfg = ArticulationCfg.from_dict(
-        {"root_props": {name: _NEWTON_CREATION_ROOT_PROPS[name]}}
-    )
-    with pytest.raises(ValueError, match="Newton backend"):
-        articulation_desc_from_cfg(cfg, source_path="robot.urdf")
-
-
-@pytest.mark.parametrize(
-    ("root_props", "error"),
-    [
-        ({"newton_sleep_policy": "sometimes"}, ValueError),
-        ({"newton_shape_collision_links": "base_link"}, TypeError),
-        ({"newton_mesh_approximation": "convex_hull"}, TypeError),
-    ],
-)
-def test_articulation_newton_creation_options_reject_invalid_values(
-    root_props, error
-) -> None:
-    with pytest.raises(error):
-        ArticulationCfg.from_dict({"root_props": root_props})
-
-
 @pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), float("inf")])
 def test_articulation_gravity_compensation_rejects_invalid_values(value) -> None:
     cfg = ArticulationCfg()
@@ -1412,7 +1314,7 @@ def test_passive_damping_rejects_native_merges_that_discard_it(monkeypatch) -> N
         configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni", "mujoco_warp"])
 @pytest.mark.parametrize("mode", ["preserve", "overlay"])
 @pytest.mark.parametrize("source_gap", [None, 0.0, 0.025])
 def test_imported_articulation_gap_default_is_owned_by_embodichain(
@@ -1430,7 +1332,7 @@ def test_imported_articulation_gap_default_is_owned_by_embodichain(
     assert collision.newton.margin == 0.012
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni", "mujoco_warp"])
 @pytest.mark.parametrize("has_geometry", [True, False, None])
 def test_urdf_native_shapes_receive_gap_without_synthetic_geometry(
     solver_type: str | None, has_geometry: bool | None
@@ -1455,7 +1357,7 @@ def test_urdf_native_shapes_receive_gap_without_synthetic_geometry(
     assert link.collisions[0].newton.ke is None
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni", "mujoco_warp"])
 @pytest.mark.parametrize("mode", ["preserve", "overlay"])
 @pytest.mark.parametrize("source_gap", [None, 0.0, 0.025])
 def test_imported_rigid_gap_default_is_owned_by_embodichain(
@@ -1734,7 +1636,7 @@ def test_non_mode_aware_newton_position_fallback_is_explicit() -> None:
         configure_articulation_desc(descriptor, cfg, newton_solver_type="xpbd")
 
 
-def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
+def test_dexuni_solver_consumes_position_mode_without_warning() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
@@ -1749,7 +1651,7 @@ def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        configure_articulation_desc(descriptor, cfg, newton_solver_type="auto")
+        configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
 
     assert not caught
 
@@ -1908,7 +1810,7 @@ def test_articulation_array_qpos_limits_compile_before_backend_build() -> None:
     assert joint.upper_limit == pytest.approx(0.75)
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni"])
 @pytest.mark.parametrize("authored_velocity", [0.05, None])
 def test_robot_default_drive_preserves_authored_velocity_limit(
     solver_type: str | None,
@@ -1926,7 +1828,7 @@ def test_robot_default_drive_preserves_authored_velocity_limit(
     assert joint.dexsim.max_velocity == authored_velocity
 
 
-@pytest.mark.parametrize("solver_type", [None, "auto"])
+@pytest.mark.parametrize("solver_type", [None, "dexuni"])
 def test_explicit_zero_speed_override_is_preserved(solver_type: str | None) -> None:
     descriptor = _resolved_articulation_desc()
     joint = descriptor.get_joint_desc("arm_joint")

@@ -48,6 +48,22 @@ class Light(BatchEntity):
         super().__init__(cfg, entities, device)
         self.reset()
 
+    def get_color(self) -> torch.Tensor:
+        """Return owned native RGB values for each light instance."""
+        return torch.tensor(
+            [list(entity.get_color()) for entity in self._entities],
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+    def get_intensity(self) -> torch.Tensor:
+        """Return owned native intensity values for each light instance."""
+        return torch.tensor(
+            [float(entity.get_intensity()) for entity in self._entities],
+            dtype=torch.float32,
+            device=self.device,
+        )
+
     def set_color(
         self, colors: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:

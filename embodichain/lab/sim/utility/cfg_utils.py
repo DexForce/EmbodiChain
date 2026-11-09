@@ -181,6 +181,8 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
 
     Partial ``root_props`` mappings retain unspecified preset values. Explicit
     ``None`` entries are applied, and iteration pairs validate after merging.
+    Assembly output name/directory overrides apply before appending components,
+    allowing a tool-equipped variant to use a separate assembly cache.
 
     Args:
         base_cfg (RobotCfg): The base robot configuration.
@@ -336,6 +338,13 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge urdf components
             user_urdf_cfg = override_cfg_dict.get("urdf_cfg")
             if isinstance(user_urdf_cfg, dict):
+                for output_field in ("fname", "fpath_prefix"):
+                    if output_field in user_urdf_cfg:
+                        setattr(
+                            base_cfg.urdf_cfg,
+                            output_field,
+                            user_urdf_cfg[output_field],
+                        )
                 # Merge name_case policy if the override specifies one.
                 user_name_case = user_urdf_cfg.get("name_case")
                 if isinstance(user_name_case, dict):

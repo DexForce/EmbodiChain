@@ -21,11 +21,14 @@ device, not a separate environment tensor device.
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
 
-Newton `solver_cfg=None` preserves DexSim's `DexUniSolverCfg` default.
-DexUni owns scene-based partitioning between MuJoCo, VBD and supported particle
-paths; `NewtonPhysicsBackend.solver_type` remains `dexuni`. Legacy `auto` and
-`AutoSolverCfg` mappings select DexUni. Robot presets select `newton_dexuni`
-before the MuJoCo aliases and portable fallbacks. Gradient mode requires an explicit
+Newton `solver_cfg=None` preserves DexSim's scene-aware `DexUniSolverCfg`.
+DexUni resolves its ownership and contact paths from the complete Spawn scene;
+the configured solver type is exposed through `NewtonPhysicsBackend.solver_type`.
+Do not guess a solver-specific robot preset while scene ownership is unresolved.
+Explicit selection uses `dexuni`; `contact_mode="auto"` retains the native
+contact-path policy. Expert settings use the native option groups
+(`vbd_options`, `mujoco_options`, `collision_options`); unknown solver names
+and flat DexUni options are rejected. Gradient mode requires an explicit
 `semi_implicit` solver. Read exact solver options/defaults in
 `cfg/physics.py` and the installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
@@ -56,9 +59,10 @@ from `sim.spawn_result.get_solver_diagnostics()` after `prepare()`.
 
 Capability checks remain explicit: Default owns native rigid constraints and
 Newton deformables are separate. Contact support is rechecked after Newton
-solver resolution; capabilities depend on the concrete DexUni contact path
-and whether MuJoCo runs on CUDA. See `physics/` and the
-[contact capability contract](../sensor-system/lifecycle.md#contact-queries).
+solver resolution. DexUni requires per-row `ContactBuffer` quantity validity;
+its one-way CPU MuJoCo path can expose geometry-only contacts, while CPU
+MuJoCo force reports are unavailable. See `physics/` and
+[sensors](../sensor-system/sensor-system.md).
 
 ## Sparse source physics
 
@@ -103,9 +107,11 @@ preserve mode, without replacing explicit zero, margins or materials. Inspect
 `spawn/descriptors.py` for these application defaults rather than altering
 DexSim global defaults.
 
-Newton `condim` belongs in collision descriptors before preparation; friction
-coefficients belong in material properties. Use per-link overlays for contact
-intent, not finalized solver-array mutations. `has_particle_collision` is
+Newton `condim`, `contype` and `conaffinity` belong in collision descriptors
+before preparation; friction coefficients and raw MuJoCo `solref`, `solimp` and
+`solmix` belong in material properties. Explicit `solref` retains its native
+positive or direct-mode meaning. Use per-link overlays for contact intent, not
+finalized solver-array mutations. `has_particle_collision` is
 per-shape participation; Arena isolation remains scene-owned.
 
 `DefaultRigidBodyPropertiesCfg.has_gravity` is Default-native configuration,

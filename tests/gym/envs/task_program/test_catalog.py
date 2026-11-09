@@ -19,7 +19,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import dataclass, replace
+import hashlib
+import json
 from pathlib import Path
 from threading import Event, Lock
 from types import SimpleNamespace
@@ -39,6 +42,7 @@ from embodichain.lab.task_program.integrations import (
     SimulationTaskProgramRegistration,
     SimulationRigidObjectBinding,
     SimulationSceneBinding,
+    ContainerAffordanceBinding,
     SupportSurfaceAffordanceBinding,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
@@ -490,6 +494,50 @@ def _registration() -> SimulationTaskProgramRegistration:
     )
 
 
+def test_explicit_settle_mode_is_fingerprinted_and_preflighted_without_simulation():
+    from embodichain.lab.task_program.integrations import (
+        SimulationRigidizedArticulationObjectBinding,
+    )
+    from embodichain.lab.task_program.integrations.simulation.policies import (
+        SimulationSettleMonitorCfg,
+    )
+
+    base = _registration()
+    pose = replace(
+        base,
+        settle_presets={
+            "observed": SimulationSettleMonitorCfg(measurement="pose_delta")
+        },
+    )
+    velocity = replace(base, settle_presets={"observed": SimulationSettleMonitorCfg()})
+    assert pose.fingerprint != velocity.fingerprint
+    assert pose.settle_presets["observed"].measurement == "pose_delta"
+    payload = _program_payload()
+    payload["program"] = {
+        "kind": "segment",
+        "name": "observe",
+        "steps": payload["program"],
+        "post": [{"kind": "wait_stable", "entity": "cube", "preset": "observed"}],
+    }
+    program = decode_task_program(payload)
+    pose.catalog.preflight(program)
+    unsupported = replace(
+        pose,
+        scene_binding=SimulationSceneBinding(
+            registry_id=CUBE_SCENE_REGISTRY_ID,
+            rigidized_articulations=(
+                SimulationRigidizedArticulationObjectBinding(
+                    entity_id="cube",
+                    simulation_uid="native_articulation",
+                    locked_qpos={"joint": 0.0},
+                ),
+            ),
+        ),
+    )
+    with pytest.raises(TaskProgramValidationError, match="native rigid object"):
+        unsupported.catalog.preflight(program)
+
+
 def _parallel_live_inputs() -> tuple[object, SceneRegistry, AtomicActionEngine]:
     """Build minimal identity-consistent inputs for factory lifecycle tests."""
     robot = object()
@@ -919,6 +967,35 @@ def test_catalog_accepts_linked_place_relation_with_exact_grounder_key() -> None
     assert tuple(compiled.iter_segments())[0].calls[0].call.semantic_id == "place"
 
 
+def test_registration_replace_does_not_duplicate_scene_grounders() -> None:
+    """Replacing immutable registration metadata keeps derived grounders unique."""
+    base = create_cube_scene_binding()
+    scene = replace(
+        base,
+        registry_id="container_relation_scene",
+        containers=(
+            ContainerAffordanceBinding(
+                entity_id="cube_inside",
+                parent_id="cube",
+                native_name="inside_target",
+                is_default=True,
+            ),
+        ),
+    )
+    registration = SimulationTaskProgramRegistration(
+        scene_binding=scene,
+        robot_profile_binding=create_cube_robot_profile_binding(),
+    )
+
+    replaced = replace(registration, settle_presets=registration.settle_presets)
+
+    assert len(registration.relation_grounders) == 1
+    assert len(replaced.relation_grounders) == 1
+    assert type(replaced.relation_grounders[0]).__name__ == (
+        "ContainerRelationTargetGrounder"
+    )
+
+
 def test_standard_support_binding_installs_grounder_without_task_code() -> None:
     """A task relation declaration supplies its production grounder implicitly."""
     base = create_cube_scene_binding()
@@ -1021,6 +1098,108 @@ def test_fingerprint_is_stable_for_equivalent_declarations() -> None:
     assert len(left.fingerprint) == 64
 
 
+def test_fingerprint_payload_is_detached_and_matches_full_registration() -> None:
+    registration = _registration()
+    payload = registration.fingerprint_payload()
+    before = deepcopy(payload)
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    assert hashlib.sha256(encoded).hexdigest() == registration.fingerprint
+    payload["robot_profile_binding"]["fields"]["profile_id"] = "changed"
+    payload["call_descriptors"].clear()
+    assert registration.fingerprint_payload() == before
+    registration.assert_unchanged()
+
+
+def test_fingerprint_payload_rejects_drift_during_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registration = SimulationTaskProgramRegistration(
+        scene_binding=create_cube_scene_binding(),
+        robot_profile_binding=create_cube_robot_profile_binding(),
+        handover_pose_providers=(_CatalogHandOverPoseProvider(transfer_height=0.6),),
+    )
+    checked = SimulationTaskProgramRegistration._checked_fingerprint_payload
+
+    def drift_after_check(
+        self: SimulationTaskProgramRegistration,
+    ) -> dict[str, object]:
+        payload = checked(self)
+        object.__setattr__(self.handover_pose_providers[0], "transfer_height", 0.8)
+        return payload
+
+    monkeypatch.setattr(
+        SimulationTaskProgramRegistration,
+        "_checked_fingerprint_payload",
+        drift_after_check,
+    )
+    with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+        registration.fingerprint_payload()
+
+
+def test_motion_modes_participate_in_sealed_registration_identity() -> None:
+    """Default behavior stays valid; explicit modes cannot reuse another seal."""
+    base = create_cube_robot_profile_binding().presets[0]
+
+    def registration_for(motion_policy):
+        return _registration_with_preset(
+            SkillPolicyPreset(
+                base.preset_id,
+                action_option_templates=base.action_option_templates,
+                effect_assurance=base.effect_assurance,
+                motion_policy=motion_policy,
+                tracking_policy=base.tracking_policy,
+                recovery_policy=base.recovery_policy,
+                workflow_recovery_policy=base.workflow_recovery_policy,
+                runner_cfg=base.runner_cfg,
+                effect_monitors=base.effect_monitors,
+                required_planner=base.required_planner,
+            )
+        )
+
+    policy = base.motion_policy
+    default = registration_for(policy)
+    explicit_default = registration_for(
+        replace(policy, interpolation_mode="adaptive", ik_seed_mode="batched")
+    )
+    sequential = registration_for(replace(policy, ik_seed_mode="sequential"))
+    fixed = registration_for(
+        replace(
+            policy,
+            interpolation_mode="fixed_grid",
+            acceleration_limit=None,
+            velocity_limit=None,
+        )
+    )
+    assert default.fingerprint == explicit_default.fingerprint
+    assert len({default.fingerprint, sequential.fingerprint, fixed.fingerprint}) == 3
+    for registration in (default, explicit_default, sequential, fixed):
+        program = decode_task_program(
+            _program_payload(), validation_context=registration.catalog
+        )
+        compiled = registration.catalog.preflight(program)
+        assert tuple(compiled.iter_segments())[0].calls[0].call.semantic_id == "pick"
+        registration.assert_unchanged()
+
+    legacy = json.loads(
+        (Path(__file__).parent / "data/motion_policy_registration_v1.json").read_text()
+    )
+    assert default.fingerprint != legacy["fingerprint"]
+    # Load the actual pre-migration seal beside the default current declaration.
+    object.__setattr__(
+        default,
+        "catalog",
+        replace(default.catalog, fingerprint=legacy["fingerprint"]),
+    )
+    with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+        default.assert_unchanged()
+
+
 def test_fingerprint_covers_workflow_recovery_policy() -> None:
     """A recovery budget is immutable registration-owned integration behavior."""
     base = create_cube_robot_profile_binding().presets[0]
@@ -1089,6 +1268,8 @@ def test_fingerprint_owns_provider_ids_and_declarative_fields() -> None:
     object.__setattr__(provider, "transfer_height", 0.8)
     with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
         registration.assert_unchanged()
+    with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+        registration.fingerprint_payload()
 
 
 def test_fingerprint_rejects_opaque_nested_declaration_values() -> None:

@@ -18,17 +18,21 @@
 from __future__ import annotations
 
 import math
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 import torch
 import warp as wp
 
 from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
     MassPropertiesCfg,
     NewtonPhysicsCfg,
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
 )
+from embodichain.lab.gym.envs.base_env import BaseEnv
 from embodichain.lab.sim.sensors import (
     ArticulationContactFilterCfg,
     ContactSensorCfg,
@@ -43,7 +47,10 @@ pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
 @pytest.mark.parametrize(
     "solver_type", ["mujoco_warp", pytest.param(None, id="default_dexuni")]
 )
-def test_newton_contact_sensor_reports_each_arena(solver_type: str | None) -> None:
+@pytest.mark.parametrize("num_substeps", [1, 10])
+def test_newton_contact_sensor_reports_each_arena(
+    solver_type: str | None, num_substeps: int
+) -> None:
     from dexsim.scene import ContactBuffer
 
     if solver_type is None and not hasattr(ContactBuffer, "impulse_valid"):
@@ -59,7 +66,7 @@ def test_newton_contact_sensor_reports_each_arena(solver_type: str | None) -> No
             arena_space=2.0,
             physics_cfg=NewtonPhysicsCfg(
                 device="cuda:0",
-                num_substeps=1,
+                num_substeps=num_substeps,
                 use_cuda_graph=False,
                 # Exercise a multi-point manifold so query-side reductions
                 # cannot satisfy this regression contract accidentally.
@@ -120,12 +127,184 @@ def test_newton_contact_sensor_reports_each_arena(solver_type: str | None) -> No
             sensor.get_actor_info(actor_id).path.endswith(("/ground", "/cube"))
             for actor_id in set(actor_ids.flatten().cpu().tolist())
         )
+        history = sensor.create_history(
+            "support",
+            sensor.get_actor_ids("cube"),
+            counterpart_ids=sensor.get_actor_ids("ground"),
+            force_threshold=1.0,
+        )
+        # Keep the physical load invariant while varying both the solver's
+        # internal substeps and the actual World.update interval.
+        for dt in (0.01, 0.02):
+            sensor.begin_control_step()
+            sim.update(dt, step=3, after_substep=sensor.update_physics_step)
+            torch.testing.assert_close(
+                history.force[..., 2],
+                torch.full_like(history.contact, 9.81, dtype=torch.float32),
+                rtol=0.01,
+                atol=0.05,
+            )
+            assert history.found.all()
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
         from dexsim.engine.newton_physics import teardown_newton_physics
 
         teardown_newton_physics()
+
+
+@pytest.fixture
+def dexuni_contact_scene(tmp_path):
+    """A native contact report with articulation dynamics invalidated by reset."""
+    urdf = tmp_path / "slider.urdf"
+    urdf.write_text("""<robot name="slider">
+      <link name="base"/><link name="moving">
+        <inertial><mass value="0.1"/>
+          <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+        </inertial>
+        <collision><geometry><box size="0.05 0.05 0.05"/></geometry></collision>
+      </link>
+      <joint name="slide" type="prismatic"><parent link="base"/><child link="moving"/>
+        <origin xyz="0 0 0.5"/><axis xyz="1 0 0"/>
+        <limit lower="0" upper="0.1" effort="10" velocity="1"/>
+      </joint>
+    </robot>""")
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cuda:0",
+            physics_cfg=NewtonPhysicsCfg(
+                device="cuda:0",
+                physics_dt=0.01,
+                num_substeps=10,
+                use_cuda_graph=False,
+            ),
+        )
+    )
+    try:
+        sim.add_articulation(
+            ArticulationCfg(uid="slider", fpath=str(urdf), build_pk_chain=False)
+        )
+        sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="ground",
+                shape=CubeCfg(size=[1.0, 1.0, 0.1]),
+                attrs=RigidBodyPhysicsCfg(),
+                body_type="static",
+                init_pos=(0.0, 0.0, 0.1),
+            )
+        )
+        sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="cube",
+                shape=CubeCfg(size=[0.2, 0.2, 0.2]),
+                attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=1.0)),
+                init_pos=(0.0, 0.0, 0.4),
+            )
+        )
+        sensor = sim.add_sensor(
+            ContactSensorCfg(
+                uid="contacts",
+                rigid_uid_list=["ground", "cube"],
+                max_contacts_per_env=32,
+            )
+        )
+        sim.update(step=150)
+        sensor.update()
+        assert sensor.get_data()["is_valid"].any()
+        yield sim, sensor
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+        from dexsim.engine.newton_physics import teardown_newton_physics
+
+        teardown_newton_physics()
+
+
+def test_dexuni_physics_reset_keeps_initial_sensor_observations_readable(
+    dexuni_contact_scene,
+):
+    sim, sensor = dexuni_contact_scene
+    env = SimpleNamespace(
+        sim=sim,
+        sensors={"contacts": sensor},
+        device=sim.device,
+        num_envs=sim.num_envs,
+        _camera_group_ids=[],
+        _profiler=SimpleNamespace(section=lambda *_: nullcontext()),
+    )
+    assert not sensor.requires_substep_update
+    assert BaseEnv._get_sensor_obs(env)["contacts"]["is_valid"].any()
+    # Sensor-only reset must retain the valid, same-step native report.
+    sensor.reset([0])
+    assert BaseEnv._get_sensor_obs(env)["contacts"]["is_valid"].any()
+    # Reproduce Gym's physical reset ordering, including articulation clear.
+    sim.reset_objects_state(env_ids=[0], excluded_sensor_uids=[sensor.uid])
+    sensor.reset([0])
+    for _ in range(2):
+        data = BaseEnv._get_sensor_obs(env)["contacts"]
+        assert not data["is_valid"].any()
+        assert not data["impulse_valid"].any()
+        assert not data["friction_valid"].any()
+        assert sensor.total_current_contacts == 0
+    sim.update(step=150)
+    assert BaseEnv._get_sensor_obs(env)["contacts"]["is_valid"].any()
+
+
+@pytest.mark.parametrize("history_sample", [False, True])
+def test_dexuni_external_graph_consumes_eager_native_samples(
+    dexuni_contact_scene, history_sample
+):
+    sim, sensor = dexuni_contact_scene
+    if history_sample:
+        sensor.create_history(
+            "support", sensor.get_actor_ids("cube"), force_threshold=1.0
+        )
+        sim.update(step=3, after_substep=sensor.update_physics_step)
+    stream = torch.cuda.Stream(device=sim.device)
+    stream.wait_stream(torch.cuda.current_stream(sim.device))
+    with torch.cuda.stream(stream):
+        sensor.update()
+    stream.synchronize()
+    # This is the review's native same-step warmup/capture sequence. The
+    # boundary error must occur before DexSim can wait on an uncaptured event.
+    with pytest.raises(RuntimeError, match="outside external CUDA capture"):
+        with torch.cuda.graph(torch.cuda.CUDAGraph(), stream=stream):
+            if history_sample:
+                sensor.update_physics_step(0.01)
+            else:
+                sensor.update()
+
+    # Mixed DexUni reports may provide geometry-only rows with zero impulse.
+    # Consume their validity so replay freshness does not assume force support.
+    output = torch.empty_like(sensor.get_data()["is_valid"])
+    stream.wait_stream(torch.cuda.current_stream(sim.device))
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream):
+        data = sensor.get_data()
+        output.copy_(data["is_valid"])
+
+    def replay_latest():
+        stream.wait_stream(torch.cuda.current_stream(sim.device))
+        with torch.cuda.stream(stream):
+            graph.replay()
+        stream.synchronize()
+        data = sensor.get_data()
+        torch.testing.assert_close(output, data["is_valid"])
+
+    replay_latest()
+    assert output.any()
+    sim.reset_objects_state(env_ids=[0], excluded_sensor_uids=[sensor.uid])
+    sensor.reset([0])
+    sensor.update()
+    replay_latest()
+    assert output.count_nonzero() == 0
+    sim.update(
+        step=150, after_substep=sensor.update_physics_step if history_sample else None
+    )
+    sensor.update()
+    replay_latest()
+    assert output.any()
 
 
 @pytest.mark.parametrize("solver_path", ["pure_mujoco", "coupled"])
@@ -206,7 +385,7 @@ def test_dexuni_pure_mujoco_contact_sensor_reports_impulse(solver_path: str) -> 
         else:
             assert not sensor.contact_capabilities.impulse
             assert (data["is_valid"] & ~data["impulse_valid"]).any()
-            raw = sensor._query.fetch()
+            raw = sensor._query.fetch_solver_report()
             for field in ("impulse_valid", "friction_valid"):
                 assert data[field].sum() == getattr(raw, field)[: raw.count].sum()
         assert valid.any()

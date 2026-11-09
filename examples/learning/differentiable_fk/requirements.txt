@@ -1,0 +1,5 @@
+# Optional plotting and mesh-viewer dependencies for this example.
+matplotlib
+plotly
+trimesh
+yourdfpy

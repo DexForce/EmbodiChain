@@ -37,10 +37,14 @@ __all__ = [
     "TianjiMarvinCfg",
     "DexforceW1Cfg",
     "CobotMagicCfg",
+    "FrankaCfg",
     "FrankaPandaCfg",
     "FlexivRizon4SCfg",
     "URRobotCfg",
     "SO101FollowerCfg",
+    "BrainCoRevo1Cfg",
+    "SharpaWaveCfg",
+    "WujiHandCfg",
 ]
 
 _EXPORTS = {
@@ -55,10 +59,14 @@ _EXPORTS = {
     "TianjiMarvinCfg": ".tianji.marvin",
     "DexforceW1Cfg": ".dexforce.w1",
     "CobotMagicCfg": ".agilex.cobotmagic",
+    "FrankaCfg": ".franka.cfg",
     "FrankaPandaCfg": ".franka.panda",
     "FlexivRizon4SCfg": ".flexiv.rizon4s",
     "URRobotCfg": ".universal_robots.ur_robot",
     "SO101FollowerCfg": ".the_robot_studio.so101",
+    "BrainCoRevo1Cfg": ".brainco.revo1",
+    "SharpaWaveCfg": ".sharpa.wave",
+    "WujiHandCfg": ".wuji.hand",
 }
 
 

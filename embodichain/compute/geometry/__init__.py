@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Lazy tensor geometry kernels; private Warp consumers remain independent."""
+"""Lazy numerical geometry kernels; private Warp consumers remain independent."""
 
 from __future__ import annotations
 
@@ -23,22 +23,32 @@ from typing import Any
 
 __all__ = [
     "aabb_overlap_depth",
+    "aabb_separation",
     "aabb_containment_violation",
     "group_height_offset",
     "transform_aabbs",
     "triangle_geometry",
     "nearest_half_turn_pose",
     "rotate_rigid_grasp",
+    "transform_vertex_bounds",
+    "aabb_sphere_cover",
+    "convex_projection_distance_to_origin",
+    "axis_contact_pose",
 ]
 
 _EXPORT_MODULES = {
     "aabb_overlap_depth": "aabb",
+    "aabb_separation": "aabb",
     "aabb_containment_violation": "aabb",
     "group_height_offset": "aabb",
     "transform_aabbs": "transforms",
     "triangle_geometry": "mesh",
     "nearest_half_turn_pose": "rigid",
     "rotate_rigid_grasp": "rigid",
+    "transform_vertex_bounds": "mesh_bounds",
+    "aabb_sphere_cover": "mesh_bounds",
+    "convex_projection_distance_to_origin": "convex_projection",
+    "axis_contact_pose": "rigid",
 }
 
 

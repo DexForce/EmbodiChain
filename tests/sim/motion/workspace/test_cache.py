@@ -601,7 +601,7 @@ def test_build_robot_cfg_asset_control_part_defaults_to_arm():
 
 
 def test_build_preset_robot_cfg_franka():
-    """--robot FrankaPanda loads the preset control parts (no ee-link/joints)."""
+    """--robot FrankaPanda loads the bare-arm preset without manual frame flags."""
     from embodichain.lab.scripts.analyze_workspace import build_robot_cfg
     from embodichain_robots import FrankaPandaCfg
 
@@ -615,9 +615,10 @@ def test_build_preset_robot_cfg_franka():
         )
     )
     assert isinstance(cfg, FrankaPandaCfg)
-    assert "arm" in cfg.control_parts and "eef" in cfg.control_parts
-    # Solver + ee-link come from the preset, not the CLI.
-    assert cfg.solver_cfg["arm"].end_link_name == "fr3_hand_tcp"
+    assert set(cfg.control_parts) == {"arm"}
+    assert len(cfg.control_parts["arm"]) == 7
+    # The flange frame comes from the preset, not the CLI.
+    assert cfg.solver_cfg["arm"].end_link_name == "fr3_link8"
     assert part is None  # auto-resolved later by _resolve_control_part
     assert urdf is None
 

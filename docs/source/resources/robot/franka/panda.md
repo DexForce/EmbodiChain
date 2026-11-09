@@ -1,117 +1,69 @@
-# Franka Panda
+# FrankaPanda — compatibility and native-hand setup
 
-`FrankaPandaCfg` configures the Franka Panda manipulator together with its
-parallel-jaw hand. The bundled model contains the seven-joint arm and two
-finger joints in one URDF.
+`FrankaPandaCfg` is a compatibility selector for the historical FR3 asset family.
+`robot_type: panda` continues to choose that model; it now constructs its bare
+seven-joint arm ending at `fr3_link8`. New callers use `FrankaCfg` with
+`arm_model: fr3` or `arm_model: panda`.
 
-<div style="text-align: center;">
-  <img src="../../../_static/robots/franka_panda.png" alt="Franka Panda robot" style="height: 400px; width: auto;"/>
-  <p><b>Franka Panda with parallel-jaw hand</b></p>
-</div>
+Mount end effectors with ordinary URDF components, control groups, drive
+parameters and solver TCP overrides, as for UR robots. The `franka_panda`
+embodiment explicitly installs the native hand for existing task deployments.
+See [Franka configuration](cfg.md) for arm selection, assembly and migration.
 
-## Key Features
-
-- **Seven-axis manipulator** with the two-joint Panda hand.
-- **Ready-to-use robot configuration** for the URDF, control parts, joint
-  drives, and initial joint positions.
-- **Numerical forward and inverse kinematics** through `PytorchSolverCfg` and
-  `pytorch-kinematics`.
-- **Multi-environment simulation support** through `SimulationManager`.
-- **Dual-arm composition support** through the `"FrankaPanda"` base-robot key.
-
-## Usage
+## Bare compatibility constructor
 
 ```python
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain_robots import FrankaPandaCfg
 
-sim = SimulationManager(SimulationManagerCfg(headless=True, num_envs=4))
 cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
 robot = sim.add_robot(cfg=cfg)
 ```
 
-`from_dict` also accepts standard `RobotCfg` overrides. For example, the base
-pose and initial joint positions can be changed when the configuration is
-created:
+The catalog ID `FrankaPanda` and YAML `class_type: FrankaPanda` remain valid.
+This constructor exposes `arm` with seven joints and a flange TCP. Its native
+joint names are `fr3_joint1` through `fr3_joint7`; the end link is `fr3_link8`.
+
+## Explicit native-hand assembly
+
+<div style="text-align: center;">
+  <img src="../../../_static/robots/franka/fr3_native_hand.png" alt="FrankaPanda native-hand layout: FR3 arm with the parallel-jaw Panda Hand explicitly mounted" style="height: 400px; width: auto;"/>
+  <p><b>FrankaPanda — native-hand assembly</b> (explicit <code>franka_panda</code> embodiment)</p>
+</div>
+
+The hand-equipped layout shown here is loaded from the existing embodiment
+component. It uses the same camera, lighting and arm pose as the
+[Franka bare-arm illustration](cfg.md). The
+[render record](../../../_static/robots/franka/native_hand.json) includes both
+source components and their transforms.
+
+The embodiment is a reusable configuration, selected independently of the arm
+class. It adds two named finger joints to the seven arm joints; the source
+mimic relation leaves one independent finger drive. Its control groups are
+`arm` and `eef`, and its solver TCP includes the hand mounting rotation and
+103.4 mm flange-to-TCP offset.
+
+For standalone construction, load that component through the public catalog:
 
 ```python
-cfg = FrankaPandaCfg.from_dict(
-    {
-        "robot_type": "panda",
-        "init_pos": [0.5, 0.0, 0.0],
-        "init_qpos": [0.0, -0.5, 0.0, -2.5, 0.0, 2.8, 0.7, 0.04, 0.04],
-    }
-)
-```
+from embodichain.robot_registry import resolve_robot_cfg
+from embodichain.utils.utility import load_config
+from embodichain_tasks.configs import get_config_path
 
-## Robot Configuration
-
-| Item | Default |
-|------|---------|
-| Configuration class | `FrankaPandaCfg` |
-| `robot_type` | `"panda"` (the only currently supported variant) |
-| UID | `FrankaPanda` |
-| URDF | `Franka/Panda/PandaWithHand.urdf` |
-| Arm joints | `fr3_joint1` through `fr3_joint7` |
-| Hand joints | `fr3_finger_joint1`, `fr3_finger_joint2` |
-| Kinematics root / end link | `base` / `fr3_hand_tcp` |
-| Solver | `PytorchSolverCfg` with 30 samples |
-
-The configuration exposes two independently addressable control parts:
-
-```python
-arm_joint_ids = robot.get_joint_ids("arm")
-eef_joint_ids = robot.get_joint_ids("eef")
-```
-
-The hand's second finger joint is a mimic of the first in the bundled URDF.
-`embodichain list-robot` therefore reports eight independent control DOFs and
-marks the gripper as `eef (1+1m)`.
-
-## Default Joint State
-
-The default state places the arm in a neutral ready pose and opens both fingers:
-
-| Joint | Position (rad) |
-|-------|----------------|
-| `fr3_joint1` | 0.000 |
-| `fr3_joint2` | -0.569 |
-| `fr3_joint3` | 0.000 |
-| `fr3_joint4` | -2.810 |
-| `fr3_joint5` | 0.000 |
-| `fr3_joint6` | 3.037 |
-| `fr3_joint7` | 0.741 |
-| `fr3_finger_joint1` | 0.040 |
-| `fr3_finger_joint2` | 0.040 |
-
-## Custom grippers
-
-The official `FrankaPanda` preset uses the stock Panda hand. Atomic Skill
-examples and motion-generation benchmarks assemble Panda with the DH PGI
-gripper locally, including their flange chain, TCP and contact calibration.
-`FrankaPandaPgiCfg` and the `FrankaPandaPgi` catalog ID have been removed.
-
-## Dual-Arm Composition
-
-Use `DualArmRobotCfg` with `base_robot="FrankaPanda"` to create a pair of Panda
-arms. The dual-arm builder prefixes the generated joints, control parts, and
-solver links with `left_` and `right_`.
-
-```python
-from embodichain.lab.sim.robots import DualArmRobotCfg
-
-cfg = DualArmRobotCfg.from_dict(
-    {
-        "base_robot": "FrankaPanda",
-        "mount": {"preset": "side_by_side", "separation": 0.6},
-    }
-)
+fields = load_config(get_config_path("components/embodiments/franka_panda.yaml"))[
+    "simulation"
+]
+cfg = resolve_robot_cfg(fields.pop("class_type"), fields)
 robot = sim.add_robot(cfg=cfg)
 ```
 
-See {doc}`/resources/robot/dual_arm` for the available mount presets and configuration options.
+The [Task Program quickstart](../../../overview/task_program/quickstart.md)
+uses this explicit native-hand embodiment. Tool geometry, commands and TCP
+belong to the component, while `FrankaPandaCfg` remains the bare-arm
+compatibility selector.
 
-## See Also
+```{eval-rst}
+.. py:class:: embodichain_robots.franka.panda.FrankaPandaCfg
 
-- {doc}`/overview/sim/motion/solvers/index` - IK solver reference
-- {doc}`/guides/add_robot` - Adding a new robot (quick reference)
+   Legacy FR3 arm selector. The inherited ``from_dict()`` and
+   ``build_pk_serial_chain()`` use the bare seven-joint arm and flange TCP.
+```

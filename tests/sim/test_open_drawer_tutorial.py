@@ -61,8 +61,8 @@ def test_create_scene_configures_newton_grasp_material_only_for_newton(
             return drawer
 
     monkeypatch.setattr(
-        tutorial.FrankaPandaCfg,
-        "from_dict",
+        tutorial,
+        "_create_franka_native_hand_cfg",
         lambda _config: SimpleNamespace(
             joint_drive_props=SimpleNamespace(damping={}),
             link_attrs=None,

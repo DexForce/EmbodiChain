@@ -1,0 +1,105 @@
+integration_id: pour_water_dexforce_w1_030_pika_v1
+program_id: pour_water_with_right_arm
+requires:
+  scene_contract: pour_water_scene_v1
+  embodiment_contract: dual_arm_parallel_gripper
+scene_binding:
+  contract_id: pour_water_scene_v1
+  registry_id: pour_water_tianji_marvin
+  rigid_objects:
+  - entity_id: cup
+    simulation_uid: cup
+    dynamics: dynamic
+    semantic_type: cup
+  - entity_id: bottle
+    simulation_uid: bottle
+    dynamics: dynamic
+    semantic_type: bottle
+    affordances:
+    - entity_id: bottle_grasp
+      kind: antipodal_grasp
+profile:
+  defaults:
+    pick_up:
+      primary: right
+    pour:
+      primary: right
+    place:
+      primary: right
+  action_options:
+    pick:
+      kind: pick_up
+      hand_interp_steps: 44
+      grasp_settle_steps: 100
+      fixed_object_to_eef:
+      - 0.0
+      - 0.0
+      - 1.0
+      - -0.005
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    simulation.pour:
+      kind: pour
+      rotate_angle: 1.0471975511965976
+      mouth_height: 0.07
+      max_mouth_height: 0.24
+      clearance: 0.025
+      dwell_duration: 1.0
+    place:
+      kind: place
+      hand_interp_steps: 44
+      release_settle_steps: 60
+      preserve_current_object_orientation: true
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+  - kind: pour
+    object_id: bottle
+    target:
+      receiver_id: cup
+      source_mouth_pose:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0697246268391609
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      receiver_mouth_pose:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.04387804865837097
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      receiver_radius: 0.025
+      mouth_radius: 0.012

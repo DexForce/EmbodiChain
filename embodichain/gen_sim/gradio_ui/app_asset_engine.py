@@ -209,7 +209,7 @@ def run_simready_asset(
     command = [
         sys.executable,
         "-m",
-        "embodichain.gen_sim.simready_pipeline.cli.start",
+        "embodichain.gen_sim.asset_engine.cli.start",
         "--input_dir",
         str(input_dir),
         "--output_root",

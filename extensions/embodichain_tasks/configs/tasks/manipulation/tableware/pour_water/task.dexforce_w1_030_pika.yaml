@@ -1,0 +1,19 @@
+id: PourWater-DexforceW1V030Pika-v1
+environment:
+  component: env.dexforce_w1_030_pika.yaml
+task_program:
+  program: task_program/program.workbench.yaml
+  integration: task_program/integration.dexforce_w1_030_pika.yaml
+  execution_policy:
+    component: ../../../../components/execution_policies/motion_gen_projected_manipulation.yaml
+    overrides:
+      motion:
+        velocity_limit: 0.5
+        acceleration_limit: 0.5
+      recovery:
+        action_timeout: 120.0
+embodiment:
+  component: ../../../../components/embodiments/dexforce_w1_030_pika.yaml
+collection:
+  target_episodes: 5
+device: cpu

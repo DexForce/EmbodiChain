@@ -199,7 +199,10 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboWorldCfg,
 )
 import numpy as np
-from embodichain_robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
+from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+    _create_franka_native_hand_cfg,
+)
+from embodichain_robots import URRobotCfg, DexforceW1Cfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 
 __all__ = ["main"]
@@ -251,7 +254,7 @@ def _check_runtime(curobo_gpu_id: int) -> None:
             "cuRobo V2 is not installed. Install NVIDIA's source package "
             "matching the CUDA environment: "
             "`uv pip install 'nvidia-curobo[cu12] @ "
-            "git+https://github.com/NVlabs/curobo.git@v0.8.0'` for CUDA 12.x "
+            "git+https://github.com/NVlabs/curobo.git@v0.9.0'` for CUDA 12.x "
             "or replace `cu12` with `cu13` for CUDA 13.x "
             f"(see {CUROBO_INSTALL_URL})."
         ) from exc
@@ -289,10 +292,9 @@ def _build_scene(
     if robot_type == "franka":
         control_part = "arm"
         robot = sim.add_robot(
-            cfg=FrankaPandaCfg.from_dict(
+            cfg=_create_franka_native_hand_cfg(
                 {
                     "uid": "franka",
-                    "robot_type": "panda",
                     "init_qpos": [0.0, -0.5, 0.0, -2.3, 0.0, 1.8, 0.741, 0.04, 0.04],
                 }
             )

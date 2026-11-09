@@ -40,6 +40,31 @@ Scene API. Native learned-solver deployment and functional Gym integration are
 separate consumers. There are no NeRD-specific core `compute/dynamics`,
 `data_pipeline/dynamics`, `learning/dynamics` modules or core `dynamics` command.
 
+## RigidFormer author model
+
+The native family lives in
+`extensions/embodichain_models/embodichain_models/dynamics/rigidformer/`.
+`model.py` owns geometry/configuration; `_native/` preserves licensed author
+code. Checkpoint import validates recorded architecture and named tensors.
+The community `rigidformer` package is not a runtime dependency.
+`data.py` reads verified packed scenes; `supervised.py` separates shifted
+conditioning and anchor targets; `sl_recipe.py` constructs the shared trainer
+with committed sampling, epoch scheduling and EMA participants.
+
+Integration dt=1 differs from physical seconds. Stored vertices are unscaled;
+metadata sizes apply about each origin once. Geometry prediction requires CUDA
+and at least two valid objects. Attention backend and source semantics belong
+to recipe/recovery identity. Source-owned epoch sampling does not claim the
+legacy research DataLoader's worker-RNG trajectory.
+
+The [showcase](../../../examples/learning/rigidformer/README.md) owns downloads,
+conversion, fixed-weight evaluation and independent author-Trainer comparison.
+Its `demo` command in `_demo.py` compares live Newton spheres with render-only
+model predictions after four observed frames, through a native window or an
+engine-camera recording. It uses explicit prepared geometry and weight paths.
+Assets/results stay outside the wheel. Numerical agreement, recovery and full
+benchmark/retraining qualification remain distinct evidence requirements.
+
 ## Resource and physical identity
 
 `prepare --robot cartpole|ant --resource-root DIR` downloads the pinned dataset,
@@ -91,7 +116,13 @@ Frozen source revisions, budgets and gates live in the
 Historical evidence remains bound to its recorded source, data and runtime;
 relocating code does not rerun it. NeRD validation uses the runnable showcase
 and its reference/acceptance workflows; `tests/learning/sl/` covers the common
-training contracts. The [feature guide](../../../docs/source/features/neural_dynamics.md)
-owns user commands; the [model API](../../../docs/source/api_reference/model_catalogs.rst)
-owns exported definitions. Transition error, accumulated rollout error and
-paper-scale accuracy remain separate claims.
+training contracts. The [feature overview](../../../docs/source/features/neural_dynamics.md)
+owns model selection and the shared training entry point; the
+[NeRD guide](../../../docs/source/features/neural_dynamics/nerd.md) and
+[RigidFormer guide](../../../docs/source/features/neural_dynamics/rigidformer.md)
+own their model principles and user workflows; the
+[RWM guide](../../../docs/source/features/neural_dynamics/rwm.md) covers prediction
+and replay under the linked robot-world-model contract. The
+[model API](../../../docs/source/api_reference/model_catalogs.rst) owns exported
+definitions. Transition error, accumulated rollout error and paper-scale
+accuracy remain separate claims.

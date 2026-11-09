@@ -74,6 +74,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGeneratorCfg,
     GraspAnnotationCfg,
     ParallelJawGraspCollisionCfg,
+    FixedGripperCollisionGeometry,
 )
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.utils import configclass, logger
@@ -120,15 +121,6 @@ ROBOTIQ_HAND_JOINT_PATTERN = r".*(?:finger|knuckle)_joint"
 # warning during tutorial robot construction.
 _UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
     (-2.0 * math.pi, 2.0 * math.pi) for _ in range(6)
-)
-TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
-    model_id="dh_pgi_140_80",
-    min_opening_width=0.003,
-    max_opening_width=0.100,
-    finger_length=0.10,
-    finger_width=0.040,
-    finger_thickness=0.01,
-    palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
 # UR5/DH-PGI calibration for the 5 cm cube with one-way DexUni contacts.
@@ -1964,7 +1956,9 @@ def create_parallel_jaw_grasp_pose_generator(
     *,
     n_sample: int,
     force_refresh: bool,
-    opening_margin: float = 0.03,
+    robot: Robot,
+    arm_control_part: str = "arm",
+    collision_geometry: FixedGripperCollisionGeometry | None = None,
     gripper_model: ParallelJawGripperModelCfg | None = None,
     approach_direction_samples: int = 4,
 ) -> AntipodalGraspPoseGenerator:
@@ -1973,22 +1967,37 @@ def create_parallel_jaw_grasp_pose_generator(
     Args:
         n_sample: Number of antipodal contact-pair samples.
         force_refresh: Whether to regenerate cached object annotations.
-        opening_margin: Additional clearance used for grasp collision checks.
-        gripper_model: Explicit fixture geometry; omission uses the PGI sample.
+        robot: Actual mounted robot supplying the runtime TCP calibration.
+        arm_control_part: Arm whose mounted tool is sampled.
+        collision_geometry: Explicit geometry for custom/native embodiments.
+        gripper_model: Explicit contact aperture; omission uses the mounted tool.
         approach_direction_samples: Candidate approach draws; the fixed-scene
             CLI uses one to isolate geometric and trajectory factors.
 
     Returns:
         A generator with an independently owned gripper model.
     """
+    if collision_geometry is None:
+        from .gripper_geometry import mounted_gripper_geometry
+
+        mounted_model, collision_geometry = mounted_gripper_geometry(
+            robot.cfg, arm_control_part=arm_control_part
+        )
+        if gripper_model is None:
+            gripper_model = mounted_model
+        elif gripper_model.model_id != mounted_model.model_id:
+            raise ValueError(
+                "The requested gripper model does not match the mounted URDF."
+            )
+    if gripper_model is None:
+        raise ValueError("Explicit collision geometry also requires a gripper model.")
     return AntipodalGraspPoseGenerator(
-        TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model,
+        gripper_model,
+        collision_geometry=collision_geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample, approach_direction_samples=approach_direction_samples
         ),
         collision_cfg=ParallelJawGraspCollisionCfg(
-            opening_margin=opening_margin,
-            point_sample_density=0.012,
             filter_ground_collision=False,
         ),
         annotation_cfg=GraspAnnotationCfg(
@@ -2015,6 +2024,9 @@ def make_top_down_eef_pose(position: torch.Tensor) -> torch.Tensor:
         device=position.device,
     )
     pose[:3, 3] = position
+    # Restore orthonormality lost by the authored four-decimal rotation.
+    u, _, vh = torch.linalg.svd(pose[:3, :3])
+    pose[:3, :3] = u @ vh
     return pose
 
 
@@ -2056,6 +2068,7 @@ def initialize_pre_pick_robot_pose(
     hand_open: torch.Tensor,
     *,
     height: float = 0.36,
+    clear_dynamics: bool = True,
 ) -> None:
     """Set a tutorial robot at a deterministic open-gripper pose above an object.
 
@@ -2064,6 +2077,8 @@ def initialize_pre_pick_robot_pose(
         obj: Object below the pre-pick TCP pose.
         hand_open: Open gripper joint positions.
         height: World-Z coordinate for the pre-pick TCP pose.
+        clear_dynamics: Clear robot dynamics after initialization. Disable only
+            after the host has cleared the complete Newton articulation world.
 
     Raises:
         RuntimeError: If the pre-pick pose is unreachable.
@@ -2082,7 +2097,8 @@ def initialize_pre_pick_robot_pose(
     for target in (False, True):
         robot.set_qpos(arm_qpos, name="arm", target=target)
         robot.set_qpos(hand_qpos, name="eef", target=target)
-    robot.clear_dynamics()
+    if clear_dynamics:
+        robot.clear_dynamics()
 
 
 def prepare_tutorial_scene(
@@ -2762,8 +2778,8 @@ class _FrankaPgiCfg(RobotCfg):
     gripper on the ``fr3_link8`` flange. The configuration owns the whole
     assembly: the ``arm`` and ``eef`` control parts, the PGI finger drive and
     open initial state, the PGI tool center point, and the Newton fingertip
-    contacts on the PGI finger links. The stock Panda hand settings of
-    :class:`FrankaPandaCfg` do not apply.
+    contacts on the PGI finger links. End-effector settings are owned by this
+    explicit assembly rather than the bare Franka arm preset.
 
     The arm solver and the FK/IK serial chain both end at ``fr3_link8`` on the
     arm URDF used by the assembly. The solver's ``tcp`` gives the PGI tool

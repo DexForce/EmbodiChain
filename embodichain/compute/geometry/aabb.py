@@ -22,7 +22,12 @@ import math
 
 import torch
 
-__all__ = ["aabb_overlap_depth", "aabb_containment_violation", "group_height_offset"]
+__all__ = [
+    "aabb_separation",
+    "aabb_overlap_depth",
+    "aabb_containment_violation",
+    "group_height_offset",
+]
 
 
 def _float_tensor(value: torch.Tensor, name: str) -> None:
@@ -182,3 +187,24 @@ def group_height_offset(
     offset = support_z + clearance - lowest
     valid = valid & torch.isfinite(offset)
     return torch.where(valid, offset, 0.0), valid
+
+
+def aabb_separation(bounds_a: torch.Tensor, bounds_b: torch.Tensor) -> torch.Tensor:
+    """Return Euclidean distance between broadcastable axis-aligned input boxes.
+
+    Args:
+        bounds_a: Minimum/maximum corners with shape (..., 2, D).
+        bounds_b: Same dtype/device and broadcastable leading dimensions.
+
+    Returns:
+        Zero for overlap/touch; positive distance otherwise. Invalid bounds
+        produce NaN. No scene ownership or physical success is inferred.
+    """
+    _pair_bounds(bounds_a, bounds_b)
+    gap = torch.maximum(
+        bounds_a[..., 0, :] - bounds_b[..., 1, :],
+        bounds_b[..., 0, :] - bounds_a[..., 1, :],
+    ).clamp_min(0)
+    distance = torch.linalg.vector_norm(gap, dim=-1)
+    valid = _valid_bounds(bounds_a) & _valid_bounds(bounds_b) & torch.isfinite(distance)
+    return torch.where(valid, distance, float("nan"))

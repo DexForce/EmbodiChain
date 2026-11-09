@@ -25,7 +25,7 @@
 | `embodichain/lab/scripts/_preview.py`, `preview_joint_control.py` | Shared preview stepping, frontend setup, and simulation-thread joint controls |
 
 Human-facing behavior and usage are documented in
-`docs/source/overview/sim/viser_visualization.md`.
+`docs/source/overview/sim/visualization/index.rst`.
 
 ## Ownership and Data Flow
 

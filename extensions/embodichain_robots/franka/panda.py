@@ -15,214 +15,42 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
-import math
-from typing import TYPE_CHECKING, Any, Dict
-
-import numpy as np
-import torch
-
-from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
-    LinkPhysicsOverrideCfg,
-    NewtonCollisionPropertiesCfg,
-    NewtonRigidBodyMaterialCfg,
-    RigidBodyPhysicsCfg,
-    RobotCfg,
-    URDFCfg,
-)
-from embodichain.lab.sim.motion.solvers import FEPSolverCfg
-from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+from embodichain_robots.franka.cfg import FrankaCfg
 from embodichain.utils import configclass
-
-if TYPE_CHECKING:
-    import pytorch_kinematics as pk
 
 __all__ = ["FrankaPandaCfg"]
 
-# ``robot_type`` -> URDF directory / file name.
-_FRANKA_URDF_DIR: Dict[str, str] = {
-    "panda": "Panda",
-}
-
-# Default init_qpos: arm in a neutral ready pose, fingers open.
-# Derived from the Isaac Lab Franka Emika Panda reference configuration.
-_FRANKA_DEFAULT_INIT_QPOS = [
-    0.0,  # Joint1
-    -0.569,  # Joint2
-    0.0,  # Joint3
-    -2.810,  # Joint4
-    0.0,  # Joint5
-    3.037,  # Joint6
-    0.741,  # Joint7
-    0.04,  # finger_joint1
-    0.04,  # finger_joint2 (mimic of finger_joint1)
-]
-
-_FRANKA_ARM_JOINTS = [f"fr3_joint{i}" for i in range(1, 8)]
-
-
-def _newton_gripper_contacts(link_names_expr: list[str]) -> LinkPhysicsOverrideCfg:
-    """Return the Newton fingertip contact group for the given finger links."""
-    return LinkPhysicsOverrideCfg(
-        link_names_expr=list(link_names_expr),
-        attrs=RigidBodyPhysicsCfg(
-            collision_props=NewtonCollisionPropertiesCfg(condim=4),
-            material_props=NewtonRigidBodyMaterialCfg(
-                ke=40000.0,
-                kd=400.0,
-                torsional_friction=0.1,
-                rolling_friction=0.01,
-            ),
-        ),
-    )
-
-
-def _resolve_robot_type(init_dict: dict, default: str) -> str:
-    """Return the requested Franka variant, rejecting unknown ones."""
-    robot_type = init_dict.get("robot_type", default)
-    if robot_type not in _FRANKA_URDF_DIR:
-        raise ValueError(
-            f"Unknown Franka robot_type: {robot_type!r}. "
-            f"Expected one of {sorted(_FRANKA_URDF_DIR)}."
-        )
-    return robot_type
-
 
 @configclass
-class FrankaPandaCfg(RobotCfg):
-    """Configuration for the Franka Emika Panda robot with Panda hand.
+class FrankaPandaCfg(FrankaCfg):
+    """Legacy selector for the historical FR3 model, now a bare arm.
 
-    The PandaWithHand URDF includes both the 7-DOF arm and the parallel-jaw
-    gripper in a single file. The arm defaults to
-    :class:`~embodichain.lab.sim.motion.solvers.FEPSolverCfg` with redundancy
-    search enabled.
-
-    Example:
-
-        cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
-        robot = sim.add_robot(cfg=cfg)
+    ``robot_type="panda"`` keeps selecting the historical FR3 asset family.
+    Mount a hand explicitly through an embodiment or ordinary RobotCfg overrides.
     """
 
     robot_type: str = "panda"
 
-    @classmethod
-    def from_dict(cls, init_dict):
-        """Initialize ``FrankaPandaCfg`` from a dictionary.
-
-        Args:
-            init_dict: Dictionary of configuration parameters. ``robot_type``
-                selects the Franka variant (currently ``"panda"``). All other
-                keys are merged on top of the defaults via
-                :func:`merge_robot_cfg`.
-
-        Returns:
-            A ``FrankaPandaCfg`` instance.
-        """
-        cfg = cls()
-        cfg._build_defaults(init_dict)
-        return merge_robot_cfg(cfg, init_dict)
-
     def _build_defaults(self, init_dict: dict | None = None) -> None:
-        """Populate default urdf/control/solver/physics for the Franka variant.
-
-        Args:
-            init_dict: The raw override dict passed to ``from_dict``.
-                ``robot_type`` is read from here (falling back to the class
-                default).
-        """
-        init_dict = init_dict or {}
-        robot_type = _resolve_robot_type(init_dict, self.robot_type)
-
-        self.robot_type = robot_type
-        self.uid = "FrankaPanda"
-
-        urdf_dir = _FRANKA_URDF_DIR[robot_type]
-        urdf_path = get_data_path(f"Franka/{urdf_dir}/{urdf_dir}WithHand.urdf")
-
-        self.urdf_cfg = URDFCfg(
-            components=[
-                {
-                    "component_type": "arm",
-                    "urdf_path": urdf_path,
-                    "transform": np.eye(4),
-                }
-            ]
-        )
-
-        self.control_parts = {
-            "arm": list(_FRANKA_ARM_JOINTS),
-            "eef": ["fr3_finger_joint1", "fr3_finger_joint2"],
-        }
-
-        self.solver_cfg = {
-            "arm": FEPSolverCfg(
-                end_link_name="fr3_hand_tcp",
-                root_link_name="base",
-                tcp=[
-                    [1, 0, 0.0, 0.0],
-                    [0, 1, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.0],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-                redundancy_search=True,
-            ),
-        }
-
-        self.joint_drive_props = JointDrivePropertiesCfg(
-            drive_type="force",
-            stiffness={
-                "fr3_joint[1-7]": 1e4,
-                "fr3_finger_joint[1-2]": 1e3,
-            },
-            damping={
-                "fr3_joint[1-7]": 1e3,
-                "fr3_finger_joint[1-2]": 1e2,
-            },
-            max_effort={
-                "fr3_joint[1-7]": 1e5,
-                "fr3_finger_joint[1-2]": 1e4,
-            },
-        )
-        self.link_attrs = {
-            "newton_gripper_contacts": _newton_gripper_contacts(
-                ["fr3_leftfinger|fr3_rightfinger"]
+        values = dict(init_dict or {})
+        self.robot_type = values.pop("robot_type", self.robot_type)
+        if self.robot_type != "panda":
+            raise ValueError(
+                f"Unknown Franka robot_type: {self.robot_type!r}; expected panda"
             )
-        }
-
-        self.init_qpos = list(_FRANKA_DEFAULT_INIT_QPOS)
-
-    @property
-    def _pk_urdf_path(self) -> str:
-        """URDF used for the FK/IK serial chain."""
-        urdf_dir = _FRANKA_URDF_DIR[self.robot_type]
-        return get_data_path(f"Franka/{urdf_dir}/{urdf_dir}WithHand.urdf")
-
-    def build_pk_serial_chain(
-        self, device: torch.device = torch.device("cpu"), **kwargs
-    ) -> Dict[str, "pk.SerialChain"]:
-        """Build the pytorch-kinematics serial chain for the arm.
-
-        Args:
-            device: The device to which the chain will be moved. Defaults to CPU.
-            **kwargs: Additional arguments for building the serial chain.
-
-        Returns:
-            A ``{"arm": pk.SerialChain}`` mapping.
-        """
-        from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
-
-        chain = create_pk_serial_chain(
-            urdf_path=self._pk_urdf_path,
-            device=device,
-            end_link_name="fr3_hand_tcp",
-            root_link_name="base",
-        )
-        return {"arm": chain}
+        if values.get("arm_model", "fr3") != "fr3":
+            raise ValueError(
+                "FrankaPanda keeps the historical FR3 model; use FrankaCfg for Panda"
+            )
+        values["arm_model"] = "fr3"
+        super()._build_defaults(values)
+        self.uid = "FrankaPanda"
 
 
 if __name__ == "__main__":
     import argparse
+
+    import numpy as np
 
     np.set_printoptions(precision=5, suppress=True)
 

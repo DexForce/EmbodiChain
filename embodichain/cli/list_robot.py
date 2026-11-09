@@ -144,6 +144,10 @@ def _format_robot_entries(
         - parts_width
         - variants_width,
     }
+    # PrettyTable's header renderer truncates multiline labels. Data rows wrap
+    # correctly, preserving every heading at both supported terminal widths.
+    table.header = False
+    table.add_row(table.field_names, divider=True)
     for index, robot_id in enumerate(sorted(families, key=str.casefold)):
         for profile_index, (variants, profile) in enumerate(
             _variant_profiles(entries[robot_id])

@@ -37,13 +37,22 @@ operations remain in `compute`; source storage belongs to data adapters.
 - The [RWM recipe](../robot-world-model/robot-world-model.md) is
   `embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer`. Its model,
   state codec, objective, predictor and replay belong to that model family.
+- Visual ACT belongs to `embodichain_models.policy.act` and invokes LeRobot
+  0.6.1's official trainer rather than this SL trainer. `build_act_train_config`
+  validates ordered data/control contracts; `load_act_policy` loads native
+  weights and processors with a portable task/data manifest. The runtime uses
+  the official temporal ensemble and resets it per episode. `examples/learning/act/`
+  owns collection, training invocation, independent checkpoint selection and
+  physical evaluation. Historical custom ACT checkpoints require retraining.
+
 
 Objectives own loss masks, normalization, integration and multi-step graph
 construction. The optimizer does not infer action semantics or detach histories.
 Under DDP, `LossResult.loss` is a local mean and `weight` is its effective valid
 supervision count; the learner forms the global weighted mean. Batch size is per
-rank, the learning rate is unchanged, and rank-local sampling streams draw with
-replacement, so samples may overlap. All ranks call fitting, saving and recovery;
+rank and the learning rate is unchanged. Sampling belongs to the source: tensor
+sources draw with replacement, while epoch-traversal sources may shard windows.
+All ranks call fitting, saving and recovery;
 only rank 0 writes artifacts or runs validation through the unwrapped model.
 Schema, action/frame/timestep and numerical-policy identifiers belong in each
 recipe's checkpoint signature. Tensor sources additionally bind content identity.
@@ -57,8 +66,10 @@ changes. Live buffers and delivery credits are not restored: such sources may
 train/save snapshots, but exact continuation is rejected. Acquisition, waits,
 refill and delivery debits stay source/caller-owned; encoding failures do not
 refund a delivered context.
-Distributed checkpoints retain each rank's RNG, sampler and buffers and require
-the same world size for exact recovery. Inside rank 0's validation callback only,
+Distributed checkpoints retain each rank's RNG, sampler, buffers and participant
+state and require the same world size for exact recovery. Rank-local snapshots
+are transferred to rank 0 in bounded chunks to limit device memory. Inside rank
+0's validation callback only,
 a save uses the previously gathered committed-update snapshot without a new
 collective; ordinary save calls require every rank to participate.
 
@@ -80,3 +91,9 @@ qualification belongs to each model's acceptance recipe. The distributed tests
 exercise weighted global updates and fixed-world-size recovery with CPU/Gloo;
 sequence tests reuse real CPU source fixtures for masks, provenance, owned output,
 quota and recovery admission. Examples use launch smoke checks, not tutorial tests.
+
+Factories may register ordered `SupervisedTrainingState` participants for source
+cursors, schedules and model averages. They commit after optimizer success,
+produce owned rank-local snapshots, validate before live restoration and restore
+after validation callbacks. Empty participants retain existing checkpoint
+compatibility. Model-specific participant math stays in its model family.

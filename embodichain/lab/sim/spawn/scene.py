@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
@@ -121,6 +123,24 @@ class SpawnScene:
             uid, self.builder.materials.get(uid)
         )
 
+    @contextmanager
+    def _native_material_scope(self) -> Iterator[None]:
+        """Keep visual definitions while excluding native NoRender texture loads."""
+        if (
+            getattr(getattr(self, "_material_resources", None), "renderer", None)
+            != "no-render"
+        ):
+            yield
+            return
+        materials = self.builder.materials
+        saved = dict(materials)
+        materials.clear()
+        try:
+            yield
+        finally:
+            materials.clear()
+            materials.update(saved)
+
     def _bind_resource_materials(self, descriptor: Any) -> None:
         definitions = getattr(self, "_resource_material_definitions", {})
         if not definitions or self._material_resources.renderer == "no-render":
@@ -177,23 +197,25 @@ class SpawnScene:
             return
 
         if kind == "fluid_object":
-            declaration.descriptor = self.builder.add_fluid(
-                descriptor.name,
-                descriptor.positions,
-                pose=descriptor.pose,
-                density=descriptor.density,
-                particle_spacing=descriptor.particle_spacing,
-                particle_radius=descriptor.particle_radius,
-                render_radius=descriptor.render_radius,
-                render_mode=descriptor.render_mode,
-                mesh_surface=descriptor.mesh_surface,
-                material=descriptor.render_material,
-                per_env=descriptor.per_env,
-            )
+            with self._native_material_scope():
+                declaration.descriptor = self.builder.add_fluid(
+                    descriptor.name,
+                    descriptor.positions,
+                    pose=descriptor.pose,
+                    density=descriptor.density,
+                    particle_spacing=descriptor.particle_spacing,
+                    particle_radius=descriptor.particle_radius,
+                    render_radius=descriptor.render_radius,
+                    render_mode=descriptor.render_mode,
+                    mesh_surface=descriptor.mesh_surface,
+                    material=descriptor.render_material,
+                    per_env=descriptor.per_env,
+                )
         elif kind == "rigid_object_group":
-            declaration.descriptor = tuple(
-                self.builder.add_object(member) for member in descriptor
-            )
+            with self._native_material_scope():
+                declaration.descriptor = tuple(
+                    self.builder.add_object(member) for member in descriptor
+                )
         else:
             if (
                 kind == "articulation"
@@ -212,7 +234,8 @@ class SpawnScene:
                 "soft_object": "add_soft_object",
                 "cloth_object": "add_cloth_object",
             }[kind]
-            declaration.descriptor = getattr(self.builder, add_name)(descriptor)
+            with self._native_material_scope():
+                declaration.descriptor = getattr(self.builder, add_name)(descriptor)
         self._assets[uid] = declaration
         self._configure_materialized_source(uid)
         # A Newton replacement retains the old same-path handles until commit.
@@ -304,7 +327,8 @@ class SpawnScene:
         """Finalize once or let the current ``Scene`` consume pending changes."""
         if not self.builder.is_finalized:
             self.resolve_sources()
-            result = self.builder.finalize()
+            with self._native_material_scope():
+                result = self.builder.finalize()
         else:
             result = self.builder.result
             assert result is not None
@@ -313,7 +337,8 @@ class SpawnScene:
                     self._pending_material_assignments = (
                         self._capture_material_assignments()
                     )
-                result = result.rebuild(self.builder)
+                with self._native_material_scope():
+                    result = result.rebuild(self.builder)
 
         for uid in self._assets:
             self._configure_materialized_source(uid)

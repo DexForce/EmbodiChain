@@ -58,6 +58,31 @@ launcher selects the concrete backend from the same deployment with
 `--physics`; the selected environment file remains the owner of its backend
 fields.
 
+Execution policies accept either the original string path or a component
+selection with deployment-specific tuning:
+
+```yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy:
+    component: ../../../components/execution_policies/motion_gen_verified.yaml
+    overrides:
+      motion:
+        velocity_limit: 0.5
+        dynamic_collision_mode: 'off'
+```
+
+Overrides are limited to `motion.sample_count`, `motion.velocity_limit`,
+`motion.acceleration_limit`, `motion.dynamic_collision_mode`,
+`recovery.action_timeout` and `recovery.goal_rotation_threshold`. They patch
+only the declared fields; all other base values are retained. The resolved
+values pass the normal policy decoders, including integer, finite-number and
+enum validation. Contracts, planner selection, tracking, runner and effect
+assurance stay in the base policy. The component path resolves from the
+deployment, just as a string reference does. Asset materialization writes the
+resolved policy into its standalone output.
+
 Task-facing trajectory expansion is an optional third owner. A runnable task
 can reference it without copying the robot or environment declaration:
 
@@ -280,3 +305,12 @@ programs. PourWater uses Hybrid for its glTF asset loader. Other motion checks
 run headlessly without sensors; an additional Hybrid check verified the shared
 UR5 top camera at 960 by 540 pixels. These checks do not qualify every random
 seed, physics backend or sensor configuration.
+
+## Real-demonstration trajectory expansion
+
+`configs/tasks/manipulation/carton_stocking/task.panda.yaml` is a configured
+Panda/Robotiq Task Program with three fixed real-motion prototypes. It runs
+source refinement, protected trajectory/time variants and measured LeRobot
+collection through the standard `run-task` owner. Its catalog exposes one
+Panda deployment; the standard task requires no example-generated configuration.
+See the task README for assets, accepted geometry and the 78-candidate benchmark.

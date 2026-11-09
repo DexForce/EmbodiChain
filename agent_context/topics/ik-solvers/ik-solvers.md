@@ -11,6 +11,7 @@
 | Seed generation and retrieval | `embodichain/lab/sim/motion/solvers/qpos_seed_sampler.py`, `qpos_seed_sel_sampler.py` in that directory |
 | Pink posture integration | `embodichain/lab/sim/motion/solvers/null_space_posture_task.py` |
 | Analytical kernels | `embodichain/compute/kinematics/_warp/` |
+| Bounded B=1 waypoint branch search with solver callbacks | `embodichain/compute/kinematics/ik_path.py`; stateful adapter in `lab/sim/motion/ik.py` |
 
 `SolverCfg.from_dict()` resolves a configured type; `init_solver()` creates its
 stateful instance. Robot binds solvers to control parts and synchronizes robot
@@ -44,6 +45,12 @@ For graph-preserving fixed-step DLS, use the standalone
 [learning layers](../learning-layers/learning-layers.md). They call the compute
 implementation directly without a registered runtime solver. Existing solver
 names do not imply end-to-end differentiability.
+
+The benchmark's partial-pose TOPPRA route uses the private inference solver in
+`compute/kinematics/_masked_ik.py`, supplied with batched FK and joint limits.
+It is separate from registered full-pose robot IK; its active-component contract
+and benchmark attribution belong to the
+[motion planner details](../motion-planning/planner-details.md).
 
 ## Frame and result contracts
 
