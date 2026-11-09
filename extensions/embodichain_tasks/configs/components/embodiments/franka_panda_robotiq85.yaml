@@ -333,6 +333,7 @@ skill_profile:
       capabilities:
       - kinematics.batch_inverse
       - motion.cartesian_pose
+      - motion.joint_position
       - kinematics.forward
     - endpoint_id: grasp
       control_part: eef

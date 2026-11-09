@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     )
     from .collision import _MeasuredCollision
     from .scene import JointSceneSource
-    from .real2sim import _Real2SimRow
+    from .sources import _EpisodeSource
 
 __all__: list[str] = []
 
@@ -87,6 +87,6 @@ class GymHostContext:
     prepared: dict[int, PreparedRow] = field(default_factory=dict)
     preparation_checks: dict[int, ValidationResult] = field(default_factory=dict)
     program: CompiledTaskProgram | None = None
-    services: dict[int, _Real2SimRow] = field(default_factory=dict)
+    services: dict[int, _EpisodeSource] = field(default_factory=dict)
     bridges: dict[int, TaskProgramDemoBridge] = field(default_factory=dict)
     recipe: Callable[[int], ExpansionRecipe] | None = None

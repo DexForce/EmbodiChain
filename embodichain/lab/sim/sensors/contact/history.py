@@ -108,9 +108,12 @@ class ContactHistory:
         keys, rows = keys.flatten().sort()
         return keys, rows.to(torch.int32)
 
-    def _start_sample(self, dt: float) -> list:
+    def _start_sample(self, dt: float, impulse_dt: float | None) -> list:
         if dt <= 0:
             raise ValueError("Contact sampling dt must be positive.")
+        impulse_dt = dt if impulse_dt is None else impulse_dt
+        if impulse_dt <= 0:
+            raise ValueError("Contact impulse duration must be positive.")
         self.force.zero_()
         self._hits.zero_()
         self._env_hits.zero_()
@@ -121,7 +124,7 @@ class ContactHistory:
             self.counterpart_ids is None,
             self.include_unknown_counterpart,
             self.force_threshold,
-            dt,
+            impulse_dt,
             wp.from_torch(self.force),
             wp.from_torch(self._hits),
             wp.from_torch(self._env_hits),
@@ -165,11 +168,12 @@ class ContactHistory:
         buffer: ContactBuffer,
         dt: float,
         *,
+        impulse_dt: float | None = None,
         impulse_available: bool = True,
         friction_available: bool = True,
     ) -> None:
         """Reduce compact query rows using its device-resident valid-row count."""
-        args = self._start_sample(dt)
+        args = self._start_sample(dt, impulse_dt)
         quantity_valid = getattr(buffer, "quantity_valid", None)
         self._launch(
             reduce_contact_rows,
@@ -197,14 +201,23 @@ class ContactHistory:
         self.peak_force.zero_()
         self.contact_count.zero_()
 
-    def update(self, data: Mapping[str, torch.Tensor], dt: float) -> None:
+    def update(
+        self,
+        data: Mapping[str, torch.Tensor],
+        dt: float,
+        *,
+        impulse_dt: float | None = None,
+    ) -> None:
         """Reduce a new physics sample and advance timing exactly once.
 
         Args:
             data: ContactSensor data in its documented actor/impulse convention.
-            dt: Duration of the physics sample in seconds.
+            dt: Elapsed World-step duration for history clocks, in seconds.
+            impulse_dt: Duration represented by the reported impulses, in
+                seconds. Defaults to dt. Newton solver reports represent the
+                final internal substep, so pass World dt / num_substeps.
         """
-        args = self._start_sample(dt)
+        args = self._start_sample(dt, impulse_dt)
         self._launch(
             reduce_contact_batch,
             data["is_valid"].shape,

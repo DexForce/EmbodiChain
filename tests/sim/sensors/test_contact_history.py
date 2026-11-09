@@ -83,6 +83,36 @@ def test_landing_retains_completed_air_time_until_next_landing():
     assert not history.first_contact.item()
 
 
+@pytest.mark.parametrize("compact", [False, True])
+def test_impulse_duration_does_not_shorten_history_clocks(compact):
+    from dexsim.scene import ContactBuffer
+
+    history = ContactHistory(torch.tensor([[10]]), force_threshold=1.0)
+    data = sample([[[0, 10]]])
+    data["impulse"].fill_(0.00981)
+    buffer = ContactBuffer.allocate(1, "cpu")
+    buffer.data.zero_()
+    buffer.data[:, 5] = 1.0
+    buffer.data[:, 9] = 0.00981
+    buffer.actor_ids[:] = torch.tensor([[0, 10]])
+    buffer.env_ids.zero_()
+    buffer.quantity_valid.fill_(True)
+
+    for contact in (False, False, True):
+        data["is_valid"].fill_(contact)
+        buffer.device_counts[0] = int(contact)
+        if compact:
+            history._update_from_query(buffer, 0.01, impulse_dt=0.001)
+        else:
+            history.update(data, 0.01, impulse_dt=0.001)
+        if not contact:
+            assert not history.found.any()
+    assert history.found.item()
+    assert history.force[0, 0, 2].item() == pytest.approx(9.81)
+    assert history.current_air_time.item() == 0.0
+    assert history.last_air_time.item() == pytest.approx(0.03)
+
+
 def test_selective_reset_preserves_every_untouched_history_buffer():
     history = ContactHistory(torch.tensor([[10], [20]]))
     history.update(sample([[[0, 10]], [[0, 20]]], valid=False), 0.1)

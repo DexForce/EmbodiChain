@@ -369,7 +369,7 @@ The installer applies the locked Blender dependencies and the wheel metadata
 correction described in the
 [Blender runtime notes](https://github.com/DexForce/EmbodiChain/blob/main/docker/README.md#blender-and-native-library-isolation).
 
-For SimReady pipeline usage and LLM configuration, see [SimReady Asset Pipeline](../features/generative_sim/asset_engine.md).
+For Asset Engine usage and LLM configuration, see [Asset Engine](../features/generative_sim/asset_engine.md).
 
 ## Verify installation
 

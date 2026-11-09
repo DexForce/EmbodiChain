@@ -165,6 +165,18 @@ def _sensor_for_query(query, capacity=2):
     )
 
 
+def test_contact_report_errors_other_than_reset_are_not_hidden():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+
+    def fail():
+        raise RuntimeError("contact device failure")
+
+    query.fetch_solver_report = fail
+    with pytest.raises(RuntimeError, match="contact device failure"):
+        sensor.update()
+
+
 def test_default_history_enables_substep_sampling_and_preserves_interval_drops():
     query = _FakeQuery()
     sensor = _sensor_for_query(query)

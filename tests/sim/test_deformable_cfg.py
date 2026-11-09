@@ -222,6 +222,34 @@ def test_surface_coefficients_compile_without_changing_values(topology: str) -> 
         assert getattr(desc.physics, native_field) == value
 
 
+@pytest.mark.parametrize("topology", ["volume", "surface"])
+def test_deformable_contact_material_reaches_native_descriptor(topology: str) -> None:
+    cfg_type = (
+        VolumeDeformableObjectCfg
+        if topology == "volume"
+        else SurfaceDeformableObjectCfg
+    )
+    compile_cfg = (
+        volume_deformable_desc_from_cfg
+        if topology == "volume"
+        else surface_deformable_desc_from_cfg
+    )
+    material = {"stiffness": 3000.0, "damping": 0.2, "dynamic_friction": 0.7}
+    cfg = cfg_type.from_dict(
+        {
+            "uid": "body",
+            "shape": {"fpath": "mesh.obj"},
+            "attrs": {"contact_material": material},
+        }
+    )
+
+    desc, _ = compile_cfg(cfg_type.from_dict(cfg.to_dict()))
+    native = desc.physics.contact_material
+    assert native.stiffness == pytest.approx(material["stiffness"])
+    assert native.damping == pytest.approx(material["damping"])
+    assert native.dynamic_friction == pytest.approx(material["dynamic_friction"])
+
+
 def test_volume_elasticity_uses_short_names() -> None:
     cfg = VolumeDeformableObjectCfg.from_dict(
         {

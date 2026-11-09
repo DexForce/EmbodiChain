@@ -24,7 +24,12 @@ from .handover_evidence import HandOverEvidenceBinding
 from .coordinated_evidence import CoordinatedHoldEvidenceBinding
 from ._held_evidence import one, frames
 
-__all__ = ["held_observation_request", "resolve_hold_observation_condition"]
+__all__ = [
+    "resolve_hold_observation_condition",
+    "held_observation_request",
+    "sampled_support_window",
+    "directional_observation_axes",
+]
 
 
 def held_observation_request(
@@ -133,6 +138,66 @@ def held_observation_request(
         pose_observation_kind=pose_kind,
         grips=grips,
     )
+
+
+def _sampled_support_window(
+    binding: Any, boundary_frames: Any
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    import math
+
+    ends = tuple(boundary_frames)
+    if (
+        binding.evidence_scope != "native_stable_support"
+        or binding.sampled_contact_identity is None
+        or len(ends) != 1
+        or any(type(x) is not int or x <= 0 for x in ends)
+    ):
+        raise ValueError(
+            "Sampled support requires its bound single-row completed boundary."
+        )
+    start = ends[0] - math.ceil(
+        binding.condition["duration"] / binding.sampled_contact_identity["step_dt"]
+    )
+    if start < 0:
+        raise ValueError("Sampled support window predates the initialized episode.")
+    return (start,), ends
+
+
+def sampled_support_window(
+    declaration: Mapping[str, Any], boundary_frames: Any
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Resolve the original inclusive sample window from runtime declarations.
+
+    Args:
+        declaration: Complete serialized placement observation declaration.
+        boundary_frames: Actual completed observation slots.
+
+    Returns:
+        Inclusive start/end slots with the unchanged ceil(duration/step_dt) rule.
+    """
+    from .placement_evidence import _declaration
+
+    return _sampled_support_window(_declaration(declaration), boundary_frames)
+
+
+def directional_observation_axes(
+    declaration: Mapping[str, Any],
+) -> tuple[tuple[int, int], ...]:
+    """Resolve the numerical geometry request without reading physical state.
+
+    Args:
+        declaration: Complete serialized directional observation declaration.
+
+    Returns:
+        Ordered world-axis/sign query operands for the selected spatial relation.
+    """
+    from .placement_evidence import _declaration
+    from embodichain.compute.geometry.directional import DIRECTIONAL_RELATION_AXES
+
+    selected = _declaration(declaration)
+    if selected.directional_geometry is None:
+        raise ValueError("Directional observation requires its explicit spatial route.")
+    return DIRECTIONAL_RELATION_AXES[selected.directional_geometry["relation"]]
 
 
 def resolve_hold_observation_condition(

@@ -182,3 +182,27 @@ class _Real2SimRow:
                 name: ("robot", name) for name in ("qpos", "qvel", "qf")
             },
         )
+
+    def qualify_episode(self, *, qpos, objects):
+        """Adapt legacy tabletop qualification to the shared source port."""
+        from .sources import _SourceQualification
+        from ._gym_utils import _hash
+
+        request = self.qualify(
+            qpos=qpos, object_pose=objects[self.profile.object_uid][:, :7]
+        )
+        source_ids = tuple(
+            sorted(
+                {
+                    _hash(
+                        (
+                            "real2sim",
+                            unit.unit.source.source_id,
+                            unit.unit.source.source_revision,
+                        )
+                    )
+                    for unit in self.prototypes.values()
+                }
+            )
+        )
+        return _SourceQualification(request.metadata, request.validation, source_ids)

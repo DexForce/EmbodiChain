@@ -29,6 +29,12 @@ Sampling reads completed solver contacts through DexSim's
 `fetch()` operate on a separate geometry-only observation and cannot replace
 solver reports when interpreting measured impulses or force histories.
 
+After a physics reset invalidates the native solved report, sensor observation
+reads return invalid rows until the next solve. A sensor-buffer-only reset may
+still reread the same valid native report. Contact sampling must run outside
+caller-owned CUDA graph capture; only the stable observation buffers are consumed
+inside that graph. See [history and substeps](contact-history.md) for ordering.
+
 Preserve these query/buffer contracts:
 
 - `filter_need_both_actor` chooses query `match="all"` or `"any"`.

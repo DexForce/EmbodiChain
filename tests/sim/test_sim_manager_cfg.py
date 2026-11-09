@@ -559,7 +559,6 @@ def test_newton_physics_cfg_directly_accepts_dexsim_solver_cfg_object() -> None:
 
 
 @pytest.mark.no_sim
-@pytest.mark.usefixtures("requires_dexuni_two_way")
 def test_newton_physics_cfg_forwards_two_way_coupling() -> None:
     cfg = NewtonPhysicsCfg(
         collision_cfg=None,
@@ -596,7 +595,6 @@ def test_newton_physics_cfg_forwards_two_way_coupling() -> None:
         ({"coupling_options": {"unknown": 1.0}}, "Unsupported"),
     ],
 )
-@pytest.mark.usefixtures("requires_dexuni_two_way")
 def test_newton_physics_cfg_preserves_native_two_way_validation(options, error) -> None:
     cfg = NewtonPhysicsCfg(
         solver_cfg={"solver_type": "dexuni", "coupling": "two_way", **options}
@@ -606,7 +604,6 @@ def test_newton_physics_cfg_preserves_native_two_way_validation(options, error) 
 
 
 @pytest.mark.no_sim
-@pytest.mark.usefixtures("requires_dexuni_two_way")
 def test_two_way_full_surface_options_are_forwarded_to_native() -> None:
     cfg = NewtonPhysicsCfg(
         solver_cfg={
