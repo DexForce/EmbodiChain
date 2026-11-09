@@ -23,6 +23,7 @@ import '@fontsource-variable/inter/wght.css';
 import '@fontsource/ibm-plex-mono/latin-400.css';
 import '@fontsource/ibm-plex-mono/latin-500.css';
 import '@xyflow/react/dist/style.css';
+import '@embodichain/graph-ui/style.css';
 import './styles.css';
 import App from './App';
 const validate = new Ajv2020().compile<ArchitectureSnapshot>(schema);

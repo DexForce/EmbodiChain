@@ -28,6 +28,11 @@ retain their separate configuration objects. Marvin requires an explicit
 `side="left"` or `side="right"` because its two hands have different meshes.
 A runtime TCP calibration can be supplied explicitly with `root_from_tcp`;
 this changes the returned TCP poses without moving the physical geometry.
+`root_from_contact_frame` independently calibrates the canonical grasp origin and
+axes in the hand root. It re-expresses surface samples and candidate poses while
+preserving the URDF geometry. Configured grasp services accept the same field;
+keep it with the embodiment's grasp calibration rather than using a TCP offset
+to stand in for contact calibration.
 
 For a custom hand, construct `FixedGripperCollisionGeometry.from_urdf` with
 its root/TCP, collision links, actual open joint positions, canonical-to-TCP
@@ -67,6 +72,57 @@ collision, swept paths or physical grasp success.
 
 These are contact-pair eligibility bounds. The actual URDF/open-state geometry
 owns collision checking.
+
+## Explicit geometry and opening views
+
+`pg_grasp.opening.OpeningEnvelopeGraspPoseGenerator` wraps an existing service
+and requires the complete object mesh to fit the opening after ordinary
+ranking. `pg_grasp.constraints.ConstrainedGraspPoseGenerator` additionally
+applies an immutable geometry-digest-bound region or release-plane declaration.
+Both retain the delegate's order and infinite-cost failure padding. They are
+explicit alternatives and do not change the ordinary generator's defaults.
+`NominalHandEnvelope` holds caller-declared heuristic dimensions, independently
+of actual hand geometry and physical release evidence.
+
+`pg_grasp.preshape` uses an explicit captured whole-hand sweep and table height
+for the original bounded handle candidate screening and cross-axis fallback.
+`pg_grasp.proposals.unqualified_center_proposals` retains prepared contact pairs,
+direction draws, NMS and ranking, deferring final-TCP/command qualification to
+the caller. Required ground filtering is rejected by this explicit proposal
+path rather than bypassed. These numerical entries import without Lab, Task
+Engine or a target-decomposition backend; the `pg_grasp` facade loads concrete backends
+only when requested.
+
+## Explicit contact refinement
+
+The ordinary generator continues to check its fixed pre-grasp collision geometry.
+`get_dual_arm_grasp_proposals()` is an explicit alternative for callers that own
+a later qualification stage: it returns angle/NMS/ranking-qualified proposals,
+without target/ground collision or closing-contact qualification.
+`CoordinatedGraspSampler` composes these proposals with
+`HandContactChecker.refine()`, preserving candidate order and population bounds.
+Its left/right refiners share one target-surface query per mesh identity/version,
+while retaining their own geometry and diagnostics. Model geometry sampling and
+runtime ownership remain with Lab.
+
+An explicit proposal `role="left"` or `role="right"` returns that side only.
+Both sides consume their original eligibility-dependent direction draws, keeping
+the chosen population and final Torch RNG unchanged; unrequested pose building,
+NMS and ranking are skipped. Omission retains the ordinary two-sided API.
+Raw and validated backends share read-only mesh/antipodal buffers while retaining
+separate collision state, including under the first-query refresh policy.
+
+Changing either mesh tensor retires its previous version's cached queries,
+refiners and backends, including after storage/shape changes. Distinct tensor
+pairs remain cached until `clear_cache()` on the sampler or
+`AntipodalGraspPoseGenerator`. Hosts
+should clear between unrelated asset cohorts. Lab's paired provider exposes the
+same cleanup without recapturing hand geometry; changing model calibration or
+commands still requires rebuilding the provider.
+
+Fixed-opening and closing-stroke geometry share URDF mesh/box decoding and
+collision-origin handling. Their barycentric and subdivision sampling policies
+remain separate, preserving their existing samples and provenance.
 
 ## Versioned geometry sources
 

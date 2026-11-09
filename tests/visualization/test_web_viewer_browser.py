@@ -55,13 +55,6 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend):
 
     if not hasattr(dexsim, "WebApplication"):
         pytest.skip("WebRTC-enabled DexSim with WebApplication is required")
-    if backend == "newton":
-        import dexsim.engine.newton_physics as native_newton
-
-        if not hasattr(native_newton, "AutoSolverCfg"):
-            pytest.skip(
-                "Installed DexSim removed AutoSolverCfg required by the existing Newton adapter; Newton integration is unverified"
-            )
     playwright = pytest.importorskip("playwright.sync_api")
     chrome = os.environ.get("WEBRTC_TEST_CHROME") or shutil.which("google-chrome")
     if not chrome:

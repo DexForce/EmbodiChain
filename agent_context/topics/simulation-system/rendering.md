@@ -53,6 +53,11 @@ native renderer. Viser retains native rendering because its current exporter
 reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
 when the saved training configuration uses NoRender.
 
+DexSim 0.6 still processes Spawn's visual material table on NoRender native
+add/finalize calls. `SpawnScene` temporarily excludes that table during those
+calls so texture binding is never attempted without a renderer, then restores
+the authored definitions for metadata and later declarations.
+
 ## WebRTC observation view
 
 `visualization.backend="dexsim-web"` reserves native rendering before World

@@ -26,7 +26,10 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
-from embodichain.lab.sim.scene._validation import _owned_b1_pose as _owned_pose
+from embodichain.lab.sim.scene._validation import (
+    _owned_b1_pose as _owned_pose,
+    _owned_batch_pose,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
@@ -83,41 +86,58 @@ class CuroboPayload:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CuroboQuerySnapshot:
-    """Owned B=1 state for one fresh, single-control-part planning lifetime.
+    """Owned environment-batched state for one fresh, single-control-part planning lifetime.
 
     Args:
         full_qpos: Same-observation full robot positions in ``robot.joint_names``
-            order, shape ``(1, robot.dof)``. Passive locks use these values.
+            order, shape ``(B, robot.dof)``. Passive locks must agree across rows.
         world_to_base: Same-observation world-to-cuRobo-base transform,
-            shape ``(1, 4, 4)``. World snapshots, goals and payload share it.
-        payload: Optional carried body from the same observation.
+            shape ``(B, 4, 4)``. Goals use the corresponding row.
+        payload: Optional carried body from the same observation, B=1 only.
+        env_ids: Canonical row order, defaulting to ``tuple(range(B))``.
 
-    The caller owns observation coherence and keeps the world fixed during the
-    query. These runtime values are not serialized planner configuration. A
-    snapshot is bound to the first requested control part; payloads name that
+    B>1 requires the complete robot environment batch in canonical order,
+    identical passive locks and a shared frozen collision world in each row's
+    cuRobo base frame. Payloads, subset/reordered batches and per-row worlds
+    remain unsupported. The caller owns observation coherence and keeps the
+    world fixed during the query. These runtime values are not serialized planner
+    configuration. A snapshot is bound to the first requested control part; payloads name that
     part explicitly. Switching parts requires a new planner/snapshot.
     """
 
     full_qpos: torch.Tensor
     world_to_base: torch.Tensor
     payload: CuroboPayload | None = None
+    env_ids: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         if (
             not isinstance(self.full_qpos, torch.Tensor)
             or self.full_qpos.ndim != 2
-            or self.full_qpos.shape[0] != 1
+            or self.full_qpos.shape[0] < 1
             or not self.full_qpos.shape[1]
             or not self.full_qpos.is_floating_point()
             or not torch.isfinite(self.full_qpos).all()
         ):
-            raise ValueError("Query snapshots require finite full_qpos (1, robot.dof).")
+            raise ValueError("Query snapshots require finite full_qpos (B, robot.dof).")
         if self.payload is not None and type(self.payload) is not CuroboPayload:
             raise TypeError("payload must be CuroboPayload or None.")
+        batch = self.full_qpos.shape[0]
+        if batch > 1 and self.payload is not None:
+            raise ValueError("B>1 observed queries do not support payloads.")
+        expected_ids = tuple(range(batch))
+        if self.env_ids is not None and (
+            type(self.env_ids) is not tuple
+            or any(type(value) is not int for value in self.env_ids)
+            or self.env_ids != expected_ids
+        ):
+            raise ValueError("env_ids must be the canonical environment row order.")
+        object.__setattr__(self, "env_ids", expected_ids)
+        pose = _owned_batch_pose(self.world_to_base, "world_to_base")
+        if pose.shape[0] != batch:
+            raise ValueError("world_to_base batch must match full_qpos.")
         object.__setattr__(self, "full_qpos", self.full_qpos.detach().clone())
-        object.__setattr__(
-            self, "world_to_base", _owned_pose(self.world_to_base, "world_to_base")
-        )
+        object.__setattr__(self, "world_to_base", pose)
         if self.payload is not None:
             object.__setattr__(self, "payload", replace(self.payload))
 
@@ -130,6 +150,11 @@ def _query_robot_config(
         raise ValueError("Query full_qpos must match the full robot joint order.")
     observed = dict(zip(joint_names, snapshot.full_qpos[0].cpu().tolist(), strict=True))
     kinematics = result["robot_cfg"]["kinematics"]
+    locked_names = tuple(kinematics.get("lock_joints") or {})
+    locked_ids = [joint_names.index(name) for name in locked_names]
+    locks = snapshot.full_qpos[:, locked_ids]
+    if not torch.equal(locks, locks[:1].expand_as(locks)):
+        raise ValueError("Observed batch requires identical passive joint locks.")
     kinematics["lock_joints"] = {
         name: observed[name] for name in (kinematics.get("lock_joints") or {})
     }
@@ -194,8 +219,9 @@ def curobo_motion_generator(
 
     Args:
         cfg: Standard cuRobo planner configuration, including an explicitly
-            projected world. Query snapshots require B=1, disabled CUDA graphs,
-            retained planner samples and an immutable world during this lifetime.
+            projected world. Queries require shared worlds, identical passive
+            locks, disabled CUDA graphs, retained planner samples and an immutable
+            world during this lifetime. Payload queries remain B=1.
         query_snapshot: Optional same-observation state and carried-body envelope.
 
     Yields:

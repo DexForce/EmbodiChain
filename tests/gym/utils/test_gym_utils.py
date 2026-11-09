@@ -2780,6 +2780,58 @@ def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
         assert asset.source.source_prim_path == "/World/Asset"
 
 
+def test_recording_only_observation_does_not_expand_policy_rollout_schema():
+    config = {
+        "sensor": [],
+        "env": {
+            "observations": {
+                "pose": {
+                    "mode": "add",
+                    "name": "private_pose",
+                    "consumers": ["recording"],
+                    "extra": {"shape": [7]},
+                },
+            }
+        },
+    }
+    buffer = init_rollout_buffer_from_config(
+        config=config, max_episode_steps=2, batch_size=1, state_dim=3, device="cpu"
+    )
+    assert "private_pose" not in buffer["obs"]
+
+
+@pytest.mark.parametrize(
+    "consumers",
+    [["recording"], "recording", ["evidence"], ["unknown"], ["policy", "policy"]],
+)
+def test_configured_observation_consumers_decode_and_validate(consumers):
+    config = {
+        "id": "RawObservation-v1",
+        "physics": "default",
+        "robot": {"uid": "robot"},
+        "env": {
+            "observations": {
+                "pose": {
+                    "func": "get_entity_state",
+                    "mode": "add",
+                    "name": "cube_pose",
+                    "consumers": consumers,
+                    "params": {"entity_cfg": {"uid": "cube"}},
+                    "extra": {"shape": [7]},
+                },
+            }
+        },
+    }
+    if consumers == ["recording"]:
+        cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+        assert cfg.observations.pose.consumers == ("recording",)
+        assert cfg.observations.pose.extra == {"shape": [7]}
+        assert cfg.observations.pose.params["entity_cfg"].uid == "cube"
+    else:
+        with pytest.raises(ValueError, match="Invalid observation consumers"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
 def test_web_launcher_preserves_file_view_settings_and_applies_overrides():
     parser = argparse.ArgumentParser()
     add_env_launcher_args_to_parser(parser)

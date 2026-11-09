@@ -36,16 +36,18 @@ old representation-selection behavior; inspect their config definitions.
 
 Generated robot YAML omits self-collision metadata. Both the motion planner
 and the exact trajectory collision checker load it through
-`CuroboPlanner._load_runtime_robot_config()`, which supplies cuRobo 0.8's
+`CuroboPlanner._load_runtime_robot_config()`, which supplies cuRobo's
 required empty `self_collision_buffer` and `self_collision_ignore` mappings
 in memory. Loading the unpatched YAML path in either consumer can dereference
 `None` while building spheres. The cached YAML remains unchanged. Exact sample
 validation also disables self-collision, makes each batched joint sample
 contiguous, and passes `KinematicsState` to cuRobo's public world cost rather
-than its incompatible 0.8 `validate()` wrapper. Joint-limit and world-collision
+than the native `validate()` wrapper. Joint-limit and world-collision
 costs must both be zero for a sample to pass. Reuse an existing backend with
 the same control part and batch size for validation, including a backend
 created for EEF planning; only a cold validation call creates a joint backend.
+Disable self-collision in both solver rollouts and the selected graph planner's
+`resources_config.rollout_config`; RRT and PRM have separate configuration owners.
 
 Shared pose conventions belong to [simulation](../simulation-system/simulation-system.md).
 cuRobo goal/scene adapters alone convert `xyzw` to native `wxyz`, exactly once;
@@ -60,10 +62,16 @@ runtime observations, not serialized configuration. All world providers must be
 `CollisionObjectSnapshot` values projected with the same transform; the planner
 does not reread live object or robot-base poses in this mode.
 
-The opt-in supports one control part and B=1, disabled CUDA graphs, a static
-world and preserved native samples. Passive joint locks use the observed full
-qpos in both native planning and the no-payload exact-sample checker. Payloads
-attach only to distinct buffers owned by the fresh backend's IK/optimization/
+The opt-in supports one control part, disabled CUDA graphs, a static shared
+world and preserved native samples. Without payload it supports the complete
+robot environment batch in canonical row order through the existing native
+BatchMotionPlanner; subsets, reordered environments and per-env worlds remain
+unsupported. An omitted start uses the captured selected joint rows. The motion facade reports the world as immutable. Full qpos and world_to_base carry matching batch axes. Passive
+joint locks must be identical across rows and use the observed values in both
+planning and the no-payload exact-sample checker. The shared collision source
+helper verifies that all supplied row poses project to the same planning-frame
+world; its shape descriptors declare geometry shared by all rows. Payloads
+remain B=1 and attach only to distinct buffers owned by the fresh backend's IK/optimization/
 metric models, with alias deduplication and cleanup on failure/close. Arbitrary
 trajectory validation with payload is unavailable because its separate checker
 does not own those attachments; direct calls fail closed. Default planner
@@ -73,8 +81,15 @@ behavior without a query snapshot is unchanged.
 no phase decisions. Callers must choose explicit backend velocity/acceleration
 options when switching strategies; a fixed-grid policy's absent acceleration
 budget is not a substitute for a selected backend budget. Returned trajectories
-retain ownership after closing. Input mesh envelopes and planner spheres do not
-establish native cooked equivalence, CCD or physical task acceptance.
+retain ownership after closing. Native cuRobo optimizer and graph-planner
+callbacks can keep device tensors in Python reference cycles after close.
+Hosts requiring a measured memory boundary must first leave the query scope,
+release native handles, then collect cyclic garbage and synchronize the owning
+device. Close does not run a process-wide GC or empty the CUDA allocator cache;
+reserved memory is not the same as live tensor allocation. See the observed-query
+lifecycle regression in `tests/sim/motion/planners/test_curobo_integration.py`.
+Input mesh envelopes and planner spheres do not establish native cooked
+equivalence, CCD or physical task acceptance.
 
 ## Shared versus per-environment worlds
 

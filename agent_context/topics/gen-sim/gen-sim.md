@@ -1,8 +1,9 @@
 # Generative simulation
 
-Scene Engine turns images into editable scenes and portable exports; Asset
-Engine ingests individual assets and generates articulated assets. Neither output is by
-itself a complete runnable Gym task deployment.
+Scene Engine turns images into editable scenes and portable exports. The
+Asset Engine ingests existing assets; the asset package also owns a
+separate articulated-generation service. Neither output is by itself a complete
+runnable Gym task deployment.
 
 ## Entry points and resolution
 
@@ -10,11 +11,13 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
-| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `simready` |
+| Model service configuration, adapters and ownership | `services/`; [service guide](../../../embodichain/gen_sim/services/README.md) |
+| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `asset-engine`, `task-engine` |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
 | Audited image/edit stages | `scene_engine/pipeline/api.py`: `analyze_image()`, `analyze_edit()`, and their materialization functions |
+| Prepare source GLB geometry before publication | `scene_engine/asset_normalization.py`: `normalize_source_scene_assets()`; owned declarations and content-addressed output, no simulator |
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
 | Grouped layouts from an existing export | `scene_engine/cli/randomization.py`, `scene_engine/randomization/generation.py` |
 | Baseline cache, saved runs and pose playback | `scene_engine/randomization/baseline.py`, `persistence.py`, `loading.py` |
@@ -23,10 +26,18 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
+| Frozen placement declaration → normative evidence binding | `task_engine/evidence.py` → [TaskSpec evidence boundary](../task-spec/task-spec.md#physical-evidence-boundary) |
 
 Generate: validate input → VLM understanding → geometry/articulation generation
-→ placement refinement → export. Segmentation, geometry and articulation
-clients are closed in `finally` blocks; VLM lifetime is separate.
+→ placement refinement → export. Model capabilities resolve lazily through one run-scoped `GenSimServices`.
+Normal wheel installs discover external profiles through
+`EMBODICHAIN_MODEL_SERVICES_CONFIG`, then the XDG/home user configuration, before
+bundled JSON and legacy rules. Python configuration overrides discovery. Selected
+external files fail explicitly when invalid; no installed file needs editing.
+`EMBODICHAIN_ENV_FILE` independently supplies referenced variables.
+
+Owned transports close when the run exits; explicit legacy clients and supplied
+service runs remain caller-owned. Chat requests own their stateless transport.
 Edit: import export → validate graph/typed edit plan → generate additions
 → change layout → overwrite export. Combined image/edit mode generates first.
 
@@ -43,7 +54,12 @@ Blueprint objects are in-process values with persisted audit documents; this API
 does not load them as a complete task deployment. Whole-scene rotations also
 rotate planar graph relations and table regions; directional graphs require
 quarter turns because their vocabulary is axis-aligned.
-The `simready` CLI remains available, while Python imports use `asset_engine`.
+The Asset Engine uses the `asset-engine` CLI and `asset_engine` Python
+namespace. Its [user guide](../../../docs/source/features/generative_sim/asset_engine.md)
+owns input selection, processing settings, artifacts and simulation handoff.
+Instruction/image semantic planning belongs to
+[Task Engine](../task-engine/task-engine.md); its unbound graph output retains
+pending runtime bindings rather than creating a scene or executable deployment.
 
 ## Durable scene boundary
 
@@ -151,7 +167,9 @@ Blender objects and business-environment Python/native-library paths do not.
 separate Python 3.11/NumPy 1.26 Blender environment. See
 [container setup](../../../docker/README.md) for building and qualification.
 
-Keep parser capabilities idempotent so recorded stages support resume.
+The parser interface requires idempotent capabilities, but the current CLI
+allocates a new UUID and reruns the selected sequence on every invocation.
+`status.parsed` is completion metadata, not per-stage caching or validation.
 Provider configuration belongs to its loader/client, while coordinate and graph
 contracts belong to importer/exporter. Task registration and physical/semantic
 composition belong to [env-framework](../env-framework/env-framework.md).
@@ -174,3 +192,15 @@ environment files.
 
 Select provider-backed or simulator conversion tests only when that runtime
 boundary changes; source/unit checks do not establish remote service quality.
+
+Placement declaration projection for new bundles uses
+`project_configured_placement_evidence_binding` with the public configured owner's
+resolved condition and compiled occurrence descriptors. The final builder must
+not load or emit `constraints.json`. The original `project_placement_evidence_binding`
+only validates the frozen B0 constraints payload for source-comparison fixtures;
+it delegates the semantic projection and is not a second runtime policy owner.
+
+Task Engine's `project_condition_evidence_binding` projects frozen role/lineage,
+explicit compiled occurrences and already-resolved physical criteria into the
+TaskSpec state-evidence contract. It reads no physical state and chooses no
+acceptance thresholds; the Lab observation owner supplies facts.

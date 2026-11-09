@@ -43,6 +43,48 @@ ActionInvocation                       semantic program
         EndpointCommandRouter + transports + clock
 ```
 
+`RecoveryPolicy.planning_budget` selects an outer complete-request search ledger
+and optional cooperative deadline. Nested calls retain an existing parent's
+ledger and deadline; None adds no ledger or wall budget. `PlanningRecovery`
+values contain only immutable finite data and name their skill/revision.
+`SkillDescriptor.planning_recovery_type` accepts one exact type or an explicit
+tuple; unsupported declarations fail before skill preparation. These contracts
+add no alternate built-in skill implementation or source-specific decoder.
+
+Press keeps its default open-loop path. Explicit `PressPlanningRecovery` permits
+at most two complete B1 plans, including nominal, and consumes the declared
+contact-roll alternative only after failure. Failed phases use Motion's existing
+continuous IK on the same targets and time grid: `lab/sim/motion/ik.py` adapts the
+robot while `compute/kinematics/ik_path.py` owns bounded seed search. Press owns
+only the failed-phase trigger and contact-roll alternative. Robot's
+`compute_batch_ik(continuous=True)` selects solver candidate branches; it does
+not implement this recovery's velocity window, perturbation order or RNG scope
+and is not an interchangeable recovery backend. Final emitted full-robot velocity
+qualification remains rejection-only; no transformed plan triggers another search.
+The configured decoder accepts only the fixed `press_bounded` revision-one
+declaration. `validate_press_extra_distance` validates declaration-owned extra
+travel without changing skill defaults or deciding measured Press success.
+
+`SkillDescriptor.supports_segment_motion_recovery` is read-only and derived
+from the actual Atomic validation override. A copied class marker does not
+advertise a handler. Semantic preflight rejects unsupported segment policy
+before acquisition; the default false field is omitted from canonical descriptor
+metadata, while true capabilities participate in the effective fingerprint.
+
+`MotionPolicy` separates whole-action sample retries, segment recovery and a
+final full-robot speed gate. The complete builder retains exact request/engine
+identity, applies scoped transforms and performs rejection-only qualification.
+`plan_preview` accepts only a same-observation projected context with explicit
+preview role and a different occurrence; it uses the same engine. Preview
+callbacks never become global engine configuration. Unsupported segment recovery
+rejects before provider preparation, and external nominal motion is not replaced
+by native sampling retries. No new Source skill implementation is registered.
+
+`ExecutionPlanLifecycle` is an optional host-owned adoption port. It receives an
+owned validated attempt before dispatch. Installation rejection latches the
+session: later ticks/revisions cannot resume commands. `ExecutionRunner` keeps
+its normal cancel-then-hold safe stop before the once-only abort notification.
+
 Planning never steps simulation and never treats command completion as proof of
 a physical effect. A gripper-close hold inserted into a moving arm path does not
 preserve solved timing: retain required stop boundaries and validate the compiled
@@ -55,14 +97,38 @@ that commits or invalidates observed effects.
 
 `MoveHeldObject` accepts ordered object-pose waypoints without rebasing the
 verified grasp. Its goal optionally frees only the final world yaw; default
-goals remain exact. Heading alternatives are checked as complete motion paths,
+goals remain exact. An explicit `HeldObjectPoseGoal.object_id` requires that exact
+input object before native or nominal planning and reports retained attachment
+through the existing terminal effect-verification boundary. Omission keeps the
+original effectless transport behavior and numerical path. Heading alternatives
+are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
 Held-object transport and Pour keep the binding's configured grasp command; a
 contact-blocked measured aperture does not retain closing effort.
 
+Optional `hand_geometry_cfgs` enter through `AtomicActionEngine` and its existing
+`ActionPlanningServices`. `hand_geometry_cfg(target_id)` returns an independent
+Lab configuration and fails for undeclared targets; it never infers a model or
+captures geometry. Consumers retain declared pad-link order and replace closing
+commands with the current resolved endpoint commands, including invocation
+overrides. [Robot geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
+defines the capture boundary. Task Program declarations do not enter Atomic APIs.
+
+`ActionPlanningServices.prepare_grasp_query()` resolves the declared hand
+calibration by target ID and binds Scene capture to GraspKit's typed geometric
+policy and the existing isolated Newton backend. The opt-in context manager
+closes all query resources on normal exit, failure or cancellation. Opening
+grounding and optional rigid-scene queries share the explicit observation scope;
+undeclared calibration fails before capture. It selects no experiment revisions,
+installs no alternate skill registry and leaves ordinary PickUp defaults unchanged.
+Historical revision mapping belongs only to the frozen regression fixture.
+
 `PickUpOptions.approach_direction` accepts one world vector or one vector per
 planning row. PickUp and AxisAlign normalize each row independently and use the
-same direction for candidate eligibility and pre-grasp translation. A benchmark
+same direction for candidate eligibility and pre-grasp translation. Calibrated
+fixed grasps can explicitly select `approach_along_grasp_axis` so native
+pre-grasp translation follows each realized TCP +Z after object rotation.
+The default retains the world-vector contract. A benchmark
 that freezes per-row grasp realisations must forward their directions to the
 actual action; replacing them with one shared vector changes the request.
 
@@ -82,6 +148,10 @@ checks remain with the selected planning policy. Validate executed mouth
 alignment and height throughout tilted motion with host observations, rather
 than treating an accepted final pose as evidence of pouring.
 
+ExecuteDemoSkill executes task-specific demonstration assets with measured runtime
+contracts through the same nominal-source and runner interfaces. Its internal
+events do not create independent recovery boundaries.
+
 PickUp, MoveHeldObject and Place can also assemble a pre-planning nominal motion
 source. The source does not own semantic effects or environment lifecycle; see
 [Real2Sim motion](../data-pipeline/real2sim.md) for source and replay limits.
@@ -93,6 +163,17 @@ already-satisfied rows hold, invalid observations fail, and mixed active directi
 are rejected. Omitting the target preserves fixed-distance `SlideOptions` and the
 original Slide tutorial. Slide remains open-loop; this extension does not certify
 contact or physical goal satisfaction.
+
+`source_native_contact` composes preserved explicit source policies with the
+shared Newton collision pipeline over the same GraspKit closing/opening/rest
+algorithms. Contact decisions retain the query owner's conservative interval
+semantics; threshold ambiguity remains unavailable. Scene keeps
+native geometry capture, including the caller-selected sampling grid. The source
+adapter owns only policy mapping, provenance and query cleanup; ordinary
+`ActionPlanningServices.prepare_grasp_query` retains Newton and shared defaults.
+`grasp_geometry.GraspOpeningTarget` is the single value definition, re-exported
+with the same identity from the existing Atomic/runtime imports. No concrete
+skill or alternate registry is installed by these query builders.
 
 ## Package map
 

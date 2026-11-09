@@ -273,6 +273,18 @@ python -m pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}
 
 For an editable checkout, use `-e ".[policy-deploy]"` in the second command.
 
+## Newton planning geometry
+
+Native convex planning queries reuse the isolated Newton collision pipeline.
+They require the supported Newton runtime and do not require `python-fcl` or
+an additional FCL extra. Queries run on CPU independently of the live physics
+backend; missing Newton entry points fail before native scene capture.
+
+Distance diagnostics are capped contact-band estimates, not global exact
+minimum distances. Precision intervals spanning a requested contact threshold
+remain unavailable. CPU query tests do not establish GPU or physical-task
+qualification.
+
 ## Optional: cuRobo V2 motion planning
 
 Install cuRobo separately to use EmbodiChain's CUDA-accelerated,
@@ -357,7 +369,7 @@ The installer applies the locked Blender dependencies and the wheel metadata
 correction described in the
 [Blender runtime notes](https://github.com/DexForce/EmbodiChain/blob/main/docker/README.md#blender-and-native-library-isolation).
 
-For SimReady pipeline usage and LLM configuration, see [SimReady Asset Pipeline](../features/generative_sim/asset_engine.md).
+For Asset Engine usage and LLM configuration, see [Asset Engine](../features/generative_sim/asset_engine.md).
 
 ## Verify installation
 

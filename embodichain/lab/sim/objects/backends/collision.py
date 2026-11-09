@@ -18,6 +18,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from dataclasses import dataclass
+
+import numpy as np
+import trimesh
 
 import torch
 from dexsim.engine import (
@@ -35,7 +39,108 @@ from dexsim.types import RigidBodyShape
 if TYPE_CHECKING:
     from ..rigid_object import CollisionShapeDesc
 
-__all__ = ["collision_shapes_from_entity", "collision_shapes_from_articulation_link"]
+__all__ = [
+    "collision_shapes_from_entity",
+    "collision_shapes_from_articulation_link",
+    "PhysicalCollisionGeometry",
+    "capture_physical_collision_geometry",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicalCollisionGeometry:
+    """Owned cooked convex/box geometry and original body offsets.
+
+    Args:
+        meshes: Already-scaled body-local collision meshes with shape poses applied.
+        rest_offset: Native rest offset in metres.
+        contact_offset: Native contact offset when explicitly requested.
+        path: Caller-supplied physical source address for diagnostics.
+    """
+
+    meshes: tuple[trimesh.Trimesh, ...]
+    rest_offset: float
+    contact_offset: float | None
+    path: str
+
+
+def capture_physical_collision_geometry(
+    physical_body: object,
+    *,
+    source_path: str,
+    include_contact_offsets: bool = False,
+) -> PhysicalCollisionGeometry:
+    """Read exact cooked convex/box geometry without an authored-input fallback.
+
+    Args:
+        physical_body: Native physical-body port exposing enabled collision shapes.
+        source_path: Physical address resolved by the host; not inferred here.
+        include_contact_offsets: Read contact offsets in addition to rest offsets.
+
+    Returns:
+        Independent float64 geometry and offsets. Missing or collision-disabled
+        bodies yield empty geometry, which does not establish clearance.
+
+    Raises:
+        ValueError: Shape type, topology, scale or local frame is unsupported.
+    """
+    meshes = _native_meshes(physical_body)
+    return PhysicalCollisionGeometry(
+        meshes,
+        float(physical_body.get_rest_offset()) if meshes else 0.0,
+        (
+            float(physical_body.get_contact_offset())
+            if meshes and include_contact_offsets
+            else None
+        ),
+        source_path,
+    )
+
+
+def _native_meshes(body: object) -> tuple[trimesh.Trimesh, ...]:
+    """Convert the shared native descriptor snapshots without changing precision."""
+    if body is None or not body.is_collision_enable():
+        return ()
+    shapes = _from_physical_body(
+        body,
+        object_uid="native query",
+        dtype=torch.float64,
+        convex_only=True,
+    )
+    result = []
+    for shape in shapes:
+        if shape.shape_type == RigidBodyShape.BOX:
+            half = shape.half_extents.numpy()
+            if half.shape != (3,) or not np.isfinite(half).all() or (half <= 0).any():
+                raise ValueError("Native box half extents must be finite and positive.")
+            mesh = trimesh.creation.box(2 * half)
+        else:
+            vertices, faces = shape.vertices.numpy(), shape.triangles.numpy()
+            if (
+                vertices.ndim != 2
+                or vertices.shape[1] != 3
+                or not len(vertices)
+                or faces.ndim != 2
+                or faces.shape[1] != 3
+                or not len(faces)
+                or (faces < 0).any()
+                or (faces >= len(vertices)).any()
+            ):
+                raise ValueError("Native mesh topology is unavailable.")
+            mesh = trimesh.Trimesh(vertices.copy(), faces.copy(), process=False)
+        if not np.isfinite(mesh.vertices).all():
+            raise ValueError("Native collision geometry is nonfinite.")
+        pose = shape.local_pose.numpy()
+        if (
+            not np.isfinite(pose).all()
+            or not np.allclose(pose[3], (0, 0, 0, 1))
+            or not np.allclose(pose[:3, :3].T @ pose[:3, :3], np.eye(3), atol=2e-5)
+            or not np.isclose(np.linalg.det(pose[:3, :3]), 1.0, atol=2e-5)
+        ):
+            raise ValueError("Native collision geometry requires a finite rigid pose.")
+        mesh.apply_transform(pose)
+        result.append(mesh)
+    return tuple(result)
 
 
 def collision_shapes_from_entity(
@@ -139,6 +244,9 @@ def collision_shapes_from_articulation_link(
                 if body is None
                 else _from_physical_body(body, object_uid=f"{object_uid}/{link_name}")
             )
+    native_shapes = _from_newton_link(binding, link_name)
+    if native_shapes is not None:
+        return native_shapes
     for port in physical_ports:
         getter = getattr(port, "get_collision_mesh", None)
         if callable(getter):
@@ -164,12 +272,87 @@ def collision_shapes_from_articulation_link(
     )
 
 
+def _from_newton_link(
+    binding: object, link_name: str
+) -> list[CollisionShapeDesc] | None:
+    """Preserve each cooked Newton shape and its actual convex/triangle type.
+
+    Newton's interaction mesh accessor merges shapes, losing convex decomposition.
+    This backend adapter reads the prepared model instead; no render mesh or
+    inferred convex hull is substituted for the actual physical resource.
+    """
+    runtime = getattr(binding, "_runtime", None)
+    model = getattr(runtime, "model", None)
+    links = getattr(binding, "_links", None)
+    if model is None or links is None:
+        return None
+    import newton
+    from embodichain.utils.math import matrix_from_quat
+    from ..rigid_object import CollisionShapeDesc
+
+    link = next((link for link in links if link.name == link_name), None)
+    if link is None:
+        return []
+
+    def tensor(value, dtype=torch.float32):
+        return torch.as_tensor(
+            value.numpy() if hasattr(value, "numpy") else value, dtype=dtype
+        ).clone()
+
+    kinds = tensor(model.shape_type, torch.int64)
+    flags = tensor(model.shape_flags, torch.int64)
+    scales = tensor(model.shape_scale)
+    transforms = tensor(model.shape_transform)
+    result = []
+    mapping = {
+        newton.GeoType.CONVEX_MESH: RigidBodyShape.CONVEX,
+        newton.GeoType.MESH: RigidBodyShape.MESH,
+        newton.GeoType.BOX: RigidBodyShape.BOX,
+        newton.GeoType.SPHERE: RigidBodyShape.SPHERE,
+        newton.GeoType.CAPSULE: RigidBodyShape.CAPSULE,
+    }
+    for index, shape_id in enumerate(link.shape_ids):
+        if not int(flags[shape_id]) & int(newton.ShapeFlags.COLLIDE_SHAPES):
+            continue
+        kind = newton.GeoType(int(kinds[shape_id]))
+        if kind not in mapping:
+            raise RuntimeError(
+                f"Unsupported Newton physical collision kind {kind.name}"
+            )
+        transform = transforms[shape_id]
+        pose = torch.eye(4)
+        pose[:3, :3] = matrix_from_quat(transform[3:].reshape(1, 4))[0]
+        pose[:3, 3] = transform[:3]
+        shape = CollisionShapeDesc(f"shape_{index}", mapping[kind], pose)
+        scale = scales[shape_id]
+        if kind in {newton.GeoType.CONVEX_MESH, newton.GeoType.MESH}:
+            source = model.shape_source[shape_id]
+            if source is None:
+                raise RuntimeError("Newton mesh collision source is missing")
+            shape.vertices = tensor(source.vertices).reshape(-1, 3) * scale
+            shape.triangles = tensor(source.indices, torch.int32).reshape(-1, 3)
+        elif kind == newton.GeoType.BOX:
+            shape.half_extents = scale
+        else:
+            shape.radius = float(scale[0])
+            if kind == newton.GeoType.CAPSULE:
+                shape.half_height = float(scale[1])
+        result.append(shape)
+    return result
+
+
 def _from_physical_body(
     physical_body: object,
     *,
     object_uid: str,
+    dtype: torch.dtype = torch.float32,
+    convex_only: bool = False,
 ) -> list[CollisionShapeDesc]:
-    """Extract collision descriptors from the legacy native body API."""
+    """Decode physical shapes once for public snapshots and strict native queries.
+
+    Public snapshots retain their float32 contract. Native convex queries select
+    float64 and reject unsupported shapes rather than using a descriptor fallback.
+    """
     from ..rigid_object import CollisionShapeDesc
 
     shape_count = int(physical_body.get_shape_count())
@@ -189,8 +372,13 @@ def _from_physical_body(
                 f"of RigidObject {object_uid!r}."
             )
 
+        if convex_only and not isinstance(geometry, (BoxGeometry, ConvexMeshGeometry)):
+            raise ValueError(
+                "Native queries require readable cooked convex or box shapes."
+            )
+
         shape_name = physical_body.get_shape_name(shape_idx) or f"shape_{shape_idx}"
-        local_pose = torch.tensor(geometry.local_pose, dtype=torch.float32)
+        local_pose = torch.tensor(geometry.local_pose, dtype=dtype)
         if local_pose.shape != (4, 4):
             raise RuntimeError(
                 f"DexSim collision shape {shape_idx} of {object_uid!r} returned "
@@ -202,7 +390,7 @@ def _from_physical_body(
             local_pose=local_pose.clone(),
         )
         if isinstance(geometry, BoxGeometry):
-            desc.half_extents = torch.tensor(geometry.half_extents, dtype=torch.float32)
+            desc.half_extents = torch.tensor(geometry.half_extents, dtype=dtype)
         elif isinstance(geometry, SphereGeometry):
             desc.radius = float(geometry.radius)
         elif isinstance(geometry, CapsuleGeometry):
@@ -211,17 +399,30 @@ def _from_physical_body(
         elif isinstance(
             geometry, (ConvexMeshGeometry, TriangleMeshGeometry, SDFGeometry)
         ):
-            vertices = torch.tensor(geometry.vertices, dtype=torch.float32).reshape(
-                -1, 3
+            vertices = torch.tensor(geometry.vertices, dtype=dtype)
+            triangles = torch.tensor(
+                geometry.triangles, dtype=torch.int64 if convex_only else torch.int32
             )
-            triangles = torch.tensor(geometry.triangles, dtype=torch.int32).reshape(
-                -1, 3
-            )
+            if convex_only and (
+                vertices.ndim != 2
+                or vertices.shape[1] != 3
+                or triangles.ndim != 2
+                or triangles.shape[1] != 3
+            ):
+                raise ValueError("Native mesh topology is unavailable.")
+            vertices = vertices.reshape(-1, 3)
+            triangles = triangles.reshape(-1, 3)
             scale = getattr(geometry, "scale", None)
+            if convex_only:
+                scale_tensor = torch.as_tensor(scale, dtype=dtype)
+                if (
+                    scale_tensor.shape != (3,)
+                    or not torch.isfinite(scale_tensor).all()
+                    or (scale_tensor <= 0).any()
+                ):
+                    raise ValueError("Native shape scale is unavailable.")
             if scale is not None:
-                vertices = vertices * torch.tensor(scale, dtype=torch.float32).reshape(
-                    1, 3
-                )
+                vertices = vertices * torch.tensor(scale, dtype=dtype).reshape(1, 3)
             desc.vertices = vertices
             desc.triangles = triangles
         shapes.append(desc)

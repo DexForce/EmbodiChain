@@ -630,9 +630,9 @@ class SimulationManager:
         self._requested_renderer = sim_config.render_cfg.renderer
         solver_cfg = getattr(sim_config.physics_cfg, "solver_cfg", None)
         self._requested_solver = str(
-            solver_cfg.get("solver_type", solver_cfg.get("class_type", "auto"))
+            solver_cfg.get("solver_type", solver_cfg.get("class_type", "dexuni"))
             if isinstance(solver_cfg, Mapping)
-            else getattr(solver_cfg, "solver_type", "auto")
+            else getattr(solver_cfg, "solver_type", "dexuni")
         )
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
@@ -927,6 +927,19 @@ class SimulationManager:
         if spawn_scene is None or not spawn_scene.builder.is_finalized:
             return None
         return spawn_scene.builder.result
+
+    @property
+    def physics_step_index(self) -> int:
+        """Number of physics substeps completed through :meth:`update`.
+
+        The counter advances before the substep observer, with or without
+        rendering. Observation reads, topology rebuilds and selected resets
+        leave it unchanged; it is independent of the backend's resettable clock.
+
+        Returns:
+            Monotonic completed-substep count for this manager's lifetime.
+        """
+        return self._visualization_sim_step
 
     @property
     def is_use_gpu_physics(self) -> bool:
@@ -1941,7 +1954,15 @@ class SimulationManager:
         Args:
             enable (bool): whether to enable physics simulation.
         """
+        if type(enable) is not bool:
+            raise TypeError("enable must be a bool")
         self._world.enable_physics(enable)
+        self._physics_enabled = enable
+
+    @property
+    def physics_enabled(self) -> bool:
+        """Whether physics is enabled through this manager's owned runtime API."""
+        return getattr(self, "_physics_enabled", True)
 
     def init_gpu_physics(self) -> None:
         """Prepare the Spawn-owned physics runtime.
@@ -2030,6 +2051,22 @@ class SimulationManager:
 
             if step > 0:
                 self._log_scene_summary()
+
+    @property
+    def simulation_time(self) -> float:
+        """Return elapsed time advanced through this manager's ``update`` calls.
+
+        The sum starts at manager construction and includes explicit warmup
+        updates. It is published after each successful physics substep, before
+        ``after_substep`` observers. Preparation and zero-duration render-state
+        synchronization do not advance it; object/environment resets do not
+        rewind it. Direct low-level backend/world calls are outside this clock.
+
+        This manager-relative timeline can have an offset from a Task Program's
+        episode-relative EnvironmentStepClock; consumers must map the domains
+        explicitly instead of comparing their timestamps directly.
+        """
+        return self._visualization_sim_time
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.
@@ -2924,11 +2961,11 @@ class SimulationManager:
                 "Newton deformable particle sets currently require a CUDA device."
             )
         solver_type = self._active_newton_solver_type
-        supported_solvers = {"auto", "dexuni", "xpbd", "semi_implicit", "vbd"}
+        supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
         if solver_type not in supported_solvers:
             raise NotImplementedError(
                 f"Newton solver {solver_type!r} does not support deformable "
-                "particle sets; select one of 'auto', 'dexuni', 'xpbd', "
+                "particle sets; select one of 'dexuni', 'xpbd', "
                 "'semi_implicit', or 'vbd'."
             )
         physics_cfg = self.sim_config.physics_cfg
@@ -4986,8 +5023,8 @@ class SimulationManager:
         solver_type = getattr(self.physics, "solver_type", None)
         requires_complete_world_clear = solver_type in {
             None,
-            "auto",
             "mujoco_warp",
+            "dexuni",
         }
         if (
             use_coordinated_newton_clear
@@ -5095,6 +5132,9 @@ class SimulationManager:
             bool: True if export is successful, False otherwise.
         """
         try:
+            # DexSim registers USD export methods when the optional kit is imported.
+            import dexsim.kit.usd
+
             self._env.export_to_usd_file(fpath)
             logger.log_info(f"Simulation scene exported to USD file: {fpath}")
             return True
@@ -5214,6 +5254,14 @@ class SimulationManager:
                 for asset in getattr(self, registry_name, {}).values():
                     if isinstance(asset, VisualObject):
                         asset._release_spawn_references()
+                    # Release parsed material wrappers before the native renderer.
+                    for material_attr in (
+                        "_visual_material",
+                        "_original_visual_material",
+                        "_original_visual_material_inst",
+                    ):
+                        if hasattr(asset, material_attr):
+                            setattr(asset, material_attr, [])
                     if hasattr(asset, "_data"):
                         asset._data = None
                     if hasattr(asset, "_spawn_result"):

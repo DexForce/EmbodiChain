@@ -11,10 +11,11 @@ embodichain preview-asset --asset_path /path/to/model.urdf --web
 embodichain run-task --gym_config /path/to/task.yaml --web
 ```
 
-For source development, use an environment that already contains the required
-DexSim build and project dependencies, then install this checkout with
-`python -m pip install --no-deps -e .` to preserve that build. A normal dependency
-resolution may reinstall the repository's older pinned DexSim wheel.
+Install this checkout in the project's Python environment with its pinned
+DexSim `0.6.0rc1` dependency. The package exposes the required WebRTC APIs;
+video playback also requires loadable native streaming libraries and NVIDIA
+NVENC support. Development builds can be preserved with
+`python -m pip install --no-deps -e .` after installing project dependencies.
 
 Open `http://127.0.0.1:8765/`. Click the main video before using mouse/keyboard
 navigation. The page supports resetting the view, pausing viewer rendering,
@@ -67,9 +68,9 @@ native Python facade (reported as zero), not a connectivity measurement.
 ## Current boundaries
 
 - Requires a Linux/NVIDIA WebRTC-enabled DexSim build exporting `WebApplication`
-  and the `WorldConfig.webrtc_*` settings; validated with commit `8b867e321`.
-  The repository's pinned older wheel is not sufficient unless it exposes
-  these capabilities. This opt-in feature does not silently upgrade DexSim.
+  and the `WorldConfig.webrtc_*` settings, present in the pinned `0.6.0rc1`.
+  Initial GPU/browser acceptance used development commit `8b867e321`; native
+  streaming-library compatibility must be checked when changing SDK builds.
 - Single simulation environment and single browser viewer. The Python native
   service auto-streams all cameras. Supported manager sensors are at most 15
   RGB `Camera` instances plus the observer; dimensions must be even, 32–4096.
@@ -83,10 +84,11 @@ native Python facade (reported as zero), not a connectivity measurement.
   controls, not user-account authentication. ICE configuration can be provided
   through `web.ice`; forwarding only the HTTP port does not ensure media
   connectivity.
-- Default physics was verified end to end. The latest tested DexSim build
-  removed `AutoSolverCfg`, still required by this checkout's Newton adapter;
-  Newton acceptance is explicitly skipped when that capability is absent.
-  No solver substitution is performed.
+- Default physics was initially verified end to end with `8b867e321`. The
+  current Newton adapter uses DexSim 0.6's `DexUniSolverCfg` and scene dispatch;
+  browser acceptance exercises both backends without the obsolete
+  `AutoSolverCfg` requirement. End-to-end Newton browser behavior still needs
+  qualification with loadable native streaming libraries.
 
 ## Validation
 

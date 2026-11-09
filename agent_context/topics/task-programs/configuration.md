@@ -36,6 +36,9 @@ selected effect authority and validators, not on the presence of a label.
 
 Measured segment validators can check lift from the segment's incoming pose,
 world-axis position relative to another live object, and object uprightness.
+`object_near_relative_target` compares an object's measured position against a
+fresh reference position plus a declared world-axis displacement; it does not
+reuse the reference pose captured for planning.
 They belong to the program's acceptance contract; a projected call completing
 does not replace these measurements. The Gym tutorial at
 `scripts/tutorials/gym/simple_task_program.py` shows Cartesian end-effector
@@ -72,6 +75,25 @@ fingerprint covers scene/profile declarations, the Semantic Call catalog,
 settling presets, grounders, endpoint transports, evidence and safety
 factories, and registered-call lowerers. Adapter creation calls
 `assert_unchanged()` and revalidates all live bindings.
+`fingerprint_payload()` returns an independent, revalidated JSON declaration.
+Reconstructing a registration with `dataclasses.replace` does not duplicate its
+scene-derived standard grounders; duplicate custom grounders remain errors.
+
+`runtime_services.settle_presets` is the closed serialized route to this same
+registration-owned table. Omission retains the existing dynamic presets; an
+explicit table owns its complete named selection. Components may contribute
+disjoint names, but duplicate ownership is rejected. Ordinary monitor fields
+retain `DynamicSettleMonitorCfg`; explicit `measurement` selects
+`SimulationSettleMonitorCfg`. A declared condition `kind` selects
+`SimulationStabilityConditionCfg`, with normalized owned geometry and timing.
+The explicit `joint_position_and_stability` kind selects
+`SimulationJointStabilityConditionCfg` and requires a canonical articulation,
+exact native joint, target and tolerance. These are policy parameters, not
+static articulation geometry or names inferred by an engine. Its optional invalid
+row policy and bounded raw retention belong to execution, and participate in the
+registration fingerprint; ``to_condition_dict()`` keeps only normative values.
+Support conditions include an explicit sensor UID/capacity declaration. The
+scene binding supplies native pair UIDs, and the full definition is fingerprinted.
 
 Configured environments use runnable `task.<embodiment>.yaml` deployments with
 three typed selections: `environment.component`,
@@ -149,6 +171,34 @@ declarations in the integration and timing in the execution policy, rather
 than placing a precomputed bottle world pose in the program. Omitting `target`
 retains the original internal-axis pouring behavior.
 
+The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
+relative Place and coordinated transport. Their declarations in
+`integrations/_configured_services.py` select exact Atomic Skill descriptors;
+the closed decoder in `configured.py` owns accepted options and route fields.
+Relative Place resolves a live reference plus world-axis displacement and
+requires the verified held-object transform. Coordinated transport must select
+the real primitive's release mode. Do not install frontend skill replacements.
+`move_held_object` additionally accepts an explicit `routes` declaration instead
+of its legacy single-target fields. Each route binds a canonical object, target
+ID and an inert absolute or scene-relative pose. These declarations live in
+`simulation/targets.py` and `simulation/transport.py`; lowering only constructs
+typed goals, retained-attachment effects and lookahead targets. It does not read
+live poses, select motion policy or replace the shared Atomic Skill. The original
+single-target decoder/factory and effect behavior remain unchanged. Mixed forms
+and duplicate target IDs are rejected. The optional
+`RegisteredSemanticLowererSceneValidator` contract lets an immutable factory
+preflight its references against `SceneManifest` before runtime assembly; routed
+transport uses it for canonical object/reference checks.
+The routed-2 factory uses named transport goals and verified retention-only
+phases: grounding checks the exact object and every eligible input-hold row,
+then guards `transport` and requests terminal attachment verification. Projected
+presets reject this contract before motion planning or dispatch. The legacy
+single-target factory keeps its existing effectless behavior and identity.
+
+
+Container affordances may declare a local-z release clearance while retaining
+their original semantic target for final acceptance.
+
 `motion.plan_opts.kind: trapezoidal` selects typed backend options for
 `stop_at_waypoints`, `blend_tolerance`, and `collinearity_tolerance`. It requires
 `strategy: motion_gen` and selects the Trapezoidal planner contract; incompatible
@@ -164,6 +214,19 @@ catalog lookup. The catalog is owned by
 `embodichain/toolkits/graspkit/README.md`. Embodiments may omit algorithm and
 collision fields to use GraspKit defaults; task-specific tuning belongs in
 the allowlisted `grasp_pose_generator_overrides` mapping.
+
+`runtime_services.hand_geometries` declares explicit hand calibration by grasp
+endpoint target ID. Its `sampled_parallel_jaw` entries reference an existing
+endpoint command preset and declare motion/hand parts, the hand root, ordered
+pad links and sampling bounds. `_configured_hand_geometry.py` strictly decodes
+these values and creates owned `RobotHandGeometryCfg` data without reading a
+robot or capturing geometry. An embodiment and task cannot both own the same
+target, and this calibration has no partial override map. Omission preserves
+the original integration fingerprint. Live assembly passes the data through
+the existing Atomic planning services; current invocation commands remain
+authoritative when a skill samples closing motion. See the
+[Lab capture contract](../robot-system/robot-system.md#sampled-hand-geometry)
+for supported topology, geometry and cache lifetime.
 
 The reference embodiment `skill_profile.contract_id` and `profile_id` values
 are unversioned. Versioned Gym, task-integration, or scene-registry IDs are
@@ -241,3 +304,8 @@ closed role/relation contract without contacting providers. Offline asset
 materialization owns selection and emits a new bound deployment before ordinary
 compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
 for supported adaptations, provenance and integrity boundaries.
+
+Embodiment grasp services may explicitly select `approach_deviation_angle`,
+`max_candidates` and `center_mode` (`bounds` or `centroid`). Omitted fields
+retain toolkit defaults and the prior integration fingerprint. These numerical
+search declarations do not change contact/effect evidence requirements.

@@ -63,7 +63,10 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
     ParallelSemanticExecutionResult,
     ParallelSemanticExecutor,
 )
-from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
+from embodichain.lab.task_program.runtime.executor import (
+    SemanticCallExecutor,
+    EffectEvidenceCollectorPort,
+)
 from embodichain.lab.task_program.compiler.program import CompiledTaskProgram
 from embodichain.lab.task_program.compiler.lowering import SemanticWorkflow
 from embodichain.lab.task_program.runtime.results import (
@@ -537,6 +540,9 @@ class RuntimeCommandFrameEncoder:
 
     Args:
         qpos_provider: Full-qpos source aligned to a frame's explicit ``env_ids``.
+        hold_qpos_provider: Optional controller-target source used as the base
+            action for unaddressed joints. When omitted, the latest observed qpos
+            remains the compatibility fallback.
         transports: Optional additional transport encoders.  The built-in
             joint-position encoder precedes them when enabled.
         include_joint_position: Whether to install the built-in joint-position
@@ -550,6 +556,7 @@ class RuntimeCommandFrameEncoder:
         self,
         qpos_provider: CurrentQposProvider,
         *,
+        hold_qpos_provider: Callable[[torch.Tensor], torch.Tensor] | None = None,
         transports: Iterable[RuntimeTransportActionEncoder] = (),
         include_joint_position: bool = True,
         joint_command_mode: JointCommandMode = "position",
@@ -558,11 +565,14 @@ class RuntimeCommandFrameEncoder:
             raise TypeError("qpos_provider must implement CurrentQposProvider.")
         if type(include_joint_position) is not bool:
             raise TypeError("include_joint_position must be a bool.")
+        if hold_qpos_provider is not None and not callable(hold_qpos_provider):
+            raise TypeError("hold_qpos_provider must be callable or None.")
         if joint_command_mode not in ("position", "position_velocity"):
             raise ValueError(
                 "joint_command_mode must be 'position' or 'position_velocity'."
             )
         self._qpos_provider = qpos_provider
+        self._hold_qpos_provider = hold_qpos_provider
         self._joint_command_mode = joint_command_mode
         self._transports: dict[str, RuntimeTransportActionEncoder] = {}
         # Sorted stable IDs, owned qpos targets and per-ID validity. Store rows
@@ -677,9 +687,12 @@ class RuntimeCommandFrameEncoder:
 
     def _base_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
         """Capture and validate one owned full-qpos hold action."""
-        qpos = self._qpos_provider.current_qpos(env_ids)
+        if self._hold_qpos_provider is None:
+            qpos = self._qpos_provider.current_qpos(env_ids)
+        else:
+            qpos = self._hold_qpos_provider(env_ids)
         if not isinstance(qpos, torch.Tensor):
-            raise TypeError("CurrentQposProvider.current_qpos() must return a tensor.")
+            raise TypeError("The full-qpos hold provider must return a tensor.")
         if qpos.dim() != 2 or qpos.shape[0] != env_ids.shape[0] or qpos.shape[1] == 0:
             raise ValueError(
                 "Current qpos must have shape (batch_size, robot_dof) with non-zero DOF."
@@ -987,6 +1000,26 @@ class BufferedGymCommandSink:
             metadata={"bridge_action_kind": "runtime_wait_hold"},
         )
 
+    def encode_post_policy_hold(self, qpos: torch.Tensor) -> EnvAction:
+        """Encode a policy's captured full-position hold in the controller mode.
+
+        Args:
+            qpos: Finite floating positions shaped ``(batch_size, robot_dof)``.
+
+        Returns:
+            An owned position action, including zero velocity targets when the
+            configured encoder uses ``position_velocity`` commands.
+        """
+        if (
+            not isinstance(qpos, torch.Tensor)
+            or qpos.ndim != 2
+            or not all(qpos.shape)
+            or not qpos.is_floating_point()
+            or not torch.isfinite(qpos).all().item()
+        ):
+            raise ValueError("Post-policy holds require finite full-position rows.")
+        return self._encoder._action_from_qpos(qpos)
+
 
 @dataclass(slots=True)
 class _SegmentLifecycle:
@@ -1004,6 +1037,61 @@ class _SegmentLifecycle:
     abort_complete: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     post_policy_success: torch.Tensor | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _RuntimeProgress:
+    """Lightweight lifecycle view used between immutable audit boundaries."""
+
+    status: SemanticExecutionStatus
+    current_call_index: int | None
+    env_ids: torch.Tensor
+    wait_duration: float
+
+    @property
+    def terminal(self) -> bool:
+        """Whether the runtime has reached a terminal audit boundary."""
+        return self.status in {
+            SemanticExecutionStatus.COMPLETED,
+            SemanticExecutionStatus.FAILED,
+            SemanticExecutionStatus.CANCELLED,
+        }
+
+
+def _runtime_progress(
+    value: SemanticExecutionResult | ParallelSemanticExecutionResult | Any,
+) -> _RuntimeProgress:
+    """Read the small progress surface without traversing audit history."""
+    status = getattr(value, "status", None)
+    if not isinstance(status, SemanticExecutionStatus):
+        raise TypeError("Runtime progress status must be a SemanticExecutionStatus.")
+    current_call_index = getattr(value, "current_call_index", None)
+    if current_call_index is not None and (
+        type(current_call_index) is not int or current_call_index < 0
+    ):
+        raise ValueError("Runtime progress call index must be non-negative or None.")
+    env_ids = getattr(value, "env_ids", None)
+    if (
+        not isinstance(env_ids, torch.Tensor)
+        or env_ids.dtype != torch.long
+        or env_ids.dim() != 1
+        or env_ids.numel() == 0
+    ):
+        raise ValueError("Runtime progress env_ids must be non-empty int64 IDs.")
+    wait_duration = getattr(value, "wait_duration", None)
+    if (
+        not isinstance(wait_duration, (int, float))
+        or isinstance(wait_duration, bool)
+        or not math.isfinite(float(wait_duration))
+        or float(wait_duration) < 0.0
+    ):
+        raise ValueError("Runtime progress wait_duration must be non-negative.")
+    return _RuntimeProgress(
+        status=status,
+        current_call_index=current_call_index,
+        env_ids=env_ids.clone(),
+        wait_duration=float(wait_duration),
+    )
 
 
 def _validate_runtime_result(
@@ -1195,13 +1283,111 @@ class TaskProgramDemoBridge:
         self._active_segment_id: str | None = None
         self._eligible_mask: torch.Tensor | None = None
         self._program_completed = False
+        self._segment_iterator_started = False
+        self._segment_iterator_closed = False
+        self._last_segment_lifecycle: _SegmentLifecycle | None = None
         self._sequential_workflows: dict[int, tuple[SemanticWorkflow, int]] = {}
         self._execution_trace: list[dict[str, object]] | None = None
+        self._row_rejection: tuple[torch.Tensor, ControllerAction, str] | None = None
+        self._row_hold: tuple[torch.Tensor, ControllerAction] | None = None
+        self._pending_rejected_ids: tuple[int, ...] = ()
+
+    def request_row_rejection(
+        self, env_ids: tuple[int, ...], safe_hold: ControllerAction, *, reason: str
+    ) -> None:
+        """Queue row removal after the outstanding action is acknowledged.
+
+        The next ordinary command holds rejected rows without adding a hidden
+        clock tick for surviving rows or interrupting post-policy observations.
+        Subsequent commands retain that hold, including post-policy commands.
+
+        Args:
+            env_ids: Physical rows to remove permanently from this bridge.
+            safe_hold: Full controller hold supplied by the stepping environment.
+            reason: Measured failure reason retained by the collection owner.
+        """
+        if not env_ids or len(set(env_ids)) != len(env_ids) or not reason:
+            raise ValueError("row rejection requires unique physical IDs and a reason")
+        bound = self.env_ids
+        if any(type(row) is not int or row not in bound.tolist() for row in env_ids):
+            raise ValueError("rejected row is not bound to this bridge")
+        if self._row_rejection is not None:
+            raise RuntimeError("a row rejection is awaiting its safe hold")
+        self._row_rejection = (
+            torch.tensor([int(row) in env_ids for row in bound], device=bound.device),
+            safe_hold.snapshot(),
+            reason,
+        )
+
+    @property
+    def program_id(self) -> str:
+        """Return the compiled program identity without exposing its runtime."""
+        return self._program.program_id
+
+    @property
+    def env_ids(self) -> torch.Tensor:
+        """Return owned physical environment IDs bound to this runtime."""
+        provider = getattr(self._runtime, "observation_provider", None)
+        bound = getattr(provider, "env_ids", None)
+        if isinstance(bound, torch.Tensor):
+            return bound.clone()
+        return self._runtime.result.env_ids.clone()
 
     @property
     def clock(self) -> EnvironmentStepClock:
         """Return the environment-step clock used by this bridge."""
         return self._clock
+
+    @property
+    def execution_finished(self) -> bool:
+        """Return whether segment iteration ended with no outstanding action owner.
+
+        Closing iteration does not certify success or acknowledge a pending
+        command. An active action generator retains ownership until consumed or
+        explicitly aborted by the normal executor handshake.
+        """
+        lifecycle = self._last_segment_lifecycle
+        settled = (
+            lifecycle is None
+            or lifecycle.abort_complete
+            or (lifecycle.complete and lifecycle.validation is not None)
+        )
+        return (
+            self._segment_iterator_closed
+            and self._active_segment_id is None
+            and settled
+        )
+
+    @property
+    def program(self) -> CompiledTaskProgramPort:
+        """Return the program selected for this execution."""
+        return self._program
+
+    @property
+    def post_policy_port(self) -> SegmentPostPolicyPort | None:
+        """Return this bridge's actual policy session, including isolated sessions.
+
+        This is the instance used during this execution, not its factory's
+        template port. Consumers still own checking the supported provider API.
+        """
+        return self._post_policy_port
+
+    @property
+    def evidence_collector(self) -> EffectEvidenceCollectorPort | None:
+        """Return this runtime's actual evidence port when the host exposes one.
+
+        Standard runtimes expose their injected port. A custom runtime lacking
+        this optional observation capability returns None; no provider is created
+        or borrowed from another assembly.
+        """
+        collector = getattr(self._runtime, "evidence_collector", None)
+        if collector is not None and not isinstance(
+            collector, EffectEvidenceCollectorPort
+        ):
+            raise TypeError(
+                "Runtime evidence_collector must implement its public port."
+            )
+        return collector
 
     @property
     def program_completed(self) -> bool:
@@ -1292,9 +1478,21 @@ class TaskProgramDemoBridge:
         raises :class:`TaskProgramBridgeError` instead of silently carrying stale row
         eligibility into downstream execution.
         """
+        if self._segment_iterator_started:
+            raise TaskProgramBridgeError(
+                "This bridge's segment iterator is already started or closed."
+            )
+        self._segment_iterator_started = True
+        try:
+            yield from self._iter_segments()
+        finally:
+            self._segment_iterator_closed = True
+
+    def _iter_segments(self) -> Iterator[DemoSegment]:
         for segment in self._program.iter_segments():
             metadata = self._segment_metadata(segment)
             lifecycle = _SegmentLifecycle(metadata=metadata)
+            self._last_segment_lifecycle = lifecycle
             validator = self._segment_validator(segment, lifecycle)
             yield DemoSegment(
                 actions=self._segment_actions(segment, lifecycle),
@@ -1424,7 +1622,9 @@ class TaskProgramDemoBridge:
         action: Any,
         *,
         segment: Any,
-        result: SemanticExecutionResult | ParallelSemanticExecutionResult,
+        result: (
+            SemanticExecutionResult | ParallelSemanticExecutionResult | _RuntimeProgress
+        ),
         action_kind: str | None = None,
     ) -> ControllerAction:
         """Own one action and attach stable program/runtime provenance."""
@@ -1472,6 +1672,15 @@ class TaskProgramDemoBridge:
         """Yield once and advance only after explicit consumption acknowledgement."""
         if lifecycle.pending_action is not None:
             raise RuntimeError("A prior demo action is still awaiting acknowledgement.")
+        if self._row_hold is not None:
+            mask, hold = self._row_hold
+            value = action.value.clone()
+            value[mask] = hold.value[mask]
+            metadata = dict(action.metadata)
+            if self._pending_rejected_ids:
+                metadata["rejected_env_ids"] = self._pending_rejected_ids
+                self._pending_rejected_ids = ()
+            action = ControllerAction(value, metadata=metadata)
         lifecycle.pending_action = action.snapshot()
         lifecycle.yielded_action_count += 1
         yield action
@@ -1479,6 +1688,29 @@ class TaskProgramDemoBridge:
             self._record_consumed_action(action)
             self._clock.advance_after_env_step()
             lifecycle.pending_action = None
+        if self._row_rejection is not None:
+            mask, hold, reason = self._row_rejection
+            self._row_rejection = None
+            runtime = lifecycle.runtime
+            if runtime.result.status is SemanticExecutionStatus.RUNNING:
+                deactivate = getattr(runtime, "deactivate_rows", None)
+                if not callable(deactivate):
+                    raise TaskProgramBridgeError(
+                        "runtime does not support row-local rejection"
+                    )
+                deactivate(mask, reason=reason)
+            if self._eligible_mask is None:
+                self._eligible_mask = ~mask
+            else:
+                self._eligible_mask &= ~mask
+            self._pending_rejected_ids += tuple(
+                int(row) for row in self.env_ids[mask].tolist()
+            )
+            if self._row_hold is not None:
+                previous_mask, previous_hold = self._row_hold
+                hold.value[previous_mask] = previous_hold.value[previous_mask]
+                mask |= previous_mask
+            self._row_hold = mask, hold
 
     def _segment_actions(
         self,
@@ -1496,6 +1728,7 @@ class TaskProgramDemoBridge:
             )
         self._active_segment_id = segment_id
         result: SemanticExecutionResult | ParallelSemanticExecutionResult | None = None
+        progress: _RuntimeProgress | None = None
         segment_runtime: (
             SequentialSemanticCallExecutorPort | ParallelSemanticExecutor
         ) = self._runtime
@@ -1575,49 +1808,83 @@ class TaskProgramDemoBridge:
                         execution_prefix_length=execution_prefix_length,
                     )
                 )
+            progress = _runtime_progress(result)
+
+            def advance_runtime() -> None:
+                """Advance while avoiding a full history snapshot when supported."""
+                nonlocal result, progress
+                lightweight_advance = (
+                    None if is_parallel else getattr(segment_runtime, "advance", None)
+                )
+                if callable(lightweight_advance):
+                    status = lightweight_advance()
+                    if not isinstance(status, SemanticExecutionStatus):
+                        raise TypeError(
+                            "Runtime advance() must return SemanticExecutionStatus."
+                        )
+                    progress = _runtime_progress(segment_runtime)
+                    if progress.terminal:
+                        result = _validate_runtime_result(segment_runtime.result)
+                        progress = _runtime_progress(result)
+                    return
+                result = _validate_runtime_result(segment_runtime.step())
+                progress = _runtime_progress(result)
 
             while True:
+                assert progress is not None
                 emitted = False
                 while self._sink.pending_count:
                     action = self._decorate_action(
                         self._sink.pop(),
                         segment=segment,
-                        result=result,
+                        result=progress,
                     )
                     yield from self._yield_and_advance(action, lifecycle)
                     emitted = True
 
-                if emitted and not result.terminal:
+                if emitted and not progress.terminal:
                     # The result's wait duration was measured before the action
                     # just consumed by Gym.  Refresh it against the advanced
                     # environment clock before deciding whether another hold is due.
-                    result = _validate_runtime_result(segment_runtime.step())
+                    advance_runtime()
                     continue
 
-                if result.terminal:
+                if progress.terminal:
                     break
 
-                if result.wait_duration > 0.0:
+                if progress.wait_duration > 0.0:
                     self._clock.steps_for_duration(
-                        result.wait_duration,
+                        progress.wait_duration,
                         field_name="SemanticExecutionResult.wait_duration",
                     )
                     hold = self._decorate_action(
-                        self._sink.wait_hold(result.env_ids),
+                        self._sink.wait_hold(progress.env_ids),
                         segment=segment,
-                        result=result,
+                        result=progress,
                         action_kind="runtime_wait_hold",
                     )
                     yield from self._yield_and_advance(hold, lifecycle)
 
-                result = _validate_runtime_result(segment_runtime.step())
+                advance_runtime()
 
+            assert result is not None
             self._record_runtime_result(lifecycle, result)
             self._retain_eligible_rows(result.success_mask)
             if is_parallel:
                 self._runtime.adopt_verified_task_state(result.task_state)
-            if result.status is SemanticExecutionStatus.COMPLETED:
+            if result.success_mask.any():
                 yield from self._post_policy_actions(segment, result, lifecycle)
+            # A last policy observation can reject a row just as its iterator
+            # finishes. Surface its hold outside the policy's exact step clock.
+            while self._pending_rejected_ids:
+                assert self._row_hold is not None
+                yield from self._yield_and_advance(
+                    ControllerAction(
+                        self._row_hold[1].value,
+                        metadata={"bridge_action_kind": "runtime_row_rejection_hold"},
+                    ),
+                    lifecycle,
+                )
             lifecycle.complete = True
         finally:
             if not lifecycle.abort_started and lifecycle.pending_action is not None:
@@ -1857,6 +2124,11 @@ class TaskProgramDemoBridge:
                         result=result,
                         action_kind="program_post_policy",
                     )
+                    if isinstance(processed.value, torch.Tensor):
+                        processed = ControllerAction(
+                            value=self._sink.encode_post_policy_hold(processed.value),
+                            metadata=processed.metadata,
+                        )
                     yield from self._yield_and_advance(processed, lifecycle)
             except BaseException as exc:
                 iteration_error = exc
