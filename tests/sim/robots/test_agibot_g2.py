@@ -179,6 +179,57 @@ def test_g2_arm_chains_match_source_frames(q: list[float]) -> None:
         np.testing.assert_allclose(actual, expected, atol=1e-6)
 
 
+@pytest.mark.no_sim
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_g2_default_ik_preserves_offset_limits_tcp_and_failure_masks(
+    device: str,
+) -> None:
+    """Solve the original offset arms, including boundary and unreachable queries."""
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    cfg = AgibotG2Cfg.from_dict({"fpath": str(_URDF)})
+    for part, chain in cfg.build_pk_serial_chain(torch.device(device)).items():
+        options = cfg.solver_cfg[part].copy()
+        assert isinstance(options, SSIKSolverCfg)
+        assert options.backend == "warp" and options.srs_search == "seed_local"
+        # A caller-configured rigid tool transform must remain in the IK query.
+        tcp = np.eye(4)
+        tcp[:3, :3] = Rotation.from_euler("xyz", [0.1, -0.2, 0.3]).as_matrix()
+        tcp[:3, 3] = [0.02, -0.01, 0.12]
+        options.tcp = tcp
+        solver = options.init_solver(device=device, pk_serial_chain=chain)
+        assert solver.family == "srs"
+        low, high = (torch.tensor(v, device=device) for v in chain.get_joint_limits())
+        fractions = 0.05 + 0.9 * torch.rand(
+            32, 7, generator=torch.Generator().manual_seed(42)
+        )
+        q = low + fractions.to(device) * (high - low)
+        q = torch.cat((q, torch.zeros_like(q[:1]), low[None], high[None]))
+        tool = torch.as_tensor(tcp, device=device, dtype=q.dtype)
+        targets = chain.forward_kinematics(q).get_matrix() @ tool
+        targets[-1, :3, 3] = 100.0
+        seed = ((low + high) / 2).expand_as(q).clone()
+        seed[-1] = high + 10.0
+        valid, result = solver.get_ik_batch(targets, qpos_seed=seed)
+        assert valid.tolist() == [True] * (len(q) - 1) + [False]
+        assert torch.isfinite(result).all()
+        assert (result >= low).all() and (result <= high).all()
+        torch.testing.assert_close(result[-1], high, atol=0, rtol=0)
+        actual = chain.forward_kinematics(result[valid]).get_matrix() @ tool
+        torch.testing.assert_close(actual, targets[valid], atol=1e-5, rtol=0)
+        # Candidate enumeration must also return valid original-model poses.
+        mask, candidates = solver.get_ik(
+            targets[:1], seed[:1], return_all_solutions=True
+        )
+        assert mask.any() and candidates.shape[-1] == 7
+        actual = chain.forward_kinematics(candidates[mask]).get_matrix() @ tool
+        torch.testing.assert_close(
+            actual, targets[:1].expand_as(actual), atol=1e-5, rtol=0
+        )
+
+
 @pytest.mark.requires_sim
 class TestAgibotG2Simulation:
     """Default ground placement, native FK, stable stepping and gripper actuation."""
@@ -227,6 +278,12 @@ class TestAgibotG2Simulation:
                 cfg.solver_cfg[part].end_link_name, to_matrix=True
             )
             torch.testing.assert_close(actual, expected, atol=1e-4, rtol=0.0)
+            success, solved = robot.compute_ik(
+                pose=actual, name=part, joint_seed=robot.get_qpos(name=part) + 0.02
+            )
+            assert success.all()
+            reconstructed = robot.compute_fk(solved, name=part, to_matrix=True)
+            torch.testing.assert_close(reconstructed, actual, atol=1e-5, rtol=0)
         for part in ("left_eef", "right_eef"):
             robot.set_qpos(
                 torch.tensor([[-0.6]]),

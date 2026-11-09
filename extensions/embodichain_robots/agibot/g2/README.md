@@ -94,7 +94,23 @@ preset raises the root to 4.1 cm to avoid initial penetration of the default
 ground. The fixed root supports standalone manipulation previews; mobile use
 requires `root_props.fixed_base: false` and an application-owned base controller.
 
-Both numerical arm IK solvers use `arm_base_link` as their root and the native
+Both arm IK solvers use strict Warp SSIK with seed-local redundancy search,
+on CPU or CUDA. Geometry comes from the actual URDF, including its 18 mm elbow
+offset and authored rounded joint rotations; there is no zero-offset surrogate
+or numerical fallback. The older `SRSSolver` requires separate DH calibration
+and its shoulder/elbow reconstruction assumes the upper arm lies along the
+third joint axis, which the G2 offset violates. SSIK instead reconstructs the
+actual shoulder/elbow/wrist vectors and joint axes.
+
+For reproducible CPU/CUDA accuracy, limit, latency and memory measurements,
+run `python -m scripts.benchmark.robotics.kinematic_solver.agibot_g2 --output qualification.md`.
+The checked-in [qualification report](../../../../scripts/benchmark/robotics/kinematic_solver/agibot_g2_qualification.md)
+records both arms, midpoint/nearby seeds, and batches 1/32/128 against numerical
+IK with matched acceptance thresholds. Finite swivel sampling is not a proof of
+global reachability. A complete `PytorchSolverCfg` override with this preset's
+root/end/TCP remains available through the existing solver replacement API.
+
+Both solvers use `arm_base_link` as their root and the native
 `gripper_l_base_link` / `gripper_r_base_link` as their end frame, with identity
 TCP transforms. Configure tool offsets explicitly for grasp targets. Head,
 torso and grippers use joint control. Camera housings and attachment links are

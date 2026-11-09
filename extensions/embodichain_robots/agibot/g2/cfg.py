@@ -29,7 +29,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
-from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
 
@@ -56,6 +56,9 @@ class AgibotG2Cfg(RobotCfg):
     Arm FK/IK runs from ``arm_base_link`` to the corresponding
     ``gripper_l_base_link`` / ``gripper_r_base_link``. These are mounting
     frames, with an identity TCP; configure a tool offset for a grasp target.
+    Strict Warp SSIK derives the spherical shoulder/wrist and 18 mm elbow
+    offset from the original chain, with seed-local redundancy search on
+    CPU/CUDA. It does not replace the chain with a zero-offset approximation.
     Mounted camera geometry is retained without inventing optical calibration.
     The neutral startup pose has all source joint coordinates at zero.
     """
@@ -123,7 +126,9 @@ class AgibotG2Cfg(RobotCfg):
                 )
             ]
         self.solver_cfg = {
-            f"{side}_arm": PytorchSolverCfg(
+            f"{side}_arm": SSIKSolverCfg(
+                backend="warp",
+                srs_search="seed_local",
                 root_link_name="arm_base_link",
                 end_link_name=f"gripper_{label}_base_link",
             )
