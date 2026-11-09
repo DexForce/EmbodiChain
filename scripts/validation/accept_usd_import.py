@@ -371,6 +371,7 @@ def main() -> None:
         directory.mkdir(exist_ok=True)
         job = directory / "case.json"
         job.write_text(json.dumps(case, indent=2))
+        (directory / "result.json").unlink(missing_ok=True)
         try:
             with (directory / "runtime.log").open("w") as log:
                 process = subprocess.run(

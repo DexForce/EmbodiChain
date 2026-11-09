@@ -314,6 +314,78 @@ class TestUsdCUDA(BaseUsdTest):
         self.setup_simulation("cuda")
 
 
+@pytest.mark.parametrize("kind", ["rigid", "articulation"])
+def test_singleton_authored_pose_survives_binding_and_reset(
+    tmp_path: Path, kind: str
+) -> None:
+    """Source placement is the native binding and reset baseline."""
+    from pxr import Usd, UsdGeom, UsdPhysics
+    from embodichain.lab.sim.cfg import UsdSourceCfg
+
+    path = tmp_path / "placed.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    root = UsdGeom.Xform.Define(stage, "/Asset")
+    stage.SetDefaultPrim(root.GetPrim())
+    root.AddTranslateOp().Set((2.0, -1.0, 3.0))
+    root.AddRotateZOp().Set(35.0)
+    if kind == "articulation":
+        UsdPhysics.ArticulationRootAPI.Apply(root.GetPrim())
+        bodies = [
+            UsdGeom.Xform.Define(stage, "/Asset/base"),
+            UsdGeom.Xform.Define(stage, "/Asset/tip"),
+        ]
+        joint = UsdPhysics.RevoluteJoint.Define(stage, "/Asset/joint")
+        joint.CreateBody0Rel().SetTargets(["/Asset/base"])
+        joint.CreateBody1Rel().SetTargets(["/Asset/tip"])
+        joint.CreateAxisAttr("X")
+    else:
+        bodies = [root]
+    for body in bodies:
+        UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+        UsdPhysics.MassAPI.Apply(body.GetPrim()).CreateMassAttr(1.0)
+        cube = UsdGeom.Cube.Define(stage, str(body.GetPath()) + "/mesh")
+        cube.CreateSizeAttr(0.1)
+        UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+    stage.GetRootLayer().Save()
+    angle = math.radians(35.0)
+    expected = torch.tensor(
+        [
+            [math.cos(angle), -math.sin(angle), 0, 2],
+            [math.sin(angle), math.cos(angle), 0, -1],
+            [0, 0, 1, 3],
+            [0, 0, 0, 1],
+        ],
+        dtype=torch.float32,
+    ).unsqueeze(0)
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=1,
+        )
+    )
+    asset = None
+    try:
+        source = UsdSourceCfg(file_path=str(path))
+        if kind == "rigid":
+            asset = sim.add_rigid_object(RigidObjectCfg(uid="placed", source=source))
+        else:
+            asset = sim.add_articulation(ArticulationCfg(uid="placed", source=source))
+        sim.prepare()
+        torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+        moved = expected.clone()
+        moved[:, 0, 3] += 1
+        asset.set_local_pose(moved)
+        asset.reset()
+        torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+    finally:
+        sim.destroy(exit_process=False)
+        asset = None
+        SimulationManager.flush_cleanup_queue()
+
+
 if __name__ == "__main__":
     test = TestUsdCPU()
     test.setup_method()

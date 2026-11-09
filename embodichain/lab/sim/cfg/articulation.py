@@ -547,7 +547,11 @@ class ArticulationCfg(ObjectBaseCfg):
         ):
             if "body_scale" not in init_dict:
                 cfg.body_scale = None
-            if not {"init_pos", "init_rot", "init_local_pose"}.intersection(init_dict):
+            if (
+                "init_local_pose" in init_dict and init_dict["init_local_pose"] is None
+            ) or not {"init_pos", "init_rot", "init_local_pose"}.intersection(
+                init_dict
+            ):
                 cfg.init_local_pose = None
 
         return cfg

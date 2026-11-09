@@ -50,6 +50,7 @@ def _manager():
     manager = object.__new__(SimulationManager)
     manager.device = torch.device("cpu")
     manager.physics = SimpleNamespace(name="default")
+    manager.sim_config = SimpleNamespace(render_cfg=SimpleNamespace(renderer="hybrid"))
     for name in (
         "_lights",
         "_sensors",
@@ -293,11 +294,16 @@ def test_import_recipe_selects_subtree_and_namespaces_runtime_identity(tmp_path)
 
 
 @pytest.mark.parametrize(
-    "parent,sensor_uid,valid",
-    [("base", "wrist", True), ("missing", "wrist", False), ("base", "Robot", False)],
+    "parent,sensor_uid,renderer,valid",
+    [
+        ("base", "wrist", "hybrid", True),
+        ("missing", "wrist", "hybrid", False),
+        ("base", "Robot", "hybrid", False),
+        ("base", "wrist", "no-render", False),
+    ],
 )
 def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
-    monkeypatch, parent, sensor_uid, valid
+    monkeypatch, parent, sensor_uid, renderer, valid
 ):
     import dexsim.kit.usd
     from embodichain.lab.sim.cfg import RobotCfg, ArticulationRootPropertiesCfg
@@ -335,6 +341,7 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
     )
     manager = _manager()
 
+    manager.sim_config.render_cfg.renderer = renderer
     if valid:
         result = manager.add_usd(recipe)
         assert result["/Robot"].uid == "Robot"
@@ -344,8 +351,55 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
         assert metadata.uid == "metadata_uid"
         assert metadata.sensors[0].extrinsics.parent == "base"
     else:
-        with pytest.raises(ValueError, match="unknown link|already exists"):
+        with pytest.raises(
+            (ValueError, RuntimeError),
+            match="unknown link|already exists|requires a native renderer",
+        ):
             manager.add_usd(recipe)
         manager._spawn_scene.builder.add_scene.assert_not_called()
         manager.add_sensor.assert_not_called()
         assert manager._robots == {}
+        if renderer == "no-render":
+            recipe.robot_cfgs["/Robot"].enable_sensor = False
+            result = manager.add_usd(recipe)
+            assert manager._robots == {"Robot": result["/Robot"]}
+            manager.add_sensor.assert_not_called()
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_static_collider_overrides_keep_identity_pose_and_relationships(
+    monkeypatch, typed
+):
+    import dexsim.kit.usd
+    from dexsim.spawn import CollisionDesc, ConstraintDesc
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+
+    descriptor = MeshObjectDesc(
+        name="wall", collisions=[CollisionDesc()], usd=UsdSourceDesc(prim_path="/Wall")
+    )
+    descriptor.pose[0, 3] = 2
+    constraint = ConstraintDesc(name="anchor", body0="wall", body1=None)
+    source = SceneDesc(mesh_objects=[descriptor], constraints=[constraint])
+    monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: source)
+    override = {"uid": "renamed", "init_pos": (1, 0, 0), "source_pose_mode": "offset"}
+    manager = _manager()
+    result = manager.add_usd(
+        UsdImportCfg(
+            name="room",
+            source=UsdSourceCfg(file_path="scene.usda"),
+            asset_cfgs={
+                "/Wall": (
+                    RigidObjectCfg.from_dict({**override, "body_type": None})
+                    if typed
+                    else override
+                )
+            },
+        )
+    )
+    assert descriptor.name == result["/Wall"].uid == "renamed"
+    assert manager._rigid_objects == {"renamed": result["/Wall"]}
+    assert result.resource_uids["/Wall"] == "renamed"
+    assert constraint.body0 == "renamed"
+    assert descriptor.pose[0, 3] == result["/Wall"].cfg.init_local_pose[0, 3] == 3
+    assert descriptor.physics is None
+    assert result["/Wall"].cfg.body_type == "static"

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+
 import pytest
 from pxr import Sdf, Usd, UsdGeom, UsdPhysics
 
@@ -29,6 +31,8 @@ from embodichain.lab.sim.cfg import (
     UsdSourceCfg,
     UsdImportCfg,
     VisualObjectCfg,
+    VolumeDeformableObjectCfg,
+    SurfaceDeformableObjectCfg,
 )
 from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
@@ -118,6 +122,7 @@ def test_source_configuration_round_trip(cfg_type):
     assert restored.source.source_prim_path == data["source"]["source_prim_path"]
     assert restored.source.pose_mode == "auto"
     assert restored.uid == "runtime_instance"
+    assert restored.init_local_pose is None
     assert not hasattr(cfg, "prim_path")
     assert not hasattr(ObjectBaseCfg(), "source")
 
@@ -297,3 +302,108 @@ def test_legacy_mesh_file_input_remains_available(tmp_path):
     )
     assert descriptor.name == "legacy"
     assert descriptor.physics is not None
+
+
+@pytest.mark.parametrize(
+    "cfg_type,explicit_pose",
+    [
+        (cfg_type, True)
+        for cfg_type in (
+            *ASSET_CONFIGS,
+            VolumeDeformableObjectCfg,
+            SurfaceDeformableObjectCfg,
+        )
+    ]
+    + [(VolumeDeformableObjectCfg, False), (SurfaceDeformableObjectCfg, False)],
+)
+def test_singleton_usd_round_trip_preserves_pose_intent(cfg_type, explicit_pose):
+    pose = np.eye(4)
+    pose[:3, 3] = (2.0, -1.0, 3.0)
+    cfg = cfg_type(
+        uid="asset",
+        source=UsdSourceCfg(file_path="scene.usda"),
+        init_local_pose=pose if explicit_pose else None,
+    )
+    restored = cfg_type.from_dict(cfg.to_dict())
+    if explicit_pose:
+        np.testing.assert_allclose(restored.init_local_pose, pose)
+    else:
+        assert restored.init_local_pose is None
+
+
+@pytest.mark.parametrize(
+    "kind", ["visual", "rigid", "articulation", "volume", "surface"]
+)
+def test_singleton_translation_captures_resolved_reset_pose(monkeypatch, kind):
+    import embodichain.lab.sim.spawn.usd as adapter
+    from dexsim.spawn import (
+        ArticulationDesc,
+        MeshObjectDesc,
+        SoftBodyDesc,
+        ClothDesc,
+        RigidBodyPhysicsDesc,
+        SceneDesc,
+        GeometryDesc,
+    )
+    from dexsim.types import ActorType
+
+    config_type, descriptor_type, translate, collection = {
+        "visual": (
+            VisualObjectCfg,
+            MeshObjectDesc,
+            adapter.visual_desc_from_usd,
+            "mesh_objects",
+        ),
+        "rigid": (
+            RigidObjectCfg,
+            MeshObjectDesc,
+            adapter.rigid_desc_from_usd,
+            "mesh_objects",
+        ),
+        "articulation": (
+            ArticulationCfg,
+            ArticulationDesc,
+            adapter.articulation_desc_from_usd,
+            "articulations",
+        ),
+        "volume": (
+            VolumeDeformableObjectCfg,
+            SoftBodyDesc,
+            adapter._deformable_desc_from_usd,
+            "particle_sets",
+        ),
+        "surface": (
+            SurfaceDeformableObjectCfg,
+            ClothDesc,
+            adapter._deformable_desc_from_usd,
+            "particle_sets",
+        ),
+    }[kind]
+    if kind in ("volume", "surface"):
+        mesh = GeometryDesc.mesh(
+            vertices=np.array(
+                [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32
+            ),
+            triangles=np.array([[0, 1, 2]], dtype=np.int32),
+        )
+        descriptor = descriptor_type(name="authored", mesh=mesh)
+    else:
+        descriptor = descriptor_type(name="authored")
+    descriptor.pose[:3, :3] = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+    descriptor.pose[:3, 3] = (2, -1, 3)
+    if kind == "rigid":
+        descriptor.physics = RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC)
+    scene = SceneDesc(**{collection: [descriptor]})
+    monkeypatch.setattr(
+        adapter, "_parse_singleton", lambda *args, **kwargs: (scene, descriptor)
+    )
+    cfg = config_type(
+        uid="runtime",
+        source=UsdSourceCfg(file_path="scene.usda"),
+    )
+    expected = descriptor.pose.copy()
+    resolved, _ = translate(cfg)
+    np.testing.assert_allclose(resolved.pose, expected)
+    np.testing.assert_allclose(cfg.init_local_pose, expected)
+    resolved.pose[0, 3] += 10
+    np.testing.assert_allclose(cfg.init_local_pose, expected)

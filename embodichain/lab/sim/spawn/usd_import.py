@@ -389,6 +389,8 @@ def _compile_usd_import(
                 and cfg.body_type is None
                 and cfg.resolve_asset_physics_mode() == "preserve"
             ):
+                descriptor.name = uid
+                descriptor.pose = _source_pose(cfg, descriptor.pose)
                 cfg.body_type = "static"
                 if cfg.body_scale is not None:
                     from .descriptors import _vector3
@@ -415,6 +417,7 @@ def _compile_usd_import(
             for sensor_cfg in cfg.sensors:
                 if not isinstance(sensor_cfg, CameraCfg):
                     raise TypeError("RobotCfg.sensors supports mounted cameras only.")
+                manager._require_native_renderer("Mounted cameras")
                 if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
                     raise ValueError("Mounted sensors require a non-empty uid.")
                 if sensor_cfg.uid in sensor_uids:

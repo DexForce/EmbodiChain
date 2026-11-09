@@ -230,11 +230,10 @@ class DeformableObjectCfg(ObjectBaseCfg):
         )
         cfg.init_pos, cfg.init_rot = pose.init_pos, pose.init_rot
         cfg.init_local_pose = pose.init_local_pose
-        if cfg.source is not None and not {
-            "init_pos",
-            "init_rot",
-            "init_local_pose",
-        }.intersection(init_dict):
+        if cfg.source is not None and (
+            ("init_local_pose" in init_dict and init_dict["init_local_pose"] is None)
+            or not {"init_pos", "init_rot", "init_local_pose"}.intersection(init_dict)
+        ):
             cfg.init_local_pose = None
         return cfg
 

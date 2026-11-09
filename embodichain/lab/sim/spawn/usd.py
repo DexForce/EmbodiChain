@@ -140,6 +140,7 @@ def _configure_deformable_usd(cfg: DeformableObjectCfg, descriptor) -> None:
         )
     descriptor.name = _required_uid(cfg.uid, "Deformable")
     descriptor.pose = _source_pose(cfg, descriptor.pose)
+    cfg.init_local_pose = descriptor.pose.copy()
     if cfg.validate_mesh:
         descriptor.validate_mesh = True
     if cfg.particle_radius is not None:
@@ -225,6 +226,7 @@ def visual_desc_from_usd(
     )
     desc.name = _required_uid(cfg.uid, "Visual object")
     desc.pose = _source_pose(cfg, desc.pose)
+    cfg.init_local_pose = desc.pose.copy()
     desc.per_env = per_env
     desc.physics = None
     desc.collisions = []
@@ -275,6 +277,7 @@ def _configure_rigid_usd(
 
     desc.name = uid
     desc.pose = _source_pose(cfg, desc.pose)
+    cfg.init_local_pose = desc.pose.copy()
     desc.per_env = per_env
     materials = _namespace_materials(desc.renders, scene.materials, uid)
 
@@ -398,6 +401,7 @@ def _configure_articulation_usd(
     cfg.uid = uid
     desc.name = uid
     desc.pose = _source_pose(cfg, desc.pose)
+    cfg.init_local_pose = desc.pose.copy()
     desc.per_env = per_env
     renders = [visual for link in desc.links for visual in link.visuals]
     materials = _namespace_materials(renders, scene.materials, uid)

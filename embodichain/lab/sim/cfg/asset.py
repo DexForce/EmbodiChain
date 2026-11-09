@@ -123,7 +123,15 @@ class ObjectBaseCfg:
         if (
             path is not None
             and str(path).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
-            and not {"init_pos", "init_rot", "init_local_pose"}.intersection(init_dict)
+            and (
+                (
+                    "init_local_pose" in init_dict
+                    and init_dict["init_local_pose"] is None
+                )
+                or not {"init_pos", "init_rot", "init_local_pose"}.intersection(
+                    init_dict
+                )
+            )
         ):
             cfg.init_local_pose = None
         return cfg
