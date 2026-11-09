@@ -111,6 +111,11 @@ select `py311` or `py312` with `EMBODICHAIN_ENV`. See the
 for internal registry access, environment selection, source development, and
 dependency locks.
 
+The published image digests in the container guide's validation record belong
+to the earlier DexSim 0.5.1rc1 runtime. For this checkout's DexSim 0.6.0rc1
+requirements, build a candidate from the current source or follow the guide's
+source-development instructions to update the selected environment.
+
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/engine/install/) with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
