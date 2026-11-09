@@ -78,6 +78,13 @@ compares a stopped duration objective with autograd optimization of free path
 nodes. Its CPU browser preview displays gradients, finite-difference checks and
 trajectories on a shared physical clock, with portable export and replay.
 
+The [camera ground visibility example](sim/camera_ground_visibility.py) uses one
+physical ground across four Arenas. Training and debug cameras independently
+include it, then change selected environment policies and reset one camera row.
+It saves RGB mosaics, depth arrays and capture-policy metadata. This requires the
+DexSim camera render-category API; the default camera configuration continues to
+work with older SDKs. Ground hidden in a camera still supports the falling box.
+
 The [Expansion Engine showcase](expansion/engine/showcase/README.md) demonstrates
 native and real-demonstration-driven experts through the shared engine. Its offline
 viewer pairs measured 3D playback with RGB-D, recipes, source clocks and explicit
