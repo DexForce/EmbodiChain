@@ -52,13 +52,17 @@ MuJoCo force reports are unavailable. See `physics/` and
 `"overlay"` applies non-`None` config fields after source translation. The
 same policy covers USD rigid objects and USD/URDF articulations. Generic rigid
 objects/articulations preserve by default; Robot configs overlay their authored
-drives. Preserve-mode articulation configs warn about ignored overlay fields.
+drives. Preserve mode keeps the source actor and scale even when saved config
+fields contain legacy defaults; explicit actor/scale changes require overlay.
+Preserve-mode articulation configs warn about ignored overlay fields.
 Root import intent is handled separately in
 [articulation adapters](articulation-adapters.md).
 
 Unset USD actor type, scale, root flags and placement retain parsed source
 values. An explicit singleton `source_pose_mode` replaces, preserves or offsets
-the source transform. Non-USD rigid and URDF articulation imports keep their
+the source transform. Singleton translation resolves a runtime-owned config
+copy, preserving caller placement intent for repeated imports and Gym
+replacement comparisons. Non-USD rigid and URDF articulation imports keep their
 dynamic/unit-scale and fixed-root defaults respectively. Whole-scene
 `add_usd(UsdImportCfg(...))` applies sparse dictionary fields before Spawn
 declaration. Source subtree and variants belong to its `source`; namespace and

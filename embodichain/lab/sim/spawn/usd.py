@@ -284,14 +284,6 @@ def _configure_rigid_usd(
     if cfg.resolve_asset_physics_mode() == "preserve":
         if desc.physics is None:
             raise ValueError(f"USD rigid object {path!r} has no physics.")
-        if cfg.body_type is not None:
-            desc.physics.actor_type = {
-                "dynamic": ActorType.DYNAMIC,
-                "kinematic": ActorType.KINEMATIC,
-                "static": ActorType.STATIC,
-            }[cfg.body_type]
-        if cfg.body_scale is not None:
-            desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
         cfg.body_type = {
             ActorType.DYNAMIC: "dynamic",
             ActorType.KINEMATIC: "kinematic",
@@ -424,10 +416,6 @@ def _parse_singleton(path: object, collection: str, label: str, *, source=None):
     scene = _parse_usd_source(
         source or UsdSourceCfg(file_path=str(path)), source_path=str(path)
     )
-    if scene.constraints:
-        raise ValueError(
-            "A USD source with standalone constraints requires SimulationManager.add_usd()."
-        )
     candidates = getattr(scene, collection)
     prim_path = None if source is None else source.source_prim_path
     if prim_path is not None:
@@ -446,7 +434,17 @@ def _parse_singleton(path: object, collection: str, label: str, *, source=None):
             f"Expected exactly one {label} in USD file {path!r}{selection}, found "
             f"{len(candidates)}: {found}."
         )
-    return scene, candidates[0]
+    selected = candidates[0]
+    if label != "visual object":
+        for constraint in scene.constraints:
+            if any(
+                endpoint is not None and endpoint.partition("/")[0] == selected.name
+                for endpoint in (constraint.body0, constraint.body1)
+            ):
+                raise ValueError(
+                    "A selected USD asset with standalone constraints requires SimulationManager.add_usd()."
+                )
+    return scene, selected
 
 
 def _parse_usd_source(

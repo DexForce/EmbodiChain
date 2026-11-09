@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -315,8 +317,9 @@ class TestUsdCUDA(BaseUsdTest):
 
 
 @pytest.mark.parametrize("kind", ["rigid", "articulation"])
+@pytest.mark.parametrize("pose_mode", ["auto", "offset"])
 def test_singleton_authored_pose_survives_binding_and_reset(
-    tmp_path: Path, kind: str
+    tmp_path: Path, kind: str, pose_mode: str
 ) -> None:
     """Source placement is the native binding and reset baseline."""
     from pxr import Usd, UsdGeom, UsdPhysics
@@ -369,17 +372,45 @@ def test_singleton_authored_pose_survives_binding_and_reset(
     asset = None
     try:
         source = UsdSourceCfg(file_path=str(path))
+        config_type = RigidObjectCfg if kind == "rigid" else ArticulationCfg
+        offset = 1.0 if pose_mode == "offset" else 0.0
+        cfg = config_type(
+            uid="placed",
+            source=source,
+            source_pose_mode=pose_mode,
+            init_pos=(offset, 0, 0),
+        )
+        current = SimpleNamespace(
+            num_envs=1,
+            rigid_object=[cfg],
+            background=[],
+            sim_cfg=sim.sim_config,
+            task_program=SimpleNamespace(program_id="test"),
+            target_control_frequency=10,
+        )
+        selected = deepcopy(current)
+        expected[:, 0, 3] += offset
         if kind == "rigid":
-            asset = sim.add_rigid_object(RigidObjectCfg(uid="placed", source=source))
+            asset = sim.add_rigid_object(cfg)
         else:
-            asset = sim.add_articulation(ArticulationCfg(uid="placed", source=source))
+            asset = sim.add_articulation(cfg)
         sim.prepare()
+        assert cfg.init_local_pose is None
+        if kind == "rigid":
+            from embodichain.lab.gym.envs._asset_replacement import _check_environment
+
+            _check_environment(current, selected, set())
         torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
         moved = expected.clone()
         moved[:, 0, 3] += 1
         asset.set_local_pose(moved)
         asset.reset()
         torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+        if kind == "rigid":
+            asset = sim.replace_rigid_object(cfg)
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+            assert cfg.init_local_pose is None
+            _check_environment(current, selected, set())
     finally:
         sim.destroy(exit_process=False)
         asset = None

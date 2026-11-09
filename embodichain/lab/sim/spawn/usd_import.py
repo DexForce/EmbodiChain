@@ -51,7 +51,7 @@ from embodichain.lab.sim.objects import (
     VolumeDeformableObject,
     SurfaceDeformableObject,
 )
-from embodichain.lab.sim.sensors import CameraCfg
+from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
 from .descriptors import configure_articulation_desc
 from .usd import (
     _configure_articulation_usd,
@@ -147,6 +147,7 @@ def _compile_usd_import(
     mounted_sensors = []
     sensor_uids = set(manager._sensors)
     renamed = {}
+    rigid_renames = {}
     for descriptor in descriptors:
         original_name = descriptor.name
         source_path = (
@@ -245,7 +246,7 @@ def _compile_usd_import(
                     f"Unknown USD override fields at {source_path}: {sorted(unknown)}."
                 )
             cfg = config_type.from_dict(data)
-            if not {"init_pos", "init_rot", "init_local_pose"}.intersection(data):
+            if data.get("init_local_pose") is None:
                 cfg.init_local_pose = None
             if not is_deformable and "body_scale" not in data:
                 cfg.body_scale = None
@@ -301,7 +302,8 @@ def _compile_usd_import(
             cfg.uid = descriptor.name
             cfg.asset_physics_mode = "preserve"
             cfg.init_local_pose = None
-            cfg.root_props = ArticulationRootPropertiesCfg()
+            cfg.root_props.fixed_base = descriptor.fixed_base
+            cfg.root_props.self_collision_enabled = descriptor.enable_self_collision
             pose_mode = "preserve"
         elif is_articulation:
             cfg = ArticulationCfg(build_pk_chain=False)
@@ -386,18 +388,11 @@ def _compile_usd_import(
             cfg.source.parse_kwargs()
             if (
                 descriptor.physics is None
-                and cfg.body_type is None
                 and cfg.resolve_asset_physics_mode() == "preserve"
             ):
                 descriptor.name = uid
                 descriptor.pose = _source_pose(cfg, descriptor.pose)
                 cfg.body_type = "static"
-                if cfg.body_scale is not None:
-                    from .descriptors import _vector3
-
-                    descriptor.body_scale = _vector3(
-                        cfg.body_scale, field_name="body_scale"
-                    )
                 cfg.body_scale = tuple(float(value) for value in descriptor.body_scale)
                 materials = {}
             else:
@@ -417,6 +412,21 @@ def _compile_usd_import(
             for sensor_cfg in cfg.sensors:
                 if not isinstance(sensor_cfg, CameraCfg):
                     raise TypeError("RobotCfg.sensors supports mounted cameras only.")
+                sensor_factory = manager.SUPPORTED_SENSOR_TYPES.get(
+                    sensor_cfg.sensor_type
+                )
+                if not isinstance(sensor_factory, type) or not issubclass(
+                    sensor_factory, Camera
+                ):
+                    raise ValueError(
+                        f"Unsupported mounted camera type {sensor_cfg.sensor_type!r}."
+                    )
+                if issubclass(sensor_factory, StereoCamera) and not isinstance(
+                    sensor_cfg, StereoCameraCfg
+                ):
+                    raise TypeError(
+                        "StereoCamera requires a StereoCameraCfg configuration."
+                    )
                 manager._require_native_renderer("Mounted cameras")
                 if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
                     raise ValueError("Mounted sensors require a non-empty uid.")
@@ -441,6 +451,8 @@ def _compile_usd_import(
         facade = facade_type(cfg=cfg, device=manager.device)
         declarations.append((source_path, kind, descriptor, facade))
         renamed[original_name] = descriptor.name
+        if isinstance(descriptor, MeshObjectDesc) and descriptor.physics is not None:
+            rigid_renames[original_name] = descriptor.name
 
     for sensor_cfg in mounted_sensors:
         if sensor_cfg.uid in occupied:
@@ -461,6 +473,15 @@ def _compile_usd_import(
             constraint.body1 = renamed_endpoint(constraint.body1)
         elif root_pose is not None:
             constraint.target_pose = root_pose @ constraint.target_pose
+    if source.newton is not None:
+        if source.newton.body_order is not None:
+            source.newton.body_order = [
+                rigid_renames.get(name, name) for name in source.newton.body_order
+            ]
+        for equality in source.newton.equalities:
+            if equality.equality_type == 1:
+                equality.object1 = rigid_renames.get(equality.object1, equality.object1)
+                equality.object2 = rigid_renames.get(equality.object2, equality.object2)
     source.rigid_collision_filter_pairs = [
         (renamed_endpoint(first), renamed_endpoint(second))
         for first, second in source.rigid_collision_filter_pairs

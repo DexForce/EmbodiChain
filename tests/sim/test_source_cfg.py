@@ -407,3 +407,79 @@ def test_singleton_translation_captures_resolved_reset_pose(monkeypatch, kind):
     np.testing.assert_allclose(cfg.init_local_pose, expected)
     resolved.pose[0, 3] += 10
     np.testing.assert_allclose(cfg.init_local_pose, expected)
+
+
+def test_source_placement_option_keeps_legacy_positional_shape():
+    mesh = MeshCfg(fpath="box.obj")
+    cfg = RigidObjectCfg(
+        "box", (0, 0, 0), (0, 0, 0), None, mesh, source_pose_mode="offset"
+    )
+    assert isinstance(cfg.shape, MeshCfg)
+    assert cfg.shape.fpath == "box.obj"
+    assert cfg.source_pose_mode == "offset"
+
+
+@pytest.mark.parametrize(
+    "mode,expected_actor", [("preserve", "KINEMATIC"), ("overlay", "DYNAMIC")]
+)
+def test_legacy_saved_rigid_config_retains_preserve_actor(
+    tmp_path, mode, expected_actor
+):
+    import json
+    from dexsim.types import ActorType
+
+    path = _cups(tmp_path, ("Body",))
+    stage = Usd.Stage.Open(str(path))
+    body = stage.GetPrimAtPath("/World/Body")
+    UsdPhysics.RigidBodyAPI(body).CreateKinematicEnabledAttr(True)
+    stage.GetRootLayer().Save()
+    # Previous versions serialized dynamic even when the user selected no actor.
+    saved = tmp_path / "legacy.json"
+    saved.write_text(
+        json.dumps(
+            {
+                "uid": "body",
+                "shape": {"shape_type": "Mesh", "fpath": str(path)},
+                "body_type": "dynamic",
+                "body_scale": [1, 1, 1],
+                "asset_physics_mode": mode,
+                "init_pos": [0, 0, 0],
+                "init_rot": [0, 0, 0],
+                "init_local_pose": None,
+            }
+        )
+    )
+    cfg = RigidObjectCfg.from_dict(json.loads(saved.read_text()))
+    descriptor, _ = rigid_desc_from_usd(cfg)
+    assert descriptor.physics.actor_type == getattr(ActorType, expected_actor)
+
+
+def test_singleton_constraint_checks_follow_the_selected_asset(tmp_path):
+    path = _cups(tmp_path, ("A", "B", "C"))
+    stage = Usd.Stage.Open(str(path))
+    joint = UsdPhysics.FixedJoint.Define(stage, "/World/joint")
+    joint.CreateBody0Rel().SetTargets(["/World/A"])
+    joint.CreateBody1Rel().SetTargets(["/World/B"])
+    stage.GetRootLayer().Save()
+    independent, _ = rigid_desc_from_usd(
+        RigidObjectCfg(
+            uid="free",
+            source=UsdSourceCfg(file_path=str(path), source_prim_path="/World/C"),
+        )
+    )
+    assert independent.usd.prim_path == "/World/C"
+    with pytest.raises(ValueError, match="standalone constraints"):
+        rigid_desc_from_usd(
+            RigidObjectCfg(
+                uid="coupled",
+                source=UsdSourceCfg(file_path=str(path), source_prim_path="/World/A"),
+            )
+        )
+    visual, _ = visual_desc_from_usd(
+        VisualObjectCfg(
+            uid="appearance",
+            source=UsdSourceCfg(file_path=str(path), source_prim_path="/World/B"),
+        )
+    )
+    assert visual.physics is None
+    assert visual.collisions == []

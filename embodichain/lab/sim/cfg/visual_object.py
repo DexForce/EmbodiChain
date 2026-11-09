@@ -57,6 +57,8 @@ class VisualObjectCfg(ObjectBaseCfg):
     """Initial visibility restored by reset."""
 
     def __post_init__(self) -> None:
+        if self.shape is None and self.source is None:
+            return
         path = (
             self.source.file_path
             if self.source is not None

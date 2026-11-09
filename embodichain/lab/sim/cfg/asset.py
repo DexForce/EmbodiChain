@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import field
 from typing import Dict, Literal
 
 import numpy as np
@@ -59,7 +60,9 @@ class ObjectBaseCfg:
     init_local_pose: np.ndarray | None = None
     """4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot."""
 
-    source_pose_mode: Literal["auto", "config", "preserve", "offset"] = "auto"
+    source_pose_mode: Literal["auto", "config", "preserve", "offset"] = field(
+        default="auto", kw_only=True
+    )
     """USD placement: retain an unset pose, replace it, preserve it, or offset it."""
 
     @classmethod

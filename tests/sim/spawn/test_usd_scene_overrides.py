@@ -294,16 +294,19 @@ def test_import_recipe_selects_subtree_and_namespaces_runtime_identity(tmp_path)
 
 
 @pytest.mark.parametrize(
-    "parent,sensor_uid,renderer,valid",
+    "parent,sensor_uid,renderer,sensor_type,valid",
     [
-        ("base", "wrist", "hybrid", True),
-        ("missing", "wrist", "hybrid", False),
-        ("base", "Robot", "hybrid", False),
-        ("base", "wrist", "no-render", False),
+        ("base", "wrist", "hybrid", "Camera", True),
+        ("missing", "wrist", "hybrid", "Camera", False),
+        ("base", "Robot", "hybrid", "Camera", False),
+        ("base", "wrist", "no-render", "Camera", False),
+        ("base", "wrist", "hybrid", "Unsupported", False),
+        ("base", "wrist", "hybrid", "ContactSensor", False),
+        ("base", "wrist", "hybrid", "StereoCamera", False),
     ],
 )
 def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
-    monkeypatch, parent, sensor_uid, renderer, valid
+    monkeypatch, parent, sensor_uid, renderer, sensor_type, valid
 ):
     import dexsim.kit.usd
     from embodichain.lab.sim.cfg import RobotCfg, ArticulationRootPropertiesCfg
@@ -326,11 +329,20 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
     metadata = RobotCfg(
         uid="metadata_uid",
         init_pos=(9, 0, 0),
-        root_props=ArticulationRootPropertiesCfg(fixed_base=True),
+        root_props=ArticulationRootPropertiesCfg(
+            fixed_base=True,
+            sleep_threshold=0.123,
+            min_position_iters=16,
+            min_velocity_iters=4,
+        ),
         build_pk_chain=False,
         enable_sensor=True,
         sensors=[
-            CameraCfg(uid=sensor_uid, extrinsics=CameraCfg.ExtrinsicsCfg(parent=parent))
+            CameraCfg(
+                uid=sensor_uid,
+                sensor_type=sensor_type,
+                extrinsics=CameraCfg.ExtrinsicsCfg(parent=parent),
+            )
         ],
         joint_drive_props=None,
     )
@@ -347,19 +359,25 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
         assert result["/Robot"].uid == "Robot"
         assert result["/Robot"].cfg.init_local_pose[0, 3] == 2
         assert result["/Robot"].cfg.root_props.fixed_base is False
+        root_props = result["/Robot"].cfg.root_props
+        assert (
+            root_props.sleep_threshold,
+            root_props.min_position_iters,
+            root_props.min_velocity_iters,
+        ) == (0.123, 16, 4)
         assert manager.add_sensor.call_args.args[0].extrinsics.parent == "Robot/base"
         assert metadata.uid == "metadata_uid"
         assert metadata.sensors[0].extrinsics.parent == "base"
     else:
         with pytest.raises(
-            (ValueError, RuntimeError),
-            match="unknown link|already exists|requires a native renderer",
+            (ValueError, RuntimeError, TypeError),
+            match="unknown link|already exists|requires a native renderer|Unsupported mounted|StereoCamera requires",
         ):
             manager.add_usd(recipe)
         manager._spawn_scene.builder.add_scene.assert_not_called()
         manager.add_sensor.assert_not_called()
         assert manager._robots == {}
-        if renderer == "no-render":
+        if renderer == "no-render" or sensor_type != "Camera":
             recipe.robot_cfgs["/Robot"].enable_sensor = False
             result = manager.add_usd(recipe)
             assert manager._robots == {"Robot": result["/Robot"]}
@@ -377,22 +395,25 @@ def test_static_collider_overrides_keep_identity_pose_and_relationships(
     descriptor = MeshObjectDesc(
         name="wall", collisions=[CollisionDesc()], usd=UsdSourceDesc(prim_path="/Wall")
     )
+    descriptor.body_scale = np.array([2, 3, 4], dtype=np.float32)
     descriptor.pose[0, 3] = 2
     constraint = ConstraintDesc(name="anchor", body0="wall", body1=None)
     source = SceneDesc(mesh_objects=[descriptor], constraints=[constraint])
     monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: source)
-    override = {"uid": "renamed", "init_pos": (1, 0, 0), "source_pose_mode": "offset"}
+    override = {
+        "uid": "renamed",
+        "init_pos": (1, 0, 0),
+        "source_pose_mode": "offset",
+        "body_type": "dynamic",
+        "body_scale": (1, 1, 1),
+    }
     manager = _manager()
     result = manager.add_usd(
         UsdImportCfg(
             name="room",
             source=UsdSourceCfg(file_path="scene.usda"),
             asset_cfgs={
-                "/Wall": (
-                    RigidObjectCfg.from_dict({**override, "body_type": None})
-                    if typed
-                    else override
-                )
+                "/Wall": (RigidObjectCfg.from_dict(override) if typed else override)
             },
         )
     )
@@ -403,3 +424,175 @@ def test_static_collider_overrides_keep_identity_pose_and_relationships(
     assert descriptor.pose[0, 3] == result["/Wall"].cfg.init_local_pose[0, 3] == 3
     assert descriptor.physics is None
     assert result["/Wall"].cfg.body_type == "static"
+    np.testing.assert_array_equal(result["/Wall"].cfg.body_scale, [2, 3, 4])
+
+
+@pytest.mark.parametrize("representation", ["sparse", "typed", "serialized"])
+def test_identity_override_preserves_source_actor_and_nonunit_scale(
+    monkeypatch, representation
+):
+    import dexsim.kit.usd
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+
+    descriptor = MeshObjectDesc(
+        name="body",
+        usd=UsdSourceDesc(prim_path="/Body"),
+        physics=RigidBodyPhysicsDesc(actor_type=ActorType.KINEMATIC),
+        body_scale=np.array([2, 3, 4], dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        dexsim.kit.usd,
+        "parse_usd",
+        lambda *args, **kwargs: SceneDesc(mesh_objects=[descriptor]),
+    )
+    override = (
+        {"uid": "renamed"}
+        if representation == "sparse"
+        else RigidObjectCfg(uid="renamed", body_type=None)
+    )
+    recipe = UsdImportCfg(
+        name="scene",
+        source=UsdSourceCfg(file_path="scene.usda"),
+        asset_cfgs={"/Body": override},
+    )
+    if representation == "serialized":
+        recipe = UsdImportCfg.from_dict(recipe.to_dict())
+    result = _manager().add_usd(recipe)
+    assert result["/Body"].cfg.body_type == "kinematic"
+    np.testing.assert_array_equal(result["/Body"].cfg.body_scale, [2, 3, 4])
+    assert descriptor.physics.actor_type == ActorType.KINEMATIC
+
+
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize("explicit_matrix", [False, True])
+def test_scene_override_rotation_matches_intrinsic_xyz(
+    monkeypatch, typed, explicit_matrix
+):
+    import dexsim.kit.usd
+    from scipy.spatial.transform import Rotation
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+
+    descriptor = MeshObjectDesc(
+        name="body",
+        usd=UsdSourceDesc(prim_path="/Body"),
+        physics=RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC),
+    )
+    monkeypatch.setattr(
+        dexsim.kit.usd,
+        "parse_usd",
+        lambda *args, **kwargs: SceneDesc(mesh_objects=[descriptor]),
+    )
+    fields = {"init_rot": (30, 40, 50)}
+    expected = np.eye(4)
+    expected[:3, :3] = Rotation.from_euler(
+        "XYZ", (30, 40, 50), degrees=True
+    ).as_matrix()
+    if explicit_matrix:
+        expected[:3, :3] = Rotation.from_euler("Z", 17, degrees=True).as_matrix()
+        expected[:3, 3] = (1, 2, 3)
+        fields["init_local_pose"] = expected.tolist()
+    override = RigidObjectCfg(**fields) if typed else fields
+    result = _manager().add_usd(
+        UsdImportCfg(
+            name="scene",
+            source=UsdSourceCfg(file_path="scene.usda"),
+            asset_cfgs={"/Body": override},
+        )
+    )
+    np.testing.assert_allclose(result["/Body"].cfg.init_local_pose, expected, atol=1e-6)
+
+
+def test_rigid_uid_override_remaps_newton_body_references_only(monkeypatch):
+    import dexsim.kit.usd
+    from dexsim.spawn import NewtonSceneDesc, NewtonEqualityDesc
+    from collections import Counter
+    from dexsim.spawn.adapters.newton_mujoco_scene import _validate_mujoco_references
+
+    source = SceneDesc(
+        mesh_objects=[
+            MeshObjectDesc(
+                name=name,
+                usd=UsdSourceDesc(prim_path="/" + name),
+                physics=RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC),
+            )
+            for name in ["A", "B"]
+        ],
+        newton=NewtonSceneDesc(
+            body_order=["A", "B", "link"],
+            equalities=[
+                NewtonEqualityDesc(
+                    name="weld", equality_type=1, object1="A", object2="B", data=()
+                ),
+                NewtonEqualityDesc(
+                    name="joint", equality_type=2, object1="A", object2="B", data=()
+                ),
+            ],
+        ),
+    )
+    monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: source)
+    result = _manager().add_usd(
+        UsdImportCfg(
+            name="scene",
+            source=UsdSourceCfg(file_path="scene.usda"),
+            asset_cfgs={"/A": {"uid": "new_A"}},
+        )
+    )
+    assert result["/A"].uid == "new_A"
+    assert source.newton.body_order == ["new_A", "B", "link"]
+    assert (
+        source.newton.equalities[0].object1,
+        source.newton.equalities[0].object2,
+    ) == ("new_A", "B")
+    assert (
+        source.newton.equalities[1].object1,
+        source.newton.equalities[1].object2,
+    ) == ("A", "B")
+    _validate_mujoco_references(
+        source.newton,
+        Counter({"new_A": 1, "B": 1}),
+        Counter({"A": 1, "B": 1}),
+        Counter(),
+    )
+
+
+def test_visual_rename_does_not_rewrite_newton_articulation_body_names(monkeypatch):
+    import dexsim.kit.usd
+    from dexsim.spawn import NewtonSceneDesc, NewtonEqualityDesc
+
+    visual = MeshObjectDesc(name="A", usd=UsdSourceDesc(prim_path="/Visual"))
+    robot = ArticulationDesc(
+        name="Robot",
+        links=[
+            LinkDesc(
+                name="A",
+                parent_name=None,
+                pose=np.eye(4, dtype=np.float32),
+                rigid_body=RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC),
+            )
+        ],
+        usd=UsdSourceDesc(prim_path="/Robot"),
+    )
+    source = SceneDesc(
+        mesh_objects=[visual],
+        articulations=[robot],
+        newton=NewtonSceneDesc(
+            body_order=["A"],
+            equalities=[
+                NewtonEqualityDesc(
+                    name="weld", equality_type=1, object1="A", object2=None, data=()
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: source)
+    result = _manager().add_usd(
+        UsdImportCfg(
+            name="scene",
+            source=UsdSourceCfg(file_path="scene.usda"),
+            asset_cfgs={"/Visual": {"uid": "new_visual"}},
+        )
+    )
+    assert result["/Visual"].uid == "new_visual"
+    assert robot.links[0].name == "A"
+    assert source.newton.body_order == ["A"]
+    assert source.newton.equalities[0].object1 == "A"

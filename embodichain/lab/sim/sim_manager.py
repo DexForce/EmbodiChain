@@ -2587,6 +2587,7 @@ class SimulationManager:
         Returns:
             The declared facade, bound after ``prepare()``.
         """
+        cfg = deepcopy(cfg)
         if cfg.uid is None or cfg.uid in self.asset_uids:
             raise ValueError("Visual object requires a unique, nonempty UID.")
         path = _asset_file_path(cfg)
@@ -2711,7 +2712,7 @@ class SimulationManager:
         validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> list[RigidObject]:
         """Translate the complete batch before changing the scene."""
-        cfgs = list(cfgs)
+        cfgs = [deepcopy(cfg) for cfg in cfgs]
         if not cfgs:
             return []
         seen: set[str] = set()
@@ -2778,6 +2779,7 @@ class SimulationManager:
                 the requested deformable type.
             ValueError: If the discriminator or UID is invalid.
         """
+        cfg = deepcopy(cfg)
         deformable_type = cfg.deformable_type
         if deformable_type == "volume":
             supported = self.physics.supports_volume_deformables
@@ -3406,6 +3408,7 @@ class SimulationManager:
         backend materializes it. Runtime Batch data is created at the shared
         prepare boundary.
         """
+        cfg = deepcopy(cfg)
         if _is_usd_path(_asset_file_path(cfg)):
             descriptor, materials = articulation_desc_from_usd(
                 cfg,

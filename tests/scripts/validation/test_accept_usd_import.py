@@ -64,3 +64,77 @@ def test_rerun_requires_a_result_from_the_current_child(
     else:
         assert result["status"] == "failed"
         assert "without a result" in result["error"]
+
+
+@pytest.mark.parametrize(
+    "case_id", ["../outside", "..\\outside", "/outside", "C:outside", "..", "", None]
+)
+def test_manifest_rejects_unsafe_case_ids_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case_id: object
+) -> None:
+    from unittest.mock import Mock
+
+    output = tmp_path / "output"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "result.json"
+    sentinel.write_text("keep")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"id": case_id, "file_path": "source.usda"}]))
+    monkeypatch.setattr(
+        acceptance.sys,
+        "argv",
+        ["accept_usd_import", "--manifest", str(manifest), "--output", str(output)],
+    )
+    child = Mock()
+    monkeypatch.setattr(acceptance.subprocess, "run", child)
+    with pytest.raises(ValueError, match="single path component"):
+        acceptance.main()
+    child.assert_not_called()
+    assert sentinel.read_text() == "keep"
+    assert not (outside / "case.json").exists()
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "directory",
+        "case.json",
+        "runtime.log",
+        "result.json",
+        "overview.png",
+        "results.json",
+    ],
+)
+def test_acceptance_rejects_output_symlinks_without_touching_external_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    from unittest.mock import Mock
+
+    output = tmp_path / "output"
+    case_dir = output / "example"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    external = outside / "result.json"
+    external.write_text("keep")
+    if target == "directory":
+        output.mkdir()
+        case_dir.symlink_to(outside, target_is_directory=True)
+    else:
+        case_dir.mkdir(parents=True)
+        destination = output / target if target == "results.json" else case_dir / target
+        destination.symlink_to(external)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"id": "example", "file_path": "source.usda"}]))
+    monkeypatch.setattr(
+        acceptance.sys,
+        "argv",
+        ["accept_usd_import", "--manifest", str(manifest), "--output", str(output)],
+    )
+    child = Mock()
+    monkeypatch.setattr(acceptance.subprocess, "run", child)
+    with pytest.raises(ValueError, match="symlink|escapes"):
+        acceptance.main()
+    child.assert_not_called()
+    assert external.read_text() == "keep"
+    assert not (outside / "case.json").exists()

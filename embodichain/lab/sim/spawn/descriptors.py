@@ -318,6 +318,8 @@ def visual_desc_from_cfg(
         raise NotImplementedError(
             "Visual objects support MeshCfg, CubeCfg and SphereCfg."
         )
+    if cfg.body_scale is None:
+        cfg.body_scale = (1.0, 1.0, 1.0)
     scale = _vector3(cfg.body_scale, field_name="body_scale")
     material_ref, material_entry = _compile_visual_material(uid, shape.visual_material)
     return ObjectDesc(
@@ -350,6 +352,11 @@ def rigid_desc_from_cfg(
             "USD files describe typed scenes; use rigid_desc_from_usd() to "
             "select one rigid object."
         )
+
+    if cfg.body_type is None:
+        cfg.body_type = "dynamic"
+    if cfg.body_scale is None:
+        cfg.body_scale = (1.0, 1.0, 1.0)
 
     physics = _with_procedural_collision_defaults(
         _resolve_rigid_physics(

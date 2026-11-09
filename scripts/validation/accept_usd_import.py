@@ -28,7 +28,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 import time
@@ -343,6 +343,42 @@ def _accept_case(case: dict[str, Any], output: Path) -> dict[str, Any]:
     return record
 
 
+def _validate_output_files(directory: Path) -> None:
+    """Reject existing artifact symlinks before any output is changed."""
+    for name in (
+        "case.json",
+        "runtime.log",
+        "result.json",
+        "results.json",
+        "overview.png",
+    ):
+        if (directory / name).is_symlink():
+            raise ValueError(
+                f"Acceptance output cannot be a symlink: {directory / name}"
+            )
+
+
+def _case_directory(output: Path, case_id: object) -> Path:
+    """Resolve a manifest case strictly inside its authorized output root."""
+    if (
+        not isinstance(case_id, str)
+        or not case_id.strip()
+        or case_id in {".", ".."}
+        or any(char in case_id for char in ("/", "\\", "\0"))
+        or PureWindowsPath(case_id).drive
+    ):
+        raise ValueError(
+            f"Acceptance case id must be a safe single path component: {case_id!r}"
+        )
+    directory = output / case_id
+    if directory.is_symlink() or not directory.resolve().is_relative_to(output):
+        raise ValueError(
+            f"Acceptance case directory escapes its output root: {case_id!r}"
+        )
+    _validate_output_files(directory)
+    return directory
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path)
@@ -350,6 +386,8 @@ def main() -> None:
     parser.add_argument("--case", type=Path)
     parser.add_argument("--timeout", type=int, default=240)
     args = parser.parse_args()
+    args.output = args.output.expanduser().resolve()
+    _validate_output_files(args.output)
     args.output.mkdir(parents=True, exist_ok=True)
     if args.case:
         record = _accept_case(json.loads(args.case.read_text()), args.output)
@@ -366,8 +404,8 @@ def main() -> None:
         return
     cases = json.loads(args.manifest.read_text())
     results = []
-    for case in cases:
-        directory = args.output / case["id"]
+    directories = [_case_directory(args.output, case["id"]) for case in cases]
+    for case, directory in zip(cases, directories):
         directory.mkdir(exist_ok=True)
         job = directory / "case.json"
         job.write_text(json.dumps(case, indent=2))

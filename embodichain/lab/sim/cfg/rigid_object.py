@@ -57,10 +57,15 @@ class RigidObjectCfg(ObjectBaseCfg):
     """
 
     body_type: Literal["dynamic", "kinematic", "static"] | None = None
-    """Actor override; ``None`` retains a USD source's actor type."""
+    """Actor type for procedural bodies or explicit USD ``overlay`` mode.
+
+    USD ``preserve`` mode always retains the source actor, including when
+    loading older configurations that serialized a default actor type."""
 
     body_scale: tuple | list | None = None
-    """Scale of the rigid body in the simulation world frame."""
+    """Geometry scale for procedural bodies or USD ``overlay`` mode.
+
+    USD ``preserve`` mode retains its source scale."""
 
     asset_physics_mode: AssetPhysicsMode = "preserve"
     """How a file-backed asset's physical properties are handled.
@@ -71,6 +76,8 @@ class RigidObjectCfg(ObjectBaseCfg):
     """
 
     def __post_init__(self) -> None:
+        if self.shape is None and self.source is None:
+            return
         path = (
             self.source.file_path
             if self.source is not None
