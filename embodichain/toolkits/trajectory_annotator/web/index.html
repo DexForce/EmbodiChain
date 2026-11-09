@@ -1,0 +1,85 @@
+<!doctype html>
+<!-- Copyright (c) 2021-2026 DexForce Technology Co., Ltd. Licensed under Apache-2.0. -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>原子技能区间标注 · EmbodiChain</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M7 9h18M7 16h18M7 23h18M12 5v22M22 5v22" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="9" r="3" fill="currentColor"/><circle cx="22" cy="23" r="3" fill="currentColor"/></svg></div>
+    <div class="brand"><span class="eyebrow">EMBODICHAIN · TOOLKITS</span><h1>原子技能区间标注</h1></div>
+    <div class="header-shortcuts" aria-label="标注快捷键">
+      <span><kbd>←</kbd>前一帧</span><span><kbd>→</kbd>后一帧</span><span><kbd>空格</kbd>播放 / 暂停</span><span><kbd>I</kbd>标注起始帧</span><span><kbd>O</kbd>标注结束帧</span>
+    </div>
+    <div class="header-actions"><span id="save-status" class="status-pill">等待图像</span><button id="save" disabled title="Ctrl / Cmd + S">保存</button><button id="export" disabled>导出 JSON</button><button id="help" class="icon-button" aria-label="快捷键帮助" title="快捷键帮助（?）">?</button></div>
+  </header>
+
+  <main>
+    <section id="initialization" class="init-panel" aria-live="polite">
+      <div class="init-icon" aria-hidden="true">◌</div><h2 id="init-title">正在打开图像序列</h2>
+      <p id="init-message">建立逐帧索引后即可开始标注。</p>
+      <progress id="init-progress" aria-label="图像序列初始化进度"></progress>
+      <button id="cancel-init">取消初始化</button>
+    </section>
+
+    <div id="workspace" class="workspace" hidden>
+      <div class="media-column">
+        <section class="card video-card" aria-label="图像预览">
+          <div class="card-heading"><div class="file-heading"><span class="live-dot"></span><h2 id="video-name">图像序列</h2></div><span id="video-meta" class="muted"></span></div>
+          <div id="video-stage" class="video-stage" tabindex="0" aria-label="图像画面，可使用空格播放和方向键逐帧查看">
+            <img id="video-frame" alt="当前图像序列帧" hidden>
+            <span id="loading-frame" class="loading-frame" hidden>正在定位…</span>
+            <div class="frame-overlay"><span id="playback-state">已暂停</span><span class="frame-badge">FRAME <strong id="frame-current">—</strong><span class="dim"> / <span id="frame-last">—</span></span></span></div>
+          </div>
+          <div class="transport">
+            <div class="transport-buttons"><button id="previous" class="icon-button" aria-label="前一帧" title="前一帧（←）">❮</button><button id="play" class="primary play-button" aria-label="播放" title="播放 / 暂停（Space）">▶ 播放</button><button id="next" class="icon-button" aria-label="后一帧" title="后一帧（→）">❯</button></div>
+            <span id="frame-time" class="timecode">00:00.000</span>
+            <span id="actual-fps" class="muted fps"></span>
+            <label class="speed-label">速度 <select id="speed" aria-label="播放速度"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+          </div>
+        </section>
+
+        <section class="card timeline-card" aria-label="原子技能区间时间轴">
+          <div class="card-heading"><h2>原子技能时间轴 <span class="muted small">0 基帧号 · 包含起止帧</span></h2><div class="zoom-controls"><button id="zoom-out" aria-label="缩小时间轴">−</button><span id="zoom-value">1×</span><button id="zoom-in" aria-label="放大时间轴">+</button><button id="zoom-reset" title="重置缩放">适应</button></div></div>
+          <div class="scrubber-row"><input id="scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="视频帧进度"><label class="jump-label">跳转到帧 <input id="goto-frame" type="number" min="0" step="1" value="0" aria-label="跳转到帧"></label></div>
+          <div id="timeline-scroll" class="timeline-scroll"><div id="timeline" class="timeline" tabindex="0" role="slider" aria-label="按帧定位原子技能时间轴" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div id="timeline-ticks" class="timeline-ticks"></div><div id="timeline-skill-intervals"></div><div id="draft-range" class="draft-range" hidden><span class="skill-interval-caption"></span></div><div id="playhead" class="playhead" hidden><span></span></div></div></div>
+          <div class="timeline-legend"><span><i class="legend-saved"></i>已标注</span><span><i class="legend-draft"></i>当前草稿</span><span class="muted">拖动时间轴定位 · ← → 精调一帧</span></div>
+        </section>
+      </div>
+
+      <div class="annotation-column">
+        <aside class="card annotations-card" aria-label="已标注原子技能区间">
+          <div class="card-heading"><h2>已标注原子技能区间 <span id="skill-interval-count" class="count-badge">0</span></h2><div class="history-buttons"><button id="undo" class="icon-button" disabled title="撤销（Ctrl / Cmd + Z）" aria-label="撤销">↶</button><button id="redo" class="icon-button" disabled title="重做（Ctrl / Cmd + Shift + Z）" aria-label="重做">↷</button></div></div>
+          <div class="coverage"><div><span id="coverage-count">0 帧已标注</span><span id="coverage-percent">0%</span></div><div class="coverage-track"><div id="coverage-bar"></div></div></div>
+          <div class="annotation-table-wrap"><table><thead><tr><th>原子技能</th><th>起点</th><th>终点</th><th>帧数</th></tr></thead><tbody id="skill-interval-list"></tbody></table><div id="empty-list" class="empty-list"><span aria-hidden="true">⌁</span><strong>还没有原子技能标注</strong><p>定位到原子技能起点，按 <kbd>I</kbd><br>在终点按 <kbd>O</kbd>，然后提交。</p></div></div>
+          <div id="selection-info" class="selection-info">选择一段标注以定位或编辑</div>
+          <div class="selection-actions"><button id="to-start" disabled>到起点</button><button id="to-end" disabled>到终点</button><button id="edit" disabled>编辑 <kbd>E</kbd></button><button id="delete" class="danger" disabled>删除</button></div>
+          <div class="annotation-path"><span class="eyebrow">标注文件</span><span id="annotation-path"></span><small>已完成区间自动保存 · 草稿提交后保存</small></div>
+        </aside>
+
+        <section class="card skill-editor-card" aria-label="原子技能区间编辑">
+          <div class="card-heading"><h2 id="editor-title">新建原子技能区间</h2><span id="draft-status" class="muted">在起点按 I 开始</span></div>
+          <div class="editor-grid">
+            <label class="label-field">原子技能名称<input id="label" type="text" list="label-suggestions" maxlength="512" placeholder="例如：翻转包裹" autocomplete="off"><datalist id="label-suggestions"></datalist></label>
+            <label>起点帧<input id="start-frame" type="number" min="0" step="1" placeholder="—" disabled></label>
+            <label>终点帧<input id="end-frame" type="number" min="0" step="1" placeholder="—" disabled></label>
+            <div class="duration-field"><span>区间长度</span><strong id="skill-interval-length">— <small>帧</small></strong></div>
+          </div>
+          <label class="note-field">备注 <span class="muted">可选</span><input id="note" type="text" maxlength="8192" placeholder="添加标注说明" disabled></label>
+          <p id="draft-error" class="draft-error" role="status"></p>
+          <div class="editor-actions"><button id="mark-start" title="I">设为起点 <kbd>I</kbd></button><button id="mark-end" title="O">设为终点 <kbd>O</kbd></button><div class="spacer"></div><button id="cancel-draft" disabled>取消 <kbd>Esc</kbd></button><button id="commit" class="primary" disabled>提交区间 <kbd>Enter</kbd></button></div>
+        </section>
+      </div>
+    </div>
+
+    <footer class="app-footer"><span id="message" role="status" aria-live="polite">正在连接本地标注服务…</span><span>Space 播放 · I / O 标记 · Enter 提交 · ? 帮助</span></footer>
+  </main>
+
+  <dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-heading"><h2 id="help-title">键盘快捷键</h2><button id="close-help" class="icon-button" aria-label="关闭帮助">×</button></div><dl class="shortcut-list"><dt><kbd>Space</kbd></dt><dd>播放 / 暂停</dd><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>前一帧 / 后一帧；Shift 跨 10 帧</dd><dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>首帧 / 末帧</dd><dt><kbd>G</kbd></dt><dd>输入帧号跳转</dd><dt><kbd>I</kbd> <kbd>O</kbd></dt><dd>设置当前显示帧为起点 / 终点</dd><dt><kbd>L</kbd></dt><dd>输入原子技能名称</dd><dt><kbd>Enter</kbd> <kbd>Esc</kbd></dt><dd>提交 / 取消草稿</dd><dt><kbd>E</kbd></dt><dd>编辑选中的标注</dd><dt><kbd>Delete</kbd></dt><dd>删除选中的标注（Backspace 也可）</dd><dt><kbd>Ctrl/Cmd Z</kbd></dt><dd>撤销；加 Shift 重做</dd><dt><kbd>Ctrl/Cmd S</kbd></dt><dd>保存已完成标注</dd></dl><p class="muted">在文本框中输入时，保留文字编辑快捷键。名称输入后按 Enter 返回视频区，再按 Enter 提交区间。起止帧都包含在标注中。</p></dialog>
+</body>
+</html>

@@ -35,6 +35,7 @@ from embodichain import __main__ as entrypoint
 EXPECTED_COMMANDS = {
     "analyze-workspace",
     "annotate-grasp",
+    "annotate-trajectory",
     "benchmark",
     "data",
     "dataset",

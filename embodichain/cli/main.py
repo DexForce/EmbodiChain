@@ -158,6 +158,11 @@ COMMANDS = (
         help="Interactively annotate a grasp region on a mesh.",
     ),
     Command(
+        name="annotate-trajectory",
+        target="embodichain.toolkits.trajectory_annotator._cli:cli",
+        help="Annotate atomic skill frame intervals in an image sequence.",
+    ),
+    Command(
         name="decompose-urdf",
         target="embodichain.toolkits.acd.cli:main",
         help="Generate convex collision meshes for a URDF.",
