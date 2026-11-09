@@ -624,9 +624,9 @@ class SimulationManager:
         self._requested_renderer = sim_config.render_cfg.renderer
         solver_cfg = getattr(sim_config.physics_cfg, "solver_cfg", None)
         self._requested_solver = str(
-            solver_cfg.get("solver_type", solver_cfg.get("class_type", "auto"))
+            solver_cfg.get("solver_type", solver_cfg.get("class_type", "dexuni"))
             if isinstance(solver_cfg, Mapping)
-            else getattr(solver_cfg, "solver_type", "auto")
+            else getattr(solver_cfg, "solver_type", "dexuni")
         )
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
@@ -1926,7 +1926,17 @@ class SimulationManager:
         if group_ids or self.is_window_opened:
             self._ensure_render_state()
         if group_ids:
+            cameras = [
+                sensor
+                for sensor in self._sensors.values()
+                if isinstance(sensor, Camera) and sensor.group_id in group_ids
+            ]
+            for sensor in cameras:
+                sensor._capture_metadata = None
+                sensor._pending_capture_metadata = None
             self._world.render_camera_group(group_ids)
+            for sensor in cameras:
+                sensor._snapshot_render_metadata()
         self._log_scene_summary()
 
     def update(
@@ -2199,6 +2209,23 @@ class SimulationManager:
         if intensity is not None:
             self._env.set_env_light_intensity(intensity)
 
+    # Reserved for the manager-owned shared ground Mesh. Arena IDs are unrelated.
+    _GROUND_RENDER_CATEGORY = 1
+
+    def _require_ground_plane_filtering(self) -> None:
+        from dexsim.spawn import ObjectDesc
+
+        if not (
+            hasattr(ObjectDesc, "render_categories")
+            and callable(
+                getattr(dexsim.render.Camera, "set_excluded_render_categories", None)
+            )
+        ):
+            raise RuntimeError(
+                "Per-camera ground visibility requires a DexSim build with "
+                "ObjectDesc.render_categories and Camera.set_excluded_render_categories"
+            )
+
     def _declare_spawn_default_plane(self) -> None:
         """Declare the global ground in the World's Spawn scene."""
 
@@ -2246,6 +2273,9 @@ class SimulationManager:
             physics=RigidBodyPhysicsDesc.static(),
             per_env=False,
         )
+
+        if hasattr(descriptor, "render_categories"):
+            descriptor.render_categories = self._GROUND_RENDER_CATEGORY
 
         self._spawn_scene.declare(
             "rigid_object",
@@ -2892,11 +2922,11 @@ class SimulationManager:
                 "Newton deformable particle sets currently require a CUDA device."
             )
         solver_type = self._active_newton_solver_type
-        supported_solvers = {"auto", "dexuni", "xpbd", "semi_implicit", "vbd"}
+        supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
         if solver_type not in supported_solvers:
             raise NotImplementedError(
                 f"Newton solver {solver_type!r} does not support deformable "
-                "particle sets; select one of 'auto', 'dexuni', 'xpbd', "
+                "particle sets; select one of 'dexuni', 'xpbd', "
                 "'semi_implicit', or 'vbd'."
             )
         physics_cfg = self.sim_config.physics_cfg
@@ -4956,8 +4986,8 @@ class SimulationManager:
         solver_type = getattr(self.physics, "solver_type", None)
         requires_complete_world_clear = solver_type in {
             None,
-            "auto",
             "mujoco_warp",
+            "dexuni",
         }
         if (
             use_coordinated_newton_clear
@@ -5065,6 +5095,9 @@ class SimulationManager:
             bool: True if export is successful, False otherwise.
         """
         try:
+            # DexSim registers USD export methods when the optional kit is imported.
+            import dexsim.kit.usd
+
             self._env.export_to_usd_file(fpath)
             logger.log_info(f"Simulation scene exported to USD file: {fpath}")
             return True
@@ -5184,6 +5217,14 @@ class SimulationManager:
                 for asset in getattr(self, registry_name, {}).values():
                     if isinstance(asset, VisualObject):
                         asset._release_spawn_references()
+                    # Release parsed material wrappers before the native renderer.
+                    for material_attr in (
+                        "_visual_material",
+                        "_original_visual_material",
+                        "_original_visual_material_inst",
+                    ):
+                        if hasattr(asset, material_attr):
+                            setattr(asset, material_attr, [])
                     if hasattr(asset, "_data"):
                         asset._data = None
                     if hasattr(asset, "_spawn_result"):

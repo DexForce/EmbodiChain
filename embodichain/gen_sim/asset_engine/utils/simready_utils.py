@@ -16,6 +16,11 @@
 
 from __future__ import annotations
 
+from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
+from embodichain.gen_sim.services.compat import chat_from_legacy_messages
+
+__all__: list[str] = []
+
 import argparse
 import base64
 import json
@@ -26,45 +31,9 @@ import numpy as np
 import trimesh
 import pyrender
 from PIL import Image
-from openai import OpenAI
 import itertools
 from scipy.spatial import ConvexHull
 from typing import Dict, Any, List
-
-
-def _load_gen_config() -> Dict[str, Any]:
-    config_path = Path(__file__).resolve().parents[1] / "configs" / "gen_config.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"gen_config.json not found: {config_path}")
-
-    with config_path.open("r", encoding="utf-8") as f:
-        raw_cfg = json.load(f)
-
-    cfg = raw_cfg.get("llm", {}).get("openai_compatible", {})
-    cfg["api_key"] = os.getenv("OPENAI_API_KEY") or cfg.get("api_key", "")
-    cfg["model"] = os.getenv("OPENAI_MODEL") or cfg.get("model", "")
-    cfg["base_url"] = os.getenv("OPENAI_BASE_URL") or cfg.get("base_url", "")
-    cfg["default_query"] = cfg.get("default_query", {})
-    if cfg["base_url"]:
-        cfg["base_url"] = cfg["base_url"].rstrip("/")
-
-    required = ["api_key", "model", "base_url"]
-    missing = [k for k in required if k not in cfg or not cfg[k]]
-    if missing:
-        raise ValueError(f"Missing required config keys: {missing}")
-
-    return cfg
-
-
-_GEN_CONFIG = _load_gen_config()
-
-DEPLOYMENT = _GEN_CONFIG["model"]
-
-client = OpenAI(
-    api_key=_GEN_CONFIG["api_key"],
-    base_url=_GEN_CONFIG["base_url"],
-    default_query=_GEN_CONFIG.get("default_query") or None,
-)
 
 STRATEGY = None
 
@@ -72,6 +41,8 @@ STRATEGY = None
 def get_chat_completion_content(resp: Any) -> str:
     """Return chat completion message content with a clearer URL hint on bad responses."""
 
+    if isinstance(resp, str):
+        return resp
     try:
         choices = resp.choices
     except AttributeError as exc:
@@ -406,7 +377,9 @@ def render_views(mesh, views, out_dir, res=512):
     return results
 
 
-def ask_mllm_detect_and_classify(views_data, extra_text=""):
+def ask_mllm_detect_and_classify(
+    views_data, extra_text="", *, services: GenSimServices | None = None
+):
 
     instruction_text = """
             You are a single-purpose multimodal classifier. You will be given several images (multiple views) of a single object plus an OPTIONAL short text note ("Additional context"). Your job is twofold and must be completed in one step:
@@ -491,10 +464,11 @@ def ask_mllm_detect_and_classify(views_data, extra_text=""):
         )
 
     content.extend(build_image_inputs(views_data))
-    resp = client.chat.completions.create(
-        model=DEPLOYMENT,
+    resp = chat_from_legacy_messages(
         temperature=0.2,
         messages=[{"role": "user", "content": content}],
+        services=services,
+        role="asset_orientation",
     )
     raw = get_chat_completion_content(resp)
     return extract_json(raw)
@@ -506,6 +480,8 @@ def ask_mllm_primary_surface(
     main_surface="None",
     orientation_requirement="None",
     extra_text="",
+    *,
+    services: GenSimServices | None = None,
 ):
 
     instruction_text = f"""
@@ -546,16 +522,23 @@ def ask_mllm_primary_surface(
         )
 
     content.extend(build_image_inputs(views_data))
-    resp = client.chat.completions.create(
-        model=DEPLOYMENT,
+    resp = chat_from_legacy_messages(
         temperature=0.2,
         messages=[{"role": "user", "content": content}],
+        services=services,
+        role="asset_orientation",
     )
     raw = get_chat_completion_content(resp)
     return extract_json(raw)
 
 
-def ask_llm_upright_2a1(object_name, upright_img_path, flipped_img_path):
+def ask_llm_upright_2a1(
+    object_name,
+    upright_img_path,
+    flipped_img_path,
+    *,
+    services: GenSimServices | None = None,
+):
     for p in [upright_img_path, flipped_img_path]:
         img_path = Path(p).resolve()
         if not img_path.exists():
@@ -608,8 +591,7 @@ OUTPUT JSON ONLY:
 }}
 """
 
-    resp = client.chat.completions.create(
-        model=DEPLOYMENT,
+    resp = chat_from_legacy_messages(
         messages=[
             {
                 "role": "user",
@@ -617,11 +599,15 @@ OUTPUT JSON ONLY:
             }
         ],
         temperature=0.0,
+        services=services,
+        role="asset_orientation",
     )
     return extract_json(get_chat_completion_content(resp))
 
 
-def ask_llm_full_side_profile(object_name, views_data):
+def ask_llm_full_side_profile(
+    object_name, views_data, *, services: GenSimServices | None = None
+):
     img_paths = []
     for v in views_data:
         name = v["name"]
@@ -663,8 +649,7 @@ def ask_llm_full_side_profile(object_name, views_data):
             }}
             """
 
-    resp = client.chat.completions.create(
-        model=DEPLOYMENT,
+    resp = chat_from_legacy_messages(
         messages=[
             {
                 "role": "user",
@@ -672,11 +657,15 @@ def ask_llm_full_side_profile(object_name, views_data):
             }
         ],
         temperature=0.0,
+        services=services,
+        role="asset_orientation",
     )
     return extract_json(get_chat_completion_content(resp))
 
 
-def ask_llm_upright_rotation(object_name, rotated_imgs_paths):
+def ask_llm_upright_rotation(
+    object_name, rotated_imgs_paths, *, services: GenSimServices | None = None
+):
     """
     rotated_imgs_paths: list of image paths in order [0°, 90°, 180°, 270°]
     object_name: string, name of the object
@@ -731,8 +720,7 @@ OUTPUT JSON ONLY:
   "confidence": 0.0-1.0
 }}
 """
-    resp = client.chat.completions.create(
-        model=DEPLOYMENT,
+    resp = chat_from_legacy_messages(
         messages=[
             {
                 "role": "user",
@@ -740,11 +728,20 @@ OUTPUT JSON ONLY:
             }
         ],
         temperature=0.0,
+        services=services,
+        role="asset_orientation",
     )
     return extract_json(get_chat_completion_content(resp))
 
 
-def ask_llm_dimension(object_name, img_paths, user_text_hint, current_bbox_dims):
+def ask_llm_dimension(
+    object_name,
+    img_paths,
+    user_text_hint,
+    current_bbox_dims,
+    *,
+    services: GenSimServices | None = None,
+):
 
     if isinstance(img_paths, (str, Path)):
         img_paths = [{"path": str(img_paths)}]
@@ -812,8 +809,7 @@ CRITICAL:
 - Do not explain anything.
 """
 
-    resp = client.chat.completions.create(
-        model=DEPLOYMENT,
+    resp = chat_from_legacy_messages(
         messages=[
             {
                 "role": "user",
@@ -821,6 +817,8 @@ CRITICAL:
             }
         ],
         temperature=0.0,
+        services=services,
+        role="asset_dimensions",
     )
     return extract_json(get_chat_completion_content(resp))
 
@@ -917,7 +915,9 @@ def scale_mesh_uniform_to_dimensions(
     return mesh, scale
 
 
-def ask_llm_semantics_info(object_name, img_paths, user_text_hint=""):
+def ask_llm_semantics_info(
+    object_name, img_paths, user_text_hint="", *, services: GenSimServices | None = None
+):
 
     imgs_payload = []
     for item in img_paths:
@@ -998,8 +998,7 @@ CRITICAL RULES:
 - Do not return null unless the object is completely unrecognizable.
 """
 
-    resp = client.chat.completions.create(
-        model=DEPLOYMENT,
+    resp = chat_from_legacy_messages(
         messages=[
             {
                 "role": "user",
@@ -1007,6 +1006,8 @@ CRITICAL RULES:
             }
         ],
         temperature=0.0,
+        services=services,
+        role="asset_semantics",
     )
     return extract_json(get_chat_completion_content(resp))
 
@@ -1051,7 +1052,16 @@ def delete_rendered_pngs(output_dir):
             p.unlink()
 
 
-def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
+@service_entry
+def process_mesh(
+    file,
+    name=None,
+    extra_text="",
+    out_dir="renders",
+    res=1024,
+    *,
+    services: GenSimServices | None = None,
+):
     if isinstance(file, (str, Path)):
         file = Path(file).resolve()
         name = file.stem
@@ -1062,7 +1072,9 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
     images_first = render_views(
         mesh, diagonal_views + cardinal_views + up_down_views, out_dir, res
     )
-    category_res = ask_mllm_detect_and_classify(images_first, extra_text=extra_text)
+    category_res = ask_mllm_detect_and_classify(
+        images_first, extra_text=extra_text, services=services
+    )
     print(category_res)
     category = int(category_res.get("category", 0))
     object_name = str(category_res.get("detected_object", "None"))
@@ -1074,7 +1086,9 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
 
     elif category == 1:
         images_for_1_1 = render_views(mesh, side_profile, out_dir, res)
-        side_profile_result = ask_llm_full_side_profile(object_name, images_for_1_1)
+        side_profile_result = ask_llm_full_side_profile(
+            object_name, images_for_1_1, services=services
+        )
         print(side_profile_result)
         side_profile_result = side_profile_result.get("full_side_profile_image", "B")
         if side_profile_result == "B":
@@ -1090,7 +1104,9 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
                     )
                 )
                 rotated_imgs.append(rotate_image_deg(upright_img, deg, flipped_path))
-            side_rotation_result = ask_llm_upright_rotation(object_name, rotated_imgs)
+            side_rotation_result = ask_llm_upright_rotation(
+                object_name, rotated_imgs, services=services
+            )
             side_rotation_result = side_rotation_result.get("upright_index", 0)
             print("side rotation is", side_rotation_result)
             if side_rotation_result == 0:
@@ -1125,7 +1141,9 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
                     )
                 )
                 rotated_imgs.append(rotate_image_deg(upright_img, deg, flipped_path))
-            side_rotation_result = ask_llm_upright_rotation(object_name, rotated_imgs)
+            side_rotation_result = ask_llm_upright_rotation(
+                object_name, rotated_imgs, services=services
+            )
             side_rotation_result = side_rotation_result.get("upright_index", 0)
             print("side rotation is", side_rotation_result)
             if side_rotation_result == 0:
@@ -1151,7 +1169,11 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
             mesh, cardinal_views + up_down_views, out_dir, res
         )
         result_main_surface = ask_mllm_primary_surface(
-            images_for_2_1, object_name, main_surface, orientation_requirement
+            images_for_2_1,
+            object_name,
+            main_surface,
+            orientation_requirement,
+            services=services,
         )
         print(result_main_surface)
         primary_view = result_main_surface.get("primary_surface_view", "None")
@@ -1199,7 +1221,9 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
                     )
                 )
                 rotated_imgs.append(rotate_image_deg(upright_img, deg, flipped_path))
-            result = ask_llm_upright_rotation(object_name, rotated_imgs)
+            result = ask_llm_upright_rotation(
+                object_name, rotated_imgs, services=services
+            )
             print(result)
             upright_result = result.get("upright_index", 0)
             if upright_result == 0:
@@ -1258,7 +1282,9 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
                     )
                 )
                 rotated_imgs.append(rotate_image_deg(upright_img, deg, flipped_path))
-            result = ask_llm_upright_rotation(object_name, rotated_imgs)
+            result = ask_llm_upright_rotation(
+                object_name, rotated_imgs, services=services
+            )
             print(result)
             upright_result = result.get("upright_index", 0)
             if upright_result == 0:
@@ -1316,7 +1342,9 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
                     )
                 )
                 rotated_imgs.append(rotate_image_deg(upright_img, deg, flipped_path))
-            result = ask_llm_upright_rotation(object_name, rotated_imgs)
+            result = ask_llm_upright_rotation(
+                object_name, rotated_imgs, services=services
+            )
             print(result)
             upright_result = result.get("upright_index", 0)
             if upright_result == 0:
@@ -1354,6 +1382,7 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
         img_paths=dimension_views,
         user_text_hint=extra_text,
         current_bbox_dims=current_bbox_dims,
+        services=services,
     )
     print(dimension_result)
 
@@ -1381,6 +1410,7 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
         object_name=object_name,
         img_paths=dimension_views,
         user_text_hint=extra_text,
+        services=services,
     )
     return {
         "Path": out_path,
@@ -1390,7 +1420,8 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
     }
 
 
-def main():
+@service_entry
+def main(*, services: GenSimServices | None = None):
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--file",
@@ -1420,7 +1451,9 @@ def main():
         print(f"Error: Input file does not exist - {args.file}")
         exit(1)
 
-    process_mesh(args.file, args.name, args.extra_text, args.out_dir, args.res)
+    process_mesh(
+        args.file, args.name, args.extra_text, args.out_dir, args.res, services=services
+    )
 
 
 if __name__ == "__main__":
