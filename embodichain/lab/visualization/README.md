@@ -18,17 +18,18 @@ HTTP/signaling port and observer rendering rate. Web and Viser are mutually
 exclusive. `--headless --web` keeps local windows closed while presenting the
 scene in the browser.
 
-Click the main video before navigating with the mouse and keyboard. Scene
-editing requires `allow_commands=True` (enabled by `--web`). The page provides
-entity picking/dragging, configured robot TCP controls, preview joint sliders,
-replay seeking, camera reset, single-frame rendering, image download and
-reconnection. Drag TCP axes in translation or rotation mode; I toggles the
-configured robot controls. Hybrid uses the SDK's native picking/input;
-FastRT and OfflineRT use the same main-thread camera and facade-pose APIs
-through browser gestures and an environment/object selector. Registered keyboard callbacks, including configured
-R recording and P camera-pose shortcuts, run on the simulation thread.
-Pausing viewer rendering does not pause physics; replay and terminal waits
-continue to handle browser requests without taking a physical step.
+The page displays live video, connection status and the EmbodiChain
+initialization table. It shares the terminal's structured summary rows rather
+than parsing logs. Standalone runs show runtime, renderer, physics and scene
+readiness; Gym runs publish their combined environment/manager initialization
+snapshot. `startup_summary: compact|full|off` also controls these details.
+
+The page is read-only: browser input is disabled and `/api/command` rejects
+application commands even for older configurations with `allow_commands=True`.
+Object editing, robot controls, keyboard shortcuts and replay sliders are owned
+by the native/Viser frontends or Python host. The Web integration supplies an
+observation view and initialization information, leaving general viewer GUI
+functionality to DexSim.
 
 ## Programmatic configuration
 
@@ -63,31 +64,26 @@ before World construction. NoRender cannot serve a native viewport.
 
 `open_viewer()`, `viewer`, `is_viewer_open`, `poll_viewer()`, `close_viewer()` and
 `wait_for_input()` / `sleep()` are the shared local/Web presentation surface. Viewports
-support look-at/pose, title and keyboard-control operations. Explicit
+support Python look-at/pose and title operations; the Web page dispatches no
+keyboard callbacks. Explicit
 `open_window()` and `World.get_windows()` retain their native-window meaning;
 custom callers using them must migrate to the shared surface. Viser retains
 its scene-snapshot runtime rather than a native viewport.
 
-## State, interactions and lifecycle
+## Information and lifecycle
 
 The observer has a dedicated camera group, even when its size matches a task
 camera. Native task-camera videos show existing rendered RGB buffers. Opening
-or navigating the observer does not render task sensors again or alter their
-configuration. Task cameras may remain black until their host renders them.
-Video downloads are presentation images, independent of original dataset data.
+the observer does not render task sensors again or alter their configuration.
+Task cameras may remain black until their host renders them. Environment count
+and task-sensor construction are independent of Web mode.
 
-Environment count and task-sensor construction are independent of Web mode.
-The observer sees the replicated scene; automatic robot TCP controls retain the
-existing single-instance robot contract. Their poses use the same arena/world
-conversion and FK/IK contracts as managed Viser controls. Editing a robot can
-naturally move its attached sensors. Read-only clients cannot submit physical,
-joint, keyboard-callback or replay-seek changes.
-
-Application operations remain on the World creator thread. Commands carry the
-run identity and topology revision; stale drags are canceled. HTTP work is
-bounded, joint requests keep only the newest request per control, and physical
-state is republished after edits. Newton consumes its existing Scene-owned
-entity-Gizmo mailbox while paused without calling the physics stepper.
+Application creation, information requests, observer rendering and closure
+remain on the World creator thread. Reading initialization rows never prepares
+a scene or advances physics. Paused callers keep the information page and video
+responsive through `poll_viewer()` / `wait_for_input()` / `sleep()`.
+`visualization_runtime` remains the Viser snapshot runtime; native Web
+presentation is available through `viewer` and `visualization_health`.
 
 `close_viewer()` closes the application and observer without changing the task.
 It remains closed until explicitly reopened. The World-owned observer group is
@@ -119,11 +115,11 @@ application readiness/errors; native peer count is unavailable (reported zero).
 
 ## Validation
 
-CPU coverage includes configuration, CLI forwarding, shared viewport operation,
-permissions, stale requests, paused replay and input handling. Real browser
-acceptance runs bounded child scenes with default/Newton physics and multiple
-environments, checking decoded pixels, picking, unchanged sensor buffers,
-manual redraw without physics advancement, downloads, reconnect and cleanup:
+CPU coverage includes configuration, CLI forwarding, shared viewport lifecycle,
+read-only command rejection and shared terminal/Web initialization data. Real
+browser acceptance runs bounded child scenes with default/Newton physics and
+multiple environments, checking decoded pixels, information tables, disabled
+input, unchanged scene/sensor data, reconnect and cleanup:
 
 ```bash
 python -m pytest tests/visualization/test_web_viewer_browser.py --run-gpu -q

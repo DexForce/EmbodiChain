@@ -61,7 +61,7 @@ class ViserServerCfg:
 
 @configclass
 class DexSimWebCfg:
-    """Configure the experimental native WebRTC window replacement.
+    """Configure the experimental read-only native WebRTC observation view.
 
     Requires a Linux/NVIDIA DexSim build with WebApplication and NVENC.
     The native listener binds all IPv4 interfaces and lives until World teardown.
@@ -124,9 +124,9 @@ class VisualizationCfg:
             captures once per visualization step instead of using wall-clock
             rate limiting.
         soft_body_fps: Maximum soft-body and cloth vertex update rate.
-        allow_commands: Whether simulation-mutating browser commands are allowed.
-            Enables Viser Gizmos/joint controls or native WebRTC entity editing.
-            Read-only WebRTC clients can still navigate the observer camera.
+        allow_commands: Whether simulation-mutating Viser commands are allowed.
+            Enables Viser Gizmos and joint controls. Native WebRTC presents a
+            read-only information page and always disables application commands.
             Keep disabled for untrusted or publicly reachable browser sessions.
         viser_server: Viser HTTP/WebSocket server binding settings.
         web: Native WebRTC observation-view settings.
@@ -153,6 +153,8 @@ class VisualizationCfg:
             raise ValueError(
                 f"Unsupported visualization backend {self.backend!r}; expected 'none', 'viser' or 'dexsim-web'."
             )
+        if self.backend == "dexsim-web":
+            self.allow_commands = False
         if self.scene_fps <= 0.0:
             raise ValueError("scene_fps must be greater than zero.")
         if self.max_visible_envs is not None and self.max_visible_envs <= 0:

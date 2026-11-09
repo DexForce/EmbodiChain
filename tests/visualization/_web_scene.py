@@ -55,7 +55,6 @@ def main() -> None:
             headless=True,
             web=True,
             num_envs=num_envs,
-            startup_summary="off",
             physics_cfg=physics_cfg_for_backend(backend),
             render_cfg=RenderCfg(
                 renderer=renderer,
@@ -146,8 +145,7 @@ def main() -> None:
                 test_arena_offsets=sim.arena_offsets.tolist(),
                 test_sensor_pose=sensor.get_local_pose(to_matrix=True).tolist(),
                 test_cube_pose=cube.get_local_pose(to_matrix=True).tolist(),
-                test_intrinsic=np.asarray(viewer.camera.get_intrinsic()).tolist(),
-                test_gizmo_count=viewer.gizmo.gizmo_count if viewer.gizmo else 0,
+                test_camera_pose=viewer.get_pose_matrix().tolist(),
             )
 
         viewer.state = state

@@ -1447,7 +1447,11 @@ def _replay_visualization_runtime(
 def replay_control(replay_env: ReplayWrapper) -> None:
     """Run an interactive, single-key kinematic trajectory scrubber."""
     visualization_runtime = _replay_visualization_runtime(replay_env)
-    if replay_env.env.sim_cfg.headless and visualization_runtime is None:
+    if (
+        replay_env.env.sim_cfg.headless
+        and not replay_env.env.sim_cfg.web
+        and visualization_runtime is None
+    ):
         log_warning(
             "control mode with --headless: no window to view the scrub. "
             "Re-run without --headless or enable --viser to see the replay."

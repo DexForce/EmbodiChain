@@ -57,10 +57,13 @@ def test_visualization_cfg_rejects_non_positive_image_fps() -> None:
         VisualizationCfg(backend="viser", sensor_image_fps=0.0)
 
 
-def test_visualization_cfg_accepts_explicit_viser_commands() -> None:
-    cfg = VisualizationCfg(backend="viser", allow_commands=True)
+@pytest.mark.parametrize("backend,expected", [("viser", True), ("dexsim-web", False)])
+def test_visualization_cfg_limits_application_commands_to_viser(
+    backend, expected
+) -> None:
+    cfg = VisualizationCfg(backend=backend, allow_commands=True)
 
-    assert cfg.allow_commands
+    assert cfg.allow_commands is expected
 
 
 def test_visualization_cfg_rejects_commands_without_viser() -> None:

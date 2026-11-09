@@ -33,7 +33,6 @@ import time
 import urllib.request
 
 import pytest
-import numpy as np
 
 pytestmark = [pytest.mark.gpu, pytest.mark.no_sim]
 
@@ -114,11 +113,14 @@ def test_native_browser_view_and_sensor_isolation(
                 errors = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.goto(url)
-                _wait(
-                    lambda: page.evaluate(
+
+                def video_ready():
+                    assert not errors, errors
+                    return page.evaluate(
                         "Boolean(window.RTC_ViewPeer?.ViewReady && !window.RTC_ViewPeer.Stopped && typeof state !== 'undefined')"
                     )
-                )
+
+                _wait(video_ready)
                 _wait(
                     lambda: page.evaluate(
                         "Boolean(document.querySelector('#main-view video')?.readyState >= 2)"
@@ -139,108 +141,37 @@ def test_native_browser_view_and_sensor_isolation(
                     page.locator("#sensor-views video").first.get_attribute("tabindex")
                     == "-1"
                 )
-                before = page.evaluate("state.camera_pose")
+                assert page.locator("#initialization-summary").is_visible()
+                table = page.locator("#initialization-summary").inner_text()
+                assert "EmbodiChain" in page.title()
+                assert "Physics timestep" in table and "640 × 360" in table
+                assert "READY" in table and "task_camera" in table
+                assert initial["read_only"] is True
+                assert (
+                    page.locator("aside button, aside input, aside select").count() == 0
+                )
+                assert page.evaluate("window.RTC_ViewPeer.Config.Input") is False
+
+                # Observation gestures and forged old commands cannot edit the
+                # scene or advance physics through this information page.
                 page.locator("#main-view video").click()
                 page.mouse.wheel(0, -200)
-                _wait(
-                    lambda: page.evaluate("state.camera_pose"),
-                    lambda pose: pose != before,
-                    timeout=10,
-                )
-                page.get_by_role("button", name="Release control", exact=True).click()
-                page.get_by_label("Select and move scene objects").check()
-                _wait(lambda: page.evaluate("state.gizmo"))
-                page.get_by_role("button", name="Reset view", exact=True).click()
-                _wait(
-                    lambda: page.evaluate("state.camera_pose"),
-                    lambda pose: pose == initial["camera_pose"],
-                )
-
-                def projected(point):
-                    current = ready()
-                    local = (
-                        np.linalg.inv(np.asarray(current["camera_pose"]))
-                        @ np.r_[point, 1.0]
-                    )
-                    k = np.asarray(current["test_intrinsic"])
-                    return [
-                        (k[0, 0] * local[0] / -local[2] + k[0, 2]) / 640,
-                        (-k[1, 1] * local[1] / -local[2] + k[1, 2]) / 360,
-                    ]
-
-                cube_before = np.asarray(ready()["test_cube_pose"])[0]
-                offset = np.asarray(ready()["test_arena_offsets"][0])
-                if not initial["native_input"]:
-                    page.locator("#entity").select_option("rigid:0:cube")
-                    _wait(
-                        ready, lambda value: value["selected_entity"] == "rigid:0:cube"
-                    )
-                    _wait(lambda: page.locator("#targets line").count() > 0)
-                    points = page.evaluate("""() => {
-                        const svg=document.querySelector('#targets'),line=svg.querySelector('line'),m=svg.getScreenCTM();
-                        const a=new DOMPoint(Number(line.getAttribute('x1')),Number(line.getAttribute('y1'))).matrixTransform(m);
-                        const b=new DOMPoint(Number(line.getAttribute('x2')),Number(line.getAttribute('y2'))).matrixTransform(m);
-                        return [a.x+(b.x-a.x)*.8,a.y+(b.y-a.y)*.8,b.x-a.x,b.y-a.y];
-                    }""")
-                    x, y, dx, dy = points
-                    page.mouse.move(x, y)
-                    page.mouse.down()
-                    page.mouse.move(x + dx, y + dy, steps=5)
-                    page.mouse.up()
-                    _wait(
-                        ready,
-                        lambda value: not np.allclose(
-                            value["test_cube_pose"][0], cube_before
-                        ),
-                        timeout=5,
-                    )
-                else:
-                    x, y = projected(cube_before[:3, 3] + offset)
-                    page.evaluate(
-                        """([x,y])=>{const p=RTC_ViewPeer;
-                        p.InputStream=p.Config.StreamNames.indexOf(state.camera_name);
-                        p.SendInput(2,1,x,y);p.SendInput(3,1,x,y)}""",
-                        [x, y],
-                    )
-                    _wait(ready, lambda value: value["test_gizmo_count"] == 1)
-                    page.screenshot(path=str(tmp_path / "gizmo.png"))
-                    x, y = projected(cube_before[:3, 3] + offset + [0.32, 0, 0])
-                    ex, ey = projected(cube_before[:3, 3] + offset + [0.52, 0, 0])
-                    page.evaluate("([x,y])=>RTC_ViewPeer.SendInput(2,1,x,y)", [x, y])
-                    for i in range(1, 6):
-                        page.evaluate(
-                            "([x,y])=>RTC_ViewPeer.SendInput(1,0,x,y)",
-                            [x + (ex - x) * i / 5, y + (ey - y) * i / 5],
-                        )
-                        time.sleep(0.05)
-                    page.evaluate("([x,y])=>RTC_ViewPeer.SendInput(3,1,x,y)", [ex, ey])
-                    _wait(
-                        ready,
-                        lambda value: not np.allclose(
-                            value["test_cube_pose"][0], cube_before
-                        ),
-                        timeout=5,
-                    )
-                    page.evaluate("RTC_ViewPeer.ReleaseInput()")
-                page.get_by_label("Select and move scene objects").uncheck()
-                _wait(lambda: page.evaluate("state.gizmo"), lambda enabled: not enabled)
-                page.get_by_label("Pause viewer rendering (physics continues)").check()
-                _wait(lambda: page.evaluate("state.paused"))
-                time.sleep(0.6)
-                paused_frames = ready()["frames"]
-                time.sleep(0.3)
-                assert ready()["frames"] == paused_frames
-                page.get_by_role("button", name="Render one frame", exact=True).click()
-                _wait(ready, lambda state: state["frames"] == paused_frames + 1)
-                page.get_by_role("button", name="Reset view", exact=True).click()
-                _wait(
-                    lambda: page.evaluate("state.camera_pose"),
-                    lambda pose: pose == initial["camera_pose"],
-                )
-                with page.expect_download() as download:
-                    page.get_by_role("button", name="Save image", exact=True).click()
-                download.value.save_as(tmp_path / "capture.png")
-                assert (tmp_path / "capture.png").read_bytes().startswith(b"\x89PNG")
+                page.keyboard.press("KeyR")
+                status = page.evaluate("""async () => {
+                    const peer = window.RTC_ViewPeer;
+                    const response = await fetch('/api/command', {
+                        method: 'POST', headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({action:'key',key:21,down:true,
+                            run_id:state.run_id,revision:state.revision,
+                            room:peer.Config.Room,token:peer.Token,after:peer.After})
+                    });
+                    return response.status;
+                }""")
+                assert status == 403
+                current = ready()
+                assert current["test_camera_pose"] == initial["test_camera_pose"]
+                assert current["test_cube_pose"] == initial["test_cube_pose"]
+                assert current["frames"] > initial["frames"]
                 page.screenshot(path=str(tmp_path / "viewer.png"))
                 page.reload()
                 _wait(

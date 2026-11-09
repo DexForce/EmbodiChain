@@ -3423,32 +3423,20 @@ def test_closed_web_viewer_stays_closed_until_explicit_reopen() -> None:
     sim.start_visualization.assert_not_called()
 
 
-def test_web_open_viewer_registers_configured_keyboard_controls_once() -> None:
+def test_web_open_viewer_keeps_information_display_separate_from_input_controls() -> (
+    None
+):
     sim = object.__new__(SimulationManager)
     sim.sim_config = SimulationManagerCfg(web=True)
     sim._web_viewer = SimpleNamespace(closed=False)
+    sim._visualization_runtime = None
     sim._window = None
-    sim._auto_entity_gizmo_pending = False
-    sim._window_record_hotkey_cfg = {"fps": 12}
-    sim._window_camera_pose_hotkey_cfg = {"convert_to_look_at": True}
-    sim._window_record_input_control = None
-    sim._window_camera_pose_input_control = None
     sim.start_visualization = MagicMock()
-
-    def register_record(**kwargs):
-        assert kwargs == {"fps": 12}
-        sim._window_record_input_control = object()
-
-    def register_pose(**kwargs):
-        assert kwargs == {"convert_to_look_at": True}
-        sim._window_camera_pose_input_control = object()
-
-    sim.enable_window_record_hotkey = MagicMock(side_effect=register_record)
-    sim.enable_window_camera_pose_hotkey = MagicMock(side_effect=register_pose)
+    sim._setup_viewer_controls = MagicMock()
     assert sim.open_viewer()
     assert sim.open_viewer()
-    sim.enable_window_record_hotkey.assert_called_once()
-    sim.enable_window_camera_pose_hotkey.assert_called_once()
+    assert sim.visualization_runtime is None
+    sim._setup_viewer_controls.assert_not_called()
 
 
 def test_web_terminal_wait_keeps_polling_without_advancing_physics(monkeypatch) -> None:

@@ -12,6 +12,8 @@ WebRTC presentation, alongside headless/window selection. The compatibility
 `--web-fps` overrides. Browser modes force headless before World construction.
 WebRTC calls to `capture_visualization()` pump application events and render
 the observer on the creator thread, including while physics is paused.
+The Web page is read-only and uses the same structured initialization data
+as the terminal. `allow_commands` applies to Viser and is disabled in Web mode.
 Its sensor restrictions, network and lifecycle boundaries are documented in
 [the viewer guide](../../../embodichain/lab/visualization/README.md).
 

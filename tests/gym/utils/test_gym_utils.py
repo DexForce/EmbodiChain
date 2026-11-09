@@ -2846,6 +2846,7 @@ def test_web_launcher_preserves_file_view_settings_and_applies_overrides():
     merged = merge_args_with_gym_config(args, config)
     assert merged["headless"]
     assert merged["visualization"]["backend"] == "dexsim-web"
+    assert merged["visualization"]["allow_commands"] is False
     assert merged["visualization"]["web"] == {
         "width": 640,
         "height": 360,

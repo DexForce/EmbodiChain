@@ -1514,7 +1514,7 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     if web_enabled:
         merged_config["web"] = True
         visualization = deepcopy(merged_config.get("visualization", {}))
-        visualization.update(backend="dexsim-web", allow_commands=True)
+        visualization.update(backend="dexsim-web", allow_commands=False)
         web = deepcopy(visualization.get("web", {}))
         for name in ("port", "fps"):
             value = getattr(args, f"web_{name}", None)

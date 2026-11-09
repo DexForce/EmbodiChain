@@ -267,6 +267,11 @@ class BaseEnv(gym.Env):
         ):
             return
         logger.log_info("\n".join(self._initialization_summary_lines()), prefix=False)
+        if self.sim_cfg.web:
+            self.sim._web_initialization_summary = {
+                "title": f"Environment initialized: {type(self).__name__}",
+                "rows": self._initialization_summary_rows(),
+            }
         self._initialization_summary_logged = True
         self.sim._startup_summary_logged = True
         self.sim._scene_summary_logged = True
@@ -275,6 +280,13 @@ class BaseEnv(gym.Env):
         """Combine the shared simulation snapshot with environment details."""
         if self.sim_cfg.startup_summary == "off":
             return []
+        return format_summary(
+            f"Environment initialized: {type(self).__name__}",
+            self._initialization_summary_rows(),
+        ).splitlines()
+
+    def _initialization_summary_rows(self) -> list[tuple[str, str, str]]:
+        """Share initialization data between terminal and Web information tables."""
         robot_description = type(self.robot).__name__
         robot_uid = getattr(self.robot, "uid", None)
         if robot_uid:
@@ -325,9 +337,7 @@ class BaseEnv(gym.Env):
                 )
             )
         rows.extend(self._extra_initialization_summary_rows())
-        return format_summary(
-            f"Environment initialized: {type(self).__name__}", rows
-        ).splitlines()
+        return rows
 
     def _extra_initialization_summary_rows(self) -> list[tuple[str, str, str]]:
         """Return subclass-specific startup table rows."""

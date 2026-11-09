@@ -44,7 +44,7 @@ def visualization_cfg_from_args(
             if value is not None:
                 setattr(web, name, value)
         web.__post_init__()
-        return VisualizationCfg(backend="dexsim-web", web=web, allow_commands=True)
+        return VisualizationCfg(backend="dexsim-web", web=web)
     defaults = VisualizationCfg()
     server_defaults = defaults.viser_server
     enabled = bool(getattr(args, "viser", False))

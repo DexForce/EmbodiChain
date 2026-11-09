@@ -59,10 +59,13 @@ render scheduling and closure run on the World creator thread. Configuration
 must enable WebRTC before World construction; native renderer selection is preserved. Top-level
 `SimulationManagerCfg.web` and common `--web` select it independently of arena
 count and task-sensor eligibility. `open_viewer()` / `viewer` provide the shared
-local/Web camera and keyboard surface; explicit window APIs stay native.
+local/Web Python camera surface; explicit window APIs stay native.
 Paused and terminal loops use `poll_viewer()` / `wait_for_input()` on the creator
-thread. TCP and joint commands reuse existing managed controls, and paused
-Newton entity edits consume the SDK's Scene-owned mailbox without stepping.
+thread. The Web page displays video and structured initialization information only;
+browser input is disabled and application commands are rejected. Its summary
+reuses the terminal rows from `sim/_startup_summary.py`; Gym publishes its
+combined initialization snapshot from `BaseEnv`. Native and Viser retain
+editing controls. `visualization_runtime` exposes only the Viser snapshot runtime.
 Native video-catalog restrictions remain an SDK media limitation.
 The listener binds all IPv4 interfaces and remains World-owned after application
 closure. See [WebRTC operation and limitations](../../../embodichain/lab/visualization/README.md).

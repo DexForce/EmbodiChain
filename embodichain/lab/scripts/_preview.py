@@ -61,9 +61,7 @@ def _setup_viser_joint_control(
     *,
     follow_external_targets: bool = False,
 ) -> ArticulationPreviewController | None:
-    if not (
-        getattr(args, "viser", False) or getattr(args, "web", False)
-    ) or not getattr(args, "joint_control", True):
+    if not getattr(args, "viser", False) or not getattr(args, "joint_control", True):
         return None
 
     from embodichain.lab.scripts.preview_joint_control import (

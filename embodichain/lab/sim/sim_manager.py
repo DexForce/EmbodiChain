@@ -305,7 +305,7 @@ class SimulationManagerCfg:
     """The width of the simulation window."""
 
     startup_summary: Literal["compact", "full", "off"] = "compact"
-    """Startup table detail. ``off`` disables both simulation and Gym summaries."""
+    """Startup detail. ``off`` disables terminal and Web initialization tables."""
 
     dexsim_startup_info: bool = False
     """Show DexSim's native startup information in addition to our summary.
@@ -1024,9 +1024,9 @@ class SimulationManager:
         return uid_list
 
     @property
-    def visualization_runtime(self) -> VisualizationRuntime | _WebViewer | None:
-        """Return the active visualization runtime, if one has been started."""
-        return getattr(self, "_web_viewer", None) or self._visualization_runtime
+    def visualization_runtime(self) -> VisualizationRuntime | None:
+        """Return the active Viser scene runtime, if one has been started."""
+        return self._visualization_runtime
 
     @property
     def visualization_health(self) -> RuntimeHealth:
@@ -1106,7 +1106,6 @@ class SimulationManager:
                 from embodichain.lab.visualization._web_viewer import _WebViewer
 
                 self._web_viewer = _WebViewer(self)
-                self._setup_viewer_controls()
                 self._visualization_error_reported = False
                 logger.log_info(
                     f"WebRTC viewer ready at {self._web_viewer.endpoint} "
@@ -2231,7 +2230,6 @@ class SimulationManager:
         """
         if self.sim_config.web:
             self.start_visualization()
-            self._setup_viewer_controls()
             return self.is_viewer_open
         return self.open_window()
 
@@ -2252,13 +2250,9 @@ class SimulationManager:
     def close_viewer(self) -> None:
         """Close the selected viewport on the World creator thread."""
         if self.sim_config.web:
-            enabled = (
-                self._web_viewer is not None and self._web_viewer.gizmo is not None
-            )
             if self.is_window_recording():
                 self.stop_window_record()
             self.stop_visualization()
-            self._auto_entity_gizmo_pending = enabled
         else:
             self.close_window()
 
@@ -3800,12 +3794,6 @@ class SimulationManager:
             else self._world.enable_entity_gizmo(config)
         )
         self._auto_entity_gizmo_pending = False
-        if (
-            getattr(self, "_web_viewer", None) is not None
-            and self.sim_config.visualization.allow_commands
-        ):
-            self._web_viewer.gizmo = controller
-            controller.attach_camera(self._web_viewer.camera)
         default_plane = getattr(self, "_default_plane", None)
         if default_plane is None:
             return controller
@@ -3829,26 +3817,13 @@ class SimulationManager:
         Robot IK controllers and Viser command permissions are independent.
         """
         self._world.disable_entity_gizmo()
-        if getattr(self, "_web_viewer", None) is not None:
-            self._web_viewer.gizmo = None
         self._auto_entity_gizmo_pending = False
 
     def _enable_default_entity_gizmo(self) -> None:
         # Apply the startup default once; DexSim owns subsequent controller
         # state, including explicit native disable calls and window reopens.
-        web = (
-            getattr(self, "_web_viewer", None) is not None
-            and self.sim_config.visualization.allow_commands
-            and self.spawn_result is not None
-        )
-        if (self._window is not None or web) and self._auto_entity_gizmo_pending:
-            if web and self._window is None:
-                config = dexsim.interaction.EntityGizmoConfig()
-                config.attach_on_click = True
-                config.selection_cache = False
-                self.enable_entity_gizmo(config)
-            else:
-                self.enable_entity_gizmo()
+        if self._window is not None and self._auto_entity_gizmo_pending:
+            self.enable_entity_gizmo()
 
     def enable_gizmo(
         self,
@@ -4079,11 +4054,7 @@ class SimulationManager:
             self.sim_config.visualization.backend == "viser"
             and self.sim_config.visualization.allow_commands
         )
-        web = (
-            getattr(self, "_web_viewer", None) is not None
-            and self.sim_config.visualization.allow_commands
-        )
-        if not native and not viser and not web:
+        if not native and not viser:
             return
         for uid, robot in self._robots.items():
             solver_cfgs = robot.cfg.solver_cfg
