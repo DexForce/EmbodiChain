@@ -54,6 +54,10 @@ Camera
     :show-inheritance:
     :exclude-members: __init__, copy, replace, to_dict, validate
 
+Camera and stereo captures exclude native markers by default. Set
+``include_visual_overlays=True`` on an explicit preview camera to include
+both scene-lit markers and overlays.
+
 Attachment resolution
 ---------------------
 

@@ -24,6 +24,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING, List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
+from embodichain.lab.visualization.markers._native import _MARKER_RENDER_CATEGORY
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
 from embodichain.utils import logger, configclass
 
@@ -70,6 +71,9 @@ class CameraCfg(SensorCfg):
 
     visualization_role: Literal["sensor", "record"] = "sensor"
     """Role used to group this camera in live visualization previews."""
+
+    include_visual_overlays: bool = False
+    """Include native visual overlays and scene-lit markers in captured images."""
 
     # Camera parameters
     width: int = 640
@@ -185,6 +189,8 @@ class Camera(BaseSensor):
             self._entities[i] = view
             self._camera_names.append((arena, view_name))
 
+        self._configure_visual_overlays(self._entities, config.include_visual_overlays)
+
         # Define a mapping of data types to their respective shapes and dtypes
         buffer_specs = {
             "color": (
@@ -219,6 +225,15 @@ class Camera(BaseSensor):
                 )
 
         self.cfg: CameraCfg = config
+
+    def _configure_visual_overlays(
+        self, views: Sequence[dr.CameraView], include: bool
+    ) -> None:
+        if include:
+            self._frame_buffer.set_visual_overlay_enabled(True)
+        else:
+            for view in views:
+                view.set_excluded_render_categories(_MARKER_RENDER_CATEGORY)
 
     @cached_property
     def group_id(self) -> int:

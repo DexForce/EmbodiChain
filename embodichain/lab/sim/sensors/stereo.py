@@ -219,6 +219,10 @@ class StereoCamera(Camera):
             right_list.append(right_view)
             self._camera_names.append((arena, right_view_name))
 
+        self._configure_visual_overlays(
+            left_list + right_list, config.include_visual_overlays
+        )
+
         for i in range(self.num_instances):
             self._entities[i] = PairCameraView(
                 left_list[i], right_list[i], config.left_to_right.cpu().numpy()
