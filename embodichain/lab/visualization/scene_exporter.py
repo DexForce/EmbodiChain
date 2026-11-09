@@ -772,10 +772,29 @@ class SceneExporter:
             else None
         )
         marker_frames = self._capture_axis_marker_overlays(reserved_frame_ids)
-        if overlays is None:
-            return SceneOverlays(frames=marker_frames)
+        overlays = overlays or SceneOverlays()
+        fluid_points = []
+        for uid, fluid in getattr(self._sim, "_fluid_objects", {}).items():
+            if fluid.is_declared or fluid.cfg.render.mode == "none":
+                continue
+            state = fluid.data.particle_pos_w
+            for env_id in self._env_ids:
+                points = state[env_id].detach().cpu().numpy().copy()
+                if fluid.cfg.render.clip_below_z is not None:
+                    points = points[points[:, 2] >= fluid.cfg.render.clip_below_z]
+                fluid_points.append(
+                    PointCloudOverlay(
+                        overlay_id=f"fluid/{uid}/{env_id}",
+                        points=points,
+                        point_size=2
+                        * (
+                            fluid.cfg.render.render_radius
+                            or fluid.cfg.particle_spacing / 2
+                        ),
+                    )
+                )
         point_clouds: list[PointCloudOverlay] = []
-        for point_cloud in overlays.point_clouds:
+        for point_cloud in overlays.point_clouds + tuple(fluid_points):
             point_count = point_cloud.points.shape[0]
             if point_count <= self.cfg.point_cloud_max_points:
                 point_clouds.append(point_cloud)
