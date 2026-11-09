@@ -687,7 +687,7 @@ def test_initial_validator_reads_contacts_without_replaying_history() -> None:
         selected_actor_ids=(4,),
         actors=(actor,),
         actor_info=lambda actor_id: actor,
-        fetch=lambda: buffer,
+        fetch_solver_report=lambda: buffer,
     )
     owner = SimpleNamespace(
         num_envs=1,

@@ -35,13 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-try:  # Python 3.11 (the CI planner runtime) has this in the standard library.
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised only on Python 3.10.
-    try:
-        import tomli as tomllib  # type: ignore[import-not-found]
-    except ModuleNotFoundError:
-        tomllib = None  # type: ignore[assignment]
+import tomllib
 
 __all__ = [
     "ChangedPath",
@@ -249,10 +243,6 @@ def collect_changed_paths(
 
 def load_manifest(path: str | Path) -> dict[str, Any]:
     """Load and validate the CI impact manifest."""
-    if tomllib is None:  # pragma: no cover - Python 3.10 without tomli.
-        raise RuntimeError(
-            "Python 3.11 or the tomli package is required to read the impact manifest"
-        )
     manifest_path = Path(path)
     try:
         data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))

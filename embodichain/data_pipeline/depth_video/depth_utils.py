@@ -31,7 +31,7 @@ because it allocates more quanta to near-range depth, matching the
 
 The math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's
 ``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and
-:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.
+:mod:`torch` -- all of which run on supported Python 3.11--3.12. See issue #424.
 """
 
 from __future__ import annotations
