@@ -269,6 +269,7 @@ def main() -> None:
     from embodichain.lab.sim.material import VisualMaterialCfg
     from embodichain.lab.sim.shapes import MeshCfg
     from embodichain.utils.math import quat_from_matrix
+    from embodichain.lab.visualization import VisualizationCfg
     from embodichain.lab.visualization.markers import (
         MarkerPrototypeCfg,
         RobotMarkers,
@@ -297,6 +298,7 @@ def main() -> None:
             width=width,
             height=height,
             enable_entity_gizmo=False,
+            visualization=VisualizationCfg(backend="none"),
             render_cfg=RenderCfg(
                 renderer="fast-rt",
                 spp=args.spp,
