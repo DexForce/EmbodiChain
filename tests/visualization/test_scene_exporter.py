@@ -19,6 +19,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from embodichain.lab.visualization import (
     FrameOverlay,
@@ -225,6 +226,12 @@ class _Simulation:
     def get_deformable_object(self, uid: str) -> None:
         raise AssertionError(f"Unexpected deformable-object lookup: {uid}")
 
+    def get_cable_object_uid_list(self) -> list[str]:
+        return []
+
+    def get_cable_object(self, uid: str) -> None:
+        raise AssertionError(f"Unexpected cable-object lookup: {uid}")
+
     def get_sensor_uid_list(self) -> list[str]:
         return []
 
@@ -260,11 +267,72 @@ class _EmptySimulation:
     def get_deformable_object(self, uid: str) -> None:
         raise AssertionError(f"Unexpected deformable-object lookup: {uid}")
 
+    def get_cable_object_uid_list(self) -> list[str]:
+        return []
+
+    def get_cable_object(self, uid: str) -> None:
+        raise AssertionError(f"Unexpected cable-object lookup: {uid}")
+
     def get_sensor_uid_list(self) -> list[str]:
         return []
 
     def get_sensor(self, uid: str) -> None:
         raise AssertionError(f"Unexpected sensor lookup: {uid}")
+
+
+class _CableData:
+    def __init__(self, arena_offsets: np.ndarray) -> None:
+        self.num_instances = len(arena_offsets)
+        self.num_segments = 3
+        self.poses = np.zeros(
+            (self.num_instances, self.num_segments, 7), dtype=np.float32
+        )
+        self.poses[..., :3] = arena_offsets[:, None, :] + np.array(
+            [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]]
+        )
+        self.poses[..., 3:] = np.array([1.0, 2.0, 3.0, 4.0]) / np.sqrt(30.0)
+        self.fetch_count = 0
+        self.released = False
+
+    @property
+    def segment_pose_w(self) -> np.ndarray:
+        if self.released:
+            raise RuntimeError("Cable batch has been released")
+        self.fetch_count += 1
+        return self.poses
+
+
+class _CableObject:
+    def __init__(self, arena_offsets: np.ndarray) -> None:
+        self.cfg = SimpleNamespace(
+            points=np.array(
+                [
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.25],
+                    [0.25, 0.0, 0.25],
+                    [0.25, 0.0, 0.75],
+                ]
+            ),
+            radius=0.02,
+            render_mode="tube",
+        )
+        self.data = _CableData(arena_offsets)
+
+
+class _CableSimulation(_EmptySimulation):
+    num_envs = 3
+    arena_offsets = np.array(
+        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [-7.0, 8.0, 9.0]], dtype=np.float32
+    )
+
+    def __init__(self) -> None:
+        self.cables = {"cable/main": _CableObject(self.arena_offsets)}
+
+    def get_cable_object_uid_list(self) -> list[str]:
+        return list(self.cables)
+
+    def get_cable_object(self, uid: str) -> _CableObject:
+        return self.cables[uid]
 
 
 class _JointControlProvider:
@@ -533,6 +601,157 @@ def test_empty_scene_can_publish_a_current_frame() -> None:
     assert manifest.nodes == ()
     assert result.frame.scene_revision == 1
     assert result.frame.positions.shape == (0, 3)
+
+
+@pytest.mark.parametrize("render_mode", ["tube", "capsules"])
+def test_cable_manifest_shares_closed_capsules_without_native_render_meshes(
+    render_mode: str,
+) -> None:
+    sim = _CableSimulation()
+    sim.cables["second"] = _CableObject(sim.arena_offsets)
+    for cable in sim.cables.values():
+        cable.cfg.render_mode = render_mode
+    exporter = SceneExporter(sim, VisualizationCfg(backend="viser", env_ids=[2, 0]))
+
+    manifest = exporter.build_manifest()
+
+    assert len(manifest.nodes) == 12
+    assert len(manifest.geometries) == 2  # The two distinct rest segment lengths.
+    assert not exporter.has_deformables
+    assert all(cable.data.fetch_count == 0 for cable in sim.cables.values())
+    geometries = {geometry.geometry_id: geometry for geometry in manifest.geometries}
+    for node in manifest.nodes:
+        assert node.kind == "cable_segment"
+        assert not node.dynamic_geometry
+        segment_index = int(node.node_id.rsplit(":", 1)[1])
+        length = (0.25, 0.25, 0.5)[segment_index]
+        mesh = geometries[node.geometry_id]
+        np.testing.assert_allclose(
+            mesh.vertices.min(axis=0), [-0.02, -0.02, -length / 2 - 0.02]
+        )
+        np.testing.assert_allclose(
+            mesh.vertices.max(axis=0), [0.02, 0.02, length / 2 + 0.02]
+        )
+        triangles = mesh.vertices[mesh.faces]
+        normals = np.cross(
+            triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+        )
+        centroids = triangles.mean(axis=1)
+        axis_points = np.zeros_like(centroids)
+        axis_points[:, 2] = np.clip(centroids[:, 2], -length / 2, length / 2)
+        assert np.all(np.sum(normals * (centroids - axis_points), axis=1) > 0)
+        edges = np.concatenate(
+            [mesh.faces[:, [0, 1]], mesh.faces[:, [1, 2]], mesh.faces[:, [2, 0]]]
+        )
+        _, counts = np.unique(np.sort(edges, axis=1), axis=0, return_counts=True)
+        assert np.all(counts == 2)
+    cable_node = next(
+        node
+        for node in manifest.nodes
+        if node.node_id == "env:2/cable:cable%2Fmain/segment:0"
+    )
+    assert cable_node.path == "/envs/2/cable_objects/cable%2Fmain/segments/0"
+    assert exporter.resolve_node_target(cable_node.node_id) == ("cable/main", "cable")
+
+
+def test_cable_capture_batches_world_poses_for_selected_environments() -> None:
+    sim = _CableSimulation()
+    sim.cables["second"] = _CableObject(sim.arena_offsets)
+    sim.cables["second"].data.poses[..., 0] += 0.75
+    exporter = SceneExporter(sim, VisualizationCfg(backend="viser", env_ids=[2, 0]))
+    manifest = exporter.build_manifest()
+
+    frame = exporter.capture(
+        sim_step=1, sim_time=0.01, capture_dynamic_geometry=False
+    ).frame
+
+    assert {node.env_id for node in manifest.nodes} == {2, 0}
+    assert frame.dynamic_meshes == ()
+    assert all(cable.data.fetch_count == 1 for cable in sim.cables.values())
+    for index, node in enumerate(manifest.nodes):
+        uid, _ = exporter.resolve_node_target(node.node_id)
+        segment_index = int(node.node_id.rsplit(":", 1)[1])
+        pose = sim.cables[uid].data.poses[node.env_id, segment_index]
+        np.testing.assert_allclose(frame.positions[index], pose[:3])
+        np.testing.assert_allclose(frame.wxyz[index], pose[[6, 3, 4, 5]], atol=1e-7)
+
+
+def test_cable_pose_changes_keep_geometry_and_previous_frames_independent() -> None:
+    sim = _CableSimulation()
+    exporter = SceneExporter(sim, VisualizationCfg(backend="viser", env_ids=None))
+    manifest = exporter.build_manifest()
+    first_frame = exporter.capture(sim_step=0, sim_time=0.0).frame
+    saved_positions = first_frame.positions.copy()
+    saved_wxyz = first_frame.wxyz.copy()
+    data = sim.cables["cable/main"].data
+    data.poses[..., :3] += [0.25, -0.5, 0.75]
+    data.poses[..., 3:] = [0.0, 0.0, 0.0, 1.0]
+
+    next_frame = exporter.capture(sim_step=1, sim_time=0.01).frame
+    rebuilt = exporter.build_manifest()
+
+    assert data.fetch_count == 2
+    assert next_frame.node_ids == first_frame.node_ids
+    assert [node.geometry_id for node in rebuilt.nodes] == [
+        node.geometry_id for node in manifest.nodes
+    ]
+    assert next_frame.scene_revision == first_frame.scene_revision
+    np.testing.assert_array_equal(first_frame.positions, saved_positions)
+    np.testing.assert_array_equal(first_frame.wxyz, saved_wxyz)
+    np.testing.assert_allclose(
+        next_frame.positions, saved_positions + [0.25, -0.5, 0.75]
+    )
+    np.testing.assert_allclose(next_frame.wxyz, np.tile([1, 0, 0, 0], (9, 1)))
+
+
+def test_cable_can_coexist_with_rigid_and_robot_assets() -> None:
+    class _MixedSimulation(_Simulation):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cable = _CableObject(self.arena_offsets)
+
+        def get_cable_object_uid_list(self) -> list[str]:
+            return ["cable"]
+
+        def get_cable_object(self, uid: str) -> _CableObject:
+            return self.cable
+
+    sim = _MixedSimulation()
+    exporter = SceneExporter(sim, VisualizationCfg(backend="viser", env_ids=None))
+    manifest = exporter.build_manifest()
+    frame = exporter.capture(sim_step=0, sim_time=0).frame
+
+    assert len(manifest.nodes) == 12
+    assert {node.kind for node in manifest.nodes} == {
+        "rigid_object",
+        "robot_link",
+        "cable_segment",
+    }
+    np.testing.assert_allclose(
+        frame.positions[frame.node_ids.index("env:1/rigid:cube%2Fname")],
+        [2.2, 0.0, 0.3],
+    )
+    np.testing.assert_allclose(
+        frame.positions[frame.node_ids.index("env:1/cable:cable/segment:0")],
+        [2.1, 0.2, 0.3],
+    )
+
+
+def test_cable_export_requires_prepared_data_and_propagates_released_state() -> None:
+    sim = _CableSimulation()
+    cable = sim.cables["cable/main"]
+    data = cable.data
+    cable.data = None
+    exporter = SceneExporter(sim, VisualizationCfg(backend="viser"))
+
+    with pytest.raises(RuntimeError, match="prepare"):
+        exporter.build_manifest()
+
+    cable.data = data
+    exporter.build_manifest()
+    data.released = True
+    with pytest.raises(RuntimeError, match="released"):
+        exporter.capture(sim_step=0, sim_time=0)
 
 
 def test_joint_control_provider_is_filtered_and_captured() -> None:

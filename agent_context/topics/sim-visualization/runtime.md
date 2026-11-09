@@ -6,7 +6,7 @@ Read this when the request needs these details. [Topic overview](sim-visualizati
 
 | API | Behavior |
 |---|---|
-| `start_visualization()` | No-op for backend `"none"`; otherwise starts or returns the active runtime and forces an initial capture |
+| `start_visualization()` | No-op for backend `"none"`; prepares declared assets (including cable-only scenes), otherwise leaves an empty Spawn builder open; starts or returns the active runtime and forces an initial capture |
 | `notify_visualization_topology_changed()` | Increments the manager-local topology revision |
 | `refresh_visualization()` | Rebuilds and asynchronously publishes a manifest immediately |
 | `capture_visualization(force=False)` | Refreshes dirty topology, then captures a due frame |
@@ -22,7 +22,7 @@ Drawing markers and capturing visualization do not advance physics; interactive
 loops call `SimulationManager.update(step=1)` to process Gizmos and step the world.
 
 Manager add methods mark topology dirty for rigid objects, rigid-object groups,
-volume/surface deformables, robots, articulations, and `Camera` sensors. Supported
+volume/surface deformables, cables, robots, articulations, and `Camera` sensors. Supported
 `remove_asset()` branches do the same. The next simulation update refreshes the
 browser automatically. Use `refresh_visualization()` when the refresh must
 happen before another physics step. Code that changes mesh topology outside
@@ -48,6 +48,8 @@ fields already named `wxyz` remain protocol-native.
 
 Arena offsets are added to rigid, robot, articulation, and camera poses.
 Deformable vertices are stored relative to the corresponding arena node.
+Cable `segment_pose_w` already contains world positions, including Arena
+offsets; export must not add those offsets again.
 
 ### Exported content
 
@@ -55,6 +57,7 @@ Deformable vertices are stored relative to the corresponding arena node.
 |---|---|
 | `RigidObject` | Complete combined render mesh; multi-segment faces receive matching vertex offsets |
 | `RigidObjectGroup` | One node and pose per constituent object |
+| `CableObject` | One capsule node per segment, shared rest geometry, and live world poses |
 | `Robot` | One mesh node per non-empty link |
 | `Articulation` | One mesh node per non-empty link |
 | `VolumeDeformableObject` | Live Newton render-surface vertices and triangles |
@@ -67,6 +70,13 @@ Lights, rigid constraints, markers/gizmos, contact sensors, and stereo cameras
 are not exported as scene nodes by the current `SceneExporter`. Visual
 materials and textures are not mirrored; meshes use category colors from
 `SceneExporter._COLORS`.
+
+Cables use capsule observer geometry generated from configured endpoint
+distances and radius, centered along each segment's local +Z axis. Export does
+not depend on native rendering resources and does not reproduce tube skins or
+custom visual meshes. Prepared cable data is sampled once per cable per frame;
+segment poses update at `scene_fps` through the static-mesh batch path, without
+rebuilding geometry or using the deformable-vertex channel.
 
 ## Cameras
 

@@ -103,8 +103,12 @@ matching their source functions/parameters, including callable strings and
 omitted default arguments. Env only supplies the declarations. Recording-only
 fields never enlarge policy observations or policy rollout allocation.
 
-`observations.get_entity_state` derives native UID, quantity, arena/joint frame,
-representation, shape, dtype and joint order from its source. Immutable
+`observations.get_entity_state` derives native UID, quantity, reference frame,
+representation, shape, dtype and joint order from its source. Cable
+`segment_state_w` uses world coordinates and a segment axis; its descriptor
+includes COM linear velocity and angular velocity alongside position and XYZW
+orientation. Recording declares these fields through `trajectory_observation_cfgs`,
+so cable observations share the ordinary acquisition and history lifecycle. Immutable
 schema descriptors are reused by semantic value; no simulation handles enter
 the bounded cache. Pose acquisition uses the resolved UID without constructing
 another `SceneEntityCfg` during each step. Explicit boundaries

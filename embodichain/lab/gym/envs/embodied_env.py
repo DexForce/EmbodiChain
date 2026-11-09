@@ -54,6 +54,7 @@ from embodichain.lab.sim.cfg import (
     VisualObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
+    CableObjectCfg,
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
@@ -240,6 +241,9 @@ class EmbodiedEnvCfg(EnvCfg):
     rigid_object_group: List[RigidObjectGroupCfg] = []
 
     articulation: List[ArticulationCfg] = []
+
+    cable_object: list[CableObjectCfg] = []
+    """Fixed-topology cables declared before simulation preparation."""
 
     events: Union[object, None] = None
     """Event settings. Defaults to None, in which case no events are applied through the event manager.
@@ -3140,6 +3144,9 @@ class EmbodiedEnv(BaseEnv):
 
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)
+
+        for cfg in self.cfg.cable_object:
+            self.sim.add_cable_object(cfg=cfg)
 
     def preview_sensor_data(
         self,

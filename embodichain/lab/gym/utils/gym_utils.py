@@ -651,6 +651,7 @@ def config_to_cfg(
         MeshCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
+        CableObjectCfg,
         LightCfg,
         DLSSCfg,
         NRDCfg,
@@ -964,6 +965,13 @@ def config_to_cfg(
             cfg = ArticulationCfg.from_dict(obj_dict)
             resolve_asset_paths(cfg)
             env_cfg.articulation.append(cfg)
+
+    env_cfg.cable_object = []
+    for value in config.get("cable_object", []):
+        cable = CableObjectCfg.from_dict(value)
+        if isinstance(cable.visual_shape, MeshCfg):
+            cable.visual_shape.fpath = get_data_path(cable.visual_shape.fpath)
+        env_cfg.cable_object.append(cable)
 
     env_cfg.control_parts = config["env"].get("control_parts", None)
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
@@ -1555,7 +1563,9 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
             if cli_visualization.env_ids is None
             else list(cli_visualization.env_ids)
         )
-        visualization["allow_commands"] = cli_visualization.allow_commands
+        # Enabling the viewer must preserve a deployment's explicit read-only
+        # policy, especially while an expert owns the robot drive targets.
+        visualization.setdefault("allow_commands", cli_visualization.allow_commands)
         legacy_server = visualization.pop("server", {})
         viser_server = deepcopy(visualization.get("viser_server", legacy_server))
         viser_server["host"] = cli_visualization.viser_server.host
@@ -2303,6 +2313,29 @@ def build_trajectory_buffer(
                     device=device,
                 )
                 for uid, obj in rigid_items.items()
+            },
+            batch_size=[num_envs, max_steps],
+            device=device,
+        )
+
+    cables = {
+        uid: obj
+        for uid, obj in getattr(env.sim, "_cable_objects", {}).items()
+        if uids is None or uid in uids
+    }
+    if cables:
+        states["cables"] = TensorDict(
+            {
+                uid: TensorDict(
+                    {
+                        "segment_state_w": _zeros(
+                            num_envs, max_steps, obj.data.num_segments, 13
+                        )
+                    },
+                    batch_size=[num_envs, max_steps],
+                    device=device,
+                )
+                for uid, obj in cables.items()
             },
             batch_size=[num_envs, max_steps],
             device=device,

@@ -81,6 +81,16 @@ def _state_descriptor(
     names: tuple[str, ...],
 ) -> ObservationDescriptor:
     # Only immutable schema values are cached; no environment or asset handle.
+    if quantity == "segment_state_w":
+        return ObservationDescriptor(
+            uid,
+            quantity,
+            "world",
+            "xyz_xyzw_com_lin_vel_ang_vel",
+            ("m", "unitless", "m/s", "rad/s"),
+            shape,
+            dtype,
+        )
     joint = quantity in ("qpos", "qvel")
     return ObservationDescriptor(
         uid,
@@ -128,7 +138,9 @@ def get_entity_state(
     env: EmbodiedEnv,
     obs: EnvObs,
     entity_cfg: SceneEntityCfg,
-    quantity: Literal["pose", "qpos", "qvel", "lin_vel", "ang_vel"] = "pose",
+    quantity: Literal[
+        "pose", "qpos", "qvel", "lin_vel", "ang_vel", "segment_state_w"
+    ] = "pose",
 ) -> ObservationSample:
     """Acquire a described original state channel for any observation consumer.
 
@@ -136,7 +148,9 @@ def get_entity_state(
     functors. Missing entities remain invalid, even though policy views retain
     the historical zero-fill behavior. Joint channels contain the complete
     asset-defined order, including mimic joints; selectors are rejected rather
-    than silently describing a subset as the complete state.
+    than silently describing a subset as the complete state. Cable
+    ``segment_state_w`` contains each segment's world position, XYZW quaternion,
+    COM linear velocity and angular velocity; it does not include solver history.
 
     Args:
         env: Environment owning the native scene.
@@ -147,7 +161,14 @@ def get_entity_state(
     Returns:
         Raw values and explicit row validity, before policy transformations.
     """
-    if quantity not in ("pose", "qpos", "qvel", "lin_vel", "ang_vel"):
+    if quantity not in (
+        "pose",
+        "qpos",
+        "qvel",
+        "lin_vel",
+        "ang_vel",
+        "segment_state_w",
+    ):
         raise ValueError(f"Unsupported raw state quantity: {quantity!r}.")
     if entity_cfg.joint_names is not None or entity_cfg.joint_ids != slice(None):
         raise ValueError("Raw entity state requires the complete joint order.")
@@ -165,11 +186,14 @@ def _read_entity_state(env: EmbodiedEnv, uid: str, quantity: str) -> Observation
         joint = quantity in ("qpos", "qvel")
         if obj is None:
             width = 0 if joint else 7 if quantity == "pose" else 3
-            values = torch.zeros((env.num_envs, width), device=env.device)
+            shape = (0, 13) if quantity == "segment_state_w" else (width,)
+            values = torch.zeros((env.num_envs, *shape), device=env.device)
             valid = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
             errors = (f"Entity {uid!r} is unavailable.",) * env.num_envs
         else:
-            if quantity == "pose":
+            if quantity == "segment_state_w":
+                values = obj.data.segment_state_w
+            elif quantity == "pose":
                 values = obj.get_local_pose(to_matrix=False)
             elif joint:
                 values = obj.get_qpos() if quantity == "qpos" else obj.get_qvel()
@@ -180,9 +204,9 @@ def _read_entity_state(env: EmbodiedEnv, uid: str, quantity: str) -> Observation
             else:
                 values = getattr(obj.body_data, quantity)
             valid = torch.isfinite(values).reshape(env.num_envs, -1).all(dim=-1)
-            if quantity == "pose":
+            if quantity in ("pose", "segment_state_w"):
                 valid &= (
-                    (torch.linalg.vector_norm(values[..., 3:], dim=-1) > 0)
+                    (torch.linalg.vector_norm(values[..., 3:7], dim=-1) > 0)
                     .reshape(env.num_envs, -1)
                     .all(dim=-1)
                 )
