@@ -366,8 +366,10 @@ validators:
 
 Each segment occurrence starts at its first consumed control step. The window
 includes post-policy steps within its bound. Missing or invalid observations
-interrupt a hold. Validation traces retain measurements, thresholds, witness
-steps and acquisition revisions.
+interrupt a hold. Rules that reference the same compiled temporal node with
+the same evidence qualification share its history within the occurrence.
+Validation traces retain each selected rule's identity, measurements,
+thresholds, witness steps and acquisition revisions.
 
 `final_acceptance` and `process_constraints` select instantaneous roots.
 Program overrides keep these deployment-owned selections. The bridge checks

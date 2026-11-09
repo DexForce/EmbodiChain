@@ -2724,16 +2724,20 @@ def test_fresh_bridge_reports_physical_binding_before_runtime_grounding():
     assert runtime.observation_provider.env_ids.tolist() == [7, 3]
 
 
-def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
+def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments(
+    monkeypatch,
+):
     from contextlib import nullcontext
     from types import SimpleNamespace
 
     from embodichain.lab.evaluation import (
+        BooleanRule,
         EvaluationSpec,
         EvaluationStatus,
         PredicateDefinition,
         PredicateMeasurement,
         PredicateSpec,
+        RuleSession,
         TemporalRule,
         builtin_predicates,
         evaluate_recorded_rules,
@@ -2781,6 +2785,15 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
         )
 
     measured = Mock(side_effect=measure)
+    advances = []
+    advance_window = RuleSession._advance_window
+
+    def count_advance(session, history, rule, measured, step, revisions, active):
+        if rule.ref == "near":
+            advances.append(step)
+        return advance_window(session, history, rule, measured, step, revisions, active)
+
+    monkeypatch.setattr(RuleSession, "_advance_window", count_advance)
     registry = builtin_predicates()
     registry.register(
         "counted_near", PredicateDefinition(1, ("position", "target"), dict, measured)
@@ -2797,8 +2810,9 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
                     {"tolerance": 0.5},
                 ),
                 "near_goal": TemporalRule("hold_for", "near", 1, steps=2),
+                "ready": BooleanRule("all", ("near_goal", "near")),
             },
-            ("near_goal", "near"),
+            ("near_goal", "ready"),
         )
     )
     bound = graph.select("near_goal")
@@ -2817,7 +2831,7 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
             ("raised",),
         )
     )
-    conditions = {"near_goal": bound, "raised": raised, "near": graph.select("near")}
+    conditions = {"near_goal": bound, "raised": raised, "ready": graph.select("ready")}
     declaration = {
         "program_id": "measured_hold",
         "integration": {
@@ -2856,7 +2870,7 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
                 "validators": [
                     {"kind": "condition", "ref": "near_goal"},
                     {"kind": "condition", "ref": "raised"},
-                    {"kind": "condition", "ref": "near"},
+                    {"kind": "condition", "ref": "ready"},
                 ],
             },
         },
@@ -2967,6 +2981,10 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
             [True, False] if occurrence == 0 else [False, False]
         )
         reports.append(segment.metadata["validation"]["validators"][0]["result"])
+        shared = segment.metadata["validation"]["validators"][2]["result"]
+        assert shared["rules"]["near_goal"] == reports[-1]["rules"]["near_goal"]
+        assert "ready" not in reports[-1]["rules"]
+        assert shared["evaluation_identity"] == conditions["ready"].identity
         lifts.append(
             segment.metadata["validation"]["validators"][1]["result"]["rules"][
                 "raised"
@@ -2982,6 +3000,7 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments():
     assert lifts[0] == pytest.approx([0.2, 0.2])
     assert lifts[1] == pytest.approx([0.0])
     assert measured.call_count == len(revisions) == 4
+    assert advances == [1, 2, 3, 4]
     history = {"raw_observations": export_observation_history(env.observation_manager)}
     result = evaluate_recorded_rules(
         bound,

@@ -47,8 +47,9 @@ from embodichain.lab.evaluation import (
     RuleSession,
 )
 from embodichain.lab.evaluation.observations import (
-    _rule_report,
     _advance_observation,
+    _combine_selections,
+    _rule_report,
 )
 from embodichain.lab.evaluation._recording import _is_segment_start_field
 from embodichain.lab.evaluation._predicates import (
@@ -324,6 +325,9 @@ class SimulationSegmentPolicyPort:
         self._validator_active_masks: dict[int, torch.Tensor] = {}
         self._lift_baselines: dict[int, torch.Tensor] = {}
         self._evaluation_specs: dict[str, CompiledEvaluation] = {}
+        self._evaluation_groups: tuple[
+            tuple[tuple[str, ...], CompiledEvaluation], ...
+        ] = ()
         self._evaluation_fields: tuple[str, ...] = ()
         self._evaluation_initial = {}
         self._evaluation_sessions: dict[str, RuleSession] = {}
@@ -457,6 +461,7 @@ class SimulationSegmentPolicyPort:
         session._validator_active_masks = {}
         session._lift_baselines = {}
         session._evaluation_specs = {}
+        session._evaluation_groups = ()
         session._evaluation_fields = ()
         session._evaluation_initial = {}
         session._evaluation_sessions = {}
@@ -858,6 +863,7 @@ class SimulationSegmentPolicyPort:
             for validator in segment.validators
             if type(validator) is CompiledConditionValidator
         }
+        self._evaluation_groups = _combine_selections(self._evaluation_specs)
         required = tuple(
             dict.fromkeys(
                 field
@@ -927,8 +933,8 @@ class SimulationSegmentPolicyPort:
         if self._evaluation_initial:
             frame = replace(frame, fields={**frame.fields, **self._evaluation_initial})
         measurements = {}
-        for ref, spec in self._evaluation_specs.items():
-            session = self._evaluation_sessions.get(ref)
+        for refs, spec in self._evaluation_groups:
+            session = self._evaluation_sessions.get(refs[0])
             if session is None:
                 rows = self._evaluation_rows
                 session = RuleSession(
@@ -937,9 +943,9 @@ class SimulationSegmentPolicyPort:
                     episode_ids=tuple(episode_owner.episode_ids[row] for row in rows),
                     start_step=start,
                     device=self._env_ids.device,
-                    scope=f"{ref}@{start}",
+                    scope=f"segment@{start}",
                 )
-                self._evaluation_sessions[ref] = session
+                self._evaluation_sessions.update(dict.fromkeys(refs, session))
             _advance_observation(
                 session,
                 frame,
@@ -972,10 +978,10 @@ class SimulationSegmentPolicyPort:
                 witness_steps[active] = root.witness_steps
                 witness_revisions[active] = root.witness_revisions
             graph_trace = {
-                "evaluation_identity": session.compiled.identity,
+                "evaluation_identity": validator.spec.identity,
                 "rules": {
-                    name: _rule_report(result)
-                    for name, result in snapshot.rules.items()
+                    name: _rule_report(snapshot.rules[name])
+                    for name, _ in validator.spec._nodes
                 },
             }
         accepted = status == EvaluationStatus.SATISFIED

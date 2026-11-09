@@ -18,17 +18,20 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping
+from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from . import EvaluationStatus
-from ._recording import _field_projection, _foreign_layouts
+from ._graph import CompiledEvaluation
+from ._recording import _field_projection, _foreign_layouts, _joint_layout_pairs
 
 if TYPE_CHECKING:
     import torch
 
-    from . import CompiledEvaluation, RuleSession
+    from . import RuleSession
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
 
@@ -76,6 +79,48 @@ def _graph_frame_inputs(
     for field in _foreign_layouts(descriptors):
         del values[field], valid[field]
     return values, valid
+
+
+def _combine_selections(
+    selections: Mapping[str, CompiledEvaluation],
+) -> tuple[tuple[tuple[str, ...], CompiledEvaluation], ...]:
+    """Share compiled dependencies without changing evidence qualification."""
+    groups = []
+    for ref, spec in selections.items():
+        fields = set(spec.required_fields)
+        for members, nodes, required in groups:
+            # A union must not cause a channel to be rejected by a joint-order
+            # check that did not apply to it in the original selection.
+            if any(
+                (command in fields) != (position in fields)
+                or (command in required) != (position in required)
+                for command, position in _joint_layout_pairs(required | fields)
+            ):
+                continue
+            if all(nodes.get(name, node) is node for name, node in spec._nodes):
+                members[ref] = spec
+                nodes.update(spec._nodes)
+                required.update(fields)
+                break
+        else:
+            # Independently compiled libraries may also reuse a local name.
+            groups.append(({ref: spec}, dict(spec._nodes), fields))
+    combined = []
+    for members, nodes, fields in groups:
+        refs = tuple(members)
+        spec = members[refs[0]]
+        if len(refs) > 1:
+            specs = tuple(members.values())
+            spec = CompiledEvaluation(
+                tuple(dict.fromkeys(root for graph in specs for root in graph.roots)),
+                tuple(sorted(fields)),
+                sha256(
+                    json.dumps([graph.identity for graph in specs]).encode()
+                ).hexdigest(),
+                tuple(nodes.items()),
+            )
+        combined.append((refs, spec))
+    return tuple(combined)
 
 
 def _json_metric(value):

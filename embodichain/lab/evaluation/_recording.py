@@ -320,17 +320,21 @@ def _descriptor_value(descriptor, name, default=None):
     return getattr(descriptor, name, default)
 
 
+def _joint_layout_pairs(fields):
+    for command in fields:
+        if command.startswith("robot/") and command.endswith("/command"):
+            position = command.removesuffix("/command") + "/qpos"
+            if position in fields:
+                yield command, position
+
+
 def _foreign_layouts(descriptors):
     invalid = set()
-    for field, descriptor in descriptors.items():
-        if not field.startswith("robot/") or not field.endswith("/command"):
-            continue
-        position = field.removesuffix("/command") + "/qpos"
-        if position in descriptors and (
-            tuple(_descriptor_value(descriptor, "joint_names", ()))
-            != tuple(_descriptor_value(descriptors[position], "joint_names", ()))
+    for command, position in _joint_layout_pairs(descriptors):
+        if tuple(_descriptor_value(descriptors[command], "joint_names", ())) != tuple(
+            _descriptor_value(descriptors[position], "joint_names", ())
         ):
-            invalid.update((field, position))
+            invalid.update((command, position))
     return invalid
 
 

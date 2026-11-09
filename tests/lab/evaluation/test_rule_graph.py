@@ -84,6 +84,54 @@ def test_registered_predicate_boolean_and_missing_evidence():
     assert result["progress"].status.tolist() == [Status.UNAVAILABLE] * 2
 
 
+def test_shared_segment_sessions_preserve_selection_qualification_and_names():
+    from embodichain.lab.evaluation.observations import _combine_selections
+
+    registry = builtin_predicates()
+    position = "robot/arm/gripper/qpos"
+    command = "robot/arm/gripper/command"
+    compiled = registry.compile(
+        EvaluationSpec(
+            {
+                "preset": PredicateSpec(
+                    "command_preset_match",
+                    {"position": position},
+                    {"preset": "closed", "positions": [0.0], "tolerance": 0.1},
+                ),
+                "tracking": PredicateSpec(
+                    "command_position_match",
+                    {"position": position, "command": command},
+                    {"tolerance": 0.1},
+                ),
+            },
+            ("preset", "tracking"),
+        )
+    )
+    preset, tracking = compiled.select("preset"), compiled.select("tracking")
+    # Foreign command order invalidates the pair, but cannot invalidate a
+    # separately selected preset that never used the command channel.
+    assert _combine_selections({"preset": preset, "tracking": tracking}) == (
+        (("preset",), preset),
+        (("tracking",), tracking),
+    )
+    independent = registry.compile(
+        EvaluationSpec(
+            {
+                "preset": PredicateSpec(
+                    "command_preset_match",
+                    {"position": position},
+                    {"preset": "open", "positions": [1.0], "tolerance": 0.1},
+                ),
+            },
+            ("preset",),
+        )
+    )
+    assert _combine_selections({"first": preset, "second": independent}) == (
+        (("first",), preset),
+        (("second",), independent),
+    )
+
+
 def test_temporal_witnesses_and_partial_reset_are_row_local():
     graph = _graph()
     session = RuleSession(graph, env_ids=(4, 1), episode_ids=(9, 8), scope="pick/0")
