@@ -1819,6 +1819,19 @@ def test_segment_fragment_payloads_are_independent_and_keep_provenance() -> None
                 "metadata": {
                     "task_program_id": "repeat_pick_place",
                     "program_segment_id": "pick_0",
+                    "segment_contract": {
+                        "segment_id": "pick_0",
+                        "prerequisites": [],
+                        "outcomes": [
+                            {
+                                "kind": "held",
+                                "ref": "cube",
+                                "assurance": "symbolic",
+                                "status": ["satisfied"],
+                            }
+                        ],
+                        "accepted_mask": [True],
+                    },
                 },
             },
             {
@@ -1859,6 +1872,10 @@ def test_segment_fragment_payloads_are_independent_and_keep_provenance() -> None
     assert fragment_metadata["truncated"] is False
     assert fragment_metadata["segments"][0]["start_step"] == 0
     assert fragment_metadata["segments"][0]["end_step"] == 2
+    assert fragment_metadata["segments"][0]["instruction"] == "Pick the cube"
+    assert fragment_metadata["segments"][0]["metadata"]["segment_contract"] == (
+        metadata["segments"][0]["metadata"]["segment_contract"]
+    )
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")

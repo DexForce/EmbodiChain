@@ -32,6 +32,8 @@ embodichain.lab.task_program
       SequenceCfg
       RepeatCfg
       SegmentCfg
+      SegmentContractCfg
+      SegmentEvidenceCfg
       ParallelCfg
       BarrierCfg
       WaitStablePostCfg
@@ -424,3 +426,13 @@ MLLM frontend
 .. autofunction:: embodichain.agents.mllm.decode_mllm_task_program
 
 .. autofunction:: embodichain.agents.mllm.compile_mllm_task_program
+
+
+Segment acceptance contracts
+----------------------------
+
+.. autoclass:: SegmentContractCfg
+   :members:
+
+.. autoclass:: SegmentEvidenceCfg
+   :members:

@@ -139,11 +139,11 @@ def _evaluate_final_frame(
     )
 
 
-def _evaluate_frame_rule(ref, spec, frame, device, measurements):
-    values, valid = _graph_frame_inputs(spec, frame)
+def _evaluate_frame_rule(ref, spec, frame, device, measurements, *, rows=None):
+    values, valid = _graph_frame_inputs(spec, frame, rows)
     results = spec._evaluate(
         values,
-        len(frame.episode_ids),
+        len(frame.episode_ids) if rows is None else rows.numel(),
         device,
         valid,
         None,

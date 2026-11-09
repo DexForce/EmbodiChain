@@ -48,6 +48,8 @@ from .schema import (
     RegisteredSemanticCallCfg,
     RepeatCfg,
     SegmentCfg,
+    SegmentContractCfg,
+    SegmentEvidenceCfg,
     SemanticCallCfg,
     SequenceCfg,
     TargetCfg,
@@ -399,6 +401,34 @@ def _construct(
         raise
     except (TypeError, ValueError) as exc:
         raise _error("invalid_value", path, str(exc)) from exc
+
+
+def _decode_segment_contract(value: object, *, path: ConfigPath) -> SegmentContractCfg:
+    raw = _expect_mapping(value, path=path)
+    _validate_fields(
+        raw,
+        allowed=frozenset({"prerequisites", "outcomes"}),
+        required=frozenset({"outcomes"}),
+        path=path,
+    )
+    groups = {}
+    for group in ("prerequisites", "outcomes"):
+        groups[group] = []
+        for index, item in enumerate(
+            _expect_list(raw.get(group, []), path=(*path, group))
+        ):
+            item_path = (*path, group, index)
+            entry = _expect_mapping(item, path=item_path)
+            _validate_fields(
+                entry,
+                allowed=frozenset({"kind", "ref", "assurance", "required"}),
+                required=frozenset({"kind", "ref"}),
+                path=item_path,
+            )
+            groups[group].append(
+                _construct(SegmentEvidenceCfg, path=item_path, **entry)
+            )
+    return _construct(SegmentContractCfg, path=path, **groups)
 
 
 def _decode_pose(value: object, *, path: ConfigPath) -> PoseCfg:
@@ -923,7 +953,15 @@ def _decode_program_node(
         _validate_fields(
             mapping,
             allowed=frozenset(
-                {"kind", "name", "steps", "post", "validators", "instruction"}
+                {
+                    "kind",
+                    "name",
+                    "steps",
+                    "post",
+                    "validators",
+                    "instruction",
+                    "contract",
+                }
             ),
             required=frozenset({"kind", "name", "steps"}),
             path=path,
@@ -967,6 +1005,11 @@ def _decode_program_node(
             ),
             post=post,
             validators=validators,
+            contract=(
+                _decode_segment_contract(mapping["contract"], path=(*path, "contract"))
+                if "contract" in mapping
+                else None
+            ),
         )  # type: ignore[return-value]
 
     if kind == "parallel":

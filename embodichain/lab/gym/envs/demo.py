@@ -140,6 +140,11 @@ def _segment_outcome_kind(
         return "cancelled"
 
     validation = metadata.get("validation")
+    contract = metadata.get("segment_contract")
+    if isinstance(contract, Mapping) and (
+        _validation_mask_value(contract, "prerequisite_mask", env_id) is False
+    ):
+        return "validation_failed"
     if isinstance(validation, Mapping):
         if _validation_mask_value(validation, "runtime_success_mask", env_id) is False:
             return "runtime_failed"
@@ -1250,17 +1255,24 @@ def execute_demo_episode(
                     "after an emergency safe-stop attempt."
                 ) from action_error
 
-            traced_terminal_runtime_failure = (
+            contract = segment.metadata.get("segment_contract")
+            traced_boundary_rejection = (
                 action_count == 0
                 and actions_exhausted
                 and segment_reason is None
                 and segment.validator is not None
-                and _has_terminal_runtime_failure_trace(segment)
+                and (
+                    _has_terminal_runtime_failure_trace(segment)
+                    or (
+                        isinstance(contract, Mapping)
+                        and contract.get("prerequisites_rejected_all") is True
+                    )
+                )
             )
             if (
                 action_count == 0
                 and segment_reason is None
-                and not traced_terminal_runtime_failure
+                and not traced_boundary_rejection
             ):
                 fatal_reason = "empty_segment"
                 segment_reason = fatal_reason

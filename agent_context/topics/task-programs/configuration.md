@@ -301,6 +301,41 @@ matching a target whose relative pose composes the complete parent transform.
 
 ## Named evaluation rules
 
+### Segment acceptance contracts
+
+Use an explicit segment when an outcome can be described and verified at a
+meaningful boundary given its incoming state. For example, grasp and lift a
+bottle as one subgoal. Keep a tightly coupled transport and tilt in one
+segment when the intended outcome is a combined maneuver with no useful
+intermediate acceptance boundary. A segment may contain one call or a
+sequence of calls. It can depend on state produced by earlier segments.
+
+An optional `contract` names incoming `prerequisites` and required or
+diagnostic `outcomes`. The segment's `instruction` remains the language
+label. For example, the transport segment can require
+`{kind: held, ref: bottle}` before dispatch and name
+`{kind: validator, ref: 0}` in its outcomes. The validator can refer to a
+shared named condition. An incoming `condition` selects an instantaneous
+exported rule and acquires its raw fields at the segment boundary. Use a
+named temporal validator for observations acquired during the segment.
+
+`held` and `released` read symbolic TaskState. Report their authority as
+symbolic even when a task also records a measured lift or pose.
+`call_effect` references a local sequential call index and declares
+`assurance: projected|verified`. Verified references require a verifying
+preset and effect monitor. `validator` and `post_policy` reuse existing
+zero-based segment indices and cached results. An `unsupported` capability
+reports unavailable evidence, and blocks acceptance when it is required.
+
+Use `inspect_deployment.py --strict-contracts` to require each segment to
+have an instruction and contract. This checks declaration structure,
+bindings and supported authorities. The runtime checks measured truth at
+the incoming or outgoing boundary. Segment reports and dataset fragments
+retain the instruction, separate evidence statuses and the acceptance mask.
+Programs that omit contracts keep the existing execution path.
+
+### Shared rule components
+
 Select the library in the runnable deployment.
 
 ```yaml
@@ -346,6 +381,12 @@ as logical aliases to native robot links. Use `robot_links/<alias>/position`
 for measured link distance. Trusted Python hosts can pass an
 `evaluation_registry` when loading the deployment. YAML contains only
 registered kind IDs and inert parameters.
+
+`near_frame_target` compares a measured XYZ position with a target offset in
+an observed object's frame. In a configured deployment its
+`params.transport_target` can select the target ID of an existing
+`move_held_object` lowerer. The rule then uses that lowerer's local offset
+and checks that its reference binding names the same object.
 
 The `lift` predicate can bind its `baseline` to
 `rigid_objects/<entity>/segment_start_frame`. Segment execution captures that
