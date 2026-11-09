@@ -44,6 +44,22 @@
       "owner": "tests/sim/objects/test_{light,rigid_object,articulation,rigid_object_group}.py",
       "changed": "Use 512 scene nodes and a 64x64 unused viewport in small object fixtures; release test-owned references before queue flushing.",
       "contract": "Backend/device, arena counts, models, timesteps, controller inputs, tolerances and all physical assertions are retained. Pixel tests and standalone default-capacity regressions are unchanged. Native state observations must end with no Worlds, managers or queued cleanup."
+    },
+    {
+      "owner": "tests/sim/motion/solvers/test_ssik_solver.py",
+      "changed": "Validate finite rigid transforms explicitly and compute rotation error from the relative matrix, avoiding unnecessary spectral orthogonalization in the reference oracle.",
+      "contract": "Translation and angular thresholds remain at 1e-5; malformed inputs, scaling and reflections are rejected rather than normalized. Apply the identical oracle stabilization to baseline and candidate benchmark variants. Recorded original 12-case prefix reproduces SVD failure on finite rotations with <3e-7 orthogonality error; no solver result/limit/winding assertion is removed."
+    },
+    {
+      "owner": "tests/sim/motion/workspace/test_manipulability.py",
+      "changed": "Reuse one class-scoped native CobotMagic scene and reset object state before each analysis; keep fresh analyzers/configs and independent cache directories. Move a mock-only cache-aggregate test to the existing no_sim metric unit class.",
+      "removed": [
+        "TestAnalyzerManipulability::test_no_solver_hit_recomputes_aggregates_under_current_config"
+      ],
+      "retained": [
+        "TestManipulabilityMetricUnit::test_no_solver_hit_recomputes_aggregates_under_current_config"
+      ],
+      "contract": "All14case assertions remain, with unchanged robot/solver/backend/device/arena settings,100sample workloads and seed42. Only World lifetime changes; at most one scene/manager may remain inside the class, and both must return to zero when its fixture ends."
     }
   ],
   "measurement": "Report original, cleaned and final execution policy separately. Preserve raw failures/skips and explicitly list removed/consolidated coverage; do not add stage percentages."
