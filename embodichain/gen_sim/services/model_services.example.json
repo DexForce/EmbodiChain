@@ -1,0 +1,120 @@
+{
+  "model_services": {
+    "profiles": {
+      "task_chat": {
+        "adapter": "openai_compatible",
+        "model": {
+          "env": "OPENAI_MODEL"
+        },
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": {
+          "env": "OPENAI_BASE_URL"
+        },
+        "timeout_s": 120,
+        "max_attempts": 1
+      },
+      "scene_chat": {
+        "adapter": "openai_compatible",
+        "model": {
+          "env": "OPENAI_MODEL"
+        },
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": {
+          "env": "OPENAI_BASE_URL"
+        },
+        "timeout_s": 120,
+        "max_attempts": 1
+      },
+      "images": {
+        "adapter": "image_http",
+        "base_url": {
+          "env": "SCENE_ENGINE_IMAGE_GENERATION_BASE_URL"
+        },
+        "timeout_s": 120,
+        "max_attempts": 1,
+        "options": {
+          "health_path": {
+            "env": "SCENE_ENGINE_IMAGE_GENERATION_HEALTH_PATH"
+          },
+          "generate_image_by_prompt_path": {
+            "env": "SCENE_ENGINE_IMAGE_GENERATION_BY_PROMPT_PATH"
+          }
+        }
+      },
+      "segmentation": {
+        "adapter": "segmentation_http",
+        "base_url": {
+          "env": "SCENE_ENGINE_IMAGE_SEGMENTATION_BASE_URL"
+        },
+        "timeout_s": 120,
+        "max_attempts": 1,
+        "options": {
+          "health_path": {
+            "env": "SCENE_ENGINE_IMAGE_SEGMENTATION_HEALTH_PATH"
+          },
+          "segment_by_prompt_path": {
+            "env": "SCENE_ENGINE_IMAGE_SEGMENTATION_BY_PROMPT_PATH"
+          }
+        }
+      },
+      "geometry": {
+        "adapter": "geometry_http",
+        "base_url": {
+          "env": "SCENE_ENGINE_GEOMETRY_GENERATION_BASE_URL"
+        },
+        "timeout_s": 120,
+        "max_attempts": 1,
+        "options": {
+          "health_path": {
+            "env": "SCENE_ENGINE_GEOMETRY_GENERATION_HEALTH_PATH"
+          },
+          "generate_objects_path": {
+            "env": "SCENE_ENGINE_GEOMETRY_GENERATION_OBJECTS_PATH"
+          }
+        }
+      },
+      "articulation": {
+        "adapter": "articulation_http",
+        "base_url": {
+          "env": "ASSET_ENGINE_ARTICULATED_GENERATION_BASE_URL"
+        },
+        "timeout_s": 7200,
+        "max_attempts": 1,
+        "options": {
+          "health_path": {
+            "env": "ASSET_ENGINE_ARTICULATED_GENERATION_HEALTH_PATH"
+          },
+          "generate_path": {
+            "env": "ASSET_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH"
+          }
+        }
+      },
+      "articulation_jobs": {
+        "adapter": "articulation_jobs_http",
+        "base_url": {
+          "env": "ARTICULATION_SERVER_BASE_URL"
+        },
+        "timeout_s": 30
+      }
+    },
+    "roles": {
+      "task_interpretation": "task_chat",
+      "task_image_grounding": "task_chat",
+      "graph_localization": "task_chat",
+      "scene_understanding": "scene_chat",
+      "scene_edit": "scene_chat",
+      "scene_asset_orientation": "scene_chat",
+      "scene_asset_dimensions": "scene_chat",
+      "asset_orientation": "scene_chat",
+      "asset_dimensions": "scene_chat",
+      "asset_semantics": "scene_chat",
+      "asset_physics": "scene_chat",
+      "image_generation": "images",
+      "image_segmentation": "segmentation",
+      "geometry_reconstruction": "geometry",
+      "articulated_generation": "articulation",
+      "articulation_jobs": "articulation_jobs",
+      "task_semantic_planning": "task_chat"
+    }
+  }
+}

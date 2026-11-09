@@ -71,12 +71,15 @@ require a new provider.
    :nosignatures:
 
    RobotHandGeometryCfg
+   ordered_pad_line_world
    build_parallel_jaw_hand_geometry
    RobotHandGeometryProvider
    RobotCoordinatedGraspProvider
 
 .. autoclass:: RobotHandGeometryCfg
    :members:
+
+.. autofunction:: ordered_pad_line_world
 
 .. autofunction:: build_parallel_jaw_hand_geometry
 

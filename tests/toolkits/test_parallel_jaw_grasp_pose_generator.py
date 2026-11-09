@@ -20,7 +20,10 @@ from __future__ import annotations
 
 import ast
 import gc
+import importlib
 from pathlib import Path
+import subprocess
+import sys
 from typing import Any, ClassVar
 from unittest.mock import Mock
 import weakref
@@ -47,6 +50,58 @@ from embodichain.toolkits.graspkit.pg_grasp._antipodal_backend import (
     _AntipodalMeshBackend,
 )
 from embodichain.toolkits.graspkit.pg_grasp import pose_generator as module
+
+
+def test_public_facade_preserves_canonical_export_identity() -> None:
+    # These are the original star-import owners, including explicit-import names
+    # outside the narrower package __all__ contract.
+    for name in (
+        "embodichain.toolkits.graspkit.pose_generator",
+        "embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler",
+        "embodichain.toolkits.graspkit.pg_grasp.collision_checker",
+        "embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker",
+        "embodichain.toolkits.graspkit.pg_grasp.fixed_geometry",
+        "embodichain.toolkits.graspkit.pg_grasp.model_geometry",
+        "embodichain.toolkits.graspkit.pg_grasp.pose_generator",
+    ):
+        owner = importlib.import_module(name)
+        for exported in owner.__all__:
+            assert getattr(pg_grasp, exported) is getattr(owner, exported)
+    with pytest.raises(AttributeError, match="has no attribute"):
+        getattr(pg_grasp, "unknown_grasp_backend")
+
+
+def test_numeric_grasp_entries_do_not_import_runtime_backends() -> None:
+    code = """
+import importlib
+import importlib.abc
+import sys
+class BlockRuntime(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        forbidden = (
+            'embodichain.lab', 'embodichain.gen_sim', 'embodichain_robots',
+            'embodichain_tasks', 'dexsim', 'fcl',
+            'embodichain.toolkits.graspkit.pg_grasp._antipodal_backend',
+            'embodichain.toolkits.graspkit.pg_grasp.collision_checker',
+        )
+        if any(fullname == p or fullname.startswith(p + '.') for p in forbidden):
+            raise AssertionError('Unexpected runtime import: ' + fullname)
+sys.meta_path.insert(0, BlockRuntime())
+for suffix in (
+    'hand_envelope', 'pg_grasp.constraints', 'pg_grasp.opening',
+    'pg_grasp.contact_fit', 'pg_grasp.preshape', 'pg_grasp.proposals',
+):
+    module = importlib.import_module('embodichain.toolkits.graspkit.' + suffix)
+    for exported in module.__all__:
+        getattr(module, exported)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 class _Backend:

@@ -1066,6 +1066,8 @@ def test_executor_without_transform_factory_is_unchanged() -> None:
         (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
         install_effect_monitor=False,
     )
+    assert system.runtime.evidence_collector is system.collector
+    assert system.collector.calls == []
 
     result = system.runtime.start(_call("baseline"), workflow_id="baseline-workflow")
 
@@ -3071,3 +3073,39 @@ def test_split_grasp_and_place_preserve_verified_held_state_across_workflows() -
         "pick",
         "place",
     ]
+
+
+def test_composite_lifecycle_requires_one_explicit_owner():
+    from types import SimpleNamespace
+    from embodichain.lab.task_program.runtime import (
+        CompositeTaskProgramPlanLifecycleFactory,
+    )
+
+    request, engine = object(), object()
+    lifecycle = SimpleNamespace(
+        on_plan_installed=lambda attempt: None, on_execution_aborted=lambda reason: None
+    )
+    calls = []
+
+    class Factory:
+        def __init__(self, selected):
+            self.selected = selected
+
+        def create_plan_lifecycle(self, actual, *, engine):
+            calls.append((actual, engine))
+            return self.selected
+
+    selected, absent = Factory(lifecycle), Factory(None)
+    composed = CompositeTaskProgramPlanLifecycleFactory((absent, selected))
+    assert composed.create_plan_lifecycle(request, engine=engine) is lifecycle
+    assert calls == [(request, engine), (request, engine)]
+    with pytest.raises(ValueError, match="More than one lifecycle"):
+        CompositeTaskProgramPlanLifecycleFactory(
+            (selected, Factory(lifecycle))
+        ).create_plan_lifecycle(request, engine=engine)
+    with pytest.raises(ValueError, match="registered twice"):
+        CompositeTaskProgramPlanLifecycleFactory((selected, selected))
+    with pytest.raises(TypeError, match="unsupported execution owner"):
+        CompositeTaskProgramPlanLifecycleFactory(
+            (Factory(object()),)
+        ).create_plan_lifecycle(request, engine=engine)

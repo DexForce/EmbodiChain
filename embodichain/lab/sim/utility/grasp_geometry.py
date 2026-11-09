@@ -42,9 +42,11 @@ from embodichain.utils import configclass
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects.robot import Robot
+    from embodichain.lab.sim.motion.solvers import SolverCfg
 
 __all__ = [
     "RobotHandGeometryCfg",
+    "ordered_pad_line_world",
     "build_parallel_jaw_hand_geometry",
     "RobotHandGeometryProvider",
     "RobotCoordinatedGraspProvider",
@@ -141,7 +143,10 @@ def _validate_cfg_values(result: RobotHandGeometryCfg) -> None:
             raise ValueError(f"{name} must be finite and positive.")
 
 
-def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
+def _resolve_hand_frame(
+    robot: Robot, cfg: RobotHandGeometryCfg
+) -> tuple[Path, tuple[str, ...], tuple[str, ...], SolverCfg]:
+    """Resolve explicit topology and fixed frames without reading robot state."""
     path = Path(robot.cfg.fpath).expanduser().resolve(strict=True)
     document = ET.parse(path).getroot()
     joints = {joint.attrib["name"]: joint for joint in document.findall("joint")}
@@ -195,15 +200,24 @@ def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
             "Unsupported hand frame: hand root and motion solver end link must "
             "be connected only by fixed URDF joints."
         )
-    current = robot.get_qpos()
-    if (
-        not isinstance(current, torch.Tensor)
-        or current.ndim != 2
-        or not len(current)
-        or current.shape[1] != len(robot.joint_names)
-    ):
-        raise ValueError("Robot positions must match the full named joint order.")
-    states = current[0:1].detach().repeat(cfg.sample_count, 1)
+    return path, link_names, joint_names, solver
+
+
+def _sample_hand_stroke(
+    robot: Robot,
+    cfg: RobotHandGeometryCfg,
+    reference_qpos: torch.Tensor,
+    *,
+    link_names: list[str],
+    joint_names: list[str],
+    solver: SolverCfg,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Share named closing FK between URDF surfaces and native shape capture.
+
+    Callers retain their reference-state validation, link order and inverse
+    arithmetic. This helper never reads or writes the robot's live state.
+    """
+    states = reference_qpos.detach().repeat(cfg.sample_count, 1)
     opened, closed = (
         states.new_tensor(values) for values in (cfg.open_qpos, cfg.closed_qpos)
     )
@@ -234,7 +248,28 @@ def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
         raise ValueError(
             "Unsupported hand frame: the declared motion TCP moves during hand actuation."
         )
-    relative = torch.linalg.inv(tools)[:, None] @ fk[:, :-1]
+    return fk[:, :-1], tools
+
+
+def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
+    path, link_names, joint_names, solver = _resolve_hand_frame(robot, cfg)
+    current = robot.get_qpos()
+    if (
+        not isinstance(current, torch.Tensor)
+        or current.ndim != 2
+        or not len(current)
+        or current.shape[1] != len(robot.joint_names)
+    ):
+        raise ValueError("Robot positions must match the full named joint order.")
+    fk, tools = _sample_hand_stroke(
+        robot,
+        cfg,
+        current[0:1],
+        link_names=link_names,
+        joint_names=joint_names,
+        solver=solver,
+    )
+    relative = torch.linalg.inv(tools)[:, None] @ fk
     clouds = sample_urdf_collision_surfaces(
         path,
         link_names=link_names,
@@ -264,6 +299,43 @@ def _capture(robot: Robot, cfg: RobotHandGeometryCfg) -> SampledHandGeometry:
     return SampledHandGeometry(
         torch.cat(body, dim=1).detach(), pad_tensor.detach(), gaps.detach()
     )
+
+
+def ordered_pad_line_world(robot: Robot, *, cfg: RobotHandGeometryCfg) -> torch.Tensor:
+    """Read the second-minus-first declared pad line without sampling the hand.
+
+    Args:
+        robot: Robot owning the configured hand, motion frame and link poses.
+        cfg: Explicit hand calibration. Its original pad-link order is preserved.
+
+    Returns:
+        Owned world-frame pad displacement, shape ``(B, 3)``. No geometry surfaces,
+        sampled FK grids or robot state writes are involved.
+
+    Raises:
+        ValueError: The hand/motion topology or observed pad poses are unsupported.
+    """
+    owned = _owned_cfg(cfg)
+    _resolve_hand_frame(robot, owned)
+    first, second = (
+        robot.get_link_pose(name, to_matrix=True) for name in owned.pad_link_names
+    )
+    if (
+        not isinstance(first, torch.Tensor)
+        or not isinstance(second, torch.Tensor)
+        or first.ndim != 3
+        or first.shape[-2:] != (4, 4)
+        or first.shape != second.shape
+        or not first.shape[0]
+        or first.device != second.device
+        or first.dtype != second.dtype
+        or not first.is_floating_point()
+    ):
+        raise ValueError("Declared pad poses must share a floating (B, 4, 4) layout.")
+    line = second[:, :3, 3].detach() - first[:, :3, 3].detach()
+    if not torch.isfinite(line).all():
+        raise ValueError("Declared pad positions must be finite.")
+    return line
 
 
 def build_parallel_jaw_hand_geometry(

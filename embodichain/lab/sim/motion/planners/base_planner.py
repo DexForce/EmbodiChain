@@ -454,6 +454,7 @@ class BasePlanner(ABC):
                 control_part=control_part,
                 dof=vels.shape[-1],
                 batch_size=vels.shape[0] if vels.ndim >= 3 else 1,
+                env_ids=getattr(self, "_planning_env_ids", None),
             )
 
         max_vel = torch.as_tensor(
