@@ -35,6 +35,10 @@ from dexsim.types import ActorType
 
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
 NUM_ARENAS = 4
 Z_TRANSLATION = 2.0
 # Newton converts principal-frame inertia diagonals through a float32 full
@@ -79,6 +83,9 @@ class BaseRigidObjectGroupTest:
             device=device,
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg_for_backend(physics),
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
         )
         self.sim = SimulationManager(config)
         self.physics = physics
@@ -287,11 +294,7 @@ class BaseRigidObjectGroupTest:
         """Clean up resources after each test method."""
         self.sim.destroy(exit_process=False)
         self.__dict__.clear()
-        import gc
-
-        gc.collect()
         SimulationManager.flush_cleanup_queue()
-        gc.collect()
 
 
 class TestRigidObjectGroupCPU(BaseRigidObjectGroupTest):

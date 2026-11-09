@@ -540,6 +540,19 @@ def test_flush_cleanup_queue_waits_after_running_pending_destroy(
     wait_scene_destruction.assert_called_once_with()
 
 
+@pytest.mark.parametrize("worlds", [0, 1])
+def test_wait_scene_destruction_collects_only_when_worlds_remain(
+    monkeypatch: pytest.MonkeyPatch, worlds: int
+) -> None:
+    """An empty World set needs no GC; cyclic live Worlds still get collected."""
+    counts = iter([worlds, 0])
+    monkeypatch.setattr(dexsim, "get_world_num", lambda: next(counts))
+    collect = MagicMock()
+    monkeypatch.setattr(gc, "collect", collect)
+    SimulationManager.wait_scene_destruction()
+    assert collect.call_count == worlds
+
+
 def test_flush_cleanup_queue_preserves_other_live_managers(monkeypatch):
     cleanup_queue = queue.Queue()
     cleanup_queue.put(MagicMock())

@@ -21,11 +21,22 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import LightCfg
 
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
 
 class TestLight:
     def setup_method(self):
         # Setup SimulationManager
-        config = SimulationManagerCfg(headless=True, device="cpu", num_envs=10)
+        config = SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=10,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
+        )
         self.sim = SimulationManager(config)
 
         # Create batch of lights
@@ -155,13 +166,11 @@ class TestLight:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
 
 class TestLightTypes:
@@ -170,17 +179,22 @@ class TestLightTypes:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Create a SimulationManager for each test."""
-        config = SimulationManagerCfg(headless=True, device="cpu", num_envs=4)
+        config = SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=4,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
+        )
         self.sim = SimulationManager(config)
         yield
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
     # ------------------------------------------------------------------
     # Creation tests
@@ -207,6 +221,11 @@ class TestLightTypes:
             uid=f"test_{light_type}",
             light_type=light_type,
             init_pos=(0.0, 0.0, 3.0),
+            direction=(0.0, -1.0, 0.0),
+            spot_angle_inner=20.0,
+            spot_angle_outer=40.0,
+            rect_width=2.0,
+            rect_height=1.5,
         )
         light = self.sim.add_light(cfg=cfg)
         assert light is not None, f"Failed to create light of type '{light_type}'"
@@ -300,46 +319,6 @@ class TestLightTypes:
     # ------------------------------------------------------------------
     # Type-specific property tests
     # ------------------------------------------------------------------
-
-    def test_spot_light_has_cone_angles(self):
-        """Spot light creation applies inner/outer cone angles from cfg."""
-        cfg = LightCfg(
-            uid="spot_test",
-            light_type="spot",
-            init_pos=(0.0, 0.0, 3.0),
-            direction=(0.0, 0.0, -1.0),
-            spot_angle_inner=20.0,
-            spot_angle_outer=40.0,
-        )
-        light = self.sim.add_light(cfg=cfg)
-        assert light is not None
-        # Should not crash on creation; spot_angle applied during reset()
-
-    def test_rect_light_has_dimensions(self):
-        """Rect light creation applies width/height from cfg."""
-        cfg = LightCfg(
-            uid="rect_test",
-            light_type="rect",
-            init_pos=(0.0, 0.0, 3.0),
-            direction=(0.0, 0.0, -1.0),
-            rect_width=2.0,
-            rect_height=1.5,
-        )
-        light = self.sim.add_light(cfg=cfg)
-        assert light is not None
-
-    @pytest.mark.parametrize("light_type", ["sun", "direction"])
-    def test_global_light_no_position_in_reset(self, light_type):
-        """Global light (sun/direction) reset does not set position."""
-        cfg = LightCfg(
-            uid=f"{light_type}_test",
-            light_type=light_type,
-            direction=(0.0, -1.0, 0.0),
-        )
-        light = self.sim.add_light(cfg=cfg)
-        assert light is not None
-        assert light.is_global
-        assert light.num_instances == 1
 
     @pytest.mark.parametrize("light_type", ["sun", "direction"])
     def test_reset_global_light_with_env_ids(self, light_type):

@@ -44,6 +44,10 @@ from embodichain.utils.math import matrix_from_quat
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 CHAIR_PATH = "Chair/chair.glb"
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
 NUM_ARENAS = 2
 Z_TRANSLATION = 2.0
 # Newton stores a full inertia tensor and converts it to/from the principal-frame
@@ -152,6 +156,9 @@ class BaseRigidObjectTest:
             device=device,
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg_for_backend(physics),
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
         )
         self.sim = SimulationManager(config)
         self.physics = physics
@@ -1173,13 +1180,11 @@ class BaseRigidObjectTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
 
 class TestRigidObjectCPU(BaseRigidObjectTest):
@@ -1289,6 +1294,9 @@ class TestRigidObjectNewtonMujoco:
                 device="cuda",
                 num_envs=1,
                 physics_cfg=physics_cfg,
+                scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+                width=TEST_VIEWPORT_SIZE,
+                height=TEST_VIEWPORT_SIZE,
             )
         )
         self.obj = self.sim.add_rigid_object(

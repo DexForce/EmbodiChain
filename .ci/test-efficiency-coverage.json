@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "baseline": "460939c83b6fc62f113b62af4798a89c42b3bec2",
+  "groups": [
+    {
+      "owner": "tests/sim/objects/test_light.py",
+      "removed": [
+        "TestLightTypes::test_spot_light_has_cone_angles",
+        "TestLightTypes::test_rect_light_has_dimensions",
+        "TestLightTypes::test_global_light_no_position_in_reset[sun]",
+        "TestLightTypes::test_global_light_no_position_in_reset[direction]"
+      ],
+      "retained": "TestLightTypes::test_create_each_light_type[spot-4,rect-4,sun-1,direction-1]",
+      "contract": "Native creation with nondefault cone/rectangle configuration; global-light identity and instance count. Original tests did not check readback of cone angles or dimensions, so no readback coverage is claimed."
+    },
+    {
+      "owner": "tests/utils/test_nms.py",
+      "changed": "3 seeds x 4 chunk sizes x 2 ordering policies use 64 rather than 400 poses; actual CPU execution is explicit.",
+      "retained": [
+        "24-case CPU seed/order/chunk matrix",
+        "400-pose partial/multirow tiles for both ordering policies",
+        "6000-pose heavy suppression for both ordering policies",
+        "Independent CUDA and CPU-input-offload/device coverage",
+        "Explicit empty, duplicates, float64, thresholds and deterministic priority cases"
+      ],
+      "contract": "Reference-equivalent selection and ordering, tile boundaries and bounded reference blocks. Large-input Cartesian repetition is reduced; unique branch and stress coverage remains."
+    },
+    {
+      "owner": "tests/sim/test_backend_parity.py;tests/sim/test_sim_manager_cfg.py;tests/sim/motion/planners/test_neural_planner.py",
+      "changed": "Module-level no_sim classification; no assertion or input changes.",
+      "contract": "Configuration, fake backends and fake ONNX/robot state do not initialize a native engine."
+    },
+    {
+      "owner": "embodichain/lab/sim/sim_manager.py",
+      "changed": "Consolidate post-World collections and skip a redundant collection when no Worlds remain.",
+      "contract": "Backend synchronization and child-before-parent release remain; queued cleanup still performs an outer full collection. Existing lifecycle regressions and complete native validation are required."
+    },
+    {
+      "owner": "tests/conftest.py",
+      "changed": "Clear reported sys.last_exc and legacy traceback fields before native/GPU user finalizers, with a fallback at global queue cleanup.",
+      "contract": "The original failed test remains failed; its frame-owned resources can be reclaimed before finalizers and the next test. Python 3.12 regression fails before the fix and passes afterward."
+    },
+    {
+      "owner": "tests/sim/objects/test_{light,rigid_object,articulation,rigid_object_group}.py",
+      "changed": "Use 512 scene nodes and a 64x64 unused viewport in small object fixtures; release test-owned references before queue flushing.",
+      "contract": "Backend/device, arena counts, models, timesteps, controller inputs, tolerances and all physical assertions are retained. Pixel tests and standalone default-capacity regressions are unchanged. Native state observations must end with no Worlds, managers or queued cleanup."
+    }
+  ],
+  "measurement": "Report original, cleaned and final execution policy separately. Preserve raw failures/skips and explicitly list removed/consolidated coverage; do not add stage percentages."
+}

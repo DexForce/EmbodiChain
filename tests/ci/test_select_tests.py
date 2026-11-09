@@ -1283,3 +1283,102 @@ def test_no_finalize_runner_preserves_pytest_result(
     assert result.returncode == exit_code, result.stdout + result.stderr
     assert summary in result.stdout
     assert not finalizer_marker.exists()
+
+
+@pytest.mark.parametrize("workers", [1, 8])
+def test_cpu_worker_budget_does_not_parallelize_native_lanes(workers: int) -> None:
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": {"fast": ["tests"], "gpu": ["tests"], "sim": ["tests"]},
+        "slow_lanes": {"slow-fast": ["tests"]},
+    }
+    commands = dict(build_commands(plan, cpu_workers=workers))
+    for lane in ("fast", "slow-fast"):
+        assert commands[lane][commands[lane].index("-n") + 1] == str(workers)
+    for lane in ("gpu", "sim"):
+        assert "-n" not in commands[lane]
+
+
+@pytest.mark.parametrize("workers", [0, -1, True, 1.5])
+def test_invalid_cpu_worker_budget_is_rejected(workers: object) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        build_commands({"mode": "full", "lanes": {}}, cpu_workers=workers)
+
+
+def test_metrics_and_duration_order_stay_inside_requested_lanes(tmp_path: Path) -> None:
+    plan = {
+        "mode": "full",
+        "lanes": {"fast": ["tests"], "gpu": ["tests"], "sim": ["tests"]},
+    }
+    commands = dict(
+        build_commands(
+            plan, metrics_dir=tmp_path / "metrics", cpu_duration_history=tmp_path
+        )
+    )
+    assert "--ci-duration-history" in commands["fast"]
+    assert "--no-loadscope-reorder" in commands["fast"]
+    for lane in ("gpu", "sim"):
+        assert "--ci-duration-history" not in commands[lane]
+        assert "--no-loadscope-reorder" not in commands[lane]
+        assert "--ci-metrics-dir" in commands[lane]
+
+
+def test_partial_cpu_history_keeps_unselected_cases_and_ignores_other_lanes(
+    tmp_path: Path,
+) -> None:
+    from scripts.ci.duration_history import merge_history
+
+    history = tmp_path / "history/history.json"
+    history.parent.mkdir()
+    history.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "phases": [
+                    {"nodeid": "unselected", "group": "other", "seconds": 7.0},
+                    {"nodeid": "updated", "group": "module", "seconds": 20.0},
+                ],
+            }
+        )
+    )
+    metrics = tmp_path / "metrics"
+    (metrics / "fast").mkdir(parents=True)
+    (metrics / "gpu").mkdir()
+    (metrics / "fast/gw0.json").write_text(
+        json.dumps(
+            {
+                "exitstatus": 0,
+                "phases": [
+                    {"nodeid": "updated@module", "group": "module", "seconds": 1.0},
+                    {"nodeid": "updated@module", "group": "module", "seconds": 2.0},
+                ],
+            }
+        )
+    )
+    (metrics / "gpu/main.json").write_text(
+        json.dumps(
+            {
+                "exitstatus": 0,
+                "phases": [
+                    {"nodeid": "updated", "group": "module", "seconds": 1000.0},
+                ],
+            }
+        )
+    )
+    (metrics / "fast/failed.json").write_text(
+        json.dumps(
+            {
+                "exitstatus": 1,
+                "phases": [
+                    {"nodeid": "unselected", "group": "other", "seconds": 9999.0},
+                ],
+            }
+        )
+    )
+    merge_history(metrics, history)
+    values = {
+        row["nodeid"]: row["seconds"]
+        for row in json.loads(history.read_text())["phases"]
+    }
+    assert values == {"unselected": 7.0, "updated": 3.0}
