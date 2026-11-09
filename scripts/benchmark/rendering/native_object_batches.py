@@ -318,6 +318,7 @@ def _worker(args: argparse.Namespace) -> None:
         warmup=args.warmup,
         repeats=args.repeats,
         denoising="optix",
+        measurement_order=args.order,
     )
     Path(args.worker_output).write_text(
         json.dumps(
@@ -337,7 +338,9 @@ def _report(results: dict[str, Any], path: Path) -> None:
         "# Camera/light facade migration comparison",
         "",
         "```json",
-        json.dumps(after["environment"], indent=2),
+        json.dumps(
+            {name: run["environment"] for name, run in results.items()}, indent=2
+        ),
         "```",
         "",
         "## Time & Memory",
@@ -396,6 +399,9 @@ def run_all_benchmarks() -> None:
     )
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--repeats", type=int, default=20)
+    parser.add_argument(
+        "--order", choices=("baseline-first", "batch-first"), default="baseline-first"
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--worker-output", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--source-root", type=Path, help=argparse.SUPPRESS)
@@ -423,7 +429,10 @@ def run_all_benchmarks() -> None:
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     results = {}
-    for variant, source in (("baseline", reference), ("batch", root)):
+    variants = [("baseline", reference), ("batch", root)]
+    if args.order == "batch-first":
+        variants.reverse()
+    for variant, source in variants:
         child = output.with_name(output.stem + f"-{variant}.json")
         log = child.with_suffix(".log")
         command = [
@@ -445,12 +454,22 @@ def run_all_benchmarks() -> None:
             str(args.warmup),
             "--repeats",
             str(args.repeats),
+            "--order",
+            args.order,
         ]
+        source_paths = [source, source / "extensions"] + sorted(
+            path
+            for path in (source / "extensions").iterdir()
+            if (path / path.name / "__init__.py").is_file()
+        )
         with log.open("w") as stream:
             completed = subprocess.run(
                 command,
                 cwd=source,
-                env={**os.environ, "PYTHONPATH": str(source)},
+                env={
+                    **os.environ,
+                    "PYTHONPATH": os.pathsep.join(map(str, source_paths)),
+                },
                 stdout=stream,
                 stderr=subprocess.STDOUT,
             )
