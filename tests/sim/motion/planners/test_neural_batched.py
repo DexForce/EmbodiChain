@@ -60,6 +60,7 @@ class TestNeuralPlanBatched:
     def test_plan_returns_batched_success(self, monkeypatch):
         from embodichain.lab.sim.motion.planners.neural_planner import (
             NeuralPlanner,
+            NeuralPlannerCfg,
             NeuralPlanOptions,
             _waypoint_obs_dim,
         )
@@ -79,17 +80,16 @@ class TestNeuralPlanBatched:
             planner._num_waypoints, planner._use_relative_obs
         )
         _set_identity_policy_frames(planner)
-        planner.cfg = type(
-            "c",
-            (),
-            {
-                "action_scale": 0.0,
-                "dt": 0.01,
-                "control_part": "arm",
-                "num_arm_joints": 7,
-                "constraints": None,
-            },
-        )()
+        planner.cfg = NeuralPlannerCfg(
+            robot_uid="robot",
+            onnx_model_path="unused.onnx",
+            action_scale=0.0,
+            dt=0.01,
+            control_part="arm",
+            num_arm_joints=7,
+            constraints=None,
+        )
+        planner.cfg.validate()
 
         # Stub ONNX policy: qpos stays fixed but the huge eps marks each goal reached.
         planner._policy = lambda obs: torch.zeros(obs.shape[0], 7)

@@ -394,11 +394,13 @@ x-physics: &physics
 
 x-gripper-cube: &gripper_cube
   control_part: eef
+  finger_links: [gripper_finger1_link_1, gripper_finger2_link_1]
   open_qpos: [0.0]
   grasp_qpos: [0.036]
 
 x-gripper-contact: &gripper_contact
   control_part: eef
+  finger_links: [gripper_finger1_link_1, gripper_finger2_link_1]
   open_qpos: [0.0]
   grasp_qpos: [0.040]
 

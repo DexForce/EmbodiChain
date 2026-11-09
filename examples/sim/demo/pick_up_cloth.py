@@ -442,6 +442,8 @@ def main(args: argparse.Namespace | None = None) -> None:
             num_substeps=12,
             solver_cfg={
                 "solver_type": "dexuni",
+                # The registered runtime control advances and interpolates the
+                # robot kinematically at every Newton substep.
                 "joint_mode": "kinematic",
                 "contact_mode": "soft",
                 "vbd_options": {
@@ -458,9 +460,7 @@ def main(args: argparse.Namespace | None = None) -> None:
                     "rigid_contact_k_start": CLOTH_RIGID_CONTACT_KE,
                     "rigid_body_particle_contact_buffer_size": 512,
                 },
-                "collision_options": {
-                    "soft_contact_margin": 0.008,
-                },
+                "collision_options": {"soft_contact_margin": 0.008},
             },
             # DexUni owns its particle-shape contacts and collision detection.
             collision_cfg=None,
@@ -497,11 +497,13 @@ def main(args: argparse.Namespace | None = None) -> None:
         if not args.headless:
             sim.open_window()
         sim.update(step=settle_steps)
-        input("Press Enter to start grabbing the cloth...")
+        if not args.headless:
+            input("Press Enter to start grabbing the cloth...")
 
         # The initial trajectory row is already active after settling.
         sim.update(step=grab_traj.shape[1] - 1)
-        input("Press Enter to exit the simulation...")
+        if not args.headless:
+            input("Press Enter to exit the simulation...")
     finally:
         sim.destroy()
 

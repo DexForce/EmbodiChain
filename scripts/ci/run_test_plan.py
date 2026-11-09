@@ -265,7 +265,13 @@ def _resource_command_for_nodes(command: list[str], nodes: list[str]) -> list[st
     return [*command[:4], *nodes, *command[marker_index:]]
 
 
-def _run_resource_lane(lane: str, command: list[str], repository_root: Path) -> int:
+def _run_resource_lane(
+    lane: str,
+    command: list[str],
+    repository_root: Path,
+    *,
+    no_finalize_resource_lanes: bool = False,
+) -> int:
     """Discover selected nodes, then run the same ordered collection freshly."""
     with tempfile.TemporaryDirectory(prefix="embodichain-test-selection-") as directory:
         manifest = Path(directory) / "selection.json"
@@ -290,6 +296,8 @@ def _run_resource_lane(lane: str, command: list[str], repository_root: Path) -> 
             )
         narrowed = _resource_command_for_nodes(command, nodes)
         narrowed.append(f"--ci-expected-collection={manifest}")
+        if no_finalize_resource_lanes:
+            narrowed[2] = "scripts.ci.pytest_no_finalize"
         print(f"[CI] {lane}: selected nodes: {shlex.join(narrowed)}", flush=True)
         return subprocess.run(
             narrowed, cwd=repository_root, check=False, env=None
@@ -303,6 +311,7 @@ def run_plan(
     python_executable: str | None = None,
     lanes: Sequence[str] | None = None,
     dry_run: bool = False,
+    no_finalize_resource_lanes: bool = False,
 ) -> int:
     """Execute all selected lanes and return the first failing exit code.
 
@@ -316,6 +325,8 @@ def run_plan(
     Serial GPU and simulation lanes discover their selected nodes in a fresh
     collection-only process before execution. Discovery and execution are both
     included in the reported lane time; ordered nodes and markers must match.
+    ``no_finalize_resource_lanes`` returns after pytest hooks without unloading
+    native libraries in GPU and simulation processes.
     """
     repository_root = Path(root).resolve()
     commands = build_commands(
@@ -339,7 +350,12 @@ def run_plan(
                 environment.setdefault(variable, "1")
         started = time.monotonic()
         if lane.removeprefix(_SLOW_LANE_PREFIX) in {"gpu", "sim"}:
-            returncode = _run_resource_lane(lane, command, repository_root)
+            returncode = _run_resource_lane(
+                lane,
+                command,
+                repository_root,
+                no_finalize_resource_lanes=no_finalize_resource_lanes,
+            )
         else:
             returncode = subprocess.run(
                 command, cwd=repository_root, check=False, env=environment
@@ -367,6 +383,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--python", dest="python_executable")
     parser.add_argument("--lane", action="append", dest="lanes")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--no-finalize-resource-lanes",
+        action="store_true",
+        help="Return GPU and simulation pytest results without native teardown.",
+    )
     return parser
 
 
@@ -381,6 +402,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             python_executable=args.python_executable,
             lanes=args.lanes,
             dry_run=args.dry_run,
+            no_finalize_resource_lanes=args.no_finalize_resource_lanes,
         )
     except (OSError, RuntimeError, ValueError) as error:
         print(f"test plan execution failed: {error}", file=sys.stderr)

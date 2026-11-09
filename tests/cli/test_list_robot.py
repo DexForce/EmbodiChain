@@ -102,18 +102,21 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     output = capsys.readouterr().out
     assert output.startswith("╭")
     assert output.rstrip().endswith("╯")
-    assert "EmbodiChain · Robot Catalog · 16 robots" in output
     assert "Robot ID" in output
     assert "Config Class" not in output
     assert "Variants" in output
     assert "Mimic" in output and "Joints" in output
     assert "Control" in output and "DOF" in output and "Parts" in output
     expected_ids = {
+        "BrainCoRevo1",
+        "SharpaWave",
+        "WujiHand",
         "ARX5",
         "AlohaMini",
         "TianjiMarvin",
         "DexforceW1",
         "CobotMagic",
+        "Franka",
         "FrankaPanda",
         "FlexivRizon4S",
         "SO101Follower",
@@ -132,7 +135,16 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "ur10",
         "ur10e",
     }
-    for robot_id in expected_ids - {"ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"}:
+    assert f"EmbodiChain · Robot Catalog · {len(expected_ids) - 7} robots" in output
+    for robot_id in expected_ids - {
+        "ur3",
+        "ur3e",
+        "ur5",
+        "ur5e",
+        "ur10",
+        "ur10e",
+        "FrankaPanda",
+    }:
         assert re.search(rf"│\s*{re.escape(robot_id)}\s*│", output)
     assert set(registry.list_robot_cfgs()) == expected_ids
     for alias in (
@@ -148,8 +160,8 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     assert output.count("│ URRobot") == 1
     for model in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"):
         assert model in output
-    assert "eef (1+1m)" in output
-    assert "fr3_finger_joint2" in _column_text(output, 5)
+    assert "arm (7)" in _column_text(output, 4)
+    assert "fr3_finger_joint2" not in _column_text(output, 5)
 
 
 @pytest.mark.parametrize("terminal_width", [80, 120])
@@ -219,7 +231,8 @@ main(["list-robot"])
         check=True,
     )
 
-    assert "16 robots" in result.stdout
+    assert "SharpaWave" in result.stdout
+    assert "WujiHand" in result.stdout
     assert result.stderr == ""
 
 
@@ -290,9 +303,9 @@ def test_dual_arm_variant_rows_use_each_base_dof(catalogs: list[Any]) -> None:
     assert profiles[0][1]["dof"] == 12
     assert "ur10*" in profiles[0][0]
     assert profiles[1][0] == "FrankaPanda"
-    assert profiles[1][1]["dof"] == 16
-    assert len(profiles[1][1]["mimic_joints"]) == 2
-    assert "left_eef (1+1m)" in list_robot._format_control_parts(profiles[1][1])
+    assert profiles[1][1]["dof"] == 14
+    assert not profiles[1][1]["mimic_joints"]
+    assert "left_arm (7)" in list_robot._format_control_parts(profiles[1][1])
 
 
 def test_dual_arm_composite_part_marks_overlapping_mimics(

@@ -100,6 +100,21 @@ def test_fluid_deployment_resolves_sources_and_observation_entities():
     assert cfg.task_program is not None
 
 
+@pytest.mark.parametrize(
+    "deployment",
+    ("task.franka.fluid.yaml", "task.franka.newton.yaml", "task.franka.yaml"),
+)
+def test_pour_cup_embodiment_mounts_franka_hand(deployment):
+    path = TASK.parent / deployment
+    robot = config_to_cfg(load_config(path), source_path=path).robot
+    assert "hand" in robot.urdf_cfg.components
+    assert robot.control_parts["eef"] == [
+        "fr3_finger_joint1",
+        "fr3_finger_joint2",
+    ]
+    assert len(robot.init_qpos) == 9
+
+
 def test_fluid_component_rejects_duplicate_inline_ownership():
     config = load_config(TASK)
     config["fluid_object"] = []

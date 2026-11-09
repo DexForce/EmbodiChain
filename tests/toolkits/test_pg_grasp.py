@@ -103,11 +103,9 @@ def test_default_grasp_mode_ranks_by_transformed_bounding_box_center(
     backend._max_candidates = 10
     backend._filter_ground_collision = False
     backend._collision_checker = Mock()
-    backend._collision_checker.query.side_effect = (
-        lambda obj, poses, widths, **kwargs: (
-            torch.zeros(len(poses), dtype=torch.bool),
-            torch.zeros(len(poses)),
-        )
+    backend._collision_checker.query.side_effect = lambda obj, poses, **kwargs: (
+        torch.zeros(len(poses), dtype=torch.bool),
+        torch.zeros(len(poses)),
     )
     object_pose = _object_pose()
 
@@ -143,11 +141,9 @@ def test_hard_approach_filter_precedes_nms_and_top_candidate(
     backend._max_candidates = 1
     backend._filter_ground_collision = False
     backend._collision_checker = Mock()
-    backend._collision_checker.query.side_effect = (
-        lambda obj, poses, widths, **kwargs: (
-            torch.zeros(len(poses), dtype=torch.bool),
-            torch.zeros(len(poses)),
-        )
+    backend._collision_checker.query.side_effect = lambda obj, poses, **kwargs: (
+        torch.zeros(len(poses), dtype=torch.bool),
+        torch.zeros(len(poses)),
     )
     poses = torch.eye(4).repeat(3, 1, 1)
     poses[:, :3, 3] = centers

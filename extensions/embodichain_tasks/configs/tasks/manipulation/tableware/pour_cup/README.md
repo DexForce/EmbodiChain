@@ -7,9 +7,8 @@
 ## 依赖
 
 基础流体接口来自 [PR #777](https://github.com/DexForce/EmbodiChain/pull/777)。
-运行此任务需要提供 `DexUniSolverCfg.sph_cfg`、SPH world 隔离和选择性 reset 的
-DexSim 开发构建；`dexsim_engine==0.5.1rc1` 不支持该组合。当前验证使用
-`0.5.1+0b8422cc6f6717058bd15371e61bd35cdbbe3c0c`、Newton 1.7 和 CUDA。
+仓库锁定的 `dexsim_engine==0.6.0rc1` 提供 `DexUniSolverCfg.sph_cfg`、SPH world
+隔离和选择性 reset；在线流体运行还需要 CUDA。
 任务网格由资产缓存中的 `PourCupAssets` 提供。
 
 ## 运行

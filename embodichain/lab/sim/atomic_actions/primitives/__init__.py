@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from ..core import AtomicAction
+from .execute_demo_skill import DemoSkillGoal, ExecuteDemoSkill
 from .axis_align import AxisAlign, AxisAlignGoal, AxisAlignOptions
 from .coordinated_pickment import (
     CoordinatedPickGoal,
@@ -45,14 +46,20 @@ from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
-from .press import Press, PressGoal, PressOptions
+from .press import (
+    Press,
+    PressGoal,
+    PressOptions,
+    PressPlanningRecovery,
+    validate_press_extra_distance,
+)
 from .push_object import (
     PushObject,
     PushObjectGoal,
     PushObjectOptions,
     PushObjectToolCalibration,
 )
-from .pour import Pour, PourGoal, PourOptions
+from .pour import Pour, PourGoal, PourOptions, PourTarget
 from .slide import (
     Slide,
     SlideGoal,
@@ -62,6 +69,7 @@ from .slide import (
 from .twist import Twist, TwistGoal, TwistOptions
 
 BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
+    ExecuteDemoSkill,
     MoveEndEffector,
     MoveJoints,
     PickUp,
@@ -81,6 +89,8 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
 """Built-in action implementations instantiated once per action engine."""
 
 __all__ = [
+    "DemoSkillGoal",
+    "ExecuteDemoSkill",
     "AssembleGoal",
     "AxisAlign",
     "AxisAlignGoal",
@@ -116,9 +126,12 @@ __all__ = [
     "Pour",
     "PourGoal",
     "PourOptions",
+    "PourTarget",
     "Press",
     "PressGoal",
     "PressOptions",
+    "PressPlanningRecovery",
+    "validate_press_extra_distance",
     "PushObject",
     "PushObjectGoal",
     "PushObjectOptions",

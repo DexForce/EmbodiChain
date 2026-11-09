@@ -33,6 +33,7 @@ __all__ = [
     "expansion",
     "motion_generator",
     "execution",
+    "refinement",
 ]
 
 

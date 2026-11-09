@@ -13,6 +13,11 @@ resolves source metadata before its first immutable build. Do not implement
 initial configuration as finalize-then-rebuild or duplicate descriptor writes
 inside `Articulation._apply_spawn_config()`.
 
+URDF continuous joints retain unbounded source limits during resolution. Native
+Skeleton metadata may expose zero-filled limits; those must not become a locked
+joint at the Newton boundary. Caller-authored limits and later config overlays
+retain precedence over the source default.
+
 `ArticulationRootPropertiesCfg` separates root intent from link physics.
 Fixed-base/self-collision settings enter common descriptors, independently of
 the source overlay policy; explicit `None` preserves USD intent and selects
@@ -25,15 +30,6 @@ Applying them only during facade binding is too late for captured GPU settings.
 both asset physics modes; omission preserves the source/default policy. It
 compensates articulation link weight without removing payload gravity or
 contact reactions. DexSim checks the resolved solver's MuJoCo support.
-The other Newton creation options on `root_props` (`newton_kinematic`,
-`newton_sleep_policy`, `newton_shape_collision[_links]`,
-`newton_particle_collision_links`, `newton_mesh_approximation`,
-`newton_force_sdf`) follow the same
-rule: `None` keeps the DexSim default, explicit values require Newton.
-The SDF request retains imported concave collision meshes. The compiler carries
-it onto per-link entries after source configuration because those entries take
-precedence over articulation-wide defaults, including attribute-only entries
-inserted for native URDF geometry. Contact participation remains separate.
 URDF mimic joints on Newton keep the configured follower drives and the
 native MuJoCo equality by default, matching a plain DexSim scene; reset starts
 followers on their mimic relation. `root_props.newton_mimic_stabilizer=True`

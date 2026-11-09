@@ -12,6 +12,9 @@ episode acceptance, or dataset writes. Public imports use the normal
 ``embodichain.lab.sim`` initialization and require the simulation dependencies;
 constructing these values creates no simulation world.
 
+See :doc:`/overview/sim/scene/workflows` for source-independent batch generation
+and :doc:`/overview/sim/scene/integrations` for Gym reset and Task Program hosts.
+
 .. currentmodule:: embodichain.lab.sim.scene.expansion
 
 .. autosummary::

@@ -20,11 +20,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+import os
 from pathlib import Path
 
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
+
+from .composition import ResolvedGymComponents as _ResolvedGymComponents
 
 __all__: list[str] = []
 
@@ -83,17 +85,6 @@ def _resolve_physical_source_paths(simulation: dict, base_dir: Path) -> dict:
     return result
 
 
-@dataclass(frozen=True, slots=True)
-class _ResolvedGymComponents:
-    """One Gym config after its reusable components are expanded."""
-
-    config: dict[str, object]
-    embodiment_selected: bool
-    scene_selected: bool
-    embodiment_skill_profile: dict[str, object] | None
-    scene_config: dict[str, object] | None
-
-
 def _mapping(
     value: object,
     *,
@@ -127,13 +118,19 @@ def _component_path(
     *,
     base_dir: Path,
     path: str,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
 ) -> Path:
     """Resolve one packaged or owner-relative YAML component path."""
     selected = _identifier(value, path=path)
-    component_path = resolve_config_path(selected, base_dir=base_dir).resolve()
+    if sources is not None:
+        component_path = Path(os.path.abspath(base_dir / selected))
+        if component_path not in sources:
+            raise ValueError(f"{path} is absent from the supplied component snapshot.")
+    else:
+        component_path = resolve_config_path(selected, base_dir=base_dir).resolve()
     if component_path.suffix.lower() not in {".yaml", ".yml"}:
         raise ValueError(f"{path} must be a YAML file: {component_path}.")
-    if not component_path.is_file():
+    if sources is None and not component_path.is_file():
         raise FileNotFoundError(f"{path} is not a file: {component_path}.")
     return component_path
 
@@ -154,9 +151,16 @@ def _owned_sequence(value: object, *, path: str) -> list[object]:
     return deepcopy(list(value))
 
 
-def _load_yaml_component(path: Path, *, field_name: str) -> dict[str, object]:
+def _load_yaml_component(
+    path: Path,
+    *,
+    field_name: str,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
+) -> dict[str, object]:
     """Load one YAML component mapping."""
-    return _owned_mapping(load_config(path), path=field_name)
+    return _owned_mapping(
+        load_config(path) if sources is None else sources[path], path=field_name
+    )
 
 
 def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
@@ -188,6 +192,7 @@ def _resolve_environment_component(
     *,
     base_dir: Path,
     selected_backend: str | None = None,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Expand one selected reusable physical environment component.
 
@@ -243,9 +248,12 @@ def _resolve_environment_component(
         component_value,
         base_dir=base_dir,
         path=component_path_name,
+        sources=sources,
     )
     component = _mapping(
-        _load_yaml_component(component_path, field_name="environment component"),
+        _load_yaml_component(
+            component_path, field_name="environment component", sources=sources
+        ),
         path="environment component",
         required=frozenset({"environment_id", "physics", "simulation", "env"}),
         optional=_ENVIRONMENT_COMPONENT_FIELDS - {"physics", "simulation", "env"},
@@ -303,6 +311,7 @@ def _resolve_embodiment_component(
     value: object,
     *,
     base_dir: Path,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
 ) -> tuple[dict[str, object], list[object], dict[str, object] | None]:
     """Resolve robot, sensors, and an optional Task Program skill profile."""
     declaration = _mapping(
@@ -315,9 +324,12 @@ def _resolve_embodiment_component(
         declaration["component"],
         base_dir=base_dir,
         path="embodiment.component",
+        sources=sources,
     )
     component = _mapping(
-        _load_yaml_component(component_path, field_name="embodiment component"),
+        _load_yaml_component(
+            component_path, field_name="embodiment component", sources=sources
+        ),
         path="embodiment component",
         required=frozenset({"embodiment_id", "simulation", "sensor"}),
         optional=frozenset({"skill_profile"}),
@@ -353,6 +365,7 @@ def _resolve_scene_component(
     value: object,
     *,
     base_dir: Path,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Resolve physical scene simulation fields."""
     declaration = _mapping(
@@ -364,9 +377,12 @@ def _resolve_scene_component(
         declaration["component"],
         base_dir=base_dir,
         path="scene.component",
+        sources=sources,
     )
     component = _mapping(
-        _load_yaml_component(component_path, field_name="scene component"),
+        _load_yaml_component(
+            component_path, field_name="scene component", sources=sources
+        ),
         path="scene component",
         required=frozenset({"scene_id", "simulation"}),
     )
@@ -456,10 +472,26 @@ def _resolve_gym_components(
     config: Mapping[str, object],
     *,
     base_dir: str | Path,
+    component_sources: Mapping[str, Mapping[str, object]] | None = None,
 ) -> _ResolvedGymComponents:
     """Expand optional environment, embodiment, and scene selectors."""
     resolved = _owned_mapping(config, path="Gym config")
     selected_base_dir = Path(base_dir).expanduser()
+    sources = None
+    if component_sources is not None:
+        if not isinstance(component_sources, Mapping):
+            raise TypeError("component_sources must be a mapping or None.")
+        sources = {}
+        for name, declaration in component_sources.items():
+            selected = _identifier(name, path="component_sources key")
+            source_path = Path(os.path.abspath(selected_base_dir / selected))
+            if source_path in sources:
+                raise ValueError(
+                    "Component snapshot contains duplicate resolved paths."
+                )
+            sources[source_path] = _owned_mapping(
+                declaration, path=f"component_sources.{name}"
+            )
     _resolve_local_resource_paths(resolved, base_dir=selected_base_dir)
 
     if "task" in resolved:
@@ -472,6 +504,7 @@ def _resolve_gym_components(
         resolved = _resolve_environment_component(
             resolved,
             base_dir=selected_base_dir,
+            sources=sources,
         )
 
     embodiment_selected = "embodiment" in resolved
@@ -488,6 +521,7 @@ def _resolve_gym_components(
         robot, sensors, embodiment_skill_profile = _resolve_embodiment_component(
             resolved.pop("embodiment"),
             base_dir=selected_base_dir,
+            sources=sources,
         )
         resolved["robot"] = robot
         resolved["sensor"] = sensors
@@ -498,6 +532,7 @@ def _resolve_gym_components(
         scene_config = _resolve_scene_component(
             resolved.pop("scene"),
             base_dir=selected_base_dir,
+            sources=sources,
         )
         duplicate_fields = sorted(set(scene_config).intersection(resolved))
         if duplicate_fields:

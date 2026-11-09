@@ -38,6 +38,9 @@ import json
 from embodichain.data import dataset
 from embodichain.data.assets import CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, PourCupAssets, PourCupDemoData
 from embodichain.data.assets.w1_assets import DexforceW1V030
+from embodichain_robots.agilex.pika.assets import PikaGripper
+from embodichain_robots.sharpa.wave.assets import SharpaWave
+from embodichain_robots.wuji.hand.assets import WujiHand
 
 urls = {}
 
@@ -49,7 +52,7 @@ def capture(self, prefix, descriptor, path):
     raise Captured  # stop before anything is downloaded
 
 dataset.EmbodiChainDataset.__init__ = capture
-for cls in (CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, DexforceW1V030, PourCupAssets, PourCupDemoData):
+for cls in (CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, DexforceW1V030, PourCupAssets, PourCupDemoData, PikaGripper, SharpaWave, WujiHand):
     try:
         cls()
     except Captured:
@@ -107,6 +110,18 @@ def test_download_prefix_gets_a_trailing_slash(monkeypatch, reload_constants) ->
 @pytest.mark.parametrize("prefix", [MIRROR, MIRROR.rstrip("/")])
 def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
     urls = _consumer_urls(prefix)
+    assert urls["WujiHandV2"] == [
+        f"{MIRROR}eef_assets/WujiHandV2.zip",
+        f"{HF_PREFIX}eef_assets/WujiHandV2.zip",
+    ]
+    assert urls["SharpaWaveV1"] == [
+        f"{MIRROR}eef_assets/SharpaWaveV1.zip",
+        f"{HF_PREFIX}eef_assets/SharpaWaveV1.zip",
+    ]
+    assert urls["PikaGripper"] == [
+        f"{MIRROR}eef_assets/PikaGripper.zip",
+        f"{HF_PREFIX}eef_assets/PikaGripper.zip",
+    ]
     assert urls["CobotMagicArm"] == [f"{MIRROR}robot_assets/CobotMagicArmV4.zip"]
     for name in ("PourCupAssets", "PourCupDemoData"):
         assert urls[name] == [
@@ -134,6 +149,8 @@ def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
 @pytest.mark.no_sim
 def test_assets_do_not_repeat_the_hub_url() -> None:
     urls = _consumer_urls(HF_PREFIX)
+    assert urls["WujiHandV2"] == [f"{HF_PREFIX}eef_assets/WujiHandV2.zip"]
+    assert urls["SharpaWaveV1"] == [f"{HF_PREFIX}eef_assets/SharpaWaveV1.zip"]
     assert urls["UnitreeGo2Locomotion"] == [
         f"{HF_PREFIX}robot_assets/UnitreeGo2Locomotion.zip"
     ]
@@ -143,3 +160,4 @@ def test_assets_do_not_repeat_the_hub_url() -> None:
         f"{HF_PREFIX}robot_assets/UniversalRobots_v4.zip"
     ]
     assert urls["FlexivRizon4S_v1"] == [f"{HF_PREFIX}robot_assets/FlexivRizon4S_v1.zip"]
+    assert urls["PikaGripper"] == [f"{HF_PREFIX}eef_assets/PikaGripper.zip"]

@@ -108,19 +108,10 @@ class SerialChainKinematics:
         """Return a model copy on the requested device and precision."""
         return type(self)(self.chain, device, dtype)
 
-    def evaluate(
+    def _prepare_inputs(
         self, qpos: torch.Tensor, tcp: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute TCP transforms and geometric Jacobians using one FK pass.
-
-        Args:
-            qpos: Joint positions, shape ``(..., dof)``.
-            tcp: Flange-to-tool transforms, shape ``(4, 4)`` or ``(..., 4, 4)``.
-
-        Returns:
-            TCP poses ``(..., 4, 4)`` and root-frame Jacobians ``(..., 6, dof)``.
-            Their backward paths include both FK and Jacobian derivatives.
-        """
+        """Validate shared FK/Jacobian inputs and flatten leading batch axes."""
         if (
             qpos.ndim < 1
             or qpos.shape[-1] != self.dof
@@ -134,13 +125,49 @@ class SerialChainKinematics:
             or tcp.dtype != qpos.dtype
         ):
             raise ValueError("qpos, TCP and kinematics model must share dtype/device")
+        return qpos.reshape(-1, self.dof), tcp.reshape(-1, 4, 4)
+
+    def forward_kinematics(self, qpos: torch.Tensor, tcp: torch.Tensor) -> torch.Tensor:
+        """Compute TCP transforms without constructing geometric Jacobians.
+
+        Args:
+            qpos: Joint positions in ``joint_names`` order, shape ``(..., dof)``.
+            tcp: Flange-to-tool transforms, shape ``(4, 4)`` or ``(..., 4, 4)``.
+                Both tensors must share this model's device and dtype.
+
+        Returns:
+            Root-frame TCP poses, shape ``(..., 4, 4)``, retaining input
+            gradients. Joint limits are not enforced by FK.
+
+        Raises:
+            ValueError: If input shapes, devices or dtypes do not match.
+        """
+        q, tool_offset = self._prepare_inputs(qpos, tcp)
+        transforms = self.chain.forward_kinematics_tensor(q, analytical_grad=False)
+        flange = transforms[self.chain._serial_eef_frame_idx]
+        tool = flange @ tool_offset
+        return tool.reshape(*qpos.shape[:-1], 4, 4)
+
+    def evaluate(
+        self, qpos: torch.Tensor, tcp: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute TCP transforms and geometric Jacobians using one FK pass.
+
+        Args:
+            qpos: Joint positions, shape ``(..., dof)``.
+            tcp: Flange-to-tool transforms, shape ``(4, 4)`` or ``(..., 4, 4)``.
+
+        Returns:
+            TCP poses ``(..., 4, 4)`` and root-frame Jacobians ``(..., 6, dof)``.
+            Their backward paths include both FK and Jacobian derivatives.
+        """
+        q, tool_offset = self._prepare_inputs(qpos, tcp)
         batch = qpos.shape[:-1]
-        q = qpos.reshape(-1, self.dof)
         transforms = self.chain.forward_kinematics_tensor(q, analytical_grad=False)
         jacobian, flange = self.chain.jacobian_tensor(
             q, ret_eef_pose=True, all_transforms=transforms
         )
-        tool = flange @ tcp.reshape(-1, 4, 4)
+        tool = flange @ tool_offset
         offset = tool[:, :3, 3] - flange[:, :3, 3]
         correction = torch.cross(
             jacobian[:, 3:, :].transpose(-1, -2),

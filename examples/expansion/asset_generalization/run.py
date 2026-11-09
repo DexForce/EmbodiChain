@@ -74,13 +74,17 @@ def _template(root: Path, *, side: float, seed: int, batch_index: int) -> Path:
             task["embodiment"]["component"], base_dir=source.parent
         ).resolve()
     )
-    policy = resolve_config_path(
-        task["task_program"]["execution_policy"], base_dir=source.parent
-    )
+    policy = task["task_program"]["execution_policy"]
+    if isinstance(policy, dict):
+        policy["component"] = str(
+            resolve_config_path(policy["component"], base_dir=source.parent).resolve()
+        )
+    else:
+        policy = str(resolve_config_path(policy, base_dir=source.parent).resolve())
     task["task_program"] = {
         "program": "program.yaml",
         "integration": "integration.yaml",
-        "execution_policy": str(policy.resolve()),
+        "execution_policy": policy,
     }
     cube = next(
         obj for obj in environment["simulation"]["rigid_object"] if obj["uid"] == "cube"

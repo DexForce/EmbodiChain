@@ -1,8 +1,44 @@
 embodiment_id: franka_panda_firm_grip_newton
 simulation:
-  class_type: FrankaPanda
-  robot_type: panda
+  class_type: Franka
+  arm_model: fr3
   uid: FrankaPanda
+  urdf_cfg:
+    fname: franka_fr3_panda_hand
+    components:
+    - component_type: hand
+      urdf_path: Franka/Panda/Fr3HandV1.urdf
+      transform:
+      - - 0.7071067811865476
+        - 0.7071067811865475
+        - 0.0
+        - 0.0
+      - - -0.7071067811865475
+        - 0.7071067811865476
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+  control_parts:
+    eef:
+    - fr3_finger_joint1
+    - fr3_finger_joint2
+  init_qpos:
+  - 0.0
+  - -0.569
+  - 0.0
+  - -2.81
+  - 0.0
+  - 3.037
+  - 0.741
+  - 0.04
+  - 0.04
   joint_drive_props:
     drive_type: force
     stiffness:
@@ -14,6 +50,25 @@ simulation:
     max_effort:
       fr3_joint[1-7]: 100000.0
       fr3_finger_joint[1-2]: 80.0
+  solver_cfg:
+    arm:
+      tcp:
+      - - 0.7071067811865476
+        - 0.7071067811865475
+        - 0.0
+        - 0.0
+      - - -0.7071067811865475
+        - 0.7071067811865476
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.1034
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
   link_attrs:
     # Configure the existing finger selector for MuJoCo torsional and rolling contacts.
     newton_gripper_contacts:
@@ -84,8 +139,7 @@ skill_profile:
       eef:
         kind: antipodal_parallel_jaw
         sample_count: 1000
-        opening_margin: 0.002
-        point_sample_density: 0.012
+        point_spacing: 0.012
         filter_ground_collision: false
         model:
           model_id: franka_panda_hand

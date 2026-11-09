@@ -18,10 +18,8 @@ Fluid simulation requires Newton CUDA, a DexSim build exposing
 `DexUniSolverCfg.sph_cfg`, no gradients and fixed particle topology.
 Multiple environments require a DexSim SPH solver that explicitly advertises
 both world isolation and selected-world reset; arena spacing alone does not
-establish isolation. The development build
-`0.5.1+0b8422cc6f6717058bd15371e61bd35cdbbe3c0c` supports both. The published
-`0.5.1rc1` artifact does not provide the DexUni/DFSPH composition and cannot
-run this fluid path.
+establish isolation. The repository's pinned `dexsim_engine==0.6.0rc1` build
+provides the DexUni/DFSPH composition and both multi-world capabilities.
 
 The current native DexUni/DFSPH implementation is a prototype: DFSPH follows
 the rigid step with one-way rigid-to-fluid interaction. When rigid bodies are

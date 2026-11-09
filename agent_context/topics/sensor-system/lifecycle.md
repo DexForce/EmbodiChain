@@ -22,7 +22,20 @@ configuration failures; missing per-arena render topology is a runtime failure.
 
 `SimulationManager.add_sensor()` prepares the scene and passes its explicit
 owner to `ContactSensor`. The sensor resolves configured rigid/link targets to
-Spawn handles and creates one query. Preserve these query/buffer contracts:
+Spawn handles and creates one query.
+
+Sampling reads completed solver contacts through DexSim's
+`fetch_solver_report()` or `fetch_solver_report_async()`. `detect()` and
+`fetch()` operate on a separate geometry-only observation and cannot replace
+solver reports when interpreting measured impulses or force histories.
+
+After a physics reset invalidates the native solved report, sensor observation
+reads return invalid rows until the next solve. A sensor-buffer-only reset may
+still reread the same valid native report. Contact sampling must run outside
+caller-owned CUDA graph capture; only the stable observation buffers are consumed
+inside that graph. See [history and substeps](contact-history.md) for ordering.
+
+Preserve these query/buffer contracts:
 
 - `filter_need_both_actor` chooses query `match="all"` or `"any"`.
 - Capacity is bounded per Arena as well as globally, so a busy environment
@@ -51,7 +64,11 @@ The sensor retains backend-emitted rows rather than reducing an actor pair to
 one contact. Force-reporting paths apply the query's positive-impulse filtering;
 geometry-only paths may provide valid rows with zero impulse. Solver settings
 can change manifold density. Fixed sensor capacity may truncate rows; increasing
-capacity does not normalize manifold semantics across backends.
+capacity does not normalize manifold semantics across backends. Consumers that
+interpret missing contacts as a physical miss must first check the device-local
+`dropped_contacts_mask`: scatter overflow is row-local, while unattributed native
+query overflow conservatively invalidates every row. Standalone updates report
+the latest query; history-enabled sensors retain the current interval's losses.
 
 PhysX Direct GPU cannot identify static counterparts from its raw contact
 buffer and uses actor ID `-1` for those rows. To observe arbitrary static

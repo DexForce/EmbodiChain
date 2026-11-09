@@ -10,8 +10,10 @@
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
 | Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
-| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact_sensor.py` |
-| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/_warp/contact.py` |
+| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact/sensor.py` |
+| Joint and contact acquisition windows | `embodichain/lab/sim/sensors/contact/observation.py` |
+| Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
+| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
 
 Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
 a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Online rigid boundaries, mass ownership and selected fluid resets."""
+"""Online rigid boundaries, gripper state and selected fluid resets."""
 
 from __future__ import annotations
 
@@ -225,8 +225,9 @@ class _FluidOnlineRuntime:
             sim.destroy(exit_process=False)
             SimulationManager.flush_cleanup_queue()
 
-    def test_mimic_follower_uses_inner_rigid_solver(self):
-        from embodichain_robots import FrankaPandaCfg
+    def test_franka_gripper_stays_stable_with_inner_rigid_solver(self):
+        from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+        from embodichain.utils.utility import load_config
 
         sim = SimulationManager(
             SimulationManagerCfg(
@@ -253,8 +254,11 @@ class _FluidOnlineRuntime:
         )
         robot = fluid = None
         try:
-            robot_cfg = FrankaPandaCfg.from_dict({})
-            robot_cfg.root_props.newton_mimic_stabilizer = True
+            task = (
+                Path(__file__).resolve().parents[3]
+                / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+            )
+            robot_cfg = config_to_cfg(load_config(task), source_path=task).robot
             robot = sim.add_robot(robot_cfg)
             fluid = sim.add_fluid_object(
                 FluidObjectCfg(
@@ -266,8 +270,8 @@ class _FluidOnlineRuntime:
                 )
             )
             sim.prepare()
-            assert robot._newton_mimic_compliance_configured
-            joint_ids = robot.get_joint_ids("eef", remove_mimic=True)
+            joint_ids = robot.get_joint_ids("eef")
+            assert len(joint_ids) == 2
             robot.set_qpos(
                 torch.zeros((1, len(joint_ids)), device=sim.device), joint_ids=joint_ids
             )
@@ -345,7 +349,7 @@ class _FluidOnlineRuntime:
             SimulationManager.flush_cleanup_queue()
 
 
-def test_online_fluid_boundaries_and_mimic_reset_in_fresh_process():
+def test_online_fluid_boundaries_and_reset_in_fresh_process():
     result = subprocess.run(
         [sys.executable, str(Path(__file__).resolve())],
         capture_output=True,
@@ -359,5 +363,5 @@ if __name__ == "__main__":
     worker = _FluidOnlineRuntime()
     worker.test_kinematic_trajectory_reset_keeps_other_world_clock()
     worker.test_live_dynamic_boundary_and_selected_reset()
-    worker.test_mimic_follower_uses_inner_rigid_solver()
+    worker.test_franka_gripper_stays_stable_with_inner_rigid_solver()
     worker.test_normal_gym_partial_reset_does_not_advance_peer()

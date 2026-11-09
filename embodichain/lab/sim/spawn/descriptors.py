@@ -864,7 +864,10 @@ def articulation_desc_from_cfg(
             newton_solver_type=newton_solver_type,
         )
     fixed_base, self_collision_enabled = _articulation_root_values(cfg)
-    newton_options = _articulation_newton_options(cfg, newton_solver_type)
+    compensation = _articulation_gravity_compensation(cfg, newton_solver_type)
+    gravity_options = (
+        {} if compensation is None else {"newton_gravity_compensation": compensation}
+    )
     return ArticulationDesc(
         name=_articulation_uid(cfg.uid, str(path)),
         pose=_pose_from_cfg(cfg),
@@ -879,7 +882,7 @@ def articulation_desc_from_cfg(
         urdf_read_inertia=True,
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
-        **newton_options,
+        **gravity_options,
     )
 
 
@@ -903,61 +906,6 @@ def _articulation_gravity_compensation(
             "newton_gravity_compensation requires DexSim dev f32785317 or newer."
         )
     return float(value)
-
-
-_ARTICULATION_NEWTON_CREATION_FIELDS = (
-    "newton_kinematic",
-    "newton_sleep_policy",
-    "newton_shape_collision",
-    "newton_shape_collision_links",
-    "newton_particle_collision_links",
-    "newton_mesh_approximation",
-    "newton_force_sdf",
-)
-
-
-def _articulation_newton_options(
-    cfg: ArticulationCfg, newton_solver_type: str | None
-) -> dict[str, Any]:
-    """Collect explicit Newton articulation creation options from root props.
-
-    Unset (``None``) fields are omitted so DexSim keeps its own defaults.
-    """
-    options: dict[str, Any] = {}
-    compensation = _articulation_gravity_compensation(cfg, newton_solver_type)
-    if compensation is not None:
-        options["newton_gravity_compensation"] = compensation
-    root = cfg.root_props
-    for name in _ARTICULATION_NEWTON_CREATION_FIELDS:
-        value = getattr(root, name)
-        if value is None:
-            continue
-        if newton_solver_type is None:
-            raise ValueError(f"{name} requires the Newton backend.")
-        if name == "newton_force_sdf":
-            if not isinstance(value, (bool, np.bool_)):
-                raise TypeError("newton_force_sdf must be a boolean when configured.")
-            options["newton_collision"] = NewtonCollisionDesc(
-                **{
-                    item.name: bool(value) if item.name == "force_sdf" else None
-                    for item in fields(NewtonCollisionDesc)
-                }
-            )
-            continue
-        if name == "newton_sleep_policy":
-            from dexsim.spawn import NewtonSleepPolicy
-
-            value = NewtonSleepPolicy(value)
-        elif name == "newton_mesh_approximation":
-            from dexsim.spawn import NewtonMeshApproximationDesc
-
-            value = NewtonMeshApproximationDesc(**dict(value))
-        elif name in ("newton_kinematic", "newton_shape_collision"):
-            value = bool(value)
-        else:
-            value = tuple(value)
-        options[name] = value
-    return options
 
 
 def _validate_articulation_rigid_physics(
@@ -1056,8 +1004,9 @@ def configure_articulation_desc(
             f"Articulation source {desc.name!r} must be resolved before "
             "configuration."
         )
-    for name, value in _articulation_newton_options(cfg, newton_solver_type).items():
-        setattr(desc, name, value)
+    compensation = _articulation_gravity_compensation(cfg, newton_solver_type)
+    if compensation is not None:
+        desc.newton_gravity_compensation = compensation
     preserve_source_physics = cfg.resolve_asset_physics_mode() == "preserve"
     setattr(desc, "_embodichain_preserve_source_physics", preserve_source_physics)
     for link in desc.links:
@@ -1078,7 +1027,6 @@ def configure_articulation_desc(
                 stacklevel=2,
             )
         _apply_articulation_newton_gap_default(desc, newton_solver_type)
-        _apply_articulation_sdf_request(desc, cfg.root_props.newton_force_sdf)
         return desc
     default_physics = _resolve_rigid_physics(
         cfg.attrs,
@@ -1229,27 +1177,7 @@ def configure_articulation_desc(
                 "f32785317 or newer."
             )
     _apply_articulation_newton_gap_default(desc, newton_solver_type)
-    _apply_articulation_sdf_request(desc, cfg.root_props.newton_force_sdf)
     return desc
-
-
-def _apply_articulation_sdf_request(
-    desc: ArticulationDesc, force_sdf: bool | None
-) -> None:
-    """Carry SDF intent onto resolved or newly inserted URDF attribute entries."""
-    if force_sdf is None:
-        return
-    # Per-link entries override articulation-wide defaults in the native
-    # adapter. URDF resolution retains geometry in its native skeleton and
-    # inserts these attribute-only entries during configuration.
-    for link in desc.links:
-        for collision in link.collisions:
-            source = collision.newton
-            if source is None:
-                source = NewtonCollisionDesc(
-                    **{item.name: None for item in fields(NewtonCollisionDesc)}
-                )
-            collision.newton = replace(source, force_sdf=bool(force_sdf))
 
 
 def _apply_newton_gap_default(
@@ -1546,7 +1474,6 @@ def _compile_joint_properties(
     )
     if normalized_solver not in {
         None,
-        "auto",
         "mujoco_warp",
         "mjwarp",
         "dexuni",

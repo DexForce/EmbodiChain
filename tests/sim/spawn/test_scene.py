@@ -653,3 +653,36 @@ def test_no_render_retains_visual_declaration_without_native_transform_binding()
     assert "visual" in scene._assets
     scene.remove("visual")
     assert "visual" not in scene._assets
+
+
+def test_no_render_excludes_visual_materials_during_native_spawn() -> None:
+    scene = object.__new__(SpawnScene)
+    material = MaterialDesc(name="textured", base_color_map="texture.png")
+    observed_materials = []
+
+    def add_object(descriptor):
+        observed_materials.append(dict(scene.builder.materials))
+        return descriptor
+
+    def finalize():
+        observed_materials.append(dict(scene.builder.materials))
+        return SimpleNamespace(handles={})
+
+    scene.builder = SimpleNamespace(
+        materials={"texture": material},
+        is_finalized=False,
+        result=None,
+        backend="dexsim",
+        add_object=add_object,
+        finalize=finalize,
+    )
+    scene._num_envs = 1
+    scene._assets = {}
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    scene._resource_material_definitions = {}
+
+    scene.declare("rigid_object", "box", SimpleNamespace(name="box", per_env=False))
+    scene.commit()
+
+    assert observed_materials == [{}, {}]
+    assert scene.builder.materials == {"texture": material}

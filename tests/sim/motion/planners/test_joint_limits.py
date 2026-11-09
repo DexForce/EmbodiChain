@@ -336,6 +336,7 @@ def test_invalid_acceleration_request_fails_before_planning(value: float) -> Non
 @pytest.mark.parametrize("planner_type", ["toppra", "trapezoidal"])
 def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
     robot = _Robot()
+    expected_dtype = torch.float64 if planner_type == "toppra" else torch.float32
     planner_class, cfg_class = (
         (ToppraPlanner, ToppraPlannerCfg)
         if planner_type == "toppra"
@@ -366,7 +367,10 @@ def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
         else:
             assert result.positions.shape[1] > 2
             assert bool((result.dt[:, 1:] <= options.sample_interval + 1e-6).all())
-        torch.testing.assert_close(result.positions[:, -1], states[-1].qpos)
+        assert result.positions.dtype == expected_dtype
+        torch.testing.assert_close(
+            result.positions[:, -1], states[-1].qpos.to(expected_dtype)
+        )
         assert bool(
             (
                 result.velocities.abs().amax(dim=(0, 1))
@@ -454,7 +458,8 @@ def test_curobo_cache_changes_with_limits_and_closes_stale_backend(change: str) 
     planner.robot = robot
     planner.cfg = CuroboPlannerCfg(robot_uid="robot", use_cuda_graph=False)
     key = planner._robot_yaml_cache_key("", "arm", None, planner.cfg.auto_gen)
-    cached = SimpleNamespace(motion_limits_key=key, planner=Mock())
+    cached = SimpleNamespace(motion_limits_key=key, gravity=None, planner=Mock())
+    planner.cfg.enable_timeopt = False
     backend_key = ("arm", 2, False, MoveType.EEF_MOVE)
     planner._backend_cache = {backend_key: cached}
     assert planner._get_backend("arm", 2) is cached

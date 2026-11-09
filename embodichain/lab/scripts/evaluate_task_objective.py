@@ -144,8 +144,11 @@ def _component_snapshot(source: Path) -> dict[str, dict[str, str]]:
         program = data.get("task_program")
         if isinstance(program, Mapping):
             for name in ("program", "integration", "execution_policy"):
-                if isinstance(program.get(name), str):
-                    visit(path.parent / program[name])
+                selection = program.get(name)
+                if isinstance(selection, Mapping):
+                    selection = selection.get("component")
+                if isinstance(selection, str):
+                    visit(path.parent / selection)
 
     visit(source)
     return result
@@ -362,10 +365,12 @@ def _run(args: argparse.Namespace) -> Path:
             if env.expert_action_spec.joint_command_mode == "position_velocity":
                 command["qvel"] = torch.zeros_like(qpos)
             for _ in range(tail_steps):
-                env.step(ControllerAction(TensorDict(command, batch_size=[1])))
-                env._demo_active_mask.fill_(True)
-                env._write_trajectory_step()
-                env._demo_active_mask.fill_(False)
+                env.step(
+                    ControllerAction(TensorDict(command, batch_size=[1])),
+                    recording_active_mask=torch.ones(
+                        1, dtype=torch.bool, device=env.device
+                    ),
+                )
         finally:
             env._demo_no_auto_reset = prior_guard
             env._demo_active_mask.copy_(prior_active)

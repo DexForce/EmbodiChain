@@ -599,6 +599,7 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "convert_to_heightfield",
         "heightfield_resolution",
         "preserve_mesh_transform",
+        "max_hull_vertices",  # Mesh cooking is outside rigid-body physics.
     }
     assert (
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
@@ -995,7 +996,11 @@ def test_legacy_mesh_collision_physics_rejects_non_mesh_shape() -> None:
 
 def test_backend_joint_and_articulation_configs_round_trip() -> None:
     drive = NewtonJointDrivePropertiesCfg(target_mode=None)
-    root = ArticulationRootPropertiesCfg(fixed_base=False)
+    root = ArticulationRootPropertiesCfg(
+        fixed_base=False,
+        newton_gravity_compensation=0.5,
+        newton_mimic_stabilizer=True,
+    )
 
     restored_drive = JointDrivePropertiesCfg.from_dict(drive.to_dict())
     restored_root = ArticulationRootPropertiesCfg.from_dict(root.to_dict())
@@ -1007,24 +1012,31 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,
-        "newton_gravity_compensation": None,
-        "newton_kinematic": None,
-        "newton_sleep_policy": None,
-        "newton_shape_collision": None,
-        "newton_shape_collision_links": None,
-        "newton_particle_collision_links": None,
-        "newton_mimic_stabilizer": False,
-        "newton_mesh_approximation": None,
-        "newton_force_sdf": None,
+        "newton_gravity_compensation": 0.5,
+        "newton_mimic_stabilizer": True,
     }
     assert type(restored_root) is ArticulationRootPropertiesCfg
+    assert restored_root == root
 
 
-def test_articulation_root_config_rejects_backend_discriminator() -> None:
-    with pytest.raises(TypeError, match="backend"):
-        ArticulationRootPropertiesCfg.from_dict(
-            {"backend": "newton", "fixed_base": False}
-        )
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("backend", "newton"),
+        ("newton_kinematic", True),
+        ("newton_sleep_policy", "never"),
+        ("newton_shape_collision", False),
+        ("newton_shape_collision_links", ["tool"]),
+        ("newton_particle_collision_links", ["tool"]),
+        ("newton_mesh_approximation", {"method": "convex_hull"}),
+        ("newton_force_sdf", True),
+    ],
+)
+def test_articulation_root_config_rejects_unsupported_fields(name, value) -> None:
+    with pytest.raises(TypeError, match=name):
+        ArticulationRootPropertiesCfg.from_dict({name: value})
+    with pytest.raises(TypeError, match=name):
+        ArticulationCfg.from_dict({"root_props": {name: value}})
 
 
 def test_articulation_root_config_round_trip() -> None:
@@ -1620,7 +1632,7 @@ class _DexUniRobotPresetCfg(RobotPresetCfg):
 )
 @pytest.mark.parametrize(
     "solver_mapping",
-    [None, {}, {"solver_type": "auto"}, {"solver_type": "dexuni"}],
+    [None, {}, {"solver_type": "dexuni"}],
 )
 def test_dexuni_preset_priority_and_isolation(
     missing, expected, solver_mapping

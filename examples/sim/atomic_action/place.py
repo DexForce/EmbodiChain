@@ -36,6 +36,7 @@ from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
+from embodichain.utils.math import matrix_from_quat, quat_from_matrix
 from examples.sim.atomic_action.support import (
     DEFAULT_GRIPPER_CLOSE_QPOS,
     DEXUNI_CUBE_CLOSE_QPOS,
@@ -148,7 +149,13 @@ def make_place_eef_poses(device: torch.device) -> torch.Tensor:
         dtype=torch.float32,
         device=device,
     )
+    # The recorded orientation is rounded to four decimals. Reconstruct a
+    # proper rotation so analytical IK receives a rigid target transform.
+    rotation = matrix_from_quat(quat_from_matrix(rotation))
     poses = []
+    # The authored four-decimal orientation needs projection onto SO(3).
+    u, _, vh = torch.linalg.svd(rotation)
+    rotation = u @ vh
     for position in ((-0.40, 0.48, 0.20), (-0.40, 0.48, 0.10)):
         pose = torch.eye(4, dtype=torch.float32, device=device)
         pose[:3, :3], pose[:3, 3] = rotation, torch.tensor(position, device=device)
@@ -225,6 +232,7 @@ def run(args: argparse.Namespace) -> None:
         },
         grasp_pose_generators={
             "eef": create_parallel_jaw_grasp_pose_generator(
+                robot=robot,
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
                 approach_direction_samples=getattr(args, "grasp_approach_samples", 4),

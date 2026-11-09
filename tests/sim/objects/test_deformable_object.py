@@ -188,13 +188,11 @@ def test_manager_rejects_non_particle_newton_solver(solver_type: str) -> None:
         sim.add_deformable_object(VolumeDeformableObjectCfg(uid="soft"))
 
 
-@pytest.mark.parametrize("solver_type", ["auto", "dexuni"])
 @pytest.mark.parametrize(
     "config_type", [SurfaceDeformableObjectCfg, VolumeDeformableObjectCfg]
 )
 def test_manager_declares_deformables_with_supported_solver(
     config_type: type[DeformableObjectCfg],
-    solver_type: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from embodichain.lab.sim.shapes import MeshCfg
@@ -202,7 +200,7 @@ def test_manager_declares_deformables_with_supported_solver(
 
     sim = object.__new__(SimulationManager)
     sim.physics = NewtonPhysicsBackend(SimpleNamespace())
-    sim.physics._configured_solver_type = solver_type
+    sim.physics._configured_solver_type = "dexuni"
     sim.device = torch.device("cuda")
     sim.sim_config = SimpleNamespace(physics_cfg=NewtonPhysicsCfg())
     sim._deformable_objects = {}
