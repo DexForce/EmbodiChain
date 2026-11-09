@@ -27,7 +27,7 @@ import numpy as np
 import pytest
 import warp as wp
 
-from embodichain.lab.sim.physics.solvers._reference_assets import (
+from examples.learning.nerd._support._scene_assets import (
     _import_reference,
     make_reference_articulation,
     reference_asset_hash,

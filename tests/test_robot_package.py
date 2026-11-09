@@ -59,7 +59,7 @@ class CoreProbe(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, CoreProbe())
 try:
-    runpy.run_path(str(root / 'extensions/embodichain_robots/dexforce_w1/cfg.py'), run_name='__main__')
+    runpy.run_path(str(root / 'extensions/embodichain_robots/dexforce/w1/cfg.py'), run_name='__main__')
 except CoreDiscovered:
     pass
 else:
@@ -80,12 +80,18 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         name
         for name in get_packages()
         if name == "embodichain"
-        or name.startswith(("embodichain_robots", "embodichain.lab.sim.robots"))
+        or name.startswith(
+            ("embodichain_robots", "embodichain.lab.sim.robots", "embodichain.data")
+        )
     ]
     distribution = Distribution(
         {
             "packages": packages,
             "package_dir": get_package_dir(),
+            "package_data": {
+                "": ["profile.json"],
+                "embodichain_robots": ["README.md", "**/README.md"],
+            },
             "script_name": "setup.py",
         }
     )
@@ -98,10 +104,19 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
     for relative in (
         "embodichain_robots/__init__.py",
         "embodichain_robots/_catalog.py",
-        "embodichain_robots/franka_panda.py",
-        "embodichain_robots/ur_robot.py",
-        "embodichain_robots/dexforce_w1/cfg.py",
-        "embodichain_robots/dexforce_w1/types.py",
+        "embodichain_robots/_asset_catalog.py",
+        "embodichain_robots/_locomotion.py",
+        "embodichain_robots/locomotion_profiles.py",
+        "embodichain_robots/franka/assets.py",
+        "embodichain_robots/universal_robots/assets.py",
+        "embodichain_robots/dexforce/w1/assets.py",
+        "embodichain_robots/the_robot_studio/so101/assets.py",
+        "embodichain_robots/franka/panda.py",
+        "embodichain_robots/universal_robots/ur_robot.py",
+        "embodichain_robots/flexiv/rizon4s/cfg.py",
+        "embodichain_robots/the_robot_studio/so101/cfg.py",
+        "embodichain_robots/dexforce/w1/cfg.py",
+        "embodichain_robots/dexforce/w1/types.py",
         "embodichain/lab/sim/robots/dual_arm.py",
         "embodichain/robot_registry.py",
     ):
@@ -113,3 +128,59 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "dual_arm.py",
     }
     assert not (legacy / "dexforce_w1").exists()
+    assert not (output / "embodichain/data/assets/eef_assets.py").exists()
+
+    # Provenance accompanies every migrated archive in the installed package.
+    from embodichain_robots._asset_catalog import ROBOT_ASSETS
+
+    for spec in ROBOT_ASSETS.values():
+        if spec["category"] != "eef":
+            continue
+        module = spec["class_path"].partition(":")[0]
+        owner = output.joinpath(*module.split(".")[:-1])
+        assert (owner / "assets.py").is_file()
+        assert (owner / "README.md").is_file()
+    assert (output / "embodichain_robots/sharpa/wave/cfg.py").is_file()
+    assert (output / "embodichain_robots/wuji/hand/cfg.py").is_file()
+    for filename in ("cfg.py", "_specs.py"):
+        assert (output / "embodichain_robots/brainco/revo1" / filename).is_file()
+    for retired in ("franka_panda.py", "ur_robot.py", "so101.py", "dexforce_w1"):
+        assert not (output / "embodichain_robots" / retired).exists()
+
+    for owner, retired in (
+        ("unitree/go1", "unitree_go1"),
+        ("unitree/go2", "unitree_go2"),
+        ("unitree/g1", "unitree_g1"),
+        ("unitree/h1_2", "unitree_h1_2"),
+        ("anybotics/anymal_c", "anymal_c"),
+        ("pollen_robotics/microduck", "microduck"),
+    ):
+        for filename in ("__init__.py", "cfg.py", "assets.py", "profile.json"):
+            assert (output / "embodichain_robots" / owner / filename).is_file()
+        assert not (output / "embodichain_robots" / f"{retired}.py").exists()
+
+    script = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from embodichain_robots.locomotion_profiles import load_locomotion_robot_profile
+for robot, count in (
+    ('UnitreeGo1', 12), ('UnitreeGo2', 12), ('UnitreeG1', 29),
+    ('UnitreeH1_2', 27), ('ANYmalC', 12), ('MicroDuck', 14),
+):
+    assert len(load_locomotion_robot_profile(robot)['robot']['joint_names']) == count
+profile = load_locomotion_robot_profile('UnitreeGo2')
+assert profile['robot']['joint_names'][0] == 'FL_hip_joint'
+assert profile['robot']['stiffness'][0] == 20.0
+profile['robot']['stiffness'][0] = 999.0
+assert load_locomotion_robot_profile('UnitreeGo2')['robot']['stiffness'][0] == 20.0
+assert 'torch' not in sys.modules
+assert 'embodichain.lab.sim' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(output)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

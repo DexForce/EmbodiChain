@@ -239,7 +239,9 @@ class BasePlanner(ABC):
     When ``True``, :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`
     prepends the observed ``start_qpos`` before dispatching a joint target. This
     lets the planner own both path timing and derivative generation without
-    making every caller materialize the current state as a waypoint.
+    making every caller materialize the current state as a waypoint. Cartesian
+    preparation also keeps only requested goals unless ``is_linear`` explicitly
+    requests a dense Cartesian path.
     """
 
     preserve_plan_samples: bool = False
@@ -452,6 +454,7 @@ class BasePlanner(ABC):
                 control_part=control_part,
                 dof=vels.shape[-1],
                 batch_size=vels.shape[0] if vels.ndim >= 3 else 1,
+                env_ids=getattr(self, "_planning_env_ids", None),
             )
 
         max_vel = torch.as_tensor(

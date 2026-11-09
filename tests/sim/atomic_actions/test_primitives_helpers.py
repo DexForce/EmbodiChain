@@ -69,9 +69,10 @@ def test_resolve_batched_pose_broadcasts_and_owns_global_pose() -> None:
     assert source[0, 0] == 1.0
 
 
-def test_assemble_full_robot_trajectory_overlays_control_parts() -> None:
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_assemble_full_robot_trajectory_overlays_control_parts(dtype) -> None:
     base = torch.zeros(BATCH_SIZE, ROBOT_DOF)
-    first = torch.ones(BATCH_SIZE, WAYPOINT_COUNT, 2)
+    first = torch.ones(BATCH_SIZE, WAYPOINT_COUNT, 2, dtype=dtype)
     second = torch.full((BATCH_SIZE, WAYPOINT_COUNT, 1), 2.0)
 
     result = assemble_full_robot_trajectory(
@@ -139,6 +140,31 @@ def test_resample_planned_trajectory_pads_but_never_shortens_native_timing() -> 
 
     assert result.shape == (1, 5, 1)
     assert torch.equal(result[:, -3:], torch.ones(1, 3, 1))
+
+
+def test_control_grid_accepts_double_planner_output_before_command_conversion() -> None:
+    trajectory = torch.tensor([[[2.8], [2.81], [2.83]]], dtype=torch.float64)
+    dt = torch.tensor([[0.0, 0.02, 0.03]], dtype=torch.float64)
+    result = resample_planned_trajectory(
+        trajectory, sample_count=3, dt=dt, control_dt=0.01
+    )
+    assert result.dtype == torch.float32
+    # The Atomic destination uses indexed writes, which require a matching
+    # dtype; the planner samples themselves must retain their precision.
+    commands = torch.zeros(1, result.shape[1], 2)
+    commands[:, :, [1]] = result
+    torch.testing.assert_close(commands[:, -1, 1], trajectory[:, -1, 0].float())
+    assert trajectory.dtype == dt.dtype == torch.float64
+
+
+@pytest.mark.parametrize("batch, count", [(0, 2), (1, 1), (1, 3), (1, 4)])
+def test_command_precision_is_consistent_without_timing(batch: int, count: int) -> None:
+    trajectory = torch.full((batch, count, 2), 2.8, dtype=torch.float64)
+    result = resample_planned_trajectory(trajectory, sample_count=3)
+    assert result.shape == (batch, 3, 2)
+    assert result.dtype == torch.float32
+    torch.testing.assert_close(result, torch.full_like(result, 2.8))
+    assert trajectory.dtype == torch.float64
 
 
 def test_resolve_object_target_uses_custom_name_in_shape_error() -> None:

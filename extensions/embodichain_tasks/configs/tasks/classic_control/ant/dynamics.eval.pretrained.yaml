@@ -1,8 +1,0 @@
-# Offline evaluation of the published NeRD model and dataset.
-mode: offline
-dataset: ../../../../../../outputs/datasets/neural_dynamics/nerd/ant/v1
-model: ../../../../../../outputs/models/neural_dynamics/nerd/ant/v1
-split: test
-batch_size: 256
-device: cpu
-output: ../../../../../../outputs/dynamics/ant/pretrained/offline.json

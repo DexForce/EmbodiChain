@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import ClassVar
 
 import torch
@@ -44,6 +44,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
+    PlannerDiagnostics,
     TimedTrajectory,
     normalize_success_mask,
 )
@@ -61,6 +62,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     pad_trajectory_to_length,
     plan_named_arm_trajectory,
+    plan_named_arm_trajectories,
     require_shared_task_state_key,
     repeat_qpos,
     resolve_batched_pose,
@@ -258,13 +260,8 @@ class CoordinatedPlacement(
         target = request.goal
         options = request.skill_options
         resources = self._resolve_resources(request)
-        if (
-            request.motion_policy.strategy == "motion_gen"
-            and self.motion_generator.planner.cfg.planner_type == "curobo"
-        ):
-            raise ValueError(
-                "Coordinated dual-arm planning is not supported by the cuRobo backend."
-            )
+        # Each segment plans one explicitly named arm. The task layer merges
+        # their trajectories; this does not require a coupled dual-arm solver.
         state = context
         (
             placing_xpos,
@@ -302,15 +299,60 @@ class CoordinatedPlacement(
         )
 
         success_mask = eligible.clone()
-        segment_success, placing_approach_traj = plan_named_arm_trajectory(
-            self.motion_generator,
-            resources.placing_arm.control_part,
-            placing_start_qpos,
-            torch.stack([placing_lift_xpos, placing_xpos], dim=1),
-            segments["approach"],
-            request.motion_policy,
-            context.control_dt,
-        )
+        paired_approach = None
+        policy_batching = None
+        placing_targets = torch.stack([placing_lift_xpos, placing_xpos], dim=1)
+        if request.motion_policy.strategy == "motion_gen":
+            # Both ready requests belong to this group. Classical backends
+            # evaluate both sequentially before the task failure gates below.
+            paired_approach, policy_batching = plan_named_arm_trajectories(
+                self.motion_generator,
+                {
+                    resources.placing_arm.control_part: (
+                        placing_start_qpos,
+                        placing_targets,
+                        segments["approach"],
+                    ),
+                    resources.support_arm.control_part: (
+                        support_start_qpos,
+                        support_xpos.unsqueeze(1),
+                        segments["approach"],
+                    ),
+                },
+                request.motion_policy,
+                context.control_dt,
+            )
+            segment_success, placing_approach_traj = paired_approach[
+                resources.placing_arm.control_part
+            ]
+        else:
+            segment_success, placing_approach_traj = plan_named_arm_trajectory(
+                self.motion_generator,
+                resources.placing_arm.control_part,
+                placing_start_qpos,
+                placing_targets,
+                segments["approach"],
+                request.motion_policy,
+                context.control_dt,
+            )
+
+        def failed_with_batching(message: str) -> ActionPlan:
+            failed = self.failed_plan(request, context, message=message)
+            if policy_batching is None:
+                return failed
+            return replace(
+                failed,
+                diagnostics=replace(
+                    failed.diagnostics,
+                    metadata={
+                        **failed.diagnostics.metadata,
+                        "packed_motion_groups": [
+                            {"stages": ["approach"], **policy_batching}
+                        ],
+                    },
+                ),
+            )
+
         success_mask &= normalize_success_mask(
             segment_success,
             num_envs=self.num_envs,
@@ -319,19 +361,22 @@ class CoordinatedPlacement(
         )
         if not success_mask.any():
             logger.log_warning("CoordinatedPlacement failed to plan placing approach.")
-            return self.failed_plan(
-                request, context, message="Placing approach failed."
-            )
+            return failed_with_batching("Placing approach failed.")
 
-        segment_success, support_approach_traj = plan_named_arm_trajectory(
-            self.motion_generator,
-            resources.support_arm.control_part,
-            support_start_qpos,
-            support_xpos.unsqueeze(1),
-            segments["approach"],
-            request.motion_policy,
-            context.control_dt,
-        )
+        if paired_approach is not None:
+            segment_success, support_approach_traj = paired_approach[
+                resources.support_arm.control_part
+            ]
+        else:
+            segment_success, support_approach_traj = plan_named_arm_trajectory(
+                self.motion_generator,
+                resources.support_arm.control_part,
+                support_start_qpos,
+                support_xpos.unsqueeze(1),
+                segments["approach"],
+                request.motion_policy,
+                context.control_dt,
+            )
         success_mask &= normalize_success_mask(
             segment_success,
             num_envs=self.num_envs,
@@ -340,9 +385,7 @@ class CoordinatedPlacement(
         )
         if not success_mask.any():
             logger.log_warning("CoordinatedPlacement failed to plan support approach.")
-            return self.failed_plan(
-                request, context, message="Support approach failed."
-            )
+            return failed_with_batching("Support approach failed.")
 
         approach_count = max(
             placing_approach_traj.shape[1], support_approach_traj.shape[1]
@@ -411,7 +454,7 @@ class CoordinatedPlacement(
         )
         if not success_mask.any():
             logger.log_warning("CoordinatedPlacement failed to plan placing retreat.")
-            return self.failed_plan(request, context, message="Placing retreat failed.")
+            return failed_with_batching("Placing retreat failed.")
         segments["retreat"] = placing_retreat_traj.shape[1]
 
         placing_hand_retreat_qpos = (
@@ -458,6 +501,18 @@ class CoordinatedPlacement(
                 "release": release_trajectory.shape[1],
                 "retreat": retreat_trajectory.shape[1],
             },
+            diagnostics=(
+                PlannerDiagnostics(
+                    backend=self.planning_services.planner_name,
+                    metadata={
+                        "packed_motion_groups": [
+                            {"stages": ["approach"], **policy_batching}
+                        ]
+                    },
+                )
+                if policy_batching is not None
+                else None
+            ),
         )
 
     def _resolve_object_pose(

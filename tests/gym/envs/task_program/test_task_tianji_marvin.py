@@ -131,7 +131,7 @@ def test_marvin_deployments_preflight_and_register(
 ) -> None:
     """Each real task selects compatible contracts and registers EmbodiedEnv."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path, payload, physical, deployment = _deployment(task)
     registration = deployment.integration.registration
@@ -202,11 +202,16 @@ def test_marvin_grasp_tcp_aligns_with_physical_hand_axes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The task-facing frame opens on hand X and approaches on hand Z."""
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path, payload, _, _ = _deployment("repeated_pick_place")
     cfg = config_to_cfg(payload, source_path=path)
+    solver_cfg = cfg.robot.solver_cfg[f"{side}_arm"]
+    assert isinstance(solver_cfg, SSIKSolverCfg)
+    assert solver_cfg.backend == "warp" and solver_cfg.srs_search == "seed_local"
     # Both URDF hand-tool fixed joints rotate by Rz(-pi/2) @ Ry(-pi/2).
     hand_to_tool = torch.tensor(
         [
@@ -216,7 +221,7 @@ def test_marvin_grasp_tcp_aligns_with_physical_hand_axes(
             [0.0, 0.0, 0.0, 1.0],
         ]
     )
-    hand_to_tcp = hand_to_tool @ torch.tensor(cfg.robot.solver_cfg[f"{side}_arm"].tcp)
+    hand_to_tcp = hand_to_tool @ torch.tensor(solver_cfg.tcp)
     torch.testing.assert_close(hand_to_tcp[:3, :3], torch.eye(3))
     torch.testing.assert_close(hand_to_tcp[:3, 3], torch.tensor([0.0, 0.0, 0.1125]))
 
@@ -329,7 +334,7 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
 ) -> None:
     """The 750 mm table variant shifts assets and targets together by 125 mm."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path, payload, _, deployment = _deployment("tableware/pour_water")
     reference = load_config(path.parent / "task.cobotmagic.yaml")

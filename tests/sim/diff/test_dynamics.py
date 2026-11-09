@@ -66,7 +66,15 @@ class Provider:
         def reset_history(state,fresh,world_mask):
             mask=torch.ones_like(state.valid_history_lengths,dtype=torch.bool) if world_mask is None else wp.to_torch(world_mask)[:-1]
             return {'memory':torch.where(mask,torch.zeros_like(state.history['memory']),state.history['memory'])},torch.where(mask,0,state.valid_history_lengths)
-        return NewtonSolverExtension(native_solver=native,capabilities=NewtonSolverCapabilities(differentiable=True,reset=True),functional_step=transition,initial_functional_state=initial,named_parameters=lambda:{'gain':gain},commit_functional_state=commit,reset_functional_history=reset_history)
+        commit_history = commit
+        reset = reset_history
+        class Functional:
+            create_state = staticmethod(initial)
+            parameters = staticmethod(lambda: {'gain':gain})
+            step = staticmethod(transition)
+            commit = staticmethod(commit_history)
+            reset_history = staticmethod(reset)
+        return NewtonSolverExtension(native_solver=native,capabilities=NewtonSolverCapabilities(reset=True),functional=Functional())
 """
 
 

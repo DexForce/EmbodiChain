@@ -69,7 +69,7 @@ components/execution_policies/*.yaml
   motion, tracking, recovery, runner, effect assurance
 
 task.<embodiment>.yaml
-  runnable ID and component selections
+  runnable ID, component selections and allowlisted deployment overrides
 ```
 
 Never put robot IDs or an integration selection into serialized

@@ -7,10 +7,6 @@ belongs to [data-assets](../data-assets/data-assets.md).
 
 ## Entry points
 
-Offline dynamics shards and their generation/training contract are owned by
-[neural dynamics](../neural-dynamics/neural-dynamics.md); they do not use the
-LeRobot expert-action schema described below.
-
 | Request | Owner |
 |---|---|
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |
@@ -18,7 +14,7 @@ LeRobot expert-action schema described below.
 | Explicit owner-side refill, waits and pacing | `embodichain/data_pipeline/runtime.py`: `ODSFlowController`; compact READY-only flow status in `engine/data.py` |
 | PyTorch iteration | `embodichain/data_pipeline/datasets/`: `sequence_data.py` owns `SequenceDataset`; `online_data.py` preserves `OnlineDataset`; `OfflineDataset` is an alias |
 | Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
-| Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
+| Numeric and bounded RGB LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping and image selection |
 | Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
@@ -26,9 +22,18 @@ LeRobot expert-action schema described below.
 | Depth sidecars | `embodichain/data_pipeline/depth_video/writer.py`, `reader.py` |
 | Offline collection retries and final partial batch | `embodichain/lab/scripts/run_task.py` |
 | File-only validation and grouped quality splits | `embodichain/data_pipeline/datasets/inspection.py`; `embodichain dataset validate\|split` |
+| Annotated real2sim source/prototype and task-specific DemoSkill preparation | `embodichain/data_pipeline/real2sim/`; `embodichain real2sim prepare\|validate` |
 | Durable commit diagnostics and metadata repair | `embodichain/data_pipeline/recording/journal.py`; `embodichain dataset recover` |
-| Dynamics teacher generation and HDF5 windows | `embodichain/data_pipeline/dynamics/`; contracts in [neural dynamics](../neural-dynamics/neural-dynamics.md) |
+| NeRD-specific HDF5 windows and teacher collection | `extensions/embodichain_models/embodichain_models/dynamics/nerd/data.py` and `examples/learning/nerd/_support/_generation.py`; contracts in [neural dynamics](../neural-dynamics/neural-dynamics.md) |
 | Isolated LeRobot 0.6.1 language/depth conversion | `tools/lerobot_export/` (Python >=3.12, independent dependencies) |
+
+Real2Sim normalization keeps source qpos, raw velocity, optional command and
+pose evidence separate. Phases and source-frame declarations are explicit;
+hard events must survive the control grid. JSON/NPZ bundles disable pickle and
+verify content digests. A qpos-only prototype supports fixed-scene replay;
+tabletop Cartesian transfer needs source TCP poses. Prototype preparation and
+planning do not establish collision freedom or physical task success. See
+[Real2Sim motion](real2sim.md) for ownership and source binding.
 
 Read [online sampling](online-sampling.md) for worker states, refill, shared
 errors, action schemas, sample provenance, causal histories and example-runner
@@ -52,6 +57,15 @@ helpers while retaining distinct lifecycle/lock ownership. `LeRobotDataSource`
 requires explicit action semantics, step duration, field mapping and a resident
 memory limit; imports do not initialize simulation or import the SDK until load.
 The first backend samples resident numeric tensors after bounded SDK reads.
+`LeRobotDataSource` optionally decodes selected RGB image features on demand,
+using the same canonical frame index built during numeric loading and a shared
+bounded uint8 CPU cache. Video decoding is unsupported. The official ACT example uses LeRobot's own
+dataset loader for training; this source remains available to SL/ODS consumers.
+
+`learning/sl/sequence.py` bridges these sources through an explicit encoder;
+the [SL context](../supervised-learning/supervised-learning.md) owns its identity
+and recovery admission. Online lifecycle and delivery credits remain here.
+Neither trainer RNG restoration nor encoding failure rewinds source quotas.
 
 The demo's `lerobot.py` owns writing and sidecar/hash auditing around the public
 reader. It measures initial loading rather than per-batch disk reads and does
@@ -106,6 +120,12 @@ its lifecycle and rejection rules are owned by
 drains committed work; it does not commit a live rollout. Final partial vector
 batches use `commit_env_ids` to select dataset rows while preserving a full
 physical reset. The recorder requires an exactly representable integer FPS.
+
+Expert rollout observation/action payloads are allocated without filling the
+configured episode capacity. Only entries marked by `valid` may be consumed;
+invalid payload values are unspecified. Reset invalidates the selected rows
+without clearing their large image tensors. This avoids touching unwritten
+CPU RGB-D frames at startup while preserving dtype and observation contents.
 
 Default expert rollout actions use the environment's `ExpertActionSpec`,
 independently of the policy action space. The default position mode preserves

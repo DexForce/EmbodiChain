@@ -18,12 +18,15 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.motion._budget import _planning_call
+
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Mapping, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import cached_property
-from typing import Any, ClassVar, Generic, TYPE_CHECKING
+import math
+from typing import Any, ClassVar, Generic, TYPE_CHECKING, Protocol
 
 import torch
 
@@ -44,12 +47,18 @@ from .plans import (
     ActionPlan,
     EffectVerificationRequirement,
     PlannerDiagnostics,
+    PlanQualification,
     PlanningFailure,
     TimedTrajectory,
     TrajectorySegment,
     normalize_success_mask,
 )
-from .policies import DynamicCollisionMode
+from .policies import (
+    DynamicCollisionMode,
+    MotionPolicy,
+    PlanningRecovery,
+    RecoveryPolicy,
+)
 from .requirements import GRASP_CAPABILITY, SkillBindingContract
 from .runtime_commands import (
     EndpointCommand,
@@ -70,6 +79,8 @@ if TYPE_CHECKING:
 
     from .runtime import ActionPlanningServices
     from .state import PlanningContext
+    from .nominal import NominalMotionSource
+    from .nominal import InstantiatedSkillMotion
 
 
 def resolve_runtime_device(device: torch.device | str) -> torch.device:
@@ -147,6 +158,13 @@ class SkillDescriptor:
     """Whether completion reports motion execution without physical-effect proof."""
     binding_contract: SkillBindingContract | None = None
     """Explicit generic resource contract used by Task Program lowering."""
+    planning_recovery_type: (
+        type[PlanningRecovery] | tuple[type[PlanningRecovery], ...] | None
+    ) = None
+    """Exact supported declaration type(s); None rejects nonempty declarations."""
+
+    supports_segment_motion_recovery: bool = field(default=False, init=False)
+    """Derived from the actual Atomic override; not a caller-supplied claim."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:
@@ -164,12 +182,128 @@ class SkillDescriptor:
             )
         if not isinstance(self.open_loop, bool):
             raise TypeError("SkillDescriptor.open_loop must be a bool.")
+        recovery_types = (
+            self.planning_recovery_type
+            if isinstance(self.planning_recovery_type, tuple)
+            else (
+                ()
+                if self.planning_recovery_type is None
+                else (self.planning_recovery_type,)
+            )
+        )
+        if self.planning_recovery_type is not None and (
+            not recovery_types
+            or len(set(recovery_types)) != len(recovery_types)
+            or any(
+                not isinstance(value, type) or not issubclass(value, PlanningRecovery)
+                for value in recovery_types
+            )
+        ):
+            raise TypeError(
+                "planning_recovery_type requires distinct PlanningRecovery types or None."
+            )
         if self.binding_contract is not None:
             if not isinstance(self.binding_contract, SkillBindingContract):
                 raise TypeError(
                     "SkillDescriptor.binding_contract must be a "
                     "SkillBindingContract or None."
                 )
+
+    def validate_motion_policy(self, policy: MotionPolicy) -> None:
+        """Reject unsupported segment recovery before grounding/provider work.
+
+        Args:
+            policy: Explicit motion policy selected for this exact skill.
+
+        Raises:
+            TypeError: The policy has an unsupported type.
+            ValueError: Segment recovery has no implementation for this skill.
+        """
+        if not isinstance(policy, MotionPolicy):
+            raise TypeError("policy must be a MotionPolicy.")
+        if (
+            policy.segment_sample_count_retries or policy.segment_continuous_ik_recovery
+        ) and not self.supports_segment_motion_recovery:
+            raise ValueError(
+                f"Skill {self.skill_id!r} does not support Cartesian segment recovery."
+            )
+
+    def validate_planning_recovery(self, policy: RecoveryPolicy) -> None:
+        """Reject incompatible declarations before grounding or planning.
+
+        Args:
+            policy: Selected immutable recovery policy.
+
+        Raises:
+            TypeError: The policy or concrete declaration type is unsupported.
+            ValueError: The declaration belongs to another skill.
+        """
+        if not isinstance(policy, RecoveryPolicy):
+            raise TypeError("policy must be a RecoveryPolicy.")
+        policy.validate_skill(self.skill_id)
+        declaration = policy.planning_recovery
+        if declaration is not None and type(declaration) not in (
+            self.planning_recovery_type
+            if isinstance(self.planning_recovery_type, tuple)
+            else (self.planning_recovery_type,)
+        ):
+            raise TypeError(
+                f"Skill {self.skill_id!r} does not support planning recovery {type(declaration).__name__}."
+            )
+
+
+class CompletePlanBuilder(Protocol):
+    """Engine-owned candidate construction and selected-plan finalization."""
+
+    def __call__(
+        self,
+        request: ResolvedActionRequest,
+        *,
+        planner: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
+        apply_transform: bool = True,
+        action_qualifier: (
+            Callable[
+                [ResolvedActionRequest, PlanningContext, ActionPlan],
+                PlanQualification | None,
+            ]
+            | None
+        ) = None,
+    ) -> ActionPlan:
+        """Build with sampling retries and final generic qualification.
+
+        ``planner`` retains request preparation and command authorization.
+        Explicit candidate search may defer the caller's transform until
+        :meth:`finalize_selected`; default calls preserve the original pipeline.
+        A declared mask-only velocity gate waits until the complete action hook
+        returns; it does not change masks seen by internal candidate searches.
+        ``action_qualifier`` replaces only this build's post-transform action
+        qualification. Structural checks and generic final velocity checks remain
+        mandatory; omitted callbacks use the action's normal qualifier.
+        """
+        ...
+
+    def plan_preview(
+        self, request: ResolvedActionRequest, context: PlanningContext
+    ) -> ActionPlan:
+        """Build an exact suffix under a private same-observation context.
+
+        The original caller transform stays local to this complete planning call.
+        The engine validates rows, observed robot, world/scene and request owner;
+        no command, state commit or second compiler is created by a preview.
+        """
+        ...
+
+    def finalize_selected(
+        self, request: ResolvedActionRequest, plan: ActionPlan
+    ) -> ActionPlan:
+        """Transform the selected candidate and qualify it without replanning.
+
+        Call once after selecting a candidate built with ``apply_transform=False``.
+        Structural, velocity and action final-plan qualification remain enforced.
+        """
+        ...
 
 
 class AtomicAction(Generic[GoalT, OptionsT], ABC):
@@ -188,6 +322,11 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
     OptionsType: ClassVar[type[ActionOptions]] = ActionOptions
     """Concrete per-invocation runtime options accepted by this skill."""
+
+    PlanningRecoveryType: ClassVar[
+        type[PlanningRecovery] | tuple[type[PlanningRecovery], ...] | None
+    ] = None
+    """Exact opt-in planning declarations supported by this skill."""
 
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
@@ -272,7 +411,20 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     @cached_property
     def num_envs(self) -> int:
         """Number of environments owned by the bound robot."""
-        return int(self.robot.get_qpos().shape[0])
+        selection = self.planning_services.env_ids
+        return (
+            int(
+                self.robot.get_qpos(
+                    **(
+                        {"env_ids": self.planning_services.env_ids}
+                        if self.planning_services.env_ids is not None
+                        else {}
+                    )
+                ).shape[0]
+            )
+            if selection is None
+            else len(selection)
+        )
 
     @cached_property
     def robot_dof(self) -> int:
@@ -293,14 +445,22 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     @classmethod
     def descriptor(cls) -> SkillDescriptor:
         """Return stable metadata used by registries and Action Agent adapters."""
-        return SkillDescriptor(
+        descriptor = SkillDescriptor(
             skill_id=cls.skill_id,
             goal_type=cls.GoalType,
             options_type=cls.OptionsType,
             agent_visible=cls.agent_visible,
             open_loop=cls.open_loop,
             binding_contract=cls.__dict__.get("binding_contract"),
+            planning_recovery_type=cls.PlanningRecoveryType,
         )
+        object.__setattr__(
+            descriptor,
+            "supports_segment_motion_recovery",
+            cls._validate_segment_motion_recovery
+            is not AtomicAction._validate_segment_motion_recovery,
+        )
+        return descriptor
 
     def resolve_request(
         self,
@@ -324,6 +484,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Invocation skill_id {invocation.skill_id!r} does not match "
                 f"{self.skill_id!r}."
             )
+        descriptor = self.descriptor()
+        descriptor.validate_planning_recovery(invocation.recovery_policy)
+        descriptor.validate_motion_policy(invocation.motion_policy)
         if not isinstance(invocation.goal, self.GoalType):
             expected = (
                 " | ".join(item.__name__ for item in self.GoalType)
@@ -376,6 +539,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Request skill_id {request.skill_id!r} does not match "
                 f"{self.skill_id!r}."
             )
+        descriptor = self.descriptor()
+        descriptor.validate_planning_recovery(request.recovery_policy)
+        descriptor.validate_motion_policy(request.motion_policy)
         if not isinstance(request.goal, self.GoalType):
             raise TypeError(
                 f"Skill {self.skill_id!r} received incompatible goal "
@@ -394,10 +560,42 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         self.planning_services.validate_binding(request.binding, contract)
         return request.goal
 
+    @_planning_call("check")
+    def plan_complete_request(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        *,
+        build: CompletePlanBuilder,
+        external_nominal: bool = False,
+    ) -> ActionPlan:
+        """Delegate one complete request, optionally specialized by a typed skill.
+
+        Args:
+            request: Already-resolved immutable invocation and selected policies.
+            context: Actual planning observation; no execution is permitted.
+            build: Engine-owned builder retaining generic retry/transform/final
+                qualification boundaries. A skill may select only its declared
+                bounded alternatives; it cannot modify the builder or registry.
+            external_nominal: Whether the caller supplied an external nominal
+                motion source. Unsupported explicit recovery combinations reject.
+
+        Returns:
+            One complete action plan. The default delegates exactly once and
+            performs no reads, snapshots, retries or state changes.
+        """
+        return build(request)
+
+    @_planning_call("check")
     def plan(
         self,
         request: ResolvedActionRequest[GoalT, OptionsT],
         context: PlanningContext,
+        *,
+        nominal_source: NominalMotionSource | None = None,
+        planner: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
     ) -> ActionPlan:
         """Bind the current collision scene and invoke the skill planner.
 
@@ -409,14 +607,301 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             Scene-bound action plan with expected, uncommitted effects.
         """
         self.require_goal(request)
+        if planner is not None and (
+            not callable(planner) or nominal_source is not None
+        ):
+            raise ValueError(
+                "An action-owned candidate planner cannot replace external nominal motion."
+            )
+        segment_recovery = bool(
+            request.motion_policy.segment_sample_count_retries
+            or request.motion_policy.segment_continuous_ik_recovery
+        )
+        if segment_recovery:
+            if nominal_source is not None:
+                raise ValueError(
+                    "Segment motion recovery cannot alter external nominal motion."
+                )
+            self._validate_segment_motion_recovery(request, context)
         prepared = self._prepare_request(request, context)
-        plan = self._plan(prepared, context)
+        plan = (
+            (self._plan if planner is None else planner)(prepared, context)
+            if nominal_source is None
+            else self._plan_from_nominal(prepared, context, nominal_source)
+        )
         if not isinstance(plan, ActionPlan):
             raise TypeError("AtomicAction._plan() must return an ActionPlan.")
         return replace(
             plan,
             commands=self._authorize_command_targets(prepared, plan.commands),
         )
+
+    def _validate_segment_motion_recovery(self, request, context) -> None:
+        """Reject unsupported non-default segment policy before scene/provider work."""
+        raise ValueError(
+            f"Skill {self.skill_id!r} does not support Cartesian segment recovery."
+        )
+
+    def _qualify_final_plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        plan: ActionPlan,
+    ) -> PlanQualification | None:
+        """Inspect emitted samples after plan transforms without replanning.
+
+        The engine supplies an owned plan snapshot and accepts only a mask and
+        diagnostics. Implementations may reject rows, never return a replacement
+        plan, change the request/context, execute commands or commit effects.
+        The default has no additional qualification requirement.
+        """
+        return None
+
+    def _plan_from_nominal(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        nominal_source: NominalMotionSource,
+    ) -> ActionPlan:
+        """Reject external motion unless the concrete skill opts in."""
+        raise ValueError(
+            f"Skill {self.skill_id!r} does not support external nominal motion."
+        )
+
+    def _validate_nominal_motion(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        source: NominalMotionSource,
+        *,
+        segments: tuple[str, ...] | None,
+    ) -> InstantiatedSkillMotion:
+        """Validate a single-slot external reference before skill assembly."""
+        from .nominal import InstantiatedSkillMotion
+
+        if context.batch_size != 1:
+            raise ValueError("external nominal motion currently requires B=1")
+        if (
+            request.recovery_policy.max_replans
+            or request.recovery_policy.max_action_retries
+        ):
+            raise ValueError(
+                "external nominal motion requires zero replans and action retries"
+            )
+        source_generator = getattr(source, "motion_generator", None)
+        if (
+            source_generator is not None
+            and source_generator is not self.motion_generator
+        ):
+            raise ValueError(
+                "external source must use the engine-owned motion generator"
+            )
+        motion = source.instantiate(request, context)
+        if not isinstance(motion, InstantiatedSkillMotion):
+            raise TypeError("nominal source must return a InstantiatedSkillMotion")
+        timed = motion.trajectory
+        if segments is not None and tuple(motion.segment_lengths) != segments:
+            raise ValueError(f"external motion requires ordered segments {segments}")
+        if tuple(self.robot.joint_names) != motion.joint_names:
+            raise ValueError("external motion joint layout does not match the robot")
+        if (
+            timed.batch_size != 1
+            or timed.robot_dof != context.robot.robot_dof
+            or not torch.equal(timed.env_ids, context.env_ids)
+        ):
+            raise ValueError(
+                "external motion must match the active environment and robot"
+            )
+        if not torch.allclose(
+            motion.initial_qpos, context.robot.qpos, atol=1e-4, rtol=0
+        ):
+            raise ValueError(
+                "external motion start does not match the observed robot state"
+            )
+        hand = request.binding.endpoint("primary", "grasp").require_target(
+            JointPositionTarget
+        )
+        arm = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        hand_ids = set(hand.joint_ids)
+        owned = hand_ids | set(arm.joint_ids)
+        mimic_ids = tuple(getattr(self.robot, "mimic_ids", ()))
+        if mimic_ids:
+            parents = tuple(self.robot.mimic_parents)
+            multipliers = tuple(self.robot.mimic_multipliers)
+            offsets = tuple(self.robot.mimic_offsets)
+            if not (len(mimic_ids) == len(parents) == len(multipliers) == len(offsets)):
+                raise ValueError("robot mimic metadata is inconsistent")
+            pending = list(zip(mimic_ids, parents, multipliers, offsets))
+            while pending:
+                previous = len(pending)
+                for item in tuple(pending):
+                    child, parent, multiplier, offset = item
+                    if parent not in owned:
+                        continue
+                    if (
+                        type(child) is not int
+                        or type(parent) is not int
+                        or not 0 <= child < timed.robot_dof
+                        or not 0 <= parent < timed.robot_dof
+                    ):
+                        raise ValueError("robot mimic metadata indexes invalid joints")
+                    expected = timed.positions[:, :, parent] * multiplier + offset
+                    if not torch.allclose(
+                        timed.positions[:, :, child], expected, atol=1e-5, rtol=0
+                    ):
+                        raise ValueError(
+                            "external motion violates robot mimic constraints: "
+                            f"{self.robot.joint_names[child]} <- {self.robot.joint_names[parent]} "
+                            f"multiplier={multiplier} offset={offset} "
+                            f"max_error={float((timed.positions[:,:,child]-expected).abs().max()):.6g}"
+                        )
+                    owned.add(child)
+                    pending.remove(item)
+                if len(pending) == previous:
+                    break
+        unowned = [index for index in range(timed.robot_dof) if index not in owned]
+        if unowned and not torch.allclose(
+            timed.positions[:, :, unowned],
+            context.robot.qpos[:, None, unowned].expand(-1, timed.waypoint_count, -1),
+            atol=1e-6,
+            rtol=0,
+        ):
+            raise ValueError("external motion cannot command unowned joints")
+        other_ids = [
+            index
+            for index in range(timed.robot_dof)
+            if index not in hand_ids | set(mimic_ids)
+        ]
+        if not torch.allclose(
+            timed.positions[:, 0, other_ids],
+            context.robot.qpos[:, other_ids],
+            atol=1e-4,
+            rtol=0,
+        ):
+            raise ValueError(
+                "external motion begins with a discontinuous non-gripper target"
+            )
+        if timed.waypoint_count < 2 or not torch.allclose(
+            timed.dt[:, 0], torch.zeros_like(timed.dt[:, 0]), atol=1e-7, rtol=0
+        ):
+            raise ValueError(
+                "external motion requires at least two samples and zero initial dt"
+            )
+        if not torch.allclose(
+            timed.dt[:, 1:],
+            torch.full_like(timed.dt[:, 1:], context.require_control_dt()),
+            atol=1e-6,
+            rtol=0,
+        ):
+            raise ValueError("external motion must use the environment control grid")
+        arm_ids = list(arm.joint_ids)
+        limits = self.robot.get_qpos_limits(name=arm.control_part)
+        speeds = self.robot.get_qvel_limits(name=arm.control_part)
+        if self.planning_services.env_ids is not None:
+            if isinstance(limits, torch.Tensor) and limits.ndim == 3:
+                limits = limits.index_select(0, context.env_ids.to(limits.device))
+            if isinstance(speeds, torch.Tensor) and speeds.ndim == 2:
+                speeds = speeds.index_select(0, context.env_ids.to(speeds.device))
+        if (
+            not isinstance(limits, torch.Tensor)
+            or limits.shape != (1, len(arm_ids), 2)
+            or bool(torch.isnan(limits).any())
+            or not bool((limits[:, :, 0] <= limits[:, :, 1]).all())
+        ):
+            raise ValueError("external motion requires ordered robot joint limits")
+        if (
+            not isinstance(speeds, torch.Tensor)
+            or speeds.shape != (1, len(arm_ids))
+            or bool(torch.isnan(speeds).any())
+            or not bool((speeds > 0).all())
+        ):
+            raise ValueError("external motion requires positive robot speed limits")
+        arm_path = timed.positions[:, :, arm_ids]
+        if bool(
+            (
+                (arm_path < limits[:, None, :, 0] - 1e-5)
+                | (arm_path > limits[:, None, :, 1] + 1e-5)
+            ).any()
+        ):
+            raise ValueError("external motion exceeds robot joint limits")
+        velocity = (arm_path[:, 1:] - arm_path[:, :-1]) / timed.dt[:, 1:, None]
+        if request.motion_policy.velocity_limit is not None:
+            speeds = torch.minimum(
+                speeds, torch.full_like(speeds, request.motion_policy.velocity_limit)
+            )
+        if bool((velocity.abs() > speeds[:, None] + 1e-5).any()):
+            raise ValueError("external motion exceeds robot speed limits")
+        if (
+            request.motion_policy.acceleration_limit is not None
+            and velocity.shape[1] > 1
+        ):
+            acceleration = (velocity[:, 1:] - velocity[:, :-1]) / timed.dt[:, 2:, None]
+            if bool(
+                (
+                    acceleration.abs() > request.motion_policy.acceleration_limit + 1e-5
+                ).any()
+            ):
+                magnitude = acceleration.abs()
+                flat_index = int(magnitude.reshape(-1).argmax())
+                sample_index = flat_index // len(arm_ids) + 2
+                joint_index = arm_ids[flat_index % len(arm_ids)]
+                start = 0
+                phase = "unknown"
+                for phase_name, length in motion.segment_lengths.items():
+                    if start <= sample_index < start + length:
+                        phase = phase_name
+                        break
+                    start += length
+                raise ValueError(
+                    "external motion exceeds the configured acceleration limit: "
+                    f"sample={sample_index}, phase={phase}, joint={self.robot.joint_names[joint_index]}, "
+                    f"acceleration={float(magnitude.reshape(-1)[flat_index]):.6g}, "
+                    f"limit={request.motion_policy.acceleration_limit:.6g}"
+                )
+        return motion
+
+    def _validate_nominal_anchor(
+        self,
+        trajectory: TimedTrajectory,
+        *,
+        index: int,
+        endpoint: JointPositionTarget,
+        target: torch.Tensor,
+    ) -> None:
+        """Verify an external reference against a skill-owned TCP target."""
+        if not 0 <= index < trajectory.waypoint_count:
+            raise ValueError("external motion anchor index is out of range")
+        qpos = trajectory.positions[:, index, list(endpoint.joint_ids)]
+        actual = self.robot.compute_fk(
+            qpos=qpos,
+            name=endpoint.control_part,
+            to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
+        )
+        if (
+            not isinstance(actual, torch.Tensor)
+            or actual.shape != target.shape
+            or not bool(torch.isfinite(actual).all())
+        ):
+            raise ValueError("external motion anchor FK is unavailable")
+        position_error = torch.linalg.vector_norm(
+            actual[:, :3, 3] - target[:, :3, 3], dim=-1
+        )
+        relative = actual[:, :3, :3].transpose(-1, -2) @ target[:, :3, :3]
+        cosine = ((relative.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2).clamp(-1, 1)
+        rotation_error = torch.acos(cosine)
+        if bool(((position_error > 0.002) | (rotation_error > math.radians(2))).any()):
+            raise ValueError(
+                "external motion does not reach its required TCP anchor: "
+                f"position_error_m={float(position_error.max()):.6g}, "
+                f"rotation_error_deg={math.degrees(float(rotation_error.max())):.6g}"
+            )
 
     def _prepare_request(
         self,
@@ -1048,6 +1533,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
 __all__ = [
     "AtomicAction",
+    "CompletePlanBuilder",
     "ObjectSemantics",
     "SkillDescriptor",
     "resolve_runtime_device",

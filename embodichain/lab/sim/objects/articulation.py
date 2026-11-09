@@ -113,6 +113,7 @@ from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from dexsim.scene import SpawnedArticulation
+    from .rigid_object import CollisionShapeDesc
 
 
 @dataclass(frozen=True, slots=True)
@@ -1550,6 +1551,32 @@ class Articulation(BatchEntity):
             pose[:, :3, 3] = xyz
             pose[:, :3, :3] = mat
         return pose
+
+    def get_link_collision_shapes(
+        self, link_name: str, env_id: int = 0
+    ) -> list[CollisionShapeDesc]:
+        """Read actual physical collision geometry for one articulation link.
+
+        Args:
+            link_name: Asset-defined link identity.
+            env_id: Physical environment row whose cooked shapes are requested.
+        Returns:
+            Owned link-local descriptors with native scale/approximation applied.
+            Links without physical collision geometry return an empty list.
+        Raises:
+            ValueError: For an unknown link.
+            IndexError: For an invalid environment row.
+            RuntimeError: When the active backend cannot expose physical shapes.
+        """
+        from .backends import collision_shapes_from_articulation_link
+
+        if link_name not in self.link_names:
+            raise ValueError(f"Unknown articulation link {link_name!r}")
+        if not 0 <= env_id < len(self._entities):
+            raise IndexError("Articulation environment row is out of range")
+        return collision_shapes_from_articulation_link(
+            self._entities[env_id], link_name, object_uid=self.uid
+        )
 
     def get_link_vert_face(self, link_name: str) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get the vertices and faces of a specific link in the articulation.

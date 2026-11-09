@@ -490,7 +490,7 @@ def test_snapshot_rejects_incomplete_joint_state() -> None:
         {"controlled_joint_indices": (0, 0)},
         {"representation": "eef_delta"},
         {"phases": (TrajectoryPhase("transit", 0, 4),)},
-        {"phases": (TrajectoryPhase("a", 0, 2), TrajectoryPhase("b", 1, 3))},
+        {"phases": (TrajectoryPhase("a", 0, 2), TrajectoryPhase("b", 0, 3))},
     ],
 )
 def test_template_rejects_invalid_representation_timing_and_indices(
@@ -633,3 +633,80 @@ def test_receipts_use_stable_ids_and_distinct_write_attempts() -> None:
         replace(receipt, error="inconsistent")
     with pytest.raises(ValueError, match="submission_id"):
         replace(receipt, submission_id=-1)
+
+
+@pytest.mark.parametrize("task_space", [False, True])
+def test_coordinator_uses_registered_guidance_reference_and_keeps_selection_evidence(
+    task_space: bool,
+) -> None:
+    from embodichain.lab.sim.motion.expansion.cfg import TrajectoryExpansionCfg
+
+    cfg = TrajectoryExpansionCfg.from_mapping(
+        {
+            "augmentation": {
+                "factors": {
+                    "task_space": {"enabled": task_space, "max_rotation_rad": 0.0},
+                    "manipulability": {
+                        "enabled": True,
+                        "guided_proposals": 4,
+                        "jacobian_rows": "translational",
+                    },
+                },
+                "coverage": {"joint_dedup_normalized_tol": 1e-6},
+            },
+        }
+    )
+    positions = torch.zeros(7, 4, dtype=torch.float64)
+    positions[:, 0] = torch.linspace(0, 0.5, 7)
+    positions[:, 3] = 0.1
+    dt = torch.full((7,), 0.1, dtype=torch.float64)
+    dt[0] = 0
+    source = TrajectoryTemplate(
+        "source",
+        "one",
+        "template",
+        ("x", "y", "z", "hand"),
+        positions,
+        dt,
+        phases=(
+            TrajectoryPhase(
+                "move", 0, 7, "free", ("joint_residual", "task_space_residual")
+            ),
+        ),
+        allowed_operators=("joint_residual", "task_space_residual"),
+        controlled_joint_indices=(0, 1, 2),
+    )
+
+    def kinematics(q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        poses = torch.eye(4, dtype=q.dtype).repeat(len(q), 1, 1)
+        poses[:, :3, 3] = q
+        jac = torch.zeros(len(q), 6, 3, dtype=q.dtype)
+        jac[:, :3] = torch.eye(3, dtype=q.dtype)
+        return poses, jac
+
+    session = ExpansionSession(cfg)
+    limits = torch.tensor([[-1.0, 1.0]] * 4)
+    session.register_case(
+        _case(), limits, joint_names=source.joint_names, manipulability_reference=4.0
+    )
+    assert session.manipulability_reference(_case()) == 4.0
+    with pytest.raises(ValueError, match="registered case"):
+        session.manipulability_reference(replace(_case(), initial_state_id="missing"))
+    coordinator = CandidateCoordinator(
+        cfg,
+        session=session,
+        source_adapter=TemplateSourceAdapter(),
+        source_context=_source_context(),
+        joint_limits=limits,
+        kinematics=kinematics,
+    )
+    items = coordinator.enqueue_source(source, count=2)
+    assert len(items) == 2
+    evidence = items[1].spec.trajectory_variant
+    # J has score 1. A host normalizer of 4 places it in band 0; deriving a
+    # fresh normalizer from this source instead would incorrectly give band 2.
+    assert evidence["manipulability"] == pytest.approx(1.0)
+    assert evidence["manipulability_band"] == 0
+    assert evidence["manipulability_matched"] == 1
+    assert ("task_space_operator" in evidence) == task_space
+    assert torch.equal(items[1].template.positions[:, 3], source.positions[:, 3])

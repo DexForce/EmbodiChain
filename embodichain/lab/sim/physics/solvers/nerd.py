@@ -34,8 +34,12 @@ from dexsim.engine.newton_physics import (
     NewtonSolverContext,
     NewtonSolverExtension,
 )
-from embodichain.compute.dynamics import NeRDStateCodec, append_history, reset_history
-from embodichain.learning.models.nerd import load_model
+from embodichain_models.dynamics.nerd.codec import (
+    NeRDStateCodec,
+    append_history,
+    reset_history,
+)
+from embodichain_models.dynamics.nerd import load_model
 
 from ._kinematics import differentiable_fk, _stream_scope
 from ._nerd_binding import NeRDBinding, _PHYSICS_SIGNATURE_SCHEMA
@@ -327,11 +331,43 @@ class NeuralRobotDynamicSolver(SolverBase):
         self._history = {}
 
 
+class _FunctionalNeRD:
+    """Expose one native solver's transition through the DexSim service contract."""
+
+    def __init__(self, solver: NeuralRobotDynamicSolver) -> None:
+        self.solver = solver
+
+    def create_state(self, native_state: Any) -> FunctionalSolverState:
+        return self.solver.initial_functional_state(native_state)
+
+    def parameters(self) -> Mapping[str, torch.Tensor]:
+        return dict(self.solver.network.named_parameters())
+
+    def step(
+        self,
+        state: FunctionalSolverState,
+        control: Mapping[str, torch.Tensor],
+        parameters: Mapping[str, torch.Tensor],
+        dt: float,
+    ) -> FunctionalSolverState:
+        return self.solver.functional_step(state, control, parameters, dt)
+
+    def commit(self, state: FunctionalSolverState) -> None:
+        self.solver.commit_functional_state(state)
+
+    def reset_history(
+        self,
+        state: FunctionalSolverState,
+        reset_state: FunctionalSolverState,
+        world_mask: Any | None,
+    ) -> tuple[Mapping[str, torch.Tensor], torch.Tensor]:
+        return self.solver.reset_functional_history(state, reset_state, world_mask)
+
+
 class NeRDProvider:
     """Entry-point provider for the registered ``nerd`` Newton solver."""
 
     capabilities = NewtonSolverCapabilities(
-        differentiable=True,
         reset=True,
         contact_reports=False,
         reduced_coordinates=True,
@@ -361,10 +397,6 @@ class NeRDProvider:
         return NewtonSolverExtension(
             native_solver=solver,
             capabilities=self.capabilities,
-            functional_step=solver.functional_step,
-            initial_functional_state=solver.initial_functional_state,
-            named_parameters=lambda: dict(solver.network.named_parameters()),
+            functional=_FunctionalNeRD(solver),
             close=solver.close,
-            commit_functional_state=solver.commit_functional_state,
-            reset_functional_history=solver.reset_functional_history,
         )

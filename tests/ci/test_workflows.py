@@ -137,6 +137,7 @@ def test_release_tag_preserves_distribution_build() -> None:
 def test_dataset_tools_can_still_run_manually() -> None:
     assert _eligible_jobs("dataset-tooling.yml", "workflow_dispatch") == {
         "offline-tools",
+        "lerobot-sdk",
         "lerobot-export",
     }
 
@@ -293,6 +294,7 @@ def test_test_job_restores_git_access_before_running_selected_tests(
         GIT_CONFIG_NOSYSTEM="1",
         GITHUB_WORKSPACE=str(repository),
         CI_NODE_BIN_DIR="",
+        XDG_RUNTIME_DIR=str(tmp_path / "xdg-runtime"),
     )
     for args in (
         ["init", "-q"],
@@ -338,18 +340,31 @@ def test_test_job_restores_git_access_before_running_selected_tests(
     )
 
 
+def test_gpu_test_job_prepares_headless_sdl_runtime() -> None:
+    job = _load_workflow("main.yml")["jobs"]["test"]
+    assert job["env"]["SDL_VIDEODRIVER"] == "dummy"
+    assert job["env"]["XDG_RUNTIME_DIR"] == "/tmp/embodichain-ci-runtime"
+    selected = next(
+        step for step in job["steps"] if step.get("name") == "Run selected tests"
+    )
+    assert 'install -d -m 0700 "$XDG_RUNTIME_DIR"' in selected["run"]
+
+
 @pytest.mark.parametrize(
     "invalid_contents",
     [
         None,
         "missing_robots",
+        "missing_models",
         "missing_entry_point",
         "wrong_entry_point_group",
+        "missing_asset_entry_point",
+        "retired_robot_module",
         "foreign_package",
         "bytecode",
     ],
 )
-def test_release_guard_validates_bundled_robot_catalog(
+def test_release_guard_validates_bundled_runtime_packages(
     tmp_path: Path, invalid_contents: str | None
 ) -> None:
     """Execute the release guard against wheels, including invalid artifacts."""
@@ -369,18 +384,32 @@ def test_release_guard_validates_bundled_robot_catalog(
     entry_points = (
         "[embodichain.tasks]\nembodichain_tasks = embodichain_tasks\n\n"
         "[embodichain.robots]\nofficial = embodichain_robots._catalog:ROBOT_CONFIGS\n"
+        "\n[embodichain.assets]\n"
+        "official_robots = embodichain_robots._asset_catalog:ROBOT_ASSETS\n"
     )
     if invalid_contents == "missing_entry_point":
-        entry_points = entry_points.split("[embodichain.robots]", 1)[0]
+        entry_points = entry_points.replace(
+            "[embodichain.robots]\nofficial = embodichain_robots._catalog:ROBOT_CONFIGS\n",
+            "",
+        )
     elif invalid_contents == "wrong_entry_point_group":
         entry_points = entry_points.replace("[embodichain.robots]", "[other.robots]")
+    elif invalid_contents == "missing_asset_entry_point":
+        entry_points = entry_points.split("[embodichain.assets]", 1)[0]
     members = {
         "embodichain/VERSION": version,
-        "embodichain/gen_sim/simready_pipeline/configs/gen_config.json": "{}",
+        "embodichain/gen_sim/asset_engine/configs/gen_config.json": "{}",
         "embodichain_tasks/__init__.py": "",
         task_config: source.read_text(),
         "embodichain_robots/__init__.py": "",
         "embodichain_robots/_catalog.py": "ROBOT_CONFIGS = {}\n",
+        "embodichain_robots/_asset_catalog.py": "ROBOT_ASSETS = {}\n",
+        "embodichain/data/_asset_registry.py": "",
+        "embodichain_robots/franka/assets.py": "",
+        "embodichain_robots/dexforce/w1/assets.py": "",
+        "embodichain_benchmarks/__init__.py": "",
+        "embodichain_models/__init__.py": "",
+        f"embodichain-{version}.data/data/share/embodichain/examples/__init__.py": "",
         f"embodichain-{version}.dist-info/METADATA": f"Version: {version}\n",
         f"embodichain-{version}.dist-info/entry_points.txt": entry_points,
     }
@@ -390,6 +419,14 @@ def test_release_guard_validates_bundled_robot_catalog(
             for path, data in members.items()
             if not path.startswith("embodichain_robots/")
         }
+    elif invalid_contents == "missing_models":
+        members = {
+            path: data
+            for path, data in members.items()
+            if not path.startswith("embodichain_models/")
+        }
+    elif invalid_contents == "retired_robot_module":
+        members["embodichain_robots/franka_panda.py"] = ""
     elif invalid_contents == "foreign_package":
         members["foreign/__init__.py"] = ""
     elif invalid_contents == "bytecode":

@@ -1,8 +1,9 @@
 # Generative simulation
 
-Scene Engine turns images into editable scenes and portable exports; the
-general SimReady pipeline ingests individual assets. Neither output is by
-itself a complete runnable Gym task deployment.
+Scene Engine turns images into editable scenes and portable exports. The
+Asset Engine ingests existing assets; the asset package also owns a
+separate articulated-generation service. Neither output is by itself a complete
+runnable Gym task deployment.
 
 ## Entry points and resolution
 
@@ -10,26 +11,55 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
-| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `simready` |
+| Model service configuration, adapters and ownership | `services/`; [service guide](../../../embodichain/gen_sim/services/README.md) |
+| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `asset-engine`, `task-engine` |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
+| Audited image/edit stages | `scene_engine/pipeline/api.py`: `analyze_image()`, `analyze_edit()`, and their materialization functions |
+| Prepare source GLB geometry before publication | `scene_engine/asset_normalization.py`: `normalize_source_scene_assets()`; owned declarations and content-addressed output, no simulator |
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
 | Grouped layouts from an existing export | `scene_engine/cli/randomization.py`, `scene_engine/randomization/generation.py` |
 | Baseline cache, saved runs and pose playback | `scene_engine/randomization/baseline.py`, `persistence.py`, `loading.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
-| General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
+| General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
+| Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
+| Frozen placement declaration → normative evidence binding | `task_engine/evidence.py` → [TaskSpec evidence boundary](../task-spec/task-spec.md#physical-evidence-boundary) |
 
 Generate: validate input → VLM understanding → geometry/articulation generation
-→ placement refinement → export. Segmentation, geometry and articulation
-clients are closed in `finally` blocks; VLM lifetime is separate.
+→ placement refinement → export. Model capabilities resolve lazily through one run-scoped `GenSimServices`.
+Normal wheel installs discover external profiles through
+`EMBODICHAIN_MODEL_SERVICES_CONFIG`, then the XDG/home user configuration, before
+bundled JSON and legacy rules. Python configuration overrides discovery. Selected
+external files fail explicitly when invalid; no installed file needs editing.
+`EMBODICHAIN_ENV_FILE` independently supplies referenced variables.
+
+Owned transports close when the run exits; explicit legacy clients and supplied
+service runs remain caller-owned. Chat requests own their stateless transport.
 Edit: import export → validate graph/typed edit plan → generate additions
 → change layout → overwrite export. Combined image/edit mode generates first.
 
 Read [pipeline details](pipeline-details.md) for stage contracts, parser resume
 behavior, Gradio artifact ownership and focused failure diagnosis.
+
+The staged API persists a versioned image or edit blueprint before generating
+assets. Image materialization verifies the persisted blueprint and source/mask
+hashes before generation; changed workspaces require a new analysis. It copies
+the supplied scene/graph and closes only clients it creates. Move/delete-only
+edit materialization uses no generation clients or VLM configuration. Pipeline
+exports load lazily so utility imports do not require generation dependencies.
+Blueprint objects are in-process values with persisted audit documents; this API
+does not load them as a complete task deployment. Whole-scene rotations also
+rotate planar graph relations and table regions; directional graphs require
+quarter turns because their vocabulary is axis-aligned.
+The Asset Engine uses the `asset-engine` CLI and `asset_engine` Python
+namespace. Its [user guide](../../../docs/source/features/generative_sim/asset_engine.md)
+owns input selection, processing settings, artifacts and simulation handoff.
+Instruction/image semantic planning belongs to
+[Task Engine](../task-engine/task-engine.md); its unbound graph output retains
+pending runtime bindings rather than creating a scene or executable deployment.
 
 ## Durable scene boundary
 
@@ -51,6 +81,9 @@ support. The packaged native glTF textures retain their original pixels.
 - Scene object IDs and graph node IDs must be equal sets on import and export.
 - Editable scene state is Y-up; portable runtime output is Z-up. Convert world
   pose at this boundary, and preserve `body_scale` separately from mesh geometry.
+- Articulation export measures the native root collision geometry against its
+  support surface. `init_pos` belongs to the runtime root; `proxy_init_pos`
+  preserves the editable GLB placement independently.
 - A generated scene includes a rigid table. Articulated assets need both a
   runtime USDC and a GLB proxy for editing.
 - Overwrite validates/writes new scene state before deleting stale assets.
@@ -125,7 +158,18 @@ without sampling. File/model coordinate adaptation remains owned here.
 
 ## Runtime and extension boundaries
 
-Keep parser capabilities idempotent so recorded stages support resume.
+Blender operations use `gen_sim/_blender_runtime.py` to launch the standalone
+worker selected by `EMBODICHAIN_BLENDER_PYTHON`. The worker loads only Blender
+operations and their direct dependencies; it must not import the business
+framework, Torch or DexSim. Input/output files cross this process boundary;
+Blender objects and business-environment Python/native-library paths do not.
+`docker/` owns the py312 public runtime, py311/py312 internal profiles and the
+separate Python 3.11/NumPy 1.26 Blender environment. See
+[container setup](../../../docker/README.md) for building and qualification.
+
+The parser interface requires idempotent capabilities, but the current CLI
+allocates a new UUID and reruns the selected sequence on every invocation.
+`status.parsed` is completion metadata, not per-stage caching or validation.
 Provider configuration belongs to its loader/client, while coordinate and graph
 contracts belong to importer/exporter. Task registration and physical/semantic
 composition belong to [env-framework](../env-framework/env-framework.md).
@@ -143,8 +187,20 @@ environment files.
 | Portable scene/pose/overwrite contract | `tests/gen_sim/scene_engine/test_scene_core_and_export.py` |
 | Grouped layout generation, provenance and playback | `tests/gen_sim/scene_engine/test_randomization_*.py` |
 | Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
-| Ingest formats and metadata | `tests/gen_sim/simready_pipeline/` |
+| Ingest formats and metadata | `tests/gen_sim/asset_engine/` |
 | UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
 
 Select provider-backed or simulator conversion tests only when that runtime
 boundary changes; source/unit checks do not establish remote service quality.
+
+Placement declaration projection for new bundles uses
+`project_configured_placement_evidence_binding` with the public configured owner's
+resolved condition and compiled occurrence descriptors. The final builder must
+not load or emit `constraints.json`. The original `project_placement_evidence_binding`
+only validates the frozen B0 constraints payload for source-comparison fixtures;
+it delegates the semantic projection and is not a second runtime policy owner.
+
+Task Engine's `project_condition_evidence_binding` projects frozen role/lineage,
+explicit compiled occurrences and already-resolved physical criteria into the
+TaskSpec state-evidence contract. It reads no physical state and chooses no
+acceptance thresholds; the Lab observation owner supplies facts.

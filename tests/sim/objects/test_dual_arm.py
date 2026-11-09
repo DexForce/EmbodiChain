@@ -28,7 +28,7 @@ from embodichain.lab.sim.robots.dual_arm import (
     build_dual_arm_cfg,
     resolve_mounts,
 )
-from embodichain_robots.ur_robot import URRobotCfg
+from embodichain_robots.universal_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import URSolverCfg
 
 # --------------------------------------------------------------------------- #
@@ -209,7 +209,8 @@ def test_dual_arm_from_dict_franka_base_robot():
         }
     )
     assert set(["left_arm", "right_arm", "dual_arm"]).issubset(cfg.control_parts.keys())
-    assert set(["left_eef", "right_eef"]).issubset(cfg.control_parts.keys())
+    assert {"left_eef", "right_eef"}.isdisjoint(cfg.control_parts)
+    assert len(cfg.control_parts["dual_arm"]) == 14
 
 
 def test_dual_arm_unknown_base_robot_raises():

@@ -26,14 +26,14 @@ import torch
 from scipy.spatial.transform import Rotation
 
 from embodichain.lab.sim.motion.solvers import FEPSolver, FEPSolverCfg
-from embodichain_robots.dexforce_w1 import DexforceW1Cfg
-from embodichain_robots.dexforce_w1.utils import build_dexforce_w1_assembly_urdf_cfg
+from embodichain_robots.dexforce.w1 import DexforceW1Cfg
+from embodichain_robots.dexforce.w1.utils import build_dexforce_w1_assembly_urdf_cfg
 
 
 @pytest.fixture
 def standard_cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DexforceW1Cfg:
     """Split the independent full-body reference into local kinematic components."""
-    from embodichain_robots.dexforce_w1 import utils
+    from embodichain_robots.dexforce.w1 import utils
 
     fixture = Path(__file__).parents[2] / "fixtures/kinematics/w1_v030_body.urdf"
     reference = ET.parse(fixture).getroot()
@@ -204,7 +204,7 @@ def test_standard_cfg_search_and_partial_failures(
 def test_standard_component_frame_metadata_resolves_source_links(
     standard_cfg: DexforceW1Cfg,
 ) -> None:
-    from embodichain_robots.dexforce_w1.utils import (
+    from embodichain_robots.dexforce.w1.utils import (
         chassis_manager,
         torso_manager,
         head_manager,

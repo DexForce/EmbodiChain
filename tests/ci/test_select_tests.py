@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -77,7 +79,7 @@ def test_repository_manifest_selectors_resolve() -> None:
     ("source_path", "expected_selector"),
     [
         (
-            "extensions/embodichain_robots/franka_panda.py",
+            "extensions/embodichain_robots/franka/panda.py",
             "tests/sim/robots/test_entrypoints.py",
         ),
         (
@@ -93,8 +95,8 @@ def test_repository_manifest_selectors_resolve() -> None:
             "tests/lab/scripts/test_run_task.py",
         ),
         (
-            "scripts/tutorials/atomic_action/pickup.py",
-            "tests/sim/atomic_actions/test_core.py",
+            "scripts/tutorials/atomic_action/single_arm.py",
+            "tests/visualization/test_example_tutorial_coverage.py",
         ),
         (
             "scripts/tutorials/visualization/viser_scene.py",
@@ -1093,8 +1095,12 @@ def _write_collection_manifest(command: list[str], files: list[str]) -> Path | N
     ["gpu", "sim", "slow-gpu", "slow-sim"],
     ids=["accelerator", "simulation", "slow-accelerator", "slow-simulation"],
 )
+@pytest.mark.parametrize("no_finalize_resource_lanes", [False, True])
 def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lane: str,
+    no_finalize_resource_lanes: bool,
 ) -> None:
     original_selectors = [
         "tests/empty.py",
@@ -1132,11 +1138,22 @@ def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
     }
     original = dict(build_commands(plan, lanes=[base_lane]))[lane]
 
-    assert run_test_plan.run_plan(plan, root=tmp_path, lanes=[base_lane]) == 0
+    assert (
+        run_test_plan.run_plan(
+            plan,
+            root=tmp_path,
+            lanes=[base_lane],
+            no_finalize_resource_lanes=no_finalize_resource_lanes,
+        )
+        == 0
+    )
 
     assert len(calls) == 2
     discovery, execution = calls[0][0], calls[1][0]
     assert discovery[: len(original)] == original
+    assert execution[2] == (
+        "scripts.ci.pytest_no_finalize" if no_finalize_resource_lanes else "pytest"
+    )
     assert "--collect-only" in discovery and "--collect-only" not in execution
     marker_index = execution.index("-m", 3)
     assert execution[4:marker_index] == [
@@ -1231,3 +1248,38 @@ def test_runner_dry_run_does_not_discover_or_execute_resource_tests(
     plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
 
     assert run_test_plan.run_plan(plan, root=tmp_path, dry_run=True) == 0
+
+
+@pytest.mark.parametrize(
+    ("assertion", "summary", "exit_code"),
+    [("True", "1 passed", 0), ("False", "1 failed", 1)],
+)
+def test_no_finalize_runner_preserves_pytest_result(
+    tmp_path: Path, assertion: str, summary: str, exit_code: int
+) -> None:
+    test_file = tmp_path / "test_contract.py"
+    finalizer_marker = tmp_path / "atexit-ran"
+    test_file.write_text(
+        "import atexit\n"
+        "from pathlib import Path\n"
+        f"atexit.register(lambda: Path({str(finalizer_marker)!r}).write_text('ran'))\n"
+        f"def test_contract():\n    assert {assertion}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.ci.pytest_no_finalize",
+            "-q",
+            str(test_file),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert summary in result.stdout
+    assert not finalizer_marker.exists()

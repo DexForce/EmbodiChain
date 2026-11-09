@@ -38,19 +38,39 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="expansion",
+        target="embodichain.cli.expansion:main",
+        help="Preflight, collect, resume and inspect expert expansion jobs.",
+    ),
+    Command(
+        name="train-sl",
+        target="embodichain.learning.sl.workflow:cli",
+        help="Train a supervised policy or dynamics recipe from YAML or JSON.",
+    ),
+    Command(
         name="data",
         target="embodichain.data.download:main",
         help="List and download EmbodiChain data assets.",
     ),
     Command(
-        name="simready",
-        target="embodichain.gen_sim.simready_pipeline.cli.start:main",
+        name="asset-engine",
+        target="embodichain.gen_sim.asset_engine.cli.start:main",
         help="Convert a raw asset directory into a SimReady asset.",
+    ),
+    Command(
+        name="task-engine",
+        target="embodichain.gen_sim.task_engine.cli:main",
+        help="Generate an image-grounded semantic task graph without simulation.",
     ),
     Command(
         name="scene-engine",
         target="embodichain.gen_sim.scene_engine.cli.start:main",
         help="Generate a scene export from an input image using gen_sim/.env.",
+    ),
+    Command(
+        name="search-scene-feasibility",
+        target="embodichain.lab.task_program.integrations.feasibility:cli",
+        help="Search task-conditioned scene layouts and robot installations.",
     ),
     Command(
         name="scene-randomization",
@@ -113,9 +133,9 @@ COMMANDS = (
         help="Validate, split, and recover recorded expert datasets.",
     ),
     Command(
-        name="dynamics",
-        target="embodichain.cli.dynamics:main",
-        help="Generate data, train and evaluate neural dynamics models.",
+        name="real2sim",
+        target="embodichain.data_pipeline.real2sim.cli:main",
+        help="Prepare and validate annotated real-to-simulation motion prototypes.",
     ),
     Command(
         name="preview_lerobot_data",

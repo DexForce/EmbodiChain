@@ -16,16 +16,14 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
+from urllib.parse import urlsplit
 from zipfile import ZipFile
 
 import pytest
 from packaging.requirements import Requirement
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
+from packaging.utils import canonicalize_name, parse_wheel_filename
 
 import setup as package_setup
 from scripts.validate_wheel_metadata import WheelMetadataError, validate_wheel
@@ -38,6 +36,39 @@ _TEST_VERSION = "0.2.4"
 def _read_project_metadata() -> dict:
     with (_REPOSITORY_ROOT / "pyproject.toml").open("rb") as stream:
         return tomllib.load(stream)
+
+
+def test_docker_locks_match_core_dexsim_requirement() -> None:
+    dependencies = _read_project_metadata()["project"]["dependencies"]
+    core = next(
+        requirement
+        for requirement in map(Requirement, dependencies)
+        if canonicalize_name(requirement.name) == "dexsim-engine"
+    )
+
+    for profile in ("py311", "py312"):
+        requirements = []
+        for directory in ("profiles", "locks"):
+            path = (
+                _REPOSITORY_ROOT
+                / "docker"
+                / directory
+                / f"{profile}.{'in' if directory == 'profiles' else 'txt'}"
+            )
+            lines = [
+                line
+                for line in path.read_text().splitlines()
+                if line.startswith("dexsim-engine @ ")
+            ]
+            assert len(lines) == 1
+            requirements.append(Requirement(lines[0]))
+        assert requirements[0].url == requirements[1].url
+
+        wheel_name = Path(urlsplit(requirements[0].url).path).name
+        package_name, version, _, tags = parse_wheel_filename(wheel_name)
+        assert canonicalize_name(package_name) == "dexsim-engine"
+        assert version in core.specifier
+        assert any(tag.interpreter == f"cp{profile[2:]}" for tag in tags)
 
 
 def _write_test_wheel(tmp_path: Path, requirements: list[str]) -> Path:
@@ -76,10 +107,11 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_tasks",
         "embodichain_robots",
         "embodichain_benchmarks",
+        "embodichain_models",
     }
     assert runtime_roots | {
         "embodichain_tasks.configs",
-        "embodichain_robots.dexforce_w1",
+        "embodichain_robots.dexforce.w1",
     } <= set(packages)
     assert "embodichain_tasks.manipulation.tableware" in packages
     assert "embodichain_tasks.tableware" not in packages
@@ -89,7 +121,46 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
         "embodichain_robots": "extensions/embodichain_robots",
         "embodichain_benchmarks": "extensions/embodichain_benchmarks",
+        "embodichain_models": "extensions/embodichain_models/embodichain_models",
     }
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_new_extension_package_is_discovered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool
+) -> None:
+    extensions = tmp_path / "extensions"
+    project = extensions / "embodichain_example"
+    package = project / "embodichain_example" if nested else project
+    (package / "feature").mkdir(parents=True)
+    (package / "__init__.py").touch()
+    (package / "feature" / "__init__.py").touch()
+    monkeypatch.setattr(package_setup, "THIS_DIR", tmp_path)
+    monkeypatch.setattr(package_setup, "EXTENSIONS_DIR", extensions)
+
+    assert {"embodichain_example", "embodichain_example.feature"} <= set(get_packages())
+    assert (
+        get_package_dir()["embodichain_example"]
+        == package.relative_to(tmp_path).as_posix()
+    )
+
+
+@pytest.mark.parametrize("layout", ["missing", "ambiguous", "invalid_name"])
+def test_invalid_extension_layout_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str
+) -> None:
+    extensions = tmp_path / "extensions"
+    name = "embodichain_bad-name" if layout == "invalid_name" else "embodichain_example"
+    project = extensions / name
+    project.mkdir(parents=True)
+    if layout == "ambiguous":
+        (project / "__init__.py").touch()
+        (project / name).mkdir()
+        (project / name / "__init__.py").touch()
+    monkeypatch.setattr(package_setup, "EXTENSIONS_DIR", extensions)
+
+    with pytest.raises(ValueError, match="extension package name|package layout"):
+        get_packages()
 
 
 def test_project_metadata_has_no_direct_dependencies() -> None:
@@ -110,7 +181,7 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
 def test_wheel_metadata_accepts_index_dependencies(tmp_path: Path) -> None:
     wheel_path = _write_test_wheel(
         tmp_path,
-        ["gymnasium>=0.29.1", 'viser==1.0.21; python_version >= "3.10"'],
+        ["gymnasium>=0.29.1", 'viser==1.0.21; python_version >= "3.11"'],
     )
 
     validate_wheel(wheel_path)

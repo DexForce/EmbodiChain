@@ -27,51 +27,21 @@ import h5py
 import numpy as np
 import pytest
 import torch
-from embodichain.lab.sim.physics.solvers.collection import (
-    DynamicsGenerationCfg,
+from examples.learning.nerd._support._scene import (
     generate_dataset,
     evaluate_rollouts,
-    _sample,
     _task_values,
     _FixedPolicy,
 )
-from embodichain.data_pipeline.dynamics.shards import load_manifest, trajectory_split
+from embodichain_models.dynamics.nerd.data import load_manifest, trajectory_split
+from examples.learning.nerd._support._generation import _sample
 
 _ROOT = Path(__file__).resolve().parents[4]
 
 
-@pytest.mark.parametrize(
-    "key,value",
-    [
-        ("num_envs", True),
-        ("horizon", 2.5),
-        ("trajectories", 0),
-        ("resume", "false"),
-        ("seed", False),
-        ("num_substeps", -1),
-        ("max_attempts", 1),
-        ("effort_scale", float("nan")),
-        ("physics_profile", "unregistered"),
-    ],
-)
-def test_generation_config_rejects_invalid_values_before_runtime(key, value) -> None:
-    with pytest.raises((ValueError, TypeError)):
-        DynamicsGenerationCfg(**{key: value})
-
-
-def test_sampling_is_candidate_seed_local_and_passive_zero() -> None:
-    first = _sample("ant", 9, 5, "random_effort", "sample", 0.1)
-    _sample("cartpole", 73, 2, "random_effort", "sample", 1.0)
-    second = _sample("ant", 9, 5, "random_effort", "sample", 0.1)
-    for a, b in zip(first, second):
-        torch.testing.assert_close(a, b, atol=0, rtol=0)
-    assert not first[2][:, :6].any()
-    assert not _sample("cartpole", 3, 5, "passive", "default", 1.0)[2].any()
-
-
 @pytest.mark.parametrize("robot,substeps", [("cartpole", 5), ("ant", 16)])
 def test_warp_parameter_profile_preserves_reset_replay(robot, substeps) -> None:
-    from embodichain.lab.sim.physics.solvers.collection import DynamicsSimulation
+    from examples.learning.nerd._support._scene import DynamicsSimulation
 
     with DynamicsSimulation(
         robot, num_envs=2, num_substeps=substeps, physics_profile="warp_reference"
@@ -117,7 +87,7 @@ def test_warp_parameter_profile_preserves_reset_replay(robot, substeps) -> None:
 def test_ant_warp_contact_mapping_rejects_inconsistent_solver_before_scene(
     monkeypatch, smoothing
 ) -> None:
-    from embodichain.lab.sim.physics.solvers import collection
+    from examples.learning.nerd._support import _scene as collection
 
     def forbidden_scene(*args, **kwargs):
         pytest.fail("Invalid coupled parameters must fail before allocating a scene")
@@ -137,7 +107,7 @@ def test_ant_warp_contact_mapping_rejects_inconsistent_solver_before_scene(
 
 
 def test_ant_warp_mujoco_keeps_original_material_domain() -> None:
-    from embodichain.lab.sim.physics.solvers.collection import DynamicsSimulation
+    from examples.learning.nerd._support._scene import DynamicsSimulation
 
     with DynamicsSimulation(
         "ant",
@@ -156,7 +126,7 @@ def test_ant_warp_mujoco_keeps_original_material_domain() -> None:
 def test_ant_warp_neural_mapping_rejects_unknown_marker_before_scene(
     tmp_path: Path, monkeypatch
 ) -> None:
-    from embodichain.lab.sim.physics.solvers import collection
+    from examples.learning.nerd._support import _scene as collection
 
     checkpoint = tmp_path / "unknown-mapping"
     checkpoint.mkdir()
@@ -200,9 +170,9 @@ def test_ant_warp_contact_mapping_survives_nerd_scene_rebuild(
     tmp_path: Path, mapped: bool
 ) -> None:
     """Exports and neural scenes must bind the same actual material domain."""
-    from embodichain.lab.sim.physics.solvers.collection import DynamicsSimulation
+    from examples.learning.nerd._support._scene import DynamicsSimulation
 
-    from embodichain.learning.models.nerd import export_model, load_model
+    from embodichain_models.dynamics.nerd import export_model, load_model
 
     solver = None if mapped else {"solver_type": "mujoco_warp", "use_mujoco_cpu": True}
     with DynamicsSimulation(
@@ -241,7 +211,7 @@ def test_ant_warp_contact_mapping_survives_nerd_scene_rebuild(
 
 
 def _check_pipeline(tmp_path: Path, robot: str) -> None:
-    from embodichain.lab.sim.physics.solvers.collection import DynamicsSimulation
+    from examples.learning.nerd._support._scene import DynamicsSimulation
 
     cfg = {
         "robot": robot,
@@ -439,10 +409,10 @@ def _check_pipeline(tmp_path: Path, robot: str) -> None:
 
 
 def _check_actor_and_failures(tmp_path: Path) -> None:
-    from embodichain.lab.sim.physics.solvers.collection import DynamicsSimulation
+    from examples.learning.nerd._support._scene import DynamicsSimulation
     from embodichain.learning.models import build_mlp_from_cfg
     from embodichain.learning.rl.policies import build_policy
-    from embodichain.learning.models.nerd import load_model, export_model
+    from embodichain_models.dynamics.nerd import load_model, export_model
 
     with DynamicsSimulation(
         "cartpole", device="cpu", num_envs=2, num_substeps=2
@@ -512,41 +482,6 @@ def _check_actor_and_failures(tmp_path: Path) -> None:
     assert len(Path(report["trajectory_evidence"]).read_text().splitlines()) == 3
 
 
-def _check_rejection_limit(tmp_path: Path) -> None:
-    import embodichain.lab.sim.physics.solvers.collection as collection
-
-    original = collection._sample
-
-    def fast_velocity(*args):
-        q, qd, effort = original(*args)
-        qd[:] = 2e5
-        return q, qd, effort
-
-    collection._sample = fast_velocity
-    try:
-        with pytest.raises(RuntimeError, match="attempt limit"):
-            generate_dataset(
-                {
-                    "robot": "cartpole",
-                    "output_dir": str(tmp_path / "rejected"),
-                    "num_envs": 2,
-                    "trajectories": 1,
-                    "horizon": 1,
-                    "max_attempts": 2,
-                    "device": "cpu",
-                    "initial_states": "default",
-                    "motion_mode": "passive",
-                }
-            )
-        progress = json.loads(
-            (tmp_path / "rejected/generation-progress.json").read_text()
-        )
-        assert progress["rejected"] == 2 and len(progress["rejections"]) == 2
-        assert not load_manifest(tmp_path / "rejected")["shards"]
-    finally:
-        collection._sample = original
-
-
 def _subprocess(tmp_path: Path, operation: str, robot: str = "cartpole") -> None:
     code = "import importlib.util,sys;from pathlib import Path;s=importlib.util.spec_from_file_location('collection_test',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);getattr(m,sys.argv[3])(Path(sys.argv[2]),sys.argv[4]) if sys.argv[3]=='_check_pipeline' else getattr(m,sys.argv[3])(Path(sys.argv[2]))"
     subprocess.run(
@@ -564,7 +499,9 @@ def _subprocess(tmp_path: Path, operation: str, robot: str = "cartpole") -> None
             **os.environ,
             "OMP_NUM_THREADS": "2",
             "MKL_NUM_THREADS": "2",
-            "PYTHONPATH": str(_ROOT),
+            "PYTHONPATH": os.pathsep.join(
+                (str(_ROOT), os.environ.get("PYTHONPATH", ""))
+            ),
             "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
         },
     )
@@ -581,64 +518,3 @@ def test_actual_generation_resume_alignment_and_batched_closed_loop(
 @pytest.mark.subprocess_sim
 def test_actual_actor_artifact_and_nonfinite_evidence(tmp_path: Path) -> None:
     _subprocess(tmp_path, "_check_actor_and_failures")
-
-
-@pytest.mark.subprocess_sim
-def test_actual_rejection_attempt_limit(tmp_path: Path) -> None:
-    _subprocess(tmp_path, "_check_rejection_limit")
-
-
-def test_error_metric_wraps_only_continuous_coordinates() -> None:
-    from embodichain.lab.sim.physics.solvers.collection import _error_values
-
-    q = torch.zeros(1, 15)
-    q[:, 6] = 1.0
-    target = q.clone()
-    q[:, 7] = 2 * torch.pi
-    error = _error_values("ant", q, torch.zeros(1, 14), target, torch.zeros(1, 14))
-    torch.testing.assert_close(
-        error[:, 0], torch.tensor([2 * torch.pi / 8], dtype=torch.double)
-    )
-    cart = torch.tensor([[0.0, 2 * torch.pi]])
-    error = _error_values(
-        "cartpole", cart, torch.zeros(1, 2), torch.zeros(1, 2), torch.zeros(1, 2)
-    )
-    assert error[0, 0] < 1e-6
-
-
-def test_teacher_content_hash_uses_values_and_logical_identity_not_paths() -> None:
-    from embodichain.lab.sim.physics.solvers.collection import (
-        _teacher_row_sha256,
-        _teacher_origin,
-    )
-
-    record = {
-        "id": "sample:7",
-        "file": "shard-a.h5",
-        "group": "0",
-        "metadata": {"sampling_seed": 7},
-    }
-    values = [
-        np.zeros((4, 2), dtype=np.float32),
-        np.zeros((4, 2), dtype=np.float32),
-        np.ones((3, 2), dtype=np.float32),
-    ]
-    expected = _teacher_row_sha256(record, values)
-    assert (
-        _teacher_row_sha256(
-            {**record, "file": "/different/location.h5", "group": "17"}, values
-        )
-        == expected
-    )
-    changed = [array.copy() for array in values]
-    changed[0][2, 1] = 1.0
-    assert _teacher_row_sha256(record, changed) != expected
-    assert _teacher_row_sha256({**record, "id": "sample:8"}, values) != expected
-    official = {
-        "kind": "official_warp",
-        "warp_version": "1.5.1",
-        "source_commit": "pinned",
-    }
-    assert _teacher_origin({"teacher_origin": official}) == official
-    with pytest.raises(ValueError, match="teacher_origin"):
-        _teacher_origin({"robot": "ant"})

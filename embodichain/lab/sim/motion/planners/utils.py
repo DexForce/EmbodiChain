@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import torch
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from scipy.spatial.transform import Rotation, Slerp
 from enum import Enum
 from typing import Union, List
@@ -31,6 +31,8 @@ __all__ = [
     "MoveType",
     "PlanState",
     "PlanResult",
+    "RejectedMotionCandidate",
+    "MotionRecoveryTrace",
     "normalize_success_mask",
     "calculate_point_allocations",
     "interpolate_xpos",
@@ -182,6 +184,69 @@ class MoveType(Enum):
     PAUSE = 4  # Pause for a specified duration (use pause_seconds in PlanState)
 
 
+@dataclass(frozen=True, slots=True)
+class RejectedMotionCandidate:
+    """Owned candidate evidence retained when execution rows become safe holds.
+
+    Args:
+        positions: Original candidate joint samples, shape ``(B, T, D)``.
+        dt: Original arrival intervals, shape ``(B, T)``.
+        env_mask: Rows rejected by fixed-grid validation, shape ``(B,)``.
+
+    These tensors are detached snapshots for audit and bounded retries. They are
+    not an executable trajectory or a certificate of motion feasibility.
+    """
+
+    positions: torch.Tensor
+    dt: torch.Tensor
+    env_mask: torch.Tensor
+
+    def __post_init__(self) -> None:
+        if (
+            self.positions.ndim != 3
+            or self.dt.shape != self.positions.shape[:2]
+            or self.env_mask.shape != self.positions.shape[:1]
+            or self.env_mask.dtype != torch.bool
+            or self.dt.device != self.positions.device
+            or self.env_mask.device != self.positions.device
+        ):
+            raise ValueError("Rejected candidate samples, timing and rows must match.")
+        for name in ("positions", "dt", "env_mask"):
+            object.__setattr__(self, name, getattr(self, name).detach().clone())
+
+
+@dataclass(frozen=True, slots=True)
+class MotionRecoveryTrace:
+    """Actual attempts within one Cartesian motion request.
+
+    Args:
+        attempted_counts: Nominal and actually attempted denser sample counts,
+            in order. Complete-action retries have separate counters.
+        used_continuity: Whether continuous IK supplied the accepted path on
+            the original sampling grid. This trace certifies no physical effect.
+    """
+
+    attempted_counts: tuple[int, ...]
+    used_continuity: bool = False
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.attempted_counts) is not tuple
+            or not self.attempted_counts
+            or any(
+                type(count) is not int or count < 2 for count in self.attempted_counts
+            )
+            or any(
+                a >= b for a, b in zip(self.attempted_counts, self.attempted_counts[1:])
+            )
+        ):
+            raise ValueError(
+                "Recovery attempts require increasing integer sample counts >=2."
+            )
+        if type(self.used_continuity) is not bool:
+            raise TypeError("used_continuity must be a boolean.")
+
+
 @dataclass
 class PlanResult:
     r"""Data class representing the result of a motion plan (env-batched).
@@ -221,11 +286,84 @@ class PlanResult:
     assess heterogeneous limits.
     """
 
+    policy_rollout_positions: torch.Tensor | None = None
+    """Original policy joint states ``(B, S, DOF)``, before output retiming.
+
+    Sample zero is the requested initial state. Subsequent samples correspond
+    to one policy control step each; output interpolation never changes this
+    trace. Non-policy planners leave both rollout fields unavailable.
+    """
+
+    policy_rollout_lengths: torch.Tensor | None = None
+    """Valid prefix lengths ``(B,)``, including sample zero and excluding holds.
+
+    Batched rows may finish at different steps. The remaining terminal holds
+    are padding and must not establish later constraint arrivals.
+    """
+
+    waypoint_indices: torch.Tensor | None = None
+    """Ordered target arrival indices in output positions, ``(B, K)``.
+
+    Each column is a distinct target visit, including repeated target values.
+    Unreached or unavailable visits use -1; terminal padding is not an arrival.
+    """
+
+    policy_waypoint_indices: torch.Tensor | None = None
+    """Original policy arrival indices before retiming, using the same target order."""
+
+    policy_batching: dict[str, int] | None = None
+    """Optional shared-policy inference dimensions and call count.
+
+    ``scene_batch_size`` is the number of independent environments;
+    ``control_part_count`` is the number of packed manipulators. Their product
+    is ``actor_batch_size``. ``policy_forward_calls`` counts shared inference
+    calls for the group, not a separate latency or count for each result.
+    """
+
+    rejected_candidate: RejectedMotionCandidate | None = field(
+        default=None, kw_only=True
+    )
+    """Original rejected samples, retained separately from executable holds."""
+
+    recovery: MotionRecoveryTrace | None = field(default=None, kw_only=True)
+    """Optional immutable segment recovery receipt, separate from the trajectory."""
+
     def __post_init__(self) -> None:
-        """Validate the explicit trajectory-timing contract."""
+        """Validate trajectory timing and optional original policy traces."""
+        if self.recovery is not None and not isinstance(
+            self.recovery, MotionRecoveryTrace
+        ):
+            raise TypeError("recovery must be a MotionRecoveryTrace.")
+        if self.rejected_candidate is not None and not isinstance(
+            self.rejected_candidate, RejectedMotionCandidate
+        ):
+            raise TypeError("rejected_candidate must be a RejectedMotionCandidate.")
+        rollout, lengths = self.policy_rollout_positions, self.policy_rollout_lengths
+        if rollout is not None or lengths is not None:
+            if not isinstance(rollout, torch.Tensor) or rollout.dim() != 3:
+                raise ValueError(
+                    "Policy rollout positions must have shape (B, S, DOF)."
+                )
+            if (
+                not isinstance(lengths, torch.Tensor)
+                or lengths.shape != rollout.shape[:1]
+                or lengths.dtype not in (torch.int32, torch.int64)
+                or lengths.device != rollout.device
+                or bool(((lengths < 1) | (lengths > rollout.shape[1])).any())
+            ):
+                raise ValueError("Policy rollout lengths must identify valid prefixes.")
+            if self.positions is not None and (
+                rollout.shape[::2] != self.positions.shape[::2]
+                or rollout.device != self.positions.device
+            ):
+                raise ValueError(
+                    "Policy rollout must match the output batch, DoF and device."
+                )
         if self.positions is None:
             if self.dt is not None:
                 raise ValueError("PlanResult timing requires positions.")
+            if self.waypoint_indices is not None:
+                raise ValueError("Output arrivals require positions.")
             return
         if not isinstance(self.positions, torch.Tensor) or self.positions.dim() != 3:
             raise ValueError("PlanResult.positions must have shape (B, N, DOF).")
@@ -242,6 +380,34 @@ class PlanResult:
             raise ValueError("PlanResult.dt and positions must share a device.")
         if not torch.isfinite(self.dt).all() or (self.dt < 0).any():
             raise ValueError("PlanResult.dt must contain finite non-negative values.")
+        for name, indices, source, valid_lengths in (
+            ("waypoint_indices", self.waypoint_indices, self.positions, None),
+            ("policy_waypoint_indices", self.policy_waypoint_indices, rollout, lengths),
+        ):
+            if indices is None:
+                continue
+            if (
+                source is None
+                or not isinstance(indices, torch.Tensor)
+                or indices.ndim != 2
+                or indices.shape[0] != source.shape[0]
+                or indices.dtype not in (torch.int32, torch.int64)
+                or indices.device != source.device
+            ):
+                raise ValueError(
+                    f"{name} requires integer (B, K) on its source device."
+                )
+            limit = source.shape[1] if valid_lengths is None else valid_lengths[:, None]
+            valid = indices >= 0
+            if bool(((indices < -1) | (indices >= limit)).any()) or bool(
+                (
+                    valid[:, 1:]
+                    & (~valid[:, :-1] | (indices[:, 1:] <= indices[:, :-1]))
+                ).any()
+            ):
+                raise ValueError(
+                    f"{name} must be a strictly ordered prefix followed by -1."
+                )
 
     @property
     def duration(self) -> torch.Tensor | None:

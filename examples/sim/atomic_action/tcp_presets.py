@@ -83,13 +83,34 @@ FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP = (
     (0.0, 0.0, 0.0, 1.0),
 )
 
+# PGC finger pads close along the mounted hand's Y axis. Rotate the grasp
+# frame's opening axis onto it and center the short pads at local Z = 0.12 m.
+UR5_PGC_140_50_HANDOVER_TCP = (
+    (0.0, -1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.12),
+    (0.0, 0.0, 0.0, 1.0),
+)
+FRANKA_PGC_140_50_HANDOVER_TCP = (
+    (0.0, -1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.12),
+    (0.0, 0.0, 0.0, 1.0),
+)
+UR10_PGC_140_50_HANDOVER_TCP = (
+    (0.0, -1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.12),
+    (0.0, 0.0, 0.0, 1.0),
+)
+
 
 def sample_tool_tcp(
     robot_type: RobotPreset,
     *,
     point: ToolPoint = "default",
     tcp_z: float | None = None,
-    gripper: Literal["robotiq_2f_140"] | None = None,
+    gripper: Literal["robotiq_2f_140", "pgc_140_50"] | None = None,
 ) -> list[list[float]]:
     """Resolve a mounted gripper's TCP as an independent homogeneous matrix.
 
@@ -99,7 +120,7 @@ def sample_tool_tcp(
             calibrations where they differ from the general tool point.
         tcp_z: Optional explicit local-Z calibration override for Python callers.
             The remaining translation and mounting rotation are preserved.
-        gripper: Optional explicit Robotiq selection for the Handover fixture.
+        gripper: Optional explicit mounted gripper for the Handover fixture.
             Omission uses the robot's existing sample gripper calibration.
 
     Returns:
@@ -111,13 +132,21 @@ def sample_tool_tcp(
     if point not in ("default", "grasp", "handover"):
         raise ValueError(f"Unknown sample tool point {point!r}")
     if gripper is not None:
-        if gripper != "robotiq_2f_140":
+        if gripper not in ("robotiq_2f_140", "pgc_140_50"):
             raise ValueError(f"Unknown sample gripper {gripper!r}")
-        poses = {
-            "ur5": UR5_ROBOTIQ_2F_140_HANDOVER_TCP,
-            "franka": FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP,
-            "ur10": UR10_ROBOTIQ_2F_140_TCP,
-        }
+        poses = (
+            {
+                "ur5": UR5_PGC_140_50_HANDOVER_TCP,
+                "franka": FRANKA_PGC_140_50_HANDOVER_TCP,
+                "ur10": UR10_PGC_140_50_HANDOVER_TCP,
+            }
+            if gripper == "pgc_140_50"
+            else {
+                "ur5": UR5_ROBOTIQ_2F_140_HANDOVER_TCP,
+                "franka": FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP,
+                "ur10": UR10_ROBOTIQ_2F_140_TCP,
+            }
+        )
         if robot_type not in poses:
             raise ValueError(f"Unknown sample robot/fixture {robot_type!r}")
         pose = poses[robot_type]
@@ -145,5 +174,8 @@ __all__ = [
     "UR10_ROBOTIQ_2F_140_TCP",
     "UR5_ROBOTIQ_2F_140_HANDOVER_TCP",
     "FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP",
+    "UR5_PGC_140_50_HANDOVER_TCP",
+    "FRANKA_PGC_140_50_HANDOVER_TCP",
+    "UR10_PGC_140_50_HANDOVER_TCP",
     "sample_tool_tcp",
 ]

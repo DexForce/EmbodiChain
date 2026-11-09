@@ -1,0 +1,432 @@
+[
+  {
+    "kind": "press",
+    "past": false,
+    "binding": {
+      "schema_version": "task_spec.control_evidence_binding/v1",
+      "task_spec_digest": "650919a1800f86c3ec12b194b773ff6d0afba4ac14f6b6dcd3a6015bb5a2b24d",
+      "program_digest": "7df5b9651055941eecd410d4b36e5268474e3197999c2c34b5b501d8510b42ec",
+      "predicate_id": "control",
+      "entity_id": "appliance",
+      "control_kind": "press",
+      "observation_kind": "final",
+      "operation": {
+        "preset": "terminal_preset",
+        "required_execution": [
+          {
+            "segment_id": "prepare",
+            "source_path": [
+              "program",
+              "items",
+              0
+            ]
+          },
+          {
+            "segment_id": "terminal",
+            "source_path": [
+              "program",
+              "items",
+              1
+            ]
+          }
+        ],
+        "route_payload": {
+          "arm": "right",
+          "binding": {
+            "joint": "authored_joint",
+            "link": "authored_link",
+            "object_id": "appliance",
+            "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "operation_id": "opaque-operation"
+        },
+        "terminal_segment_id": "terminal",
+        "terminal_source_path": [
+          "program",
+          "items",
+          1
+        ]
+      },
+      "evidence_format": "historical_record",
+      "env_ids": [
+        0
+      ],
+      "episode_ids": null,
+      "binding_hash": "77c9cd63263a45e6e4394ef30c14955eadc62b11abc3062b8f2862a8752cfc3f"
+    },
+    "outcomes": [
+      {
+        "predicate_id": "control",
+        "predicate": "pressed",
+        "status": "satisfied",
+        "observed": true,
+        "expected": true,
+        "reason": "The declared original operation criterion is supported by its own complete physical receipts.",
+        "evidence_refs": [
+          "77c9cd63263a45e6e4394ef30c14955eadc62b11abc3062b8f2862a8752cfc3f",
+          "f510484f8c1f0e10e2a30737f251c4d88ede26c5fb0fdbab77bf050744f1d711"
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "status": "satisfied",
+        "certificate_ready": true,
+        "init": [],
+        "goal": [
+          {
+            "predicate_id": "control",
+            "predicate": "pressed",
+            "status": "satisfied",
+            "observed": true,
+            "expected": true,
+            "reason": "The declared original operation criterion is supported by its own complete physical receipts.",
+            "evidence_refs": [
+              "77c9cd63263a45e6e4394ef30c14955eadc62b11abc3062b8f2862a8752cfc3f",
+              "f510484f8c1f0e10e2a30737f251c4d88ede26c5fb0fdbab77bf050744f1d711"
+            ]
+          }
+        ],
+        "invariants": [],
+        "temporal": [],
+        "milestones": []
+      }
+    ]
+  },
+  {
+    "kind": "press",
+    "past": true,
+    "binding": {
+      "schema_version": "task_spec.control_evidence_binding/v1",
+      "task_spec_digest": "3663b8409c41de01dd5cfc6defce7a0eb79dbb1e3ce43c14ca43bd00ef371e68",
+      "program_digest": "7df5b9651055941eecd410d4b36e5268474e3197999c2c34b5b501d8510b42ec",
+      "predicate_id": "control",
+      "entity_id": "appliance",
+      "control_kind": "press",
+      "observation_kind": "recorded",
+      "operation": {
+        "preset": "terminal_preset",
+        "required_execution": [
+          {
+            "segment_id": "prepare",
+            "source_path": [
+              "program",
+              "items",
+              0
+            ]
+          },
+          {
+            "segment_id": "terminal",
+            "source_path": [
+              "program",
+              "items",
+              1
+            ]
+          }
+        ],
+        "route_payload": {
+          "arm": "right",
+          "binding": {
+            "joint": "authored_joint",
+            "link": "authored_link",
+            "object_id": "appliance",
+            "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "operation_id": "opaque-operation"
+        },
+        "terminal_segment_id": "terminal",
+        "terminal_source_path": [
+          "program",
+          "items",
+          1
+        ]
+      },
+      "evidence_format": "historical_record",
+      "env_ids": [
+        0
+      ],
+      "episode_ids": null,
+      "binding_hash": "79b261a48f92ff89487574793eb5a64fa67bec96fcaeb96a5dedbb1f0f8a3a67"
+    },
+    "outcomes": [
+      {
+        "predicate_id": "control",
+        "predicate": "pressed",
+        "status": "satisfied",
+        "observed": true,
+        "expected": true,
+        "reason": "The declared original operation criterion is supported by its own complete physical receipts.",
+        "evidence_refs": [
+          "79b261a48f92ff89487574793eb5a64fa67bec96fcaeb96a5dedbb1f0f8a3a67",
+          "f510484f8c1f0e10e2a30737f251c4d88ede26c5fb0fdbab77bf050744f1d711"
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "status": "unavailable",
+        "certificate_ready": false,
+        "init": [],
+        "goal": [
+          {
+            "predicate_id": "final_state",
+            "predicate": "pressed",
+            "status": "unavailable",
+            "observed": null,
+            "expected": true,
+            "reason": "observation 'final_state' was not provided",
+            "evidence_refs": []
+          }
+        ],
+        "invariants": [],
+        "temporal": [],
+        "milestones": [
+          {
+            "predicate_id": "milestone:operated",
+            "predicate": "semantic_goal",
+            "status": "satisfied",
+            "observed": {
+              "predicates": [
+                {
+                  "evidence_refs": [
+                    "79b261a48f92ff89487574793eb5a64fa67bec96fcaeb96a5dedbb1f0f8a3a67",
+                    "f510484f8c1f0e10e2a30737f251c4d88ede26c5fb0fdbab77bf050744f1d711"
+                  ],
+                  "expected": true,
+                  "observed": true,
+                  "predicate": "pressed",
+                  "predicate_id": "control",
+                  "reason": "The declared original operation criterion is supported by its own complete physical receipts.",
+                  "status": "satisfied"
+                }
+              ],
+              "step": 0
+            },
+            "expected": true,
+            "reason": "milestone achieved at step 0",
+            "evidence_refs": [
+              "79b261a48f92ff89487574793eb5a64fa67bec96fcaeb96a5dedbb1f0f8a3a67",
+              "f510484f8c1f0e10e2a30737f251c4d88ede26c5fb0fdbab77bf050744f1d711"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "twist",
+    "past": false,
+    "binding": {
+      "schema_version": "task_spec.control_evidence_binding/v1",
+      "task_spec_digest": "c5209620b963110f4ef3b2fbc9c70156cc07e75c907a7301cde2951d5ee59795",
+      "program_digest": "7df5b9651055941eecd410d4b36e5268474e3197999c2c34b5b501d8510b42ec",
+      "predicate_id": "control",
+      "entity_id": "appliance",
+      "control_kind": "twist",
+      "observation_kind": "final",
+      "operation": {
+        "preset": "terminal_preset",
+        "required_execution": [
+          {
+            "segment_id": "prepare",
+            "source_path": [
+              "program",
+              "items",
+              0
+            ]
+          },
+          {
+            "segment_id": "terminal",
+            "source_path": [
+              "program",
+              "items",
+              1
+            ]
+          }
+        ],
+        "route_payload": {
+          "arm": "right",
+          "binding": {
+            "joint": "authored_joint",
+            "link": "authored_link",
+            "object_id": "appliance",
+            "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "operation_id": "opaque-operation",
+          "success_criterion": "contact_backed_coarse_turn"
+        },
+        "terminal_segment_id": "terminal",
+        "terminal_source_path": [
+          "program",
+          "items",
+          1
+        ]
+      },
+      "evidence_format": "historical_record",
+      "env_ids": [
+        0
+      ],
+      "episode_ids": null,
+      "binding_hash": "ede1ac13d063405ebdbdbf43a53d1f6c7ee91ed7954ee24006205d7f9310328a"
+    },
+    "outcomes": [
+      {
+        "predicate_id": "control",
+        "predicate": "semantic_goal",
+        "status": "satisfied",
+        "observed": true,
+        "expected": true,
+        "reason": "The declared original operation criterion is supported by its own complete physical receipts.",
+        "evidence_refs": [
+          "ede1ac13d063405ebdbdbf43a53d1f6c7ee91ed7954ee24006205d7f9310328a",
+          "9bace3fded5e24fd298b63ff4469ffa4d1d74fff17195934d297fae9823e504f"
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "status": "satisfied",
+        "certificate_ready": true,
+        "init": [],
+        "goal": [
+          {
+            "predicate_id": "control",
+            "predicate": "semantic_goal",
+            "status": "satisfied",
+            "observed": true,
+            "expected": true,
+            "reason": "The declared original operation criterion is supported by its own complete physical receipts.",
+            "evidence_refs": [
+              "ede1ac13d063405ebdbdbf43a53d1f6c7ee91ed7954ee24006205d7f9310328a",
+              "9bace3fded5e24fd298b63ff4469ffa4d1d74fff17195934d297fae9823e504f"
+            ]
+          }
+        ],
+        "invariants": [],
+        "temporal": [],
+        "milestones": []
+      }
+    ]
+  },
+  {
+    "kind": "twist",
+    "past": true,
+    "binding": {
+      "schema_version": "task_spec.control_evidence_binding/v1",
+      "task_spec_digest": "108230ee5a9f7575f95f3341359ac7024a0e6d5518de12931651be8185e905ce",
+      "program_digest": "7df5b9651055941eecd410d4b36e5268474e3197999c2c34b5b501d8510b42ec",
+      "predicate_id": "control",
+      "entity_id": "appliance",
+      "control_kind": "twist",
+      "observation_kind": "recorded",
+      "operation": {
+        "preset": "terminal_preset",
+        "required_execution": [
+          {
+            "segment_id": "prepare",
+            "source_path": [
+              "program",
+              "items",
+              0
+            ]
+          },
+          {
+            "segment_id": "terminal",
+            "source_path": [
+              "program",
+              "items",
+              1
+            ]
+          }
+        ],
+        "route_payload": {
+          "arm": "right",
+          "binding": {
+            "joint": "authored_joint",
+            "link": "authored_link",
+            "object_id": "appliance",
+            "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "operation_id": "opaque-operation",
+          "success_criterion": "contact_backed_coarse_turn"
+        },
+        "terminal_segment_id": "terminal",
+        "terminal_source_path": [
+          "program",
+          "items",
+          1
+        ]
+      },
+      "evidence_format": "historical_record",
+      "env_ids": [
+        0
+      ],
+      "episode_ids": null,
+      "binding_hash": "b0c6bb395cdbe37d6a3f06da7da9709a15e901255fa52cb0a4227efc197acfaf"
+    },
+    "outcomes": [
+      {
+        "predicate_id": "control",
+        "predicate": "semantic_goal",
+        "status": "satisfied",
+        "observed": true,
+        "expected": true,
+        "reason": "The declared original operation criterion is supported by its own complete physical receipts.",
+        "evidence_refs": [
+          "b0c6bb395cdbe37d6a3f06da7da9709a15e901255fa52cb0a4227efc197acfaf",
+          "9bace3fded5e24fd298b63ff4469ffa4d1d74fff17195934d297fae9823e504f"
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "status": "unavailable",
+        "certificate_ready": false,
+        "init": [],
+        "goal": [
+          {
+            "predicate_id": "final_state",
+            "predicate": "semantic_goal",
+            "status": "unavailable",
+            "observed": null,
+            "expected": true,
+            "reason": "observation 'final_state' was not provided",
+            "evidence_refs": []
+          }
+        ],
+        "invariants": [],
+        "temporal": [],
+        "milestones": [
+          {
+            "predicate_id": "milestone:operated",
+            "predicate": "semantic_goal",
+            "status": "satisfied",
+            "observed": {
+              "predicates": [
+                {
+                  "evidence_refs": [
+                    "b0c6bb395cdbe37d6a3f06da7da9709a15e901255fa52cb0a4227efc197acfaf",
+                    "9bace3fded5e24fd298b63ff4469ffa4d1d74fff17195934d297fae9823e504f"
+                  ],
+                  "expected": true,
+                  "observed": true,
+                  "predicate": "semantic_goal",
+                  "predicate_id": "control",
+                  "reason": "The declared original operation criterion is supported by its own complete physical receipts.",
+                  "status": "satisfied"
+                }
+              ],
+              "step": 0
+            },
+            "expected": true,
+            "reason": "milestone achieved at step 0",
+            "evidence_refs": [
+              "b0c6bb395cdbe37d6a3f06da7da9709a15e901255fa52cb0a4227efc197acfaf",
+              "9bace3fded5e24fd298b63ff4469ffa4d1d74fff17195934d297fae9823e504f"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

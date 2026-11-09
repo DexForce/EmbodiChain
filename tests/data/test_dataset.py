@@ -126,3 +126,75 @@ def test_dataset_initialization_is_serialized_across_processes(tmp_path) -> None
 
     assert [worker.exitcode for worker in workers] == [0, 0]
     assert maximum_active_initializers.value == 1
+
+
+@pytest.mark.no_sim
+def test_registered_file_reference_uses_verified_asset_root(
+    tmp_path, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+    from embodichain.data._references import _resolve_data_reference
+
+    root = tmp_path / "bundle"
+    root.mkdir()
+    (root / "trajectory.json").write_text("verified")
+    calls = []
+
+    def asset_type(name):
+        calls.append(name)
+        return lambda: SimpleNamespace(extract_dir=str(root))
+
+    monkeypatch.setattr("embodichain.data.get_data_class", asset_type)
+    resolved = _resolve_data_reference(
+        {"asset": "DemoInputs", "path": "trajectory.json"}, base_dir=tmp_path / "owner"
+    )
+    assert resolved == root / "trajectory.json"
+    assert calls == ["DemoInputs"]
+    assert (
+        _resolve_data_reference("source.json", base_dir=tmp_path)
+        == tmp_path / "source.json"
+    )
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "reference",
+    [
+        {"asset": "DemoInputs", "path": "../secret"},
+        {"asset": "DemoInputs", "path": "/secret"},
+        {"asset": "DemoInputs", "path": "a\\secret"},
+        {"asset": "DemoInputs", "path": "a.json", "import": "arbitrary"},
+        {"asset": "https://example.test", "path": "a.json"},
+    ],
+)
+def test_asset_file_reference_rejects_invalid_input_before_download(
+    tmp_path, monkeypatch, reference
+) -> None:
+    from embodichain.data._references import _resolve_data_reference
+
+    def forbidden(*args):
+        raise AssertionError("invalid reference reached asset initialization")
+
+    monkeypatch.setattr("embodichain.data.get_data_class", forbidden)
+    with pytest.raises(ValueError):
+        _resolve_data_reference(reference, base_dir=tmp_path)
+
+
+@pytest.mark.no_sim
+def test_asset_file_reference_rejects_symlink_escape(tmp_path, monkeypatch) -> None:
+    from types import SimpleNamespace
+    from embodichain.data._references import _resolve_data_reference
+
+    root = tmp_path / "bundle"
+    root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("outside")
+    (root / "escape.json").symlink_to(outside)
+    monkeypatch.setattr(
+        "embodichain.data.get_data_class",
+        lambda _: lambda: SimpleNamespace(extract_dir=str(root)),
+    )
+    with pytest.raises(ValueError, match="escapes"):
+        _resolve_data_reference(
+            {"asset": "DemoInputs", "path": "escape.json"}, base_dir=tmp_path
+        )

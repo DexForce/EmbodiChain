@@ -290,21 +290,51 @@ After creating the PR, select proper labels from the repository label list and a
 First, list available labels:
 
 ```bash
-gh label list
+gh label list --limit 100
 ```
 
 Then choose labels based on change type and scope. Typical mapping:
 
 - Bug fix: `bug`
-- Enhancement: `enhancement`
+- Improvement to an existing capability: `enhancement`
 - New feature: `feature`
 - Documentation update: `docs`
-- Affected area labels when available (for example): `physics`, `robot`, `agent`, `dataset`, `dexsim`
+- Structural change: `refactor`; performance work: `performance`
+- Add `breaking` for user-visible incompatible changes, independently of change type.
+- Select the affected areas from the current repository labels. Preserve the
+  exact label `motion gen` for motion planning, generation, retiming and expansion.
+
+Keep these ownership boundaries explicit:
+
+- `task`: concrete tasks, deployments and objectives; `task-program`: language,
+  semantics, compiler, runtime and integrations; `gym`: environment framework.
+- `atomic-skill`: Atomic Skill contracts and execution; `kinematics`: FK/IK,
+  Jacobians and reachability; `physics`: dynamics and physics solvers.
+- `gen-sim`: scene generation/editing and SimReady; `scene`: shared scene
+  composition/layout/state services; `assets`: resource files and catalogs;
+  `sim-object`: runtime simulation entities and their lifecycle.
+- `data-pipeline`: collection, ODS, sampling, recording, persistence, conversion
+  and analysis. The former `data` and `dataset` labels are consolidated here.
+- `model`: model architectures, inference and weights; `sl` and `rl`: the
+  corresponding training systems; `compute`: shared numerical algorithms.
+- `agent`: runtime agents, MLLM and MCP integration; `devtools`: repository
+  development skills, agent context and contribution tooling.
+- `rendering`: image generation and renderer behavior; `visualization`: viewers,
+  markers, previews and interactive debugging. Use these instead of `interaction`.
+- `benchmark`: evaluation protocols, suites, metrics and reports; `performance`:
+  optimization work. Use both when both scopes change.
+- `dexsim`: SDK interfaces and version integration, rather than every simulation
+  change; `robot`, `sensor` and `toolkit`: their corresponding runtime/tool owners.
+
+Use `ci` for build/release automation and `dependencies` for dependency changes.
+Apply `skip-release-notes` only when explicitly excluding the change from release
+notes. Draft state and dependency links describe PR progress; area labels do not
+claim that a planned capability has shipped.
 
 Apply labels to the PR:
 
 ```bash
-gh pr edit <pr-number> --add-label "bug" --add-label "env"
+gh pr edit <pr-number> --add-label "bug" --add-label "gym"
 ```
 
 If needed, remove incorrect labels:
@@ -382,7 +412,7 @@ Fixes #<issue-number>
 | `gh stack sync` | Fetch, cascade rebase, push, and synchronize the stack |
 | `gh stack rebase --no-trunk` | Cascade a lower-layer update through the stack |
 | `gh stack merge` | Merge a selected portion or the entire stack |
-| `gh label list` | List repository labels |
+| `gh label list --limit 100` | List repository labels |
 | `gh pr edit <pr-number> --add-label ...` | Apply labels to PR |
 
 ## Notes

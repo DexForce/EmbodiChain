@@ -410,4 +410,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from embodichain.lab.sim import SimulationManager
+
+    try:
+        main()
+    finally:
+        SimulationManager.flush_cleanup_queue()

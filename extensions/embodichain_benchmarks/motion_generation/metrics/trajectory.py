@@ -622,6 +622,141 @@ def _reference_path_deviation(
     return float(values.mean()), float(values.max())
 
 
+def _policy_step_metrics(
+    result: PlanResult,
+    case: BenchmarkCase,
+    robot: "Robot",
+    control_part: str,
+    *,
+    position_threshold_m: float,
+    rotation_threshold_rad: float,
+    start_state_tolerance_rad: float,
+) -> list[dict[str, object]]:
+    """Match constraints on original policy controls, independently of timing."""
+    from ._constraints import match_constraints
+
+    rollout = result.policy_rollout_positions
+    if rollout is None:
+        return [{} for _ in range(case.batch_size)]
+    lengths = result.policy_rollout_lengths
+    assert lengths is not None  # PlanResult validates the paired trace fields.
+    rollout = rollout.to(robot.device)
+    poses = robot.compute_batch_fk(qpos=rollout, name=control_part, to_matrix=True)
+    modalities = case.case_parameters.get("constraint_modalities")
+    if modalities is None:
+        joint = case.case_parameters.get("motion_validity") == "ordered_joint_waypoints"
+        modalities = ["joint" if joint else "pose"] * case.num_waypoints
+    rows: list[dict[str, object]] = []
+    for row, length in enumerate(lengths.tolist()):
+        qpos = rollout[row, :length]
+        valid = bool(torch.isfinite(qpos).all()) and bool(
+            (qpos[0] - case.start_qpos[row].to(qpos)).abs().max()
+            <= start_state_tolerance_rad
+        )
+        matching = match_constraints(
+            qpos if valid else qpos[:0],
+            poses[row, :length] if valid else poses[row, :0],
+            case.reference_qpos[row],
+            case.target_waypoints[row],
+            modalities,
+            position_threshold_m=position_threshold_m,
+            rotation_threshold_rad=rotation_threshold_rad,
+            joint_threshold_rad=float(
+                case.case_parameters.get("joint_threshold_rad", 0.01)
+            ),
+        )
+        arrivals = matching["arrival_indices"]
+        rows.append(
+            {
+                "policy_steps_used": length - 1,
+                "policy_completion_step": (
+                    arrivals[-1] if matching["ordered_waypoints_reached"] else None
+                ),
+                "policy_waypoint_arrival_steps": tuple(arrivals)
+                + (None,) * (case.num_waypoints - len(arrivals)),
+            }
+        )
+    return rows
+
+
+def _arrival_validation_grid(
+    positions: torch.Tensor,
+    distance_grid: torch.Tensor,
+    *,
+    dt: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Merge native/index and distance witnesses in row-local path order.
+
+    Timed holds retain their identity and multiplicity; trailing zero-time
+    repeats are padding. Subdivision density is independent of other rows'
+    padding. Extra distance witnesses already present at the same path distance
+    are omitted, and returned prefix lengths exclude rectangular union padding.
+    """
+    batch, count, dofs = positions.shape
+    samples = distance_grid.shape[1]
+    if count == 1:
+        return positions, torch.ones(batch, device=positions.device, dtype=torch.long)
+    lengths = torch.full((batch,), count, device=positions.device, dtype=torch.long)
+    if dt is not None:
+        # A zero-time position change is invalid motion, not removable padding.
+        nonpadding = (dt[:, 1:] > 0) | (positions.diff(dim=1) != 0).any(dim=-1)
+        lengths = (
+            torch.where(
+                nonpadding, torch.arange(1, count, device=positions.device)[None], 0
+            ).amax(dim=1)
+            + 1
+        )
+    segments = lengths - 1
+    subdivisions = torch.div(
+        samples - 2 + segments.clamp_min(1),
+        segments.clamp_min(1),
+        rounding_mode="floor",
+    ).clamp_min(1)
+    linear_counts = segments * subdivisions + 1
+    indices = torch.arange(int(linear_counts.max()), device=positions.device)
+    valid = indices[None] < linear_counts[:, None]
+    parameter = torch.minimum(
+        indices[None].to(positions.dtype) / subdivisions[:, None], segments[:, None]
+    )
+    left = parameter.long().clamp(max=count - 2)
+    fraction = parameter - left
+    rows = torch.arange(batch, device=positions.device)[:, None]
+    linear = torch.lerp(
+        positions[rows, left], positions[rows, left + 1], fraction[..., None]
+    )
+    cumulative = torch.cat(
+        (
+            positions.new_zeros((batch, 1)),
+            torch.linalg.vector_norm(positions.diff(dim=1), dim=-1).cumsum(dim=1),
+        ),
+        dim=1,
+    )
+    linear_distance = torch.lerp(
+        cumulative[rows, left], cumulative[rows, left + 1], fraction
+    )
+    distance = (
+        cumulative[:, -1:]
+        * torch.linspace(0, 1, samples, device=positions.device, dtype=positions.dtype)[
+            None
+        ]
+    )
+    linear_keys = linear_distance.masked_fill(~valid, float("inf"))
+    nearest = torch.searchsorted(
+        linear_keys.contiguous(), distance.contiguous()
+    ).clamp_max(linear.shape[1] - 1)
+    duplicate = (linear_distance.gather(1, nearest) == distance) & (
+        linear.gather(1, nearest[:, :, None].expand(-1, -1, dofs)) == distance_grid
+    ).all(dim=-1)
+    keys = torch.cat(
+        (linear_keys, distance.masked_fill(duplicate, float("inf"))), dim=1
+    )
+    order = keys.argsort(dim=1, stable=True)
+    union = torch.cat((linear, distance_grid), dim=1).gather(
+        1, order[:, :, None].expand(-1, -1, dofs)
+    )
+    return union, linear_counts + (~duplicate).sum(dim=1)
+
+
 def compute_case_outcomes(
     result: PlanResult,
     case: BenchmarkCase,
@@ -643,6 +778,15 @@ def compute_case_outcomes(
     if not math.isfinite(start_state_tolerance_rad) or start_state_tolerance_rad < 0:
         raise ValueError("start_state_tolerance_rad must be finite and non-negative.")
     planning_success = _success_tensor(result.success, case.batch_size)
+    policy_metrics = _policy_step_metrics(
+        result,
+        case,
+        robot,
+        control_part,
+        position_threshold_m=position_threshold_m,
+        rotation_threshold_rad=rotation_threshold_rad,
+        start_state_tolerance_rad=start_state_tolerance_rad,
+    )
     if result.positions is None or result.positions.ndim != 3:
         return tuple(
             replace(
@@ -658,6 +802,7 @@ def compute_case_outcomes(
                     ),
                 )[0],
                 env_index=env_index,
+                **policy_metrics[env_index],
             )
             for env_index in range(case.batch_size)
         )
@@ -703,32 +848,17 @@ def compute_case_outcomes(
         name=control_part,
         to_matrix=True,
     )
-    constraint_qpos_batch = None
-    constraint_pose_batch = None
-    if "constraint_modalities" in case.case_parameters:
-        # Every native state survives; deterministic linear joint subdivisions
-        # supply at least validation_samples states for sparse planner outputs.
-        count = safe_positions.shape[1]
-        subdivisions = max(1, math.ceil((validation_samples - 1) / max(1, count - 1)))
-        if count > 1:
-            parameter = (
-                torch.arange(
-                    (count - 1) * subdivisions + 1,
-                    device=safe_positions.device,
-                    dtype=safe_positions.dtype,
-                )
-                / subdivisions
-            )
-            left = parameter.long().clamp(max=count - 2)
-            fraction = (parameter - left)[None, :, None]
-            constraint_qpos_batch = torch.lerp(
-                safe_positions[:, left], safe_positions[:, left + 1], fraction
-            )
-        else:
-            constraint_qpos_batch = safe_positions
-        constraint_pose_batch = robot.compute_batch_fk(
-            qpos=constraint_qpos_batch, name=control_part, to_matrix=True
-        )
+    # Preserve both actual commands and existing interpolated witnesses. Uniform
+    # index subdivision alone undersamples motion when actions contain long holds.
+    # Path metrics retain the unchanged normalized distance grid above.
+    constraint_qpos_batch, constraint_lengths = _arrival_validation_grid(
+        safe_positions,
+        validation_qpos_batch,
+        dt=sample_dt if positions.shape[1] else None,
+    )
+    constraint_pose_batch = robot.compute_batch_fk(
+        qpos=constraint_qpos_batch, name=control_part, to_matrix=True
+    )
     native_pose_batch = robot.compute_batch_fk(
         qpos=positions,
         name=control_part,
@@ -750,10 +880,10 @@ def compute_case_outcomes(
         if finite:
             validation_qpos = validation_qpos_batch[env_index]
             validation_poses = validation_pose_batch[env_index]
-            # Keep the benchmark's established, sample-count-normalized
-            # trajectory for all success and path metrics.  Native planner
-            # samples are retained below only for rollout diagnostics.
-            poses = validation_poses
+            poses = constraint_pose_batch[env_index, : constraint_lengths[env_index]]
+            constraint_qpos = constraint_qpos_batch[
+                env_index, : constraint_lengths[env_index]
+            ]
             native_poses = native_pose_batch[env_index]
         else:
             validation_qpos = torch.empty(
@@ -766,6 +896,7 @@ def compute_case_outcomes(
             native_poses = torch.empty(
                 (0, 4, 4), device=robot.device, dtype=positions.dtype
             )
+            constraint_qpos = native_qpos[:0]
 
         waypoints = case.target_waypoints[env_index]
         rotation_symmetry = case.case_parameters.get("waypoint_rotation_symmetry")
@@ -818,8 +949,8 @@ def compute_case_outcomes(
             from ._constraints import match_constraints
 
             semantic_matching = match_constraints(
-                constraint_qpos_batch[env_index] if finite else native_qpos[:0],
-                constraint_pose_batch[env_index] if finite else native_poses,
+                constraint_qpos,
+                poses,
                 case.reference_qpos[env_index],
                 waypoints,
                 case.case_parameters["constraint_modalities"],
@@ -834,7 +965,7 @@ def compute_case_outcomes(
                     "ordered_joint_waypoints requires numeric joint_threshold_rad."
                 )
             semantic_matching = match_ordered_joint_waypoints(
-                validation_qpos,
+                constraint_qpos,
                 case.reference_qpos[env_index],
                 joint_threshold_rad=float(threshold),
             )
@@ -842,8 +973,8 @@ def compute_case_outcomes(
             semantic_matching = cartesian_matching
         else:
             raise ValueError(f"Unknown motion_validity mode {validity_space!r}.")
+        semantic_matching["sample_grid"] = "native_linear_and_distance_subdivision"
         if "constraint_modalities" in case.case_parameters:
-            semantic_matching["sample_grid"] = "native_with_linear_subdivision"
             arrivals = semantic_matching["arrival_errors"]
             pos_errors_mm = [
                 item["position_m"] * 1000.0 for item in arrivals if "position_m" in item
@@ -961,6 +1092,7 @@ def compute_case_outcomes(
             CaseOutcome(
                 env_index=env_index,
                 planning_success=planner_ok,
+                **policy_metrics[env_index],
                 constraint_metrics=(
                     semantic_matching
                     if "constraint_modalities" in case.case_parameters

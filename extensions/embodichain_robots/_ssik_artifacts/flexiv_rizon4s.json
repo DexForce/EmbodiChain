@@ -1,0 +1,28 @@
+{
+  "ssik_commit": "4109147f37a7ca3e2516c83853aca583612783f3",
+  "model_fingerprint": "a526344e32701b7e5c4eec409d11329227407a6f1cc0f70b4bbad67cc5cedb79",
+  "joint_names": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "joint7"
+  ],
+  "root_link_name": "base_link",
+  "end_link_name": "flange",
+  "source_sha256": "05c77ee93ed7ee24f5ff7c17745c30993b18f71d793af594e36cba01412aaa77",
+  "prebuilt": {
+    "module": "ssik.prebuilt.flexiv.rizon4_ik",
+    "source_sha256": "16c1734c249261c179098ada3d36581c730e4deee6e4f78ee4ac8824d7118073",
+    "sidecars": {
+      "rizon4_jl.npz": "a047bb730836954447ad6dc99a1683db5476d48da82dc3093fbcaaec9cfe3066"
+    }
+  },
+  "prebuilt_prefix": {
+    "max_axis_error": 2.634990301161436e-07,
+    "max_link_offset_error": 1.9565918116377964e-08
+  },
+  "generation": "Explicit pinned cached-jointlock family, verified joint prefix, terminal-frame correction and fixed cached-RR grid without symbolic runtime fallback"
+}

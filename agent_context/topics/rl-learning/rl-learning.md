@@ -72,7 +72,9 @@ Select this path with `trainer.gym_config`.
 
 Simulator environments use standard rollouts. A differentiable algorithm on
 this path is rejected. Simulator tasks with a supported training configuration
-declare `supports_rl=True` in `@register_env`. Task listing is implemented
+declare `supports_rl=True` in `@register_env`, or use a configuration-owned
+manipulation deployment with root `rl_task`; its loader registers the common
+host automatically. Task listing is implemented
 in `embodichain/cli/list_task.py`; capability and config discovery belong to
 [environment configuration](../env-framework/configuration.md).
 

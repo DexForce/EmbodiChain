@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -243,7 +244,9 @@ class BaseUsdTest:
         print(f"All joint stiffness: {stiffness}")
         print(f"All joint damping: {damping}")
         print(f"All joint max force: {max_force}")
-        expected_stiffness = 10000000.0
+        # USD angular drives are authored per degree; DexSim reports the
+        # equivalent per-radian stiffness in its joint-state API.
+        expected_stiffness = 10000000.0 * 180.0 / math.pi
         assert torch.allclose(
             stiffness, torch.tensor(expected_stiffness, dtype=torch.float32)
         )
@@ -256,7 +259,8 @@ class BaseUsdTest:
             joint_idx = joint_names.index(target_joint_name)
             # check for the first instance
             assert torch.isclose(
-                stiffness[0, joint_idx], torch.tensor(10000000.0, dtype=torch.float32)
+                stiffness[0, joint_idx],
+                torch.tensor(expected_stiffness, dtype=torch.float32),
             )
             assert torch.isclose(
                 damping[0, joint_idx], torch.tensor(0.0, dtype=torch.float32)

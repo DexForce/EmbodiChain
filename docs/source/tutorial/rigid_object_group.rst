@@ -59,5 +59,5 @@ Use ``--viser`` to publish every constituent object in the group to the browser:
 
 Each group member has its own pose and browser node. Shared geometry remains
 batched by the Viser backend. See
-:doc:`/overview/sim/viser_visualization` for server and environment-selection
+:doc:`/overview/sim/visualization/viser` for server and environment-selection
 options.

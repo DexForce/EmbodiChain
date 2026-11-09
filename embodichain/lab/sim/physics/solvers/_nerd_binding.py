@@ -27,7 +27,7 @@ import numpy as np
 import torch
 import warp as wp
 
-from embodichain.compute.dynamics import plane_contact_features, quat_rotate
+from embodichain_models.dynamics.nerd.codec import plane_contact_features, quat_rotate
 
 __all__: list[str] = []
 

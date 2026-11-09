@@ -52,8 +52,10 @@ class ANYmalCFlatEnv(EmbodiChainVelocityEnv):
     build_observations_fn = staticmethod(build_observations)
     compute_rewards_fn = staticmethod(compute_rewards)
     compute_termination_fn = staticmethod(compute_termination)
-    foot_link_names = ("LF_FOOT", "LH_FOOT", "RF_FOOT", "RH_FOOT")
-    foot_offsets = ((0.0, 0.0, 0.0),) * 4
+    foot_link_names = tuple(_CONFIG.data["robot"]["frames"]["foot_link_names"])
+    foot_offsets = tuple(
+        tuple(offset) for offset in _CONFIG.data["robot"]["frames"]["foot_offsets"]
+    )
     illegal_contact_link_names = (
         "base",
         "LF_THIGH",
@@ -61,4 +63,4 @@ class ANYmalCFlatEnv(EmbodiChainVelocityEnv):
         "RF_THIGH",
         "RH_THIGH",
     )
-    orientation_link_name = "base"
+    orientation_link_name = _CONFIG.data["robot"]["frames"]["orientation_link_name"]

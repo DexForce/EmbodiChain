@@ -71,8 +71,8 @@ python scripts/tutorials/sim/create_softbody.py --physics newton --viser
 python scripts/tutorials/sim/create_cloth.py --physics newton --viser
 ```
 
-The atomic-action tutorials receive the same options through
-`tutorial_utils.py`. Gym tutorials pass the generated visualization
+The Atomic Skill examples and two teaching walkthroughs receive the same
+options through `examples/sim/atomic_action/support.py`. Gym tutorials pass the generated visualization
 configuration into their environment configuration. Gizmo examples accept
 `--viser`, which uses a headless simulation with browser-native transform
 controls. Omit `--viser` to use the DexSim native window instead.

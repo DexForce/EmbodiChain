@@ -20,6 +20,10 @@
    `task_index` and segment instructions in `subtask_index` with
    `meta/subtasks.parquet`, including independent fragments. Episode sidecars
    retain the overall `instruction` and each segment's own `instruction`.
+   Original physical fields are captured once and retained by
+   [episode recording](../env-framework/env-framework.md#expert-trajectory-contract),
+   independently of policy normalization/noise. Trajectory exports add terminal
+   state and raw-channel history without resizing the legacy action stream.
 2. Recorder construction requires `1 / env.step_dt` to be an exact integer FPS. Non-integral
    simulation rates fail early.
 3. `_save_episodes()` slices only valid lengths. Segment-fragment mode creates independent
@@ -69,6 +73,13 @@
     LeRobot and depth commits; unlike subtask parquet and `depth_meta.json`, it is not
     replaced as one atomic file. A JSONL append failure is therefore a surfaced post-commit
     failure, not a rollback point. Journal completion follows the sidecar append.
+
+LeRobot 0.4.4 owns episode buffers and image writers on the dataset; 0.6.1
+delegates them to `DatasetWriter`. The recorder's private writer resolver and
+per-instance image-compression hook handle this difference. Do not identify the
+new API by the presence of `dataset.writer` alone: 0.4.4 uses that name for its
+Parquet writer. Keep format conversion separate from SDK version selection;
+see [offline tools](offline-datasets.md).
 
 ### Common failures and recommended change sites
 

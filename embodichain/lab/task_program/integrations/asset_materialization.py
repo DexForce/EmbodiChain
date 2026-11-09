@@ -42,6 +42,7 @@ from ._asset_pouring import (
     prepare_pour_adaptation,
     finish_pour_adaptation,
 )
+from ._configured_composition import _resolve_execution_policy
 
 from embodichain.utils import configclass
 from embodichain.utils.config_paths import resolve_config_path
@@ -386,7 +387,9 @@ def materialize_asset_deployment(
     task_program = raw["task_program"]
     integration_path = _path(task_program["integration"], source)
     program_path = _path(task_program["program"], source)
-    policy_path = _path(task_program["execution_policy"], source)
+    policy_path, policy = _resolve_execution_policy(
+        task_program["execution_policy"], base_dir=source.parent
+    )
     embodiment_path = _path(raw["embodiment"]["component"], source)
     integration = _read(integration_path)
     if (
@@ -398,7 +401,6 @@ def materialize_asset_deployment(
             "Supplied requirements differ from the task integration contract"
         )
     program = _read(program_path)
-    policy = _read(policy_path)
     embodiment = _read(embodiment_path)
     prepared_pour = None
     if adaptations.pour is not None:

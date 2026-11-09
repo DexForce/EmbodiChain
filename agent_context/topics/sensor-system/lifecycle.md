@@ -22,7 +22,20 @@ configuration failures; missing per-arena render topology is a runtime failure.
 
 `SimulationManager.add_sensor()` prepares the scene and passes its explicit
 owner to `ContactSensor`. The sensor resolves configured rigid/link targets to
-Spawn handles and creates one query. Preserve these query/buffer contracts:
+Spawn handles and creates one query.
+
+Sampling reads completed solver contacts through DexSim's
+`fetch_solver_report()` or `fetch_solver_report_async()`. `detect()` and
+`fetch()` operate on a separate geometry-only observation and cannot replace
+solver reports when interpreting measured impulses or force histories.
+
+After a physics reset invalidates the native solved report, sensor observation
+reads return invalid rows until the next solve. A sensor-buffer-only reset may
+still reread the same valid native report. Contact sampling must run outside
+caller-owned CUDA graph capture; only the stable observation buffers are consumed
+inside that graph. See [history and substeps](contact-history.md) for ordering.
+
+Preserve these query/buffer contracts:
 
 - `filter_need_both_actor` chooses query `match="all"` or `"any"`.
 - Capacity is bounded per Arena as well as globally, so a busy environment
@@ -35,16 +48,27 @@ Spawn handles and creates one query. Preserve these query/buffer contracts:
 - Only validity/counts reset each update. Data outside valid rows is undefined.
 
 `contact_capabilities` distinguishes geometry from normal/friction impulse
-support. Do not infer force support from sensor construction alone. Inspect
+support for the whole query. Current DexSim DexUni reports may mix geometry-only
+and measured-force rows; `impulse_valid` and `friction_valid` preserve their
+per-row quantity availability through sensor scatter, filtering and reset.
+Unavailable values are placeholders, not measured zeros. Older buffers without
+per-row flags use the query capabilities; DexUni queries require the newer
+validity contract. Do not infer force support from sensor construction alone. Inspect
 `supports_contact_sensor` in `embodichain/lab/sim/physics/` for the current
-backend/solver/device matrix: Newton AutoSolver may change the answer during
+backend/solver/device matrix: DexUni's scene-based dispatch may change the answer during
 preparation, so the manager checks again afterwards.
+
+Particle-shape contacts do not enter this rigid ContactQuery.
 
 The sensor retains backend-emitted rows rather than reducing an actor pair to
 one contact. Force-reporting paths apply the query's positive-impulse filtering;
 geometry-only paths may provide valid rows with zero impulse. Solver settings
 can change manifold density. Fixed sensor capacity may truncate rows; increasing
-capacity does not normalize manifold semantics across backends.
+capacity does not normalize manifold semantics across backends. Consumers that
+interpret missing contacts as a physical miss must first check the device-local
+`dropped_contacts_mask`: scatter overflow is row-local, while unattributed native
+query overflow conservatively invalidates every row. Standalone updates report
+the latest query; history-enabled sensors retain the current interval's losses.
 
 PhysX Direct GPU cannot identify static counterparts from its raw contact
 buffer and uses actor ID `-1` for those rows. To observe arbitrary static

@@ -23,7 +23,10 @@ results remain example evidence rather than generic ODS defaults.
 
 ## Expert dataset tools
 
-EmbodiChain records with its existing Python >=3.10 runtime and LeRobot 0.4.x.
+EmbodiChain selects LeRobot 0.4.4 on Python 3.11 and LeRobot 0.6.1
+on Python >=3.12. The official ACT workflow uses Python 3.12; see the
+[LeRobot integration guide](../../docs/source/guides/lerobot.md) for training
+and simulation evaluation.
 Offline validation, quality filtering, and recovery do not start a simulator.
 LeRobot 0.6.1 conversion lives in the independent
 [`tools/lerobot_export`](../../tools/lerobot_export/) package and runs in its own

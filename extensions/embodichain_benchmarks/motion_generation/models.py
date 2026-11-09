@@ -219,6 +219,17 @@ class CaseOutcome:
     and orientation-only requests have no translation reference-path metric.
     """
 
+    policy_steps_used: int | None = None
+    """Policy controls applied before termination; excludes initial state/padding."""
+    policy_completion_step: int | None = None
+    """First original control step satisfying the ordered constraints, else None.
+
+    Independent of retimed output validity. Zero means the initial state already
+    satisfies the complete request. Missing traces are unavailable, never zero.
+    """
+    policy_waypoint_arrival_steps: tuple[int | None, ...] = ()
+    """Strictly ordered original-state arrival steps, with None for missed goals."""
+
     def __post_init__(self) -> None:
         """Recompute geometry validity from its authoritative component checks."""
         object.__setattr__(

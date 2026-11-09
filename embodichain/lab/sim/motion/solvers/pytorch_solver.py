@@ -16,10 +16,10 @@
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 
-from typing import Union, Tuple, List, TYPE_CHECKING
-from dataclasses import MISSING
+from typing import Union, Tuple, TYPE_CHECKING
 from copy import deepcopy
 
 from embodichain.utils import configclass, logger
@@ -33,11 +33,15 @@ from embodichain.lab.sim.motion.solvers.qpos_seed_sel_sampler import (
 from embodichain.lab.sim.utility.solver_utils import validate_iteration_params
 
 if TYPE_CHECKING:
+    import pytorch_kinematics as pk
+
     from typing import Self
 
 from embodichain.lab.sim.utility.import_utils import (
     lazy_import_pytorch_kinematics,
 )
+
+__all__ = ["PytorchSolverCfg", "PytorchSolver"]
 
 
 @configclass
@@ -64,10 +68,10 @@ class PytorchSolverCfg(SolverCfg):
     """Time step for numerical integration"""
 
     damp: float = 1e-6
-    """Damping factor to prevent numerical instability"""
+    """Diagonal DLS regularization; zero retains the PK numerical floor of 1e-9."""
 
     is_only_position_constraint: bool = False
-    """Flag to indicate whether the solver should only consider position constraints."""
+    """Constrain TCP position only, ignoring target orientation in DLS and convergence."""
 
     num_samples: int = 30
     """Number of samples to generate different joint seeds for IK iterations.
@@ -200,24 +204,12 @@ class PytorchSolver(BaseSolver):
             self.pk_serial_chain.get_joint_limits(), device=self.device
         )
 
-        # Inverse kinematics is available via damped least squares (iterative steps with Jacobian pseudo-inverse damped to avoid oscillation near singularlities).
-        self.pik = self.pk.PseudoInverseIK(
-            self.pk_serial_chain,
-            pos_tolerance=self._pos_eps,
-            rot_tolerance=self._rot_eps,
-            joint_limits=self.lim.T,
-            early_stopping_any_converged=True,
-            max_iterations=self._max_iterations,
-            lr=self._dt,
-            num_retries=1,
-            use_compile=True,
-        )
+        self.pik = self._build_ik_backend()
 
         self.dof = self.pk_serial_chain.n_joints
 
         # Optional database-driven seed selection. The database stores flange
-        # poses (no TCP), so runtime ``set_tcp`` calls never invalidate it;
-        # ``get_ik`` queries it with the TCP-stripped target accordingly.
+        # poses (no TCP), so runtime ``set_tcp`` calls never invalidate it.
         self._seed_sampler: QposSeedSelSampler | None = None
         if cfg.enable_seed_selection:
             self._seed_sampler = QposSeedSelSampler(
@@ -229,6 +221,61 @@ class PytorchSolver(BaseSolver):
                 db_size=cfg.seed_db_size,
                 rot_scale=cfg.seed_rot_scale,
             )
+
+    def _build_ik_backend(self) -> pk.PseudoInverseIK:
+        """Build DLS for the flange pose or the unconstrained TCP position."""
+        chain = self.pk_serial_chain
+        position_only = self._is_only_position_constraint
+        if position_only and not np.array_equal(self.tcp_xpos, np.eye(4)):
+            # Removing TCP with the target rotation is invalid when orientation
+            # is free. A fixed terminal frame gives PK the actual TCP position
+            # and its translational Jacobian, without changing the public chain.
+            # PK constructs some index tensors on CPU, even with device="cuda".
+            # Build on CPU first, then move the completed chain to the solver.
+            chain = deepcopy(chain).to(device="cpu")
+            end_frame = chain.find_frame(chain.get_frame_names(False)[-1])
+            tcp_name = end_frame.name + "_embodichain_tcp"
+            end_frame.add_child(
+                self.pk.Frame(
+                    name=tcp_name,
+                    link=self.pk.Link(name=tcp_name),
+                    joint=self.pk.Joint(
+                        offset=self.pk.Transform3d(
+                            matrix=torch.as_tensor(
+                                self.tcp_xpos, dtype=chain.dtype, device=chain.device
+                            )
+                        )
+                    ),
+                )
+            )
+            chain = self.pk.SerialChain(chain, tcp_name, dtype=chain.dtype).to(
+                device=self.device
+            )
+        return self.pk.PseudoInverseIK(
+            chain,
+            pos_tolerance=self._pos_eps,
+            rot_tolerance=float("inf") if position_only else self._rot_eps,
+            orientation_weight=0.0 if position_only else 1.0,
+            regularlization=max(self._damp, 1e-9),
+            # PK's stagnation metric includes the unweighted rotation error.
+            early_stopping_no_improvement=None if position_only else "any",
+            joint_limits=self.lim.T,
+            early_stopping_any_converged=True,
+            max_iterations=self._max_iterations,
+            lr=self._dt,
+            num_retries=1,
+            use_compile=True,
+        )
+
+    def set_tcp(self, xpos: np.ndarray) -> None:
+        """Set the TCP and refresh the position-only IK task frame.
+
+        Args:
+            xpos: Finite 4x4 SE(3) transform from the end link to the TCP.
+        """
+        super().set_tcp(xpos)
+        if getattr(self, "_is_only_position_constraint", False):
+            self.pik = self._build_ik_backend()
 
     def _compute_flange_fk(self, qpos: torch.Tensor) -> torch.Tensor:
         """Compute end-link poses without the TCP transform.
@@ -262,6 +309,7 @@ class PytorchSolver(BaseSolver):
             "dt": self._dt,
             "damp": self._damp,
             "num_samples": self._num_samples,
+            "is_only_position_constraint": self._is_only_position_constraint,
         }
 
     def set_iteration_params(
@@ -303,17 +351,7 @@ class PytorchSolver(BaseSolver):
         self._num_samples = num_samples
         self._is_only_position_constraint = is_only_position_constraint
 
-        self.pik = self.pk.PseudoInverseIK(
-            self.pk_serial_chain,
-            pos_tolerance=self._pos_eps,
-            rot_tolerance=self._rot_eps,
-            joint_limits=self.lim.T,
-            early_stopping_any_converged=True,
-            max_iterations=self._max_iterations,
-            lr=self._dt,
-            num_retries=1,
-            use_compile=True,
-        )
+        self.pik = self._build_ik_backend()
 
         return True
 
@@ -323,7 +361,9 @@ class PytorchSolver(BaseSolver):
         r"""Computes the inverse kinematics solutions for the given target poses and joint seeds.
 
         Args:
-            target_pose (torch.Tensor): The target poses represented as a (batch_size, 4, 4) tensor.
+            target_pose (torch.Tensor): Targets of shape (batch_size, 4, 4)
+                relative to the chain root, at the TCP for position-only IK
+                and at the flange otherwise.
             joint_seed (torch.Tensor): The initial joint positions used as a seed. It can be either a 1D tensor of shape (dof,) or a 2D tensor of shape (batch_size, dof).
 
         Returns:
@@ -350,7 +390,7 @@ class PytorchSolver(BaseSolver):
         self.pik.initial_config = joint_seed
 
         result = self.pik.solve(tf)
-        return result.converged_any, result.solutions[:, 0, :].squeeze(0)
+        return result.converged_any, result.solutions[:, 0, :]
 
     def _qpos_map_to_limits(
         self, qpos: torch.Tensor
@@ -399,10 +439,12 @@ class PytorchSolver(BaseSolver):
         This function generates random joint configurations within the specified limits,
         including the provided joint_seed, and attempts to find valid inverse kinematics solutions.
         It then identifies the joint positions that are closest to the joint_seed.
+        With ``is_only_position_constraint=True``, only the TCP translation is
+        constrained; target rotation does not affect the solve or acceptance.
 
         Args:
-            target_xpos (torch.Tensor): A tensor representing the target positions. It can be of shape
-                                         (batch_size, 3) for multiple positions or (3,) for a single position.
+            target_xpos (torch.Tensor): Root-relative TCP poses of shape
+                (batch_size, 4, 4) or (4, 4) for a single target.
             qpos_seed (torch.Tensor | None): Initial joint positions used as seed for IK solving.
                                             Can be:
                                             - 1D tensor of shape (dof,): Single seed for all target positions
@@ -446,20 +488,29 @@ class PytorchSolver(BaseSolver):
             )
         # output qpos_seed shape: (batch_size, dof)
 
-        # Transform target_xpos by TCP
+        # Full-pose goals can remove TCP using their specified orientation.
+        # Position-only IK solves directly at the TCP, whose orientation is free.
         tcp_xpos = torch.as_tensor(
             self.tcp_xpos, device=self.device, dtype=torch.float32
         )
         tcp_xpos_inv = inv_transform(tcp_xpos)
-        target_xpos = target_xpos @ tcp_xpos_inv
+        if not self._is_only_position_constraint:
+            target_xpos = target_xpos @ tcp_xpos_inv
 
         # Get joint limits and ensure shape matches dof
 
         batch_size = target_xpos.shape[0]
 
         if self._seed_sampler is not None:
-            # Database retrieval: ``target_xpos`` is in the flange frame here
-            # (TCP stripped above), matching the frame the database stores.
+            # The database stores flange poses. For a position-only goal use
+            # the caller seed's orientation to estimate the flange translation,
+            # so the arbitrary target rotation cannot influence seed retrieval.
+            seed_target = target_xpos
+            if self._is_only_position_constraint:
+                seed_target = self._compute_flange_fk(qpos_seed).clone()
+                seed_target[:, :3, 3] = target_xpos[:, :3, 3] - (
+                    seed_target[:, :3, :3] @ tcp_xpos[:3, 3]
+                )
             sampler = self._seed_sampler
             sampler.num_samples = self._num_samples
             random_qpos_seeds = sampler.sample(
@@ -467,7 +518,7 @@ class PytorchSolver(BaseSolver):
                 self.lower_qpos_limits,
                 self.upper_qpos_limits,
                 batch_size,
-                target_xpos=target_xpos,
+                target_xpos=seed_target,
             )
         else:
             sampler = QposSeedSampler(

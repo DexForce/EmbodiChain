@@ -39,12 +39,12 @@ from dexsim.engine.newton_physics import (
 )
 from dexsim.engine.newton_physics.newton_backend import NewtonBackend
 from dexsim.scene import Scene
-from embodichain.lab.sim.physics.solvers._reference_assets import (
+from examples.learning.nerd._support._scene_assets import (
     make_reference_articulation,
     reference_profile,
 )
 from embodichain.lab.sim.physics.solvers._nerd_binding import NeRDBinding
-from embodichain.learning.models.nerd import NeRDModel, NeRDModelCfg, export_model
+from embodichain_models.dynamics.nerd import NeRDModel, NeRDModelCfg, export_model
 
 DT = 1 / 60
 
@@ -134,7 +134,7 @@ def _small_export(scene, destination: Path, robot: str) -> Path:
     binding = NeRDBinding.from_metadata(dict(scene.dynamics_metadata()), robot)
     physical = scene.dynamics_snapshot().physical
     q, qd = binding.read(physical)
-    from embodichain.compute.dynamics import NeRDStateCodec
+    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
 
     codec = NeRDStateCodec(**binding.metadata(DT)["codec"])
     features = codec.encode(
@@ -324,7 +324,7 @@ def test_wrong_timestep_and_control_schema_fail_without_advance(tmp_path: Path) 
 
 
 def test_non_float32_export_rejected_before_newton_execution(tmp_path: Path) -> None:
-    from embodichain.learning.models.nerd import load_model
+    from embodichain_models.dynamics.nerd import load_model
 
     original = _export(tmp_path, "cartpole")
     model, manifest = load_model(original)
@@ -560,7 +560,12 @@ def test_real_manager_public_scene_and_partial_arena_reset(
             **os.environ,
             "OMP_NUM_THREADS": "2",
             "MKL_NUM_THREADS": "2",
-            "PYTHONPATH": str(Path(__file__).resolve().parents[4]),
+            "PYTHONPATH": os.pathsep.join(
+                (
+                    str(Path(__file__).resolve().parents[4]),
+                    os.environ.get("PYTHONPATH", ""),
+                )
+            ),
         },
     )
 
@@ -684,7 +689,12 @@ def test_actual_differentiable_environment_constructor_reset_and_backward(
             **os.environ,
             "OMP_NUM_THREADS": "2",
             "MKL_NUM_THREADS": "2",
-            "PYTHONPATH": str(Path(__file__).resolve().parents[4]),
+            "PYTHONPATH": os.pathsep.join(
+                (
+                    str(Path(__file__).resolve().parents[4]),
+                    os.environ.get("PYTHONPATH", ""),
+                )
+            ),
         },
     )
 

@@ -19,6 +19,9 @@ Practical guides for common tasks in EmbodiChain.
    lerobot_export
    task_catalog
    robot_catalog
+   configured_manipulation_rl
    policy_evaluation
+   training_frameworks
+   lerobot
    rlinf
    cli

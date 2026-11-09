@@ -45,11 +45,18 @@ retained, and physical replication must still fit the effective capacity.
 The manager skips native background, light and visual-material setup, keeps
 physical ground, and skips Newton render-state publication. Gym additionally
 skips configured lights/IBL and built-in native visual effects; background
-objects and collision geometry remain. DexSim uses its existing package and
+objects and collision geometry remain. Render-only `VisualObject` declarations
+stay in the registry without native handles; visual pose events must skip
+native writes in this mode. DexSim uses its existing package and
 device-free NoRender engine. Native camera and window operations require a
 native renderer. Viser retains native rendering because its current exporter
 reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
 when the saved training configuration uses NoRender.
+
+DexSim 0.6 still processes Spawn's visual material table on NoRender native
+add/finalize calls. `SpawnScene` temporarily excludes that table during those
+calls so texture binding is never attempted without a renderer, then restores
+the authored definitions for metadata and later declarations.
 
 ## Default scene presentation
 

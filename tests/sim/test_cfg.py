@@ -596,6 +596,10 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "is_site",
         # Asset-loading adapter option, not a native ShapeConfig parameter.
         "use_native_mesh_loader",
+        "convert_to_heightfield",
+        "heightfield_resolution",
+        "preserve_mesh_transform",
+        "max_hull_vertices",  # Mesh cooking is outside rigid-body physics.
     }
     assert (
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
@@ -792,7 +796,7 @@ def test_robot_preset_accepts_newton_solver_alias() -> None:
     preset = _NewtonSolverAliasRobotPresetCfg()
 
     assert preset.resolve(DefaultPhysicsCfg()).uid == "fallback"
-    assert preset.resolve(NewtonPhysicsCfg()).uid == "fallback"
+    assert preset.resolve(NewtonPhysicsCfg()).uid == "mjwarp"
     assert (
         preset.resolve(NewtonPhysicsCfg(solver_cfg={"solver_type": "mjwarp"})).uid
         == "mjwarp"

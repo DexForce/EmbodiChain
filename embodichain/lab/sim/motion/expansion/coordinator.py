@@ -38,6 +38,7 @@ from .contracts import (
 )
 from .session import ExpansionSession
 from .source import SourceAdapter, SourceContext
+from .task_space import KinematicsFn
 from .variants import TrajectoryVariant, expand_trajectory_variants
 
 __all__ = ["CandidateCoordinator", "CandidateWorkItem"]
@@ -147,6 +148,16 @@ class CandidateCoordinator:
     Initial-state restoration, physical slots, measured validation, and
     persistence remain host responsibilities. A caller must register the source
     case with the supplied :class:`ExpansionSession` before proposing.
+
+    ``kinematics`` binds a host-owned root-frame FK/Jacobian callable to the
+    template's controlled joint order. Task-space and guided proposals share
+    this callable; guidance uses the initial state's registered reference
+    normalizer. Candidate metadata preserves the actual selection evidence.
+    An optional ``geometry_family_id`` pins a host-owned baseline across
+    variants. ``label_proposal_ordinal`` includes the accepted numerical draw in
+    candidate identity, so rejected draws cannot be mistaken for the winner.
+    ``max_generation_attempts`` bounds proposal draws; their rejection counts
+    remain available through :attr:`last_generation_statistics`.
     """
 
     def __init__(
@@ -161,6 +172,10 @@ class CandidateCoordinator:
         velocity_limits: torch.Tensor | None = None,
         acceleration_limits: torch.Tensor | None = None,
         task_jacobians: torch.Tensor | None = None,
+        kinematics: KinematicsFn | None = None,
+        geometry_family_id: str | None = None,
+        label_proposal_ordinal: bool = False,
+        max_generation_attempts: int | None = None,
     ) -> None:
         if isinstance(cfg, TrajectoryExpansionJobCfg):
             cfg = TrajectoryExpansionCfg.from_expansion_job(cfg)
@@ -176,6 +191,18 @@ class CandidateCoordinator:
             raise TypeError("joint_limits must be a tensor")
         if type(backend_id) is not str or not backend_id.strip():
             raise ValueError("backend_id must be a nonempty string")
+        if geometry_family_id is not None and (
+            not isinstance(geometry_family_id, str) or not geometry_family_id.strip()
+        ):
+            raise ValueError("geometry_family_id must be a nonempty string or None")
+        if type(label_proposal_ordinal) is not bool:
+            raise TypeError("label_proposal_ordinal must be a boolean")
+        if max_generation_attempts is not None and (
+            type(max_generation_attempts) is not int or max_generation_attempts < 1
+        ):
+            raise ValueError(
+                "max_generation_attempts must be a positive integer or None"
+            )
         if (velocity_limits is None) != (acceleration_limits is None):
             raise ValueError(
                 "velocity_limits and acceleration_limits must be supplied together"
@@ -186,6 +213,9 @@ class CandidateCoordinator:
         self._source_context = source_context
         self._joint_limits = joint_limits.detach().clone()
         self._backend_id = backend_id
+        self._geometry_family_id = geometry_family_id
+        self._label_proposal_ordinal = label_proposal_ordinal
+        self._max_generation_attempts = max_generation_attempts
         self._observation_profiles = (
             self._cfg.observation.profiles if self._cfg.observation.enabled else ()
         )
@@ -200,8 +230,12 @@ class CandidateCoordinator:
         self._task_jacobians = (
             None if task_jacobians is None else task_jacobians.detach().clone()
         )
+        if kinematics is not None and not callable(kinematics):
+            raise TypeError("kinematics must be callable or None")
+        self._kinematics = kinematics
         self._pending: deque[CandidateWorkItem] = deque()
         self._seen_fingerprints: set[str] = set()
+        self._last_generation_statistics: dict[str, object] | None = None
 
     @property
     def pending_count(self) -> int:
@@ -212,6 +246,16 @@ class CandidateCoordinator:
     def session(self) -> ExpansionSession:
         """Return the session that owns candidate lifecycle and receipts."""
         return self._session
+
+    @property
+    def last_generation_statistics(self) -> dict[str, object] | None:
+        """Return attempted and rejected proposal counts from the last source."""
+        if self._last_generation_statistics is None:
+            return None
+        return {
+            "attempted": self._last_generation_statistics["attempted"],
+            "rejected": dict(self._last_generation_statistics["rejected"]),
+        }
 
     @property
     def source_case(self) -> SceneCase:
@@ -287,7 +331,19 @@ class CandidateCoordinator:
             acceleration_limits=self._acceleration_limits,
             task_jacobians=self._task_jacobians,
             generator=generator,
+            max_attempts=self._max_generation_attempts,
+            kinematics=self._kinematics,
+            manipulability_reference=(
+                self._session.manipulability_reference(self._source_context.scene_case)
+                if self._cfg.augmentation.factors.manipulability.enabled
+                and self._cfg.augmentation.factors.manipulability.guided_proposals > 1
+                else None
+            ),
         )
+        self._last_generation_statistics = {
+            "attempted": variants.attempted,
+            "rejected": dict(variants.rejected),
+        }
         if compatibility_key is not None and (
             type(compatibility_key) is not str or not compatibility_key.strip()
         ):
@@ -298,7 +354,9 @@ class CandidateCoordinator:
             backend_id=self._backend_id,
             observation_profiles=self._observation_profiles,
         )
-        prepared: list[tuple[TrajectoryVariant, TrajectoryTemplate, str]] = []
+        prepared: list[
+            tuple[TrajectoryVariant, TrajectoryTemplate, str, Mapping[str, object]]
+        ] = []
         batch_fingerprints: set[str] = set()
         for index, variant in enumerate(variants.variants):
             row = variants.candidates.row(index)
@@ -325,7 +383,7 @@ class CandidateCoordinator:
             ):
                 continue
             batch_fingerprints.add(fingerprint)
-            prepared.append((variant, row_template, fingerprint))
+            prepared.append((variant, row_template, fingerprint, row.factors[0]))
         if not prepared:
             return ()
         budget = self._cfg.scheduling.candidate_budget
@@ -339,13 +397,18 @@ class CandidateCoordinator:
                     self._source_context.source_id,
                     self._source_context.source_revision,
                     self._source_context.unit_id,
-                    variant.spatial_operator,
+                    (
+                        f"{variant.spatial_operator}:{'task' if variant.task_space else 'joint'}:ordinal:{variant.ordinal}"
+                        if self._label_proposal_ordinal
+                        else variant.spatial_operator
+                    ),
+                    geometry_family_id=self._geometry_family_id,
                 )
-                for variant, _, _ in prepared
+                for variant, _, _, _ in prepared
             )
         )
         created: list[CandidateWorkItem] = []
-        for (variant, row_template, fingerprint), (identity, _) in zip(
+        for (variant, row_template, fingerprint, evidence), (identity, _) in zip(
             prepared,
             allocations,
             strict=True,
@@ -353,7 +416,7 @@ class CandidateCoordinator:
             spec = CandidateSpec(
                 identity=identity,
                 affordance_selection=affordance,
-                trajectory_variant=variant.factors,
+                trajectory_variant=evidence,
                 compatibility_key=key,
                 estimated_cost=float(row_template.dt.sum().item()),
                 observation_profiles=self._observation_profiles,
@@ -361,7 +424,7 @@ class CandidateCoordinator:
             item = CandidateWorkItem(spec=spec, template=row_template)
             created.append(item)
         self._pending.extend(created)
-        self._seen_fingerprints.update(fingerprint for _, _, fingerprint in prepared)
+        self._seen_fingerprints.update(fingerprint for _, _, fingerprint, _ in prepared)
         return tuple(created)
 
     def take_next(self) -> CandidateWorkItem | None:

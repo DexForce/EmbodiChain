@@ -1,0 +1,73 @@
+{
+  "schema": "carton-assets/v1",
+  "units": "m",
+  "robot": [
+    {
+      "id": "original_panda",
+      "version": "FrankaV2 + exact-quarter-RPY variant v1",
+      "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/robot_assets/FrankaV2.zip",
+      "sha256": "3bf4adfc5ffe6d32a18d2cfe357fcfe787d3539312ffb1b9a4638c91df680768",
+      "md5": "f0675b9da98126bc3d4e18c98ef5e06c",
+      "license": "Apache-2.0 (distribution card and franka_description)",
+      "scale": "URDF-declared mesh scales; no scene rescaling"
+    },
+    {
+      "id": "robotiq_2f85",
+      "version": "Robotiq_V2",
+      "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/eef_assets/Robotiq_V2.zip",
+      "sha256": "c37c1745e6742a77d57fe94d3f81bc7377dd657f3ceb7570c88b5bdc7733d359",
+      "md5": "9bcbf92946b200c903938d59323e7b2c",
+      "license": "Apache-2.0 distribution; upstream robotiq visualization BSD",
+      "scale": "URDF-declared mm-to-m mesh scales; no additional scaling"
+    }
+  ],
+  "inertia": [
+    {
+      "id": "panda_identified",
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_ros/ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98/franka_description/robots/common/inertial.yaml",
+      "revision": "ddd2fffd9de44b02ad15b4bbb2bfa2cec4d60d98",
+      "sha256": "c7d15b15e45876b44e030053bca3ca19cf471806e46031ec090b8500cb9b330b",
+      "license": "Apache-2.0",
+      "qualification": "identified parameters; not manufacturer certified"
+    },
+    {
+      "id": "robotiq_nominal_cad",
+      "url": "https://raw.githubusercontent.com/ros-industrial-attic/robotiq/45196f6558fe8ba9d89bc8a105396c68c3e7e892/robotiq_2f_85_gripper_visualization/urdf/robotiq_arg2f_85_model_macro.xacro",
+      "revision": "45196f6558fe8ba9d89bc8a105396c68c3e7e892",
+      "sha256": "bb38a58a3112017efbc273327fc65388449f4e4a54a23c3218cf35e7b89356bb",
+      "license": "BSD",
+      "qualification": "commented CAD nominal inertials; pads separately assumed 5 g"
+    }
+  ],
+  "carton": {
+    "id": "staples_closed_carton_proxy",
+    "source": "annotations/box_registration.json",
+    "sha256": "001bbb615f4d9b35154b084c297c6a94ab2331024ceab7ad1ab044026d38a485",
+    "size_m": [
+      0.0965656254430435,
+      0.04723983617095631,
+      0.0365978079862995
+    ],
+    "license": "Apache-2.0 procedural geometry; DROID-derived annotation CC BY 4.0",
+    "qualification": "estimated cuboid; SKU and manufacturer CAD unverified; procedural proxy label"
+  },
+  "support": {
+    "source": "annotations/staples.json",
+    "size_m": [
+      0.65,
+      0.65,
+      0.043592974023364456
+    ],
+    "license": "Apache-2.0 procedural geometry"
+  },
+  "background": {
+    "source": "SDK fixed ground and procedural display markings",
+    "license": "Apache-2.0; no external HDRI"
+  },
+  "source_lock": "source.lock.json",
+  "viewer_dependency_lock": "viewer.vendor.lock.json",
+  "unused_assets": [
+    "YCB",
+    "Poly Haven"
+  ]
+}

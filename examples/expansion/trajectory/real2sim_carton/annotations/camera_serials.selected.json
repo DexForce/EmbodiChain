@@ -1,0 +1,11 @@
+{
+  "repository": "KarlP/droid",
+  "revision": "bcb840c3b496533e0adf548a54b51f2f00057837",
+  "file": "camera_serials.json",
+  "episode_id": "RAIL+d027f2ae+2023-11-20-11h-50m-49s",
+  "entry": {
+    "wrist_cam_serial": "13062452",
+    "ext1_cam_serial": "20521388",
+    "ext2_cam_serial": "24259877"
+  }
+}

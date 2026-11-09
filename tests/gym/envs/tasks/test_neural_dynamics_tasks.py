@@ -35,12 +35,12 @@ from embodichain.learning.rl.env import (
 from embodichain.utils.utility import load_config
 
 _ROOT = Path(__file__).resolve().parents[4]
-_CONFIGS = _ROOT / "extensions/embodichain_tasks/configs/tasks/classic_control"
+_CONFIGS = _ROOT / "examples/learning/nerd/configs"
 
 
 @pytest.mark.parametrize("robot,title", [("cartpole", "Cartpole"), ("ant", "Ant")])
 def test_registered_task_and_yaml_ownership(robot: str, title: str) -> None:
-    importlib.import_module(f"embodichain_tasks.classic_control.{robot}")
+    importlib.import_module(f"examples.learning.nerd._support._{robot}_env")
     assert f"{title}Dynamics-v1" in REGISTERED_ENVS
     assert f"{title.lower()}dynamics-v1" in get_registered_learning_env_names()
     path = _CONFIGS / robot / "env.nerd.yaml"
@@ -58,8 +58,8 @@ def test_registered_task_and_yaml_ownership(robot: str, title: str) -> None:
 
 
 def _check_task_and_trainer(tmp_path: Path, robot: str, title: str) -> None:
-    importlib.import_module(f"embodichain_tasks.classic_control.{robot}")
-    from embodichain.lab.sim.physics.solvers.collection import DynamicsSimulation
+    importlib.import_module(f"examples.learning.nerd._support._{robot}_env")
+    from examples.learning.nerd._support._scene import DynamicsSimulation
     from embodichain.learning.rl.train import train_from_config
 
     helper_path = _ROOT / "tests/sim/physics/solvers/test_nerd_solver.py"
@@ -165,7 +165,9 @@ def test_actual_registered_task_and_one_apg_update(
             **os.environ,
             "OMP_NUM_THREADS": "2",
             "MKL_NUM_THREADS": "2",
-            "PYTHONPATH": str(_ROOT),
+            "PYTHONPATH": os.pathsep.join(
+                (str(_ROOT), os.environ.get("PYTHONPATH", ""))
+            ),
             "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
         },
     )
