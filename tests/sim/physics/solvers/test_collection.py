@@ -408,6 +408,60 @@ def _check_pipeline(tmp_path: Path, robot: str) -> None:
         )
 
 
+@pytest.mark.parametrize("motion", ["random_effort", "passive"])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("dt", 1 / 30),
+        ("gravity", [0.0, 0.0, 0.0]),
+        ("physics_signature", "different-scene"),
+        ("physics_signature_schema", "direct-newton"),
+        ("physics_signature", None),
+    ],
+)
+def test_cached_teacher_rejects_physical_mismatch_before_simulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, motion: str, field: str, value
+) -> None:
+    from examples.learning.nerd._support import _scene
+
+    metadata = {
+        "robot": "cartpole",
+        "dt": 1 / 60,
+        "gravity": [0.0, 0.0, -9.81],
+        "physics_signature": "matching-scene",
+        "physics_signature_schema": "nerd-scene-v1",
+        "contact_schema": "nerd-static-plane-v1",
+        "codec": {"robot": "cartpole"},
+        "joint_names": ["slider_to_cart", "cart_to_pole"],
+    }
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "weights.pt").write_bytes(b"not loaded during validation")
+    (model / "manifest.json").write_text(json.dumps(metadata))
+    teacher = tmp_path / "teacher"
+    teacher.mkdir()
+    changed = {**metadata, field: value}
+    (teacher / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "metadata": changed, "shards": []})
+    )
+    monkeypatch.setattr(
+        _scene, "DynamicsSimulation", lambda *a, **kw: pytest.fail("Started simulation")
+    )
+    with pytest.raises(ValueError, match=field):
+        evaluate_rollouts(
+            {
+                "robot": "cartpole",
+                "model": str(model),
+                "teacher_dataset": str(teacher),
+                "motion_mode": motion,
+                "output": str(tmp_path / "result.json"),
+                "trajectories": 1,
+                "horizons": [1],
+            }
+        )
+    assert not (tmp_path / "result-evidence.h5").exists()
+
+
 def _check_actor_and_failures(tmp_path: Path) -> None:
     from examples.learning.nerd._support._scene import DynamicsSimulation
     from embodichain.learning.models import build_mlp_from_cfg
@@ -434,6 +488,8 @@ def _check_actor_and_failures(tmp_path: Path) -> None:
     torch.manual_seed(11)
     actor = build_mlp_from_cfg(block["actor"], 4, 1)
     policy = build_policy(block, 4, 1, torch.device("cpu"), actor=actor)
+    from examples.learning.nerd.__main__ import _resolve_paths
+
     config_path = tmp_path / "policy.json"
     config_path.write_text(json.dumps({"policy": block}))
     weights = tmp_path / "policy.pt"
@@ -452,11 +508,17 @@ def _check_actor_and_failures(tmp_path: Path) -> None:
         {
             **common,
             "motion_mode": "fixed_policy",
-            "policy": {
-                "kind": "actor_only",
-                "config": str(config_path),
-                "checkpoint": str(weights),
-            },
+            "policy": _resolve_paths(
+                {
+                    "policy": {
+                        "kind": "actor_only",
+                        "config": config_path.name,
+                        "checkpoint": weights.name,
+                    }
+                },
+                tmp_path,
+                "eval",
+            )["policy"],
             "output": str(tmp_path / "actor.json"),
         }
     )

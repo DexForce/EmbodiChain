@@ -64,9 +64,11 @@ def _resolve_paths(
     }
     if operation == "eval":
         inputs.update(model="directory", teacher_dataset="directory")
-        if isinstance(config.get("policy"), dict) and "checkpoint" in config["policy"]:
+        if isinstance(config.get("policy"), dict):
             policy = dict(config["policy"])
-            policy["checkpoint"] = str(_path(policy["checkpoint"], base))
+            for name in ("checkpoint", "config"):
+                if name in policy:
+                    policy[name] = str(_path(policy[name], base))
             config["policy"] = policy
     if operation == "generate":
         inputs.pop("resume")  # generation resume is a Boolean, not a checkpoint.

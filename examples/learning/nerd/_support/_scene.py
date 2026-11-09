@@ -871,6 +871,19 @@ def evaluate_rollouts(config: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError("split must be train, validation, test or all")
     if dataset["metadata"].get("robot") != robot:
         raise ValueError("Teacher dataset robot differs from evaluation robot")
+    exported = json.loads((model / "manifest.json").read_text())
+    for field in (
+        "dt",
+        "gravity",
+        "physics_signature",
+        "physics_signature_schema",
+        "contact_schema",
+        "codec",
+        "joint_names",
+    ):
+        value = dataset["metadata"].get(field)
+        if value is None or value != exported.get(field):
+            raise ValueError(f"Teacher dataset/model {field} differs or is missing")
     records = [
         {**row, "file": shard["file"]}
         for shard in dataset["shards"]
@@ -888,13 +901,6 @@ def evaluate_rollouts(config: Mapping[str, Any]) -> dict[str, Any]:
         if motion == "fixed_policy":
             assert policy is not None
             _verify_feedback_trace(dataset, policy)
-            exported = json.loads((model / "manifest.json").read_text())
-            if dataset["metadata"].get("physics_signature") != exported.get(
-                "physics_signature"
-            ):
-                raise ValueError(
-                    "Feedback teacher trace/model physics signatures differ"
-                )
         elif source_motion == "fixed_policy":
             raise ValueError(
                 "Fixed-policy traces cannot be labeled passive or random_effort replay"
