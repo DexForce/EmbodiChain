@@ -42,6 +42,7 @@ from embodichain.lab.visualization import DexSimWebCfg, VisualizationCfg
 def main() -> None:
     port, backend, result_path = int(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
     num_envs = int(sys.argv[4]) if len(sys.argv) > 4 else 1
+    renderer = sys.argv[6] if len(sys.argv) > 6 else "hybrid"
     running = True
 
     def stop(*_: object) -> None:
@@ -57,7 +58,7 @@ def main() -> None:
             startup_summary="off",
             physics_cfg=physics_cfg_for_backend(backend),
             render_cfg=RenderCfg(
-                renderer="hybrid",
+                renderer=renderer,
                 denoising=DenoisingCfg(window="optix", offscreen="optix"),
             ),
             visualization=VisualizationCfg(

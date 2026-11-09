@@ -8,8 +8,11 @@ function canControl() {
 }
 function update(next) {
     if (state && (state.run_id!==next.run_id || state.revision!==next.revision)) {
-        dragging=null;targetPending=null;heldKeys.clear();
+        dragging=null;targetPending=null;cameraPending=null;cameraDrag=null;heldKeys.clear();
     }
+    const active=new Set([...(next.gizmos||[]),...(next.entity_gizmos||[])].map(g=>`${g.entity===true}:${g.id}`));
+    if(dragging&&!active.has(`${dragging.entity===true}:${dragging.id}`))dragging=null;
+    if(targetPending&&!active.has(`${targetPending.entity===true}:${targetPending.id}`))targetPending=null;
     state = next;
     $('pause').checked = next.paused;
     $('gizmo').checked = next.gizmo;
@@ -58,10 +61,15 @@ async function connect() {
             const description = await RTC_ReadSceneDescription();
             if (description.state === 'error') throw new Error(description.error);
             if (!description.room || !description.sources?.length) throw new Error('Waiting for scene cameras…');
+            if (!state) {
+                const response=await fetch('/api/state',{cache:'no-store'});
+                if (!response.ok) throw new Error('Viewport is not ready');
+                update(await response.json());
+            }
             const sources = description.sources;
             await window.RTC_Run({Room: description.room, Role: 'offerer', Video: true, View: true,
                 TestPattern: false, Timeout: 30, Input: true,
-                InputStreams: sources.map(source => source.input === true), Cameras: sources.length,
+                InputStreams: sources.map(source => state.native_input && source.input === true), Cameras: sources.length,
                 FramesPerSecond: description.fps, BitrateBps: description.bitrate,
                 StreamNames: sources.map(source => source.name),
                 StreamSizes: sources.map(source => [source.width, source.height])});
@@ -87,12 +95,19 @@ async function poll() {
                 for (const child of [...container.children]) if (!['waiting','targets'].includes(child.id)) child.remove();
             }
             container.append(stream.Card);
+            if (main && !state.native_input) {
+                stream.Element.tabIndex=0;
+                stream.Element.setAttribute('aria-label','Interactive camera viewport');
+            }
         }
         const ready = peer?.ViewReady && !peer.Stopped && !stopped;
         $('waiting').hidden = !!(ready && state?.frames);
         $('waiting').textContent = stopped ? 'Viewing stopped' : ready ? 'Waiting for a rendered frame…' : 'Connecting video…';
         for (const id of ['reset', 'render', 'pause']) $(id).disabled = !canControl() || busy;
         $('gizmo').disabled = !canControl() || busy || !state?.allow_commands;
+        $('RTC_ReleaseControl').hidden=!state?.native_input;
+        $('release-web').hidden=!!state?.native_input;
+        $('release-web').disabled=!canControl();
     } catch (error) { showError(error.message); }
     setTimeout(poll, 500);
 }
@@ -148,7 +163,7 @@ function updateControls() {
         const r=video.getBoundingClientRect(),parent=$('main-view').getBoundingClientRect();
         Object.assign(svg.style,{left:`${r.left-parent.left}px`,top:`${r.top-parent.top}px`,width:`${r.width}px`,height:`${r.height}px`});
         svg.setAttribute('viewBox',`0 0 ${video.videoWidth} ${video.videoHeight}`);
-        for(const gizmo of state.gizmos || []) {
+        for(const gizmo of [...(state.gizmos || []), ...(state.entity_gizmos || [])]) {
             const origin=gizmo.pose.slice(0,3).map(row=>row[3]),a=projection(origin);
             if(!a)continue;
             const label=svgNode('text',{x:a[0]+8,y:a[1]-12,fill:'white','font-size':14});
@@ -161,13 +176,25 @@ function updateControls() {
                 line.addEventListener('pointerdown',event=>{
                     event.preventDefault();event.stopPropagation();
                     const rect=svg.getBoundingClientRect();
-                    dragging={run_id:state.run_id,revision:state.revision,id:gizmo.id,pose:structuredClone(gizmo.pose),axis,dx:b[0]-a[0],dy:b[1]-a[1],x:event.clientX,y:event.clientY,sx:video.videoWidth/rect.width,sy:video.videoHeight/rect.height};
+                    dragging={run_id:state.run_id,revision:state.revision,entity:gizmo.entity===true,id:gizmo.id,pose:structuredClone(gizmo.pose),axis,dx:b[0]-a[0],dy:b[1]-a[1],x:event.clientX,y:event.clientY,sx:video.videoWidth/rect.width,sy:video.videoHeight/rect.height};
                     svg.setPointerCapture(event.pointerId);
                 });
                 svg.append(line);
             }
         }
     }
+    $('object-controls').hidden=state.native_input || !state.gizmo;
+    $('entity-env').max=state.num_envs-1;
+    if(document.activeElement!==$('entity-env'))$('entity-env').value=state.entity_environment;
+    const entities=JSON.stringify(state.entities||[]);
+    if($('entity').dataset.entities!==entities) {
+        $('entity').dataset.entities=entities;$('entity').replaceChildren();
+        for(const id of ['',...(state.entities||[])]) {
+            const option=document.createElement('option');option.value=id;option.textContent=id||'Choose an object';$('entity').append(option);
+        }
+    }
+    $('entity').value=state.selected_entity||'';
+    $('entity').disabled=$('entity-env').disabled=!canControl()||!state.allow_commands;
     const revision=`${state.run_id}:${state.revision}:${(state.joints||[]).map(j=>j.control_id).join(",")}`;
     if($('joints').dataset.revision!==revision) {
         $('joints').dataset.revision=revision;$('joints').replaceChildren();
@@ -199,7 +226,7 @@ $('targets').addEventListener('pointermove',event=>{
         const i=(axis+1)%3,j=(axis+2)%3;r[i][j]=-s;r[j][i]=s;
         for(let row=0;row<3;row++)for(let col=0;col<3;col++)pose[row][col]=r[row].reduce((sum,v,k)=>sum+v*d.pose[k][col],0);
     } else pose[d.axis][3]+=delta*.18;
-    targetPending={action:'target',run_id:d.run_id,revision:d.revision,id:d.id,pose};
+    targetPending={action:'target',run_id:d.run_id,revision:d.revision,entity:d.entity,id:d.id,pose};
 });
 function endTargetDrag(){dragging=null;}
 $('targets').addEventListener('pointerup',endTargetDrag);
@@ -209,3 +236,50 @@ $('targets').addEventListener('lostpointercapture',endTargetDrag);
 $('main-view').addEventListener('pointerdown', event=>{
     if(event.button===2 && state?.pan_enabled===false){event.preventDefault();event.stopImmediatePropagation();}
 },true);
+
+
+// Some SDK offscreen views render correctly but do not accept native input.
+// Adapt their camera gestures on the creator thread without changing renderer.
+let cameraPending=null,cameraDrag=null;
+function queueCamera(fields) {
+    if(!canControl())return;
+    const same=cameraPending?.kind===fields.kind;
+    cameraPending={action:'navigate',run_id:state.run_id,revision:state.revision,...fields,
+        dx:(same?cameraPending.dx||0:0)+(fields.dx||0),
+        dy:(same?cameraPending.dy||0:0)+(fields.dy||0),
+        delta:Math.max(-100,Math.min(100,(same?cameraPending.delta||0:0)+(fields.delta||0)))};
+}
+setInterval(()=>{if(!busy&&cameraPending){const fields=cameraPending;cameraPending=null;command(fields);}},100);
+$('entity').onchange=()=>{dragging=null;targetPending=null;command({action:'select_entity',id:$('entity').value});};
+$('entity-env').onchange=()=>{dragging=null;targetPending=null;command({action:'select_environment',env_id:Number($('entity-env').value)});};
+$('main-view').addEventListener('contextmenu',event=>{if(!state?.native_input)event.preventDefault();});
+$('main-view').addEventListener('pointerdown',event=>{
+    if(state?.native_input || event.target.tagName!=='VIDEO'||!canControl())return;
+    if(event.button!==0&&event.button!==1&&event.button!==2)return;
+    event.preventDefault();event.stopImmediatePropagation();event.target.focus();
+    cameraDrag={x:event.clientX,y:event.clientY,button:event.button};
+    event.target.setPointerCapture(event.pointerId);
+},true);
+$('main-view').addEventListener('pointermove',event=>{
+    if(!cameraDrag||state?.native_input)return;
+    const rect=event.target.getBoundingClientRect();
+    const dx=(event.clientX-cameraDrag.x)/rect.width,dy=(event.clientY-cameraDrag.y)/rect.height;
+    queueCamera({kind:cameraDrag.button===0?'orbit':'pan',dx,dy});
+    cameraDrag.x=event.clientX;cameraDrag.y=event.clientY;
+},true);
+for(const name of ['pointerup','pointercancel','lostpointercapture'])$('main-view').addEventListener(name,()=>{cameraDrag=null;},true);
+$('main-view').addEventListener('wheel',event=>{
+    if(state?.native_input||event.target.tagName!=='VIDEO'||!canControl())return;
+    event.preventDefault();event.stopImmediatePropagation();
+    const units=event.deltaMode===1?16:event.deltaMode===2?event.target.clientHeight:1;
+    queueCamera({kind:'zoom',delta:-event.deltaY*units/100});
+},{capture:true,passive:false});
+document.addEventListener('keydown',event=>{
+    if(state?.native_input||event.target.tagName!=='VIDEO'||!canControl())return;
+    const keys={KeyA:[.03,0],KeyD:[-.03,0],KeyW:[0,.03],KeyS:[0,-.03],ArrowLeft:[.03,0],ArrowRight:[-.03,0],ArrowUp:[0,.03],ArrowDown:[0,-.03]};
+    const motion=keys[event.code];if(motion){event.preventDefault();queueCamera({kind:'pan',dx:motion[0],dy:motion[1]});}
+},true);
+
+$('release-web').onclick=()=>{
+    releaseKeys();cameraPending=null;cameraDrag=null;targetPending=null;dragging=null;
+};

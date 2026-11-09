@@ -18,7 +18,10 @@ Query through `sim.get_world().get_entity_gizmo()`. DexSim owns window
 detach/reopen and controller state; reopening never reapplies the default or
 overwrites an explicit native disable. Pure headless and Viser runs do not
 automatically create a native entity controller. A writable Web viewport binds
-the same native entity controller to its observer camera with click picking.
+the same native entity controller to its Hybrid observer camera with click
+picking. The SDK's OptiX offscreen views do not accept native RTC input;
+FastRT/OfflineRT use browser camera gestures and registered facade-pose editing
+on the creator thread, including environment-local root selections.
 Newton's Scene-owned mailbox is consumed during paused viewer polling without
 advancing physics.
 

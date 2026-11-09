@@ -23,7 +23,9 @@ editing requires `allow_commands=True` (enabled by `--web`). The page provides
 entity picking/dragging, configured robot TCP controls, preview joint sliders,
 replay seeking, camera reset, single-frame rendering, image download and
 reconnection. Drag TCP axes in translation or rotation mode; I toggles the
-configured robot controls. Registered keyboard callbacks, including configured
+configured robot controls. Hybrid uses the SDK's native picking/input;
+FastRT and OfflineRT use the same main-thread camera and facade-pose APIs
+through browser gestures and an environment/object selector. Registered keyboard callbacks, including configured
 R recording and P camera-pose shortcuts, run on the simulation thread.
 Pausing viewer rendering does not pause physics; replay and terminal waits
 continue to handle browser requests without taking a physical step.

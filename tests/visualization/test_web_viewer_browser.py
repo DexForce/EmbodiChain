@@ -49,8 +49,18 @@ def _wait(read, accept=bool, timeout=30):
     raise AssertionError(f"Timed out: {value!r}")
 
 
-@pytest.mark.parametrize("backend,num_envs", [("default", 2), ("newton", 1)])
-def test_native_browser_view_and_sensor_isolation(tmp_path, backend, num_envs):
+@pytest.mark.parametrize(
+    "backend,num_envs,renderer",
+    [
+        ("default", 2, "hybrid"),
+        ("newton", 1, "hybrid"),
+        ("default", 1, "fast-rt"),
+        ("default", 1, "rt"),
+    ],
+)
+def test_native_browser_view_and_sensor_isolation(
+    tmp_path, backend, num_envs, renderer
+):
     import dexsim
 
     if not hasattr(dexsim, "WebApplication"):
@@ -74,6 +84,8 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend, num_envs):
                 backend,
                 str(result_path),
                 str(num_envs),
+                "view",
+                renderer,
             ],
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -104,7 +116,12 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend, num_envs):
                 page.goto(url)
                 _wait(
                     lambda: page.evaluate(
-                        "Boolean(window.RTC_ViewPeer?.ViewReady && typeof state !== 'undefined')"
+                        "Boolean(window.RTC_ViewPeer?.ViewReady && !window.RTC_ViewPeer.Stopped && typeof state !== 'undefined')"
+                    )
+                )
+                _wait(
+                    lambda: page.evaluate(
+                        "Boolean(document.querySelector('#main-view video')?.readyState >= 2)"
                     )
                 )
                 _wait(lambda: page.locator("#waiting").is_hidden())
@@ -153,33 +170,58 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend, num_envs):
 
                 cube_before = np.asarray(ready()["test_cube_pose"])[0]
                 offset = np.asarray(ready()["test_arena_offsets"][0])
-                x, y = projected(cube_before[:3, 3] + offset)
-                page.evaluate(
-                    """([x,y])=>{const p=RTC_ViewPeer;
-                    p.InputStream=p.Config.StreamNames.indexOf(state.camera_name);
-                    p.SendInput(2,1,x,y);p.SendInput(3,1,x,y)}""",
-                    [x, y],
-                )
-                _wait(ready, lambda value: value["test_gizmo_count"] == 1)
-                page.screenshot(path=str(tmp_path / "gizmo.png"))
-                x, y = projected(cube_before[:3, 3] + offset + [0.32, 0, 0])
-                ex, ey = projected(cube_before[:3, 3] + offset + [0.52, 0, 0])
-                page.evaluate("([x,y])=>RTC_ViewPeer.SendInput(2,1,x,y)", [x, y])
-                for i in range(1, 6):
-                    page.evaluate(
-                        "([x,y])=>RTC_ViewPeer.SendInput(1,0,x,y)",
-                        [x + (ex - x) * i / 5, y + (ey - y) * i / 5],
+                if not initial["native_input"]:
+                    page.locator("#entity").select_option("rigid:0:cube")
+                    _wait(
+                        ready, lambda value: value["selected_entity"] == "rigid:0:cube"
                     )
-                    time.sleep(0.05)
-                page.evaluate("([x,y])=>RTC_ViewPeer.SendInput(3,1,x,y)", [ex, ey])
-                _wait(
-                    ready,
-                    lambda value: not np.allclose(
-                        value["test_cube_pose"][0], cube_before
-                    ),
-                    timeout=5,
-                )
-                page.evaluate("RTC_ViewPeer.ReleaseInput()")
+                    _wait(lambda: page.locator("#targets line").count() > 0)
+                    points = page.evaluate("""() => {
+                        const svg=document.querySelector('#targets'),line=svg.querySelector('line'),m=svg.getScreenCTM();
+                        const a=new DOMPoint(Number(line.getAttribute('x1')),Number(line.getAttribute('y1'))).matrixTransform(m);
+                        const b=new DOMPoint(Number(line.getAttribute('x2')),Number(line.getAttribute('y2'))).matrixTransform(m);
+                        return [a.x+(b.x-a.x)*.8,a.y+(b.y-a.y)*.8,b.x-a.x,b.y-a.y];
+                    }""")
+                    x, y, dx, dy = points
+                    page.mouse.move(x, y)
+                    page.mouse.down()
+                    page.mouse.move(x + dx, y + dy, steps=5)
+                    page.mouse.up()
+                    _wait(
+                        ready,
+                        lambda value: not np.allclose(
+                            value["test_cube_pose"][0], cube_before
+                        ),
+                        timeout=5,
+                    )
+                else:
+                    x, y = projected(cube_before[:3, 3] + offset)
+                    page.evaluate(
+                        """([x,y])=>{const p=RTC_ViewPeer;
+                        p.InputStream=p.Config.StreamNames.indexOf(state.camera_name);
+                        p.SendInput(2,1,x,y);p.SendInput(3,1,x,y)}""",
+                        [x, y],
+                    )
+                    _wait(ready, lambda value: value["test_gizmo_count"] == 1)
+                    page.screenshot(path=str(tmp_path / "gizmo.png"))
+                    x, y = projected(cube_before[:3, 3] + offset + [0.32, 0, 0])
+                    ex, ey = projected(cube_before[:3, 3] + offset + [0.52, 0, 0])
+                    page.evaluate("([x,y])=>RTC_ViewPeer.SendInput(2,1,x,y)", [x, y])
+                    for i in range(1, 6):
+                        page.evaluate(
+                            "([x,y])=>RTC_ViewPeer.SendInput(1,0,x,y)",
+                            [x + (ex - x) * i / 5, y + (ey - y) * i / 5],
+                        )
+                        time.sleep(0.05)
+                    page.evaluate("([x,y])=>RTC_ViewPeer.SendInput(3,1,x,y)", [ex, ey])
+                    _wait(
+                        ready,
+                        lambda value: not np.allclose(
+                            value["test_cube_pose"][0], cube_before
+                        ),
+                        timeout=5,
+                    )
+                    page.evaluate("RTC_ViewPeer.ReleaseInput()")
                 page.get_by_label("Select and move scene objects").uncheck()
                 _wait(lambda: page.evaluate("state.gizmo"), lambda enabled: not enabled)
                 page.get_by_label("Pause viewer rendering (physics continues)").check()
@@ -203,7 +245,7 @@ def test_native_browser_view_and_sensor_isolation(tmp_path, backend, num_envs):
                 page.reload()
                 _wait(
                     lambda: page.evaluate(
-                        "Boolean(window.RTC_ViewPeer?.ViewReady && typeof state !== 'undefined')"
+                        "Boolean(window.RTC_ViewPeer?.ViewReady && !window.RTC_ViewPeer.Stopped && typeof state !== 'undefined')"
                     )
                 )
                 current = ready()

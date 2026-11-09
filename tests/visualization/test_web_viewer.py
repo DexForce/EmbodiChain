@@ -45,6 +45,7 @@ def viewer():
         get_gizmo_items=lambda: (),
         is_window_recording=lambda: False,
         asset_uids=["cube"],
+        num_envs=1,
         arena_offsets=np.zeros((1, 3)),
         enable_entity_gizmo=Mock(),
         disable_entity_gizmo=Mock(),
@@ -55,6 +56,9 @@ def viewer():
     value.camera = Mock()
     value.camera.get_world_pose.return_value = np.eye(4)
     value.camera.get_intrinsic.return_value = np.eye(3)
+    value.native_input = True
+    value.entity_environment = 0
+    value.selected_entity = None
     value.title = "EmbodiChain"
     value.home_view = (value.cfg.eye, value.cfg.target, (0, 0, 1))
     value.pan_enabled = True
@@ -229,3 +233,68 @@ def test_read_only_clients_cannot_inject_shared_keyboard_controls(viewer):
     assert command(viewer, "key", key=26, down=True)[0] == 403
     assert not viewer.key_state(26)
     assert not viewer.keys
+
+
+def test_camera_only_navigation_is_available_to_read_only_clients(viewer):
+    assert command(viewer, "navigate", kind="zoom", delta=1)[0] == 200
+    viewer.camera.look_at.assert_called_once()
+    assert not np.array_equal(viewer.camera.look_at.call_args.args[0], np.zeros(3))
+    viewer.sim.update_gizmos.assert_not_called()
+    assert command(viewer, "navigate", kind="zoom", delta=float("inf"))[0] == 400
+    assert command(viewer, "navigate", kind="pan", dx=0.1)[0] == 200
+    assert not np.array_equal(viewer.orbit, viewer.cfg.target)
+    assert command(viewer, "reset_view")[0] == 200
+    np.testing.assert_allclose(viewer.orbit, viewer.cfg.target, atol=1e-7)
+
+
+def test_offscreen_object_controls_write_only_the_selected_environment(viewer):
+    import torch
+
+    asset = SimpleNamespace(
+        cfg=SimpleNamespace(body_type="kinematic"),
+        device=torch.device("cpu"),
+        set_local_pose=Mock(),
+        get_local_pose=lambda **_: np.repeat(np.eye(4)[None], 2, axis=0),
+    )
+    viewer.native_input = False
+    viewer.entity_environment = 1
+    viewer.gizmo = Mock()
+    viewer.selected_entity = "rigid:1:cube"
+    viewer.sim.num_envs = 2
+    viewer.sim.arena_offsets = np.array([[0, 0, 0], [5, 0, 0]])
+    viewer.sim._rigid_objects = {"cube": asset}
+    viewer.sim.sim_config.visualization.allow_commands = True
+    pose = np.eye(4)
+    pose[:3, 3] = [5.2, 0.3, 0.4]
+    assert (
+        command(viewer, "target", id="rigid:1:cube", entity=True, pose=pose.tolist())[0]
+        == 200
+    )
+    actual = asset.set_local_pose.call_args.args[0]
+    assert asset.set_local_pose.call_args.kwargs == {"env_ids": [1]}
+    np.testing.assert_allclose(actual[0, :3, 3], [0.2, 0.3, 0.4], atol=1e-6)
+
+
+def test_disabled_object_editing_rejects_old_targets_without_aliasing_gizmo_ids(viewer):
+    import torch
+
+    asset = SimpleNamespace(
+        cfg=SimpleNamespace(body_type="kinematic"),
+        device=torch.device("cpu"),
+        set_local_pose=Mock(),
+    )
+    viewer.native_input = False
+    viewer.sim._rigid_objects = {"cube": asset}
+    viewer.sim.sim_config.visualization.allow_commands = True
+    pose = np.eye(4)
+    assert (
+        command(viewer, "target", id="rigid:0:cube", entity=True, pose=pose.tolist())[0]
+        == 409
+    )
+    asset.set_local_pose.assert_not_called()
+    gizmo = Mock()
+    gizmo.get_control_pose.return_value = np.eye(4)[None]
+    viewer.sim.get_gizmo_items = lambda: (("rigid:0:cube", gizmo),)
+    assert command(viewer, "target", id="rigid:0:cube", pose=pose.tolist())[0] == 200
+    gizmo.request_local_pose.assert_called_once()
+    asset.set_local_pose.assert_not_called()

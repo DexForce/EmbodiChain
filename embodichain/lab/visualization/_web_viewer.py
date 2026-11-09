@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 import threading
 import time
@@ -58,6 +59,9 @@ class _WebViewer:
         self.application = None
         self.gizmo = None
         self.error: str | None = None
+        self.native_input = sim.sim_config.render_cfg.renderer == "hybrid"
+        self.entity_environment = 0
+        self.selected_entity: str | None = None
         self.title = "EmbodiChain"
         self.orbit = np.asarray(self.cfg.target, dtype=np.float32)
         self.home_view = (self.cfg.eye, self.cfg.target, (0, 0, 1))
@@ -97,6 +101,10 @@ class _WebViewer:
                 dexsim.render.ViewFlags.COLOR,
                 self.group,
             )
+            # OptiX-backed cameras are constructed closed; Hybrid currently
+            # opens them implicitly. Explicitly open the observer for every
+            # native renderer before publishing video or accepting input.
+            self.camera.open_camera()
             self.camera.set_visual_overlay_enabled(True)
             self.camera.enable_control()
             self.camera.look_at(self.cfg.eye, self.cfg.target)
@@ -123,11 +131,85 @@ class _WebViewer:
         pose[:3, 3] += np.asarray(self.sim.arena_offsets[0].tolist())
         return pose.tolist()
 
+    def _entity_choices(self) -> dict[str, tuple[object, int]]:
+        """Use registered facade identity; no mesh/name heuristics or export."""
+        choices = {}
+        for registry, kind in (
+            ("_rigid_objects", "rigid"),
+            ("_visual_objects", "visual"),
+            ("_articulations", "articulation"),
+            ("_robots", "robot"),
+        ):
+            for uid, asset in getattr(self.sim, registry, {}).items():
+                if kind == "rigid" and asset.cfg.body_type == "static":
+                    continue
+                choices[f"{kind}:{self.entity_environment}:{uid}"] = (
+                    asset,
+                    self.entity_environment,
+                )
+        return choices
+
+    def _selected_pose(self) -> list[dict]:
+        target = self._entity_choices().get(self.selected_entity)
+        if target is None:
+            return []
+        asset, env_id = target
+        pose = np.asarray(
+            asset.get_local_pose(to_matrix=True)[env_id].tolist(), dtype=np.float32
+        )
+        pose[:3, 3] += np.asarray(self.sim.arena_offsets[env_id].tolist())
+        return [dict(id=self.selected_entity, entity=True, pose=pose.tolist())]
+
+    def _navigate(self, body: dict) -> None:
+        """Adapt camera-only gestures for SDK offscreen views without input."""
+        dx, dy, delta = (float(body.get(key, 0)) for key in ("dx", "dy", "delta"))
+        if not all(math.isfinite(v) and abs(v) <= 100 for v in (dx, dy, delta)):
+            raise ValueError("Invalid camera gesture.")
+        pose = self.get_pose_matrix()
+        eye = pose[:3, 3].astype(np.float64)
+        orbit = self.orbit.copy()
+        offset = eye - orbit
+        radius = max(float(np.linalg.norm(offset)), 0.02)
+        kind = body.get("kind")
+        if kind == "zoom":
+            eye = orbit + offset / radius * np.clip(
+                radius * math.exp(-delta * 0.15), 0.02, 10000
+            )
+        elif kind == "pan":
+            if not self.pan_enabled:
+                return
+            motion = (-dx * pose[:3, 0] + dy * pose[:3, 1]) * radius * 2
+            eye += motion
+            orbit = orbit + motion
+        elif kind == "orbit":
+            yaw = math.atan2(offset[1], offset[0]) - dx * math.pi
+            pitch = np.clip(
+                math.asin(np.clip(offset[2] / radius, -1, 1)) + dy * math.pi,
+                -1.55,
+                1.55,
+            )
+            eye = orbit + radius * np.array(
+                [
+                    math.cos(pitch) * math.cos(yaw),
+                    math.cos(pitch) * math.sin(yaw),
+                    math.sin(pitch),
+                ]
+            )
+        else:
+            raise ValueError("Unknown camera gesture.")
+        self.camera.look_at(eye, orbit, (0, 0, 1))
+        self.orbit = orbit
+
     def state(self) -> dict[str, object]:
         return {
             "run_id": self.run_id,
             "revision": self.sim._visualization_topology_revision,
             "camera_name": _CAMERA_NAME,
+            "native_input": self.native_input,
+            "num_envs": self.sim.num_envs,
+            "entity_environment": self.entity_environment,
+            "selected_entity": self.selected_entity,
+            "entities": [] if self.native_input else list(self._entity_choices()),
             "frames": self.frames,
             "paused": self.paused,
             "allow_commands": self.sim.sim_config.visualization.allow_commands,
@@ -147,6 +229,13 @@ class _WebViewer:
                     for key, gizmo in self.sim.get_gizmo_items()
                     if gizmo.is_visible()
                 ]
+            ),
+            "entity_gizmos": (
+                []
+                if self.native_input
+                or self.gizmo is None
+                or self.sim.spawn_result is None
+                else self._selected_pose()
             ),
             "joints": (
                 []
@@ -252,8 +341,24 @@ class _WebViewer:
                     {"error": "Scene changed; refresh before controlling it."}
                 )
             action = body.get("action")
-            if action == "reset_view":
-                self.camera.look_at(*self.home_view)
+            if action == "navigate":
+                self._navigate(body)
+            elif action in {"select_entity", "select_environment"}:
+                if not self.sim.sim_config.visualization.allow_commands:
+                    return 403, json.dumps({"error": "Scene editing is disabled."})
+                if action == "select_environment":
+                    env_id = body.get("env_id")
+                    if type(env_id) is not int or not 0 <= env_id < self.sim.num_envs:
+                        raise ValueError("Invalid environment.")
+                    self.entity_environment = env_id
+                    self.selected_entity = None
+                else:
+                    key = body.get("id")
+                    if key and key not in self._entity_choices():
+                        raise ValueError("Unknown scene object.")
+                    self.selected_entity = key or None
+            elif action == "reset_view":
+                self.set_look_at(*self.home_view)
             elif action == "render":
                 pass  # Deferred until after state synchronization, never inside HTTP handling.
             elif action == "pause":
@@ -292,8 +397,23 @@ class _WebViewer:
                     return 403, json.dumps({"error": "Scene editing is disabled."})
                 if action == "target":
                     gizmo = dict(self.sim.get_gizmo_items()).get(body.get("id"))
-                    if gizmo is None:
+                    entity = (
+                        self._entity_choices().get(body.get("id"))
+                        if body.get("entity") is True and not self.native_input
+                        else None
+                    )
+                    if gizmo is None and entity is None:
                         raise ValueError("Unknown Gizmo.")
+                    if entity is not None and (
+                        self.gizmo is None or self.selected_entity != body.get("id")
+                    ):
+                        return 409, json.dumps(
+                            {
+                                "error": "Object editing is not active for this selection."
+                            }
+                        )
+                    if entity is None and gizmo is not None and not gizmo.is_visible():
+                        return 409, json.dumps({"error": "Gizmo is inactive."})
                     pose = np.asarray(body.get("pose"), dtype=np.float32)
                     if (
                         pose.shape != (4, 4)
@@ -307,8 +427,19 @@ class _WebViewer:
                         or np.linalg.det(rotation) < 0
                     ):
                         raise ValueError("Expected an orthonormal rotation.")
-                    pose[:3, 3] -= np.asarray(self.sim.arena_offsets[0].tolist())
-                    if not gizmo.request_local_pose(pose, source_id="web"):
+                    env_id = 0 if entity is None else entity[1]
+                    pose[:3, 3] -= np.asarray(self.sim.arena_offsets[env_id].tolist())
+                    if entity is not None:
+                        import torch
+
+                        asset = entity[0]
+                        asset.set_local_pose(
+                            torch.as_tensor(
+                                pose, dtype=torch.float32, device=asset.device
+                            )[None],
+                            env_ids=[env_id],
+                        )
+                    elif not gizmo.request_local_pose(pose, source_id="web"):
                         return 409, json.dumps(
                             {"error": "Gizmo is controlled by another source."}
                         )
@@ -420,6 +551,7 @@ class _WebViewer:
             self.gizmo = None
         if self.camera is not None:
             self.camera.disable_control()
+            self.camera.close_camera()
             self.arena.remove_camera(_CAMERA_NAME)
             self.camera = None
         for _, gizmo in self.sim.get_gizmo_items():

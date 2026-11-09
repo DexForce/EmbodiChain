@@ -9,9 +9,10 @@
 <label><input id="pause" type="checkbox">Pause viewer rendering (physics continues)</label>
 <label><input id="gizmo" type="checkbox">Select and move scene objects</label>
 <small>Object and robot controls change simulation state. Drag the colored TCP axes; I toggles IK controls.</small>
+<div id="object-controls" hidden><label>Environment<input id="entity-env" type="number" min="0" step="1" value="0"></label><label>Object<select id="entity"></select></label></div>
 <button id="rotate">Mode: translate</button><div id="joints"></div>
 <label id="replay-controls" hidden>Replay frame<input id="seek" type="range" min="0" step="1"></label>
-<button id="RTC_ReleaseControl">Release control</button><button id="RTC_Stop">Stop viewing</button><button id="reconnect">Reconnect</button>
+<button id="RTC_ReleaseControl">Release control</button><button id="release-web" hidden>Release control</button><button id="RTC_Stop">Stop viewing</button><button id="reconnect">Reconnect</button>
 <details open><summary>Task cameras · read-only</summary><p>These show the latest task-rendered RGB frames.</p><div id="sensor-views"></div></details>
 <details><summary>Scene</summary><pre id="scene"></pre></details>
 <details id="RTC_StatsPanel"><summary>Stream statistics</summary><div id="RTC_Stats"></div></details>
