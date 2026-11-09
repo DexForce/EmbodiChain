@@ -44,6 +44,28 @@ def validate_display_coverage(
         raise ValueError(
             "HTML coverage companion identity does not match graph/TaskSpec."
         )
+    if envelope.get("schema_version") == "semantic_plan_validation/v1":
+        from .semantic_plan_validation import validate_semantic_plan
+        from embodichain.lab.task_program.language.semantic_contracts import (
+            semantic_planning_catalog,
+        )
+
+        if (
+            envelope.get("graph_digest") != canonical_hash(selected)
+            or envelope.get("task_spec_digest") != canonical_hash(spec.to_dict())
+            or envelope.get("catalog_digest")
+            != canonical_hash(semantic_planning_catalog())
+        ):
+            raise ValueError("Semantic plan companion identity mismatch")
+        source = envelope["source"]
+        from .task_spec import task_spec_from_candidate
+
+        if task_spec_from_candidate(source["candidate"]).to_dict() != spec.to_dict():
+            raise ValueError("Semantic plan TaskSpec differs from source")
+        coverage = validate_semantic_plan(selected, **source)
+        if coverage != envelope.get("coverage"):
+            raise ValueError("Semantic plan companion is stale")
+        return envelope
     legacy = envelope.get("schema_version") == GRAPH_VALIDATION_SCHEMA
     modern = envelope.get("schema_version") == "semantic_graph_coverage/v1"
     if not (legacy or modern):

@@ -876,14 +876,21 @@ class TaskProgramEnvironmentAdapter:
             expansion_trace_provider=expansion_trace_provider,
         )
 
+    @property
+    def configured_nominal_sources(self) -> tuple[object, ...]:
+        """Return immutable occurrence-bound source declarations for host qualification."""
+        return self._configured_nominal_sources
+
     def _set_configured_nominal_sources(self, sources: tuple[object, ...]) -> None:
         """Install the immutable config-owned source declarations once."""
         from .nominal import _ConfiguredPrototypeSource
+        from .demo_skill import _ConfiguredDemoSkillSource
 
         if self._configured_nominal_sources:
             raise ValueError("configured nominal sources are already installed")
         if not isinstance(sources, tuple) or not all(
-            isinstance(item, _ConfiguredPrototypeSource) for item in sources
+            isinstance(item, (_ConfiguredPrototypeSource, _ConfiguredDemoSkillSource))
+            for item in sources
         ):
             raise TypeError("configured nominal sources must be typed declarations")
         self._configured_nominal_sources = sources
@@ -891,7 +898,7 @@ class TaskProgramEnvironmentAdapter:
     def create_traced_configured_sources(
         self,
         program: CompiledTaskProgram,
-        collision_guard: TabletopCollisionGuardFactory,
+        collision_guard: TabletopCollisionGuardFactory | None = None,
     ) -> TracingTaskProgramNominalSources:
         """Bind configured prototypes to a paired host collision guard.
 
@@ -903,11 +910,15 @@ class TaskProgramEnvironmentAdapter:
             _ConfiguredTaskProgramNominalSources,
             TracingTaskProgramNominalSources,
         )
+        from .demo_skill import _ConfiguredDemoSkillSource
 
         if not self._configured_nominal_sources:
             raise ValueError("integration has no configured nominal sources")
-        if collision_guard is None:
-            raise TypeError("configured source tracing requires a collision guard")
+        if collision_guard is None and not any(
+            isinstance(item, _ConfiguredDemoSkillSource)
+            for item in self._configured_nominal_sources
+        ):
+            raise TypeError("configured prototype tracing requires a collision guard")
         delegate = _ConfiguredTaskProgramNominalSources(
             program,
             self._configured_nominal_sources,
@@ -978,8 +989,10 @@ class TaskProgramEnvironmentAdapter:
                     isinstance(nominal_source_factory, TracingTaskProgramNominalSources)
                     and isinstance(delegate, _ConfiguredTaskProgramNominalSources)
                     and delegate._declarations == self._configured_nominal_sources
-                    and delegate._host_collision_guard is not None
-                    and delegate._host_collision_guard is plan_transform_factory
+                    and (
+                        delegate._host_collision_guard is None
+                        or delegate._host_collision_guard is plan_transform_factory
+                    )
                 ):
                     raise ValueError(
                         "configured and explicit nominal source factories cannot be combined"
@@ -1053,7 +1066,11 @@ class TaskProgramEnvironmentAdapter:
             plan_transform_factory=(
                 expansion if expansion is not None else plan_transform_factory
             ),
-            expansion_trace_provider=expansion,
+            expansion_trace_provider=(
+                expansion
+                if expansion is not None
+                else getattr(plan_transform_factory, "expansion_trace_provider", None)
+            ),
             nominal_source_factory=nominal_source_factory,
             runtime_scope_guard=runtime_scope_guard,
         )

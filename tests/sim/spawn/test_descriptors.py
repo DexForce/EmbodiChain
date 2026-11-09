@@ -1636,7 +1636,7 @@ def test_non_mode_aware_newton_position_fallback_is_explicit() -> None:
         configure_articulation_desc(descriptor, cfg, newton_solver_type="xpbd")
 
 
-def test_dexuni_solver_preserves_position_mode_without_compatibility_warning() -> None:
+def test_dexuni_solver_consumes_position_mode_without_warning() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",

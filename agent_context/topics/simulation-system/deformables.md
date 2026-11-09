@@ -12,8 +12,8 @@ binding. Return to the [simulation overview](simulation-system.md).
 uses one registry and backend dispatch for both topologies.
 
 The supported path is Newton on CUDA, without gradient mode. Declarations
-accept a supported particle solver (`xpbd`,
-`semi_implicit`, `vbd`, `dexuni`); they reject unsupported backends/solvers and
+accept the default DexUni solver or an explicit supported particle solver
+(`xpbd`, `semi_implicit`, `vbd`); they reject unsupported backends/solvers and
 post-finalization additions. Default soft/cloth compatibility is absent.
 Future backend support belongs at dispatch, not inside a monolithic config.
 
@@ -50,6 +50,9 @@ parser. Volume-only `meshing` and common `surface_props` preserve topology
 ownership. Volume elasticity uses Young's modulus/Poisson's ratio, translated
 to Lamé coefficients at Spawn; density units differ (kg/m³ volume, kg/m²
 surface). Exact fields and defaults stay in the typed config source.
+Optional `attrs.contact_material` sets DexUni stiffness, damping and dynamic
+friction per soft or cloth object; it is separate from element elasticity and
+replaces removed flat solver-level soft-contact coefficients in examples.
 
 Surface cloth can author a constant signed rest dihedral angle through
 `attrs.edge_rest_angle`; omitting it preserves the mesh-inferred rest geometry.
@@ -57,11 +60,9 @@ The surface descriptor compiler validates and forwards it to native cloth
 physics. This is a rest-shape choice separate from bending stiffness and is not
 a volume-surface material field.
 
-`attrs.contact_material` optionally owns a DexUni particle object's contact
-stiffness, damping and dynamic friction; it is independent of elasticity and
-lowers to the native cloth/soft-body physics descriptor. Native validation and
-pair-material mixing remain DexSim-owned. Older wheels still support omitted
-materials and reject an explicit block if their descriptor API is unavailable.
+The contact material lowers to the native cloth/soft-body physics descriptor.
+Native validation and pair-material mixing remain DexSim-owned. An explicit
+block requires the native per-object material API.
 
 Surface `attrs.pneumatic` optionally lowers a mapping to native
 `PneumaticPhysicsDesc`. Closed-surface topology, pressure-law validation and

@@ -55,7 +55,8 @@ EXPECTED_COMMANDS = {
     "scene-engine",
     "scene-randomization",
     "search-scene-feasibility",
-    "simready",
+    "asset-engine",
+    "task-engine",
     "train-rl",
     "train-sl",
     "preview-scene",
@@ -521,10 +522,11 @@ def test_subcommand_help_uses_complete_command_parser(
 ) -> None:
     """Subcommand help should show real arguments instead of an empty shell."""
     with pytest.raises(SystemExit) as exc_info:
-        cli.main(["simready", "--help"])
+        cli.main(["asset-engine", "--help"])
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
+    assert "embodichain asset-engine" in output
     assert "--input_dir" in output
     assert "--output_root" in output
     assert "--category" in output

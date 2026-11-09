@@ -5154,7 +5154,7 @@ class SimulationManager:
             bool: True if export is successful, False otherwise.
         """
         try:
-            # The optional USD kit registers the export methods on DexSim Env.
+            # DexSim registers USD export methods when the optional kit is imported.
             import dexsim.kit.usd
 
             self._env.export_to_usd_file(fpath)
@@ -5276,7 +5276,7 @@ class SimulationManager:
                 for asset in getattr(self, registry_name, {}).values():
                     if isinstance(asset, VisualObject):
                         asset._release_spawn_references()
-                    # Parsed material wrappers must die before their native renderer.
+                    # Release parsed material wrappers before the native renderer.
                     for material_attr in (
                         "_visual_material",
                         "_original_visual_material",

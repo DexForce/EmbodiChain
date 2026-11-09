@@ -268,6 +268,15 @@ jobs:
           restore-keys: |
             docs-full-site-${{ github.repository }}-
 
+      - name: Install wget for published docs merge
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if ! command -v wget >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends wget
+          fi
+
       # Tag-scoped caches are invisible on main; merge live Pages so releases survive.
       - name: Merge versions from live GitHub Pages
         if: github.event_name == 'push'
@@ -349,6 +358,9 @@ jobs:
       NVIDIA_DISABLE_REQUIRE: 1
       HF_ENDPOINT: https://hf-mirror.com
       PIP_CACHE_DIR: /cache/pip
+      PYTHONFAULTHANDLER: "1"
+      SDL_VIDEODRIVER: dummy
+      XDG_RUNTIME_DIR: /tmp/embodichain-ci-runtime
       NEEDS_GENSIM: ${{ needs.test_plan.outputs.needs_gensim }}
       NEEDS_CUROBO: ${{ needs.test_plan.outputs.needs_curobo }}
     container: *container_template
@@ -405,6 +417,7 @@ jobs:
         run: |
           source activate py311
           set -euo pipefail
+          install -d -m 0700 "$XDG_RUNTIME_DIR"
           # Login shells may use a different Git config from actions/checkout.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git -C "$GITHUB_WORKSPACE" rev-parse \
@@ -418,6 +431,7 @@ jobs:
           python scripts/ci/run_test_plan.py \
             --plan test-plan.json \
             --repo-root "${GITHUB_WORKSPACE}" \
+            --no-finalize-resource-lanes \
             --lane fast \
             --lane distributed \
             --lane gpu \

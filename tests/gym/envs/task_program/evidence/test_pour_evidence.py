@@ -28,13 +28,11 @@ import pytest
 from embodichain.gen_sim.task_spec import TaskSpec, canonical_hash, EvaluationStatus
 from embodichain.gen_sim.task_spec.pour_evidence import (
     PourEvidenceBinding,
-    evaluate_pour_evidence,
 )
 
 _SOURCE = json.loads(
     (
-        Path(__file__).resolve().parents[2]
-        / "gym/envs/task_program/data/pour_observation_source_reference.json"
+        Path(__file__).parents[1] / "data/pour_observation_source_reference.json"
     ).read_text()
 )
 
@@ -158,6 +156,45 @@ def test_pour_motion_retains_frozen_source_outcomes_for_current_goals_and_milest
     assert "fluid transfer is not established" in outcome.reason
 
 
+@pytest.mark.parametrize("raw", [False, True])
+@pytest.mark.parametrize("past", [False, True])
+def test_explicit_single_count_preserves_pour_proof_without_rewriting_selectors(
+    raw, past
+):
+    spec, binding, evidence, program = _case(raw=raw, past=past)
+    original_spec, original_binding = spec.to_dict(), binding.to_dict()
+    counted = replace(
+        spec,
+        roles=tuple(replace(role, quantifier="count", count=1) for role in spec.roles),
+    )
+    declared = replace(
+        binding, task_spec_digest=canonical_hash(counted.to_dict()), binding_hash=""
+    )
+    expected = evaluate_pour_evidence(spec, binding, evidence, program=program)[0]
+    outcome = evaluate_pour_evidence(counted, declared, evidence, program=program)[0]
+    assert outcome.status is expected.status is EvaluationStatus.SATISFIED
+    assert outcome.observed is expected.observed is True
+    assert all(role.quantifier == "count" and role.count == 1 for role in counted.roles)
+    assert counted.semantic_hash != spec.semantic_hash
+    assert spec.to_dict() == original_spec and binding.to_dict() == original_binding
+
+
+@pytest.mark.parametrize("role_index", [0, 1])
+@pytest.mark.parametrize("quantifier,count", [("count", 2), ("all", 0)])
+def test_pour_single_member_proof_cannot_certify_a_larger_selector(
+    role_index, quantifier, count
+):
+    spec, binding, evidence, program = _case(raw=True)
+    roles = list(spec.roles)
+    roles[role_index] = replace(roles[role_index], quantifier=quantifier, count=count)
+    selected = replace(spec, roles=tuple(roles))
+    declared = replace(
+        binding, task_spec_digest=canonical_hash(selected.to_dict()), binding_hash=""
+    )
+    outcome = evaluate_pour_evidence(selected, declared, evidence, program=program)[0]
+    assert outcome.status is EvaluationStatus.UNAVAILABLE and outcome.observed is None
+
+
 @pytest.mark.parametrize(
     "damage",
     [
@@ -234,7 +271,7 @@ def test_pour_motion_proof_does_not_certify_a_fluid_predicate_or_resign_drift():
 
 
 def test_pour_binding_cold_import_and_decode_do_not_load_numeric_or_simulation_owners():
-    root = Path(__file__).resolve().parents[3]
+    root = Path(__file__).resolve().parents[5]
     data = _case()[1].to_dict()
     script = f"import sys;sys.path.insert(0,{str(root)!r});from embodichain.gen_sim.task_spec.pour_evidence import PourEvidenceBinding;PourEvidenceBinding.from_dict({data!r});assert not any(name=='torch' or name=='numpy' or name.startswith('embodichain.lab') for name in sys.modules)"
     result = subprocess.run(
@@ -245,9 +282,7 @@ def test_pour_binding_cold_import_and_decode_do_not_load_numeric_or_simulation_o
 
 @pytest.mark.parametrize("raw", [False, True])
 def test_pour_report_requires_independent_goal_and_milestone_proofs(raw):
-    from embodichain.gen_sim.task_spec.evidence_report import (
-        evaluate_physical_evidence_report,
-    )
+    from ._evaluation import evaluate_physical_evidence_report
 
     spec, goal, current, program = _case(raw=raw)
     _, milestone, past, _ = _case(raw=raw, past=True)
@@ -313,3 +348,6 @@ def test_raw_pour_retains_valid_rows_when_another_geometry_channel_is_unavailabl
         EvaluationStatus.SATISFIED,
         EvaluationStatus.UNAVAILABLE,
     ]
+
+
+from ._evaluation import evaluate_pour_evidence
