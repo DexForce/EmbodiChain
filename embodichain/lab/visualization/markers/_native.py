@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import import_module
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -136,8 +136,8 @@ class NativeMarkerRenderer:
         # The marker's display color uses sRGB regardless of the source space.
         parameters.pop("name", None)
         parameters.pop("base_color", None)
-        textured_overlay = self._textured_overlay(marker)
-        if parameters.get("color_space") == "linear" or textured_overlay:
+        textured = marker.texture is not None
+        if parameters.get("color_space") == "linear" or textured:
             color = np.asarray(marker.color)
             color = color.copy()
             color[:3] = np.where(
@@ -165,19 +165,15 @@ class NativeMarkerRenderer:
                     color_space="sRGB",
                     wrap_s=marker.texture_wrap[0],
                     wrap_t=marker.texture_wrap[1],
-                    scale=(*color[:3], 1.0) if textured_overlay else (1.0,) * 4,
                 ),
                 "opacity_map": self._spawn.MaterialTextureDesc(
                     channel="a",
                     color_space="raw",
                     wrap_s=marker.texture_wrap[0],
                     wrap_t=marker.texture_wrap[1],
-                    scale=(1.0, 1.0, 1.0, color[3]) if textured_overlay else (1.0,) * 4,
+                    scale=(1.0, 1.0, 1.0, color[3]),
                 ),
             }
-        if textured_overlay:
-            # The native overlay shader reads the packed texture directly.
-            color = (1.0, 1.0, 1.0, 1.0)
         parameters.update(texture_options)
         if "texture_settings" in parameters:
             parameters["texture_settings"] = {
@@ -188,6 +184,20 @@ class NativeMarkerRenderer:
                 )
                 for key, value in parameters["texture_settings"].items()
             }
+        if textured:
+            # Hybrid replaces the material factor with the sampled base color.
+            # Apply tint during texture lowering and keep the factor neutral.
+            settings = parameters.setdefault("texture_settings", {})
+            base = settings.get(
+                "base_color_map", self._spawn.MaterialTextureDesc(color_space="sRGB")
+            )
+            tint = np.array([*color[:3], 1.0])
+            settings["base_color_map"] = replace(
+                base,
+                scale=tuple(np.asarray(base.scale) * tint),
+                bias=tuple(np.asarray(base.bias) * tint),
+            )
+            color = (1.0, 1.0, 1.0, 1.0)
         parameters.update(unlit=marker.unlit or (use_scene and not scene_lighting))
         if not scene_lighting:
             parameters.update(alpha_mode="blend", depth_write=False, double_sided=True)
@@ -238,21 +248,12 @@ class NativeMarkerRenderer:
         return marker.scene_lighting and not marker.unlit and marker.color[3] == 1.0
 
     @staticmethod
-    def _textured_overlay(marker: MeshMarkerOverlay) -> bool:
-        return marker.texture is not None and not NativeMarkerRenderer._scene_lit(
-            marker
-        )
-
-    @staticmethod
     def _same_geometry(left: MeshMarkerOverlay, right: MeshMarkerOverlay) -> bool:
         return (
             left.unlit == right.unlit
             and NativeMarkerRenderer._scene_lit(left)
             == NativeMarkerRenderer._scene_lit(right)
-            and (
-                not NativeMarkerRenderer._textured_overlay(left)
-                or left.color == right.color
-            )
+            and (left.texture is None or left.color == right.color)
             and left.material == right.material
             and all(
                 getattr(left, key) is getattr(right, key)
@@ -280,7 +281,7 @@ class NativeMarkerRenderer:
         if transform:
             handle.set_world_pose(_pose(marker))
             handle.set_scale(*(float(value) for value in marker.scale))
-        if not NativeMarkerRenderer._textured_overlay(marker) and (
+        if marker.texture is None and (
             previous is None or previous.color != marker.color
         ):
             handle.get_material().set_base_color(marker.color)

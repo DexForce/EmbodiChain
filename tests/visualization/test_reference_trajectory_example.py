@@ -18,7 +18,9 @@
 from __future__ import annotations
 
 import numpy as np
-from examples.sim.reference_trajectory import _camera_path
+import pytest
+from scipy.spatial.transform import Rotation
+from examples.sim.reference_trajectory import _camera_path, _root_link_index
 
 
 def test_follow_camera_ignores_vertical_motion_and_articulation_extent():
@@ -43,3 +45,27 @@ def test_fixed_camera_retains_one_view_over_translating_clip():
     eye, target = _camera_path(poses, np.zeros((1, 3)), "fixed")
     np.testing.assert_allclose(eye, np.tile(eye[0], (3, 1)))
     np.testing.assert_allclose(target, np.tile(target[0], (3, 1)))
+
+
+@pytest.mark.parametrize("mode", ["follow_xy", "fixed"])
+def test_camera_uses_named_root_when_recording_and_asset_link_orders_differ(
+    tmp_path, mode
+):
+    asset = tmp_path / "robot.urdf"
+    asset.write_text(
+        '<robot name="robot"><link name="tip"/><link name="root"/>'
+        '<joint name="joint" type="fixed"><parent link="root"/><child link="tip"/></joint></robot>'
+    )
+    names = ("tip", "root")
+    poses = np.zeros((3, 1, 2, 7))
+    poses[..., 6] = 1
+    poses[:, 0, 1, 0] = [0, 1, 2]
+    poses[:, 0, 0, 0] = [10, 20, 40]
+    poses[:, 0, 1, 3:] = Rotation.from_euler("z", 90, degrees=True).as_quat()
+    root_index = _root_link_index(str(asset), names)
+    assert root_index == 1
+    expected = _camera_path(poses[:, :, [1, 0]], np.zeros((1, 3)), mode)
+    actual = _camera_path(poses, np.zeros((1, 3)), mode, root_index)
+    np.testing.assert_allclose(actual, expected)
+    with pytest.raises(ValueError, match="must include the robot root"):
+        _root_link_index(str(asset), ("tip",))

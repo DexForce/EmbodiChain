@@ -27,6 +27,7 @@ import json
 from pathlib import Path
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 
 import numpy as np
 from PIL import Image
@@ -56,15 +57,49 @@ __all__ = ["main"]
 COLORS = [(0.15, 0.8, 0.4), (0.2, 0.55, 1.0), (1.0, 0.55, 0.15)]
 
 
+def _root_link_index(asset_path: str, names: tuple[str, ...]) -> int:
+    """Resolve the asset root in the recording's independently ordered links."""
+    path = Path(asset_path).expanduser().resolve()
+    if path.suffix.lower() == ".urdf":
+        robot = ET.parse(path).getroot()
+        children = {
+            joint.find("child").attrib["link"] for joint in robot.findall("joint")
+        }
+        roots = [
+            link.attrib["name"]
+            for link in robot.findall("link")
+            if link.attrib["name"] not in children
+        ]
+        if len(roots) != 1:
+            raise ValueError("Robot asset must contain exactly one root link.")
+        root_name = roots[0]
+    else:
+        from embodichain.lab.sim.spawn._usd_assets import _parse_singleton
+
+        _, obj = _parse_singleton(
+            path,
+            ("articulations", "mesh_objects"),
+            "robot marker articulation or visual object",
+        )
+        root_name = obj.root_link_name if hasattr(obj, "links") else obj.name
+    if len(set(names)) != len(names):
+        raise ValueError("Recorded link_names must be unique.")
+    if root_name not in names:
+        raise ValueError(
+            f"Recorded link_names must include the robot root {root_name!r}."
+        )
+    return names.index(root_name)
+
+
 def _camera_path(
-    poses: np.ndarray, offsets: np.ndarray, mode: str
+    poses: np.ndarray, offsets: np.ndarray, mode: str, root_index: int = 0
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fit the whole clip once, then track XY at fixed height and distance."""
     anchors = np.zeros((len(poses), 3), dtype=np.float64)
     if mode == "follow_xy":
-        anchors[:, :2] = poses[:, 0, 0, :2]
+        anchors[:, :2] = poses[:, 0, root_index, :2]
     else:
-        anchors[:, :2] = poses[0, 0, 0, :2]
+        anchors[:, :2] = poses[0, 0, root_index, :2]
     relative = poses[..., :3] + offsets[None, :, None] - anchors[:, None, None]
     lower = relative.min(axis=(0, 1, 2))
     upper = relative.max(axis=(0, 1, 2))
@@ -77,7 +112,7 @@ def _camera_path(
     targets = anchors + center
     targets[:, 2] = cfg.target_height
     # Apply the preset heading once, as in the policy viewer's reset.
-    yaw = Rotation.from_quat(poses[0, 0, 0, 3:]).as_euler("xyz")[2]
+    yaw = Rotation.from_quat(poses[0, 0, root_index, 3:]).as_euler("xyz")[2]
     offset = Rotation.from_euler("z", yaw).apply(cfg.eye_offset)
     return targets + offset, targets
 
@@ -121,7 +156,13 @@ def main() -> None:
     offsets = np.zeros((count, 3))
     if args.layout == "offset":
         offsets[:, 1] = (np.arange(count) - (count - 1) / 2) * args.spacing
-    camera_eyes, camera_targets = _camera_path(poses, offsets, args.camera_mode)
+    try:
+        root_index = _root_link_index(args.asset, names)
+    except ValueError as exc:
+        parser.error(str(exc))
+    camera_eyes, camera_targets = _camera_path(
+        poses, offsets, args.camera_mode, root_index
+    )
     args.output.mkdir(parents=True, exist_ok=True)
     torch.set_num_threads(8)
     sim = SimulationManager(
@@ -298,7 +339,7 @@ def main() -> None:
                 if field in data
             ]
             if vector_fields:
-                root = poses[index, 0, 0]
+                root = poses[index, 0, root_index]
                 vectors = np.stack(
                     [data[field][index] for _, field in vector_fields]
                 ).copy()

@@ -147,6 +147,31 @@ def test_reference_joint_fk_uses_named_link_order(robot_path):
     )
 
 
+def test_single_link_joint_space_preserves_roots_and_visual_origins(tmp_path):
+    path = tmp_path / "static.urdf"
+    path.write_text(
+        '<robot name="static"><link name="base"><visual><origin xyz="1 0 0"/>'
+        '<geometry><box size="1 1 1"/></geometry></visual></link></robot>'
+    )
+    ghost, group = _ghost(path)
+    assert ghost.joint_names == ()
+    ghost.visualize_qpos(np.empty((2, 0)))
+    np.testing.assert_allclose(
+        [s.position for s in group.snapshot()], [[1, 0, 0], [11, 0, 0]]
+    )
+    roots = np.tile(np.eye(4), (1, 2, 1, 1))
+    roots[0, 0, :3, :3] = Rotation.from_euler("z", 90, degrees=True).as_matrix()
+    roots[0, :, 1, 3] = [2, 4]
+    ghost.visualize_qpos(np.empty((1, 2, 0)), root_poses=roots, env_ids=[1])
+    np.testing.assert_allclose(
+        [s.position for s in group.snapshot()],
+        [[1, 0, 0], [10, 3, 0], [11, 4, 0]],
+        atol=1e-6,
+    )
+    ghost.visualize_qpos(np.empty((1, 0, 0)), env_ids=[1])
+    assert group.counts == (1, 0)
+
+
 @pytest.mark.parametrize(
     "appearance",
     [
@@ -369,8 +394,9 @@ def test_usd_visual_origin_material_and_packaged_texture(
         assert not texture_path.exists()
 
 
+@pytest.mark.parametrize("multiplier", [False, True])
 def test_usd_texture_sampling_preserves_uv_transform_and_opacity(
-    tmp_path, usd_material_runtime
+    tmp_path, usd_material_runtime, multiplier
 ):
     from PIL import Image
     from dexsim.spawn import MaterialDesc, MaterialTextureDesc
@@ -401,6 +427,17 @@ def test_usd_texture_sampling_preserves_uv_transform_and_opacity(
         opacity_map=str(path),
         texture_settings={"base_color_map": base, "opacity_map": alpha},
     )
+    if multiplier:
+        from dataclasses import replace
+
+        material.base_color_multiplier_map = str(path)
+        material.emissive_map = str(path)
+        material.emissive_multiplier_map = str(path)
+        material.texture_settings.update(
+            base_color_multiplier_map=replace(base, scale=(0.5, 0.5, 0.5, 1)),
+            emissive_map=base,
+            emissive_multiplier_map=base,
+        )
     prototype = MarkerPrototypeCfg(
         shape="mesh", uv_coords=np.array([[1.0, 0.0], [0.0, 1.0]])
     )
@@ -408,11 +445,61 @@ def test_usd_texture_sampling_preserves_uv_transform_and_opacity(
     np.testing.assert_allclose(
         prototype.uv_coords, [[0.1, 2.2], [-2.9, 0.2]], atol=1e-6
     )
-    np.testing.assert_array_equal(prototype.texture[0, 0], [188, 188, 188, 64])
+    expected_rgb = 99 if multiplier else 188
+    np.testing.assert_array_equal(prototype.texture[0, 0], [expected_rgb] * 3 + [64])
     assert prototype.texture_wrap == ("mirror", "clamp")
     alpha.uv_scale = (1, 1)
     with pytest.raises(ValueError, match="matching UV"):
         _usd_texture(prototype, material)
+
+
+def test_omnipbr_usd_bakes_ambient_occlusion_into_marker_color(
+    tmp_path, usd_material_runtime
+):
+    from PIL import Image
+    from pxr import Sdf, Usd, UsdGeom, UsdShade
+
+    Image.fromarray(np.full((2, 2, 3), 255, np.uint8)).save(tmp_path / "base.png")
+    Image.fromarray(np.full((2, 2, 3), 128, np.uint8)).save(tmp_path / "ao.png")
+    path = tmp_path / "omnipbr.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageMetersPerUnit(stage, 1)
+    root = UsdGeom.Xform.Define(stage, "/Visual")
+    root.GetPrim().CreateAttribute("MeshObject", Sdf.ValueTypeNames.Token)
+    stage.SetDefaultPrim(root.GetPrim())
+    mesh = UsdGeom.Mesh.Define(stage, "/Visual/mesh")
+    mesh.CreatePointsAttr([(-1, -1, 0), (1, -1, 0), (0, 1, 0)])
+    mesh.CreateFaceVertexCountsAttr([3])
+    mesh.CreateFaceVertexIndicesAttr([0, 1, 2])
+    UsdGeom.PrimvarsAPI(mesh).CreatePrimvar(
+        "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex
+    ).Set([(0, 0), (1, 0), (0.5, 1)])
+    material = UsdShade.Material.Define(stage, "/Material")
+    shader = UsdShade.Shader.Define(stage, "/Material/Shader")
+    shader.CreateIdAttr("OmniPBR")
+    shader.CreateInput("diffuse_texture", Sdf.ValueTypeNames.Asset).Set(
+        Sdf.AssetPath("base.png")
+    )
+    shader.CreateInput("ao_texture", Sdf.ValueTypeNames.Asset).Set(
+        Sdf.AssetPath("ao.png")
+    )
+    shader.CreateInput("ao_to_diffuse", Sdf.ValueTypeNames.Float).Set(1)
+    shader.CreateInput("texture_scale", Sdf.ValueTypeNames.Float2).Set((2, 3))
+    material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+    UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
+    stage.GetRootLayer().Save()
+    ghost, group = _ghost(path)
+    ghost.visualize_link_poses(np.tile(np.eye(4), (2, 1, 1, 1)))
+    snapshot = group.snapshot()[0]
+    np.testing.assert_array_equal(snapshot.texture[0, 0], [188, 188, 188, 255])
+    np.testing.assert_allclose(snapshot.uv_coords, [[0, 0], [2, 0], [1, 3]])
+    parameters = json.loads(snapshot.material)
+    assert parameters["base_color_multiplier_map"].endswith("ao.png")
+    assert parameters["texture_settings"]["base_color_multiplier_map"]["uv_scale"] == [
+        2,
+        3,
+    ]
+    ghost.remove()
 
 
 def test_shared_usd_source_selects_one_visual_and_rejects_ambiguous_address(tmp_path):

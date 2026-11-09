@@ -1778,6 +1778,12 @@ class ViserBackend(VisualizationBackend):
             self._env_visibility
         ):
             self._register_visibility_controls(self._manifest)
+            for batch in self._mesh_batches.values():
+                self._apply_mesh_visibility(batch)
+            for dynamic_mesh in self._dynamic_meshes.values():
+                self._apply_dynamic_mesh_visibility(dynamic_mesh)
+            self._apply_camera_visibility()
+            self._apply_gizmo_visibility()
 
         active_overlays: set[tuple[str, str]] = set()
         for overlay in frame.overlays.frames:

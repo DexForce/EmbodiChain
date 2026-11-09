@@ -23,6 +23,7 @@ from dataclasses import MISSING
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Literal
+import xml.etree.ElementTree as ET
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -219,7 +220,16 @@ class RobotMarkers:
         if self._chain is None:
             import pytorch_kinematics as pk
 
-            self._chain = pk.build_chain_from_urdf(self._urdf_path.read_bytes())
+            data = self._urdf_path.read_bytes()
+            root = ET.fromstring(data)
+            if not root.findall("joint"):
+                links = root.findall("link")
+                if len(links) != 1:
+                    raise ValueError("A zero-joint URDF must contain exactly one link.")
+                name = links[0].attrib["name"]
+                self._chain = pk.Chain(pk.Frame(name, link=pk.Link(name)))
+            else:
+                self._chain = pk.build_chain_from_urdf(data)
         return self._chain
 
     def visualize_link_poses(

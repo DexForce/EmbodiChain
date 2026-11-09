@@ -1584,3 +1584,53 @@ def test_marker_only_many_environments_use_selection_and_world_markers_stay_visi
     assert not backend._env_visibility
     assert server.scene.dynamic_mesh_handles[-1].visible
     backend.stop()
+
+
+def test_marker_removal_reselects_and_shows_existing_scene_mesh():
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    geometry = MeshGeometry(
+        "static-geometry",
+        np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32),
+        np.array([[0, 1, 2]], dtype=np.uint32),
+    )
+    node = SceneNode(
+        "static", "/envs/0/static", "env:0", 0, "rigid_object", geometry.geometry_id
+    )
+    markers = tuple(
+        replace(_mesh_marker(env_id=i), overlay_id=f"marker-{i}")
+        for i in range(1, backend._INDIVIDUAL_ENV_CONTROL_LIMIT + 2)
+    )
+    frame = replace(
+        _empty_frame_with_mesh(None, 1),
+        node_ids=(node.node_id,),
+        positions=np.zeros((1, 3), dtype=np.float32),
+        wxyz=np.array([[1, 0, 0, 0]], dtype=np.float32),
+        visible=np.ones(1, dtype=bool),
+        overlays=SceneOverlays(meshes=markers),
+    )
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (node,), (geometry,)))
+    assert backend.publish_frame(frame)
+    handle = server.scene.mesh_handles[0]
+    server.gui.checkboxes["Show all environments"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=False))
+    )
+    server.gui.dropdowns["Selected environment"].callback(
+        SimpleNamespace(target=SimpleNamespace(value="3"))
+    )
+    backend.poll()
+    np.testing.assert_array_equal(handle.batched_opacities, [0])
+    for sequence in (2, 3):
+        assert backend.publish_frame(
+            replace(
+                frame,
+                sequence=sequence,
+                overlays=SceneOverlays(
+                    meshes=tuple(m for m in markers if m.env_id != 3)
+                ),
+            )
+        )
+        assert server.gui.dropdowns["Selected environment"].value == "0"
+        np.testing.assert_array_equal(handle.batched_opacities, [1])
+    backend.stop()

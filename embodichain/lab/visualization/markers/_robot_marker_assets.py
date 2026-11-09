@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 from uuid import uuid4
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -194,18 +194,23 @@ def _usd_texture(prototype: MarkerPrototypeCfg, material: object) -> None:
     from dexsim.spawn import MaterialTextureDesc
     from dexsim.spawn.adapters.material_texture import prepare_material_textures
 
-    # Ghosts use base color and opacity. Other material lobes are not rendered.
+    # The browser/overlay texture contains base color, its multiplier and opacity.
     settings = {
         name: material.texture_settings.get(
             name, MaterialTextureDesc(channel="a" if name == "opacity_map" else "rgb")
         )
-        for name in ("base_color_map", "opacity_map")
+        for name in ("base_color_map", "base_color_multiplier_map", "opacity_map")
         if getattr(material, name) is not None
     }
     if not settings:
         return
+    unused_maps = {
+        field.name: None
+        for field in fields(material)
+        if field.name.endswith("_map") and field.name not in settings
+    }
     data, sampling = prepare_material_textures(
-        replace(material, texture_settings=settings)
+        replace(material, texture_settings=settings, **unused_maps)
     )["base_color_map"]
     if prototype.uv_coords is None:
         raise ValueError(

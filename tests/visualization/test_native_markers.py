@@ -477,3 +477,55 @@ def test_scene_lighting_keeps_texture_with_native_uv_coordinates(source_map):
                 np.testing.assert_array_equal(np.asarray(image), pixels)
     finally:
         renderer.close()
+
+
+@pytest.mark.parametrize("source_map", [False, True])
+def test_opaque_texture_tint_is_baked_and_updates_without_double_color(
+    tmp_path, source_map
+):
+    from PIL import Image
+    from dexsim.spawn.adapters.material_texture import prepare_material_textures
+
+    pixels = np.full((2, 2, 4), 255, dtype=np.uint8)
+    path = tmp_path / "base.png"
+    Image.fromarray(pixels).save(path)
+    material = (
+        {
+            "base_color_map": str(path),
+            "texture_settings": {
+                "base_color_map": {
+                    "color_space": "sRGB",
+                    "scale": (0.5, 1, 1, 1),
+                    "bias": (0.25, 0, 0, 0),
+                }
+            },
+        }
+        if source_map
+        else None
+    )
+    snapshot = replace(
+        marker(),
+        unlit=False,
+        scene_lighting=True,
+        texture=pixels,
+        color=(0, 1, 0, 1),
+        uv_coords=np.zeros((3, 2)),
+        material=material,
+    )
+    scene = Scene()
+    renderer = NativeMarkerRenderer(scene)
+    try:
+        for color, expected in [
+            ((0, 1, 0, 1), (0, 1, 0, 1)),
+            ((1, 0, 0, 1), (0.75 if source_map else 1, 0, 0, 1)),
+        ]:
+            renderer.publish("g", (replace(snapshot, color=color),))
+            handle = next(iter(scene.handles.values()))
+            lowered, _ = prepare_material_textures(handle.desc.renders[0].material)[
+                "base_color_map"
+            ]
+            np.testing.assert_allclose(lowered[0, 0], expected)
+            np.testing.assert_array_equal(handle.get_material().color, [1, 1, 1, 1])
+            assert len(scene.handles) == 1
+    finally:
+        renderer.close()
