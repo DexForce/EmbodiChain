@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from copy import copy
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +35,7 @@ from dexsim.spawn import (
     RenderDesc,
 )
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from embodichain.lab.sim.sim_manager import SimulationManager
 from embodichain_tasks.locomotion.velocity.isaac.curriculum import (
     ReferenceTerrainCurriculum,
@@ -519,7 +521,7 @@ def test_rough_curriculum_matches_executed_isaac_resets() -> None:
 
 @pytest.mark.no_sim
 def test_rough_reset_curriculum_uses_terminal_step_command(monkeypatch) -> None:
-    """A timeout must use the command that generated the terminal reward."""
+    """A timeout must use the terminal pose and its reward command."""
     origins = torch.zeros((10, 1, 3))
     curriculum = ReferenceTerrainCurriculum(
         origins, 1, 5, 8.0, 20.0, torch.Generator().manual_seed(42)
@@ -529,6 +531,12 @@ def test_rough_reset_curriculum_uses_terminal_step_command(monkeypatch) -> None:
     env._device = torch.device("cpu")
     env.sim = SimpleNamespace(device=torch.device("cpu"))
     env._num_envs = 1
+    env._elapsed_steps = torch.ones(1, dtype=torch.long)
+    env.episode_context = EpisodeContext(1)
+    env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
+    env.is_task_success = lambda: torch.zeros(1, dtype=torch.bool)
+    env.sensors = {}
+    env._detached_uids_for_reset = ()
     env._reference_terrain_course = curriculum
     env.robot = SimpleNamespace(
         body_data=SimpleNamespace(
@@ -538,10 +546,15 @@ def test_rough_reset_curriculum_uses_terminal_step_command(monkeypatch) -> None:
     env.reward_command = torch.tensor([[0.4, 0.0, 0.0]])
     env.command = torch.tensor([[0.1, 0.0, 0.0]])
 
+    def reset_objects_state(**kwargs):
+        env.robot.body_data.root_pose[0, 0] = 6.0
+
+    env.sim.reset_objects_state = reset_objects_state
+
     class ResetRecorded(Exception):
         pass
 
-    def stop_after_curriculum(self, **kwargs):
+    def stop_after_curriculum(self, *args, **kwargs):
         raise ResetRecorded
 
     from embodichain_tasks.locomotion.velocity._embodichain import (
@@ -549,10 +562,13 @@ def test_rough_reset_curriculum_uses_terminal_step_command(monkeypatch) -> None:
     )
 
     monkeypatch.setattr(
+        EmbodiChainVelocityEnv, "_before_episode_reset", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
         EmbodiChainVelocityEnv, "_initialize_episode", stop_after_curriculum
     )
     with pytest.raises(ResetRecorded):
-        env._initialize_episode()
+        env.reset(options={"reset_ids": [0]})
     # Two meters is below the old command's four-meter threshold; the next
     # command's one-meter threshold would incorrectly keep the level unchanged.
     assert curriculum.levels.item() == 2
