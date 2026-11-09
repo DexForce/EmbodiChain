@@ -505,17 +505,18 @@ class BaseRigidObjectTest:
             self.duck.uid not in self.sim.asset_uids
         ), "Duck UID still present after removal"
 
-    def test_set_physical_visible(self):
+    def test_visibility_controls(self):
+        """Collision debug and render visibility accept both toggle states."""
+        self.table.set_visible(visible=True)
+        self.table.set_visible(visible=False)
+        # Restore the initial render state before creating collision overlays.
+        self.table.set_visible(visible=True)
         self.table.set_physical_visible(
             visible=True,
             rgba=(0.1, 0.1, 0.9, 0.4),
         )
         self.table.set_physical_visible(visible=True)
         self.table.set_physical_visible(visible=False)
-
-    def test_set_visible(self):
-        self.table.set_visible(visible=True)
-        self.table.set_visible(visible=False)
 
     def test_body_data(self):
         """Test the body_data property for dynamic objects."""

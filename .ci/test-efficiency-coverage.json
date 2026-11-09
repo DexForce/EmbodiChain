@@ -65,6 +65,34 @@
       "owner": "scripts/ci/pytest_no_finalize.py;scripts/ci/run_test_plan.py",
       "changed": "Opt-in static dependency import freezing only inside the existing owned no-finalize process; refuse domain/test preloads and preserve normal GC for objects created afterward.",
       "contract": "Full lifecycle GC remains enabled for domain/test objects. Existing permanent roots are retained through process exit; reusable application interpreters are unaffected. Original failed tests keep their exit codes; successful optimized exits additionally require zero nativeWorlds/managers/queue. Discovery stays unmodified and ordered execution must match it."
+    },
+    {
+      "owner": "tests/sim/objects/test_light.py",
+      "removed": [
+        "TestLightTypes::test_mesh_light_empty_path_warns"
+      ],
+      "retained": "TestLightTypes::test_create_each_light_type[mesh-4], now with explicit empty mesh_path and cfg type readback",
+      "relocated": {
+        "TestLightTypes::test_from_dict_new_types": "test_from_dict_new_types",
+        "TestLightTypes::test_set_direction_on_point_warns": "test_inapplicable_light_setters_warn_without_native_calls[point-direction]",
+        "TestLightTypes::test_set_spot_angle_on_point_warns": "test_inapplicable_light_setters_warn_without_native_calls[point-spot-angle]",
+        "TestLightTypes::test_set_rect_wh_on_point_warns": "test_inapplicable_light_setters_warn_without_native_calls[point-rect-size]",
+        "TestLightTypes::test_set_local_pose_on_direction_warns": "test_inapplicable_light_setters_warn_without_native_calls[direction-position]",
+        "TestLightTypes::test_set_local_pose_on_sun_warns": "test_inapplicable_light_setters_warn_without_native_calls[sun-position]"
+      },
+      "contract": "The configuration assertions are unchanged and require no World. The five unsupported type/setter combinations retain their original call arguments and now assert one warning and no native calls using CPU-only handles. Real supported setters, creation for all six types, unknown-type factory errors, global reset and four-arena legacy compatibility remain native tests."
+    },
+    {
+      "owner": "tests/sim/objects/test_rigid_object.py;tests/sim/objects/test_rigid_object_group.py",
+      "changed": "For each object kind, merge collision-overlay and render-visibility smoke checks into test_visibility_controls on the original CPU, CUDA and Newton classes.",
+      "removed": [
+        "TestRigidObject{CPU,CUDA,Newton}::test_set_visible",
+        "TestRigidObjectGroup{CPU,CUDA,Newton}::test_set_visible"
+      ],
+      "renamed": {
+        "test_set_physical_visible": "test_visibility_controls"
+      },
+      "contract": "All original true/false and RGBA calls remain. Render toggles run before collision overlays exist; visibility is restored before the original collision-overlay sequence. Each backend retains a fresh native scene for the combined test and its original teardown. No simulation, pose, mass, limit or other numeric assertions are removed."
     }
   ],
   "measurement": "Report original, cleaned and final execution policy separately. Preserve raw failures/skips and explicitly list removed/consolidated coverage; do not add stage percentages. Use the same qualified CXX compiler and JIT-cache policy for both variants and retain their environment metadata. Original solver pose-reference assertions are unchanged."

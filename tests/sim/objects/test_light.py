@@ -16,14 +16,83 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import LightCfg
+from embodichain.lab.sim.objects import Light
+from embodichain.utils import logger
 
 # These small scenes do not inspect pixels; leave room for all tested links.
 TEST_SCENE_NODE_CAPACITY = 512
 TEST_VIEWPORT_SIZE = 64
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "light_type,method,values",
+    [
+        pytest.param(
+            "point", "set_direction", ([1.0, 0.0, 0.0],), id="point-direction"
+        ),
+        pytest.param("point", "set_spot_angle", (15.0, 30.0), id="point-spot-angle"),
+        pytest.param("point", "set_rect_wh", (2.0, 3.0), id="point-rect-size"),
+        pytest.param(
+            "direction", "set_local_pose", ([1.0, 2.0, 3.0],), id="direction-position"
+        ),
+        pytest.param("sun", "set_local_pose", ([1.0, 2.0, 3.0],), id="sun-position"),
+    ],
+)
+def test_inapplicable_light_setters_warn_without_native_calls(
+    light_type: str,
+    method: str,
+    values: tuple[float | list[float], ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsupported setters warn and leave native lights untouched."""
+    light = object.__new__(Light)
+    light.cfg = LightCfg(
+        uid="guarded_light",
+        light_type=light_type,
+        init_pos=(0.0, 0.0, 2.0),
+        direction=(0.0, -1.0, 0.0),
+    )
+    light.uid = light.cfg.uid
+    light.device = torch.device("cpu")
+    light._entities = [Mock() for _ in range(1 if light.is_global else 4)]
+    warning = Mock()
+    monkeypatch.setattr(logger, "log_warning", warning)
+    arguments = tuple(
+        torch.tensor(value, dtype=torch.float32, device="cpu") for value in values
+    )
+
+    getattr(light, method)(*arguments)
+
+    warning.assert_called_once()
+    assert all(not entity.method_calls for entity in light._entities)
+
+
+@pytest.mark.no_sim
+def test_from_dict_new_types() -> None:
+    """LightCfg.from_dict works with new type fields."""
+    cfg = LightCfg.from_dict(
+        {
+            "light_type": "spot",
+            "color": [1.0, 0.9, 0.8],
+            "intensity": 100.0,
+            "init_pos": [0.0, 0.0, 3.0],
+            "direction": [0.0, 0.0, -1.0],
+            "spot_angle_inner": 25.0,
+            "spot_angle_outer": 50.0,
+            "uid": "from_dict_spot",
+        }
+    )
+    assert cfg.light_type == "spot"
+    assert cfg.spot_angle_inner == 25.0
+    assert cfg.spot_angle_outer == 50.0
+    assert cfg.direction == (0.0, 0.0, -1.0) or cfg.direction == [0.0, 0.0, -1.0]
 
 
 class TestLight:
@@ -226,10 +295,12 @@ class TestLightTypes:
             spot_angle_outer=40.0,
             rect_width=2.0,
             rect_height=1.5,
+            mesh_path="",
         )
         light = self.sim.add_light(cfg=cfg)
         assert light is not None, f"Failed to create light of type '{light_type}'"
         assert light.num_instances == expected_num_instances
+        assert light.cfg.light_type == light_type
         if light_type in ("sun", "direction"):
             assert light.is_global, f"{light_type} should be a global light"
 
@@ -238,83 +309,6 @@ class TestLightTypes:
         cfg = LightCfg(uid="bad", light_type="invalid")
         with pytest.raises(ValueError, match="Unsupported light type"):
             self.sim.add_light(cfg=cfg)
-
-    def test_mesh_light_empty_path_warns(self):
-        """Mesh light with empty mesh_path warns at creation but succeeds."""
-        cfg = LightCfg(
-            uid="mesh_no_path",
-            light_type="mesh",
-            init_pos=(0.0, 0.0, 2.0),
-        )
-        light = self.sim.add_light(cfg=cfg)
-        assert light is not None, "Mesh light should be created even without path"
-
-    # ------------------------------------------------------------------
-    # Setter type-validation tests
-    # ------------------------------------------------------------------
-
-    def test_set_direction_on_point_warns(self):
-        """Calling set_direction on a point light logs a warning and no-ops."""
-        cfg = LightCfg(uid="pt", light_type="point", init_pos=(0, 0, 2))
-        light = self.sim.add_light(cfg=cfg)
-        direction = torch.tensor([1.0, 0.0, 0.0])
-        # Should not raise; should log a warning
-        try:
-            light.set_direction(direction)
-        except Exception as e:
-            pytest.fail(f"set_direction on point light should warn, not crash: {e}")
-
-    def test_set_spot_angle_on_point_warns(self):
-        """Calling set_spot_angle on a non-spot light warns and no-ops."""
-        cfg = LightCfg(uid="pt2", light_type="point", init_pos=(0, 0, 2))
-        light = self.sim.add_light(cfg=cfg)
-        inner = torch.tensor(15.0)
-        outer = torch.tensor(30.0)
-        try:
-            light.set_spot_angle(inner, outer)
-        except Exception as e:
-            pytest.fail(f"set_spot_angle on point light should warn, not crash: {e}")
-
-    def test_set_rect_wh_on_point_warns(self):
-        """Calling set_rect_wh on a non-rect light warns and no-ops."""
-        cfg = LightCfg(uid="pt3", light_type="point", init_pos=(0, 0, 2))
-        light = self.sim.add_light(cfg=cfg)
-        w = torch.tensor(2.0)
-        h = torch.tensor(3.0)
-        try:
-            light.set_rect_wh(w, h)
-        except Exception as e:
-            pytest.fail(f"set_rect_wh on point light should warn, not crash: {e}")
-
-    def test_set_local_pose_on_direction_warns(self):
-        """Calling set_local_pose on a direction light warns and no-ops."""
-        cfg = LightCfg(
-            uid="dir_light",
-            light_type="direction",
-            direction=(0.0, -1.0, 0.0),
-        )
-        light = self.sim.add_light(cfg=cfg)
-        pose = torch.tensor([1.0, 2.0, 3.0])
-        try:
-            light.set_local_pose(pose)
-        except Exception as e:
-            pytest.fail(
-                f"set_local_pose on direction light should warn, not crash: {e}"
-            )
-
-    def test_set_local_pose_on_sun_warns(self):
-        """Calling set_local_pose on a sun light warns and no-ops."""
-        cfg = LightCfg(
-            uid="sun_light",
-            light_type="sun",
-            direction=(0.0, -1.0, 0.0),
-        )
-        light = self.sim.add_light(cfg=cfg)
-        pose = torch.tensor([1.0, 2.0, 3.0])
-        try:
-            light.set_local_pose(pose)
-        except Exception as e:
-            pytest.fail(f"set_local_pose on sun light should warn, not crash: {e}")
 
     # ------------------------------------------------------------------
     # Type-specific property tests
@@ -380,29 +374,6 @@ class TestLightTypes:
             light.enable_shadow(torch.tensor(1.0))  # enable
         except Exception as e:
             pytest.fail(f"enable_shadow failed: {e}")
-
-    # ------------------------------------------------------------------
-    # from_dict compatibility
-    # ------------------------------------------------------------------
-
-    def test_from_dict_new_types(self):
-        """LightCfg.from_dict works with new type fields."""
-        cfg = LightCfg.from_dict(
-            {
-                "light_type": "spot",
-                "color": [1.0, 0.9, 0.8],
-                "intensity": 100.0,
-                "init_pos": [0.0, 0.0, 3.0],
-                "direction": [0.0, 0.0, -1.0],
-                "spot_angle_inner": 25.0,
-                "spot_angle_outer": 50.0,
-                "uid": "from_dict_spot",
-            }
-        )
-        assert cfg.light_type == "spot"
-        assert cfg.spot_angle_inner == 25.0
-        assert cfg.spot_angle_outer == 50.0
-        assert cfg.direction == (0.0, 0.0, -1.0) or cfg.direction == [0.0, 0.0, -1.0]
 
     # ------------------------------------------------------------------
     # Backward compatibility
