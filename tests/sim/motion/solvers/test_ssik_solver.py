@@ -169,14 +169,85 @@ def _pk_fk(solver: SSIKSolver, joints: torch.Tensor) -> torch.Tensor:
 
 
 def _assert_pose(target: torch.Tensor, actual: torch.Tensor) -> None:
+    """Compare rigid FK poses without projecting an invalid matrix onto SO(3)."""
     expected = target.detach().cpu().numpy().astype(np.float64)
     result = actual.detach().cpu().numpy().astype(np.float64)
+    expected_rotation = expected[..., :3, :3]
+    result_rotation = result[..., :3, :3]
+    for pose, rotation_matrix in (
+        (expected, expected_rotation),
+        (result, result_rotation),
+    ):
+        assert np.isfinite(pose).all()
+        np.testing.assert_allclose(
+            rotation_matrix.swapaxes(-1, -2) @ rotation_matrix,
+            np.broadcast_to(np.eye(3), rotation_matrix.shape),
+            atol=1e-5,
+            rtol=0,
+        )
+        determinant = np.sum(
+            np.cross(rotation_matrix[..., 0, :], rotation_matrix[..., 1, :])
+            * rotation_matrix[..., 2, :],
+            axis=-1,
+        )
+        np.testing.assert_allclose(determinant, 1.0, atol=1e-5, rtol=0)
+
     translation = np.linalg.norm(expected[..., :3, 3] - result[..., :3, 3], axis=-1)
-    expected_rotation = Rotation.from_matrix(expected[..., :3, :3])
-    result_rotation = Rotation.from_matrix(result[..., :3, :3])
-    rotation = (expected_rotation.inv() * result_rotation).magnitude()
+    relative = expected_rotation.swapaxes(-1, -2) @ result_rotation
+    skew = np.stack(
+        (
+            relative[..., 2, 1] - relative[..., 1, 2],
+            relative[..., 0, 2] - relative[..., 2, 0],
+            relative[..., 1, 0] - relative[..., 0, 1],
+        ),
+        axis=-1,
+    )
+    sine = np.linalg.norm(skew, axis=-1) / 2
+    cosine = (np.trace(relative, axis1=-2, axis2=-1) - 1) / 2
+    rotation = np.arctan2(sine, cosine)
     assert np.all(translation <= 1e-5)
     assert np.all(rotation <= 1e-5)
+
+
+@pytest.mark.parametrize(
+    "angle, matches", [(0.0, True), (1e-6, True), (2e-5, False), (np.pi, False)]
+)
+def test_pose_assertion_preserves_angles_without_svd(
+    monkeypatch: pytest.MonkeyPatch, angle: float, matches: bool
+) -> None:
+    """Legal float32 rotations need no orthogonalization or spectral solver."""
+    rotation = Rotation.from_euler("xyz", [0.2, -0.4, 0.7]).as_matrix()
+    target = torch.eye(4, dtype=torch.float32)
+    target[:3, :3] = torch.from_numpy(rotation)
+    actual = target.clone()
+    actual[:3, :3] = torch.from_numpy(
+        rotation @ Rotation.from_rotvec([0.0, 0.0, angle]).as_matrix()
+    )
+
+    def unavailable_svd(*args: Any, **kwargs: Any) -> None:
+        raise np.linalg.LinAlgError("SVD did not converge")
+
+    monkeypatch.setattr(np.linalg, "svd", unavailable_svd)
+    if matches:
+        _assert_pose(target[None], actual[None])
+    else:
+        with pytest.raises(AssertionError):
+            _assert_pose(target[None], actual[None])
+
+
+@pytest.mark.parametrize("defect", ["nonfinite-target", "scaled-output", "reflection"])
+def test_pose_assertion_rejects_nonrigid_transforms(defect: str) -> None:
+    """Normalization must not conceal a malformed target or FK result."""
+    target = torch.eye(4, dtype=torch.float32)[None]
+    actual = target.clone()
+    if defect == "nonfinite-target":
+        target[0, 0, 0] = torch.nan
+    elif defect == "scaled-output":
+        actual[0, :3, :3] *= 1.01
+    else:
+        actual[0, 0, 0] = -1
+    with pytest.raises(AssertionError):
+        _assert_pose(target, actual)
 
 
 def _assert_limits(solver: SSIKSolver, joints: torch.Tensor) -> None:
