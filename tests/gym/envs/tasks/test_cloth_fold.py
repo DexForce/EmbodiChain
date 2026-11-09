@@ -24,6 +24,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -134,3 +135,27 @@ def test_fold_remeasures_both_corners_after_program_completion() -> None:
     assert not env.is_task_success().item()
     nodes[0, 3, 1] = float("nan")
     assert not env.is_task_success().item()
+
+
+def test_fold_abort_hold_does_not_consume_next_replay_frame() -> None:
+    from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnv
+    from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay
+    from embodichain.lab.gym.envs.types import ControllerAction
+
+    env = object.__new__(EmbodiedEnv)
+    replay = object.__new__(_PhysicalReplay)
+    env._physical_replay = replay
+    replay.factory = SimpleNamespace(fps=60, steps=2)
+    replay.commands = torch.tensor([[0.0], [0.1], [0.2]])
+    env.sim = SimpleNamespace(
+        spawn_result=SimpleNamespace(get_simulation_time=lambda: 1 / 60)
+    )
+    hold = ControllerAction(
+        replay.commands[None, 1],
+        metadata={"bridge_action_kind": "runtime_abort_safe_hold"},
+    )
+
+    torch.testing.assert_close(env._step_action(hold), hold.value)
+    with patch.object(BaseEnv, "_advance_physics") as advance:
+        env._advance_physics()
+    advance.assert_not_called()

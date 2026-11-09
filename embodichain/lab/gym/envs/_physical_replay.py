@@ -160,10 +160,9 @@ class _PhysicalReplay:
 
     def consume(self, env, action):
         command = action.value if isinstance(action, ControllerAction) else action
-        self.hold = (
-            isinstance(action, ControllerAction)
-            and action.metadata.get("bridge_action_kind") == "runtime_safe_hold"
-        )
+        self.hold = isinstance(action, ControllerAction) and action.metadata.get(
+            "bridge_action_kind"
+        ) in ("runtime_safe_hold", "runtime_abort_safe_hold")
         if self.hold:
             return command
         qpos = command.get("qpos") if isinstance(command, TensorDict) else command
