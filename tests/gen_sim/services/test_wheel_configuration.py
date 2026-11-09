@@ -218,6 +218,38 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
         assert auth == ["Bearer process-key"] * 3 and all(
             b["model"] == "wheel-model" for b in bodies
         )
+        execute(
+            [
+                python,
+                "-I",
+                "-B",
+                "-m",
+                "embodichain",
+                "gensim",
+                "task",
+                "plan",
+                "--image",
+                str(image),
+                "--instruction",
+                "执行测试任务",
+                "--output",
+                str(external / "canonical"),
+            ],
+            external,
+            env,
+        )
+        assert (external / "canonical/semantic_task_graph.html").is_file()
+        assert auth == ["Bearer process-key"] * 6
+        for command in (
+            ["gensim", "run"],
+            ["gensim", "ui"],
+            ["gensim", "scene", "expand"],
+        ):
+            execute(
+                [python, "-I", "-B", "-m", "embodichain", *command, "--help"],
+                external,
+                env,
+            )
         # A second installed consumer discovers XDG configuration without the selector.
         user = external / "xdg/embodichain/model_services.json"
         user.parent.mkdir(parents=True)

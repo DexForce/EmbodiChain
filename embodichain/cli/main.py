@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="gensim",
+        target="embodichain.cli.gensim:main",
+        help="Prepare assets, generate scenes, plan tasks and run GenSim workflows.",
+    ),
+    Command(
         name="expansion",
         target="embodichain.cli.expansion:main",
         help="Preflight, collect, resume and inspect expert expansion jobs.",
