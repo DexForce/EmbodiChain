@@ -2087,7 +2087,7 @@
       "kind": "module",
       "topic_ids": [],
       "summary": "Defines parallel-jaw gripper models and grasp-pose generation interfaces.",
-      "details": "Input: target meshes and explicit parallel-jaw gripper geometry. Output: candidate grasp poses or annotated contact pairs, depending on the operation. Entry: the public AntipodalGraspPoseGenerator API for generation, or embodichain annotate-grasp for interactive region annotation. Shared interfaces and gripper models are defined by graspkit.pose_generator.",
+      "details": "Input: target meshes, explicit scalar opening limits and numerical hand collision geometry. Output: candidate grasp poses or annotated contact pairs. Entry: AntipodalGraspPoseGenerator, or embodichain annotate-grasp through its Lab launcher. GraspKit owns numerical interfaces and algorithms; concrete physics and generator support declarations belong to hand Cfg defaults beside robot assets.",
       "boundaries": [
         "A geometric grasp candidate is not proof of successful physical grasping."
       ],
@@ -3005,21 +3005,21 @@
     },
     {
       "id": "gripper-model",
-      "label": "Parallel-jaw gripper model",
+      "label": "Parallel-jaw gripper configuration",
       "kind": "class",
       "topic_ids": [],
-      "summary": "Defines physical gripper dimensions independently of the sampling algorithm.",
-      "details": "Input: opening limits, finger dimensions, palm depth, and a model identifier. Output: validated geometry configuration shared by compatible parallel-jaw generators. Entry: ParallelJawGripperModelCfg or get_parallel_jaw_gripper_model().",
+      "summary": "Owns native hand physics, calibration and declared grasp-generator support.",
+      "details": "Input: source asset, contact-width bounds, native links and commands, contact/TCP calibration and supported generator kinds. Output: independently controllable hand configuration with shared pure defaults. Concrete values belong to model-owned robot defaults. Entry: ParallelJawGripperCfg or resolve_gripper_defaults().",
       "boundaries": [
-        "A gripper geometry description is not a robot controller."
+        "GraspKit receives numerical scalar limits and collision geometry; it does not consume this Cfg."
       ],
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/pose_generator.py",
-          "symbol": "ParallelJawGripperModelCfg",
-          "start_line": 49,
-          "end_line": 49,
-          "excerpt": "class ParallelJawGripperModelCfg:"
+          "path": "embodichain/lab/sim/cfg/gripper.py",
+          "symbol": "ParallelJawGripperCfg",
+          "start_line": 48,
+          "end_line": 48,
+          "excerpt": "class ParallelJawGripperCfg(RobotCfg):"
         }
       ],
       "documentation": [
@@ -3145,7 +3145,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/scripts/annotate_grasp.py",
+          "path": "embodichain/lab/scripts/annotate_grasp.py",
           "symbol": "cli",
           "start_line": 35,
           "end_line": 35,
@@ -3594,10 +3594,10 @@
           "excerpt": "    template = TaskSpec("
         },
         {
-          "path": "embodichain/gen_sim/task_engine/cli.py",
-          "symbol": "main",
-          "start_line": 104,
-          "end_line": 108,
+          "path": "embodichain/gen_sim/task_engine/_image_run.py",
+          "symbol": "_plan_image_task",
+          "start_line": 99,
+          "end_line": 103,
           "excerpt": "            \"pending_bindings\": len(result[\"binding_requirements\"]),\n            \"execution_ready\": False,\n            \"runtime_evidence_status\": \"not_run\",\n            \"image_sha256\": result[\"image_grounding\"][\"image_sha256\"],\n            \"integration_status\": \"unbound\","
         },
         {
@@ -4568,7 +4568,7 @@
           "symbol": "<module>",
           "start_line": 94,
           "end_line": 94,
-          "excerpt": "        target=\"embodichain.toolkits.graspkit.scripts.annotate_grasp:cli\","
+          "excerpt": "        target=\"embodichain.lab.scripts.annotate_grasp:cli\","
         }
       ]
     },
@@ -5561,7 +5561,7 @@
       "scope": "Invoked by annotate-grasp with interactive selection enabled.",
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/scripts/annotate_grasp.py",
+          "path": "embodichain/lab/scripts/annotate_grasp.py",
           "symbol": "cli",
           "start_line": 107,
           "end_line": 107,
@@ -5584,24 +5584,6 @@
           "start_line": 386,
           "end_line": 386,
           "excerpt": "        backend = _AntipodalMeshBackend("
-        }
-      ]
-    },
-    {
-      "id": "antipodal-generator-reads-gripper-model",
-      "source": "antipodal-generator",
-      "target": "gripper-model",
-      "relation": "reads",
-      "description": "Reads physical gripper dimensions when preparing a mesh backend.",
-      "provenance": "source-reviewed",
-      "scope": "The model configuration is separate from algorithm and collision policies.",
-      "evidence": [
-        {
-          "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
-          "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 382,
-          "end_line": 382,
-          "excerpt": "        model = self._gripper_model"
         }
       ]
     },
@@ -6978,7 +6960,6 @@
         "cli-calls-grasp-annotation",
         "grasp-annotation-constructs-antipodal-generator",
         "antipodal-generator-constructs-grasp-backend",
-        "antipodal-generator-reads-gripper-model",
         "antipodal-generator-imports-grasp-tools",
         "grasp-backend-constructs-grasp-sampler",
         "grasp-backend-constructs-grasp-collision",

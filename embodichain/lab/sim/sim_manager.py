@@ -3708,6 +3708,12 @@ class SimulationManager:
                 newton_solver_type=self._active_newton_solver_type,
             )
 
+        if cfg.gripper_bindings:
+            from embodichain.lab.sim.utility.gripper_binding import (
+                prepare_robot_grippers,
+            )
+
+            prepare_robot_grippers(cfg)
         uid = cfg.uid
         source_path = _asset_file_path(cfg)
         if source_path is None:
@@ -5361,7 +5367,10 @@ class SimulationManager:
         import dexsim
         import gc
 
-        # Force garbage collection to break cycle references
+        if dexsim.get_world_num() == 0:
+            return
+
+        # Live Worlds may still be held by cycles; release them before polling.
         gc.collect()
 
         import time
@@ -5535,9 +5544,8 @@ class SimulationManager:
         self._world = None
         self._default_plane = None
 
-        # Try to break ANY possible frame cycle
-        gc.collect()
-
+        # Clear all remaining Python owners before the post-World collection.
+        # Collecting both here and after these clears scans the same live heap.
         self._visual_materials.clear()
         self._texture_cache.clear()
         self._arenas.clear()
@@ -5548,11 +5556,8 @@ class SimulationManager:
         if SimulationManager._instances.get(self.instance_id) is self:
             SimulationManager.reset(self.instance_id)
 
-        # Forcefully drop underlying C++ object wrappers
-        self._env = None
-        self._world = None
-
-        gc.collect()
+        # The queue performs the post-World collection after destruction-task
+        # locals unwind. Keep the pre-Scene collection for child destructors.
 
     @staticmethod
     def flush_cleanup_queue() -> None:

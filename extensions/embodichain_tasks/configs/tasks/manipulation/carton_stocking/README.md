@@ -88,3 +88,12 @@ embodichain run-example expansion/trajectory/real2sim_carton -- \
 See the packaged example's README for preparation-only, repeated collection
 and the complete 78-candidate benchmark. Reports, datasets and media belong to
 the selected output directory, not the task package or asset cache.
+
+## Ordinary RGB-D deployment
+
+`task.panda.rgbd.yaml` uses the RGB-D embodiment with the ordinary verified
+Task Program controller. Its separate `integration.ordinary.yaml` keeps the
+scene and action contracts but selects no source prototypes or Real2Sim
+collection profile. Use this variant for camera-enabled expert/replay checks;
+its success does not assert source-trajectory reproduction or a confirmed
+Real2Sim collection receipt. `task.panda.yaml` retains that source-backed path.

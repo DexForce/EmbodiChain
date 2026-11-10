@@ -1692,10 +1692,15 @@ def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
     fixtures = Path(__file__).parents[2] / "fixtures/kinematics"
     # Keep the shared Robotiq_V2 geometry distinct from the separate 2F85
     # archive; both are registered after the EEF ownership migration.
+    from embodichain.data import get_data_path as asset_path
+
+    # Runtime gripper preparation validates collision topology as well as joints.
+    # Keep the linkage fixture below as the independent Pinocchio reference.
     sources = {
         "FrankaPandaArm/Panda/PandaExactV1.urdf": fixtures / "panda_original.urdf",
-        "Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf": fixtures
-        / "robotiq85_linkage.urdf",
+        "Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf": Path(
+            asset_path("Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf")
+        ),
     }
 
     def source(name):
@@ -1707,11 +1712,20 @@ def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
 
-    declaration = load_config(
-        get_config_path("components/embodiments/franka_panda_robotiq85.yaml")
-    )["simulation"]
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    component = get_config_path("components/embodiments/franka_panda_robotiq85.yaml")
+    physical = resolve_gym_components(
+        {"embodiment": {"component": str(component)}}, base_dir=Path(component).parent
+    )
+    declaration = physical.config["robot"]
     cfg = _robot_cfg_from_dict(declaration)
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    # Match SimulationManager.add_robot: mounted TCPs require assembled frames.
+    prepare_robot_grippers(cfg)
     restored = panda.FrankaCfg.from_dict(cfg.to_dict())
+    prepare_robot_grippers(restored)
     assert restored.control_parts == cfg.control_parts
     chain = restored.build_pk_serial_chain()["arm"]
     assert chain.get_joint_parameter_names() == [f"Joint{i}" for i in range(1, 8)]
