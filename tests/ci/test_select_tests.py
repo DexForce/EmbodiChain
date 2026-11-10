@@ -1159,7 +1159,19 @@ def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
     assert execution[4:marker_index] == [
         f"{file}::TestContract::test_selected" for file in files
     ]
-    assert execution[marker_index:-1] == original[original.index("-m", 3) :]
+    original_options = original[original.index("-m", 3) :]
+    assert execution[marker_index : marker_index + len(original_options)] == (
+        original_options
+    )
+    diagnostics = [
+        "--exitfirst",
+        "--verbose",
+        "--tb=short",
+        "-o",
+        "faulthandler_timeout=120",
+    ]
+    assert execution[marker_index + len(original_options) : -1] == diagnostics
+    assert "--exitfirst" not in discovery and "--verbose" not in discovery
     assert all(
         kwargs["env"] is None and kwargs["cwd"] == tmp_path for _, kwargs in calls
     )
