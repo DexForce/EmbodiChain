@@ -42,7 +42,9 @@ owns namespace, scene placement and sparse per-asset overrides keyed by source
 prim paths. Single-asset placement belongs to `source_pose_mode` on the asset
 configuration. Both routes share the fresh DexSim source parser and validate
 before native declaration. `UsdImportResult` maps source paths to facades and
-records logical UIDs for constraints and native-only resources. It remaps
+records logical UIDs for constraints and native-only resources. Unique sources
+retain prim-path keys; multiple resources from one prim receive ordinal keys,
+with `resource_source_paths` retaining the original prim identity. It remaps
 standalone constraint endpoints after UID changes, preserves physical types,
 and wraps only objects without physics and colliders
 as visuals. Conflicting visual UIDs receive the scene-name prefix while returned

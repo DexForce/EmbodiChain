@@ -494,3 +494,66 @@ def test_singleton_constraint_checks_follow_the_selected_asset(tmp_path):
     )
     assert visual.physics is None
     assert visual.collisions == []
+
+
+@pytest.mark.parametrize("source_field", ["source", "fpath"])
+@pytest.mark.parametrize("configured_scale", [None, (2.0, 3.0, 4.0)])
+def test_robot_source_scale_survives_portable_round_trip(
+    tmp_path, monkeypatch, source_field, configured_scale
+):
+    import json
+    from copy import deepcopy
+    from dexsim.spawn import ArticulationDesc, SceneDesc
+    import embodichain.lab.sim.spawn.usd as adapter
+
+    path = tmp_path / "robot.usda"
+    path.touch()
+    file_fields = (
+        {"source": UsdSourceCfg(file_path=str(path))}
+        if source_field == "source"
+        else {"fpath": str(path)}
+    )
+    original = RobotCfg(uid="robot", body_scale=configured_scale, **file_fields)
+    serialized = json.loads(json.dumps(original.to_dict()))
+    restored = RobotCfg.from_dict(serialized)
+    if configured_scale is None:
+        assert restored.body_scale is None
+    else:
+        np.testing.assert_allclose(restored.body_scale, configured_scale)
+    authored = ArticulationDesc(name="authored", body_scale=np.array([1.5, 1.5, 1.5]))
+    monkeypatch.setattr(
+        adapter,
+        "_parse_singleton",
+        lambda *args, **kwargs: (SceneDesc(), deepcopy(authored)),
+    )
+    for cfg in (original, restored):
+        descriptor, _ = adapter.articulation_desc_from_usd(cfg)
+        np.testing.assert_allclose(
+            descriptor.body_scale,
+            [1.5] * 3 if configured_scale is None else configured_scale,
+        )
+
+
+def test_robot_decode_retains_preset_scale_and_urdf_defaults(tmp_path):
+    from embodichain.utils import configclass
+
+    @configclass
+    class ScaledRobotCfg(RobotCfg):
+        body_scale: tuple = (2.0, 3.0, 4.0)
+
+    cfg = ScaledRobotCfg.from_dict({"source": {"file_path": "robot.usda"}})
+    assert cfg.body_scale == (2.0, 3.0, 4.0)
+    path = tmp_path / "robot.urdf"
+    path.touch()
+    assert RobotCfg.from_dict({"fpath": str(path)}).body_scale == (1.0, 1.0, 1.0)
+
+
+def test_locomotion_preset_keeps_source_scale_unset_after_decode(tmp_path):
+    from embodichain.robot_registry import resolve_robot_cfg
+
+    path = tmp_path / "g1.usda"
+    path.touch()
+    cfg = resolve_robot_cfg("UnitreeG1", {"source": {"file_path": str(path)}})
+    assert cfg.source.file_path == str(path)
+    assert cfg.fpath is None
+    assert cfg.body_scale is None

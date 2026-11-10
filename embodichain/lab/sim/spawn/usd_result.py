@@ -37,11 +37,15 @@ __all__ = ["UsdImportResult"]
 class UsdImportResult(
     Mapping[str, "VisualObject | RigidObject | Articulation | Robot | DeformableObject"]
 ):
-    """Map source prim paths to stable, declared EmbodiChain facades.
+    """Map source resource keys to stable, declared EmbodiChain facades.
 
     Facades bind in place at ``SimulationManager.prepare()``. Resource maps
     include native-only scene resources and constraints; their values are
-    logical Spawn UIDs, not native handles or builder indices.
+    logical Spawn UIDs, not native handles or builder indices. A unique source
+    keeps its prim path as the resource key. When a source prim produces several
+    resources, each uses ``<prim_path>#<ordinal>`` in parser order, starting at
+    zero. Keys are independent of namespace and runtime UID changes;
+    :attr:`resource_source_paths` retains the exact prim path for every key.
     """
 
     def __init__(
@@ -53,16 +57,24 @@ class UsdImportResult(
         resource_uids: Mapping[str, str],
         resource_types: Mapping[str, str],
         constraint_uids: Mapping[str, str],
+        resource_source_paths: Mapping[str, str] | None = None,
     ) -> None:
         """Capture mappings for one successful declaration.
 
         Args:
-            assets: Source prim paths mapped to stable EmbodiChain facades.
-            resource_uids: Source paths mapped to logical Spawn identifiers.
-            resource_types: Logical scene resource kinds for those source paths.
-            constraint_uids: Source constraint paths mapped to logical identifiers.
+            assets: Source resource keys mapped to stable EmbodiChain facades.
+            resource_uids: Source resource keys mapped to logical Spawn identifiers.
+            resource_types: Logical scene resource kinds for the same resource keys.
+            constraint_uids: Source constraint resource keys mapped to identifiers.
+            resource_source_paths: Resource keys mapped to their exact source prim
+                paths. Defaults to identity mapping for singleton resources.
         """
         self._assets = MappingProxyType(dict(assets))
+        self.resource_source_paths: Mapping[str, str] = MappingProxyType(
+            dict(resource_source_paths)
+            if resource_source_paths is not None
+            else {key: key for key in resource_uids}
+        )
         self.resource_uids: Mapping[str, str] = MappingProxyType(dict(resource_uids))
         self.resource_types: Mapping[str, str] = MappingProxyType(dict(resource_types))
         self.constraint_uids: Mapping[str, str] = MappingProxyType(

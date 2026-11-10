@@ -24,7 +24,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
-from pxr import Usd, UsdGeom, UsdPhysics
+from pxr import Sdf, Usd, UsdGeom, UsdPhysics
 
 from dexsim.spawn import (
     MeshObjectDesc,
@@ -630,3 +630,93 @@ def test_sparse_override_preserves_explicit_zero_placement(
     )
     expected = authored if preserve_source else np.eye(4)
     np.testing.assert_allclose(result["/Body"].cfg.init_local_pose, expected, atol=1e-6)
+
+
+@pytest.mark.parametrize("curve_count", [1, 2])
+def test_curve_prim_resources_keep_all_uids_and_stable_source_keys(
+    tmp_path, curve_count
+):
+    path = tmp_path / "cables.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    root = UsdGeom.Xform.Define(stage, "/World")
+    stage.SetDefaultPrim(root.GetPrim())
+    curves = UsdGeom.BasisCurves.Define(stage, "/World/Cable")
+    curves.CreateTypeAttr("linear")
+    curves.CreateWrapAttr("nonperiodic")
+    curves.CreateCurveVertexCountsAttr([2] * curve_count)
+    curves.CreatePointsAttr(
+        [
+            (0, i, 1) if end == 0 else (1, i, 1)
+            for i in range(curve_count)
+            for end in (0, 1)
+        ]
+    )
+    curves.GetPrim().SetMetadata(
+        "apiSchemas",
+        Sdf.TokenListOp.Create(prependedItems=["PhysicsCurvesDeformableSimAPI"]),
+    )
+    stage.GetRootLayer().Save()
+    expected_keys = (
+        ["/World/Cable"]
+        if curve_count == 1
+        else [f"/World/Cable#{i}" for i in range(curve_count)]
+    )
+    for namespace in (None, "copy"):
+        manager = _manager()
+        result = manager.add_usd(
+            UsdImportCfg(
+                name="scene",
+                source=UsdSourceCfg(file_path=str(path)),
+                namespace=namespace,
+            )
+        )
+        declared = manager._spawn_scene.builder.add_scene.call_args.args[0].cables
+        assert len(declared) == curve_count
+        assert list(result.resource_uids) == expected_keys
+        assert list(result.resource_uids.values()) == [cable.name for cable in declared]
+        assert dict(result.resource_types) == {key: "cable" for key in expected_keys}
+        assert dict(result.resource_source_paths) == {
+            key: "/World/Cable" for key in expected_keys
+        }
+        assert len(result) == 0
+        with pytest.raises(TypeError):
+            result.resource_source_paths[expected_keys[0]] = "/Other"
+
+
+def test_portable_sparse_articulation_pose_matrix_is_decoded(monkeypatch):
+    import json
+    import dexsim.kit.usd
+    from scipy.spatial.transform import Rotation
+
+    descriptor = ArticulationDesc(
+        name="robot",
+        links=[LinkDesc(name="base", parent_name=None, pose=np.eye(4))],
+        usd=UsdSourceDesc(prim_path="/Robot"),
+    )
+    monkeypatch.setattr(
+        dexsim.kit.usd,
+        "parse_usd",
+        lambda *args, **kwargs: SceneDesc(articulations=[descriptor]),
+    )
+    expected = np.eye(4)
+    expected[:3, :3] = Rotation.from_euler(
+        "XYZ", (20, 30, 40), degrees=True
+    ).as_matrix()
+    expected[:3, 3] = (1, 2, 3)
+    recipe = UsdImportCfg.from_dict(
+        json.loads(
+            json.dumps(
+                {
+                    "name": "scene",
+                    "source": {"file_path": "robot.usda"},
+                    "asset_cfgs": {"/Robot": {"init_local_pose": expected.tolist()}},
+                }
+            )
+        )
+    )
+    result = _manager().add_usd(recipe)
+    np.testing.assert_allclose(
+        result["/Robot"].cfg.init_local_pose, expected, atol=1e-6
+    )

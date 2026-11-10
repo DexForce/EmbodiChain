@@ -2538,8 +2538,9 @@ class SimulationManager:
     ):
         """Declare a USD import through a validated configuration recipe.
 
-        The returned mapping uses unchanged source prim paths. Facades bind in
-        place at ``prepare()``. Source selection, overrides and supported facade
+        The returned mapping uses source resource keys; unique sources retain
+        their prim paths. See :class:`UsdImportResult` for derived resource keys.
+        Facades bind in place at ``prepare()``. Source selection, overrides and supported facade
         types are checked before native declaration. Backend materialization is
         validated at ``prepare()``;
         native creation failures do not promise rollback.
@@ -2604,6 +2605,7 @@ class SimulationManager:
             resource_uids=plan.resource_uids,
             resource_types=plan.resource_types,
             constraint_uids=plan.constraint_uids,
+            resource_source_paths=plan.resource_source_paths,
         )
         return dict(result) if legacy_result else result
 

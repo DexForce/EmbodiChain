@@ -172,6 +172,7 @@ def _accept_case(case: dict[str, Any], output: Path) -> dict[str, Any]:
                 len(raw.mesh_objects) + len(raw.articulations) + len(raw.particle_sets)
             )
             record["resources"] = dict(imported.resource_uids)
+            record["resource_source_paths"] = dict(imported.resource_source_paths)
             record["constraints"] = dict(imported.constraint_uids)
         else:
             config_type, add, collection = {
@@ -405,6 +406,8 @@ def main() -> None:
     cases = json.loads(args.manifest.read_text())
     results = []
     directories = [_case_directory(args.output, case["id"]) for case in cases]
+    if len(set(directories)) != len(directories):
+        raise ValueError("Duplicate acceptance case IDs would overwrite case evidence.")
     for case, directory in zip(cases, directories):
         directory.mkdir(exist_ok=True)
         job = directory / "case.json"

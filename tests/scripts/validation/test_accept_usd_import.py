@@ -138,3 +138,36 @@ def test_acceptance_rejects_output_symlinks_without_touching_external_files(
     child.assert_not_called()
     assert external.read_text() == "keep"
     assert not (outside / "case.json").exists()
+
+
+def test_duplicate_manifest_ids_are_rejected_before_any_child_or_case_write(
+    tmp_path, monkeypatch
+):
+    from unittest.mock import Mock
+
+    output = tmp_path / "output"
+    case_dir = output / "same"
+    case_dir.mkdir(parents=True)
+    sentinel = case_dir / "runtime.log"
+    sentinel.write_text("keep previous evidence")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            [
+                {"id": "same", "file_path": "first.usda"},
+                {"id": "same", "file_path": "second.usda"},
+            ]
+        )
+    )
+    monkeypatch.setattr(
+        acceptance.sys,
+        "argv",
+        ["accept_usd_import", "--manifest", str(manifest), "--output", str(output)],
+    )
+    child = Mock(return_value=SimpleNamespace(returncode=0))
+    monkeypatch.setattr(acceptance.subprocess, "run", child)
+    with pytest.raises(ValueError, match="Duplicate acceptance case"):
+        acceptance.main()
+    child.assert_not_called()
+    assert sentinel.read_text() == "keep previous evidence"
+    assert not (case_dir / "case.json").exists()

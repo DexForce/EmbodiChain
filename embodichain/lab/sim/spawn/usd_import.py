@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
@@ -75,6 +76,7 @@ class _UsdImportPlan:
     resource_uids: dict[str, str]
     resource_types: dict[str, str]
     constraint_uids: dict[str, str]
+    resource_source_paths: dict[str, str]
 
 
 def _source_path(descriptor: Any) -> str:
@@ -103,9 +105,18 @@ def _compile_usd_import(
         raise NotImplementedError(
             f"Unsupported USD particle-set types: {unsupported_particles}."
         )
-    descriptors = [
-        item for item in source.iter_entities() if not isinstance(item, ConstraintDesc)
-    ]
+    resources = list(source.iter_entities())
+    source_paths_by_id = {id(item): _source_path(item) for item in resources}
+    counts = Counter(source_paths_by_id.values())
+    occurrences: Counter[str] = Counter()
+    resource_keys = {}
+    for item in resources:
+        path = source_paths_by_id[id(item)]
+        resource_keys[id(item)] = (
+            path if counts[path] == 1 else f"{path}#{occurrences[path]}"
+        )
+        occurrences[path] += 1
+    descriptors = [item for item in resources if not isinstance(item, ConstraintDesc)]
     robot_cfgs = recipe.robot_cfgs
     asset_cfgs = recipe.asset_cfgs
     source_paths = {
@@ -452,7 +463,7 @@ def _compile_usd_import(
                 bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
                 mounted_sensors.append(bound_cfg)
         facade = facade_type(cfg=cfg, device=manager.device)
-        declarations.append((source_path, kind, descriptor, facade))
+        declarations.append((resource_keys[id(descriptor)], kind, descriptor, facade))
         renamed[original_name] = descriptor.name
         if isinstance(descriptor, MeshObjectDesc) and descriptor.physics is not None:
             rigid_renames[original_name] = descriptor.name
@@ -490,8 +501,10 @@ def _compile_usd_import(
         for first, second in source.rigid_collision_filter_pairs
     ]
 
-    resources = list(source.iter_entities())
-    resource_uids = {_source_path(item): item.name for item in resources}
+    resource_uids = {resource_keys[id(item)]: item.name for item in resources}
+    resource_source_paths = {
+        resource_keys[id(item)]: source_paths_by_id[id(item)] for item in resources
+    }
     public_kinds = {
         "soft_object": "volume_deformable",
         "cloth_object": "surface_deformable",
@@ -508,9 +521,11 @@ def _compile_usd_import(
         ("constraints", "constraint"),
     ):
         resource_types.update(
-            {_source_path(item): kind for item in getattr(source, collection)}
+            {resource_keys[id(item)]: kind for item in getattr(source, collection)}
         )
-    constraint_uids = {_source_path(item): item.name for item in source.constraints}
+    constraint_uids = {
+        resource_keys[id(item)]: item.name for item in source.constraints
+    }
     return _UsdImportPlan(
         source,
         declarations,
@@ -518,4 +533,5 @@ def _compile_usd_import(
         resource_uids,
         resource_types,
         constraint_uids,
+        resource_source_paths,
     )
