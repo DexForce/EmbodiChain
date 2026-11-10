@@ -95,7 +95,7 @@ def test_repository_manifest_selectors_resolve() -> None:
             "tests/lab/scripts/test_run_task.py",
         ),
         (
-            "scripts/tutorials/atomic_action/single_arm.py",
+            "scripts/tutorials/atomic_skill/single_arm.py",
             "tests/visualization/test_example_tutorial_coverage.py",
         ),
         (
@@ -125,8 +125,8 @@ def test_repository_manifest_maps_supported_scripts(
 @pytest.mark.parametrize(
     "source_path",
     [
-        "examples/sim/atomic_action/defaults.py",
-        "examples/sim/atomic_action/host.py",
+        "examples/sim/atomic_skill/defaults.py",
+        "examples/sim/atomic_skill/host.py",
         "embodichain/cli/run_example.py",
         "embodichain/cli/_example_runner.py",
         "examples/sim/motion/planners/curobo_planner.py",
@@ -147,10 +147,10 @@ def test_example_changes_keep_launch_package_and_physical_smoke_coverage(
     assert {
         "tests/cli/test_run_example.py",
         "tests/test_example_package.py",
-        "tests/examples/atomic_action/test_run.py",
-        "tests/examples/atomic_action/test_host.py",
+        "tests/examples/atomic_skill/test_run.py",
+        "tests/examples/atomic_skill/test_host.py",
     } <= set(plan.selectors)
-    smoke = "tests/examples/atomic_action/test_smoke.py"
+    smoke = "tests/examples/atomic_skill/test_smoke.py"
     assert smoke in plan.selectors
     # Source-only changes keep the normal non-slow PR policy. An edited slow
     # smoke must still run in the dedicated GPU lane, as in this repair.
@@ -186,7 +186,7 @@ def test_repository_manifest_maps_ik_tutorial_to_its_behavior_contracts() -> Non
     "source_path",
     [
         "embodichain/lab/scripts/preview_widgets/new_unknown.py",
-        "scripts/tutorials/atomic_action/nested/new_unknown.py",
+        "scripts/tutorials/atomic_skill/nested/new_unknown.py",
         "scripts/tutorials/visualization/nested/new_unknown.py",
     ],
 )
@@ -1167,7 +1167,19 @@ def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
     assert execution[node_start:marker_index] == [
         f"{file}::TestContract::test_selected" for file in files
     ]
-    assert execution[marker_index:-1] == original[original.index("-m", 3) :]
+    original_options = original[original.index("-m", 3) :]
+    assert execution[marker_index : marker_index + len(original_options)] == (
+        original_options
+    )
+    diagnostics = [
+        "--exitfirst",
+        "--verbose",
+        "--tb=short",
+        "-o",
+        "faulthandler_timeout=120",
+    ]
+    assert execution[marker_index + len(original_options) : -1] == diagnostics
+    assert "--exitfirst" not in discovery and "--verbose" not in discovery
     assert all(
         kwargs["env"] is None and kwargs["cwd"] == tmp_path for _, kwargs in calls
     )

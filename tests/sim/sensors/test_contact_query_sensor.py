@@ -402,7 +402,7 @@ def test_sampling_observers_reject_external_capture_before_callbacks(monkeypatch
 
 
 def test_contact_sampler_normal_update_fetches_once_before_reading_data():
-    from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
+    from embodichain.lab.sim.atomic_skills.evidence import PhysicalEvidenceRequest
     from embodichain.lab.sim.sensors.contact.sampling import (
         ContactEvidenceSampler,
         CONTACT_VALID_MASK,
@@ -641,7 +641,7 @@ def test_observer_snapshot_survives_subscription_removal_during_sampling():
 @pytest.mark.parametrize("loss", ["none", "query", "scatter"])
 def test_first_standalone_sample_with_observer_preserves_loss_unavailability(loss):
     """The observer's interval counter has not yet seen this standalone fetch_solver_report."""
-    from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
+    from embodichain.lab.sim.atomic_skills.evidence import PhysicalEvidenceRequest
     from embodichain.lab.sim.sensors.contact.sampling import (
         ContactEvidenceSampler,
     )
