@@ -126,7 +126,7 @@ class BatchEntity(ABC):
             descriptor = getattr(entities[0], "object_desc", None) if entities else None
             if descriptor is not None:
                 return _source_visual_elements(descriptor)
-        from embodichain.lab.sim.cfg.visuals import GaussianSplatCfg
+        from embodichain.lab.sim.cfg.visuals import GaussianSplatCfg, _visual_elements
 
         groups = getattr(self.cfg, "link_visuals", {})
         if getattr(self.cfg, "visuals", None) is not None:
@@ -150,7 +150,7 @@ class BatchEntity(ABC):
                 "resource_ids": (),
             }
             for link, elements in groups.items()
-            for element in elements
+            for element in (_visual_elements(elements) or ())
         )
 
     def set_visual_visibility(

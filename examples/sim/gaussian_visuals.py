@@ -40,8 +40,6 @@ from scipy.spatial.transform import Rotation
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
-    DenoisingCfg,
-    GaussianRenderCfg,
     GaussianSplatCfg,
     RenderCfg,
     RigidObjectCfg,
@@ -133,11 +131,9 @@ def main() -> None:
                 physics_dt=1 / 60,
                 enable_entity_gizmo=False,
                 startup_summary="off",
-                render_cfg=RenderCfg(
+                render_cfg=RenderCfg.for_gaussian(
                     renderer=args.renderer,
                     spp=16,
-                    gaussian=GaussianRenderCfg(enabled=True),
-                    denoising=DenoisingCfg(window="off", offscreen="optix"),
                 ),
             )
         )
@@ -153,24 +149,16 @@ def main() -> None:
                 VisualObjectCfg(
                     uid="background",
                     init_local_pose=rotation,
-                    visuals=[
-                        VisualElementCfg(
-                            representation=GaussianSplatCfg(
-                                file_path=str(args.background or cube)
-                            )
-                        )
-                    ],
+                    visuals=GaussianSplatCfg(file_path=str(args.background or cube)),
                 )
             )
-            appearance = VisualElementCfg(
-                representation=GaussianSplatCfg(file_path=str(cube))
-            )
+            appearance = GaussianSplatCfg(file_path=str(cube))
             body = sim.add_rigid_object(
                 RigidObjectCfg(
                     uid="cube",
                     init_pos=(0.4, 0, 1.4),
                     shape=CubeCfg(size=(0.25,) * 3),
-                    visuals=[appearance],
+                    visuals=appearance,
                 )
             )
             sim.add_rigid_object(
@@ -193,7 +181,7 @@ def main() -> None:
                         "tool": [
                             VisualElementCfg(
                                 id="scan",
-                                representation=appearance.representation,
+                                representation=appearance,
                                 local_pose=local,
                             ),
                             VisualElementCfg(

@@ -26,7 +26,7 @@ import numpy as np
 from embodichain.utils import configclass
 from ..shapes import ShapeCfg
 from .asset import ObjectBaseCfg
-from .visuals import VisualElementCfg
+from .visuals import GaussianSplatCfg, VisualElementCfg
 from .source import UsdSourceCfg
 
 __all__ = ["VisualObjectCfg"]
@@ -44,9 +44,15 @@ class VisualObjectCfg(ObjectBaseCfg):
     Whole-scene import instead preserves each entity's authored physical type.
     """
 
-    visuals: list[VisualElementCfg] | None = None
-    __annotations__["visuals"] = list[VisualElementCfg] | None
-    """Explicit render replacement; None preserves source appearance, [] removes it."""
+    visuals: list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None = None
+    __annotations__["visuals"] = (
+        list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None
+    )
+    """Render replacement; one Gaussian may omit its element wrapper.
+
+    None preserves source appearance; [] removes it. Multiple elements require
+    explicit VisualElementCfg IDs.
+    """
 
     shape: ShapeCfg | None = None
     """Mesh, cube or sphere supplying the object's appearance."""

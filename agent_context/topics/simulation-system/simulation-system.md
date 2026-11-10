@@ -50,7 +50,11 @@ world matrices to arena-local poses and refreshes parent transforms and native
 IDs after topology changes.
 
 Explicit `visuals` replace root/body appearance; `link_visuals` replaces named
-articulation links. `cfg/visuals.py` owns the resource and element configs;
+articulation links. Either selection may supply one `GaussianSplatCfg` directly
+or one tagged Gaussian mapping through the decoder. It normalizes to an
+identity-pose element named `appearance`; multiple elements retain explicit
+IDs. `None` and an empty list keep their existing preserve/remove meanings.
+`cfg/visuals.py` owns this normalization and the resource and element configs;
 `spawn/_visuals.py` compiles companion Mesh/Gaussian descriptors under the same
 SpawnScene and publishes their owner-relative transforms at the existing render
 boundary. Default physics is currently required. Source physics is retained;

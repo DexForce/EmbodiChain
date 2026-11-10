@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import math
 
+from collections.abc import Mapping
 from dataclasses import field, fields
 from numbers import Real
-from typing import Literal
+from typing import Any, Literal
 
 import dexsim
 from dexsim.types import RTRenderMode, Renderer, ToneMappingType
@@ -450,6 +451,78 @@ class RenderCfg:
     NRD's indirect-lighting budget is controlled separately by
     :attr:`NRDCfg.max_indirect_bounces`.
     """
+
+    @classmethod
+    def for_gaussian(cls, **overrides: Any) -> RenderCfg:
+        """Build a Gaussian-enabled native rendering configuration.
+
+        Defaults to Hybrid, no window denoising and OptiX offscreen denoising.
+        The World must receive this configuration before loading Gaussian assets.
+
+        Args:
+            **overrides: RenderCfg fields. Nested configuration mappings merge
+                Gaussian and denoising overrides with the preset defaults;
+                configuration objects retain all their explicit settings.
+
+        Returns:
+            Resolved rendering configuration with independent nested values.
+
+        Raises:
+            ValueError: If overrides disable Gaussians, select a non-native
+                renderer, or combine Hybrid with standalone NRD.
+        """
+        return cls.from_dict(dict(overrides, preset="gaussian"))
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> RenderCfg:
+        """Decode rendering fields and an optional Gaussian preset.
+
+        Args:
+            data: RenderCfg fields and optional ``preset: gaussian``. Without
+                a preset, existing rendering defaults are preserved.
+
+        Returns:
+            Resolved configuration with typed nested rendering settings.
+
+        Raises:
+            ValueError: If the preset is unknown or its overrides conflict.
+        """
+        values = dict(data)
+        preset = values.pop("preset", None)
+        if preset not in (None, "gaussian"):
+            raise ValueError(f"Unknown rendering preset: {preset!r}.")
+        if preset == "gaussian":
+            values.setdefault("renderer", "hybrid")
+            for name, defaults in (
+                ("gaussian", {"enabled": True}),
+                ("denoising", {"window": "off", "offscreen": "optix"}),
+            ):
+                override = values.get(name, defaults)
+                values[name] = (
+                    {**defaults, **override}
+                    if isinstance(override, Mapping)
+                    else override
+                )
+        for name, cfg_type in (
+            ("gaussian", GaussianRenderCfg),
+            ("denoising", DenoisingCfg),
+            ("dlss", DLSSCfg),
+            ("nrd", NRDCfg),
+        ):
+            if isinstance(values.get(name), Mapping):
+                values[name] = cfg_type(**values[name])
+        cfg = cls(**values)
+        if preset == "gaussian":
+            if not cfg.gaussian.enabled:
+                raise ValueError("The Gaussian preset requires gaussian.enabled=True.")
+            if cfg.renderer not in {"hybrid", "fast-rt", "rt"}:
+                raise ValueError("The Gaussian preset requires a native renderer.")
+            if cfg.renderer == "hybrid" and "nrd" in (
+                cfg.denoising.window,
+                cfg.denoising.offscreen,
+            ):
+                raise ValueError("Hybrid standalone NRD omits Gaussian composition.")
+        return cfg
 
     def __post_init__(self) -> None:
         """Validate rendering parameters."""

@@ -28,7 +28,7 @@ import torch
 
 from embodichain.utils import configclass, is_configclass, logger
 
-from .visuals import VisualElementCfg, _visual_elements
+from .visuals import GaussianSplatCfg, VisualElementCfg, _visual_elements
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .source import UsdSourceCfg, _raise_removed_source_fields, _usd_source_from_value
 from .rigid import (
@@ -396,11 +396,19 @@ class ArticulationCfg(ObjectBaseCfg):
     such as joint drive properties, physical attributes.
     """
 
-    link_visuals: dict[str, list[VisualElementCfg]] = field(default_factory=dict)
+    link_visuals: dict[
+        str, list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg
+    ] = field(default_factory=dict)
     # configclass copies inherited annotations into extension constructors.
-    # Keep this type concrete so subclasses need not import VisualElementCfg.
-    __annotations__["link_visuals"] = dict[str, list[VisualElementCfg]]
-    """Appearance replacements keyed by exact source link name."""
+    # Keep this type concrete so subclasses need not import visual configs.
+    __annotations__["link_visuals"] = dict[
+        str, list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg
+    ]
+    """Appearance replacements keyed by exact source link name.
+
+    A single Gaussian resource may omit its element wrapper. Multiple elements
+    require explicit VisualElementCfg IDs within each link.
+    """
 
     fpath: str = None
     """Path to the articulation asset file."""

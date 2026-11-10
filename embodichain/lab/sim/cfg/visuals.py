@@ -37,7 +37,9 @@ class GaussianSplatCfg:
 
     File decoding and immutable resource residency belong to DexSim. Use
     ``UsdSourceCfg`` or ``SimulationManager.add_usd`` for a USD stage whose
-    visual Xform references an external Gaussian PLY.
+    visual Xform references an external Gaussian PLY. A single resource can
+    be supplied directly as ``visuals`` or a ``link_visuals`` value; it becomes
+    one identity-pose element named ``appearance``.
     """
 
     file_path: str = ""
@@ -178,15 +180,26 @@ class VisualElementCfg:
 def _visual_elements(value: object) -> list[VisualElementCfg] | None:
     if value is None:
         return None
+    if isinstance(value, (GaussianSplatCfg, Mapping)):
+        value = [value]
     if not isinstance(value, (list, tuple)):
-        raise TypeError("visuals must be a list or None.")
-    elements = [
-        VisualElementCfg.from_dict(v) if isinstance(v, Mapping) else v for v in value
-    ]
-    for element in elements:
+        raise TypeError("visuals requires a list, a single Gaussian resource, or None.")
+    elements = []
+    for element in value:
+        if isinstance(element, Mapping) and element.get("type") == "gaussian_splat":
+            element = GaussianSplatCfg(**dict(element))
+        if isinstance(element, GaussianSplatCfg):
+            if len(value) != 1:
+                raise ValueError(
+                    "Gaussian shorthand requires one element; use explicit VisualElementCfg IDs for multiple elements."
+                )
+            element = VisualElementCfg(representation=element)
+        elif isinstance(element, Mapping):
+            element = VisualElementCfg.from_dict(element)
         if not isinstance(element, VisualElementCfg):
             raise TypeError("visuals requires VisualElementCfg entries.")
         element.__post_init__()
+        elements.append(element)
     if len({e.id for e in elements}) != len(elements):
         raise ValueError("Visual element IDs must be unique within their owner.")
     return elements

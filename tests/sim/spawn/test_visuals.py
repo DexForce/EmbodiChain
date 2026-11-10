@@ -116,6 +116,59 @@ def test_gaussian_visual_config_serialization_roundtrip(tmp_path, cfg_type):
     assert tuple(actual[1].representation.size) == (0.2, 0.3, 0.4)
 
 
+@pytest.mark.parametrize(
+    "cfg_type,form",
+    [
+        (VisualObjectCfg, "direct"),
+        (RigidObjectCfg, "list"),
+        (ArticulationCfg, "mapping"),
+        (RobotCfg, "mapping_list"),
+    ],
+)
+def test_single_gaussian_shorthand_reaches_binding_and_roundtrips(
+    tmp_path, cfg_type, form
+):
+    from embodichain.lab.sim.common import BatchEntity
+
+    path = tmp_path / "scan.ply"
+    path.write_text("fixture")
+    resource = GaussianSplatCfg(file_path=str(path), color_gain=(0.7, 0.8, 0.9))
+    value = resource.to_dict() if form.startswith("mapping") else resource
+    if form in {"list", "mapping_list"}:
+        value = [value]
+    linked = issubclass(cfg_type, ArticulationCfg)
+    fields = {"link_visuals": {"tool": value}} if linked else {"visuals": value}
+    cfg = (
+        cfg_type.from_dict({"uid": "owner", **fields})
+        if form.startswith("mapping")
+        else cfg_type(uid="owner", **fields)
+    )
+    owner = SimpleNamespace(
+        cfg=cfg, uid="owner", num_instances=1, device=torch.device("cpu")
+    )
+    metadata = BatchEntity.get_visual_elements(owner)
+    assert len(metadata) == 1
+    assert metadata[0]["id"] == "appearance"
+    assert metadata[0]["representation"] == "gaussian_splat"
+    assert metadata[0]["link_name"] == ("tool" if linked else None)
+    binding = _VisualBinding(owner, SimpleNamespace())
+    element = binding.elements[0]
+    assert element.gaussian and element.config.id == "appearance"
+    assert element.config.representation.color_gain == (0.7, 0.8, 0.9)
+    np.testing.assert_array_equal(element.config.local_pose, np.eye(4))
+    restored = cfg_type.from_dict(cfg.to_dict())
+    actual = restored.link_visuals["tool"] if linked else restored.visuals
+    assert len(actual) == 1
+    assert actual[0].id == "appearance"
+    assert actual[0].representation.file_path == str(path)
+
+
+def test_multiple_gaussians_still_require_explicit_visual_element_ids():
+    resource = GaussianSplatCfg(file_path="scan.ply")
+    with pytest.raises(ValueError, match="single|one|explicit"):
+        _visual_elements([resource, resource])
+
+
 def test_invalid_binding_transform_and_duplicate_ids_reject():
     with pytest.raises(ValueError, match="unique"):
         _visual_elements([VisualElementCfg(representation=CubeCfg())] * 2)
@@ -409,7 +462,7 @@ def test_robot_visual_annotations_resolve_across_configclass_inheritance():
         }
         assert (
             get_type_hints(reflected, globalns={}, localns={})["value"]
-            == dict[str, list[VisualElementCfg]]
+            == dict[str, list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg]
         )
 
 

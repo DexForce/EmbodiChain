@@ -157,6 +157,12 @@ source.
 ## Gaussian composition
 
 `RenderCfg.gaussian` configures native CUDA raster before World construction.
+`RenderCfg.for_gaussian()` composes a native renderer and compatible denoising;
+`RenderCfg.from_dict()` also resolves `preset: gaussian` for Gym YAML/JSON.
+Explicit overrides remain authoritative; conflicting preset choices fail
+instead of silently disabling rendering or changing denoising. The preset is
+resolved to ordinary typed settings, and configuration writes need not retain
+the preset name. Existing configs without a preset keep their defaults.
 Gaussian resources enter through Spawn, and `SpawnScene.sync_visuals()` runs
 after physics publication and before CameraGroups consume the state. Each
 binding retains only instance transforms/visibility and immutable references;
