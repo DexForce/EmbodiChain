@@ -60,6 +60,9 @@ budget and adapter options. Fields can use `{"env": "NAME"}`; `api_key_env` is
 shorthand for an API-key reference. Only references are resolved: process values
 win over the selected dotenv (`EMBODICHAIN_ENV_FILE` or the default GenSim `.env`).
 Unrelated `OPENAI_*` values never fill missing fields in an explicit profile.
+HTTP profile API keys are sent only to the configured origin (scheme, host and
+port). External mesh URLs and redirects to another origin receive no profile
+Authorization header.
 Unused roles require no credentials, connection or health check. The example's
 optional job-control profile is only needed when using Gradio's remote panel.
 
