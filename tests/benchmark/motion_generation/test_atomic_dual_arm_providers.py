@@ -1652,7 +1652,6 @@ def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_p
 
 def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_path):
     """Check actual assembled geometry/kinematics, including the native mimic."""
-    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
     from embodichain.utils.string import resolve_matching_names
     from embodichain_robots import FrankaPandaCfg
 
@@ -1667,9 +1666,7 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
     cfg = create_robot_provider(replace(suite.robot, config=values)).build_cfg()
     assert Path(cfg.urdf_cfg.fpath).name == "native_panda_dual_test.urdf"
     cfg.urdf_cfg.fpath = str(tmp_path / "native_panda_dual.urdf")
-    # Final hand geometry owns the effective TCP after gripper preparation.
-    prepare_robot_grippers(cfg)
-    assembled_path = cfg.fpath
+    assembled_path = cfg.urdf_cfg.assemble_urdf()
     tree = ET.parse(assembled_path)
     links = [link.get("name") for link in tree.findall("link")]
     joints = {
@@ -1716,6 +1713,9 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
         end_link_name="fr3_hand_tcp",
     )
     expected_fk = source.forward_kinematics(qpos).get_matrix()
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg)
     chains = cfg.build_pk_serial_chain(device=CPU)
     for side in ("left", "right"):
         arm = f"{side}_arm"
