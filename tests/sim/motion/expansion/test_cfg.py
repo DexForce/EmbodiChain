@@ -140,7 +140,7 @@ def test_expansion_profile_rejects_unimplemented_scheduler() -> None:
 
 @pytest.mark.parametrize(
     "kind",
-    ["handwritten", "motion_generator", "atomic_action", "task_program"],
+    ["handwritten", "motion_generator", "atomic_skill", "task_program"],
 )
 def test_expansion_profile_accepts_all_source_adapters(kind):
     cfg = TrajectoryExpansionJobCfg.from_mapping({"source": {"kind": kind}})
@@ -618,3 +618,12 @@ def test_implicit_guided_joint_sampling_requires_a_distinguishable_offset() -> N
                 }
             }
         )
+
+
+@pytest.mark.parametrize("kind", ["atomic_skill", "atomic_action"])
+def test_atomic_skill_source_kind_is_canonical_after_decoding(kind: str) -> None:
+    payload = _task_program_profile_payload()
+    payload["source"]["kind"] = kind
+    cfg = TrajectoryExpansionJobCfg.from_mapping(payload)
+    assert cfg.source.kind == "atomic_skill"
+    assert cfg.to_dict()["source"]["kind"] == "atomic_skill"

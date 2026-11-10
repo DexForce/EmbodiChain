@@ -20,7 +20,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 import pytest
 import torch
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     ObjectSemantics,
     PressGoal,
     PressOptions,
@@ -30,7 +30,7 @@ from embodichain.lab.sim.atomic_actions import (
     OpenDoorOptions,
     SceneEntityPose,
 )
-from embodichain.lab.sim.atomic_actions.affordance import (
+from embodichain.lab.sim.atomic_skills.affordance import (
     PressAffordance,
     TwistAffordance,
     OpenDoorAffordance,
@@ -38,7 +38,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
 from embodichain.lab.task_program.semantics import RegisteredSemanticCall
 from embodichain.lab.task_program.integrations.configured import (
     _decode_registered_lowerer,
-    _decode_action_options,
+    _decode_skill_options,
 )
 
 
@@ -100,7 +100,7 @@ def test_configured_controls_have_unique_declarations_and_fresh_typed_lowerers(
         )
     )
     context = SimpleNamespace(task=SimpleNamespace(get_held_object=lambda _: None))
-    options = _decode_action_options(dict(kind=kind), path="options")
+    options = _decode_skill_options(dict(kind=kind), path="options")
     assert type(options) is options_type
     result = first.lower(call, context=context, bound=bound, option_template=options)
     assert type(result.goal) is goal_type

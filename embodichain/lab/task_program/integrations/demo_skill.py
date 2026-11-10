@@ -28,10 +28,10 @@ from typing import ClassVar
 
 from embodichain.data_pipeline.real2sim import load_demo_skill
 from embodichain.data_pipeline.real2sim.demo_skill import _sha256
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     ExecuteDemoSkill,
     DemoSkillGoal,
-    ActionOptions,
+    SkillOptions,
 )
 from embodichain.lab.task_program.compiler.lowering import (
     RegisteredSemanticLowerer,
@@ -135,8 +135,8 @@ class _DemoSkillLowererFactory:
             )
 
             def lower(self, call, context, *, bound, option_template):
-                if type(option_template) is not ActionOptions:
-                    raise TypeError("ExecuteDemoSkill uses ActionOptions")
+                if type(option_template) is not SkillOptions:
+                    raise TypeError("ExecuteDemoSkill uses SkillOptions")
                 if set(call.arguments) != set(owner.role_ids):
                     raise ValueError(
                         "DemoSkill arguments must bind exactly its declared roles"

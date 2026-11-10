@@ -61,7 +61,7 @@ from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.motion.solvers import URSolverCfg
 from embodichain.data import get_data_path
-from examples.sim.atomic_action.gripper_geometry import mounted_gripper_geometry
+from examples.sim.atomic_skill.gripper_geometry import mounted_gripper_geometry
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -255,7 +255,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # Construct one standalone generator. The same instance can also be passed
-    # to AtomicActionEngine(grasp_pose_generators={"hand": grasp_generator}).
+    # to AtomicSkillEngine(grasp_pose_generators={"hand": grasp_generator}).
     gripper_model, collision_geometry = mounted_gripper_geometry(robot.cfg)
     grasp_generator = AntipodalGraspPoseGenerator(
         gripper_model,

@@ -488,6 +488,7 @@ def _make_runtime_control_sim_manager(
     sim._robots = {"robot": object()}
     sim._articulations = {}
     sim._rigid_objects = {"table": object()}
+    sim._fluid_objects = {}
     sim._deformable_objects = {
         "cloth": SimpleNamespace(
             cfg=SurfaceDeformableObjectCfg(uid="cloth", particle_flags=[0, 1, 0])
@@ -569,6 +570,7 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     sim._rigid_objects = {}
     sim._constraints = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -1314,6 +1316,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
     )
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -1458,6 +1461,7 @@ def test_render_camera_group_syncs_state_before_rendering() -> None:
     lifecycle: list[str] = []
     sim = object.__new__(SimulationManager)
     sim.is_window_opened = False
+    sim._sensors = {}
     sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
     sim._world = SimpleNamespace(
         render_camera_group=lambda _group_ids: lifecycle.append("render")
@@ -1519,6 +1523,7 @@ def test_recording_and_viser_share_substep_publication() -> None:
 def _make_render_frame_sim(*, window=False, viser=False, automatic_sync=False):
     """Track published state through real manager/backend scheduling methods."""
     sim, runtime = _make_visualization_sim_manager()
+    sim._sensors = {}
     sim.sim_config.physics_cfg = NewtonPhysicsCfg(sync_to_renderer=automatic_sync)
     sim.sim_config.visualization.backend = "viser" if viser else "none"
     sim.physics = NewtonPhysicsBackend(sim)
@@ -1915,6 +1920,68 @@ def test_register_kinematic_nodal_trajectory_rejects_finalized_scene() -> None:
 
     with pytest.raises(RuntimeError, match=r"before SimulationManager\.prepare"):
         sim.register_kinematic_nodal_trajectory("cloth", [0], offsets)
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def _runtime_control(**attrs: object):
+    from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+
+    control = type("RecordingControl", (RuntimeControl,), {})()
+    for name, value in attrs.items():
+        setattr(control, name, value)
+    return control
+
+
+def test_add_runtime_control_registers_one_scene_control() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    control = _runtime_control()
+
+    assert sim.add_runtime_control(control) == (control,)
+
+    builder.add_runtime_control.assert_called_once_with(control)
+
+
+def test_add_runtime_control_expands_factory_per_arena() -> None:
+    sim, builder = _make_runtime_control_sim_manager(num_envs=3)
+
+    controls = sim.add_runtime_control(
+        lambda arena_name, env_index: _runtime_control(
+            target=f"{arena_name}/robot", env_index=env_index
+        )
+    )
+
+    assert [control.target for control in controls] == [
+        "arena_0/robot",
+        "arena_1/robot",
+        "arena_2/robot",
+    ]
+    assert [control.env_index for control in controls] == [0, 1, 2]
+    assert [
+        call.args[0] for call in builder.add_runtime_control.call_args_list
+    ] == list(controls)
+
+
+def test_add_runtime_control_rejects_non_control_factory_results() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+
+    with pytest.raises(TypeError, match="RuntimeControl instances"):
+        sim.add_runtime_control(lambda arena_name, env_index: object())
+    with pytest.raises(TypeError, match="RuntimeControl or a factory"):
+        sim.add_runtime_control(object())
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_add_runtime_control_rejects_finalized_scene_and_default_backend() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    builder.is_finalized = True
+    with pytest.raises(RuntimeError, match=r"before SimulationManager\.prepare"):
+        sim.add_runtime_control(_runtime_control())
+
+    sim, builder = _make_runtime_control_sim_manager(backend="default")
+    with pytest.raises(RuntimeError, match="Newton backend"):
+        sim.add_runtime_control(_runtime_control())
 
     builder.add_runtime_control.assert_not_called()
 
@@ -2558,6 +2625,7 @@ def test_remove_asset_marks_visualization_topology_dirty() -> None:
     sim.prepare = MagicMock()
     sim._rigid_objects = {"cube": rigid_object}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -3033,6 +3101,7 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
     sim._rigid_object_groups = {}
     sim._lights = {}
     sim._sensors = {}
+    sim._fluid_objects = {}
     sim._visualization_sim_time = 1.25
     sim._deformable_objects = {
         "soft": MagicMock(),
@@ -3046,7 +3115,10 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
     assert sim.simulation_time == 1.25
 
 
-def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> None:
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+def test_newton_reset_clears_all_articulations_in_selected_worlds_together(
+    solver_type,
+) -> None:
     sim = object.__new__(SimulationManager)
     robot = MagicMock()
     articulation = MagicMock()
@@ -3057,7 +3129,7 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
         "robot": ("robot_0", "robot_1"),
         "arm": ("arm_0", "arm_1"),
     }
-    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim.physics = SimpleNamespace(name="newton", solver_type=solver_type)
     sim.num_envs = 2
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=spawn_result),
@@ -3067,6 +3139,7 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3079,15 +3152,19 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
     native_batch.clear_dynamics.assert_called_once_with()
 
 
-def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds() -> None:
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds(
+    solver_type,
+) -> None:
     sim = object.__new__(SimulationManager)
     robot = MagicMock()
     articulation = MagicMock()
-    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim.physics = SimpleNamespace(name="newton", solver_type=solver_type)
     sim._robots = {"robot": robot}
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3116,6 +3193,7 @@ def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3351,3 +3429,62 @@ def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
         lambda: SimpleNamespace(renderer=dexsim.types.Renderer.NORENDER),
     )
     assert SimulationManager._get_process_renderer() == "no-render"
+
+
+def test_reset_fluid_selects_rows_and_honors_exclusions():
+    sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(name="default")
+    sim.num_envs = 2
+    for name in (
+        "_robots",
+        "_articulations",
+        "_rigid_objects",
+        "_rigid_object_groups",
+        "_lights",
+        "_sensors",
+        "_deformable_objects",
+    ):
+        setattr(sim, name, {})
+    fluid, excluded = MagicMock(), MagicMock()
+    sim._fluid_objects = {"water": fluid, "other": excluded}
+    sim.reset_objects_state(env_ids=[1], excluded_uids=["other"])
+    excluded.reset.assert_not_called()
+    fluid.reset.assert_called_once_with([1])
+
+
+@pytest.mark.usefixtures("requires_particle_contact_material")
+def test_targeted_particle_material_schedule_expands_arena_paths() -> None:
+    from dexsim.engine import newton_physics
+    from dexsim.engine.newton_physics.runtime_control import GraphRuntimeControl
+
+    if not hasattr(newton_physics, "DexUniParticleContactMaterialSchedule"):
+        pytest.skip("Targeted particle schedules require a supporting DexSim build.")
+    sim, builder = _make_runtime_control_sim_manager()
+    sim.register_particle_contact_material_schedule(
+        {"dynamic_friction": ((0.0, 0.5), (1.0, 1.2))}, uid="cloth"
+    )
+    controls = [call.args[0] for call in builder.add_runtime_control.call_args_list]
+    assert [control.target for control in controls] == [
+        "arena_0/cloth",
+        "arena_1/cloth",
+    ]
+    assert all(isinstance(control, GraphRuntimeControl) for control in controls)
+
+
+def test_targeted_particle_material_schedule_rejects_unknown_uid() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    with pytest.raises(KeyError, match="missing"):
+        sim.register_particle_contact_material_schedule(
+            {"stiffness": ((0.0, 1000.0),)}, uid="missing"
+        )
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_targeted_particle_material_schedule_validates_before_registration() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    sim._spawn_scene.arena_names = ("arena_0",)
+    with pytest.raises(RuntimeError, match="arena count"):
+        sim.register_particle_contact_material_schedule(
+            {"stiffness": ((0.0, 1000.0),)}, uid="cloth"
+        )
+    builder.add_runtime_control.assert_not_called()

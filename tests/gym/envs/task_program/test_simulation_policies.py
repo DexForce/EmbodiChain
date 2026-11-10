@@ -43,7 +43,7 @@ from embodichain.lab.task_program.integrations.simulation.policies import (
     SimulationSettleMonitorCfg,
 )
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
-from embodichain.lab.sim.atomic_actions import EntityState
+from embodichain.lab.sim.atomic_skills import EntityState
 from embodichain.lab.task_program.semantics.scene import (
     SceneAffordanceRef,
     SceneArticulationRef,

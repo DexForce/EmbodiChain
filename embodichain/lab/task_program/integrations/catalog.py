@@ -31,17 +31,17 @@ from typing import cast
 import torch
 
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     EndpointTrackingFeedbackAddress,
     GRASP_CAPABILITY,
     JOINT_POSITION_CHANNEL,
     SceneProvider,
     SkillDescriptor,
 )
-from embodichain.lab.sim.atomic_actions.primitives import BUILTIN_ACTION_TYPES
-from embodichain.lab.sim.atomic_actions.tracking import (
+from embodichain.lab.sim.atomic_skills.primitives import BUILTIN_SKILL_TYPES
+from embodichain.lab.sim.atomic_skills.tracking import (
     FeedbackTerminalAcceptance,
     TrackingRuntime,
 )
@@ -198,7 +198,7 @@ def _canonical_value(value: object) -> object:
             ),
         )
     if is_dataclass(value):
-        from embodichain.lab.sim.atomic_actions.policies import RecoveryPolicy
+        from embodichain.lab.sim.atomic_skills.policies import RecoveryPolicy
 
         metadata = {
             data_field.name: _canonical_value(getattr(value, data_field.name))
@@ -209,9 +209,9 @@ def _canonical_value(value: object) -> object:
                 and getattr(value, data_field.name) is None
             )
         }
-        from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+        from embodichain.lab.sim.atomic_skills.policies import MotionPolicy
 
-        from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
+        from embodichain.lab.sim.atomic_skills.core import SkillDescriptor
 
         if (
             type(value) is SkillDescriptor
@@ -865,12 +865,12 @@ class TaskProgramIntegrationCatalog:
                     )
         return compiled
 
-    def validate_engine(self, engine: AtomicActionEngine) -> None:
+    def validate_engine(self, engine: AtomicSkillEngine) -> None:
         """Require the live engine to expose every statically selected skill."""
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         for skill_id, expected in self._required_skills.items():
-            actual = engine.skills.get(skill_id)
+            actual = engine.skill_catalog.get(skill_id)
             if actual != expected:
                 raise IntegrationFingerprintMismatch(
                     f"Live skill {skill_id!r} differs from the registered "
@@ -1361,7 +1361,7 @@ class SimulationTaskProgramRegistration:
             )
         builtin_skills = {
             descriptor.skill_id: descriptor
-            for action_type in BUILTIN_ACTION_TYPES
+            for action_type in BUILTIN_SKILL_TYPES
             if (descriptor := action_type.descriptor()).agent_visible
             and descriptor.binding_contract is not None
         }
@@ -1563,14 +1563,14 @@ class SimulationTaskProgramRegistration:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> tuple[RegisteredSemanticLowerer, ...]:
         """Create fresh live lowerers declared by this registration."""
         self.assert_unchanged()
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         if engine.robot is not robot:
             raise ValueError("engine and factory must reference the exact same robot.")
 
@@ -1626,7 +1626,7 @@ class SimulationTaskProgramRegistration:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         scene_provider: SceneProvider,
     ) -> EffectEvidenceProvider | None:
         """Create the registration-owned live control-part evidence provider.
@@ -1647,8 +1647,8 @@ class SimulationTaskProgramRegistration:
             return None
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         if engine.robot is not robot:
             raise ValueError("engine and factory must reference the exact same robot.")
         if not isinstance(scene_provider, SceneProvider):
@@ -1697,7 +1697,7 @@ class SimulationTaskProgramRegistration:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> ParallelCommandSafetyValidator | None:
         """Create and strictly validate the registration-owned live safety gate."""
         self.assert_unchanged()
@@ -1706,8 +1706,8 @@ class SimulationTaskProgramRegistration:
             return None
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         if engine.robot is not robot:
             raise ValueError("engine and factory must reference the exact same robot.")
         with self._parallel_safety_validator_lock:
@@ -1739,7 +1739,7 @@ class SimulationTaskProgramRegistration:
         self.assert_unchanged()
         self.catalog.scene.validate_registry(registry)
 
-    def validate_engine(self, engine: AtomicActionEngine) -> None:
+    def validate_engine(self, engine: AtomicSkillEngine) -> None:
         """Validate live atomic skills against this registration."""
         self.assert_unchanged()
         self.catalog.validate_engine(engine)

@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import ClassVar
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
+    AtomicSkillEngine,
     MoveHeldObject,
     MoveHeldObjectOptions,
     HeldObjectPoseGoal,
@@ -122,7 +122,7 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Bind an exact target without observing the robot or solving IK."""
         del context, bound
@@ -206,7 +206,7 @@ class RoutedMoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Validate canonical references and retain only inert declarations.
 
@@ -214,7 +214,7 @@ class RoutedMoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
             simulation: Owning simulation; no live state is read.
             robot: Exact robot selected by the existing engine.
             scene_registry: Registry containing the declared canonical identities.
-            engine: Existing AtomicActionEngine; no skill registration is changed.
+            engine: Existing AtomicSkillEngine; no skill registration is changed.
 
         Returns:
             A fresh lowerer with no retained simulator or robot handle.

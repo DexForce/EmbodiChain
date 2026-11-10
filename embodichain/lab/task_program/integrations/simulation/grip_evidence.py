@@ -29,11 +29,11 @@ from embodichain.lab.sim.sensors.contact.sensor import (
     ArticulationContactFilterCfg,
 )
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
-from embodichain.lab.sim.atomic_actions.grip_evidence import (
+from embodichain.lab.sim.atomic_skills.grip_evidence import (
     GripContactObserver,
     DriverOpeningBinding,
 )
-from embodichain.lab.sim.atomic_actions.scene import SceneProvider
+from embodichain.lab.sim.atomic_skills.scene import SceneProvider
 from embodichain.lab.task_program.semantics.evidence import (
     BinaryEffectEvidenceQuery,
     BinaryEffectObservation,
