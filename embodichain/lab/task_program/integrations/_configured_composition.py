@@ -41,6 +41,8 @@ from .configured import (
     _decode_motion_policy,
     _decode_recovery_policy,
     _identifier,
+    _normalize_skill_options_key,
+    _normalize_recovery_policy_keys,
     _mapping,
 )
 
@@ -78,7 +80,7 @@ _EXECUTION_POLICY_OVERRIDE_FIELDS = {
             "dynamic_collision_mode",
         }
     ),
-    "recovery": frozenset({"action_timeout", "goal_rotation_threshold"}),
+    "recovery": frozenset({"skill_timeout", "goal_rotation_threshold"}),
 }
 
 
@@ -347,7 +349,14 @@ def _resolve_execution_policy(
         )
     )
     _identifier(policy["policy_id"], path="execution policy.policy_id")
+    policy["recovery"] = _normalize_recovery_policy_keys(
+        policy["recovery"], path="execution policy.recovery"
+    )
     for group, values in overrides.items():
+        if group == "recovery":
+            values = _normalize_recovery_policy_keys(
+                values, path=f"{selection_path}.overrides.recovery"
+            )
         patch = _mapping(
             values,
             path=f"{selection_path}.overrides.{group}",
@@ -547,14 +556,14 @@ def _compose_integration_payload(
         )
 
     profile = _mapping(
-        task["profile"],
+        _normalize_skill_options_key(task["profile"], path="task integration.profile"),
         path="task integration.profile",
-        required=frozenset({"defaults", "action_options", "effect_monitors"}),
+        required=frozenset({"defaults", "skill_options", "effect_monitors"}),
         optional=frozenset({"skill_presets", "grounding_providers"}),
     )
     preset = {
         "preset_id": deepcopy(policy["preset_id"]),
-        "action_options": deepcopy(profile["action_options"]),
+        "skill_options": deepcopy(profile["skill_options"]),
         "motion": deepcopy(policy["motion"]),
         "tracking": deepcopy(policy["tracking"]),
         "recovery": deepcopy(policy["recovery"]),

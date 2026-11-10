@@ -50,6 +50,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.visualization.cfg import VisualizationCfg
 
 __all__ = ["main"]
 
@@ -126,6 +127,7 @@ def main() -> None:
         sim = SimulationManager(
             SimulationManagerCfg(
                 headless=True,
+                visualization=VisualizationCfg(backend="none"),
                 num_envs=args.num_envs,
                 device="cpu",
                 physics_dt=1 / 60,

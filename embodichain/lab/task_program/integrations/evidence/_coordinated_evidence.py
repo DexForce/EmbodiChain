@@ -176,7 +176,7 @@ def holding(operation, runtime, program, count, dt, final):
         one(
             value
             for value in call["events"]
-            if value["kind"] == "action_completed"
+            if value["kind"] == "skill_completed"
             and value.get("invocation_id") == call["invocation_id"]
             and value.get("invocation_revision") == call["invocation_revision"]
         )["timestamp"]

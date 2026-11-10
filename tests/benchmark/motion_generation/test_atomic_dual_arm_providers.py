@@ -958,7 +958,7 @@ def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
         compiled=SimpleNamespace(
             plan_success=torch.zeros(batch, dtype=torch.bool),
             trajectory=SimpleNamespace(env_ids=torch.arange(batch)),
-            action_plans=(
+            skill_plans=(
                 SimpleNamespace(
                     skill_id="hand_over",
                     diagnostics=SimpleNamespace(
@@ -1004,7 +1004,7 @@ def test_hand_over_rejects_invalid_grasp_rows_before_endpoint_ik(
 ):
     """Finite placeholder transforms must not be misreported as unreachable IK."""
     generate, reference, robot = _hand_over_generation(monkeypatch)
-    sample = reference.compiled.action_plans[0].diagnostics.metadata[
+    sample = reference.compiled.skill_plans[0].diagnostics.metadata[
         "affordance_sample"
     ][sample_name]
     failed = [1, 2, 6, 7]
@@ -1034,7 +1034,7 @@ def test_hand_over_valid_samples_allow_failed_reference_plan(
     generate, reference, robot = _hand_over_generation(monkeypatch)
     if not candidate_diagnostics:
         for sample in (
-            reference.compiled.action_plans[0]
+            reference.compiled.skill_plans[0]
             .diagnostics.metadata["affordance_sample"]
             .values()
         ):
@@ -1057,7 +1057,7 @@ def test_hand_over_valid_samples_allow_failed_reference_plan(
 def test_hand_over_missing_sampling_evidence_is_not_accepted(monkeypatch, missing):
     """Optional generic planner diagnostics cannot certify new grasp inputs."""
     generate, reference, robot = _hand_over_generation(monkeypatch)
-    metadata = reference.compiled.action_plans[0].diagnostics.metadata
+    metadata = reference.compiled.skill_plans[0].diagnostics.metadata
     if missing == "affordance_sample":
         metadata.clear()
     elif missing == "receive_grasp":

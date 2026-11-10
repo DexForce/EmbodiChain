@@ -2661,21 +2661,21 @@ embodichain.lab.sim
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
-embodichain.lab.sim.atomic_actions
+embodichain.lab.sim.atomic_skills
 ----------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions
+.. currentmodule:: embodichain.lab.sim.atomic_skills
 
 .. autosummary::
 
-   ActionPlanningServices
+   SkillPlanningServices
    Affordance
    AffordancePoseCandidates
    AffordanceSample
    AffordanceSamplingContext
    AntipodalAffordance
    AssembleAffordance
-   BUILTIN_ACTION_TYPES
+   BUILTIN_SKILL_TYPES
    CoordinatedPickmentOptions
    CoordinatedPlacementOptions
    DynamicCollisionMode
@@ -2687,7 +2687,7 @@ embodichain.lab.sim.atomic_actions
    MoveEndEffectorOptions
    MoveHeldObjectOptions
    MoveJointsOptions
-   ObjectActionGoal
+   ObjectSkillGoal
    OPEN_COMMAND
    PickUpOptions
    PlaceOptions
@@ -2702,10 +2702,10 @@ embodichain.lab.sim.atomic_actions
    SceneProvider
    SceneSnapshotSupplier
 
-embodichain.lab.sim.atomic_actions.affordance
+embodichain.lab.sim.atomic_skills.affordance
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.affordance
+.. currentmodule:: embodichain.lab.sim.atomic_skills.affordance
 
 .. autosummary::
 
@@ -2718,14 +2718,14 @@ embodichain.lab.sim.atomic_actions.affordance
    InteractionPoints
    AssembleAffordance
 
-.. automodule:: embodichain.lab.sim.atomic_actions.affordance
+.. automodule:: embodichain.lab.sim.atomic_skills.affordance
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.affordance_sampling
+embodichain.lab.sim.atomic_skills.affordance_sampling
 -------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
+.. currentmodule:: embodichain.lab.sim.atomic_skills.affordance_sampling
 
 .. autosummary::
 
@@ -2733,30 +2733,30 @@ embodichain.lab.sim.atomic_actions.affordance_sampling
    AffordanceSample
    AffordanceSamplingContext
 
-.. automodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
+.. automodule:: embodichain.lab.sim.atomic_skills.affordance_sampling
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.bindings
+embodichain.lab.sim.atomic_skills.bindings
 -------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.bindings
+.. currentmodule:: embodichain.lab.sim.atomic_skills.bindings
 
 .. autosummary::
 
-   ActionBinding
+   SkillBinding
    EndpointBinding
    JointPositionTarget
    RuntimeEndpointTarget
 
-embodichain.lab.sim.atomic_actions.control
+embodichain.lab.sim.atomic_skills.control
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.control
+.. currentmodule:: embodichain.lab.sim.atomic_skills.control
 
 .. autosummary::
 
-   ActionControlOverrides
+   SkillControlOverrides
    ControlCommand
    ControlPartCommandProfile
    GRASP_COMMAND
@@ -2764,14 +2764,14 @@ embodichain.lab.sim.atomic_actions.control
    OPEN_COMMAND
    PARK_COMMAND
 
-embodichain.lab.sim.atomic_actions.core
+embodichain.lab.sim.atomic_skills.core
 ---------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.core
+.. currentmodule:: embodichain.lab.sim.atomic_skills.core
 
 .. autosummary::
 
-   AtomicAction
+   AtomicSkill
    CompletePlanBuilder
    ObjectSemantics
    SkillDescriptor
@@ -2792,32 +2792,32 @@ finalization transforms once and cannot replace the logical recovery proposal.
    :members:
 
 
-embodichain.lab.sim.atomic_actions.effects
+embodichain.lab.sim.atomic_skills.effects
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.effects
+.. currentmodule:: embodichain.lab.sim.atomic_skills.effects
 
 .. autosummary::
 
    StateDelta
 
-embodichain.lab.sim.atomic_actions.engine
+embodichain.lab.sim.atomic_skills.engine
 -----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.engine
+.. currentmodule:: embodichain.lab.sim.atomic_skills.engine
 
 .. autosummary::
 
-   AtomicActionEngine
+   AtomicSkillEngine
 
-embodichain.lab.sim.atomic_actions.execution
+embodichain.lab.sim.atomic_skills.execution
 --------------------------------------------
 
 An explicit host lifecycle observes owned installed plans before dispatch. A
 rejected installation blocks ticks and revisions until the runner completes its
 ordinary safe stop and invalidates the lifecycle. Omission preserves execution.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.execution
+.. currentmodule:: embodichain.lab.sim.atomic_skills.execution
 
 .. autosummary::
 
@@ -2830,10 +2830,10 @@ ordinary safe stop and invalidates the lifecycle. Omission preserves execution.
 
    ExecutionPlanLifecycle
 
-embodichain.lab.sim.atomic_actions.verification
+embodichain.lab.sim.atomic_skills.verification
 ------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
+.. currentmodule:: embodichain.lab.sim.atomic_skills.verification
 
 .. autosummary::
 
@@ -2845,14 +2845,14 @@ embodichain.lab.sim.atomic_actions.verification
    PhaseEffectGateRequest
    PhaseEffectGateResult
 
-embodichain.lab.sim.atomic_actions.goals
+embodichain.lab.sim.atomic_skills.goals
 ----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.goals
+.. currentmodule:: embodichain.lab.sim.atomic_skills.goals
 
 .. autosummary::
 
-   ObjectActionGoal
+   ObjectSkillGoal
    PoseGoalValue
    SceneEntityPose
    collect_scene_dependencies
@@ -2860,36 +2860,36 @@ embodichain.lab.sim.atomic_actions.goals
    validate_pose_goal
    validate_pose_tensor
 
-.. automodule:: embodichain.lab.sim.atomic_actions.goals
+.. automodule:: embodichain.lab.sim.atomic_skills.goals
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.invocation
+embodichain.lab.sim.atomic_skills.invocation
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.invocation
+.. currentmodule:: embodichain.lab.sim.atomic_skills.invocation
 
 .. autosummary::
 
-   ActionInvocation
-   ActionOptions
+   SkillInvocation
+   SkillOptions
    GoalT
    OptionsT
    PhaseEffectGateRequirement
-   ResolvedActionRequest
+   ResolvedSkillRequest
 
-embodichain.lab.sim.atomic_actions.plans
+embodichain.lab.sim.atomic_skills.plans
 ----------------------------------------
 
 Qualification masks and immutable recovery proposals carry planned information.
 A proposal identifies its invocation and plan, and is never a physical effect
-or an automatic state commit. ActionPlan snapshots own these values.
+or an automatic state commit. SkillPlan snapshots own these values.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.plans
+.. currentmodule:: embodichain.lab.sim.atomic_skills.plans
 
 .. autosummary::
 
-   ActionPlan
+   SkillPlan
    CompiledTrajectory
    EffectVerificationRequirement
    PlannerDiagnostics
@@ -2901,7 +2901,7 @@ or an automatic state commit. ActionPlan snapshots own these values.
    PlanQualification
    PlanningRecoveryOutcome
 
-embodichain.lab.sim.atomic_actions.policies
+embodichain.lab.sim.atomic_skills.policies
 -------------------------------------------
 
 PlanningRecovery is immutable finite scalar/tuple data for an exact skill and
@@ -2917,7 +2917,7 @@ Segment recovery requires fixed-grid sequential IK; unsupported Atomic skills
 reject it before request/provider preparation. Final speed rejection retains
 its explicit hold or mask-only representation and cannot promote failed rows.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.policies
+.. currentmodule:: embodichain.lab.sim.atomic_skills.policies
 
 .. autosummary::
 
@@ -2928,19 +2928,19 @@ its explicit hold or mask-only representation and cannot promote failed rows.
    PlanningRecovery
    PlanningBudget
 
-embodichain.lab.sim.atomic_actions.primitives
+embodichain.lab.sim.atomic_skills.primitives
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives
 
 .. autosummary::
 
-   BUILTIN_ACTION_TYPES
+   BUILTIN_SKILL_TYPES
 
-embodichain.lab.sim.atomic_actions.requirements
+embodichain.lab.sim.atomic_skills.requirements
 -----------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.requirements
+.. currentmodule:: embodichain.lab.sim.atomic_skills.requirements
 
 .. autosummary::
 
@@ -2956,10 +2956,10 @@ embodichain.lab.sim.atomic_actions.requirements
    SkillEndpointRequirement
    SkillResourceSlot
 
-embodichain.lab.sim.atomic_actions.runner
+embodichain.lab.sim.atomic_skills.runner
 -----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.runner
+.. currentmodule:: embodichain.lab.sim.atomic_skills.runner
 
 .. autosummary::
 
@@ -2980,19 +2980,19 @@ embodichain.lab.sim.atomic_actions.runner
    RunnerStep
    RunnerStepCallback
 
-embodichain.lab.sim.atomic_actions.runtime
+embodichain.lab.sim.atomic_skills.runtime
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.runtime
+.. currentmodule:: embodichain.lab.sim.atomic_skills.runtime
 
 .. autosummary::
 
-   ActionPlanningServices
+   SkillPlanningServices
 
-embodichain.lab.sim.atomic_actions.runtime_commands
+embodichain.lab.sim.atomic_skills.runtime_commands
 ---------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.runtime_commands
+.. currentmodule:: embodichain.lab.sim.atomic_skills.runtime_commands
 
 .. autosummary::
 
@@ -3002,34 +3002,34 @@ embodichain.lab.sim.atomic_actions.runtime_commands
    RuntimeCommandPayload
    TimedCommandSequence
 
-embodichain.lab.sim.atomic_actions.scene
+embodichain.lab.sim.atomic_skills.scene
 ----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.scene
+.. currentmodule:: embodichain.lab.sim.atomic_skills.scene
 
 .. autosummary::
 
    SceneProvider
 
-embodichain.lab.sim.atomic_actions.sim_adapter
+embodichain.lab.sim.atomic_skills.sim_adapter
 ----------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.sim_adapter
+.. currentmodule:: embodichain.lab.sim.atomic_skills.sim_adapter
 
 .. autosummary::
 
    create_rigidized_articulation_antipodal_semantics
-   create_simulation_atomic_action_engine
+   create_simulation_atomic_skill_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
    SceneEntity
    SceneSnapshotSupplier
    SimulationExecutionAdapter
 
-embodichain.lab.sim.atomic_actions.state
+embodichain.lab.sim.atomic_skills.state
 ----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.state
+.. currentmodule:: embodichain.lab.sim.atomic_skills.state
 
 .. autosummary::
 
@@ -3040,14 +3040,14 @@ embodichain.lab.sim.atomic_actions.state
    SceneSnapshot
    TaskState
 
-.. automodule:: embodichain.lab.sim.atomic_actions.state
+.. automodule:: embodichain.lab.sim.atomic_skills.state
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.trajectory_ops
+embodichain.lab.sim.atomic_skills.trajectory_ops
 -------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.trajectory_ops
+.. currentmodule:: embodichain.lab.sim.atomic_skills.trajectory_ops
 
 .. autosummary::
 
@@ -3062,10 +3062,10 @@ embodichain.lab.sim.atomic_actions.trajectory_ops
    to_full_robot_trajectory
    translate_pose_world
 
-embodichain.lab.sim.atomic_actions.transports
+embodichain.lab.sim.atomic_skills.transports
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.transports
+.. currentmodule:: embodichain.lab.sim.atomic_skills.transports
 
 .. autosummary::
 
@@ -4736,14 +4736,14 @@ and impulses. Invalid or ambiguous data remains distinct from a measured negativ
 
    classify_contacts
 
-embodichain.lab.sim.atomic_actions.grip_evidence
+embodichain.lab.sim.atomic_skills.grip_evidence
 ------------------------------------------------
 
 Shared physical grip interpretation consumes a PhysicalEvidenceRequest and
 explicit actor bindings, without Semantic Call or Task Program types. Results
 are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrations.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.grip_evidence
+.. currentmodule:: embodichain.lab.sim.atomic_skills.grip_evidence
 
 .. autosummary::
 
@@ -4801,7 +4801,7 @@ embodichain.lab.task_program.runtime.lifecycle
 Provider-free runtime factory interfaces select one explicit lifecycle for a
 grounded occurrence. Composite factories reject duplicate or competing owners;
 construction does not plan, transform commands or start a simulator. Hosts can
-pass the selected port to AtomicActionEngine.start.
+pass the selected port to AtomicSkillEngine.start.
 
 .. currentmodule:: embodichain.lab.task_program.runtime.lifecycle
 
@@ -5276,12 +5276,12 @@ Portable, bounded JSON/NPZ bundles retain the raw recording separately from expl
 .. autofunction:: load_demo_skill
 
 
-embodichain.lab.sim.atomic_actions.demo_skill
+embodichain.lab.sim.atomic_skills.demo_skill
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Scene grounding and per-observation monitoring for one demonstration invocation. Evidence must match the physical row and observation timestamp; absent contact or task evidence cannot establish success.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.demo_skill
+.. currentmodule:: embodichain.lab.sim.atomic_skills.demo_skill
 
 .. autosummary::
 
@@ -5303,12 +5303,12 @@ Scene grounding and per-observation monitoring for one demonstration invocation.
    :members:
 
 
-embodichain.lab.sim.atomic_actions.primitives.execute_demo_skill
+embodichain.lab.sim.atomic_skills.primitives.execute_demo_skill
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 One Atomic Skill executes a pinned demonstration asset through the ordinary planning, command, tracking and effect-verification lifecycle. Logical roles are resolved through the selected robot profile and scene integration.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives.execute_demo_skill
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives.execute_demo_skill
 
 .. autosummary::
 

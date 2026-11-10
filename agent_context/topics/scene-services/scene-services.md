@@ -61,7 +61,7 @@ reads belong to `objects/backends/collision.py`; closing FK reuses
 [hand geometry](../robot-system/robot-system.md#sampled-hand-geometry).
 It creates no collision query and selects no grasp policy. Geometric qualification
 belongs to [GraspKit](../motion-planning/motion-planning.md); query composition and
-cleanup belong to `ActionPlanningServices` in [Atomic Actions](../atomic-actions/atomic-actions.md).
+cleanup belong to `SkillPlanningServices` in [Atomic Skills](../atomic-actions/atomic-actions.md).
 Captured shapes and nominal queries do not establish physical acquisition/release.
 
 Static control readers consume explicit authored roles, keep source mesh frames

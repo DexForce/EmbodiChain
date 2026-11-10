@@ -36,14 +36,14 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
     AxisAlignAffordance,
     ControlPartCommandProfile,
     EntityState,
     create_rigidized_articulation_antipodal_affordance,
 )
-from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+from embodichain.lab.sim.atomic_skills.articulation_geometry import (
     _rigidized_articulation_tolerance,
 )
 from embodichain.lab.task_program.semantics.profiles import (
