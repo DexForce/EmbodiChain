@@ -21,9 +21,12 @@ import os
 from dataclasses import fields, replace
 from typing import TypeVar
 
+import numpy as np
+
 from dexsim.spawn import (
     ArticulationDesc,
     CollisionDesc,
+    ConstraintDesc,
     MaterialDesc,
     ObjectDesc,
     RenderDesc,
@@ -218,7 +221,30 @@ def articulation_desc_from_usd(
     source_path: str | None = None,
     newton_solver_type: str | None = None,
 ) -> tuple[ArticulationDesc, dict[str, MaterialDesc]]:
-    """Select an articulation by exact prim path, or require a singleton stage."""
+    """Select a standalone articulation descriptor by exact USD prim path.
+
+    Use a SimulationManager to import articulations with scene constraints.
+    """
+    desc, materials, constraints = _load_usd_articulation(
+        cfg,
+        per_env=per_env,
+        source_path=source_path,
+        newton_solver_type=newton_solver_type,
+    )
+    if constraints:
+        raise ValueError(
+            "USD articulation has scene constraints. Use SimulationManager."
+        )
+    return desc, materials
+
+
+def _load_usd_articulation(
+    cfg: ArticulationCfg,
+    *,
+    per_env: bool = True,
+    source_path: str | None = None,
+    newton_solver_type: str | None = None,
+) -> tuple[ArticulationDesc, dict[str, MaterialDesc], list[ConstraintDesc]]:
     preserve_asset_physics = cfg.resolve_asset_physics_mode() == "preserve"
     if not preserve_asset_physics:
         _validate_articulation_rigid_physics(
@@ -234,23 +260,58 @@ def articulation_desc_from_usd(
         cfg.uid or os.path.splitext(os.path.basename(str(path)))[0],
         "Articulation",
     )
-    cfg.uid = uid
-    desc.name = uid
     desc.pose = _pose_from_cfg(cfg)
     desc.per_env = per_env
+    constraints = _articulation_constraints(desc, scene.constraints, uid)
+    cfg.uid = uid
+    desc.name = uid
     renders = [visual for link in desc.links for visual in link.visuals]
     materials = _namespace_materials(renders, scene.materials, uid)
 
     if preserve_asset_physics:
         cfg.body_scale = tuple(float(value) for value in desc.body_scale)
     else:
-        desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
+        scale = _vector3(cfg.body_scale, field_name="body_scale")
+        if constraints and not np.array_equal(scale, desc.body_scale):
+            raise ValueError(
+                "USD articulation with scene constraints requires the authored body scale."
+            )
+        desc.body_scale = scale
     desc.fixed_base, desc.enable_self_collision = _articulation_root_values(
         cfg,
         fixed_base_default=bool(desc.fixed_base),
         self_collision_default=desc.enable_self_collision,
     )
-    return desc, materials
+    return desc, materials, constraints
+
+
+def _articulation_constraints(
+    desc: ArticulationDesc, constraints: list[ConstraintDesc], uid: str
+) -> list[ConstraintDesc]:
+    """Keep constraints internal to the selected articulation and remap their endpoints."""
+    endpoints = {
+        f"{desc.name}/{link.name}": f"{uid}/{link.name}" for link in desc.links
+    }
+    selected = []
+    for constraint in constraints:
+        body0, body1 = constraint.body0, constraint.body1
+        if body0 not in endpoints and body1 not in endpoints:
+            continue
+        if body0 not in endpoints or body1 not in endpoints:
+            raise ValueError(
+                f"USD constraint {constraint.name!r} connects the selected "
+                "articulation to an external endpoint. Use add_usd()."
+            )
+        selected.append(
+            replace(
+                constraint,
+                name=f"{uid}/{constraint.name}",
+                body0=endpoints[body0],
+                body1=endpoints[body1],
+                per_env=desc.per_env,
+            )
+        )
+    return selected
 
 
 def _parse_singleton(

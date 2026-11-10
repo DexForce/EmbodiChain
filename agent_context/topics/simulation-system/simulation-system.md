@@ -41,6 +41,12 @@ as visuals. Conflicting visual UIDs receive the scene-name prefix while returned
 keys preserve source prim paths. Other import UID conflicts fail before declaration.
 Imported facades retain their source address in `cfg.source`. This metadata
 does not request a second spawn or bind an unrelated existing scene entity.
+Single-articulation USD imports through `add_robot()` and
+`add_articulation()` keep constraints between links of the selected prim.
+`spawn/usd.py` maps endpoints and constraint names to the runtime UID and
+keeps the authored body-local frames and scale. Declare constrained assets
+before `prepare()` on Default/PhysX. Use `add_usd()` when constraints connect
+the articulation to another object or the world.
 Visuals retain facade-owned pose/visibility/material-assignment state across native
 topology rebuilds, with separate reset baselines. They use the same prepare,
 replication, selective reset, removal and teardown owners as physical assets. They do not enter physical scene snapshots or planners.

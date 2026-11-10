@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from ._usd_assets import _UsdTextureFiles
 from .._material_presets import (
@@ -29,6 +29,9 @@ from .._material_presets import (
     _MaterialResources,
     _validate_backend,
 )
+
+if TYPE_CHECKING:
+    from dexsim.spawn import ConstraintDesc
 
 __all__ = ["SpawnScene"]
 
@@ -174,6 +177,7 @@ class SpawnScene:
         *,
         facade: Any | None = None,
         configure_source: Callable[[Any], None] | None = None,
+        constraints: list[ConstraintDesc] | None = None,
     ) -> None:
         """Add a descriptor and associate it with an EmbodiChain facade."""
         if uid in self._assets:
@@ -200,6 +204,14 @@ class SpawnScene:
                 declaration.descriptor = tuple(
                     self.builder.add_object(member) for member in descriptor
                 )
+        elif constraints:
+            from dexsim.spawn import SceneDesc
+
+            # Validate the articulation and all its endpoints together before
+            # declaring either the robot or its constraints.
+            scene = SceneDesc(articulations=[descriptor], constraints=constraints)
+            with self._native_material_scope():
+                declaration.descriptor = self.builder.add_scene(scene)[0]
         else:
             if (
                 kind == "articulation"

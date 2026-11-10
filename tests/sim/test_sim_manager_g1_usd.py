@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Exercise the original #904 asset through the public whole-scene API.
+"""Exercise the original #904 asset through both public USD import paths.
 
 Set EMBODICHAIN_G1_USD to the original G1_120s/robot.usda, with all referenced
 layers and meshes present. The asset is supplied locally by the test operator.
@@ -46,7 +46,8 @@ TARGET_TOLERANCE_RAD = 0.02
 
 
 @pytest.mark.subprocess_sim
-def test_add_usd_preserves_original_g1_gripper_loops() -> None:
+@pytest.mark.parametrize("entry_point", ["add_usd", "add_robot"])
+def test_import_preserves_original_g1_gripper_loops(entry_point: str) -> None:
     path = os.environ.get("EMBODICHAIN_G1_USD")
     if not path:
         pytest.skip("Set EMBODICHAIN_G1_USD to the original G1_120s/robot.usda")
@@ -57,6 +58,7 @@ def test_add_usd_preserves_original_g1_gripper_loops() -> None:
             sys.executable,
             str(Path(__file__).resolve()),
             str(Path(path).resolve(strict=True)),
+            entry_point,
         ],
         capture_output=True,
         text=True,
@@ -65,7 +67,7 @@ def test_add_usd_preserves_original_g1_gripper_loops() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def _check_g1(path: str) -> None:
+def _check_g1(path: str, entry_point: str) -> None:
     import dexsim
     import numpy as np
     import torch
@@ -74,6 +76,7 @@ def _check_g1(path: str) -> None:
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RenderCfg, RobotCfg
     from embodichain.lab.sim.objects import Robot
+    from embodichain.robot_registry import resolve_robot_cfg
 
     def jaw_gaps(robot: Robot) -> torch.Tensor:
         return torch.stack(
@@ -105,11 +108,20 @@ def _check_g1(path: str) -> None:
         robot = scene = None
         closures = []
         try:
-            robot = sim.add_usd(
-                "G1",
-                path,
-                robot_cfgs={"/G1": RobotCfg(uid="G1", control_parts=CONTROL_PARTS)},
-            )["/G1"]
+            if entry_point == "add_robot":
+                cfg = resolve_robot_cfg(
+                    "AgibotG1",
+                    {"source": {"file_path": path, "source_prim_path": "/G1"}},
+                )
+                robot = sim.add_robot(cfg)
+                expected_names = {f"AgibotG1/{name}" for name in CLOSURE_JOINTS}
+            else:
+                robot = sim.add_usd(
+                    "G1",
+                    path,
+                    robot_cfgs={"/G1": RobotCfg(uid="G1", control_parts=CONTROL_PARTS)},
+                )["/G1"]
+                expected_names = CLOSURE_JOINTS
             assert isinstance(robot, Robot)
             sim.prepare()
             scene = sim.spawn_result
@@ -120,7 +132,8 @@ def _check_g1(path: str) -> None:
                 if isinstance(handle, SpawnedConstraint)
             ]
             assert len(closures) == len(CLOSURE_JOINTS)
-            assert {handle.get_name() for handle in closures} == CLOSURE_JOINTS
+            assert {handle.get_name() for handle in closures} == expected_names
+            assert len(robot.mimic_ids) == 6  # Three source mimic joints per jaw.
             sim.get_world().enable_physics(True)
 
             if reimport:
@@ -157,4 +170,4 @@ def _check_g1(path: str) -> None:
 
 
 if __name__ == "__main__":
-    _check_g1(sys.argv[1])
+    _check_g1(sys.argv[1], sys.argv[2])

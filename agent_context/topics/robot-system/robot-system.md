@@ -15,6 +15,7 @@
 | Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
+| AgiBot G1 preset and pinned GenieSim USD | `extensions/embodichain_robots/agibot/g1/` → `cfg.py`, `assets.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -67,10 +68,16 @@ Locomotion presets and pure Torch task contracts share backend-free model
 profiles. For source/contract joint ordering, drive ownership and solver limits,
 see [locomotion model profiles](catalogs.md#locomotion-model-profiles).
 
+`AgibotG1` selects the original GenieSim G1_120s USD and exposes its driven
+joints. Each gripper part commands one driver. The
+[USD import contract](../simulation-system/simulation-system.md#ownership) owns
+the closed-loop constraints and backend support.
+
 `preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
 File `class_type` optionally selects the catalog; local asset paths, including
-`urdf_cfg.sensors[*].sensor_source` URDF files in lists or mappings, resolve
-from the file directory. Inline sensor definitions and data IDs are preserved.
+`source.file_path` USD files and `urdf_cfg.sensors[*].sensor_source` URDF
+files in lists or mappings, resolve from the file directory. Inline sensor
+definitions and data IDs are preserved.
 Configuration decoding and validation precede World
 creation. Native and Viser lifecycle, Gizmo/slider target coordination, and
 cleanup belong to [preview activation](../sim-visualization/configuration.md#robot-preview).

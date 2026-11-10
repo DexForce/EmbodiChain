@@ -68,11 +68,14 @@ def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
                 else "so101_assets" if name == "SO101FollowerAssets" else "robot_assets"
             )
         )
-        assert (
-            getattr(import_module("embodichain.data.assets." + legacy), name)
-            is canonical
-        )
-        assert getattr(assets, name) is canonical
+        if name == "AgibotG1":
+            assert not hasattr(assets, name)
+        else:
+            assert (
+                getattr(import_module("embodichain.data.assets." + legacy), name)
+                is canonical
+            )
+            assert getattr(assets, name) is canonical
         assert get_data_class(name) is canonical
         assert dict(registry[spec["category"]])[name] is canonical
         assert canonical.__module__ == module
@@ -143,6 +146,7 @@ def test_asset_resolution_preserves_explicit_extra_modules(monkeypatch) -> None:
         "embodichain_robots.arx.arx5.assets",
         "embodichain_robots.brainco.revo1.assets",
         "embodichain_robots.agilex.pika.assets",
+        "embodichain_robots.agibot.g1.assets",
         "embodichain_robots.franka.assets",
         "embodichain_robots.the_robot_studio.so101.assets",
         "embodichain_robots.unitree.go2.assets",
@@ -226,6 +230,7 @@ def test_robot_asset_listing_includes_locomotion_and_existing_robots(capsys) -> 
     names = [name for name, _ in registry["robot"]]
     assert set(LOCOMOTION_ASSETS).issubset(names)
     assert {
+        "AgibotG1",
         "UnitreeH1",
         "UnitreeH1Usd",
         "CartPole",
