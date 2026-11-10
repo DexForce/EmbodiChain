@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization
-suite_version: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization_v7
+suite_version: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization_v8
 profile: coverage
 
 robot:
@@ -12,7 +12,7 @@ robot:
     urdf_name: benchmark_dual_ur5_coordinated_placement
     tcp_z: 0.121
     solver: ur
-    init_pos: [1.85, 0.0, 0.1]
+    init_pos: [1.85, 0.0, 0.3]
 
 planners:
   - id: toppra
@@ -354,7 +354,7 @@ tracks:
           kind: mesh
           asset_path: CoordinatedPlacementAndPickment/bread.glb
           scale: [1.75, 1.75, 1.75]
-          position: [0.007266, 0.172187, 0.675881]
+          position: [0.007266, 0.172187, 0.715881]
           rotation_deg: [88.282569, -85.590228, -1.661869]
           max_convex_hull_num: 8
           mass: 0.01
@@ -366,7 +366,7 @@ tracks:
           kind: mesh
           asset_path: CoordinatedPlacementAndPickment/pan.glb
           scale: [1.75, 1.75, 1.75]
-          position: [0.000968, -0.141895, 0.651]
+          position: [0.000968, -0.141895, 0.675]
           rotation_deg: [90.589028, -8.186552, -179.231704]
           max_convex_hull_num: 16
           mass: 0.01

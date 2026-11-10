@@ -254,6 +254,19 @@ Other benchmark domains use separate commands: `rl`,
 --profile smoke` profiles individual actions over object and position presets;
 its reports do not contribute to this framework's planner rankings.
 
+### Frozen articulation initialization
+
+Articulation root randomization keeps the configured settling steps and the
+settled root pose, then restores actual and target joints to the captured
+initial state before freezing a case. This prevents a tilted fixture from
+starting with a gravity-actuated button or hinge. Nonzero captured joint states
+are preserved, and no additional simulation steps are introduced.
+
+The placement fixtures also keep their cooked bread/pan geometry above the
+table before settling. Reproducible collision-hull figures, recorded joint
+coordinates and the measured comparison limits are in the
+[initial-state evidence](../../../scripts/benchmark/motion_generation/evidence/initial_state/README.md).
+
 ### Dual Franka planner ownership
 
 The two Franka fixtures evaluate HandOver and CoordinatedPlacement through

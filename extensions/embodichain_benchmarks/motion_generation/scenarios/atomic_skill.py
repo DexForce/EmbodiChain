@@ -1945,7 +1945,7 @@ class AtomicSkillScenario(ScenarioProvider):
         seed: int,
         stream: int,
     ) -> torch.Tensor:
-        """Translate and yaw an articulation root in every environment.
+        """Perturb an articulation root while preserving its frozen joints.
 
         The articulation joint state stays frozen.  Skill-local position and
         yaw ranges override the pose-batch track's object-pose ranges.
@@ -1962,8 +1962,12 @@ class AtomicSkillScenario(ScenarioProvider):
             )
         if self.simulation is not None and update_steps:
             self.simulation.update(step=update_steps)
-        handle.entity.clear_dynamics()
-        return handle.entity.get_local_pose(to_matrix=True).clone()
+        settled_pose = handle.entity.get_local_pose(to_matrix=True).clone()
+        # A tilted root can actuate weakly driven joints during settling.
+        # Keep the settled root, but freeze the configured joint state used to
+        # derive link targets. reset also refreshes link FK after the qpos write.
+        handle.reset(pose=settled_pose, qpos=handle.initial_qpos)
+        return settled_pose
 
     def randomize_object_pose(
         self,

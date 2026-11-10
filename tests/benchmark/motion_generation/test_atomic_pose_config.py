@@ -1221,28 +1221,57 @@ def test_support_object_ranges_do_not_inherit_primary_object_ranges() -> None:
 
 
 def test_randomize_articulation_root_pose_is_deterministic() -> None:
-    """Articulation roots vary reproducibly over enabled 3D pose axes."""
+    """Root settling preserves configured joints, including nonzero hinge states."""
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_objects import (
+        AtomicArticulationHandle,
+    )
+
     batch_size = 4
     initial_pose = torch.eye(4).repeat(batch_size, 1, 1)
     initial_pose[:, :3, 3] = torch.tensor([-1.0, -0.3, 0.4])
     initial_qpos = torch.zeros(batch_size, 4)
-    state = {"pose": initial_pose.clone()}
+    initial_qpos[:, 1] = torch.tensor([0.0, 0.1, 0.2, 0.3])
+    expected_qpos = initial_qpos.clone()
+    state = {
+        "pose": initial_pose.clone(),
+        "qpos": initial_qpos.clone(),
+        "target": initial_qpos.clone(),
+        "qvel": torch.zeros_like(initial_qpos),
+    }
     entity = Mock()
     entity.get_local_pose.side_effect = lambda **_: state["pose"].clone()
-    handle = Mock(
+
+    def set_qpos(qpos: torch.Tensor, *, target: bool) -> None:
+        state["target" if target else "qpos"] = qpos.clone()
+
+    def set_pose(pose: torch.Tensor) -> None:
+        state["pose"] = pose.clone()
+
+    entity.set_qpos.side_effect = set_qpos
+    entity.set_local_pose.side_effect = set_pose
+    entity.clear_dynamics.side_effect = lambda: state["qvel"].zero_()
+    handle = AtomicArticulationHandle(
+        object_id="microwave",
         initial_pose=initial_pose,
         initial_qpos=initial_qpos,
         entity=entity,
         config={"reset_settle_steps": 1},
     )
-
-    def reset(*, pose: torch.Tensor, qpos: torch.Tensor) -> None:
-        state["pose"] = pose.clone()
-        torch.testing.assert_close(qpos, initial_qpos)
-
-    handle.reset.side_effect = reset
     scenario = AtomicSkillScenario()
     scenario.simulation = Mock()
+    settled_poses = []
+    settled_root_z_offset = -0.002
+
+    def settle(*, step: int) -> None:
+        assert step == 1
+        # A tilted fixture can actuate a weak button and hinge during settling.
+        state["qpos"][:, 0] = 0.006
+        state["qpos"][:, 1] += 0.03
+        state["qvel"].fill_(0.1)
+        state["pose"][:, 2, 3] += settled_root_z_offset
+        settled_poses.append(state["pose"].clone())
+
+    scenario.simulation.update.side_effect = settle
     config = {
         "articulation_position_jitter_m": [0.03, 0.02, 0.01],
         "_pose_batch": AtomicPoseRandomizationCfg(
@@ -1269,7 +1298,14 @@ def test_randomize_articulation_root_pose_is_deterministic() -> None:
     )
 
     offsets = first[:, :3, 3] - initial_pose[:, :3, 3]
+    offsets[:, 2] -= settled_root_z_offset
     torch.testing.assert_close(first, second)
+    torch.testing.assert_close(first, settled_poses[0])
+    torch.testing.assert_close(second, settled_poses[1])
+    torch.testing.assert_close(state["qpos"], expected_qpos)
+    torch.testing.assert_close(state["target"], expected_qpos)
+    torch.testing.assert_close(initial_qpos, expected_qpos)
+    torch.testing.assert_close(state["qvel"], torch.zeros_like(initial_qpos))
     assert torch.all(offsets[:, 0].abs() <= 0.03)
     assert torch.all(offsets[:, 1].abs() <= 0.02)
     assert torch.all(offsets[:, 2].abs() <= 0.01)

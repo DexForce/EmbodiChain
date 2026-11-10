@@ -3,7 +3,7 @@
 # its arm-local observations with the checked base and tool transforms below.
 schema_version: 1
 name: atomic_dual_franka_pgi_coordinated_placement
-suite_version: atomic_dual_franka_pgi_coordinated_placement_v1
+suite_version: atomic_dual_franka_pgi_coordinated_placement_v2
 profile: smoke
 robot:
   id: dual_franka_pgi_coordinated_placement
@@ -217,7 +217,7 @@ tracks:
       position:
       - 0.000968
       - -0.141895
-      - 0.656
+      - 0.675
       rotation_deg:
       - 90.589028
       - -8.186552
