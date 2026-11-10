@@ -11,7 +11,7 @@ the :class:`SimulationManager` (the DexSim scene handle), the scene-object
 hierarchy (lights, rigid/soft/cloth bodies, articulations, robots, gizmos,
 constraints), the sensor suite (cameras, stereo cameras, contact sensors), the
 ``motion`` package for solvers, planners, workspace, and trajectory augmentation,
-the atomic-action motion-primitive layer, and the shared configuration types and
+the atomic-skill motion-primitive layer, and the shared configuration types and
 utilities that wire all of these together.
 
 .. rubric:: Submodules
@@ -29,7 +29,7 @@ utilities that wire all of these together.
    robots
    sensors
    motion
-   atomic_actions
+   atomic_skills
    types
    utility
 
@@ -122,13 +122,13 @@ Robot Motion
 
    embodichain.lab.sim.motion
 
-Atomic Actions
+Atomic Skills
 --------------
 
 .. toctree::
    :maxdepth: 1
 
-   embodichain.lab.sim.atomic_actions
+   embodichain.lab.sim.atomic_skills
 
 Scene Services
 --------------

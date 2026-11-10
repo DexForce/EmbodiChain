@@ -33,6 +33,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, VisualObjectCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 
 def main() -> None:
@@ -49,6 +50,7 @@ def main() -> None:
             device="cpu",
             num_envs=4,
             render_cfg=RenderCfg(renderer=args.renderer),
+            visualization=VisualizationCfg(),
         )
     )
     records = []

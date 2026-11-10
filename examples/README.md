@@ -9,8 +9,8 @@ embodichain run-example ods/simple_bc_demo/train --help
 embodichain run-example learning/nerd --help
 embodichain run-example learning/rwm --help
 embodichain run-example learning/rigidformer demo --help
-embodichain run-example sim/atomic_action --skill place --variants 8
-embodichain run-example sim/atomic_action/coordinated_pickment --help
+embodichain run-example sim/atomic_skill --skill place --variants 8
+embodichain run-example sim/atomic_skill/coordinated_pickment --help
 ```
 
 A directory with `__main__.py` can be selected by its directory path. All arguments
@@ -63,9 +63,9 @@ weights and geometry, trains and evaluates the model, and runs an engine demo
 with Newton spheres beside a free model rollout. The demo opens a native window
 or records an engine-camera video with `--headless`.
 
-The [Atomic Skill example catalog](sim/atomic_action/README.md) owns all per-skill,
+The [Atomic Skill example catalog](sim/atomic_skill/README.md) owns all per-skill,
 coordinated-manipulation and recovery demonstrations. The two source-checkout
-walkthroughs under `scripts/tutorials/atomic_action/` teach single-arm and dual-arm
+walkthroughs under `scripts/tutorials/atomic_skill/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
 
 The [scene and robot feasibility preview](expansion/scene_robot_feasibility/README.md)
