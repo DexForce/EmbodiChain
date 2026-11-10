@@ -31,6 +31,8 @@ from embodichain.utils import logger, configclass
 if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
 
+__all__ = ["StereoCamera", "StereoCameraCfg", "PairCameraView"]
+
 
 @configclass
 class StereoCameraCfg(CameraCfg):
@@ -90,12 +92,18 @@ class StereoCameraCfg(CameraCfg):
 
 
 class PairCameraView:
+    """Forward one stereo instance's pose and exclusion policy to both views.
+
+    The owning :class:`StereoCamera` manages the borrowed native views and
+    their lifetime. Pose writes account for the configured eye separation.
+    """
+
     def __init__(
         self,
         left_view: dr.CameraView,
         right_view: dr.CameraView,
         left_to_right: np.ndarray,
-    ) -> PairCameraView:
+    ) -> None:
         self._left_view = left_view
         self._right_view = right_view
         self._left_to_right = left_to_right
@@ -105,6 +113,11 @@ class PairCameraView:
 
         self._right_to_center = np.eye(4, dtype=np.float32)
         self._right_to_center[:3, 3] = left_to_right[:3, 3] * 0.5
+
+    def set_excluded_render_categories(self, categories: int) -> None:
+        """Apply one environment's visibility policy to both stereo eyes."""
+        self._left_view.set_excluded_render_categories(categories)
+        self._right_view.set_excluded_render_categories(categories)
 
     def set_local_pose(self, pose: np.ndarray) -> None:
         left_pose = pose @ self._left_to_center
@@ -303,12 +316,16 @@ class StereoCamera(Camera):
             - normal: Normal images with shape (B, H, W, 3) and dtype torch.float32
             - position: Position images with shape (B, H, W, 3) and dtype torch.float32
             - disparity: Disparity images with shape (B, H, W, 1) and dtype torch.float32
+
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
+        self._capture_metadata = None
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
+            self._pending_capture_metadata = None
             self._frame_buffer.apply()
+            self._snapshot_render_metadata()
 
         self.cfg: StereoCameraCfg
         if self.cfg.enable_color:
@@ -349,6 +366,8 @@ class StereoCamera(Camera):
             disparity[valid_depth_mask] = (
                 self.cfg.fx * distance / depth[valid_depth_mask]
             )
+
+        self._capture_metadata = self._pending_capture_metadata
 
     def get_left_right_arena_pose(self) -> torch.Tensor:
         """Get the local pose of the left and right cameras.

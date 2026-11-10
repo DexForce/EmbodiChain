@@ -474,6 +474,12 @@ def _exercise_textured_ghost(sim, path, stereo):
     assert np.all(colored(render(sensor), 0) <= colored(baseline, 0) + 2)
     opaque = render(preview)
     assert np.all(colored(opaque, 0) > 100) and np.all(colored(opaque, 2) > 100)
+    for ground_visible in (False, True):
+        sensor.set_ground_plane_visibility(ground_visible)
+        preview.set_ground_plane_visibility(ground_visible)
+        assert np.all(colored(render(sensor), 0) <= colored(baseline, 0) + 2)
+        visible = render(preview)
+        assert np.all(colored(visible, 0) > 100) and np.all(colored(visible, 2) > 100)
     ghost.set_appearance(
         RobotMarkersAppearanceCfg(mode="override", color=(0, 1, 0), opacity=1)
     )
