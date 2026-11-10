@@ -150,6 +150,25 @@ def test_packaged_deployment_and_agent_config_agree(
             * agent["trainer"]["buffer_size"]
             // algorithm["num_mini_batches"]
         )
+        if backend == "newton":
+            solver = cfg.sim_cfg.physics_cfg.to_dexsim_cfg(gpu_id=0).solver_cfg
+            assert solver.solver_type == "dexuni"
+            assert solver.joint_mode == "dynamic"
+            assert solver.contact_mode == "auto"
+            # Match the MuJoCo Warp settings used by the locomotion training runs.
+            assert solver.mujoco_options == {
+                "njmax": 1024,
+                "nconmax": 256,
+                "iterations": 20,
+                "ls_iterations": 50,
+                "integrator": "implicitfast",
+                "separate_worlds": True,
+                "tolerance": 1.0e-8,
+                "cone": "pyramidal",
+                "impratio": 1.0,
+                "ls_parallel": False,
+                "use_mujoco_cpu": False,
+            }
     else:
         assert agent["trainer"]["renderer"] == cfg.sim_cfg.render_cfg.renderer
     assert Path(agent["trainer"]["gym_config"]).resolve() == path.resolve()
