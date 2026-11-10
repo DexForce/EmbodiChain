@@ -1683,28 +1683,14 @@ def test_ur_robot_unknown_type_raises():
 
 @pytest.mark.no_sim
 def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
-    monkeypatch,
+    tmp_path: Path,
 ) -> None:
     from embodichain_robots.franka import cfg as panda
     from embodichain_robots.robotiq.two_finger import robotiq85_joint_positions
     import pinocchio as pin
 
     fixtures = Path(__file__).parents[2] / "fixtures/kinematics"
-    # Keep the shared Robotiq_V2 geometry distinct from the separate 2F85
-    # archive; both are registered after the EEF ownership migration.
-    sources = {
-        "FrankaPandaArm/Panda/PandaExactV1.urdf": fixtures / "panda_original.urdf",
-        "Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf": fixtures
-        / "robotiq85_linkage.urdf",
-    }
-
-    def source(name):
-        return str(sources[name]) if not Path(name).is_absolute() else name
-
-    monkeypatch.setattr(panda, "get_data_path", source)
-    monkeypatch.setattr("embodichain.lab.sim.cfg.get_data_path", source)
     from embodichain_tasks.configs import get_config_path
-    from embodichain.utils.utility import load_config
     from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
 
     from embodichain.lab.gym.utils.composition import resolve_gym_components
@@ -1715,6 +1701,11 @@ def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
     )
     declaration = physical.config["robot"]
     cfg = _robot_cfg_from_dict(declaration)
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    # Validate the actual hand before inspecting its geometry-derived TCP.
+    cfg.urdf_cfg.fpath = str(tmp_path / "panda_robotiq85.urdf")
+    prepare_robot_grippers(cfg)
     restored = panda.FrankaCfg.from_dict(cfg.to_dict())
     assert restored.control_parts == cfg.control_parts
     chain = restored.build_pk_serial_chain()["arm"]
