@@ -57,7 +57,7 @@ class CuroboAdapter(PlannerAdapter):
             "joint_waypoint",
             "batched",
             "empty_world",
-            "atomic_action",
+            "atomic_skill",
         }
     )
     model_revision = "curobo-v2-fast"

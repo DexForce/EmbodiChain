@@ -113,7 +113,7 @@ Atomic policy propagation keeps whole-request sample alternatives separate from
 MotionGenerator's segment alternatives. Required final speed
 qualification checks emitted full-robot samples after transforms/recovery; it
 never treats zero-speed rejected holds as original candidate evidence. The
-ordinary automatic planning/cancellation hooks remain on AtomicAction.plan.
+ordinary automatic planning/cancellation hooks remain on AtomicSkill.plan.
 
 Normalization must preserve the meaning of timing, derivatives, failure rows
 and backend diagnostics together. Read the
@@ -239,7 +239,7 @@ qualification through an injected `ConvexMeshQuery` factory; it imports no Lab
 runtime. `ClosingContactPolicy` declares geometric rules without experiment
 revision dispatch. This exact-shape route retains native pair offsets and contact
 ordering; it does not replace the surface-based checker. Scene captures physical
-geometry, and `ActionPlanningServices` bind an explicitly supplied geometric
+geometry, and `SkillPlanningServices` bind an explicitly supplied geometric
 policy to the existing Newton backend. Queries own only isolated collision resources and preserve unavailable
 threshold results; hosts retain simulation ownership and physical-effect evidence.
 `SampledHandGeometry.at_width()` interpolates the supplied hand samples.
@@ -325,7 +325,7 @@ and bridge phases without constructing a simulator.
 `trajectory_augmentation_visualizer.py` is the CPU-only browser overview for
 the implemented trajectory operators: Python calls the production APIs and
 embeds their candidates in a self-contained HTML page. The page uses the
-official Atomic Action example's seven-DoF Franka Panda serial-chain geometry
+official Atomic Skill example's seven-DoF Franka Panda serial-chain geometry
 for orbitable 3D robot and EEF-path playback. A fixed task object and placement
 target clarify pick-and-place phases without participating in augmentation;
 JavaScript owns playback, drawing, and light/dark/system theme selection using
@@ -336,8 +336,8 @@ each versioned documentation build through `html_extra_path`, so the same page
 is published by the existing GitHub Pages workflow. It deliberately excludes
 affordance, contact-point, observation and scene augmentation.
 
-`examples/sim/atomic_action/place.py` is the demonstration host. Shared helpers
-in `examples/sim/atomic_action/support.py` convert the compiled action's named
+`examples/sim/atomic_skill/place.py` is the demonstration host. Shared helpers
+in `examples/sim/atomic_skill/support.py` convert the compiled action's named
 segments to the expansion contracts and replay one variant per simulation row.
 The default `joint_space` mode retains the earlier residual/via/null-space and
 retiming behavior. The optional `task_space` mode deforms only selected free

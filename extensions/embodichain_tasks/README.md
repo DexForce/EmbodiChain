@@ -75,7 +75,7 @@ task_program:
 
 Overrides are limited to `motion.sample_count`, `motion.velocity_limit`,
 `motion.acceleration_limit`, `motion.dynamic_collision_mode`,
-`recovery.action_timeout` and `recovery.goal_rotation_threshold`. They patch
+`recovery.skill_timeout` and `recovery.goal_rotation_threshold`. They patch
 only the declared fields; all other base values are retained. The resolved
 values pass the normal policy decoders, including integer, finite-number and
 enum validation. Contracts, planner selection, tracking, runner and effect

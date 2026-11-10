@@ -208,7 +208,7 @@ def _prepare_asset(baseline, directory, selected):
             (TASK / "task_program/integration.yaml").read_text()
         )
         grasp = tuple(
-            integration["profile"]["action_options"]["pick"]["fixed_object_to_eef"]
+            integration["profile"]["skill_options"]["pick"]["fixed_object_to_eef"]
         )
         constraints = (
             DemoSkillConstraint(
@@ -535,8 +535,8 @@ def _deployment(directory, asset, manifest, mixed):
     integration["profile"]["defaults"]["execute_demo_skill"] = {
         "primary": "primary_manipulator"
     }
-    integration["profile"]["action_options"].pop("simulation.move_held_object", None)
-    integration["profile"]["action_options"][callid] = {"kind": "execute_demo_skill"}
+    integration["profile"]["skill_options"].pop("simulation.move_held_object", None)
+    integration["profile"]["skill_options"][callid] = {"kind": "execute_demo_skill"}
     service = integration["runtime_services"]
     sources = service.pop("nominal_motion_sources", [])
     service["registered_semantic_lowerers"] = [

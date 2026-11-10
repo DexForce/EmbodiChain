@@ -431,7 +431,7 @@ Captured convex hand qualification
 ``pg_grasp.native_contact`` qualifies discrete closing, release-opening and
 rigid-clearance samples using caller-supplied convex collision groups. It imports
 no Robot, simulator or Lab backend. ``ClosingContactPolicy`` declares geometric
-rules directly; source experiment revisions are selected by Atomic Actions.
+rules directly; source experiment revisions are selected by Atomic Skills.
 The existing sampled-surface ``HandContactChecker`` remains independently usable.
 Native offset/order semantics are preserved on this convex route. An ambiguous
 clearance interval remains unavailable, and geometric acceptance does not certify

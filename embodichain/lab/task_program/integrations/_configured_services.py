@@ -35,10 +35,10 @@ from .extensions import (
     ControlPartEvidenceProviderFactory,
     RegisteredSemanticLowererFactory,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
     Affordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     AxisAlign,
     AxisAlignAffordance,
     AxisAlignGoal,
@@ -178,7 +178,7 @@ class _ParkLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct a named joint goal whose posture stays in the profile."""
         del context, bound
@@ -219,7 +219,7 @@ class _AxisAlignLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct one typed axis-alignment goal and attach effect."""
         del context, bound
@@ -286,7 +286,7 @@ class _AxisAlignLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Resolve exact axis-aware grasp semantics for every allowed object."""
         del simulation
@@ -329,7 +329,7 @@ class _ParkLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Validate runtime ownership and return one fresh Park lowerer."""
         del simulation, scene_registry
@@ -483,7 +483,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Validate the configured payload and construct one typed Slide goal."""
         del bound
@@ -563,7 +563,7 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Build one fresh lowerer from the configured live link."""
         if engine.robot is not robot:
@@ -670,7 +670,7 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct one late-bound object-space transport goal."""
         del context, bound
@@ -746,7 +746,7 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Build one lowerer after validating its live reference entity."""
         del simulation
@@ -825,7 +825,7 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Resolve fresh object/reference poses and preserve the held grasp."""
         if type(option_template) is not PlaceOptions:
@@ -913,7 +913,7 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
         route = self._resolve_route(call)
         if picked_object.entity_id != route.object_id:
             return None
-        options = bound.preset.action_option_template(call.semantic_id)
+        options = bound.preset.skill_option_template(call.semantic_id)
         if type(options) is not PlaceOptions:
             raise TypeError(
                 "Relative Place look-ahead requires an exact PlaceOptions template."
@@ -1030,7 +1030,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Canonicalize all object/reference IDs before constructing a lowerer."""
         del simulation
@@ -1165,7 +1165,7 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct one late-bound coordinated object target."""
         del bound
@@ -1292,7 +1292,7 @@ class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Resolve grasp semantics and validate all live target references."""
         del simulation
@@ -1398,7 +1398,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct the typed goal while policy presets own the tilt angle."""
         del context, bound
@@ -1433,7 +1433,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
             or previous_target.pose.relative_pose is None
         ):
             return ()
-        options = bound.preset.action_option_template(call.semantic_id)
+        options = bound.preset.skill_option_template(call.semantic_id)
         if type(options) is not PourOptions:
             raise TypeError(
                 "Configured Pour look-ahead requires an exact PourOptions template."
@@ -1498,7 +1498,7 @@ class _PourLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Validate the object's selected grasp semantics before construction."""
         del simulation
@@ -1562,7 +1562,7 @@ class _PushObjectLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct a late-bound object and target push goal."""
         del context, bound
@@ -1638,7 +1638,7 @@ class _PushObjectLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Validate configured scene entities and create one fresh lowerer."""
         del simulation
@@ -1835,7 +1835,7 @@ class _JointPositionConstraintEvidenceProviderFactory(
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         scene_provider: SceneProvider,
     ) -> EffectEvidenceProvider:
         """Bind a fresh evidence provider to the exact assembled robot."""

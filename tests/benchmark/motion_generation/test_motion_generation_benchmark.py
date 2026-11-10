@@ -26,8 +26,8 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     ControlPartCommandProfile,
     GraspGoal,
     HeldObjectPoseGoal,
@@ -1898,7 +1898,7 @@ def test_atomic_skill_pickup_builds_engine_owned_endpoint_binding():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2100,7 +2100,7 @@ def test_atomic_skill_press_invocation_uses_articulated_target_manifest():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2170,7 +2170,7 @@ def test_atomic_skill_slide_invocation_uses_tutorial_options():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2252,7 +2252,7 @@ def test_atomic_skill_twist_invocation_uses_tutorial_options():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2329,7 +2329,7 @@ def test_atomic_skill_move_held_object_uses_current_options_contract():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(

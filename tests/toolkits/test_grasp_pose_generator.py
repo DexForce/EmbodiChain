@@ -32,7 +32,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.compute.trajectory import interpolate_with_distance
-from examples.sim.atomic_action.gripper_geometry import mounted_gripper_geometry
+from examples.sim.atomic_skill.gripper_geometry import mounted_gripper_geometry
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path

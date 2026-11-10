@@ -227,7 +227,7 @@ def _choose_grasp(
         ParallelJawGraspCollisionCfg,
     )
 
-    from examples.sim.atomic_action.gripper_geometry import mounted_gripper_geometry
+    from examples.sim.atomic_skill.gripper_geometry import mounted_gripper_geometry
 
     model, geometry = mounted_gripper_geometry(robot.cfg)
     mesh = trimesh.creation.box(extents=[CUBE_SIZE] * 3)

@@ -63,7 +63,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             "joint_waypoint",
             "batched",
             "empty_world",
-            "atomic_action",
+            "atomic_skill",
         }
     )
 

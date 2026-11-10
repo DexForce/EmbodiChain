@@ -82,7 +82,7 @@ must come from the current decoder; do not invent a discriminator.
 `profile` requires:
 
 - `defaults`: Semantic Call resource slots to profile resource IDs;
-- `action_options`: configured Atomic Skill options for each call family;
+- `skill_options`: configured Atomic Skill options for each call family;
 - `effect_monitors`: mappings required by verified execution, or empty for
   projected execution.
 
@@ -125,7 +125,7 @@ If generation discovers a missing:
 
 - physical entity: fix the environment or the requested logical mapping;
 - compatible resource/capability: route to `$add-embodiment-component`;
-- Atomic Skill: route to `$add-atomic-action`;
+- Atomic Skill: route to `$add-atomic-skill`;
 - Semantic Call/allowlisted provider: route to `$add-semantic-call`.
 
 Do not encode a guessed value to make static validation pass.
