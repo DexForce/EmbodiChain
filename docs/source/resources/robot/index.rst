@@ -27,6 +27,10 @@ Manufacturers
      - :doc:`CobotMagic <agilex/cobotmagic>`
      - ``CobotMagicCfg``
      - Fixed-base dual arms and grippers for bimanual tasks.
+   * - :doc:`AgileX <agilex/index>`
+     - :doc:`PiPER-X <agilex/piper_x>`
+     - ``AgilexPiperXCfg``
+     - Fixed-base six-axis arm with a separately mounted AGX tool.
    * - :doc:`ANYbotics <anybotics/index>`
      - :doc:`ANYmal-C <anybotics/anymal_c>`
      - ``ANYmalCCfg``
@@ -142,7 +146,7 @@ instructions, provenance boundaries and rendered source-model illustrations.
      - Assets
      - Coverage
    * - :doc:`AgileX <agilex/index>`
-     - :doc:`Pika Gripper <agilex/pika>`
+     - :doc:`Pika Gripper <agilex/pika>`, :doc:`AGX Gripper <agilex/piper_x>`
      - Gripper asset; host-owned mounting.
    * - :doc:`BrainCo <brainco/index>`
      - :doc:`Revo 1 <brainco/revo1>`
