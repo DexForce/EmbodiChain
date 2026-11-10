@@ -17,10 +17,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import threading
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 import torch
@@ -37,6 +39,7 @@ from embodichain.lab.task_program.language.loader import (
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
 from embodichain.lab.scripts import run_task
 from embodichain.lab.scripts.run_task import (
+    _ReplayControlInput,
     _create_parser,
     _run_replay_control_loop,
     generate_function,
@@ -1558,3 +1561,62 @@ def test_control_loop_consumes_viser_seek_while_paused(web) -> None:
         if web
         else replay_env.env.sim.poll_viewer.call_count == 0
     )
+
+
+def test_web_control_loop_polls_during_idle_initial_command_without_viser() -> None:
+    sim = SimpleNamespace(sim_config=SimpleNamespace(web=True), poll_viewer=MagicMock())
+    replay_env = SimpleNamespace(
+        _lengths=torch.tensor([REPLAY_NUM_STEPS]),
+        env=SimpleNamespace(
+            sim=sim,
+            sim_cfg=SimpleNamespace(physics_dt=0.01),
+            cfg=SimpleNamespace(sim_steps_per_control=4),
+        ),
+        go_to_step=MagicMock(),
+    )
+    control_input = SimpleNamespace(
+        single_key=True, read_key=MagicMock(side_effect=[None, None, "q"])
+    )
+
+    _run_replay_control_loop(replay_env, control_input, visualization_runtime=None)
+
+    replay_env.go_to_step.assert_called_once_with(0)
+    assert sim.poll_viewer.call_count == 3
+    assert (
+        control_input.read_key.call_args_list == [call(timeout=VISER_POLL_INTERVAL)] * 3
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX pipe polling")
+def test_replay_input_keeps_partial_lines_and_reads_queued_commands(
+    monkeypatch,
+) -> None:
+    reader, writer = os.pipe()
+    initial_timeout = threading.Event()
+
+    def finish_line():
+        # Release an old blocking implementation too, so the assertion fails
+        # instead of leaving the test waiting forever on a partial line.
+        initial_timeout.wait(timeout=1)
+        os.write(writer, b"\nq\n")
+
+    sender = threading.Thread(target=finish_line)
+    try:
+        with os.fdopen(reader, encoding="utf-8") as stream:
+            monkeypatch.setattr(sys, "stdin", stream)
+            control_input = _ReplayControlInput()
+            os.write(writer, b"3")
+            sender.start()
+
+            assert control_input.read_key(timeout=0.01) is None
+            initial_timeout.set()
+            assert control_input.read_key(timeout=1.0) == "3"
+            assert control_input.read_key(timeout=0.05) == "q"
+            os.close(writer)
+            writer = None
+            with pytest.raises(EOFError):
+                control_input.read_key(timeout=0.05)
+    finally:
+        sender.join()
+        if writer is not None:
+            os.close(writer)

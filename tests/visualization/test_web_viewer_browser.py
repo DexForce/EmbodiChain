@@ -198,9 +198,6 @@ def test_native_browser_view_and_sensor_isolation(
     result = json.loads(result_path.read_text())
     assert result["sensor_unchanged"] and result["physics_steps"] == 1
     assert result["frames"] > 0
-    with socket.socket() as released:
-        released.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        released.bind(("127.0.0.1", port))
 
 
 def test_web_does_not_restrict_task_sensor_construction(tmp_path):

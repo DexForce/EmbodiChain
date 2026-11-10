@@ -1513,8 +1513,16 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["headless"] = bool(args.headless or viser_enabled or web_enabled)
     if web_enabled:
         merged_config["web"] = True
+    if web_enabled or (
+        not viser_enabled
+        and (
+            merged_config.get("web", False)
+            or merged_config.get("visualization", {}).get("backend") == "dexsim-web"
+        )
+    ):
         visualization = deepcopy(merged_config.get("visualization", {}))
-        visualization.update(backend="dexsim-web", allow_commands=False)
+        if web_enabled:
+            visualization.update(backend="dexsim-web", allow_commands=False)
         web = deepcopy(visualization.get("web", {}))
         for name in ("port", "fps"):
             value = getattr(args, f"web_{name}", None)

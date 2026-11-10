@@ -1239,14 +1239,17 @@ class SimulationManager:
     ) -> None:
         """Update visualization without allowing failures to stop simulation.
 
-        The first visualization failure is logged and subsequent captures are
-        skipped until the runtime is restarted.
+        The first visualization failure is logged and subsequent rendering is
+        skipped until restart. Web information requests remain available.
 
         Args:
             force: Whether to bypass visualization frame-rate limiting.
             capture_camera_images: Whether camera images may be captured.
         """
-        if self._visualization_error_reported:
+        if (
+            self._visualization_error_reported
+            and getattr(self, "_web_viewer", None) is None
+        ):
             return
         try:
             self.capture_visualization(
@@ -1326,7 +1329,10 @@ class SimulationManager:
         world_config.cache_path = str(self._material_cache_dir)
 
         if sim_config.visualization.backend == "dexsim-web":
-            from embodichain.lab.visualization._web_viewer import _CAMERA_NAME
+            from embodichain.lab.visualization._web_viewer import (
+                _CAMERA_NAME,
+                _require_webrtc_runtime,
+            )
 
             if not hasattr(dexsim, "WebApplication") or not hasattr(
                 world_config, "webrtc_enabled"
@@ -1336,6 +1342,7 @@ class SimulationManager:
                 )
             if sim_config.render_cfg.renderer == "no-render":
                 raise ValueError("dexsim-web requires a native renderer.")
+            _require_webrtc_runtime()
             world_config.webrtc_enabled = True
             world_config.webrtc_port = sim_config.visualization.web.port
             world_config.webrtc_input_camera = _CAMERA_NAME
@@ -2302,14 +2309,25 @@ class SimulationManager:
         import sys
 
         print(prompt, end="", flush=True)
+        stream = sys.stdin
+        descriptor = stream.fileno()
+        line = bytearray()
         while True:
             self.poll_viewer()
-            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
-            if ready:
-                line = sys.stdin.readline()
-                if line == "":
+            ready, _, _ = select.select([descriptor], [], [], 0.05)
+            if not ready:
+                continue
+            # Do not combine fd readiness with buffered TextIO reads: readline
+            # can consume future lines or block on a partial pipe write. Reading
+            # one byte leaves subsequent prompts/terminal consumers untouched.
+            value = os.read(descriptor, 1)
+            if not value or value == b"\n":
+                if not value and not line:
                     raise EOFError
-                return line.rstrip("\n")
+                return line.decode(
+                    stream.encoding or "utf-8", stream.errors or "strict"
+                ).removesuffix("\r")
+            line.extend(value)
 
     def can_open_native_window(self) -> bool:
         """Return whether the native DexSim window may be opened.
@@ -4728,10 +4746,15 @@ class SimulationManager:
             fixed_pose: Optional fixed 4x4 camera pose matrix.
             look_at: Optional ``(eye, target, up)`` tuple used to derive a fixed pose.
             use_sim_time: Whether to capture frames from simulation time instead of
-                wall time. Defaults to headless mode when no viewer window exists.
+                wall time. Defaults to simulation time for Web-follow and headless
+                recordings. Web-follow recordings require simulation time so the
+                observation camera is read on the World creator thread.
 
         Returns:
             bool: True if recording starts successfully, otherwise False.
+
+        Raises:
+            ValueError: If a Web-follow recording requests wall-clock capture.
         """
         if self.is_window_recording():
             logger.log_error(
@@ -4766,6 +4789,19 @@ class SimulationManager:
             )
             return False
 
+        follows_web_viewer = (
+            getattr(self, "_web_viewer", None) is not None
+            and pose_provider is None
+            and fixed_pose is None
+        )
+        if follows_web_viewer:
+            if use_sim_time is False:
+                raise ValueError(
+                    "Web-follow recording requires use_sim_time=True because its "
+                    "camera pose belongs to the World creator thread. For wall-time "
+                    "recording, provide a fixed pose or a render-thread-safe pose_provider."
+                )
+            use_sim_time = True
         if use_sim_time is None:
             use_sim_time = self.viewer is None
 

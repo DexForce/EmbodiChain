@@ -132,7 +132,7 @@ def parse_args() -> argparse.Namespace:
     )
     from embodichain.cli._visualization import add_viewer_args_to_parser
 
-    add_viewer_args_to_parser(parser)
+    add_viewer_args_to_parser(parser, allow_viser=False)
     return parser.parse_args()
 
 

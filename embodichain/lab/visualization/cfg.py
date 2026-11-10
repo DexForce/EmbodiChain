@@ -132,9 +132,6 @@ class VisualizationCfg:
         web: Native WebRTC observation-view settings.
     """
 
-    web: DexSimWebCfg = field(default_factory=DexSimWebCfg)
-    """Native WebRTC observation-view settings."""
-
     backend: str = "none"
     scene_fps: float = _DEFAULT_SCENE_FPS
     env_ids: list[int] | None = list(_DEFAULT_ENV_IDS)
@@ -144,6 +141,8 @@ class VisualizationCfg:
     soft_body_fps: float = _DEFAULT_SOFT_BODY_FPS
     allow_commands: bool = False
     viser_server: ViserServerCfg = field(default_factory=ViserServerCfg)
+    web: DexSimWebCfg = field(default_factory=DexSimWebCfg)
+    """Native WebRTC observation-view settings."""
 
     def __post_init__(self) -> None:
         """Validate visualization settings."""

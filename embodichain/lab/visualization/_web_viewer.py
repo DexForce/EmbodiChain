@@ -19,7 +19,9 @@
 from __future__ import annotations
 
 import json
+import ctypes
 from copy import deepcopy
+import os
 from pathlib import Path
 import threading
 import time
@@ -34,6 +36,23 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _CAMERA_NAME = "__embodichain_web_viewer"
+
+
+def _require_webrtc_runtime() -> None:
+    """Check the selected native streaming library before allocating a World."""
+    import dexsim
+
+    library = os.environ.get("DEXSIM_WEBRTC_LIBRARY") or str(
+        Path(dexsim.__file__).parent / "lib" / "libdexsim_streaming.so"
+    )
+    try:
+        ctypes.CDLL(library)
+    except OSError as error:
+        raise RuntimeError(
+            f"dexsim-web cannot load the DexSim streaming runtime {library!r}: {error}. "
+            "A WebApplication Python API alone does not qualify the SDK. "
+            "Install a loadable WebRTC-enabled DexSim artifact."
+        ) from error
 
 
 class _WebViewer:
@@ -188,6 +207,8 @@ class _WebViewer:
         if self.closed:
             return False
         self.application.process(self._request)
+        if self.error is not None:
+            return False
         if not (force or self.dirty or time.monotonic() >= self.next_render):
             return False
         started = time.monotonic()

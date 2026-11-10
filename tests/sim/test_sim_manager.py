@@ -2976,6 +2976,62 @@ def test_headless_recording_uses_sim_time_and_captures_frames() -> None:
     )
 
 
+@pytest.mark.parametrize("use_sim_time", [None, True])
+def test_web_follow_recording_captures_pose_on_creator_thread(use_sim_time) -> None:
+    import threading
+
+    from embodichain.lab.visualization._web_viewer import _WebViewer
+
+    sim = _make_sim_manager()
+    viewer = object.__new__(_WebViewer)
+    viewer.owner = threading.get_ident()
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = [1.0, 2.0, 3.0]
+    viewer.camera = SimpleNamespace(get_world_pose=MagicMock(return_value=pose))
+    sim._web_viewer = viewer
+    sim.sync_render_state = MagicMock()
+
+    assert sim.start_window_record(use_sim_time=use_sim_time, fps=5, max_memory=1)
+    state = sim._window_record_state
+    assert state.capture_from_sim_update is True
+    assert sim._world.thread_runtime.add_loop_calls == []
+    sim._step_window_record_from_sim_update(state, physics_dt=0.2)
+
+    assert len(state.frames) == 1
+    viewer.camera.get_world_pose.assert_called_once()
+    np.testing.assert_array_equal(sim._window_record_camera.last_pose, pose)
+
+
+def test_web_follow_recording_rejects_wall_time_before_allocating_camera() -> None:
+    sim = _make_sim_manager()
+    sim._web_viewer = object()
+
+    with pytest.raises(ValueError, match="Web-follow recording requires use_sim_time"):
+        sim.start_window_record(use_sim_time=False)
+
+    assert sim._window_record_camera is None
+    assert sim._window_record_state is None
+    assert sim._world.thread_runtime.add_loop_calls == []
+
+
+@pytest.mark.parametrize("pose_source", ["fixed_pose", "pose_provider"])
+def test_web_custom_recording_pose_retains_wall_time_option(pose_source) -> None:
+    sim = _make_sim_manager()
+    sim._web_viewer = object()
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = [1.0, 2.0, 3.0]
+    source = pose if pose_source == "fixed_pose" else lambda: pose
+
+    assert sim.start_window_record(use_sim_time=False, **{pose_source: source})
+    state = sim._window_record_state
+    assert state.capture_from_sim_update is False
+    callback, _ = sim._world.thread_runtime.add_loop_calls[0]
+    callback(0.0)
+
+    assert len(state.frames) == 1
+    np.testing.assert_array_equal(sim._window_record_camera.last_pose, pose)
+
+
 def test_render_thread_recording_does_not_republish_render_state() -> None:
     """Native recording consumes state already published by simulation calls."""
     sim = _make_sim_manager(window=object())
@@ -3366,6 +3422,11 @@ def test_web_rejects_unsupported_world_before_creation(num_envs, renderer) -> No
 def test_web_config_selects_headless_native_streaming(monkeypatch, tmp_path) -> None:
     from embodichain.lab.visualization import DexSimWebCfg
 
+    runtime_check = MagicMock()
+    monkeypatch.setattr(
+        "embodichain.lab.visualization._web_viewer._require_webrtc_runtime",
+        runtime_check,
+    )
     monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
     monkeypatch.setattr(
         "embodichain.lab.sim.utility.render_utils.select_default_renderer",
@@ -3389,6 +3450,7 @@ def test_web_config_selects_headless_native_streaming(monkeypatch, tmp_path) -> 
         physics=SimpleNamespace(configure_world=lambda *_: None),
     )
     world = SimulationManager._convert_sim_config(manager, config)
+    runtime_check.assert_called_once_with()
     assert config.headless and not world.open_windows
     assert world.webrtc_enabled and world.webrtc_port == 8766
     assert world.webrtc_input_camera == "__embodichain_web_viewer"
@@ -3461,6 +3523,79 @@ def test_web_terminal_wait_keeps_polling_without_advancing_physics(monkeypatch) 
         sim._world.update.assert_not_called()
     finally:
         timer.join()
+        os.close(writer)
+
+
+def test_web_terminal_wait_reads_queued_lines_without_waiting_for_new_bytes(
+    monkeypatch,
+) -> None:
+    import os
+    import select
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    sim.poll_viewer = MagicMock()
+    reader, writer = os.pipe()
+    original_select = select.select
+
+    def require_ready(*args):
+        ready = original_select(*args)
+        assert ready[0], "A queued terminal line must not wait for another write"
+        return ready
+
+    try:
+        with os.fdopen(reader, encoding="utf-8") as stream:
+            monkeypatch.setattr("sys.stdin", stream)
+            monkeypatch.setattr(select, "select", require_ready)
+            os.write(writer, b"first\nsecond\nlast")
+            assert sim.wait_for_input() == "first"
+            assert sim.wait_for_input() == "second"
+            os.close(writer)
+            writer = None
+            assert sim.wait_for_input() == "last"
+            with pytest.raises(EOFError):
+                sim.wait_for_input()
+    finally:
+        if writer is not None:
+            os.close(writer)
+
+
+def test_web_terminal_partial_unicode_line_keeps_polling_on_creator_thread(
+    monkeypatch,
+) -> None:
+    import os
+    import select
+    import threading
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    owner = threading.get_ident()
+    idle = threading.Event()
+    reader, writer = os.pipe()
+
+    def poll():
+        assert threading.get_ident() == owner
+        if not select.select([reader], [], [], 0)[0]:
+            idle.set()
+
+    sim.poll_viewer = poll
+
+    def finish_line():
+        # The timeout also unblocks the old implementation so a regression
+        # fails an assertion instead of hanging this test indefinitely.
+        idle.wait(timeout=1)
+        os.write(writer, b"\xa9\n")
+
+    sender = threading.Thread(target=finish_line)
+    try:
+        with os.fdopen(reader, encoding="utf-8") as stream:
+            monkeypatch.setattr("sys.stdin", stream)
+            os.write(writer, b"caf\xc3")
+            sender.start()
+            assert sim.wait_for_input() == "café"
+            assert idle.is_set(), "A partial line must not block viewer polling"
+    finally:
+        sender.join()
         os.close(writer)
 
 

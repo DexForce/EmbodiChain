@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import argparse
+import codecs
 from dataclasses import dataclass
 import json
 import os
@@ -1204,6 +1205,8 @@ class _ReplayControlInput:
     def __init__(self):
         self._fd = None
         self._term_attrs = None
+        self._decoder = None
+        self._pending_input = ""
         self.single_key = False
 
     def __enter__(self):
@@ -1242,18 +1245,31 @@ class _ReplayControlInput:
                 time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
             return None
 
-        if timeout is not None:
-            ready, _, _ = select.select([sys.stdin], [], [], timeout)
-            if not ready:
-                return None
-
-        if self.single_key:
-            value = sys.stdin.read(1)
-        else:
-            value = sys.stdin.readline()
-        if value == "":
-            raise EOFError
-        return value.lower() if self.single_key else value.strip().lower()
+        if self._decoder is None:
+            self._decoder = codecs.getincrementaldecoder(sys.stdin.encoding or "utf-8")(
+                errors=sys.stdin.errors or "strict"
+            )
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            if deadline is not None:
+                remaining = max(0.0, deadline - time.monotonic())
+                ready, _, _ = select.select([sys.stdin], [], [], remaining)
+                if not ready:
+                    return None
+            # TextIO reads can prefetch the next command or wait for an entire
+            # piped line after select reports only a partial line as ready.
+            chunk = os.read(sys.stdin.fileno(), 1)
+            value = self._decoder.decode(chunk, final=not chunk)
+            if self.single_key:
+                if value:
+                    return value.lower()
+            else:
+                self._pending_input += value
+                if "\n" in value or (not chunk and self._pending_input):
+                    command, self._pending_input = self._pending_input, ""
+                    return command.strip().lower()
+            if not chunk:
+                raise EOFError
 
 
 def _read_replay_control_command(
@@ -1396,7 +1412,7 @@ def _run_replay_control_loop(
             try:
                 if pending_command is not None:
                     initial = pending_command
-                elif visualization_runtime is not None:
+                elif visualization_runtime is not None or web:
                     initial = read_key(_REPLAY_CONTROL_POLL_INTERVAL)
                     if initial is None:
                         continue

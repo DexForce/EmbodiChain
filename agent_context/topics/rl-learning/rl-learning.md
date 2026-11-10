@@ -206,14 +206,23 @@ configuration uses NoRender, Viewer evaluation defaults to Hybrid; an explicit
 native renderer overrides that choice. `--viewer --renderer no-render` is
 rejected before creating the simulation.
 
+`eval-policy --web` uses the same task adapter with a read-only native WebRTC
+viewport. It requires an explicit finite positive episode, control-step or
+duration budget so completion reaches report writing. Paused termination is
+rejected because Web has no resume input; use auto-reset termination. External
+Motion Policy Kit profiles do not expose Web configuration and are rejected.
+
 Tasks opt in through `PolicyViewerCameraCfg` and
 `get_policy_viewer_target_pose()` (world XYZ + XYZW). The six bundled flat
 velocity tasks own their presets; `policy_evaluation/_viewer_camera.py` owns
 reset framing, X-Y translation and tracking/free-view transitions. Other tasks
-retain their existing camera. Use native window operations so manual orbit and
-zoom persist and the existing `SimulationManager` window recorder sees the
-same view. Window camera operations are queued to the render thread; reading a
-pose immediately after an update can still return the preceding rendered pose.
+retain their existing camera. Use the shared viewport operations so native
+manual orbit and zoom persist and the existing `SimulationManager` recorder
+sees the same view. Native-window camera operations are queued to the render
+thread; reading a pose immediately after an update can return the preceding
+rendered pose. Web observation camera operations remain on the World creator
+thread; its recording timing belongs to
+[visualization configuration](../sim-visualization/configuration.md).
 
 Validate changes with `tests/learning/rl/policy_evaluation/test_viewer.py` and
 an actual native Viewer run. User controls and recording are described in the

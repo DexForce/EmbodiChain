@@ -28,6 +28,7 @@ import torch
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.visualization import DexSimWebCfg
 from embodichain.lab.visualization._web_viewer import _WebViewer
+from embodichain.lab.visualization._web_viewer import _require_webrtc_runtime
 
 
 @pytest.fixture
@@ -93,6 +94,31 @@ def test_render_only_scene_draws_without_preparing_or_stepping(viewer):
     assert viewer.capture(force=True)
     viewer.sim._ensure_render_state.assert_not_called()
     viewer.camera.render.assert_called_once()
+
+
+def test_render_failure_keeps_serving_information_without_retrying_renderer(viewer):
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = viewer.sim.sim_config
+    sim._web_viewer = viewer
+    sim._visualization_error_reported = False
+    sim.start_visualization = Mock()
+    viewer.camera.render.side_effect = RuntimeError("observer render failed")
+
+    sim.capture_visualization_safely(force=True)
+
+    responses = []
+    viewer.application.process.side_effect = lambda handle: responses.append(
+        handle("/api/state", "")
+    )
+    sim.capture_visualization_safely(force=True)
+
+    assert viewer.application.process.call_count == 2
+    assert responses[0][0] == 200
+    assert json.loads(responses[0][1])["error"] == "observer render failed"
+    viewer.camera.render.assert_called_once()
+    viewer.sim.physics.step.assert_not_called()
 
 
 def test_information_table_shares_terminal_rows_and_tracks_scene_readiness(viewer):
@@ -190,3 +216,85 @@ def test_python_viewport_camera_surface_remains_available_without_browser_keys(v
     viewer.remove_input_control(control)
     control.on_key_down.assert_not_called()
     assert viewer.dirty
+
+
+@pytest.mark.parametrize("override", [None, "/selected-sdk/libdexsim_streaming.so"])
+def test_web_streaming_preflight_loads_the_selected_native_artifact(
+    monkeypatch, override
+):
+    from pathlib import Path
+    import dexsim
+
+    if override is None:
+        monkeypatch.delenv("DEXSIM_WEBRTC_LIBRARY", raising=False)
+    else:
+        monkeypatch.setenv("DEXSIM_WEBRTC_LIBRARY", override)
+    load = Mock()
+    monkeypatch.setattr("embodichain.lab.visualization._web_viewer.ctypes.CDLL", load)
+    _require_webrtc_runtime()
+    load.assert_called_once_with(
+        override or str(Path(dexsim.__file__).parent / "lib" / "libdexsim_streaming.so")
+    )
+    load.side_effect = OSError("ELF load command address/offset not page-aligned")
+    with pytest.raises(RuntimeError, match="cannot load.*ELF load command"):
+        _require_webrtc_runtime()
+
+
+def test_browser_connection_error_survives_information_polls_until_media_recovers():
+    from pathlib import Path
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the browser application script probe")
+    script = (
+        Path(__file__).resolve().parents[2]
+        / "embodichain/lab/visualization/web_assets/app.js"
+    )
+    result = subprocess.run(
+        [node, "-", str(script)],
+        input=r"""
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const elements = new Map();
+const element = id => {
+    if (!elements.has(id)) elements.set(id, {
+        textContent: '', hidden: false,
+        querySelector: () => ({replaceChildren() {}})
+    });
+    return elements.get(id);
+};
+let applicationError = null;
+const context = vm.createContext({
+    document: {getElementById: element},
+    window: {}, AbortSignal,
+    setTimeout() {},
+    RTC_ReadSceneDescription: async () => ({state: 'error', error: 'Camera catalog rejected'}),
+    fetch: async () => ({ok: true, json: async () => ({
+        title: 'Test', summary: null, error: applicationError, frames: 1
+    })})
+});
+vm.runInContext(require('node:fs').readFileSync(process.argv[2], 'utf8'), context);
+(async () => {
+    // Finish both automatic startup promises, including the successful state poll.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(element('error').textContent, /Camera catalog rejected/);
+    assert.equal(element('error').hidden, false);
+    applicationError = 'Observer render failed';
+    await vm.runInContext('poll()', context);
+    assert.match(element('error').textContent, /Camera catalog rejected/);
+    assert.match(element('error').textContent, /Observer render failed/);
+    context.window.RTC_ViewPeer = {ViewReady: true, Stopped: false};
+    await vm.runInContext('poll()', context);
+    assert.equal(element('error').textContent, 'Observer render failed');
+    applicationError = null;
+    await vm.runInContext('poll()', context);
+    assert.equal(element('error').hidden, true);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""",
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

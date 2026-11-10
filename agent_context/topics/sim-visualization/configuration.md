@@ -9,13 +9,17 @@ WebRTC presentation, alongside headless/window selection. The compatibility
 `visualization.backend="dexsim-web"` spelling remains valid;
 `visualization.web` owns `DexSimWebCfg`. Shared launchers accept
 `--web`, mutually exclusive with `--viser`, and optional `--web-port` /
-`--web-fps` overrides. Browser modes force headless before World construction.
+`--web-fps` overrides, including when the file already selects Web.
+Browser modes force headless before World construction.
 WebRTC calls to `capture_visualization()` pump application events and render
 the observer on the creator thread, including while physics is paused.
 The Web page is read-only and uses the same structured initialization data
 as the terminal. `allow_commands` applies to Viser and is disabled in Web mode.
 Its sensor restrictions, network and lifecycle boundaries are documented in
 [the viewer guide](../../../embodichain/lab/visualization/README.md).
+Following a Web observer while recording uses creator-thread simulation-time
+capture. Explicit wall-clock capture requires a fixed or thread-safe custom pose
+source; it cannot read the observer from the render thread.
 
 The following snapshot and server settings describe the Viser backend.
 

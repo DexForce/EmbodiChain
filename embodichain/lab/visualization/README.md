@@ -14,7 +14,8 @@ embodichain run-atomic-action --skill pickup --web
 ```
 
 Open `http://127.0.0.1:8765/`. `--web-port` and `--web-fps` override the
-HTTP/signaling port and observer rendering rate. Web and Viser are mutually
+HTTP/signaling port and observer rendering rate, including when a Gym YAML
+file already selects Web. Web and Viser are mutually
 exclusive. `--headless --web` keeps local windows closed while presenting the
 scene in the browser.
 
@@ -92,11 +93,30 @@ World and flushing deferred cleanup releases its listener/port; closing the
 application alone cannot stop the current SDK's listener. Health reports
 application readiness/errors; native peer count is unavailable (reported zero).
 
+Observer render failures stop further rendering until restart, while the
+application continues serving initialization information and the captured error.
+Video connection errors remain visible until media recovers; a successful
+information poll alone does not establish a video connection.
+
+Following the Web camera with `start_window_record()` uses simulation time on
+the World creator thread. Capture advances through host simulation updates;
+paused physics does not add recording frames. Explicit `use_sim_time=False`
+is rejected for this pose source. Wall-clock recording remains available with
+a fixed pose or a render-thread-safe `pose_provider`. Browser input cannot
+trigger recording; the Python host starts and stops it.
+
 ## DexSim boundaries
 
 - Requires Linux/NVIDIA, loadable WebRTC streaming libraries, and NVENC. The
   pinned SDK is `dexsim_engine==0.6.0rc1`. Its Python API exposes
   `WebApplication` and startup `WorldConfig.webrtc_*` settings.
+  **Release qualification is blocked:** the published Linux x86_64 Python 3.12
+  wheel's streaming libraries fail to load with
+  `ELF load command address/offset not page-aligned`. No loadable replacement
+  artifact is currently pinned. The manager checks the selected streaming
+  library before allocating a World and reports the native loading error.
+  Python API availability or tests using repaired binaries do not qualify the
+  unmodified release artifact.
 - The SDK automatically enumerates scene cameras and has no Python video-source
   whitelist. Its video catalog is limited to 16 RGB streams, with even
   dimensions in 32–4096. Stereo/depth-only/large camera catalogs are allowed in
@@ -112,6 +132,10 @@ application readiness/errors; native peer count is unavailable (reported zero).
   Policy Kit profiles own their own World/window factory and expose no WebRTC
   selection; that combination fails explicitly instead of opening a local
   window. Low-level native SDK input-view factories remain native APIs.
+  Web evaluation requires a finite positive `--episodes`, `--control-steps`
+  or `--duration` budget so normal completion writes `evaluation.json`.
+  Its read-only viewport cannot resume `--termination-behavior pause`; use
+  `auto_reset` instead. For example: `embodichain eval-policy RUN --web --episodes 5`.
 
 ## Validation
 
@@ -128,4 +152,7 @@ python -m pytest tests/visualization/test_web_viewer_browser.py --run-gpu -q
 Install Playwright and Chrome and retain the host's display/SDL environment.
 `WEBRTC_TEST_CHROME` selects a Chrome executable outside PATH. SDK-native
 library failures are runtime qualification failures, not successful browser
-validation; see the PR for the exact environment and any test-only repairs.
+validation. After a loadable SDK artifact is published, pin it and rerun browser
+acceptance against that exact unmodified artifact before merging. Listener
+release is checked inside the live child after manager teardown and cleanup,
+before process exit can release sockets implicitly.

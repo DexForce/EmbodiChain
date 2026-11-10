@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import importlib
+import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -58,6 +60,9 @@ def test_run_defaults_to_latest_checkpoint(tmp_path):
     [
         ((), "_run_native_headless"),
         (("--viewer",), "_run_native_viewer"),
+        (("--web", "--episodes", "1"), "_run_native_viewer"),
+        (("--web", "--control-steps", "2"), "_run_native_viewer"),
+        (("--web", "--duration", "0.04"), "_run_native_viewer"),
         (("--profile", "example"), "_run_profile"),
     ],
 )
@@ -85,6 +90,74 @@ def test_cli_routes_one_command_to_the_selected_evaluation(
 
     assert report == expected
     assert calls == [handler]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        (),
+        ("--episodes", "0"),
+        ("--control-steps", "0"),
+        ("--duration", "nan"),
+        ("--duration", "inf"),
+    ],
+)
+def test_web_requires_finite_positive_budget_before_runtime(
+    tmp_path, monkeypatch, arguments
+):
+    module = importlib.import_module("embodichain.learning.rl.policy_evaluation.cli")
+    run, _checkpoint = _run(tmp_path)
+    monkeypatch.setattr(module, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(module, "execute_init_hooks", lambda: None)
+
+    def fail(*args, **kwargs):
+        pytest.fail("invalid Web budget must not construct a runtime")
+
+    monkeypatch.setattr(module, "_build_native_runtime", fail)
+    with pytest.raises(ValueError, match="--web requires a finite positive"):
+        module.run(parse_args((str(run), "--web", *arguments)))
+
+
+def test_web_rejects_pause_that_would_prevent_reaching_budget():
+    args = parse_args(("--web", "--episodes", "1", "--termination-behavior", "pause"))
+
+    with pytest.raises(ValueError, match="--web cannot resume a paused evaluation"):
+        _validate_native_options(args)
+
+
+def test_bounded_web_viewer_writes_evaluation_report(tmp_path, monkeypatch):
+    module = importlib.import_module("embodichain.learning.rl.policy_evaluation.cli")
+    viewer = pytest.importorskip("embodichain.learning.rl.policy_evaluation.viewer")
+    run, _checkpoint = _run(tmp_path)
+    runtime = object()
+    native = module.NativeRuntime(runtime, "cpu", "cpu", 17, "hybrid", True, {})
+    monkeypatch.setattr(module, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(module, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(module, "_build_native_runtime", lambda *a, **kw: native)
+    monkeypatch.setattr(module, "_flush_simulator", lambda *args: None)
+
+    def evaluate(actual_runtime, **kwargs):
+        assert actual_runtime is runtime
+        assert kwargs["control_steps"] == 2
+        return SimpleNamespace(
+            task_id="ExampleTask",
+            reason="control steps reached",
+            simulation_time=0.04,
+            simulation_steps=8,
+            control_steps=2,
+            requested_duration=None,
+            effective_duration=0.04,
+            episodes=(),
+            metrics={},
+        )
+
+    monkeypatch.setattr(viewer, "evaluate_native_viewer", evaluate)
+    report = module.run(parse_args((str(run), "--web", "--control-steps", "2")))
+
+    payload = json.loads(report.read_text())
+    assert report.name == "evaluation.json"
+    assert payload["result"]["reason"] == "control steps reached"
+    assert payload["result"]["control_steps"] == 2
 
 
 def test_explicit_checkpoint_requires_training_config(tmp_path):

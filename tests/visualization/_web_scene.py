@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import signal
+import socket
 import sys
 import time
 
@@ -174,6 +175,11 @@ def main() -> None:
         sim.destroy(exit_process=False)
         sensor = cube = None
         SimulationManager.flush_cleanup_queue()
+        # Prove World teardown released the listener while this host is alive;
+        # process exit would release its sockets even if native cleanup leaked.
+        with socket.socket() as released:
+            released.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            released.bind(("127.0.0.1", port))
 
 
 if __name__ == "__main__":

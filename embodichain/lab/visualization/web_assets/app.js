@@ -3,8 +3,10 @@
 const $ = id => document.getElementById(id);
 let state;
 let summaryKey;
+let connectionError;
 
-function showError(message) {
+function showError(message = state?.error) {
+    message = [connectionError, message].filter(Boolean).join('\n');
     $('error').textContent = message || '';
     $('error').hidden = !message;
 }
@@ -62,7 +64,8 @@ async function connect() {
                 StreamSizes: sources.map(source => [source.width, source.height])
             });
         } catch (error) {
-            showError(error.message);
+            connectionError = error.message;
+            showError();
         }
         await new Promise(resolve => setTimeout(resolve, 1000));
     }
@@ -88,6 +91,8 @@ async function poll() {
             if (!main) $('task-cameras').hidden = false;
         }
         const ready = peer?.ViewReady && !peer.Stopped;
+        if (ready) connectionError = undefined;
+        showError();
         $('waiting').hidden = !!(ready && state?.frames);
         $('waiting').textContent = ready ? 'Waiting for a rendered frame…' : 'Connecting video…';
     } catch (error) {
