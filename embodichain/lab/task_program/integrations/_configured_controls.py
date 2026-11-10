@@ -19,9 +19,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
+    AtomicSkillEngine,
     ObjectSemantics,
     PlanningContext,
     SceneEntityPose,
@@ -36,7 +36,7 @@ from embodichain.lab.sim.atomic_actions import (
     OpenDoorGoal,
     OpenDoorOptions,
 )
-from embodichain.lab.sim.atomic_actions.affordance import (
+from embodichain.lab.sim.atomic_skills.affordance import (
     PressAffordance,
     TwistAffordance,
     OpenDoorAffordance,
@@ -82,7 +82,7 @@ class _ControlLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         resource = bound.binding.resources.get("primary")
         if resource is None or "motion" not in resource.endpoints:
@@ -144,7 +144,7 @@ class _ControlLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         del simulation
         if engine.robot is not robot:

@@ -25,7 +25,7 @@ profile:
       primary: left
     place:
       primary: left
-  action_options:
+  skill_options:
     pick:
       kind: pick_up
       hand_interp_steps: 20

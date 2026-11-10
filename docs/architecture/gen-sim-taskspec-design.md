@@ -62,7 +62,7 @@ flowchart TD
 | 任务语义 | `lab/task_program/semantics` | Semantic Call、scene/profile/effect/evidence contract |
 | 编译 | `lab/task_program/compiler` | AST 展开、Semantic Call 分析和 Atomic Skill lowering |
 | 执行 | `lab/task_program/runtime` | 顺序/并行执行、状态、重试、effect verification 和运行结果 |
-| 物理动作 | `lab/sim/atomic_actions` | Pick、Place、HandOver 等 Atomic Skills |
+| 物理动作 | `lab/sim/atomic_skills` | Pick、Place、HandOver 等 Atomic Skills |
 | 运动 | `lab/sim/motion`、`compute/trajectory` | IK、轨迹生成、插值、重定时、碰撞规划和轨迹变体 |
 | 环境 | `lab/gym` | reset、step、观测、奖励、终止、demo、记录和数据生命周期 |
 | 扩增 | `lab/sim/motion/expansion` | candidates、operators、coverage、budget、session 和 receipt |

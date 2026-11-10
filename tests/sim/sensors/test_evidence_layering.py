@@ -32,11 +32,11 @@ import torch
 from embodichain.lab.sim.evidence import PhysicalEvidenceRequest, PhysicalEvidenceBatch
 from embodichain.lab.sim.sensors.contact.sampling import ContactEvidenceSampler
 from embodichain.lab.sim.sensors.contact.timeline import ContactTimeline
-from embodichain.lab.sim.atomic_actions.grip_evidence import GripContactObserver, DriverOpeningBinding
+from embodichain.lab.sim.atomic_skills.grip_evidence import GripContactObserver, DriverOpeningBinding
 from embodichain.lab.sim.sensors.support_observation import NativeSupportObservation, NativeSupportResult, SupportObservationRegistry
-from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceBatch as ExistingBatch
+from embodichain.lab.sim.atomic_skills.evidence import PhysicalEvidenceBatch as ExistingBatch
 assert ExistingBatch is PhysicalEvidenceBatch
-assert DriverOpeningBinding.__module__ == "embodichain.lab.sim.atomic_actions.grip_evidence"
+assert DriverOpeningBinding.__module__ == "embodichain.lab.sim.atomic_skills.grip_evidence"
 sensor = SimpleNamespace(
     num_instances=1, dropped_contacts=0,
     contact_capabilities=SimpleNamespace(geometry=True, impulse=True),
@@ -82,7 +82,7 @@ def test_shared_evidence_owners_do_not_import_semantic_or_task_engines():
     failures = []
     for area in (
         "embodichain/lab/sim/sensors",
-        "embodichain/lab/sim/atomic_actions",
+        "embodichain/lab/sim/atomic_skills",
         "embodichain/compute",
     ):
         for path in (root / area).rglob("*.py"):
@@ -105,7 +105,7 @@ def test_shared_evidence_owners_do_not_import_semantic_or_task_engines():
                     "embodichain.gen_sim.task_engine",
                 )
                 if area.endswith("sensors"):
-                    forbidden += ("embodichain.lab.sim.atomic_actions",)
+                    forbidden += ("embodichain.lab.sim.atomic_skills",)
                 if any(
                     name == prefix or name.startswith(prefix + ".")
                     for name in names

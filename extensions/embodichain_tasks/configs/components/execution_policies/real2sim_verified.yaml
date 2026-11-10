@@ -12,8 +12,8 @@ tracking:
   kind: timed
 recovery:
   max_replans: 0
-  max_action_retries: 0
-  action_timeout: 120.0
+  max_skill_retries: 0
+  skill_timeout: 120.0
 workflow_recovery:
   max_recovery_attempts: 0
 runner:
