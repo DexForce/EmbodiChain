@@ -1,20 +1,24 @@
 # AgiBot Genie G2
 
-![G2 rendered with W1-style native preview lighting](preview.png)
+![G2 captured with OfflineRT in a bent-elbow display pose](preview.png)
 
-The reproducible render follows the DexForce W1 example's native preview
-appearance, explicitly selecting the `hybrid` renderer used on RTX GPUs.
-It uses 64 samples per pixel, OptiX offscreen denoising, default exposure and
-the shared default floor. Three point lights separate the dark head and
-chassis from the background: key at `[3, -4, 4.5]` with intensity `60`, fill
-at `[-3, -2, 3]` with intensity `30`, and rim at `[0, 3, 4]` with intensity
-`40`, each with radius `10`. The 1400×1200 camera frames the full neutral pose;
-physics is paused after scene preparation. Source mesh materials are preserved.
-Run:
+The reproducible render follows the
+[W1 documentation presentation](https://dexforce.github.io/EmbodiChain/main/resources/robot/dexforce/w1.html):
+`RenderCfg(renderer="rt")` (OfflineRT) defaults, a 960×1200 portrait camera,
+1 sample per pixel and DLSS offscreen reconstruction (quality 2). Tone mapping
+is off, exposure is `1.0`, and path depths are 4–8. It uses the default ground
+and environment emission with no added direct lights. The same camera as W1
+frames a G2-specific bent-elbow display pose; the catalog home pose and source
+mesh materials are preserved. Physics is not stepped, and 48 rendered frames
+warm up reconstruction. Run:
 
 ```bash
 python -m embodichain_robots.agibot.g2._preview --output g2-render.png
 ```
+
+The command also writes `g2-render.render.json`. The checked-in
+[render manifest](preview.render.json) records the camera, actual joint
+positions, rendering settings, asset revision, runtime versions and image hash.
 
 Manufacturer/model: [AgiBot G2](https://www.agibot.com.cn/products/G2).
 The `AgibotG2` preset selects the complete G2 with **CRS arms and two
