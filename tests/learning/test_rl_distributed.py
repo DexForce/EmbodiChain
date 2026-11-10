@@ -33,7 +33,7 @@ import torch
 def _run_training_command(
     command: list[str], *, cwd: Path, env: dict[str, str], timeout: float
 ) -> subprocess.CompletedProcess[str]:
-    """Bound the launcher and all ranks to the same owned process group."""
+    """Terminate the owned launcher and its rank processes on timeout."""
     with subprocess.Popen(
         command,
         cwd=cwd,
@@ -46,6 +46,17 @@ def _run_training_command(
         try:
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
+            # Elastic starts each rank in a separate session. The launcher's
+            # process group alone cannot terminate those GPU-owning workers.
+            try:
+                workers = psutil.Process(process.pid).children(recursive=True)
+            except psutil.NoSuchProcess:
+                workers = []
+            for worker in reversed(workers):
+                try:
+                    worker.kill()
+                except psutil.NoSuchProcess:
+                    pass
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -58,12 +69,18 @@ def _run_training_command(
 @pytest.mark.skipif(
     os.name != "posix", reason="NCCL launcher uses POSIX process groups"
 )
-def test_training_timeout_terminates_worker_process(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "worker_new_session", [False, True], ids=["same-session", "rank-session"]
+)
+def test_training_timeout_terminates_worker_process(
+    tmp_path: Path, worker_new_session: bool
+) -> None:
     """A timed-out launcher cannot leave a training rank using GPU resources."""
     pid_file = tmp_path / "worker.pid"
     script = (
         "import pathlib, subprocess, sys, time; "
-        "worker = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)']); "
+        f"worker = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)'], "
+        f"start_new_session={worker_new_session!r}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
         "pathlib.Path(sys.argv[1]).write_text(str(worker.pid)); "
         "worker.wait()"
     )
