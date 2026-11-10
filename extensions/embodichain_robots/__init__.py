@@ -26,6 +26,7 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "YamI2rtCfg",
     "UnitreeGo1Cfg",
     "UnitreeGo2Cfg",
     "UnitreeG1Cfg",
@@ -48,6 +49,7 @@ __all__ = [
 ]
 
 _EXPORTS = {
+    "YamI2rtCfg": ".i2rt.yam",
     "UnitreeGo1Cfg": ".unitree.go1",
     "UnitreeGo2Cfg": ".unitree.go2",
     "UnitreeG1Cfg": ".unitree.g1",
