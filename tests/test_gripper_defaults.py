@@ -135,6 +135,10 @@ def _compose(
             "grasp_pose_generators": {"custom_fingers": generator_policy}
         }
     declaration["simulation"].update(simulation or {})
+    # Prefix variants must not replace each other's assembled files under xdist.
+    declaration["simulation"].setdefault("urdf_cfg", {}).setdefault(
+        "fpath_prefix", str(tmp_path / "assembled")
+    )
     declaration["grippers"]["tool"].update(gripper_overrides or {})
     if resources is not None:
         declaration["skill_profile"]["resources"] = resources
