@@ -18,24 +18,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
 import math
 from types import MappingProxyType
+from typing import Generic, TypeVar
 
 import torch
 
-from embodichain.lab.sim.atomic_actions.bindings import EndpointBinding
-from embodichain.lab.sim.atomic_actions.execution import (
+from embodichain.lab.sim.atomic_skills.bindings import EndpointBinding
+from embodichain.lab.sim.atomic_skills.execution import (
     ExecutionEvent,
     ExecutionPlanAttempt,
 )
-from embodichain.lab.sim.atomic_actions.plans import PlanningFailure, TrajectorySegment
-from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
-from embodichain.lab.sim.atomic_actions.runner import RunnerStatus
-from embodichain.lab.sim.atomic_actions.state import TaskState
-from embodichain.lab.sim.atomic_actions.tracking import (
+from embodichain.lab.sim.atomic_skills.plans import PlanningFailure, TrajectorySegment
+from embodichain.lab.sim.atomic_skills.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_skills.runner import RunnerStatus
+from embodichain.lab.sim.atomic_skills.state import TaskState
+from embodichain.lab.sim.atomic_skills.tracking import (
     FeedbackTerminalAcceptance,
     TimedTrackingSequence,
     TrackingMetricCfg,
@@ -419,6 +420,16 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
     return {
         "strategy": policy.strategy,
         "sample_count": policy.sample_count,
+        "velocity_targets": policy.velocity_targets,
+        "interpolation_mode": policy.interpolation_mode,
+        "ik_seed_mode": policy.ik_seed_mode,
+        "sample_count_retries": list(policy.sample_count_retries),
+        "require_final_velocity": policy.require_final_velocity,
+        "final_velocity_rejection": policy.final_velocity_rejection,
+        "segment_sample_count_retries": list(policy.segment_sample_count_retries),
+        "segment_continuous_ik_recovery": policy.segment_continuous_ik_recovery,
+        "velocity_limit": _metadata_value(policy.velocity_limit),
+        "acceleration_limit": _metadata_value(policy.acceleration_limit),
         "dynamic_collision_mode": policy.dynamic_collision_mode.value,
         "plan_options": options_metadata,
     }
@@ -426,15 +437,26 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
 
 def _recovery_policy_to_metadata(policy: RecoveryPolicy) -> dict[str, object]:
     """Serialize all bounded-recovery settings."""
-    return {
+    metadata = {
         "max_replans": policy.max_replans,
-        "max_action_retries": policy.max_action_retries,
+        "max_skill_retries": policy.max_skill_retries,
         "goal_translation_threshold": _metadata_value(
             policy.goal_translation_threshold
         ),
         "goal_rotation_threshold": _metadata_value(policy.goal_rotation_threshold),
-        "action_timeout": _metadata_value(policy.action_timeout),
+        "skill_timeout": _metadata_value(policy.skill_timeout),
     }
+
+    if policy.retry_all_failed_plans is False:
+        metadata["retry_all_failed_plans"] = False
+    for name in ("planning_recovery", "planning_budget"):
+        declaration = getattr(policy, name, None)
+        if declaration is not None:
+            metadata[name] = {
+                value.name: _metadata_value(getattr(declaration, value.name))
+                for value in fields(declaration)
+            }
+    return metadata
 
 
 def _tracking_metric_to_metadata(metric: TrackingMetricCfg) -> dict[str, object]:
@@ -624,7 +646,7 @@ class SkillPlanAttemptTrace:
     planned_at: float
     invocation_index: int
     planned_mask: torch.Tensor
-    action_retry_counts: tuple[int, ...]
+    skill_retry_counts: tuple[int, ...]
     replan_counts: tuple[int, ...]
     skill_id: str
     invocation_id: str | None
@@ -669,7 +691,7 @@ class SkillPlanAttemptTrace:
         if self.planned_mask.device != self.plan_success_mask.device:
             raise ValueError("Plan-attempt masks must share a device.")
         batch_size = int(self.planned_mask.numel())
-        retries = tuple(self.action_retry_counts)
+        retries = tuple(self.skill_retry_counts)
         replans = tuple(self.replan_counts)
         if len(retries) != batch_size or len(replans) != batch_size:
             raise ValueError("Recovery counters must contain one value per row.")
@@ -757,7 +779,7 @@ class SkillPlanAttemptTrace:
             raise TypeError("planner_messages must contain strings.")
         object.__setattr__(self, "planned_mask", self.planned_mask.clone())
         object.__setattr__(self, "plan_success_mask", self.plan_success_mask.clone())
-        object.__setattr__(self, "action_retry_counts", retries)
+        object.__setattr__(self, "skill_retry_counts", retries)
         object.__setattr__(self, "replan_counts", replans)
         object.__setattr__(self, "trajectory_segments", segments)
         object.__setattr__(
@@ -814,7 +836,7 @@ class SkillPlanAttemptTrace:
             planned_at=attempt.planned_at,
             invocation_index=attempt.invocation_index,
             planned_mask=attempt.planned_mask,
-            action_retry_counts=attempt.action_retry_counts,
+            skill_retry_counts=attempt.skill_retry_counts,
             replan_counts=attempt.replan_counts,
             skill_id=plan.skill_id,
             invocation_id=plan.invocation_id,
@@ -857,7 +879,7 @@ class SkillPlanAttemptTrace:
             planned_at=self.planned_at,
             invocation_index=self.invocation_index,
             planned_mask=self.planned_mask,
-            action_retry_counts=self.action_retry_counts,
+            skill_retry_counts=self.skill_retry_counts,
             replan_counts=self.replan_counts,
             skill_id=self.skill_id,
             invocation_id=self.invocation_id,
@@ -900,7 +922,7 @@ class SkillPlanAttemptTrace:
             "invocation_index": self.invocation_index,
             "planned_mask": _metadata_value(self.planned_mask),
             "recovery_counters": {
-                "action_retries": list(self.action_retry_counts),
+                "skill_retries": list(self.skill_retry_counts),
                 "replans": list(self.replan_counts),
             },
             "skill_id": self.skill_id,
@@ -1569,6 +1591,92 @@ class SkillWorkflowRecoveryTrace:
         }
 
 
+_Trace = TypeVar("_Trace")
+_HISTORY_FIELDS = frozenset(
+    {"events", "calls", "effects", "workflow_recoveries", "failures"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _HistoryEntry(Generic[_Trace]):
+    value: _Trace
+    previous: _HistoryEntry[_Trace] | None
+    length: int
+
+
+class _HistoryJournal(Sequence[_Trace]):
+    """Append-only owned entries linked only toward the historical prefix."""
+
+    def __init__(self) -> None:
+        self._tail: _HistoryEntry[_Trace] | None = None
+
+    def __len__(self) -> int:
+        return 0 if self._tail is None else self._tail.length
+
+    def __iter__(self) -> Iterator[_Trace]:
+        values: list[_Trace] = []
+        entry = self._tail
+        while entry is not None:
+            values.append(entry.value)
+            entry = entry.previous
+        return reversed(values)
+
+    def __getitem__(self, index: int | slice) -> _Trace | tuple[_Trace, ...]:
+        if isinstance(index, slice):
+            start, stop, step = index.indices(len(self))
+            if step != 1:
+                return tuple(self)[index]
+            values: list[_Trace] = []
+            entry = self._tail
+            while entry is not None and entry.length > start:
+                if entry.length <= stop:
+                    values.append(entry.value)
+                entry = entry.previous
+            return tuple(reversed(values))
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
+        entry = self._tail
+        while entry.length != index + 1:
+            entry = entry.previous
+        return entry.value
+
+    def append(self, value: _Trace) -> None:
+        self._tail = _HistoryEntry(value, self._tail, len(self) + 1)
+
+    def extend(self, values: Iterable[_Trace]) -> None:
+        for value in values:
+            self.append(value)
+
+    def snapshot(
+        self, copy_entry: Callable[[_Trace], _Trace]
+    ) -> _HistorySnapshot[_Trace]:
+        return _HistorySnapshot(self._tail, copy_entry)
+
+
+@dataclass(frozen=True, slots=True)
+class _HistorySnapshot(Generic[_Trace]):
+    """Capture an owned immutable journal prefix without copying its history.
+
+    Only the runtime constructs these views. Journal entries already own their
+    inputs and are never changed after append. Old tails cannot retain future
+    entries, including after the runtime starts a new workflow.
+    Public access materializes independent copies, preserving result ownership.
+    """
+
+    tail: _HistoryEntry[_Trace] | None
+    copy_entry: Callable[[_Trace], _Trace]
+
+    def materialize(self) -> tuple[_Trace, ...]:
+        values: list[_Trace] = []
+        entry = self.tail
+        while entry is not None:
+            values.append(self.copy_entry(entry.value))
+            entry = entry.previous
+        return tuple(reversed(values))
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class SemanticExecutionResult:
     """Immutable workflow snapshot returned by sync and step-wise execution."""
@@ -1589,6 +1697,13 @@ class SemanticExecutionResult:
     failures: tuple[SkillFailure, ...] = ()
     wait_duration: float = 0.0
     message: str | None = None
+
+    def __getattribute__(self, name: str) -> object:
+        value = object.__getattribute__(self, name)
+        if name in _HISTORY_FIELDS and type(value) is _HistorySnapshot:
+            value = value.materialize()
+            object.__setattr__(self, name, value)
+        return value
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, SemanticExecutionStatus):
@@ -1641,9 +1756,9 @@ class SemanticExecutionResult:
             raise ValueError("wait_duration must be finite and non-negative.")
         if self.message is not None and type(self.message) is not str:
             raise TypeError("message must be a string or None.")
-        if not all(
-            type(recovery) is SkillWorkflowRecoveryTrace
-            for recovery in self.workflow_recoveries
+        recoveries = object.__getattribute__(self, "workflow_recoveries")
+        if type(recoveries) is not _HistorySnapshot and not all(
+            type(recovery) is SkillWorkflowRecoveryTrace for recovery in recoveries
         ):
             raise TypeError(
                 "workflow_recoveries must contain SkillWorkflowRecoveryTrace values."
@@ -1657,31 +1772,18 @@ class SemanticExecutionResult:
         ):
             object.__setattr__(self, name, getattr(self, name).clone())
         object.__setattr__(self, "task_state", _snapshot_task_state(self.task_state))
-        object.__setattr__(
-            self,
-            "events",
-            tuple(_snapshot_event(event) for event in self.events),
-        )
-        object.__setattr__(
-            self,
-            "calls",
-            tuple(call.snapshot() for call in self.calls),
-        )
-        object.__setattr__(
-            self,
-            "effects",
-            tuple(effect.snapshot() for effect in self.effects),
-        )
-        object.__setattr__(
-            self,
-            "workflow_recoveries",
-            tuple(recovery.snapshot() for recovery in self.workflow_recoveries),
-        )
-        object.__setattr__(
-            self,
-            "failures",
-            tuple(failure.snapshot() for failure in self.failures),
-        )
+        for name, copy_entry in (
+            ("events", _snapshot_event),
+            ("calls", SkillCallTrace.snapshot),
+            ("effects", SkillEffectTrace.snapshot),
+            ("workflow_recoveries", SkillWorkflowRecoveryTrace.snapshot),
+            ("failures", SkillFailure.snapshot),
+        ):
+            history = object.__getattribute__(self, name)
+            if type(history) is not _HistorySnapshot:
+                object.__setattr__(
+                    self, name, tuple(copy_entry(entry) for entry in history)
+                )
 
     @property
     def terminal(self) -> bool:

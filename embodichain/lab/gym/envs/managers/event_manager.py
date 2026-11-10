@@ -142,6 +142,7 @@ class EventManager(ManagerBase):
         self._mode_functor_cfgs: dict[str, list[EventCfg]] = dict()
         self._mode_class_functor_cfgs: dict[str, list[EventCfg]] = dict()
         self._functor_invocation_counts: dict[tuple[str, str, str], int] = {}
+        self._seed_revision = 0
 
         cfg_seed = getattr(getattr(env, "cfg", None), "seed", None)
         self._seed = (
@@ -152,6 +153,7 @@ class EventManager(ManagerBase):
 
         # call the base class (this will parse the functors config)
         super().__init__(cfg, env)
+        self._all_env_ids = torch.arange(env.num_envs, device=env.device)
 
     def __str__(self) -> str:
         """Returns: A string representation for event manager."""
@@ -193,6 +195,11 @@ class EventManager(ManagerBase):
         The keys are the modes of event and the values are the names of the event functors.
         """
         return self._mode_functor_names
+
+    @property
+    def seed_revision(self) -> int:
+        """Return the explicit reseed revision, including repeated seed values."""
+        return self._seed_revision
 
     @property
     def available_modes(self) -> list[str]:
@@ -245,6 +252,7 @@ class EventManager(ManagerBase):
         ):
             raise TypeError(f"Event seed must be an integer or None, got {type(seed)}.")
         self._seed = None if seed is None else int(seed)
+        self._seed_revision += 1
         self._functor_invocation_counts.clear()
         for count in getattr(self, "_interval_functor_step_count", []):
             count.zero_()
@@ -309,6 +317,17 @@ class EventManager(ManagerBase):
                     # call the event functor (with None for env_ids)
                     self._call_event_functor(
                         mode, functor_name, functor_cfg, self._env, None
+                    )
+                elif not functor_cfg.is_global and functor_cfg.interval_step == 1:
+                    # Every row is due, including rows reset on the last step.
+                    # Reuse the known selection instead of synchronizing a
+                    # CUDA nonzero merely to recover all environment indices.
+                    self._call_event_functor(
+                        mode,
+                        functor_name,
+                        functor_cfg,
+                        self._env,
+                        self._all_env_ids,
                     )
                 else:
                     valid_env_ids = (

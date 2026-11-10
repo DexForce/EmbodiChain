@@ -1,0 +1,2190 @@
+{
+  "scope": "Six exploratory protected-quota learning trials; fixed P8/C32/B256/D256; two seeds with same20developmentstates; no formaltest/confirmation100/winner-ranking",
+  "all_completed": true,
+  "runs": [
+    {
+      "run": "k1024-seed16001",
+      "quota": 1024,
+      "seed": 16001,
+      "state": "complete",
+      "timing_eligible": false,
+      "native_gpu_uuids": [
+        "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d"
+      ],
+      "owned_processes_remaining": [],
+      "process_seconds": 1114.9647603738122,
+      "accepted_episodes": 256,
+      "assigned_chunks": 262144,
+      "delivered_chunks": 251904,
+      "completed_chunks": 251904,
+      "updates": 984,
+      "max_source_draws": 1024,
+      "budget_realization": 0.9609375,
+      "retired_unused_chunks": 10239,
+      "retained_unused_chunks": 1,
+      "rates": {
+        "input_generation_episodes_per_second": 0.93264,
+        "observed_generation_episodes_per_productive_second": 0.9149679636694964,
+        "input_training_chunks_per_second": 14218.41,
+        "observed_active_training_chunks_per_second": 13826.349894310119,
+        "target_training_chunks_per_second": 955.02336,
+        "observed_wall_training_chunks_per_second": 954.4764013458711,
+        "loop_seconds": 263.91852081916295,
+        "quota_wait_seconds": 0.0,
+        "data_wait_seconds": 0.0,
+        "deliberate_throttle_seconds": 244.76951788039878
+      },
+      "latest_successes": 18,
+      "development_scenes": 20,
+      "best_successes": 20,
+      "max_observed_drawdown_scenes": 2,
+      "panels": [
+        {
+          "name": "initial_dev",
+          "step": 0,
+          "successes": 0,
+          "trials": 20
+        },
+        {
+          "name": "generation_6_publication_dev",
+          "step": 687,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "generation_7_publication_dev",
+          "step": 819,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "generation_8_publication_dev",
+          "step": 949,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "step_984_dev",
+          "step": 984,
+          "successes": 18,
+          "trials": 20
+        }
+      ],
+      "latest_goal_error_mean_m": 0.01493658070685342,
+      "latest_goal_error_p95_m": 0.031685847975313666,
+      "failed_records": [
+        {
+          "seed": 810006,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.03156161308288574,
+          "length": 600,
+          "initial_arm_target_delta": 0.34915193915367126
+        },
+        {
+          "seed": 810017,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.03404631093144417,
+          "length": 600,
+          "initial_arm_target_delta": 0.44649410247802734
+        }
+      ],
+      "training_finished_seconds": 348.17159547819756
+    },
+    {
+      "run": "k1024-seed16002",
+      "quota": 1024,
+      "seed": 16002,
+      "state": "complete",
+      "timing_eligible": true,
+      "native_gpu_uuids": [
+        "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d"
+      ],
+      "owned_processes_remaining": [],
+      "process_seconds": 1220.15338663687,
+      "accepted_episodes": 256,
+      "assigned_chunks": 262144,
+      "delivered_chunks": 252928,
+      "completed_chunks": 252928,
+      "updates": 988,
+      "max_source_draws": 1024,
+      "budget_realization": 0.96484375,
+      "retired_unused_chunks": 9016,
+      "retained_unused_chunks": 200,
+      "rates": {
+        "input_generation_episodes_per_second": 0.93264,
+        "observed_generation_episodes_per_productive_second": 0.7834853669080455,
+        "input_training_chunks_per_second": 14218.41,
+        "observed_active_training_chunks_per_second": 15693.749848831634,
+        "target_training_chunks_per_second": 955.02336,
+        "observed_wall_training_chunks_per_second": 834.3209704965311,
+        "loop_seconds": 303.1543122420553,
+        "quota_wait_seconds": 44.222267877077684,
+        "data_wait_seconds": 0.0,
+        "deliberate_throttle_seconds": 241.97299501439556
+      },
+      "latest_successes": 18,
+      "development_scenes": 20,
+      "best_successes": 19,
+      "max_observed_drawdown_scenes": 4,
+      "panels": [
+        {
+          "name": "initial_dev",
+          "step": 0,
+          "successes": 0,
+          "trials": 20
+        },
+        {
+          "name": "generation_6_publication_dev",
+          "step": 701,
+          "successes": 16,
+          "trials": 20
+        },
+        {
+          "name": "generation_7_publication_dev",
+          "step": 829,
+          "successes": 12,
+          "trials": 20
+        },
+        {
+          "name": "generation_8_publication_dev",
+          "step": 957,
+          "successes": 19,
+          "trials": 20
+        },
+        {
+          "name": "step_988_dev",
+          "step": 988,
+          "successes": 18,
+          "trials": 20
+        }
+      ],
+      "latest_goal_error_mean_m": 0.014555913058575242,
+      "latest_goal_error_p95_m": 0.03166827578097583,
+      "failed_records": [
+        {
+          "seed": 810006,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.04256798326969147,
+          "length": 600,
+          "initial_arm_target_delta": 0.4144328236579895
+        },
+        {
+          "seed": 810019,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.031094606965780258,
+          "length": 600,
+          "initial_arm_target_delta": 0.40928739309310913
+        }
+      ],
+      "training_finished_seconds": 387.7662060477305
+    },
+    {
+      "run": "k2660-seed16001",
+      "quota": 2660,
+      "seed": 16001,
+      "state": "complete",
+      "timing_eligible": true,
+      "native_gpu_uuids": [
+        "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+      ],
+      "owned_processes_remaining": [],
+      "process_seconds": 1109.7757031139918,
+      "accepted_episodes": 256,
+      "assigned_chunks": 680960,
+      "delivered_chunks": 655104,
+      "completed_chunks": 655104,
+      "updates": 2559,
+      "max_source_draws": 2660,
+      "budget_realization": 0.9620300751879699,
+      "retired_unused_chunks": 25741,
+      "retained_unused_chunks": 115,
+      "rates": {
+        "input_generation_episodes_per_second": 0.93264,
+        "observed_generation_episodes_per_productive_second": 0.9337706793124921,
+        "input_training_chunks_per_second": 14218.41,
+        "observed_active_training_chunks_per_second": 16369.114775121168,
+        "target_training_chunks_per_second": 2480.8224,
+        "observed_wall_training_chunks_per_second": 2475.6466754173434,
+        "loop_seconds": 264.6193443131633,
+        "quota_wait_seconds": 0.0,
+        "data_wait_seconds": 0.0,
+        "deliberate_throttle_seconds": 222.80838414700702
+      },
+      "latest_successes": 20,
+      "development_scenes": 20,
+      "best_successes": 20,
+      "max_observed_drawdown_scenes": 0,
+      "panels": [
+        {
+          "name": "initial_dev",
+          "step": 0,
+          "successes": 0,
+          "trials": 20
+        },
+        {
+          "name": "generation_6_publication_dev",
+          "step": 1739,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "generation_7_publication_dev",
+          "step": 2077,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "generation_8_publication_dev",
+          "step": 2411,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "step_2559_dev",
+          "step": 2559,
+          "successes": 20,
+          "trials": 20
+        }
+      ],
+      "latest_goal_error_mean_m": 0.011128313222434372,
+      "latest_goal_error_p95_m": 0.020423950161784887,
+      "failed_records": [],
+      "training_finished_seconds": 349.64073280757293
+    },
+    {
+      "run": "k2660-seed16002",
+      "quota": 2660,
+      "seed": 16002,
+      "state": "complete",
+      "timing_eligible": true,
+      "native_gpu_uuids": [
+        "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+      ],
+      "owned_processes_remaining": [],
+      "process_seconds": 1119.9636002250481,
+      "accepted_episodes": 256,
+      "assigned_chunks": 680960,
+      "delivered_chunks": 654336,
+      "completed_chunks": 654336,
+      "updates": 2556,
+      "max_source_draws": 2660,
+      "budget_realization": 0.9609022556390977,
+      "retired_unused_chunks": 26378,
+      "retained_unused_chunks": 246,
+      "rates": {
+        "input_generation_episodes_per_second": 0.93264,
+        "observed_generation_episodes_per_productive_second": 0.9019988011623027,
+        "input_training_chunks_per_second": 14218.41,
+        "observed_active_training_chunks_per_second": 16448.16640115115,
+        "target_training_chunks_per_second": 2480.8224,
+        "observed_wall_training_chunks_per_second": 2458.2077001768753,
+        "loop_seconds": 266.184179617092,
+        "quota_wait_seconds": 2.297778126085177,
+        "data_wait_seconds": 0.0,
+        "deliberate_throttle_seconds": 222.34386093867943
+      },
+      "latest_successes": 20,
+      "development_scenes": 20,
+      "best_successes": 20,
+      "max_observed_drawdown_scenes": 0,
+      "panels": [
+        {
+          "name": "initial_dev",
+          "step": 0,
+          "successes": 0,
+          "trials": 20
+        },
+        {
+          "name": "generation_6_publication_dev",
+          "step": 1792,
+          "successes": 19,
+          "trials": 20
+        },
+        {
+          "name": "generation_7_publication_dev",
+          "step": 2142,
+          "successes": 19,
+          "trials": 20
+        },
+        {
+          "name": "generation_8_publication_dev",
+          "step": 2474,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "step_2556_dev",
+          "step": 2556,
+          "successes": 20,
+          "trials": 20
+        }
+      ],
+      "latest_goal_error_mean_m": 0.01005128282122314,
+      "latest_goal_error_p95_m": 0.014238994009792814,
+      "failed_records": [],
+      "training_finished_seconds": 352.5691822418012
+    },
+    {
+      "run": "k8192-seed16001",
+      "quota": 8192,
+      "seed": 16001,
+      "state": "complete",
+      "timing_eligible": true,
+      "native_gpu_uuids": [
+        "GPU-569c23a7-9291-45ef-c727-ba74d63708db"
+      ],
+      "owned_processes_remaining": [],
+      "process_seconds": 1108.6534178152215,
+      "accepted_episodes": 256,
+      "assigned_chunks": 2097152,
+      "delivered_chunks": 2035968,
+      "completed_chunks": 2035968,
+      "updates": 7953,
+      "max_source_draws": 8192,
+      "budget_realization": 0.9708251953125,
+      "retired_unused_chunks": 60971,
+      "retained_unused_chunks": 213,
+      "rates": {
+        "input_generation_episodes_per_second": 0.93264,
+        "observed_generation_episodes_per_productive_second": 0.8867237271318662,
+        "input_training_chunks_per_second": 14218.41,
+        "observed_active_training_chunks_per_second": 16018.476402177394,
+        "target_training_chunks_per_second": 7640.18688,
+        "observed_wall_training_chunks_per_second": 7428.1718627761875,
+        "loop_seconds": 274.08735791407526,
+        "quota_wait_seconds": 6.836008009267971,
+        "data_wait_seconds": 0.0,
+        "deliberate_throttle_seconds": 134.91679755365476
+      },
+      "latest_successes": 20,
+      "development_scenes": 20,
+      "best_successes": 20,
+      "max_observed_drawdown_scenes": 1,
+      "panels": [
+        {
+          "name": "initial_dev",
+          "step": 0,
+          "successes": 0,
+          "trials": 20
+        },
+        {
+          "name": "generation_6_publication_dev",
+          "step": 5650,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "generation_7_publication_dev",
+          "step": 6674,
+          "successes": 19,
+          "trials": 20
+        },
+        {
+          "name": "generation_8_publication_dev",
+          "step": 7698,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "step_7953_dev",
+          "step": 7953,
+          "successes": 20,
+          "trials": 20
+        }
+      ],
+      "latest_goal_error_mean_m": 0.008598005247768015,
+      "latest_goal_error_p95_m": 0.0135183974634856,
+      "failed_records": [],
+      "training_finished_seconds": 360.1350755493622
+    },
+    {
+      "run": "k8192-seed16002",
+      "quota": 8192,
+      "seed": 16002,
+      "state": "complete",
+      "timing_eligible": true,
+      "native_gpu_uuids": [
+        "GPU-569c23a7-9291-45ef-c727-ba74d63708db"
+      ],
+      "owned_processes_remaining": [],
+      "process_seconds": 1092.5867904189508,
+      "accepted_episodes": 256,
+      "assigned_chunks": 2097152,
+      "delivered_chunks": 2036224,
+      "completed_chunks": 2036224,
+      "updates": 7954,
+      "max_source_draws": 8192,
+      "budget_realization": 0.970947265625,
+      "retired_unused_chunks": 60893,
+      "retained_unused_chunks": 35,
+      "rates": {
+        "input_generation_episodes_per_second": 0.93264,
+        "observed_generation_episodes_per_productive_second": 0.8932187488031483,
+        "input_training_chunks_per_second": 14218.41,
+        "observed_active_training_chunks_per_second": 16574.509998051115,
+        "target_training_chunks_per_second": 7640.18688,
+        "observed_wall_training_chunks_per_second": 7478.778530841623,
+        "loop_seconds": 272.26692054094747,
+        "quota_wait_seconds": 4.982674905331805,
+        "data_wait_seconds": 0.0,
+        "deliberate_throttle_seconds": 139.23845925624482
+      },
+      "latest_successes": 20,
+      "development_scenes": 20,
+      "best_successes": 20,
+      "max_observed_drawdown_scenes": 1,
+      "panels": [
+        {
+          "name": "initial_dev",
+          "step": 0,
+          "successes": 0,
+          "trials": 20
+        },
+        {
+          "name": "generation_6_publication_dev",
+          "step": 5651,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "generation_7_publication_dev",
+          "step": 6675,
+          "successes": 20,
+          "trials": 20
+        },
+        {
+          "name": "generation_8_publication_dev",
+          "step": 7699,
+          "successes": 19,
+          "trials": 20
+        },
+        {
+          "name": "step_7954_dev",
+          "step": 7954,
+          "successes": 20,
+          "trials": 20
+        }
+      ],
+      "latest_goal_error_mean_m": 0.007738461613189429,
+      "latest_goal_error_p95_m": 0.01112025105394423,
+      "failed_records": [],
+      "training_finished_seconds": 357.15643008076586
+    }
+  ],
+  "qualified_profile": false,
+  "regimes": {
+    "purpose": "Two-throughput configuration contract validation; not a learning recommendation or optimal-configuration study",
+    "revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+    "runtime_source_modified": false,
+    "source_sha256": {
+      "embodichain/data_pipeline/configuration.py": "6ce6916d62c8d9285910ec4248b3a9732c8abf2f64e471071d57461278b637fb",
+      "embodichain/data_pipeline/engine/data.py": "e9bc55243d18872ac63c908877d4b2c435f50acf91c44f8572d6530ad92c710f",
+      "tests/data_pipeline/test_configuration_regimes.py": "4e6411276eb05b4d2c4baa972ab6fb818f86d7e56344418828d84e4bd78eec03"
+    },
+    "pytest": {
+      "tests": 580,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 2.182,
+      "junit": "/tmp/ods-quota-validation/regime-tests-junit.xml"
+    },
+    "matrix_counts": {
+      "feasible": 414,
+      "learner_limited": 96,
+      "infeasible": 162,
+      "balance_or_integer_budget_limited": 205,
+      "supply_limited": 93,
+      "latency_and_memory_limited": 20
+    },
+    "profile": {
+      "profile_id": "regime-contract-v1",
+      "scope": "synthetic conservation tests; not a learning qualification",
+      "qualified": false,
+      "min_chunks_per_episode": 7,
+      "max_chunks_per_episode": 31,
+      "hard_max_chunks_per_episode": 47,
+      "latency_safety_factor": 1.25
+    },
+    "invariants": [
+      "target <= T and target <= G*K using exact Fraction comparisons",
+      "K within profile range and <= hard limit",
+      "whole writer batch divisibility, >=2P rows, diversity retained",
+      "one full batch fits while P rows locked",
+      "storage <= supplied cap",
+      "active consumption * p95 latency * safety <= unlocked credit",
+      "initial budget exact divmod into complete batches and remainder",
+      "public sampler depletion never overspends and failed full batch spends nothing",
+      "initial cache burst is finite and distinct from sustainable G*K"
+    ],
+    "limitations": [
+      "Synthetic profiles and capacities validate contracts, not learning quality",
+      "CPU sampler fixtures use real shared budget and public sampling but no real producer/simulation",
+      "No throughput timing or GPU performance claim"
+    ]
+  },
+  "default_device_fix_cpu_parity": {
+    "equal": true,
+    "scope": "Default CPU sample payloads excluding intentional fresh run IDs, RNG state and per-episode quota counts; nonbinding and near-exhausted cases",
+    "frozen_revision": "6d2ff529",
+    "records": [
+      {
+        "quota": 3000,
+        "payload_except_run_identity_sha256": "46e8fb3f784b85a92adb8387d856c50d32a2c8dea24ef826a761143ebf536e6f",
+        "rng_sha256": "ddf5b3d13f2b298ee5d6401c062084984e6be6a13a51859174e91834a74b8a74",
+        "delivered": 2048,
+        "per_episode_delivered": [
+          61,
+          65,
+          61,
+          59,
+          73,
+          61,
+          57,
+          65,
+          61,
+          61,
+          68,
+          62,
+          60,
+          73,
+          67,
+          56,
+          67,
+          58,
+          70,
+          64,
+          64,
+          50,
+          67,
+          64,
+          60,
+          64,
+          66,
+          73,
+          76,
+          67,
+          69,
+          59
+        ]
+      },
+      {
+        "quota": 31,
+        "payload_except_run_identity_sha256": "17dfd8c515f623fa4c76bb44370d847ece090a01a7a62a71d44ae7cfd31a1b91",
+        "rng_sha256": "44247e55a11f586a5d558520c7869dcd7b56d451b050d5c788ec863c983b9e7b",
+        "delivered": 992,
+        "per_episode_delivered": [
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31,
+          31
+        ]
+      }
+    ]
+  },
+  "drift_recalculation": {
+    "scope": "Dry-run recalculation from observed paced workload, not a new validated run or saturation measurement. Latency prior remains9.5s; only two capacity inputs changed.",
+    "previous_configuration": {
+      "episode_sample_budget": 1024,
+      "episode_sample_hard_limit": 1024,
+      "balance_chunks_per_episode": 15245.335820895521,
+      "batch_size": 256,
+      "producer_envs": 8,
+      "buffer_size": 32,
+      "cache_bytes": 32000000,
+      "initial_chunk_budget": 32768,
+      "initial_max_updates": 128,
+      "initial_remainder_chunks": 0,
+      "refill_remaining_chunks": 24576,
+      "active_chunks_per_second_cap": 2069.5578947368417,
+      "training_chunks_per_second_target": 955.02336,
+      "training_updates_per_second_target": 3.73056,
+      "publication_episodes_per_second_target": 0.93264,
+      "training_duty_fraction": 0.06716808419506823,
+      "producer_duty_fraction": 1.0,
+      "expected_training_throttle_fraction": 0.9328319158049317,
+      "expected_producer_throttle_fraction": 0.0,
+      "profile_id": "franka-chunkbc-provisional-fixed-k1024-v1",
+      "profile_scope": "Franka PickPlace ChunkBC H64 action16 DLS; successful trajectory length 332\u2013333; exploratory bounded-quota range validation",
+      "profile_qualified": false,
+      "measurement_scope": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities",
+      "reasons": [
+        "Provisional profile: sampling bounds require independent qualification.",
+        "Supply cannot sustain learner capacity within the recommended selection budget.",
+        "Cache memory limits short-window active consumption; enforce the returned active-rate cap.",
+        "Refill sizing is a latency heuristic; validate subsequent publication spacing and remeasure after pacing changes."
+      ],
+      "end_of_supply_rule": "Stop when remaining unlocked per-episode quota cannot fund one full batch."
+    },
+    "new_observed_inputs": {
+      "accepted_episodes_per_second": 0.7834853669080455,
+      "training_chunks_per_second": 15693.749848831634
+    },
+    "recomputed_configuration": {
+      "episode_sample_budget": 1024,
+      "episode_sample_hard_limit": 1024,
+      "balance_chunks_per_episode": 20030.686610990077,
+      "batch_size": 256,
+      "producer_envs": 8,
+      "buffer_size": 32,
+      "cache_bytes": 32000000,
+      "initial_chunk_budget": 32768,
+      "initial_max_updates": 128,
+      "initial_remainder_chunks": 0,
+      "refill_remaining_chunks": 24576,
+      "active_chunks_per_second_cap": 2069.5578947368417,
+      "training_chunks_per_second_target": 802.2890157138386,
+      "training_updates_per_second_target": 3.133941467632182,
+      "publication_episodes_per_second_target": 0.7834853669080455,
+      "training_duty_fraction": 0.05112156262472651,
+      "producer_duty_fraction": 1.0,
+      "expected_training_throttle_fraction": 0.9488784373752734,
+      "expected_producer_throttle_fraction": 0.0,
+      "profile_id": "franka-chunkbc-provisional-fixed-k1024-v1",
+      "profile_scope": "Franka PickPlace ChunkBC H64 action16 DLS; successful trajectory length 332\u2013333; exploratory bounded-quota range validation",
+      "profile_qualified": false,
+      "measurement_scope": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities",
+      "reasons": [
+        "Provisional profile: sampling bounds require independent qualification.",
+        "Supply cannot sustain learner capacity within the recommended selection budget.",
+        "Cache memory limits short-window active consumption; enforce the returned active-rate cap.",
+        "Refill sizing is a latency heuristic; validate subsequent publication spacing and remeasure after pacing changes."
+      ],
+      "end_of_supply_rule": "Stop when remaining unlocked per-episode quota cannot fund one full batch."
+    }
+  },
+  "diagnostic_repeat": {
+    "runs": [
+      {
+        "run": "k1024-seed16002",
+        "quota": 1024,
+        "seed": 16002,
+        "status": {
+          "state": "complete",
+          "returncode": 0,
+          "process_wall_seconds": 1151.0007471190766,
+          "alive_owned_processes": [],
+          "source_unchanged": true,
+          "native_owned_gpu_uuids": [
+            "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+          ],
+          "native_owned_peak_mib": 6324,
+          "monitor_errors": [],
+          "artifact_validation": {
+            "passed": true,
+            "errors": [],
+            "sampled_chunks": 251392,
+            "completed_chunks": 251392,
+            "max_episode_sampled": 1024,
+            "quality_score_used_as_completion_gate": false
+          },
+          "timing_eligible": true,
+          "external_gpu_activity": [],
+          "finished_utc": 1792339824.4403558,
+          "observed_owned_process_count": 10
+        },
+        "initial": {
+          "state_sha256": "4bf7344f84b11ceff4ec63577f8e994a85e2be76466ea1bae95f4d774cf88864",
+          "normalizer_sha256": "0e4bd25b6ad844c9f039fa651554e0257a8c9eb9fae503281c5b6c36692f440e",
+          "parameter_sha256": "d911578405777cb25e6af7d281eeae75c8c26c9fa8dfd127046c84331e082037",
+          "normalizer_keys": [
+            "mean",
+            "std",
+            "target_mean",
+            "target_std"
+          ]
+        },
+        "summary": {
+          "parameters_updated": true,
+          "training_step": 982,
+          "best_dev_success": 1.0,
+          "initial_dev_success": 0.0,
+          "stats": {
+            "requested_generation": 8,
+            "completed_generation": 8,
+            "successful_episodes": 256,
+            "failed_episodes": 0,
+            "generated_frames": 85132,
+            "production_seconds": 271.5622923281044,
+            "sampled_chunks": 251392,
+            "run_id": 1467515525433376523,
+            "valid_frames": 10639
+          }
+        },
+        "end_reason": "usage_budget",
+        "final_artifact_audit": {
+          "passed": true,
+          "errors": [],
+          "quality_score_used_as_gate": false
+        },
+        "training_finish_elapsed": 347.1108937263489,
+        "latest_dev_success": 1.0,
+        "panels": [
+          {
+            "name": "initial_dev",
+            "policy_step": 0,
+            "success_rate": 0.0,
+            "lift_rate": 0.0,
+            "goal_error": 0.3611317813396454,
+            "episode_length": 600.0,
+            "successes": 0,
+            "trials": 20
+          },
+          {
+            "name": "generation_6_publication_dev",
+            "policy_step": 669,
+            "success_rate": 1.0,
+            "lift_rate": 1.0,
+            "goal_error": 0.011871942062862217,
+            "episode_length": 337.05,
+            "successes": 20,
+            "trials": 20
+          },
+          {
+            "name": "generation_7_publication_dev",
+            "policy_step": 793,
+            "success_rate": 0.7,
+            "lift_rate": 0.75,
+            "goal_error": 0.10683656334877015,
+            "episode_length": 411.8,
+            "successes": 14,
+            "trials": 20
+          },
+          {
+            "name": "generation_8_publication_dev",
+            "policy_step": 922,
+            "success_rate": 0.9,
+            "lift_rate": 0.95,
+            "goal_error": 0.028902262216433883,
+            "episode_length": 340.55,
+            "successes": 18,
+            "trials": 20
+          },
+          {
+            "name": "step_982_dev",
+            "policy_step": 982,
+            "success_rate": 1.0,
+            "lift_rate": 1.0,
+            "goal_error": 0.01112043778412044,
+            "episode_length": 323.15,
+            "successes": 20,
+            "trials": 20
+          }
+        ],
+        "max_observed_panel_drawdown_pp": 30.0,
+        "panel_count": 5,
+        "post_training_wall_seconds": 803.8898533927277,
+        "quota_audit": {
+          "episodes": 256,
+          "max_delivered": 1024,
+          "min_delivered": 236,
+          "p50_p95": [
+            1024.0,
+            1024.0
+          ],
+          "total_delivered": 251392,
+          "completed_chunks": 251392,
+          "all_within_hard_limit": true,
+          "retired_unused_quota": 10631,
+          "retained_unused_quota": 121
+        },
+        "generation_exposure": {
+          "1": {
+            "episodes": 32,
+            "mean_draws": 695.0625,
+            "min_draws": 236,
+            "max_draws": 1024,
+            "unused_quota_share": 0.32122802734375
+          },
+          "2": {
+            "episodes": 32,
+            "mean_draws": 1024.0,
+            "min_draws": 1024,
+            "max_draws": 1024,
+            "unused_quota_share": 0.0
+          },
+          "3": {
+            "episodes": 32,
+            "mean_draws": 1023.6875,
+            "min_draws": 1018,
+            "max_draws": 1024,
+            "unused_quota_share": 0.00030517578125
+          },
+          "4": {
+            "episodes": 32,
+            "mean_draws": 1021.8125,
+            "min_draws": 998,
+            "max_draws": 1024,
+            "unused_quota_share": 0.00213623046875
+          },
+          "5": {
+            "episodes": 32,
+            "mean_draws": 1023.75,
+            "min_draws": 1016,
+            "max_draws": 1024,
+            "unused_quota_share": 0.000244140625
+          },
+          "6": {
+            "episodes": 32,
+            "mean_draws": 1024.0,
+            "min_draws": 1024,
+            "max_draws": 1024,
+            "unused_quota_share": 0.0
+          },
+          "7": {
+            "episodes": 32,
+            "mean_draws": 1023.46875,
+            "min_draws": 1007,
+            "max_draws": 1024,
+            "unused_quota_share": 0.000518798828125
+          },
+          "8": {
+            "episodes": 32,
+            "mean_draws": 1020.21875,
+            "min_draws": 961,
+            "max_draws": 1024,
+            "unused_quota_share": 0.003692626953125
+          }
+        },
+        "flow": {
+          "measurement": {
+            "monotonic_origin_seconds": 1502712.5684635337,
+            "time_unit": "seconds on a shared system monotonic clock",
+            "publication_timestamp_input_unit": "nanoseconds",
+            "loop_start_seconds": 80.14865282829851,
+            "loop_end_seconds": 343.46432559844106,
+            "loop_wall_seconds": 263.31567277014256,
+            "scope": "Observed under the actual learner/producer scheduler; not fully concurrent saturation capacity.",
+            "limitations": [
+              "Only complete matched warm refills inside the training window contribute to productive rates.",
+              "Completed service excludes recorded data waits; bookkeeping outside training_service remains unattributed.",
+              "Productive rates include request/publication overhead and retries but exclude idle gaps between refills.",
+              "First-publication latency observations may include incomplete refills; small samples do not establish reliable tail latency."
+            ]
+          },
+          "learner": {
+            "completed_updates": 982,
+            "chunk_unit": "one chunk consumed by a completed optimizer update",
+            "update_unit": "one completed optimizer batch",
+            "batch_chunks": 256,
+            "completed_chunks": 251392,
+            "service_seconds": 16.413617704994977,
+            "service_data_wait_seconds": 0.0,
+            "active_seconds": 16.413617704994977,
+            "wall_seconds": 263.31567277014256,
+            "active_chunks_per_second": 15316.062827727286,
+            "active_updates_per_second": 59.82837042080971,
+            "wall_chunks_per_second": 954.7171930758898,
+            "wall_updates_per_second": 3.7293640354526945,
+            "unattributed_wall_seconds": 0.8538117669522762
+          },
+          "waits": {
+            "usage_throttle_seconds": 246.0482432981953,
+            "quota_wait_seconds": 0.0,
+            "data_wait_seconds": 0.0,
+            "union_seconds": 246.0482432981953
+          },
+          "producer": {
+            "accepted_episodes": 224,
+            "episode_unit": "one accepted published trajectory",
+            "anchor_unit": "one eligible chunk-start frame",
+            "eligible_anchors": 74493,
+            "productive_seconds": 237.752962902024,
+            "accepted_episodes_per_productive_second": 0.9421543995323773,
+            "eligible_anchors_per_productive_second": 313.32101644805977,
+            "included_generations": [
+              {
+                "generation": 2,
+                "accepted_episodes": 32,
+                "eligible_anchors": 10644,
+                "request_seconds": 88.5578645633068,
+                "first_publication_seconds": 96.90643816934892,
+                "last_publication_seconds": 121.84170335134891,
+                "first_publication_latency_seconds": 8.348573606042123,
+                "productive_seconds": 33.28383878804212
+              },
+              {
+                "generation": 3,
+                "accepted_episodes": 32,
+                "eligible_anchors": 10644,
+                "request_seconds": 122.07956731831655,
+                "first_publication_seconds": 130.3806431663489,
+                "last_publication_seconds": 155.3126853963489,
+                "first_publication_latency_seconds": 8.301075848032355,
+                "productive_seconds": 33.23311807803236
+              },
+              {
+                "generation": 4,
+                "accepted_episodes": 32,
+                "eligible_anchors": 10638,
+                "request_seconds": 155.3285319074057,
+                "first_publication_seconds": 163.64739741934892,
+                "last_publication_seconds": 189.1811818823489,
+                "first_publication_latency_seconds": 8.318865511943216,
+                "productive_seconds": 33.852649974943205
+              },
+              {
+                "generation": 5,
+                "accepted_episodes": 32,
+                "eligible_anchors": 10646,
+                "request_seconds": 189.37913351040334,
+                "first_publication_seconds": 197.9178353113489,
+                "last_publication_seconds": 223.81816297734892,
+                "first_publication_latency_seconds": 8.538701800945574,
+                "productive_seconds": 34.439029466945584
+              },
+              {
+                "generation": 6,
+                "accepted_episodes": 32,
+                "eligible_anchors": 10644,
+                "request_seconds": 223.9664754893165,
+                "first_publication_seconds": 232.63719434434893,
+                "last_publication_seconds": 259.23086585734893,
+                "first_publication_latency_seconds": 8.670718855032419,
+                "productive_seconds": 35.26439036803242
+              },
+              {
+                "generation": 7,
+                "accepted_episodes": 32,
+                "eligible_anchors": 10638,
+                "request_seconds": 259.35745246033184,
+                "first_publication_seconds": 267.7679439343489,
+                "last_publication_seconds": 292.5773345723489,
+                "first_publication_latency_seconds": 8.410491474017078,
+                "productive_seconds": 33.219882112017046
+              },
+              {
+                "generation": 8,
+                "accepted_episodes": 32,
+                "eligible_anchors": 10639,
+                "request_seconds": 292.60230109933764,
+                "first_publication_seconds": 301.1546418633489,
+                "last_publication_seconds": 327.0623552133489,
+                "first_publication_latency_seconds": 8.552340764011262,
+                "productive_seconds": 34.46005411401126
+              }
+            ],
+            "excluded_generations": [
+              {
+                "generation": 1,
+                "accepted_episodes": 32,
+                "eligible_anchors": 10639,
+                "request_seconds": null,
+                "first_publication_seconds": 54.43248182834892,
+                "last_publication_seconds": 79.68910946134892,
+                "first_publication_latency_seconds": null,
+                "reasons": [
+                  "initial_fill"
+                ]
+              }
+            ],
+            "first_publication_latencies": [
+              {
+                "generation": 2,
+                "seconds": 8.348573606042123
+              },
+              {
+                "generation": 3,
+                "seconds": 8.301075848032355
+              },
+              {
+                "generation": 4,
+                "seconds": 8.318865511943216
+              },
+              {
+                "generation": 5,
+                "seconds": 8.538701800945574
+              },
+              {
+                "generation": 6,
+                "seconds": 8.670718855032419
+              },
+              {
+                "generation": 7,
+                "seconds": 8.410491474017078
+              },
+              {
+                "generation": 8,
+                "seconds": 8.552340764011262
+              }
+            ],
+            "first_publication_latency_observations": 7
+          }
+        },
+        "sampling_budget": {
+          "enabled": true,
+          "rows": [
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 224,
+              "generation": 8,
+              "slot": 0,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 225,
+              "generation": 8,
+              "slot": 1,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 226,
+              "generation": 8,
+              "slot": 2,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 227,
+              "generation": 8,
+              "slot": 3,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 228,
+              "generation": 8,
+              "slot": 4,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 229,
+              "generation": 8,
+              "slot": 5,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 230,
+              "generation": 8,
+              "slot": 6,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 231,
+              "generation": 8,
+              "slot": 7,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 232,
+              "generation": 8,
+              "slot": 8,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 233,
+              "generation": 8,
+              "slot": 9,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 234,
+              "generation": 8,
+              "slot": 10,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 235,
+              "generation": 8,
+              "slot": 11,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 236,
+              "generation": 8,
+              "slot": 12,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 237,
+              "generation": 8,
+              "slot": 13,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 238,
+              "generation": 8,
+              "slot": 14,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 239,
+              "generation": 8,
+              "slot": 15,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 240,
+              "generation": 8,
+              "slot": 16,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 241,
+              "generation": 8,
+              "slot": 17,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 242,
+              "generation": 8,
+              "slot": 18,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 243,
+              "generation": 8,
+              "slot": 19,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 244,
+              "generation": 8,
+              "slot": 20,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 245,
+              "generation": 8,
+              "slot": 21,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 246,
+              "generation": 8,
+              "slot": 22,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 247,
+              "generation": 8,
+              "slot": 23,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 248,
+              "generation": 8,
+              "slot": 24,
+              "assigned": 1024,
+              "delivered": 1006,
+              "remaining": 18,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 249,
+              "generation": 8,
+              "slot": 25,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 250,
+              "generation": 8,
+              "slot": 26,
+              "assigned": 1024,
+              "delivered": 1014,
+              "remaining": 10,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 251,
+              "generation": 8,
+              "slot": 27,
+              "assigned": 1024,
+              "delivered": 961,
+              "remaining": 63,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 252,
+              "generation": 8,
+              "slot": 28,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 253,
+              "generation": 8,
+              "slot": 29,
+              "assigned": 1024,
+              "delivered": 1024,
+              "remaining": 0,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 254,
+              "generation": 8,
+              "slot": 30,
+              "assigned": 1024,
+              "delivered": 1017,
+              "remaining": 7,
+              "locked": false
+            },
+            {
+              "run_id": 1467515525433376523,
+              "episode_id": 255,
+              "generation": 8,
+              "slot": 31,
+              "assigned": 1024,
+              "delivered": 1001,
+              "remaining": 23,
+              "locked": false
+            }
+          ],
+          "unlocked_remaining_chunks": 121,
+          "total_delivered_chunks": 251392,
+          "episode_sample_budget": 1024,
+          "episode_sample_hard_limit": 1024,
+          "clock_origin_monotonic_ns": 1502732370889845
+        },
+        "cleanup": {
+          "seconds": 6.2866061518434435,
+          "owned_worker_pids": [
+            150677,
+            153193,
+            154856,
+            156727,
+            159267,
+            160246
+          ],
+          "closed_evaluators": [
+            {
+              "pid": 150677,
+              "exitcode": 0
+            },
+            {
+              "pid": 153193,
+              "exitcode": 0
+            },
+            {
+              "pid": 154856,
+              "exitcode": 0
+            },
+            {
+              "pid": 156727,
+              "exitcode": 0
+            },
+            {
+              "pid": 159267,
+              "exitcode": 0
+            }
+          ],
+          "evaluator_exitcode": 0,
+          "engine_cleanup_error": null,
+          "resource_sampler_cleanup_error": null
+        },
+        "auto_configuration": {
+          "input_sha256": "be221bbf8be800f0fe47a05ab72e79b1c8a170d0347ccc5297e88a23032f1100",
+          "input": {
+            "accepted_episodes_per_second": 0.93264,
+            "training_chunks_per_second": 14218.41,
+            "profile": {
+              "profile_id": "franka-chunkbc-provisional-fixed-k1024-v1",
+              "scope": "Franka PickPlace ChunkBC H64 action16 DLS; successful trajectory length 332\u2013333; exploratory bounded-quota range validation",
+              "qualified": false,
+              "min_chunks_per_episode": 1024,
+              "max_chunks_per_episode": 1024,
+              "hard_max_chunks_per_episode": 1024,
+              "latency_safety_factor": 1.25
+            },
+            "runtime": {
+              "batch_size": 256,
+              "producer_envs": 8,
+              "first_publication_p95_seconds": 9.5,
+              "cache_memory_bytes": 32000000,
+              "bytes_per_episode": 1000000,
+              "min_cache_episodes": 32,
+              "measurement_scope": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities"
+            },
+            "binding": {
+              "task": "PickPlace-Franka-v1",
+              "policy": "chunk-pose",
+              "prediction_horizon": 64,
+              "action_horizon": 16,
+              "pose_ik": "dls"
+            }
+          },
+          "configuration": {
+            "episode_sample_budget": 1024,
+            "episode_sample_hard_limit": 1024,
+            "balance_chunks_per_episode": 15245.335820895521,
+            "batch_size": 256,
+            "producer_envs": 8,
+            "buffer_size": 32,
+            "cache_bytes": 32000000,
+            "initial_chunk_budget": 32768,
+            "initial_max_updates": 128,
+            "initial_remainder_chunks": 0,
+            "refill_remaining_chunks": 24576,
+            "active_chunks_per_second_cap": 2069.5578947368417,
+            "training_chunks_per_second_target": 955.02336,
+            "training_updates_per_second_target": 3.73056,
+            "publication_episodes_per_second_target": 0.93264,
+            "training_duty_fraction": 0.06716808419506823,
+            "producer_duty_fraction": 1.0,
+            "expected_training_throttle_fraction": 0.9328319158049317,
+            "expected_producer_throttle_fraction": 0.0,
+            "profile_id": "franka-chunkbc-provisional-fixed-k1024-v1",
+            "profile_scope": "Franka PickPlace ChunkBC H64 action16 DLS; successful trajectory length 332\u2013333; exploratory bounded-quota range validation",
+            "profile_qualified": false,
+            "measurement_scope": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities",
+            "reasons": [
+              "Provisional profile: sampling bounds require independent qualification.",
+              "Supply cannot sustain learner capacity within the recommended selection budget.",
+              "Cache memory limits short-window active consumption; enforce the returned active-rate cap.",
+              "Refill sizing is a latency heuristic; validate subsequent publication spacing and remeasure after pacing changes."
+            ],
+            "end_of_supply_rule": "Stop when remaining unlocked per-episode quota cannot fund one full batch."
+          },
+          "measured_buffer_payload_bytes": 7257600
+        }
+      }
+    ],
+    "initial_parity": {
+      "16001": {
+        "available_runs": [],
+        "all_three_available": false,
+        "parameter_parity": null,
+        "normalizer_parity": null
+      },
+      "16002": {
+        "available_runs": [
+          "k1024-seed16002"
+        ],
+        "all_three_available": false,
+        "parameter_parity": true,
+        "normalizer_parity": true
+      }
+    }
+  },
+  "protocol": {
+    "created_utc": "2026-10-18T15:11:11.808754+00:00",
+    "purpose": "Validate automatic protected sampling methodology across operating regimes and exploratory learning-budget boundaries; no optimum ranking",
+    "source_revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+    "fixed": {
+      "task": "PickPlace-Franka-v1",
+      "policy": "ChunkBC pose H64 action16 DLS",
+      "batch_size": 256,
+      "producer_envs": 8,
+      "cache_episodes": 32,
+      "accepted_episode_cap": 256,
+      "update_cap": 50000,
+      "training_wall_cap_seconds": 5400,
+      "evaluation": "initial + last3 generation checkpoints + latest; dev20 fixed810000\u2013810019; deferred freshprocesses"
+    },
+    "axes": {
+      "assigned_and_hard_quota": [
+        1024,
+        2660,
+        8192
+      ],
+      "learner_seeds": [
+        16001,
+        16002
+      ],
+      "producer_seed_rule": "learner+1000000",
+      "sampler_seed_rule": "learner+10000"
+    },
+    "inputs": {
+      "accepted_episodes_per_second": 0.93264,
+      "training_chunks_per_second": 14218.41,
+      "first_publication_p95_seconds": 9.5,
+      "cache_memory_bytes": 32000000,
+      "bytes_per_episode": 1000000,
+      "measurement_scope": "Existing paced B256 probe; these are workload-specific estimates, not simultaneous saturation capacities"
+    },
+    "protected_data": {
+      "formal_test_access": false,
+      "final_test_scenes": 0,
+      "confirmation100_access": false
+    },
+    "gpu_assignment": {
+      "1024": {
+        "gpu_index": 1,
+        "cpus": "0-15"
+      },
+      "2660": {
+        "gpu_index": 3,
+        "cpus": "32-47"
+      },
+      "8192": {
+        "gpu_index": 5,
+        "cpus": "128-143"
+      }
+    },
+    "engineering_gates": [
+      "three fresh idle checks with sufficientVRAM and exclusive GPUlock",
+      "same runtime hashes before/after",
+      "no source exceeds assigned cap",
+      "delivered/completed/retired/remaining quotas reconcile",
+      "256 successful episodes and8 generations",
+      "actual model update and finalcheckpoint afterquotaend",
+      "normal worker/evaluator shutdown; allobservedownedPIDs exited"
+    ],
+    "learning_interpretation": {
+      "retain": "all panels and failures; latest,best,lift,error,length,fullchronologicalcurve",
+      "descriptive_threshold": "latest>=16/20 in both seeds is a screening observation, not statistical qualification",
+      "qualified_profiles_remain": false,
+      "limits": [
+        "same20developmentstates reused",
+        "two training seeds, not generalization guarantee",
+        "cachefullreplacement may retire unused budgets",
+        "different GPUs/CPUs and sharedhost limit timing attribution",
+        "actual paced production rate changes with quota and cannot be assumed invariant"
+      ]
+    },
+    "next_step_rule": "No automatic winner/confirmation sweep. Use observed low/high exposure boundaries to revise guidance or propose a targeted diagnostic if needed."
+  },
+  "protocol_amendment": {
+    "declared_utc": "2026-10-18T15:50:13.906521+00:00",
+    "additional_runs": 1,
+    "kind": "Targeted same-seed same-budget resource-condition diagnostic",
+    "quota": 1024,
+    "seed": 16002,
+    "source_revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+    "resource_change": {
+      "from": "GPU1 CPU0\u201315 with observed external rendering activity",
+      "to": "GPU3 CPU32\u201347 after original queue finishes, fresh idle preflight and lock"
+    },
+    "unchanged": "All input rates, profile bounds, generated-data budget, initialization/producer/sampler seeds, task/model/controller and dev20 panels",
+    "trigger_evidence": {
+      "original_G_input": 0.93264,
+      "original_G_observed": 0.7834853669080455,
+      "original_G6_successes": 16,
+      "original_G7_successes": 12,
+      "trials_per_panel": 20
+    },
+    "interpretation": "Both attempts remain reported; repeat is not an independent training seed and cannot replace failure. Different placement may affect timing/sampling; no single-factor causal attribution beyond observed resource-condition sensitivity.",
+    "stop_rule": "Exactly one additional run; no parameter changes or further search regardless of result.",
+    "evidence_correction_after_launch": {
+      "recorded_utc": "2026-10-18T15:54:27.348454+00:00",
+      "correction": "OriginalK1024seed16002 has zero observed external native GPU processes and timing_eligible=true. External native process was recorded only forseed16001, atstartup. The earlier claimedseed16002GPUoverlap was a reporting attribution error, not observed evidence.",
+      "interpretation": "Retain original prelaunch rationale for audit. Repeat is same-seed same-budget replication on a different idle GPU/CPU placement, not a proven contended-versus-clean comparison. Cause of observedseed16002Gdrop is unknown.",
+      "source_status_sha256": {
+        "/tmp/ods-quota-validation/k1024-seed16001/status.json": "cdf05cb0a74ca6f0e9f040a640fc037a49c115eaaf8d8f7723cf62be666bdfe0",
+        "/tmp/ods-quota-validation/k1024-seed16002/status.json": "04f42285877f7a566357af09fe02c349eb82159fd4c546cf186fd2f1174529f8"
+      }
+    }
+  },
+  "final_campaign_audit": {
+    "runs": [
+      {
+        "run": "k1024-seed16001",
+        "execution_complete": true,
+        "artifact_checks": true,
+        "final_artifact_checks": true,
+        "source_unchanged": true,
+        "timing_eligible": false
+      },
+      {
+        "run": "k1024-seed16002",
+        "execution_complete": true,
+        "artifact_checks": true,
+        "final_artifact_checks": true,
+        "source_unchanged": true,
+        "timing_eligible": true
+      },
+      {
+        "run": "k2660-seed16001",
+        "execution_complete": true,
+        "artifact_checks": true,
+        "final_artifact_checks": true,
+        "source_unchanged": true,
+        "timing_eligible": true
+      },
+      {
+        "run": "k2660-seed16002",
+        "execution_complete": true,
+        "artifact_checks": true,
+        "final_artifact_checks": true,
+        "source_unchanged": true,
+        "timing_eligible": true
+      },
+      {
+        "run": "k8192-seed16001",
+        "execution_complete": true,
+        "artifact_checks": true,
+        "final_artifact_checks": true,
+        "source_unchanged": true,
+        "timing_eligible": true
+      },
+      {
+        "run": "k8192-seed16002",
+        "execution_complete": true,
+        "artifact_checks": true,
+        "final_artifact_checks": true,
+        "source_unchanged": true,
+        "timing_eligible": true
+      },
+      {
+        "run": "diagnostic-clean-repeat/k1024-seed16002",
+        "execution_complete": true,
+        "artifact_checks": true,
+        "final_artifact_checks": true,
+        "source_unchanged": true,
+        "timing_eligible": true
+      }
+    ],
+    "all_source_snapshots_identical": true,
+    "owned_process_identities_observed": 70,
+    "owned_processes_still_alive": [],
+    "no_additional_runs_scheduled": true,
+    "original_campaign_runs": 6,
+    "diagnostic_placement_repeats": 1
+  },
+  "validation": {
+    "fixed_core_and_regime_tests_passed": 792,
+    "configuration_and_showcase_tests_passed": 33,
+    "source_fix_commit": "69d65ecd",
+    "learning_runtime_commit": "6d2ff529",
+    "all_7_runs_independently_reconciled": true,
+    "accepted_episodes": 1792,
+    "delivered_and_completed_chunks": 6137856
+  },
+  "allocated_run_gpu_hours": 2.1991940015841585,
+  "cost_scope": "One allocated GPU per run; includes startup, training, deferred evaluation and cleanup; excludes CPU tests/preflight/other campaigns.",
+  "raw_artifact_sha256": {
+    "/tmp/ods-quota-validation/PROTOCOL.json": "d6e03a44c5c41859354cdc42b96f8a94fa2cca08bbf0ab5e2c0be3e823ab375e",
+    "/tmp/ods-quota-validation/DIAGNOSTIC_AMENDMENT.json": "492d673ef99df839b161e455a1cd68a18a398fedb6bdd40a55d21ad220d5c7d3",
+    "/tmp/ods-quota-validation/learning_results.json": "a70e9b074143afee9e4c76e6f9c133fcf1c3c32d614a79210147a10b757818c2",
+    "/tmp/ods-quota-validation/diagnostic-clean-repeat/learning_results.json": "8d448d90445362ccf918229c6c6576563f0cde5d4324f3f3832a3e4f2e9c9367",
+    "/tmp/ods-quota-validation/campaign_final_audit.json": "546638f3473694dacc34b5bf93acab03e9656614807aa8ead09094f1d4f82537",
+    "/tmp/ods-quota-validation/drift_recalculation.json": "a12c3144e422ff2f5618d362cb18eb57f003dd8a3801385cd4ef56b83b3312ab",
+    "/tmp/ods-quota-validation/default_device_parity_result.json": "08ef56ab0d92d66f79a4d6651f036df4777ce2e2698994dce5db8b5d7de43432",
+    "/tmp/ods-quota-validation/regime_tests.json": "869336f12184d54c9776cf9bdd1c6f4a93b357408d33b26ea5e47edc3ddd1e1d"
+  },
+  "run_manifests": [
+    {
+      "run": "k1024-seed16001",
+      "revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+      "cwd": "/root/sources/EmbodiChain-ods-configuration-guide",
+      "command": [
+        "taskset",
+        "-c",
+        "0-15",
+        "/root/miniconda3/envs/py311/bin/python",
+        "examples/data_pipeline/ods_pick_place_showcase.py",
+        "--output",
+        "/tmp/ods-quota-validation/k1024-seed16001/output",
+        "--auto-config-input",
+        "/tmp/ods-quota-validation/k1024-seed16001/input.json",
+        "--policy",
+        "chunk-pose",
+        "--mode",
+        "online",
+        "--seed",
+        "16001",
+        "--producer-seed",
+        "1016001",
+        "--sampling-seed",
+        "26001",
+        "--max-generated-episodes",
+        "256",
+        "--rounds",
+        "10",
+        "--updates-per-round",
+        "5000",
+        "--eval-every",
+        "50000",
+        "--dev-scenes",
+        "20",
+        "--dev-seed-base",
+        "810000",
+        "--final-test-scenes",
+        "0",
+        "--qualification-report",
+        "/tmp/ods-v4/integrated-online/expert_qualification.json",
+        "--wall-time-budget",
+        "5400",
+        "--no-viewer",
+        "--no-video",
+        "--sim-device",
+        "cuda:0",
+        "--train-device",
+        "cuda:0"
+      ],
+      "environment_overrides": {
+        "CUDA_VISIBLE_DEVICES": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+        "PYTHONPATH": ".:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime",
+        "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "gpu_uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+      "cpu_affinity": "0-15",
+      "input_sha256": "be221bbf8be800f0fe47a05ab72e79b1c8a170d0347ccc5297e88a23032f1100",
+      "qualification_sha256": "824f214f820aca4254a1dac186400a221b16a50c10bfe65b938276e1ad4b2ffa",
+      "seed": 16001,
+      "quota": 1024,
+      "development_seeds": [
+        810000,
+        810019
+      ],
+      "final_tests": 0,
+      "purpose": "Exploratory protected-quota range validation; no winner selection or formal held-out testing",
+      "measurement_caveat": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities"
+    },
+    {
+      "run": "k1024-seed16002",
+      "revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+      "cwd": "/root/sources/EmbodiChain-ods-configuration-guide",
+      "command": [
+        "taskset",
+        "-c",
+        "0-15",
+        "/root/miniconda3/envs/py311/bin/python",
+        "examples/data_pipeline/ods_pick_place_showcase.py",
+        "--output",
+        "/tmp/ods-quota-validation/k1024-seed16002/output",
+        "--auto-config-input",
+        "/tmp/ods-quota-validation/k1024-seed16002/input.json",
+        "--policy",
+        "chunk-pose",
+        "--mode",
+        "online",
+        "--seed",
+        "16002",
+        "--producer-seed",
+        "1016002",
+        "--sampling-seed",
+        "26002",
+        "--max-generated-episodes",
+        "256",
+        "--rounds",
+        "10",
+        "--updates-per-round",
+        "5000",
+        "--eval-every",
+        "50000",
+        "--dev-scenes",
+        "20",
+        "--dev-seed-base",
+        "810000",
+        "--final-test-scenes",
+        "0",
+        "--qualification-report",
+        "/tmp/ods-v4/integrated-online/expert_qualification.json",
+        "--wall-time-budget",
+        "5400",
+        "--no-viewer",
+        "--no-video",
+        "--sim-device",
+        "cuda:0",
+        "--train-device",
+        "cuda:0"
+      ],
+      "environment_overrides": {
+        "CUDA_VISIBLE_DEVICES": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+        "PYTHONPATH": ".:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime",
+        "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "gpu_uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+      "cpu_affinity": "0-15",
+      "input_sha256": "be221bbf8be800f0fe47a05ab72e79b1c8a170d0347ccc5297e88a23032f1100",
+      "qualification_sha256": "824f214f820aca4254a1dac186400a221b16a50c10bfe65b938276e1ad4b2ffa",
+      "seed": 16002,
+      "quota": 1024,
+      "development_seeds": [
+        810000,
+        810019
+      ],
+      "final_tests": 0,
+      "purpose": "Exploratory protected-quota range validation; no winner selection or formal held-out testing",
+      "measurement_caveat": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities"
+    },
+    {
+      "run": "k2660-seed16001",
+      "revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+      "cwd": "/root/sources/EmbodiChain-ods-configuration-guide",
+      "command": [
+        "taskset",
+        "-c",
+        "32-47",
+        "/root/miniconda3/envs/py311/bin/python",
+        "examples/data_pipeline/ods_pick_place_showcase.py",
+        "--output",
+        "/tmp/ods-quota-validation/k2660-seed16001/output",
+        "--auto-config-input",
+        "/tmp/ods-quota-validation/k2660-seed16001/input.json",
+        "--policy",
+        "chunk-pose",
+        "--mode",
+        "online",
+        "--seed",
+        "16001",
+        "--producer-seed",
+        "1016001",
+        "--sampling-seed",
+        "26001",
+        "--max-generated-episodes",
+        "256",
+        "--rounds",
+        "10",
+        "--updates-per-round",
+        "5000",
+        "--eval-every",
+        "50000",
+        "--dev-scenes",
+        "20",
+        "--dev-seed-base",
+        "810000",
+        "--final-test-scenes",
+        "0",
+        "--qualification-report",
+        "/tmp/ods-v4/integrated-online/expert_qualification.json",
+        "--wall-time-budget",
+        "5400",
+        "--no-viewer",
+        "--no-video",
+        "--sim-device",
+        "cuda:0",
+        "--train-device",
+        "cuda:0"
+      ],
+      "environment_overrides": {
+        "CUDA_VISIBLE_DEVICES": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+        "PYTHONPATH": ".:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime",
+        "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "gpu_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+      "cpu_affinity": "32-47",
+      "input_sha256": "5e28b21aa71a4422aef8e243977c998325db8517b00d606a276108107336634b",
+      "qualification_sha256": "824f214f820aca4254a1dac186400a221b16a50c10bfe65b938276e1ad4b2ffa",
+      "seed": 16001,
+      "quota": 2660,
+      "development_seeds": [
+        810000,
+        810019
+      ],
+      "final_tests": 0,
+      "purpose": "Exploratory protected-quota range validation; no winner selection or formal held-out testing",
+      "measurement_caveat": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities"
+    },
+    {
+      "run": "k2660-seed16002",
+      "revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+      "cwd": "/root/sources/EmbodiChain-ods-configuration-guide",
+      "command": [
+        "taskset",
+        "-c",
+        "32-47",
+        "/root/miniconda3/envs/py311/bin/python",
+        "examples/data_pipeline/ods_pick_place_showcase.py",
+        "--output",
+        "/tmp/ods-quota-validation/k2660-seed16002/output",
+        "--auto-config-input",
+        "/tmp/ods-quota-validation/k2660-seed16002/input.json",
+        "--policy",
+        "chunk-pose",
+        "--mode",
+        "online",
+        "--seed",
+        "16002",
+        "--producer-seed",
+        "1016002",
+        "--sampling-seed",
+        "26002",
+        "--max-generated-episodes",
+        "256",
+        "--rounds",
+        "10",
+        "--updates-per-round",
+        "5000",
+        "--eval-every",
+        "50000",
+        "--dev-scenes",
+        "20",
+        "--dev-seed-base",
+        "810000",
+        "--final-test-scenes",
+        "0",
+        "--qualification-report",
+        "/tmp/ods-v4/integrated-online/expert_qualification.json",
+        "--wall-time-budget",
+        "5400",
+        "--no-viewer",
+        "--no-video",
+        "--sim-device",
+        "cuda:0",
+        "--train-device",
+        "cuda:0"
+      ],
+      "environment_overrides": {
+        "CUDA_VISIBLE_DEVICES": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+        "PYTHONPATH": ".:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime",
+        "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "gpu_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+      "cpu_affinity": "32-47",
+      "input_sha256": "5e28b21aa71a4422aef8e243977c998325db8517b00d606a276108107336634b",
+      "qualification_sha256": "824f214f820aca4254a1dac186400a221b16a50c10bfe65b938276e1ad4b2ffa",
+      "seed": 16002,
+      "quota": 2660,
+      "development_seeds": [
+        810000,
+        810019
+      ],
+      "final_tests": 0,
+      "purpose": "Exploratory protected-quota range validation; no winner selection or formal held-out testing",
+      "measurement_caveat": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities"
+    },
+    {
+      "run": "k8192-seed16001",
+      "revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+      "cwd": "/root/sources/EmbodiChain-ods-configuration-guide",
+      "command": [
+        "taskset",
+        "-c",
+        "128-143",
+        "/root/miniconda3/envs/py311/bin/python",
+        "examples/data_pipeline/ods_pick_place_showcase.py",
+        "--output",
+        "/tmp/ods-quota-validation/k8192-seed16001/output",
+        "--auto-config-input",
+        "/tmp/ods-quota-validation/k8192-seed16001/input.json",
+        "--policy",
+        "chunk-pose",
+        "--mode",
+        "online",
+        "--seed",
+        "16001",
+        "--producer-seed",
+        "1016001",
+        "--sampling-seed",
+        "26001",
+        "--max-generated-episodes",
+        "256",
+        "--rounds",
+        "10",
+        "--updates-per-round",
+        "5000",
+        "--eval-every",
+        "50000",
+        "--dev-scenes",
+        "20",
+        "--dev-seed-base",
+        "810000",
+        "--final-test-scenes",
+        "0",
+        "--qualification-report",
+        "/tmp/ods-v4/integrated-online/expert_qualification.json",
+        "--wall-time-budget",
+        "5400",
+        "--no-viewer",
+        "--no-video",
+        "--sim-device",
+        "cuda:0",
+        "--train-device",
+        "cuda:0"
+      ],
+      "environment_overrides": {
+        "CUDA_VISIBLE_DEVICES": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+        "PYTHONPATH": ".:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime",
+        "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "gpu_uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+      "cpu_affinity": "128-143",
+      "input_sha256": "60b537ff8c0c2714a367a964e678b1ecfe8c901f2a6a27ec72bbd082da686370",
+      "qualification_sha256": "824f214f820aca4254a1dac186400a221b16a50c10bfe65b938276e1ad4b2ffa",
+      "seed": 16001,
+      "quota": 8192,
+      "development_seeds": [
+        810000,
+        810019
+      ],
+      "final_tests": 0,
+      "purpose": "Exploratory protected-quota range validation; no winner selection or formal held-out testing",
+      "measurement_caveat": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities"
+    },
+    {
+      "run": "k8192-seed16002",
+      "revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+      "cwd": "/root/sources/EmbodiChain-ods-configuration-guide",
+      "command": [
+        "taskset",
+        "-c",
+        "128-143",
+        "/root/miniconda3/envs/py311/bin/python",
+        "examples/data_pipeline/ods_pick_place_showcase.py",
+        "--output",
+        "/tmp/ods-quota-validation/k8192-seed16002/output",
+        "--auto-config-input",
+        "/tmp/ods-quota-validation/k8192-seed16002/input.json",
+        "--policy",
+        "chunk-pose",
+        "--mode",
+        "online",
+        "--seed",
+        "16002",
+        "--producer-seed",
+        "1016002",
+        "--sampling-seed",
+        "26002",
+        "--max-generated-episodes",
+        "256",
+        "--rounds",
+        "10",
+        "--updates-per-round",
+        "5000",
+        "--eval-every",
+        "50000",
+        "--dev-scenes",
+        "20",
+        "--dev-seed-base",
+        "810000",
+        "--final-test-scenes",
+        "0",
+        "--qualification-report",
+        "/tmp/ods-v4/integrated-online/expert_qualification.json",
+        "--wall-time-budget",
+        "5400",
+        "--no-viewer",
+        "--no-video",
+        "--sim-device",
+        "cuda:0",
+        "--train-device",
+        "cuda:0"
+      ],
+      "environment_overrides": {
+        "CUDA_VISIBLE_DEVICES": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+        "PYTHONPATH": ".:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime",
+        "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "gpu_uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+      "cpu_affinity": "128-143",
+      "input_sha256": "60b537ff8c0c2714a367a964e678b1ecfe8c901f2a6a27ec72bbd082da686370",
+      "qualification_sha256": "824f214f820aca4254a1dac186400a221b16a50c10bfe65b938276e1ad4b2ffa",
+      "seed": 16002,
+      "quota": 8192,
+      "development_seeds": [
+        810000,
+        810019
+      ],
+      "final_tests": 0,
+      "purpose": "Exploratory protected-quota range validation; no winner selection or formal held-out testing",
+      "measurement_caveat": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities"
+    },
+    {
+      "run": "k1024-seed16002",
+      "revision": "6d2ff52996d403b4b07e1ae73f42ad9abef996dd",
+      "cwd": "/root/sources/EmbodiChain-ods-configuration-guide",
+      "command": [
+        "taskset",
+        "-c",
+        "32-47",
+        "/root/miniconda3/envs/py311/bin/python",
+        "examples/data_pipeline/ods_pick_place_showcase.py",
+        "--output",
+        "/tmp/ods-quota-validation/diagnostic-clean-repeat/k1024-seed16002/output",
+        "--auto-config-input",
+        "/tmp/ods-quota-validation/diagnostic-clean-repeat/k1024-seed16002/input.json",
+        "--policy",
+        "chunk-pose",
+        "--mode",
+        "online",
+        "--seed",
+        "16002",
+        "--producer-seed",
+        "1016002",
+        "--sampling-seed",
+        "26002",
+        "--max-generated-episodes",
+        "256",
+        "--rounds",
+        "10",
+        "--updates-per-round",
+        "5000",
+        "--eval-every",
+        "50000",
+        "--dev-scenes",
+        "20",
+        "--dev-seed-base",
+        "810000",
+        "--final-test-scenes",
+        "0",
+        "--qualification-report",
+        "/tmp/ods-v4/integrated-online/expert_qualification.json",
+        "--wall-time-budget",
+        "5400",
+        "--no-viewer",
+        "--no-video",
+        "--sim-device",
+        "cuda:0",
+        "--train-device",
+        "cuda:0"
+      ],
+      "environment_overrides": {
+        "CUDA_VISIBLE_DEVICES": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+        "PYTHONPATH": ".:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime",
+        "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "gpu_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+      "cpu_affinity": "32-47",
+      "input_sha256": "be221bbf8be800f0fe47a05ab72e79b1c8a170d0347ccc5297e88a23032f1100",
+      "qualification_sha256": "824f214f820aca4254a1dac186400a221b16a50c10bfe65b938276e1ad4b2ffa",
+      "seed": 16002,
+      "quota": 1024,
+      "development_seeds": [
+        810000,
+        810019
+      ],
+      "final_tests": 0,
+      "purpose": "Predeclared resource-confounding diagnostic: exact K1024 seed16002 repeat on GPU3; not an independent seed or winner search",
+      "measurement_caveat": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities"
+    }
+  ]
+}

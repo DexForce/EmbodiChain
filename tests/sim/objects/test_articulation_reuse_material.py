@@ -30,6 +30,7 @@ class _MockArticulation(Articulation):
         # num_instances is a read-only property on BatchEntity, driven by _entities.
         self._entities = entities
         self._all_indices = list(range(len(entities)))
+        self._visual_material = [{} for _ in entities]
         self.uid = uid
         self.link_names = link_names
 

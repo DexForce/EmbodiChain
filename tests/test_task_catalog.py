@@ -75,6 +75,30 @@ def test_only_linked_deployment_acquires_rl(task_root: Path) -> None:
     assert a.embodiments == ("Arm",)
 
 
+@pytest.mark.parametrize(
+    "prefix", ["embodichain_tasks/configs", "extensions/embodichain_tasks/configs"]
+)
+def test_official_agent_references_match_outside_checkout(
+    task_root: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    """Both config prefixes retain RL discovery without matching CWD files."""
+    monkeypatch.chdir(task_root)
+    write(
+        task_root / "manipulation/pick/agents/ppo.json",
+        {"trainer": {"gym_config": f"{prefix}/tasks/manipulation/pick/task.a.yaml"}},
+    )
+    (task,) = catalog._load_catalog({"embodichain_tasks": task_root})
+    deployment = task.deployments[0]
+    assert (
+        deployment.config_ref
+        == "extensions/embodichain_tasks/configs/tasks/manipulation/pick/task.a.yaml"
+    )
+    assert catalog._RL in deployment.capabilities
+    assert deployment.agent_refs == (
+        "extensions/embodichain_tasks/configs/tasks/manipulation/pick/agents/ppo.json",
+    )
+
+
 def test_legacy_config_and_lightweight_rl_are_preserved(task_root: Path) -> None:
     (task_root / "manipulation/pick/catalog.yaml").unlink()
     write(
@@ -135,7 +159,7 @@ def test_show_and_filtered_gallery_use_static_records(
     main(["show-task", "demo:pick", "--config-root", f"demo={task_root}"])
     detail = capsys.readouterr().out
     assert "Pick <cube>" in detail
-    assert "embodichain run-env --gym_config" in detail
+    assert "embodichain run-task --gym_config" in detail
     assert "Qualification: unavailable" in detail
     main(
         [
@@ -190,8 +214,12 @@ def test_metadata_rejects_non_runnable_config(task_root: Path) -> None:
         catalog._load_catalog({"demo": task_root})
 
 
+@pytest.mark.parametrize(
+    "inferred,declared,expected",
+    [(True, None, True), (True, False, False), (False, True, True)],
+)
 def test_runtime_only_and_registered_capabilities_are_preserved(
-    task_root: Path, monkeypatch: pytest.MonkeyPatch
+    task_root: Path, monkeypatch: pytest.MonkeyPatch, inferred, declared, expected
 ) -> None:
     from types import SimpleNamespace
     from embodichain.lab.gym.utils import registration
@@ -203,43 +231,38 @@ def test_runtime_only_and_registered_capabilities_are_preserved(
         task_program_registration=None,
         task_program_adapter_factory=None,
         supports_rl=True,
+        supports_handwritten_demo=declared,
     )
     monkeypatch.setattr(registration, "REGISTERED_ENVS", {"Runtime-v1": spec})
     monkeypatch.setattr(
         env, "get_registered_learning_env_names", lambda: ["UnconfiguredRL"]
     )
-    monkeypatch.setattr(catalog, "_implements_handwritten_demo", lambda cls: True)
+    monkeypatch.setattr(catalog, "_implements_handwritten_demo", lambda cls: inferred)
     tasks = catalog._load_catalog({"demo": task_root})
     catalog._augment_runtime(tasks, ["demo"])
     runtime = catalog._select_task(tasks, "demo:runtime").deployments[0]
     assert runtime.config_ref is None
-    assert runtime.capabilities == {catalog._HANDWRITTEN_DEMO, catalog._RL}
+    assert runtime.capabilities == (
+        {catalog._HANDWRITTEN_DEMO, catalog._RL} if expected else {catalog._RL}
+    )
     assert catalog._select_task(tasks, "runtime:UnconfiguredRL").deployments[
         0
     ].capabilities == {catalog._RL}
 
 
 def test_official_catalogs_resolve_real_deployments() -> None:
-    root = Path(__file__).resolve().parents[1] / "embodichain_tasks/configs/tasks"
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/tasks"
+    )
     tasks = catalog._load_catalog({"embodichain_tasks": root})
     pick = catalog._select_task(tasks, "repeated_pick_place")
     assert {d.name for d in pick.deployments} >= {
         "franka",
         "ur5",
-        "franka_newton",
-        "ur5_newton",
-        "franka_rlinf",
-        "franka_rlinf_joint",
-        "franka_rlinf_expert",
+        "ur5_objective",
     }
     deployments = {deployment.name: deployment for deployment in pick.deployments}
-    assert deployments["franka_rlinf"].config_ref.endswith("task.franka.rlinf.yaml")
-    assert deployments["franka_rlinf_joint"].config_ref.endswith(
-        "task.franka.rlinf_joint.yaml"
-    )
-    assert deployments["franka_rlinf_expert"].config_ref.endswith(
-        "task.franka.rlinf_expert.yaml"
-    )
     assert catalog._select_task(tasks, "push_cube").deployments[0].capabilities == {
         catalog._RL
     }
@@ -299,7 +322,10 @@ def test_official_discovery_prefers_core_colocated_worktree(
     monkeypatch.setattr(
         catalog.importlib.resources, "files", lambda name: stale_package
     )
-    expected = Path(__file__).resolve().parents[1] / "embodichain_tasks/configs/tasks"
+    expected = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/tasks"
+    )
     assert catalog._task_config_roots(("embodichain_tasks",)) == (expected,)
 
 
@@ -394,3 +420,27 @@ def test_agent_relative_config_precedes_cwd_reference(
     (task,) = catalog._load_catalog({"demo": task_root})
     assert catalog._RL in task.deployments[0].capabilities
     assert catalog._RL not in task.deployments[1].capabilities
+
+
+def test_carton_task_has_one_real_source_deployment_without_loading_assets(
+    monkeypatch,
+) -> None:
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/tasks"
+    )
+
+    def forbidden(*args):
+        raise AssertionError("catalog browsing must not initialize source assets")
+
+    monkeypatch.setattr("embodichain.data.get_data_class", forbidden)
+    task = next(
+        t
+        for t in catalog._load_catalog({"embodichain_tasks": root})
+        if t.qualified_key == "embodichain_tasks:carton_stocking"
+    )
+    assert task.default_deployment == "panda"
+    assert len(task.deployments) == 1
+    assert task.deployments[0].env_id == "CartonStockingPanda-v1"
+    assert task.deployments[0].capabilities == {catalog._TASK_PROGRAM}
+    assert "--dataset-dir ./datasets" in task.deployments[0].command

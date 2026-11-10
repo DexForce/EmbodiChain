@@ -184,7 +184,7 @@ def _force_tier(functor, tier: int) -> None:
 
 def _run(functor, env, env_ids: torch.Tensor | None = None) -> None:
     env_ids = torch.arange(env.num_envs) if env_ids is None else env_ids
-    functor(env, env_ids, entity_cfg=functor.entity_cfg)
+    functor(env, env_ids, **functor.cfg.params)
 
 
 def test_fallback_to_new_preserves_legacy_path():
@@ -437,3 +437,122 @@ def test_empty_reuse_state_is_a_noop():
 
     assert functor._new_mode is True
     obj.apply_render_material_inst.assert_not_called()
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_solid_tier_applies_requested_pbr_ranges(fallback):
+    env, obj, functor = _make_rigid_functor(
+        {
+            "fallback_to_new": fallback,
+            "random_texture_prob": 0.0,
+            "metallic_range": (0.9, 0.9),
+            "roughness_range": (0.2, 0.2),
+            "ior_range": (2.0, 2.0),
+        }
+    )
+    _force_tier(functor, 2)
+
+    _run(functor, env)
+
+    instance = (
+        obj.get_visual_material_inst.return_value[0]
+        if fallback
+        else functor._reuse_state[0][0].working_inst
+    )
+    assert instance.set_metallic.call_args.args[0] == pytest.approx(0.9)
+    assert instance.set_roughness.call_args.args[0] == pytest.approx(0.2)
+    instance.set_ior.assert_called_once_with(2.0)
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_shared_partial_randomization_rejects_before_any_material_write(fallback):
+    state = [[_segment()]]
+    env, obj, functor = _make_rigid_functor(
+        {"shared": True, "fallback_to_new": fallback}, num_envs=2, states=state
+    )
+    obj.set_visual_material.reset_mock()
+
+    with pytest.raises(ValueError, match="requires all environments"):
+        _run(functor, env, torch.tensor([0]))
+
+    obj.set_visual_material.assert_not_called()
+    obj.apply_render_material_inst.assert_not_called()
+    state[0][0].working_inst.set_base_color.assert_not_called()
+
+
+def test_shared_full_randomization_mutates_once_and_attaches_all_selected_rows():
+    segment = _segment()
+    env, obj, functor = _make_rigid_functor(
+        {"shared": True}, num_envs=3, states=[[segment]]
+    )
+    _force_tier(functor, 2)
+
+    _run(functor, env, torch.tensor([2, 0, 1]))
+
+    segment.working_inst.set_base_color_texture.assert_called_once()
+    assert [c.args[0] for c in obj.apply_render_material_inst.call_args_list] == [
+        2,
+        0,
+        1,
+    ]
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_empty_material_selection_does_not_mutate_or_allocate(fallback):
+    env, obj, functor = _make_rigid_functor({"fallback_to_new": fallback})
+    obj.set_visual_material.reset_mock()
+    env.sim.env.reset_mock()
+
+    _run(functor, env, torch.tensor([], dtype=torch.int64))
+
+    obj.set_visual_material.assert_not_called()
+    obj.apply_render_material_inst.assert_not_called()
+    env.sim.env.create_color_texture.assert_not_called()
+    env.sim.env.clean_materials.assert_not_called()
+
+
+def test_partial_articulation_randomization_samples_only_selected_links():
+    env = _MockEnv(num_envs=3)
+    art = _MockArticulation(["arm", "eef"], num_envs=3)
+    states = [{name: [_segment()] for name in art.link_names} for _ in range(3)]
+    art.get_existing_visual_material = MagicMock(return_value=states)
+    env.sim._asset = art
+    env.sim.asset_uids = ["art"]
+    cfg = _make_cfg(uid="art")
+    cfg.params["entity_cfg"].link_names = art.link_names
+    functor = randomize_visual_material(cfg, env)
+    functor._sample_tiers = MagicMock(return_value=torch.tensor([2, 2]))
+
+    _run(functor, env, torch.tensor([2]))
+
+    functor._sample_tiers.assert_called_once_with(2)
+    assert all(c.args[0] == 2 for c in art.apply_render_material_inst.call_args_list)
+    for unselected in states[:2]:
+        for segments in unselected.values():
+            segments[0].working_inst.set_base_color_texture.assert_not_called()
+
+
+def test_texture_libraries_with_same_basename_remain_independent(monkeypatch, tmp_path):
+    first_path = tmp_path / "a" / "textures"
+    second_path = tmp_path / "b" / "textures"
+    pixels = {
+        str(first_path): torch.zeros((2, 2, 4), dtype=torch.uint8),
+        str(second_path): torch.full((2, 2, 4), 255, dtype=torch.uint8),
+    }
+    loads = []
+
+    def load_images(path):
+        loads.append(path)
+        return [pixels[path]]
+
+    monkeypatch.setattr("embodichain.utils.utility.read_all_folder_images", load_images)
+    env = _MockEnv()
+    first = randomize_visual_material(_make_cfg({"texture_path": str(first_path)}), env)
+    second = randomize_visual_material(
+        _make_cfg({"texture_path": str(second_path)}), env
+    )
+
+    assert loads == [str(first_path), str(second_path)]
+    assert first.textures[0] is pixels[str(first_path)]
+    assert second.textures[0] is pixels[str(second_path)]
+    assert first._library_textures is not second._library_textures

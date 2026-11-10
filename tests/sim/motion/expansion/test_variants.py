@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import pytest
 import torch
@@ -607,3 +608,316 @@ def test_application_enables_redundancy_only_when_jacobians_are_supplied() -> No
         apply_trajectory_variant(
             template(), posture, joint_limits=joint_limits(), control_dt=0.1
         )
+
+
+def _analytic_template() -> TrajectoryTemplate:
+    """Use three task coordinates, one redundant joint and an untouched hand."""
+    q = torch.zeros(13, 5, dtype=torch.float64)
+    q[:9, 2] = 0.5 - 0.4 * torch.linspace(0, math.pi, 9).sin().square()
+    q[9:, 2] = 0.5
+    q[:9, 0] = torch.linspace(0, 0.2, 9)
+    q[9:, 0] = 0.2
+    q[:, 3], q[:, 4] = 0.2, 0.15
+    dt = torch.full((13,), 0.1, dtype=torch.float64)
+    dt[0] = 0
+    return TrajectoryTemplate(
+        "analytic",
+        "one",
+        "redundant",
+        ("y", "redundant", "x", "z", "hand"),
+        q,
+        dt,
+        phases=(
+            TrajectoryPhase(
+                "move",
+                0,
+                9,
+                "free",
+                ("joint_residual", "task_space_residual", "retime"),
+            ),
+            TrajectoryPhase("grasp", 9, 13, "contact"),
+        ),
+        allowed_operators=("joint_residual", "task_space_residual", "retime"),
+        controlled_joint_indices=(2, 0, 3, 1),
+    )
+
+
+def _analytic_kinematics(q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Analytic FK with translational manipulability exactly ``1 + q[:, 0]``."""
+    poses = torch.eye(4, dtype=q.dtype, device=q.device).repeat(len(q), 1, 1)
+    poses[:, 0, 3], poses[:, 1, 3] = q[:, 0], q[:, 1]
+    poses[:, 2, 3] = (1 + q[:, 0]) * q[:, 2]
+    jac = torch.zeros(len(q), 6, 4, dtype=q.dtype, device=q.device)
+    jac[:, 0, 0], jac[:, 1, 1] = 1, 1
+    jac[:, 2, 0], jac[:, 2, 2] = q[:, 2], 1 + q[:, 0]
+    return poses, jac
+
+
+def _analytic_cfg(joint: bool, task: bool, guided: bool) -> TrajectoryAugmentationCfg:
+    return augmentation(
+        spatial={"enabled": joint, "joint_offset_scale": 0.08},
+        task_space={
+            "enabled": task,
+            "translation_axes": [False, True, False],
+            "max_translation_m": 0.04,
+            "max_rotation_rad": 0.0,
+            "ik": {
+                "damping": 1e-4,
+                "step_size": 1.0,
+                "max_iterations": 12,
+                "pos_eps": 1e-7,
+                "rot_eps": 1e-7,
+            },
+        },
+        manipulability={
+            "enabled": guided,
+            "guided_proposals": 4,
+            "jacobian_rows": "translational",
+            "band_edges": [0.85, 1.05],
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "joint,task,guided",
+    [
+        (True, False, False),
+        (False, False, True),
+        (False, True, False),
+        (True, True, False),
+        (False, True, True),
+        (True, True, True),
+    ],
+)
+def test_all_generation_routes_share_constraints_budgets_and_provenance(
+    joint: bool, task: bool, guided: bool
+) -> None:
+    source = _analytic_template()
+    cfg = _analytic_cfg(joint, task, guided)
+    state = torch.random.get_rng_state().clone()
+    kwargs = dict(
+        cfg=cfg,
+        case=case(),
+        count=4,
+        joint_limits=torch.tensor([[-1.0, 1.0]] * 5),
+        control_dt=0.1,
+        kinematics=_analytic_kinematics,
+        max_attempts=24,
+    )
+    result = expand_trajectory_variants(source, **kwargs)
+    repeated = expand_trajectory_variants(source, **kwargs)
+    assert len(result.variants) == 4
+    assert result.attempted <= 24
+    assert result.attempted == len(result.variants) + sum(result.rejected.values())
+    assert torch.equal(state, torch.random.get_rng_state())
+    assert torch.equal(result.candidates.positions, repeated.candidates.positions)
+    assert result.rejected == repeated.rejected
+    assert result.variants[0].is_nominal
+    assert torch.equal(result.candidates.positions[0], source.positions)
+    reference_poses, _ = _analytic_kinematics(source.positions[:, [2, 0, 3, 1]])
+    for row in range(1, 4):
+        q = result.candidates.positions[row]
+        assert torch.equal(q[[0, 8]], source.positions[[0, 8]])
+        assert torch.equal(q[9:], source.positions[9:])
+        assert torch.equal(q[:, 4], source.positions[:, 4])
+        factors = result.candidates.factors[row]
+        assert ("task_space_operator" in factors) == task
+        assert ("manipulability_band" in factors) == guided
+        if task:
+            poses, _ = _analytic_kinematics(q[:, [2, 0, 3, 1]])
+            # The deformation authorizes Y only. X and Z have independent
+            # analytic targets, including after a redundant joint edit.
+            torch.testing.assert_close(
+                poses[:, [0, 2], 3], reference_poses[:, [0, 2], 3], atol=1e-6, rtol=0
+            )
+            assert (
+                float((poses[:, 1, 3] - reference_poses[:, 1, 3]).abs().max())
+                <= 0.040001
+            )
+        if guided:
+            assert factors["manipulability"] == pytest.approx(
+                float((1 + q[:, 2]).min()), abs=1e-8
+            )
+
+
+def test_guidance_inner_draws_cannot_exceed_the_shared_proposal_budget() -> None:
+    cfg = _analytic_cfg(False, False, True).to_dict()
+    cfg["factors"]["manipulability"]["band_edges"] = [0.1, 0.2]
+    result = expand_trajectory_variants(
+        _analytic_template(),
+        cfg=TrajectoryAugmentationCfg.from_mapping(cfg),
+        case=case(),
+        count=2,
+        max_attempts=3,
+        joint_limits=torch.tensor([[-1.0, 1.0]] * 5),
+        control_dt=0.1,
+        kinematics=_analytic_kinematics,
+    )
+    assert result.attempted == 3
+    assert len(result.variants) == 2
+    assert result.candidates.factors[1]["manipulability_proposals_scored"] == 2
+    assert result.rejected == {"guidance_unselected": 1}
+
+
+def test_unreachable_task_space_draws_are_rejected_without_reusing_rows() -> None:
+    cfg = _analytic_cfg(False, True, False).to_dict()
+    cfg["factors"]["task_space"].update(
+        translation_axes=[False] * 3,
+        max_translation_m=0.0,
+        rotation_axes=[False, False, True],
+        max_rotation_rad=0.2,
+    )
+    result = expand_trajectory_variants(
+        _analytic_template(),
+        cfg=TrajectoryAugmentationCfg.from_mapping(cfg),
+        case=case(),
+        count=3,
+        joint_limits=torch.tensor([[-1.0, 1.0]] * 5),
+        control_dt=0.1,
+        kinematics=_analytic_kinematics,
+        max_attempts=5,
+    )
+    assert len(result.variants) == 1
+    assert result.variants[0].is_nominal
+    assert result.attempted == 5
+    assert result.rejected == {"trajectory_ik": 4}
+
+
+@pytest.mark.parametrize("task,guided", [(True, False), (False, True)])
+def test_generation_requires_live_kinematics_and_propagates_bad_callbacks(
+    task: bool, guided: bool
+) -> None:
+    kwargs = dict(
+        cfg=_analytic_cfg(False, task, guided),
+        case=case(),
+        count=2,
+        joint_limits=torch.tensor([[-1.0, 1.0]] * 5),
+        control_dt=0.1,
+    )
+    with pytest.raises(ValueError, match="requires kinematics"):
+        expand_trajectory_variants(_analytic_template(), **kwargs)
+
+    def malformed(q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        poses, jac = _analytic_kinematics(q)
+        return poses, jac[:-1]
+
+    with pytest.raises(ValueError, match="Jacobians must have shape"):
+        expand_trajectory_variants(_analytic_template(), kinematics=malformed, **kwargs)
+
+
+def test_combination_respects_separate_joint_and_task_phase_permissions() -> None:
+    source = replace(
+        _analytic_template(),
+        phases=(
+            TrajectoryPhase("cartesian", 0, 7, "free", ("task_space_residual",)),
+            TrajectoryPhase("joint", 7, 13, "free", ("joint_residual",)),
+        ),
+    )
+    cfg = _analytic_cfg(True, True, False)
+    result = apply_trajectory_variant(
+        source,
+        plan_trajectory_variants(2, cfg)[1],
+        cfg=cfg,
+        joint_limits=torch.tensor([[-1.0, 1.0]] * 5),
+        control_dt=0.1,
+        kinematics=_analytic_kinematics,
+    )
+    assert not torch.equal(result.positions[8:12], source.positions[8:12])
+    assert torch.equal(result.positions[[0, 6, 7, 12]], source.positions[[0, 6, 7, 12]])
+    before, _ = _analytic_kinematics(source.positions[:, [2, 0, 3, 1]])
+    after, _ = _analytic_kinematics(result.positions[:, [2, 0, 3, 1]])
+    torch.testing.assert_close(
+        after[:7, [0, 2], 3], before[:7, [0, 2], 3], atol=1e-6, rtol=0
+    )
+
+
+def test_task_space_combines_with_live_nullspace_and_retiming() -> None:
+    source = _analytic_template()
+    source = replace(
+        source,
+        phases=(
+            replace(
+                source.phases[0],
+                allowed_operators=source.phases[0].allowed_operators
+                + ("nullspace_residual",),
+            ),
+            source.phases[1],
+        ),
+        allowed_operators=source.allowed_operators + ("nullspace_residual",),
+    )
+    payload = _analytic_cfg(False, True, False).to_dict()
+    payload["factors"]["task_space"]["translation_axes"] = [True, False, False]
+    payload["factors"]["ik"]["enabled"] = True
+    payload["factors"]["timing"].update(enabled=True, duration_scales=[1.0, 1.5])
+    result = expand_trajectory_variants(
+        source,
+        cfg=TrajectoryAugmentationCfg.from_mapping(payload),
+        case=case(),
+        count=3,
+        joint_limits=torch.tensor([[-1.0, 1.0]] * 5),
+        control_dt=0.1,
+        kinematics=_analytic_kinematics,
+    )
+    assert len(result.variants) == 3
+    assert result.variants[1].spatial_operator == "nullspace_residual"
+    lengths = result.candidates.valid_length.tolist()
+    assert lengths[2] > lengths[1]
+    for row in (1, 2):
+        contact = result.candidates.phases[row][1]
+        assert torch.equal(
+            result.candidates.positions[row, contact.start_index : contact.stop_index],
+            source.positions[9:],
+        )
+        assert torch.equal(
+            result.candidates.positions[row, lengths[row] - 1], source.positions[-1]
+        )
+        assert not torch.equal(
+            result.candidates.positions[row, : lengths[row], 1],
+            torch.zeros(lengths[row], dtype=torch.float64),
+        )
+
+
+def test_apply_rejects_a_guidance_band_outside_the_configured_partition() -> None:
+    cfg = _analytic_cfg(False, False, True)
+    variant = replace(plan_trajectory_variants(2, cfg)[1], manipulability_band=3)
+    with pytest.raises(ValueError, match="index the configured bands"):
+        apply_trajectory_variant(
+            _analytic_template(),
+            variant,
+            cfg=cfg,
+            joint_limits=torch.tensor([[-1.0, 1.0]] * 5),
+            control_dt=0.1,
+            kinematics=_analytic_kinematics,
+        )
+
+
+def test_unconfigured_posture_application_can_derive_jacobians_from_kinematics() -> (
+    None
+):
+    source = _analytic_template()
+    source = replace(
+        source,
+        phases=(
+            replace(
+                source.phases[0],
+                allowed_operators=source.phases[0].allowed_operators
+                + ("nullspace_residual",),
+            ),
+            source.phases[1],
+        ),
+        allowed_operators=source.allowed_operators + ("nullspace_residual",),
+    )
+    posture = next(
+        v
+        for v in plan_trajectory_variants(4, default_variant_factors(redundancy=True))
+        if v.spatial_operator == "nullspace_residual"
+    )
+    result = apply_trajectory_variant(
+        source,
+        posture,
+        joint_limits=torch.tensor([[-1.0, 1.0]] * 5),
+        control_dt=0.1,
+        kinematics=_analytic_kinematics,
+    )
+    assert not torch.equal(result.positions[:, 1], source.positions[:, 1])
+    assert torch.equal(result.positions[[0, 8, 9, 12]], source.positions[[0, 8, 9, 12]])

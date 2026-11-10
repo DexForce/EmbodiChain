@@ -19,24 +19,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import gc
 import json
 from types import MethodType, SimpleNamespace
 from typing import ClassVar
 from unittest.mock import Mock
+import weakref
 
 import pytest
 import torch
 
 import embodichain.lab.task_program.runtime.executor as runtime_module
-from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
-    ActionOptions,
-    ActionPlan,
+from embodichain.lab.sim.atomic_skills import (
+    SkillBinding,
+    SkillInvocation,
+    SkillOptions,
+    SkillPlan,
     Affordance,
     ArticulationJointState,
-    AtomicAction,
-    AtomicActionEngine,
+    AtomicSkill,
+    AtomicSkillEngine,
     CommandAcknowledgement,
     EffectVerificationRequirement,
     EffectVerificationRequest,
@@ -55,7 +57,7 @@ from embodichain.lab.sim.atomic_actions import (
     PhaseEffectGateRequest,
     PlanningContext,
     RecoveryPolicy,
-    ResolvedActionRequest,
+    ResolvedSkillRequest,
     RobotObservation,
     SceneSnapshot,
     SkillBindingContract,
@@ -64,10 +66,19 @@ from embodichain.lab.sim.atomic_actions import (
     StateDelta,
     TaskState,
     TimedCommandSequence,
+    TimedTrajectory,
     TrackingFeedbackSourceRef,
     TrackingProjectorRef,
 )
-from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
+    EndpointCommand,
+    JointPositionPayload,
+    RuntimeCommandFrame,
+)
+from embodichain.lab.sim.atomic_skills.affordance_sampling import (
+    AffordanceSamplingContext,
+)
 from embodichain.lab.task_program.semantics.calls import (
     HandOver,
     Pick,
@@ -79,6 +90,8 @@ from embodichain.lab.task_program.compiler.lowering import (
     GroundedHeldObjectGuard,
     GroundedPhaseEffectGate,
     HeldObjectGuardBaseline,
+    RegisteredHeldObjectEffect,
+    RegisteredSemanticEffect,
     SemanticCallCompiler,
 )
 from embodichain.lab.task_program.semantics.effects import (
@@ -93,6 +106,7 @@ from embodichain.lab.task_program.semantics.effects import (
     EffectMonitor,
     EffectMonitorDecision,
     EffectMonitorParam,
+    EffectMonitorRef,
     HeldObjectRelation,
     HeldObjectStateExpectation,
     JOINT_STATE_EFFECT_CHANNEL,
@@ -105,6 +119,10 @@ from embodichain.lab.task_program.semantics.integration import (
     SemanticValidationError,
 )
 from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
+from embodichain.lab.task_program.runtime.expansion import (
+    TaskProgramPlanRequest,
+    TaskProgramPlanTransformFactory,
+)
 from embodichain.lab.task_program.runtime.results import (
     SkillEndpointBindingTrace,
     SemanticExecutionStatus,
@@ -266,7 +284,7 @@ class _EffectGoal:
     target_position: float
 
 
-class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
+class _EffectAction(AtomicSkill[_EffectGoal, SkillOptions]):
     """Zero-frame action with an explicit verified articulation effect."""
 
     skill_id: ClassVar[str] = "runtime_test_effect"
@@ -276,21 +294,23 @@ class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
     def __init__(self) -> None:
         super().__init__()
         self.plan_count = 0
+        self.sampling_contexts: list[object] = []
 
     def _scene_dependencies(
         self,
-        request: ResolvedActionRequest[_EffectGoal, ActionOptions],
+        request: ResolvedSkillRequest[_EffectGoal, SkillOptions],
     ) -> tuple[str, ...]:
         del request
         return ("fixture",)
 
     def _plan(
         self,
-        request: ResolvedActionRequest[_EffectGoal, ActionOptions],
+        request: ResolvedSkillRequest[_EffectGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         goal = self.require_goal(request)
         self.plan_count += 1
+        self.sampling_contexts.append(context.affordance_sampling)
         position = torch.full(
             (context.batch_size, 1),
             goal.target_position,
@@ -313,6 +333,29 @@ class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
         )
 
 
+class _EffectlessAction(_EffectAction):
+    """Zero-frame action whose successful completion has no task-state effect."""
+
+    skill_id: ClassVar[str] = "runtime_test_effectless"
+    open_loop: ClassVar[bool] = True
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract()
+
+    def _plan(
+        self,
+        request: ResolvedSkillRequest[_EffectGoal, SkillOptions],
+        context: PlanningContext,
+    ) -> SkillPlan:
+        goal = self.require_goal(request)
+        self.plan_count += 1
+        return self.build_command_plan(
+            request,
+            context,
+            success=goal.plan_success,
+            commands=TimedCommandSequence((), context.env_ids),
+            replannable=False,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class _WorkflowEffectGoal:
     """Test-only held-object effect for workflow recovery."""
@@ -329,7 +372,7 @@ class _WorkflowEffectGoal:
             raise TypeError("attach must be exactly bool.")
 
 
-class _WorkflowEffectAction(AtomicAction[_WorkflowEffectGoal, ActionOptions]):
+class _WorkflowEffectAction(AtomicSkill[_WorkflowEffectGoal, SkillOptions]):
     """Zero-frame action that commits only a verified held-object effect."""
 
     skill_id: ClassVar[str] = "runtime_test_workflow_primary"
@@ -346,9 +389,9 @@ class _WorkflowEffectAction(AtomicAction[_WorkflowEffectGoal, ActionOptions]):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[_WorkflowEffectGoal, ActionOptions],
+        request: ResolvedSkillRequest[_WorkflowEffectGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         goal = self.require_goal(request)
         endpoint = request.binding.endpoint(self.source_slot, "motion")
         task_state_key = endpoint.task_state_key
@@ -443,7 +486,7 @@ class _Workflow:
 @dataclass(frozen=True, slots=True)
 class _Grounded:
     analyzed: object
-    invocation: ActionInvocation
+    invocation: SkillInvocation
     effect_spec: SemanticEffectSpec | None
     effect_monitor: EffectMonitor | None
     eligible_mask: torch.Tensor
@@ -453,13 +496,13 @@ class _Grounded:
 
 @dataclass(frozen=True, slots=True)
 class _Integration:
-    engine: AtomicActionEngine
+    engine: AtomicSkillEngine
     scene_registry: SceneRegistry
 
     @property
     def robot_profile(self) -> object:
         """Expose the production capability surface used by the facade."""
-        return SimpleNamespace(skills=self.engine.skills)
+        return SimpleNamespace(skills=self.engine.skill_catalog)
 
 
 class _Compiler(SemanticCallCompiler):
@@ -467,12 +510,14 @@ class _Compiler(SemanticCallCompiler):
 
     def __init__(
         self,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         decisions: tuple[EffectMonitorDecision, ...],
         plan_success: tuple[torch.Tensor, ...],
         runner_cfg: ExecutionRunnerCfg,
         *,
         install_effect_monitor: bool,
+        effect_assurance: EffectAssurance | None = None,
+        skill_id: str = _EffectAction.skill_id,
     ) -> None:
         self._test_integration = _Integration(engine, SceneRegistry())
         self._decisions = tuple(
@@ -494,11 +539,13 @@ class _Compiler(SemanticCallCompiler):
         self._plan_success = plan_success
         self._runner_cfg = runner_cfg
         self._install_effect_monitor = install_effect_monitor
+        self._effect_assurance = effect_assurance
+        self._skill_id = skill_id
         self.analyze_count = 0
         self.ground_count = 0
         self.ground_timestamps: list[float] = []
         self.ground_task_masks: list[torch.Tensor | None] = []
-        self.invocations: list[ActionInvocation] = []
+        self.invocations: list[SkillInvocation] = []
         self.monitors: list[_DecisionMonitor] = []
 
     @property
@@ -523,6 +570,7 @@ class _Compiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -533,14 +581,14 @@ class _Compiler(SemanticCallCompiler):
         state = context.task.get_articulation_joint_state("fixture", "joint")
         self.ground_task_masks.append(None if state is None else state.env_mask.clone())
         call = workflow.calls[call_index]
-        invocation = ActionInvocation(
-            skill_id=_EffectAction.skill_id,
+        invocation = SkillInvocation(
+            skill_id=self._skill_id,
             goal=_EffectGoal(
                 self._plan_success[call_index].clone(),
                 float(call_index + 1),
             ),
             binding=self.integration.engine.bind_control_parts(
-                _EffectAction.skill_id,
+                self._skill_id,
                 {},
             ),
             motion_policy=MotionPolicy(
@@ -549,10 +597,10 @@ class _Compiler(SemanticCallCompiler):
             tracking_policy=TrackingPolicy.timed(),
             recovery_policy=RecoveryPolicy(
                 max_replans=0,
-                max_action_retries=0,
-                action_timeout=100.0,
+                max_skill_retries=0,
+                skill_timeout=100.0,
             ),
-            invocation_id=f"{workflow.workflow_id}:{call_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{call_index}",
             revision=revision,
         )
         target = torch.full((BATCH_SIZE, 1), float(call_index + 1))
@@ -591,15 +639,20 @@ class _Compiler(SemanticCallCompiler):
             self.monitors.append(monitor)
         analyzed = SimpleNamespace(
             call=call,
+            policy_preset_id=None,
             effect_assurance=(
-                EffectAssurance.VERIFIED
-                if self._install_effect_monitor
-                else EffectAssurance.PROJECTED
+                self._effect_assurance
+                if self._effect_assurance is not None
+                else (
+                    EffectAssurance.VERIFIED
+                    if self._install_effect_monitor
+                    else EffectAssurance.PROJECTED
+                )
             ),
             effect_monitor_ref=None,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="runtime_test_profile"),
-                binding=SimpleNamespace(action_binding=invocation.binding),
+                binding=SimpleNamespace(skill_binding=invocation.binding),
                 linked=SimpleNamespace(
                     descriptor=SimpleNamespace(skill_id=invocation.skill_id)
                 ),
@@ -625,7 +678,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
 
     def __init__(
         self,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         decisions: tuple[_WorkflowEffectDecision, ...],
         *,
         max_recovery_attempts: int,
@@ -636,7 +689,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         self.analysis_windows: list[tuple[str, ...]] = []
         self.grounded_calls: list[SemanticCallSpec] = []
         self.grounded_masks: list[torch.Tensor] = []
-        self.invocations: list[ActionInvocation] = []
+        self.invocations: list[SkillInvocation] = []
 
     @property
     def integration(self) -> _Integration:
@@ -660,6 +713,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -700,7 +754,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
                 "Workflow-recovery test compiler accepts Pick, Place, or HandOver."
             )
         object_id = call.object.entity_id
-        binding = ActionBinding(
+        binding = SkillBinding(
             owner_id=self.integration.engine.binding_owner_id,
             endpoints=(
                 EndpointBinding(
@@ -719,17 +773,17 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         tracking_policy = TrackingPolicy.timed()
         recovery_policy = RecoveryPolicy(
             max_replans=0,
-            max_action_retries=0,
-            action_timeout=100.0,
+            max_skill_retries=0,
+            skill_timeout=100.0,
         )
-        invocation = ActionInvocation(
+        invocation = SkillInvocation(
             skill_id=action_type.skill_id,
             goal=_WorkflowEffectGoal(object_id=object_id, attach=attach),
             binding=binding,
             motion_policy=motion_policy,
             tracking_policy=tracking_policy,
             recovery_policy=recovery_policy,
-            invocation_id=f"{workflow.workflow_id}:{decision_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{decision_index}",
             revision=revision,
         )
         expectation = HeldObjectStateExpectation(
@@ -782,11 +836,12 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         )
         analyzed = SimpleNamespace(
             call=call,
+            policy_preset_id=None,
             effect_assurance=EffectAssurance.VERIFIED,
             effect_monitor_ref=None,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="runtime_test_profile"),
-                binding=SimpleNamespace(action_binding=binding),
+                binding=SimpleNamespace(skill_binding=binding),
                 linked=SimpleNamespace(
                     descriptor=SimpleNamespace(skill_id=invocation.skill_id)
                 ),
@@ -819,7 +874,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
 class _System:
     runtime: SemanticCallExecutor
     compiler: _Compiler
-    engine: AtomicActionEngine
+    engine: AtomicSkillEngine
     action: _EffectAction
     observation: _ObservationProvider
     sink: _CommandSink
@@ -831,7 +886,7 @@ class _System:
 class _WorkflowRecoverySystem:
     runtime: SemanticCallExecutor
     compiler: _WorkflowRecoveryCompiler
-    engine: AtomicActionEngine
+    engine: AtomicSkillEngine
     observation: _ObservationProvider
     sink: _CommandSink
     collector: _Collector
@@ -863,6 +918,60 @@ def _call(name: str) -> RegisteredSemanticCall:
     return RegisteredSemanticCall(call_id=f"test.{name}")
 
 
+class _RecordingPlanTransformFactory:
+    """Record grounded call identity and tag the installed Atomic plan."""
+
+    def __init__(self) -> None:
+        self.requests: list[TaskProgramPlanRequest] = []
+        self.transform_calls = 0
+        self.prepare_calls = 0
+
+    def prepare_planning_context(
+        self,
+        request: TaskProgramPlanRequest,
+        context: PlanningContext,
+        *,
+        engine: AtomicSkillEngine,
+    ) -> PlanningContext:
+        assert isinstance(request, TaskProgramPlanRequest)
+        assert isinstance(engine, AtomicSkillEngine)
+        self.prepare_calls += 1
+        return replace(
+            context,
+            affordance_sampling=AffordanceSamplingContext(
+                count=4,
+                seed=11,
+                episode_id=request.workflow_call_index,
+                branch_override=2,
+            ),
+        )
+
+    def create_plan_transform(
+        self,
+        request: TaskProgramPlanRequest,
+        *,
+        engine: AtomicSkillEngine,
+    ):
+        assert isinstance(engine, AtomicSkillEngine)
+        self.requests.append(request)
+
+        def transform(resolved, context, plan):
+            del resolved, context
+            self.transform_calls += 1
+            return replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "task_program_generation_test": True,
+                    },
+                ),
+            )
+
+        return transform
+
+
 def _system(
     decisions: tuple[EffectMonitorDecision, ...],
     *,
@@ -870,6 +979,10 @@ def _system(
     preset_runner_cfg: ExecutionRunnerCfg | None = None,
     runtime_runner_cfg: ExecutionRunnerCfg | None = None,
     install_effect_monitor: bool = True,
+    effect_assurance: EffectAssurance | None = None,
+    effectless_action: bool = False,
+    plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+    nominal_source_factory=None,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -881,8 +994,8 @@ def _system(
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "runtime_test"
-    engine = AtomicActionEngine(generator, load_builtins=False)
-    action = _EffectAction()
+    engine = AtomicSkillEngine(generator, load_builtins=False)
+    action = _EffectlessAction() if effectless_action else _EffectAction()
     engine.register(action)
     selected_plan_success = plan_success or tuple(_mask(True, True) for _ in decisions)
     selected_runner_cfg = (
@@ -894,6 +1007,8 @@ def _system(
         selected_plan_success,
         selected_runner_cfg,
         install_effect_monitor=install_effect_monitor,
+        effect_assurance=effect_assurance,
+        skill_id=action.skill_id,
     )
     observation = _ObservationProvider()
     sink = _CommandSink()
@@ -907,6 +1022,8 @@ def _system(
         task_state=TaskState.empty(BATCH_SIZE, "cpu"),
         clock=clock,
         runner_cfg=runtime_runner_cfg,
+        plan_transform_factory=plan_transform_factory,
+        nominal_source_factory=nominal_source_factory,
     )
     return _System(
         runtime,
@@ -918,6 +1035,71 @@ def _system(
         collector,
         clock,
     )
+
+
+def test_executor_requests_call_scoped_plan_transform() -> None:
+    factory = _RecordingPlanTransformFactory()
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+        plan_transform_factory=factory,
+    )
+    call = _call("generation")
+
+    result = system.runtime.start(call, workflow_id="generation-workflow")
+
+    assert result.status is SemanticExecutionStatus.RUNNING
+    assert factory.transform_calls == 1
+    assert factory.prepare_calls == 1
+    assert system.action.sampling_contexts[0].branch_override == 2
+    assert len(factory.requests) == 1
+    request = factory.requests[0]
+    assert request.workflow_id == "generation-workflow"
+    assert request.workflow_call_index == 0
+    assert request.analysis_call_index == 0
+    assert request.call is call
+    assert request.invocation is system.compiler.invocations[0]
+
+
+def test_executor_without_transform_factory_is_unchanged() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+    assert system.runtime.evidence_collector is system.collector
+    assert system.collector.calls == []
+
+    result = system.runtime.start(_call("baseline"), workflow_id="baseline-workflow")
+
+    assert result.status is SemanticExecutionStatus.RUNNING
+    assert system.action.plan_count == 1
+
+
+def test_executor_selects_nominal_source_before_native_planning() -> None:
+    class Source:
+        def instantiate(self, request, context):
+            raise AssertionError("unsupported skill should reject before source use")
+
+    class Factory:
+        def __init__(self):
+            self.requests = []
+
+        def create_nominal_source(self, request, *, engine):
+            self.requests.append(request)
+            return Source()
+
+    factory = Factory()
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+        nominal_source_factory=factory,
+    )
+    result = system.runtime.start(_call("generation"), workflow_id="nominal-workflow")
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert "does not support external nominal" in result.message
+    assert factory.requests[0].workflow_id == "nominal-workflow"
+    assert factory.requests[0].analysis_call_index == 0
+    assert system.action.plan_count == 0
 
 
 def _workflow_recovery_system(
@@ -936,7 +1118,7 @@ def _workflow_recovery_system(
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "runtime_test"
-    engine = AtomicActionEngine(generator, load_builtins=False)
+    engine = AtomicSkillEngine(generator, load_builtins=False)
     engine.register(_WorkflowEffectAction())
     engine.register(_WorkflowSourceEffectAction())
     compiler = _WorkflowRecoveryCompiler(
@@ -983,7 +1165,7 @@ def test_runtime_analyzes_once_and_uses_one_fresh_session_per_call(
     original_start = system.engine.start
     original_runner = runtime_module.ExecutionRunner
 
-    def counted_start(self: AtomicActionEngine, *args: object, **kwargs: object):
+    def counted_start(self: AtomicSkillEngine, *args: object, **kwargs: object):
         nonlocal session_calls
         del self
         session_calls += 1
@@ -1011,6 +1193,42 @@ def test_runtime_analyzes_once_and_uses_one_fresh_session_per_call(
     assert system.observation.calls == 4
 
 
+def test_verified_call_without_effect_completes_without_a_monitor() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+    native = system.action._plan
+    system.action._plan = lambda request, context: replace(native(request, context), expected_effects=StateDelta(), effect_verification=None)  # type: ignore[method-assign]
+    result = system.runtime.start(_call("no_effect"))
+    system.runtime._grounded.analyzed.effect_assurance = EffectAssurance.VERIFIED
+    for _ in range(5):
+        if result.status is not SemanticExecutionStatus.RUNNING:
+            break
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    assert result.status is SemanticExecutionStatus.COMPLETED
+    assert system.collector.calls == []
+
+
+def test_verified_unmonitored_effect_fails_without_projecting_state() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+    result = system.runtime.start(_call("unexpected_effect"))
+    system.runtime._grounded.analyzed.effect_assurance = EffectAssurance.VERIFIED
+    for _ in range(5):
+        if result.status is not SemanticExecutionStatus.RUNNING:
+            break
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert result.task_state.get_articulation_joint_state("fixture", "joint") is None
+
+
 def test_runtime_projects_planned_effect_when_grounded_call_has_no_monitor() -> None:
     system = _system(
         (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
@@ -1026,6 +1244,22 @@ def test_runtime_projects_planned_effect_when_grounded_call_has_no_monitor() -> 
     assert joint is not None
     assert torch.equal(joint.env_mask, _mask(True, True))
     assert torch.allclose(joint.position, torch.ones(BATCH_SIZE, 1))
+
+
+def test_verified_runtime_accepts_an_effectless_motion_without_a_monitor() -> None:
+    """Tracking completion is sufficient when no effect claim exists to verify."""
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+        effect_assurance=EffectAssurance.VERIFIED,
+        effectless_action=True,
+    )
+
+    result = system.runtime.run(_call("park"))
+
+    assert result.status is SemanticExecutionStatus.COMPLETED
+    assert result.effects == ()
+    assert result.task_state.get_articulation_joint_state("fixture", "joint") is None
 
 
 def test_runtime_uses_selected_preset_runner_cfg_without_override(
@@ -1054,14 +1288,28 @@ def test_runtime_uses_selected_preset_runner_cfg_without_override(
     assert captured_cfgs[0].command_timeout == 3.0
 
 
-def test_runtime_runner_cfg_override_wins_over_selected_preset(
+@pytest.mark.parametrize(
+    ("explicit_policy", "expected_timeout"), [(False, 5.0), (True, 3.0)]
+)
+def test_runtime_runner_ownership_respects_explicit_occurrence_policy(
     monkeypatch: pytest.MonkeyPatch,
+    explicit_policy: bool,
+    expected_timeout: float,
 ) -> None:
     system = _system(
         (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
         preset_runner_cfg=ExecutionRunnerCfg(command_timeout=3.0),
         runtime_runner_cfg=ExecutionRunnerCfg(command_timeout=5.0),
     )
+    if explicit_policy:
+        original_ground = system.compiler.ground
+
+        def selected_ground(*args, **kwargs):
+            grounded = original_ground(*args, **kwargs)
+            grounded.analyzed.policy_preset_id = "runtime_test_preset"
+            return grounded
+
+        monkeypatch.setattr(system.compiler, "ground", selected_ground)
     captured_cfgs: list[ExecutionRunnerCfg] = []
     original_runner = runtime_module.ExecutionRunner
 
@@ -1077,7 +1325,7 @@ def test_runtime_runner_cfg_override_wins_over_selected_preset(
 
     assert result.status is SemanticExecutionStatus.COMPLETED
     assert len(captured_cfgs) == 1
-    assert captured_cfgs[0].command_timeout == 5.0
+    assert captured_cfgs[0].command_timeout == expected_timeout
 
 
 def test_runtime_analyzes_downstream_calls_but_executes_only_requested_prefix() -> None:
@@ -1299,7 +1547,9 @@ def test_runtime_retries_directly_when_verified_source_relation_remains() -> Non
     assert result.task_state.get_held_object("left_gripper") is None
 
 
-def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> None:
+def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     poses = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
     initial_state = TaskState(
         batch_size=BATCH_SIZE,
@@ -1332,6 +1582,22 @@ def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> No
         task_state=initial_state,
     )
 
+    ground = system.compiler.ground
+    identities = []
+
+    def record_ground(workflow, *args, **kwargs):
+        grounded = ground(workflow, *args, **kwargs)
+        identities.append(
+            (
+                workflow.workflow_id,
+                kwargs.get("invocation_id"),
+                grounded.invocation.invocation_id,
+            )
+        )
+        return grounded
+
+    monkeypatch.setattr(system.compiler, "ground", record_ground)
+
     result = system.runtime.run(
         HandOver(
             object=SceneObjectRef("cube"),
@@ -1359,6 +1625,15 @@ def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> No
         SkillWorkflowRecoveryRole.RETRY_REACQUIRED,
     ]
     assert [trace.attempt_index for trace in result.workflow_recoveries] == [1, 1, 1]
+    assert identities[0] == (
+        "semantic_workflow",
+        "semantic_workflow:0",
+        "semantic_workflow:0",
+    )
+    for i, (workflow_id, override, identity) in enumerate(identities[1:]):
+        assert override is None
+        assert workflow_id == f"semantic_workflow:workflow_recovery:{i}"
+        assert identity.startswith(workflow_id + ":")
     assert result.task_state.get_held_object("left_gripper") is None
 
 
@@ -1818,10 +2093,8 @@ def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace()
     )
     system.runtime._runner = SimpleNamespace(
         session=SimpleNamespace(
-            active_plan=SimpleNamespace(
-                expected_effects=StateDelta(held_object_updates={"arm": None}),
-                effect_candidates=StateDelta(held_object_updates={"arm": held}),
-            )
+            active_expected_effects=StateDelta(held_object_updates={"arm": None}),
+            active_effect_candidates=StateDelta(held_object_updates={"arm": held}),
         )
     )
     system.runtime._current_call_index = 0
@@ -1864,6 +2137,204 @@ def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace()
     assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
 
 
+@pytest.mark.parametrize(
+    "lost_during_lift, unknown_retention",
+    [(False, False), (True, False), (False, True)],
+    ids=["not_acquired", "lost_during_lift", "unknown_retention"],
+)
+def test_registered_acquisition_scheduler_stops_within_action_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, lost_during_lift: bool, unknown_retention: bool
+) -> None:
+    poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    unrelated = HeldObjectState(
+        semantics=ObjectSemantics(
+            affordance=Affordance(), geometry={}, entity_id="other_cube"
+        ),
+        object_to_eef=poses,
+        grasp_xpos=poses,
+        env_mask=_mask(True, True),
+    )
+    system = _workflow_recovery_system(
+        (_workflow_decision(_mask(True, True), _mask(False, False)),),
+        max_recovery_attempts=0,
+        task_state=TaskState(
+            batch_size=BATCH_SIZE,
+            device="cpu",
+            held_objects={"other_gripper": unrelated},
+        ),
+    )
+    plans = 0
+    original_plan = _WorkflowEffectAction._plan
+
+    def phased_plan(self, request, context):
+        nonlocal plans
+        plans += 1
+        original = original_plan(self, request, context)
+        return self.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=TimedTrajectory.from_uniform_step(
+                torch.tensor([0.0, 1.0, 2.0, 3.0])
+                .view(1, 4, 1)
+                .repeat(BATCH_SIZE, 1, 1),
+                env_ids=context.env_ids,
+                step_dt=0.01,
+            ),
+            expected_effects=original.expected_effects,
+            effect_candidates=original.expected_effects,
+            segment_lengths={"close": 1, "lift": 3},
+            replannable=False,
+        )
+
+    monkeypatch.setattr(_WorkflowEffectAction, "_plan", phased_plan)
+    call = RegisteredSemanticCall("test.registered_pick")
+    original_ground = system.compiler.ground
+    monitors = []
+
+    def decision(satisfied: bool) -> EffectMonitorDecision:
+        success, failure = _mask(satisfied, satisfied), _mask(
+            not satisfied, not satisfied
+        )
+        return EffectMonitorDecision(
+            success,
+            failure,
+            (EffectExpectationDecision("primary", success, failure, failure),),
+        )
+
+    def ground_registered(self, workflow, call_index, context, **kwargs):
+        grounded = original_ground(
+            replace(workflow, calls=(Pick(SceneObjectRef("cube")),)),
+            call_index,
+            context,
+            **kwargs,
+        )
+        spec = replace(
+            grounded.effect_spec,
+            semantic_id=call.semantic_id,
+            state_expectations=(
+                replace(
+                    grounded.effect_spec.state_expectations[0], expectation_id="primary"
+                ),
+            ),
+            clauses=(
+                replace(
+                    grounded.effect_spec.clauses[0],
+                    expectation_id="primary",
+                    clause_id="primary.constraint",
+                ),
+            ),
+        )
+        analyzed = SimpleNamespace(
+            **{
+                **vars(grounded.analyzed),
+                "call": call,
+                "effect_monitor_ref": EffectMonitorRef("test.monitor", "1"),
+            }
+        )
+        declaration = RegisteredSemanticEffect(
+            SemanticEffectKind.ATTACH,
+            (
+                RegisteredHeldObjectEffect(
+                    "primary",
+                    HeldObjectRelation.ATTACHED,
+                    "cube",
+                    "primary",
+                    acquire_before_segment="lift",
+                    retain_during_segments=(
+                        ("lift", "typo_transport") if unknown_retention else ("lift",)
+                    ),
+                ),
+            ),
+        )
+        self._effect_monitor_registry = SimpleNamespace(
+            create=lambda value, ref: _DecisionMonitor(value, decision(True))
+        )
+        gates = self._ground_phase_effect_gates(
+            analyzed, spec, registered_effect=declaration, path=("test",)
+        )
+        guards = self._ground_held_object_guards(
+            analyzed, spec, context, registered_effect=declaration, path=("test",)
+        )
+        gate_monitor, guard_monitor = gates[0].effect_monitor, guards[0].effect_monitor
+        if not lost_during_lift:
+            gate_monitor._decision = decision(False)
+        else:
+            original_observe = guard_monitor.observe
+
+            def lose_after_first_lift(request, evidence):
+                if guard_monitor.calls:
+                    guard_monitor._decision = decision(False)
+                return original_observe(request, evidence)
+
+            monkeypatch.setattr(guard_monitor, "observe", lose_after_first_lift)
+        terminal = _DecisionMonitor(spec, decision(True))
+        monitors.append((gate_monitor, guard_monitor, terminal))
+        return replace(
+            grounded,
+            analyzed=analyzed,
+            invocation=replace(
+                grounded.invocation,
+                phase_effect_gates=tuple(g.requirement for g in gates),
+                recovery_policy=replace(
+                    grounded.invocation.recovery_policy, max_skill_retries=1
+                ),
+            ),
+            effect_spec=spec,
+            effect_monitor=terminal,
+            effect_gates=gates,
+            effect_guards=guards,
+        )
+
+    monkeypatch.setattr(
+        system.compiler, "ground", MethodType(ground_registered, system.compiler)
+    )
+    sent = []
+    original_send = system.sink.send
+
+    def record_send(command, *, timeout):
+        sent.append(float(command.commands[0].payload.positions[0, 0]))
+        return original_send(command, timeout=timeout)
+
+    monkeypatch.setattr(system.sink, "send", record_send)
+    invalidations = []
+    original_guard = system.runtime._held_object_guard_verifier
+
+    def record_guard(context, request):
+        result = original_guard(context, request)
+        if result is not None and result.failure_mask.any():
+            invalidations.append(result.state_invalidation.held_object_updates)
+        return result
+
+    monkeypatch.setattr(system.runtime, "_held_object_guard_verifier", record_guard)
+    result = system.runtime.run(call, max_steps=50)
+
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert torch.equal(result.failure_mask, _mask(True, True))
+    if unknown_retention:
+        assert plans == 1
+        assert sent == []
+        assert "typo_transport" in result.message and "missing" in result.message
+        return
+    assert plans == 2
+    assert len(monitors) == 1
+    gate_monitor, guard_monitor, terminal_monitor = monitors[0]
+    assert terminal_monitor.calls == 0
+    assert result.task_state.get_held_object("left_gripper") is None
+    assert result.task_state.get_held_object("other_gripper") is not None
+    if lost_during_lift:
+        assert 1.0 in sent and 3.0 not in sent
+        assert invalidations and all(
+            value == {"left_gripper": None} for value in invalidations
+        )
+        assert guard_monitor.calls >= 2
+    else:
+        assert sent == [0.0, 0.0]
+        assert gate_monitor.calls == 2
+        assert guard_monitor.calls == 0
+        assert invalidations == []
+
+
 def test_runtime_invokes_step_observer() -> None:
     system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
     observed_steps = []
@@ -1876,6 +2347,133 @@ def test_runtime_invokes_step_observer() -> None:
 
     assert result.status is SemanticExecutionStatus.COMPLETED
     assert observed_steps
+
+
+@pytest.mark.parametrize("finish", ["complete", "cancel", "observer_failure"])
+def test_advance_matches_step_dispatch_wait_and_safe_stop_without_audit_reads(
+    monkeypatch: pytest.MonkeyPatch, finish: str
+) -> None:
+    """The lightweight entry preserves physical ordering and explicit snapshots."""
+    original_plan = _WorkflowEffectAction._plan
+    original_result = SemanticCallExecutor.result.fget
+    snapshots = 0
+
+    def command_plan(self, request, context):
+        plan = original_plan(self, request, context)
+        frame = RuntimeCommandFrame(
+            commands=(
+                EndpointCommand(
+                    target=request.binding.endpoint("primary", "motion").target,
+                    payload=JointPositionPayload(positions=torch.ones(BATCH_SIZE, 1)),
+                ),
+            ),
+            active_mask=_mask(True, True),
+            env_ids=context.env_ids,
+            hold_duration=torch.full((BATCH_SIZE,), 0.1),
+        )
+        return replace(plan, commands=TimedCommandSequence((frame,), context.env_ids))
+
+    def counted_result(runtime):
+        nonlocal snapshots
+        snapshots += 1
+        return original_result(runtime)
+
+    monkeypatch.setattr(_WorkflowEffectAction, "_plan", command_plan)
+    monkeypatch.setattr(SemanticCallExecutor, "result", property(counted_result))
+    outcomes = []
+    for lightweight in (False, True):
+        system = _workflow_recovery_system(
+            (_workflow_decision(_mask(True, True), _mask(False, False)),),
+            max_recovery_attempts=0,
+        )
+        observations = []
+
+        def observe(step):
+            observations.append(
+                (system.clock.now(), step.status.value, system.sink.sent)
+            )
+            if finish == "observer_failure":
+                raise RuntimeError("observer failed after dispatch")
+
+        system.runtime._step_observer = observe
+        initial = system.runtime.start(
+            Pick(object=SceneObjectRef("cube")), workflow_id="advance-parity"
+        )
+        progress = []
+        for _ in range(20):
+            if system.runtime.status is not SemanticExecutionStatus.RUNNING:
+                break
+            if system.runtime.wait_duration:
+                system.clock.sleep(system.runtime.wait_duration)
+            before = snapshots
+            if lightweight:
+                assert system.runtime.advance() is system.runtime.status
+                assert snapshots == before
+            else:
+                assert system.runtime.step().status is system.runtime.status
+            progress.append(
+                (
+                    system.runtime.status.value,
+                    system.runtime.current_call_index,
+                    system.runtime.wait_duration,
+                    system.observation.calls,
+                    system.sink.sent,
+                    system.sink.cancelled,
+                    system.sink.held,
+                )
+            )
+            if finish == "cancel" and system.sink.sent:
+                system.runtime.cancel("cancel after accepted frame")
+        result = system.runtime.result
+        expected = {
+            "complete": SemanticExecutionStatus.COMPLETED,
+            "cancel": SemanticExecutionStatus.CANCELLED,
+            "observer_failure": SemanticExecutionStatus.FAILED,
+        }[finish]
+        assert result.status is expected
+        assert initial.status is SemanticExecutionStatus.RUNNING
+        assert not initial.calls
+        outcomes.append(
+            (
+                progress,
+                observations,
+                system.clock.sleeps,
+                result.status.value,
+                result.message,
+                result.success_mask.tolist(),
+                result.failure_mask.tolist(),
+                result.cancelled_mask.tolist(),
+                [call.status.value for call in result.calls],
+            )
+        )
+    assert outcomes[0] == outcomes[1]
+
+
+def test_motion_policy_metadata_includes_timing_limits() -> None:
+    from embodichain.lab.task_program.runtime.results import (
+        _motion_policy_to_metadata,
+    )
+
+    metadata = _motion_policy_to_metadata(
+        MotionPolicy(
+            sample_count=7,
+            velocity_limit=0.2,
+            acceleration_limit=0.5,
+        )
+    )
+
+    assert metadata["velocity_limit"] == pytest.approx(0.2)
+    assert metadata["acceleration_limit"] == pytest.approx(0.5)
+
+
+def test_motion_policy_metadata_preserves_omitted_velocity_limit() -> None:
+    from embodichain.lab.task_program.runtime.results import (
+        _motion_policy_to_metadata,
+    )
+
+    metadata = _motion_policy_to_metadata(MotionPolicy(sample_count=7))
+
+    assert metadata["velocity_limit"] is None
 
 
 def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None:
@@ -1892,7 +2490,7 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
     assert call["call"]["arguments"]["call_id"] == "test.metadata"
     assert call["active_plan_attempt_generation"] == 0
     attempt = call["plan_attempts"][0]
-    assert attempt["trigger"] == "action_planned"
+    assert attempt["trigger"] == "skill_planned"
     assert attempt["planned_scene_version"] == 1
     assert attempt["planned_collision_world_revision"] == [0, 0]
     assert attempt["scene_dependencies"] == ["fixture"]
@@ -2004,7 +2602,7 @@ def test_endpoint_binding_trace_records_only_stable_binding_choices() -> None:
     target_fingerprint = [
         {
             "__type__": (
-                "embodichain.lab.sim.atomic_actions.bindings." "JointPositionTarget"
+                "embodichain.lab.sim.atomic_skills.bindings." "JointPositionTarget"
             )
         },
         "robot.joint_position",
@@ -2103,6 +2701,214 @@ def test_cancel_inherits_runner_cancel_then_hold_safe_stop() -> None:
     assert system.sink.cancelled == 1
     assert system.sink.held == 1
     assert result.calls[0].status.value == "cancelled"
+
+
+@pytest.mark.parametrize("failure_source", ["observer", "clock"])
+def test_sync_failure_after_dispatch_cancels_and_holds(
+    monkeypatch: pytest.MonkeyPatch, failure_source: str
+) -> None:
+    system = _workflow_recovery_system(
+        (_workflow_decision(_mask(True, True), _mask(False, False)),)
+    )
+    original_plan = _WorkflowEffectAction._plan
+
+    def command_plan(self, request, context):
+        plan = original_plan(self, request, context)
+        frame = RuntimeCommandFrame(
+            commands=(
+                EndpointCommand(
+                    target=request.binding.endpoint("primary", "motion").target,
+                    payload=JointPositionPayload(positions=torch.ones(BATCH_SIZE, 1)),
+                ),
+            ),
+            active_mask=_mask(True, True),
+            env_ids=context.env_ids,
+            hold_duration=torch.full((BATCH_SIZE,), 0.1),
+        )
+        return replace(plan, commands=TimedCommandSequence((frame,), context.env_ids))
+
+    def fail(*args):
+        del args
+        raise RuntimeError("injected driver failure")
+
+    monkeypatch.setattr(_WorkflowEffectAction, "_plan", command_plan)
+    if failure_source == "clock":
+        monkeypatch.setattr(system.clock, "sleep", fail)
+    result = system.runtime.run(
+        Pick(object=SceneObjectRef("cube")),
+        on_step=fail if failure_source == "observer" else None,
+    )
+    assert system.sink.sent == 1
+    assert system.sink.cancelled == 1
+    assert system.sink.held == 1
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert result.failure_mask.all()
+    assert "injected driver failure" in result.message
+
+
+def test_reentrant_run_does_not_abort_the_active_workflow() -> None:
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    system.runtime.start(_call("active"), workflow_id="active")
+    with pytest.raises(RuntimeError, match="already running"):
+        system.runtime.run(_call("other"), workflow_id="other")
+    assert system.runtime.status is SemanticExecutionStatus.RUNNING
+    assert system.runtime.result.workflow_id == "active"
+    assert system.sink.cancelled == 0
+    assert system.sink.held == 0
+
+
+def test_result_status_reads_do_not_copy_retained_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    system.runtime.run(_call("history"))
+    copies = 0
+    original_snapshot = runtime_module.SkillEffectTrace.snapshot
+
+    def snapshot(trace):
+        nonlocal copies
+        copies += 1
+        return original_snapshot(trace)
+
+    monkeypatch.setattr(runtime_module.SkillEffectTrace, "snapshot", snapshot)
+    for _ in range(20):
+        result = system.runtime.result
+        assert result.terminal
+    assert copies == 0
+    assert len(result.effects) == 1
+    assert copies == 1
+    result.effects[0].success_mask.zero_()
+    assert system.runtime.result.effects[0].success_mask.all()
+
+
+def test_deferred_result_history_retains_its_original_prefix() -> None:
+    decision = EffectMonitorDecision(_mask(True, True), _mask(False, False))
+    system = _system((decision, decision))
+    result = system.runtime.start(_call("first"), _call("second"))
+    while not system.runtime._effect_traces:
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    earlier = result
+    while not result.terminal:
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    assert len(earlier.effects) == 1
+    assert len(result.effects) == 2
+    system.runtime.run(_call("new_run"))
+    assert len(earlier.effects) == 1
+    assert len(result.effects) == 2
+
+
+@pytest.mark.parametrize("prefix_length", [0, 1])
+def test_early_result_does_not_retain_future_history(prefix_length: int) -> None:
+    decision = EffectMonitorDecision(_mask(True, True), _mask(False, False))
+    system = _system((decision, decision))
+    result = system.runtime.start(_call("first"), _call("second"))
+    while len(system.runtime._effect_traces) < prefix_length:
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    earlier = result
+    while not result.terminal:
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    future_evidence = weakref.ref(system.runtime._effect_traces[1].success_mask)
+    del result
+    system.runtime.run(_call("next_run"))
+    gc.collect()
+    assert future_evidence() is None
+    assert len(earlier.effects) == prefix_length
+
+
+@pytest.mark.parametrize("segment_count", [4, 12])
+def test_bridge_analyzes_a_sequential_stretch_once_and_grounds_each_call(
+    monkeypatch: pytest.MonkeyPatch, segment_count: int
+) -> None:
+    from embodichain.lab.task_program import (
+        InvokeCfg,
+        RegisteredSemanticCallCfg,
+        RepeatCfg,
+        TaskProgramCfg,
+        TaskProgramCompiler,
+        TaskProgramIntegrationCfg,
+    )
+    from embodichain.lab.gym.envs.task_program.bridge import (
+        BufferedGymCommandSink,
+        EnvironmentStepClock,
+        RuntimeCommandFrameEncoder,
+        TaskProgramDemoBridge,
+    )
+
+    decision = EffectMonitorDecision(_mask(True, True), _mask(False, False))
+    system = _system((decision,) * segment_count)
+    compiler = system.compiler
+    original_analyze = compiler.analyze
+    original_ground = compiler.ground
+
+    def analyze(calls, **kwargs):
+        workflow = original_analyze(calls, **kwargs)
+        # The fixture's grounder normally consumes raw calls. Model the real
+        # compiler's analyzed-call values at the static/dynamic boundary.
+        return SimpleNamespace(
+            workflow_id=workflow.workflow_id,
+            calls=tuple(SimpleNamespace(call=call) for call in workflow.calls),
+        )
+
+    def ground(workflow, call_index, context, **kwargs):
+        calls = tuple(value.call for value in workflow.calls)
+        return original_ground(
+            _Workflow(workflow.workflow_id, calls), call_index, context, **kwargs
+        )
+
+    monkeypatch.setattr(compiler, "analyze", analyze)
+    monkeypatch.setattr(compiler, "ground", ground)
+    monkeypatch.setattr(
+        compiler, "_assert_workflow_current", lambda *args, **kwargs: None
+    )
+    clock = EnvironmentStepClock(0.02)
+    qpos_provider = SimpleNamespace(
+        current_qpos=lambda env_ids: system.engine.robot.get_qpos()
+    )
+    sink = BufferedGymCommandSink(RuntimeCommandFrameEncoder(qpos_provider), clock)
+    runtime = SemanticCallExecutor(
+        compiler,
+        system.observation,
+        sink,
+        system.collector,
+        task_state=TaskState.empty(BATCH_SIZE, "cpu"),
+        clock=clock,
+        runner_cfg=ExecutionRunnerCfg(minimum_cycle_time=0.02),
+    )
+    config = TaskProgramCfg(
+        program_id="cached_program",
+        integration=TaskProgramIntegrationCfg(
+            robot_profile="robot", scene_registry="scene", runtime_preset="safe"
+        ),
+        program=RepeatCfg(
+            count=segment_count,
+            body=InvokeCfg(call=RegisteredSemanticCallCfg(call_id="test.cached")),
+        ),
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(SceneRegistry()).compile(config)
+    bridge = TaskProgramDemoBridge(compiled, runtime, sink, clock)
+    for segment in bridge.iter_segments():
+        tuple(segment.actions)
+        assert segment.validator().all()
+    assert bridge.completion_mask.all()
+    assert compiler.analyze_count == 1
+    assert compiler.ground_count == segment_count
+    assert [invocation.invocation_id for invocation in compiler.invocations] == [
+        f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+        for segment in compiled.iter_segments()
+        for call in segment.calls
+    ]
+    assert len(set(compiler.ground_timestamps)) == segment_count
+    assert [
+        invocation.goal.target_position for invocation in compiler.invocations
+    ] == list(range(1, segment_count + 1))
 
 
 def test_result_snapshots_do_not_expose_runtime_masks() -> None:
@@ -2227,3 +3033,79 @@ def test_parallel_factory_analyzes_claims_and_forks_owned_shared_clock_lanes() -
         result.task_state.get_articulation_joint_state("template", "joint") is None
         for result in parallel.result.branch_results.values()
     )
+
+
+def test_split_grasp_and_place_preserve_verified_held_state_across_workflows() -> None:
+    """A new segment workflow retains the grasp needed to ground its Place."""
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+        ),
+        max_recovery_attempts=0,
+    )
+    poses = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
+    system.observation.entities["cube"] = EntityState(poses)
+    system.engine.robot.compute_fk.return_value = poses.clone()
+    cube = SceneObjectRef("cube")
+    pick = Pick(object=cube)
+    place = Place(object=cube, inside=SceneObjectRef("bin"))
+
+    grasp_result = system.runtime.run(
+        (pick, place),
+        workflow_id="pick_segment",
+        execution_prefix_length=1,
+    )
+    assert grasp_result.status is SemanticExecutionStatus.COMPLETED
+    held = grasp_result.task_state.get_held_object("left_gripper")
+    assert held is not None
+    assert held.env_mask.tolist() == [True, True]
+
+    placement_result = system.runtime.run(
+        (place,),
+        workflow_id="place_segment",
+        eligible_mask=grasp_result.success_mask,
+    )
+    assert placement_result.status is SemanticExecutionStatus.COMPLETED
+    assert placement_result.task_state.get_held_object("left_gripper") is None
+    assert system.compiler.analysis_windows == [("pick", "place"), ("place",)]
+    assert [call.semantic_id for call in system.compiler.grounded_calls] == [
+        "pick",
+        "place",
+    ]
+
+
+def test_composite_lifecycle_requires_one_explicit_owner():
+    from types import SimpleNamespace
+    from embodichain.lab.task_program.runtime import (
+        CompositeTaskProgramPlanLifecycleFactory,
+    )
+
+    request, engine = object(), object()
+    lifecycle = SimpleNamespace(
+        on_plan_installed=lambda attempt: None, on_execution_aborted=lambda reason: None
+    )
+    calls = []
+
+    class Factory:
+        def __init__(self, selected):
+            self.selected = selected
+
+        def create_plan_lifecycle(self, actual, *, engine):
+            calls.append((actual, engine))
+            return self.selected
+
+    selected, absent = Factory(lifecycle), Factory(None)
+    composed = CompositeTaskProgramPlanLifecycleFactory((absent, selected))
+    assert composed.create_plan_lifecycle(request, engine=engine) is lifecycle
+    assert calls == [(request, engine), (request, engine)]
+    with pytest.raises(ValueError, match="More than one lifecycle"):
+        CompositeTaskProgramPlanLifecycleFactory(
+            (selected, Factory(lifecycle))
+        ).create_plan_lifecycle(request, engine=engine)
+    with pytest.raises(ValueError, match="registered twice"):
+        CompositeTaskProgramPlanLifecycleFactory((selected, selected))
+    with pytest.raises(TypeError, match="unsupported execution owner"):
+        CompositeTaskProgramPlanLifecycleFactory(
+            (Factory(object()),)
+        ).create_plan_lifecycle(request, engine=engine)

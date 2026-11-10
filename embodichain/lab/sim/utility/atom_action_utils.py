@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 import ast
@@ -32,6 +34,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlanOptions,
     ToppraPlannerCfg,
 )
+from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 
 
 def draw_axis(env, pose):
@@ -52,7 +55,8 @@ def draw_axis(env, pose):
         arena_index=-1,  # All arenas
     )
     env.sim.draw_marker(cfg=marker_cfg)
-    env.sim.update()
+    env.sim.sync_render_state()
+    env.sim.capture_visualization(force=True)
 
 
 def get_arm_states(env, robot_name):
@@ -216,6 +220,7 @@ def plan_trajectory(
         options=MotionGenOptions(
             control_part=select_arm,
             plan_opts=ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=sample_num,
             ),
         ),

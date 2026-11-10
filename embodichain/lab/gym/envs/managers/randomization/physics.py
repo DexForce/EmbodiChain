@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Sequence
 from embodichain.lab.gym.envs.managers.manager_base import Functor
 from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
@@ -289,6 +290,12 @@ class push_articulation_by_setting_velocity(Functor):
         if self._asset is None:
             raise ValueError(f"Articulation '{entity_cfg.uid}' was not found.")
         self._interval_range_s = tuple(cfg.params["interval_range_s"])
+        # A conservative host bound avoids CUDA nonzero on steps where no row
+        # can be due. Leave one step of slack for float32 interval rounding.
+        self._minimum_interval_steps = max(
+            1, math.floor(float(self._interval_range_s[0]) / env.step_dt) - 1
+        )
+        self._steps_until_check = self._minimum_interval_steps
         velocity_range = cfg.params["velocity_range"]
         self._velocity_lower = torch.tensor(
             [
@@ -319,6 +326,9 @@ class push_articulation_by_setting_velocity(Functor):
         self._steps_remaining[env_ids] = (
             torch.ceil(seconds / self._env.step_dt).to(torch.long).clamp_min(1)
         )
+        self._steps_until_check = min(
+            self._steps_until_check, self._minimum_interval_steps
+        )
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """Resample disturbance timers for selected environments.
@@ -331,6 +341,8 @@ class push_articulation_by_setting_velocity(Functor):
             if env_ids is None
             else torch.as_tensor(env_ids, dtype=torch.long, device=self._env.device)
         )
+        if env_ids is None:
+            self._steps_until_check = self._minimum_interval_steps
         self._resample_interval(ids)
 
     def __call__(
@@ -356,14 +368,21 @@ class push_articulation_by_setting_velocity(Functor):
             if env_ids is None
             else env_ids.to(device=env.device, dtype=torch.long)
         )
-        self._steps_remaining[ids] -= 1
-        due_ids = ids[self._steps_remaining[ids] <= 0]
-        if len(due_ids) == 0:
+        if ids.numel() == 0:
             return
-        random = torch.rand((len(due_ids), 6), device=env.device)
-        disturbance = self._velocity_lower + random * (
-            self._velocity_upper - self._velocity_lower
-        )
-        velocity = self._asset.body_data.root_vel[due_ids] + disturbance
-        self._asset.set_root_velocity(velocity, env_ids=due_ids)
-        self._resample_interval(due_ids)
+        self._steps_remaining[ids] -= 1
+        self._steps_until_check -= 1
+        if self._steps_until_check > 0:
+            return
+        due_ids = ids[self._steps_remaining[ids] <= 0]
+        if len(due_ids) > 0:
+            random = torch.rand((len(due_ids), 6), device=env.device)
+            disturbance = self._velocity_lower + random * (
+                self._velocity_upper - self._velocity_lower
+            )
+            velocity = self._asset.body_data.root_vel[due_ids] + disturbance
+            self._asset.set_root_velocity(velocity, env_ids=due_ids)
+            self._resample_interval(due_ids)
+        # All rows bound future calls, including calls advancing a subset.
+        # Partial resets can only reduce this bound to the minimum interval.
+        self._steps_until_check = int(self._steps_remaining.min().item())

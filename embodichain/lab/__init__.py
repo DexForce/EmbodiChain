@@ -22,11 +22,8 @@ real-device controllers, and browser visualization.
 
 from __future__ import annotations
 
-from . import devices
-from . import task_program
-from . import gym
-from . import sim
-from . import visualization
+from importlib import import_module
+from types import ModuleType
 
 __all__ = [
     "devices",
@@ -35,3 +32,16 @@ __all__ = [
     "sim",
     "visualization",
 ]
+
+
+def __getattr__(name: str) -> ModuleType:
+    """Load laboratory subsystems when accessed, keeping CLI help lightweight."""
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(f"{__name__}.{name}")
+    globals()[name] = module
+    return module
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

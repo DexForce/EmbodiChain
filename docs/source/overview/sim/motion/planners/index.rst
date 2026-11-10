@@ -17,7 +17,7 @@ Choose a planner
      - Native targets and requirements
    * - :doc:`toppra_planner`
      - Time-parameterizing joint paths under velocity and acceleration limits.
-     - Joint waypoints; requires TOPPRA.
+     - Joint waypoints; in-tree Warp on CPU or CUDA.
    * - :doc:`trapezoidal_planner`
      - Batched joint paths with trapezoidal or jerk-limited Double-S timing.
      - Joint waypoints; Torch or Warp.

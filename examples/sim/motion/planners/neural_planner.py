@@ -84,7 +84,9 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg, physics_cfg_for_backend
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+    _create_franka_native_hand_cfg,
+)
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
@@ -116,7 +118,7 @@ def _resolve_device(device: str, gpu_id: int) -> str:
 
 
 def create_franka(sim: SimulationManager) -> Robot:
-    return sim.add_robot(cfg=FrankaPandaCfg.from_dict({"robot_type": "panda"}))
+    return sim.add_robot(cfg=_create_franka_native_hand_cfg({}))
 
 
 def make_waypoints(start_pose: torch.Tensor, num_waypoints: int) -> torch.Tensor:

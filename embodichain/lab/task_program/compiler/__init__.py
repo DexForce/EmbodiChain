@@ -21,7 +21,9 @@ from __future__ import annotations
 from .program import (
     CompiledArticulationJointPositionValidator,
     CompiledBarrier,
+    CompiledObjectNearRelativeTargetValidator,
     CompiledObjectNearTargetValidator,
+    CompiledObjectStateValidator,
     CompiledParallelBlock,
     CompiledParallelBranch,
     CompiledPostPolicy,
@@ -39,7 +41,9 @@ from .program import (
 __all__ = [
     "CompiledArticulationJointPositionValidator",
     "CompiledBarrier",
+    "CompiledObjectNearRelativeTargetValidator",
     "CompiledObjectNearTargetValidator",
+    "CompiledObjectStateValidator",
     "CompiledParallelBlock",
     "CompiledParallelBranch",
     "CompiledPostPolicy",

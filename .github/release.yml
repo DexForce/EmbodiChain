@@ -2,6 +2,10 @@
 
 changelog:
   categories:
+    - title: "⚠️ Breaking Changes"
+      labels:
+        - breaking
+
     - title: "🚀 New Features"
       labels:
         - feature
@@ -14,10 +18,7 @@ changelog:
       labels:
         - refactor
         - enhancement
-
-    - title: "⚠️ Breaking Changes"
-      labels:
-        - breaking
+        - performance
 
     - title: "📚 Documentation"
       labels:
@@ -26,6 +27,12 @@ changelog:
     - title: "🛠 Internal / CI"
       labels:
         - ci
+        - dependencies
+        - devtools
+
+    - title: "Other Changes"
+      labels:
+        - "*"
 
   exclude:
     labels:

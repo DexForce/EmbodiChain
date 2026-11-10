@@ -19,11 +19,12 @@ from __future__ import annotations
 import torch
 import os
 import random
+import weakref
 import copy
 import numpy as np
 from pathlib import Path
 
-from typing import TYPE_CHECKING, Literal, Union, Dict
+from typing import TYPE_CHECKING, Dict, Literal, Sequence, Union
 
 from embodichain.lab.sim.objects import (
     Light,
@@ -41,6 +42,7 @@ from embodichain.lab.sim import (
 )
 from embodichain.utils.string import resolve_matching_names
 from embodichain.utils.math import (
+    matrix_from_quat,
     sample_uniform,
     quat_from_euler_xyz,
     euler_xyz_from_quat,
@@ -101,6 +103,8 @@ def set_rigid_object_visual_material(
     mat = env.sim.create_visual_material(mat_cfg)
     obj: RigidObject = env.sim.get_rigid_object(entity_cfg.uid)
     obj.set_visual_material(mat, env_ids=env_ids, update_default=True)
+    for instance in obj.get_visual_material_inst(env_ids=env_ids):
+        mat.set_default_properties(instance, mat_cfg)
 
 
 def set_rigid_object_group_visual_material(
@@ -139,12 +143,108 @@ def set_rigid_object_group_visual_material(
 
     mat = env.sim.create_visual_material(mat_cfg)
     obj: RigidObjectGroup = env.sim.get_rigid_object_group(entity_cfg.uid)
-    obj.set_visual_material(mat, env_ids=env_ids)
+    obj.set_visual_material(mat, env_ids=env_ids, reset_properties=True)
+
+
+# Keyed by the camera object, so envs that reuse a camera uid each warn once.
+_WARNED_IGNORED_CAMERA_RANGES: weakref.WeakKeyDictionary[
+    object, set[tuple[str, ...]]
+] = weakref.WeakKeyDictionary()
+
+
+def _warn_ignored_camera_ranges(
+    camera: object, uid: str, mode: str, ranges: Dict[str, object], expected: str
+) -> None:
+    """Warn once per camera when ranges that its extrinsics mode never reads are set."""
+    ignored = tuple(name for name, value in ranges.items() if value is not None)
+    if not ignored:
+        return
+    warned = _WARNED_IGNORED_CAMERA_RANGES.setdefault(camera, set())
+    if ignored in warned:
+        return
+    warned.add(ignored)
+    logger.log_warning(
+        f"randomize_camera_extrinsics: camera '{uid}' uses {mode} extrinsics, "
+        f"so {', '.join(ignored)} {'is' if len(ignored) == 1 else 'are'} ignored. "
+        f"Use {expected} for this camera instead."
+    )
+
+
+def _normalize_camera_env_ids(
+    env: EmbodiedEnv, env_ids: Sequence[int] | torch.Tensor | None
+) -> Sequence[int] | torch.Tensor:
+    """Normalize camera event indices so global and reset events share one path."""
+    if env_ids is None or isinstance(env_ids, slice):
+        return torch.arange(env.num_envs, device=env.device)
+    if isinstance(env_ids, torch.Tensor):
+        return env_ids
+    return torch.as_tensor(env_ids, device=env.device)
+
+
+def _sample_camera_range(
+    value_range: tuple[list[float], list[float]],
+    size: tuple[int, ...],
+    device: torch.device | str,
+) -> torch.Tensor:
+    """Sample one camera randomization range on the environment device."""
+    return sample_uniform(
+        lower=torch.tensor(value_range[0], dtype=torch.float32, device=device),
+        upper=torch.tensor(value_range[1], dtype=torch.float32, device=device),
+        size=size,
+        device=device,
+    )
+
+
+def _sample_camera_pose(
+    extrinsics: object,
+    num_instances: int,
+    device: torch.device | str,
+    pos_range: tuple[list[float], list[float]] | None,
+    euler_range: tuple[list[float], list[float]] | None,
+    *,
+    parented: bool,
+) -> torch.Tensor:
+    """Sample a pose-mode camera transform in the camera configuration frame."""
+    init_pos = torch.tensor(
+        getattr(extrinsics, "pos", [0.0, 0.0, 0.0]),
+        dtype=torch.float32,
+        device=device,
+    )
+    init_quat = torch.tensor(
+        getattr(extrinsics, "quat", [0.0, 0.0, 0.0, 1.0]),
+        dtype=torch.float32,
+        device=device,
+    )
+    new_pose = torch.cat((init_pos, init_quat)).repeat(num_instances, 1)
+
+    if pos_range is not None:
+        new_pose[:, :3] += _sample_camera_range(pos_range, (num_instances, 3), device)
+
+    if euler_range is not None:
+        init_euler = torch.stack(
+            euler_xyz_from_quat(init_quat.repeat(num_instances, 1)), dim=1
+        )
+        random_value = _sample_camera_range(euler_range, (num_instances, 3), device)
+        roll, pitch, yaw = (init_euler + random_value).unbind(dim=1)
+        new_pose[:, 3:7] = quat_from_euler_xyz(roll, pitch, yaw)
+
+    if parented:
+        return new_pose
+
+    # Camera.reset() converts arena-frame poses to the renderer's OpenGL frame
+    # by flipping the camera's up and forward axes. Keep randomization aligned
+    # with reset for non-mounted pose cameras.
+    pose = torch.eye(4, dtype=torch.float32, device=device).repeat(num_instances, 1, 1)
+    pose[:, :3, :3] = matrix_from_quat(new_pose[:, 3:7])
+    pose[:, :3, 3] = new_pose[:, :3]
+    pose[:, :3, 1] *= -1
+    pose[:, :3, 2] *= -1
+    return pose
 
 
 def randomize_camera_extrinsics(
     env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, None],
+    env_ids: Sequence[int] | torch.Tensor | None,
     entity_cfg: SceneEntityCfg,
     pos_range: tuple[list[float], list[float]] | None = None,
     euler_range: tuple[list[float], list[float]] | None = None,
@@ -156,63 +256,51 @@ def randomize_camera_extrinsics(
     Randomize camera extrinsic properties (position and orientation).
 
     Behavior:
-    - If extrinsics config has a parent field (attach mode), pos_range/euler_range are used to perturb the initial pose (pos, quat),
-        and set_local_pose is called to attach the camera to the parent node. In this case, pose is related to parent.
-    - If extrinsics config uses eye/target/up (no parent), eye_range/target_range/up_range are used to perturb the initial eye, target, up vectors,
-        and look_at is called to set the camera orientation.
+    - Pose extrinsics use ``pos_range``/``euler_range`` whether the camera is
+      mounted to a parent or placed directly in the arena.
+    - Look-at extrinsics use ``eye_range``/``target_range``/``up_range`` and
+      recompute the camera pose with ``look_at``.
 
     Args:
         env: The environment instance.
         env_ids: The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
-        pos_range: Position perturbation range (attach mode).
-        euler_range: Euler angle perturbation range (attach mode).
+        pos_range: Position perturbation range (pose mode).
+        euler_range: Euler angle perturbation range (pose mode).
         eye_range: Eye position perturbation range (look_at mode).
         target_range: Target position perturbation range (look_at mode).
         up_range: Up vector perturbation range (look_at mode).
+
+    Ranges that do not apply to the camera's extrinsics mode are ignored; a
+    warning is logged once per camera so that such config mistakes are visible.
     """
     camera: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
+    env_ids = _normalize_camera_env_ids(env, env_ids)
     num_instance = len(env_ids)
 
     extrinsics = camera.cfg.extrinsics
 
-    if extrinsics.parent is not None:
-        # If extrinsics has a parent field, use pos/euler perturbation and attach camera to parent node
-        init_pos = getattr(extrinsics, "pos", [0.0, 0.0, 0.0])
-        init_quat = getattr(extrinsics, "quat", [0.0, 0.0, 0.0, 1.0])
-        new_pose = torch.tensor(
-            [init_pos + init_quat], dtype=torch.float32, device=env.device
-        ).repeat(num_instance, 1)
-        if pos_range:
-            random_value = sample_uniform(
-                lower=torch.tensor(pos_range[0]),
-                upper=torch.tensor(pos_range[1]),
-                size=(num_instance, 3),
-            )
-            new_pose[:, :3] += random_value
-        if euler_range:
-            # 1. quat -> euler
-            init_quat_np = (
-                torch.tensor(init_quat, dtype=torch.float32, device=env.device)
-                .unsqueeze_(0)
-                .repeat(num_instance, 1)
-            )
-            init_euler = torch.stack(euler_xyz_from_quat(init_quat_np), dim=1)
-            # 2. Sample perturbation for euler angles
-            random_value = sample_uniform(
-                lower=torch.tensor(euler_range[0]),
-                upper=torch.tensor(euler_range[1]),
-                size=(num_instance, 3),
-            )
-            # 3. Add perturbation to each environment and convert back to quaternion
-            roll, pitch, yaw = (init_euler + random_value).unbind(dim=1)
-            new_quat = quat_from_euler_xyz(roll, pitch, yaw)
-            new_pose[:, 3:7] = new_quat
+    if extrinsics.parent is not None and extrinsics.eye is not None:
+        raise ValueError(
+            f"Camera '{entity_cfg.uid}' cannot combine parent-attached and "
+            "look-at extrinsics. Configure either parent/pos/quat or "
+            "eye/target/up."
+        )
 
-        camera.set_local_pose(new_pose, env_ids=env_ids)
-
-    elif extrinsics.eye is not None:
-        # If extrinsics uses eye/target/up, use perturbation for look_at mode
+    if extrinsics.eye is not None:
+        # Look-at mode is arena-frame; parent-attached look-at configurations
+        # are rejected above because their frame semantics are ambiguous.
+        if extrinsics.target is None:
+            raise ValueError(
+                f"Camera '{entity_cfg.uid}' look-at extrinsics require target."
+            )
+        _warn_ignored_camera_ranges(
+            camera,
+            entity_cfg.uid,
+            "look_at (eye / target / up)",
+            {"pos_range": pos_range, "euler_range": euler_range},
+            "eye_range / target_range / up_range",
+        )
         init_eye = (
             torch.tensor(extrinsics.eye, dtype=torch.float32, device=env.device)
             .unsqueeze(0)
@@ -224,45 +312,60 @@ def randomize_camera_extrinsics(
             .repeat(num_instance, 1)
         )
         init_up = (
-            torch.tensor(extrinsics.up, dtype=torch.float32, device=env.device)
+            torch.tensor(
+                extrinsics.up if extrinsics.up is not None else [0.0, 0.0, 1.0],
+                dtype=torch.float32,
+                device=env.device,
+            )
             .unsqueeze(0)
             .repeat(num_instance, 1)
         )
 
-        if eye_range:
-            eye_delta = sample_uniform(
-                lower=torch.tensor(eye_range[0]),
-                upper=torch.tensor(eye_range[1]),
-                size=(num_instance, 3),
+        if eye_range is not None:
+            new_eye = init_eye + _sample_camera_range(
+                eye_range, (num_instance, 3), env.device
             )
-            new_eye = init_eye + eye_delta
         else:
             new_eye = init_eye
 
-        if target_range:
-            target_delta = sample_uniform(
-                lower=torch.tensor(target_range[0]),
-                upper=torch.tensor(target_range[1]),
-                size=(num_instance, 3),
+        if target_range is not None:
+            new_target = init_target + _sample_camera_range(
+                target_range, (num_instance, 3), env.device
             )
-            new_target = init_target + target_delta
         else:
             new_target = init_target
 
-        if up_range:
-            up_delta = sample_uniform(
-                lower=torch.tensor(up_range[0]),
-                upper=torch.tensor(up_range[1]),
-                size=(num_instance, 3),
+        if up_range is not None:
+            new_up = init_up + _sample_camera_range(
+                up_range, (num_instance, 3), env.device
             )
-            new_up = init_up + up_delta
         else:
             new_up = init_up
 
         camera.look_at(new_eye, new_target, new_up, env_ids=env_ids)
 
     else:
-        logger.log_error("Unsupported extrinsics format for camera randomization.")
+        # Pose mode works for both parent-mounted and arena-frame cameras.
+        _warn_ignored_camera_ranges(
+            camera,
+            entity_cfg.uid,
+            "pose (parent)" if extrinsics.parent is not None else "pose (arena)",
+            {
+                "eye_range": eye_range,
+                "target_range": target_range,
+                "up_range": up_range,
+            },
+            "pos_range / euler_range",
+        )
+        pose = _sample_camera_pose(
+            extrinsics,
+            num_instance,
+            env.device,
+            pos_range,
+            euler_range,
+            parented=extrinsics.parent is not None,
+        )
+        camera.set_local_pose(pose, env_ids=env_ids)
 
 
 def randomize_light(
@@ -592,7 +695,7 @@ class randomize_visual_material(Functor):
         if texture_path is not None:
             from embodichain.utils.utility import read_all_folder_images
 
-            texture_key = os.path.basename(texture_path)
+            texture_key = str(Path(texture_path).expanduser().resolve())
             # check if the texture group is already loaded in the global texture cache
             if texture_key in env.sim.get_texture_cache():
                 logger.log_info(
@@ -625,7 +728,9 @@ class randomize_visual_material(Functor):
         self._library_textures: list = []
         self._solid_textures: list = []
         self._texture_key = (
-            os.path.basename(texture_path) if texture_path is not None else ""
+            str(Path(texture_path).expanduser().resolve())
+            if texture_path is not None
+            else ""
         )
 
         can_reuse = (
@@ -774,13 +879,15 @@ class randomize_visual_material(Functor):
             )
             self._legacy_mat = mat
             if isinstance(self.entity, RigidObject):
-                self.entity.set_visual_material(mat)
+                self.entity.set_visual_material(mat, shared=self._shared)
             elif isinstance(self.entity, Articulation):
                 _, link_names = resolve_matching_names(
                     self.entity_cfg.link_names, self.entity.link_names
                 )
                 self.entity_cfg.link_names = link_names
-                self.entity.set_visual_material(mat, link_names=link_names)
+                self.entity.set_visual_material(
+                    mat, link_names=link_names, shared=self._shared
+                )
 
         self._mat_insts = None
         if self.entity_cfg.uid == "default_plane":
@@ -843,12 +950,26 @@ class randomize_visual_material(Functor):
 
             self._randomize_texture(mat_inst)
         else:
-            # Use the bounded solid-color palette. Uploading a generated tensor
-            # here would allocate a fresh DexSim texture ID on every call.
-            texture_idx = torch.randint(0, len(self._solid_textures), (1,)).item()
-            mat_inst.set_base_color_texture(
-                texture_obj=self._solid_textures[texture_idx]
+            self._apply_solid_props(mat_inst, plan, idx)
+
+    def _selected_env_ids(
+        self, env: EmbodiedEnv, env_ids: torch.Tensor | None
+    ) -> list[int]:
+        if env_ids is None:
+            ids = list(range(env.num_envs))
+        else:
+            if env_ids.ndim != 1 or env_ids.dtype not in (torch.int32, torch.int64):
+                raise ValueError(
+                    "Material environment indices must be a 1D integer tensor."
+                )
+            ids = env_ids.detach().cpu().tolist()
+        if len(set(ids)) != len(ids) or any(i < 0 or i >= env.num_envs for i in ids):
+            raise ValueError(
+                "Material environment indices must be unique and in range."
             )
+        if ids and self._shared and len(ids) != env.num_envs:
+            raise ValueError("Shared material randomization requires all environments.")
+        return ids
 
     def __call__(
         self,
@@ -894,12 +1015,7 @@ class randomize_visual_material(Functor):
     ) -> None:
         if self.entity is None:
             return
-        if env_ids is None:
-            env_ids = torch.arange(env.num_envs, device="cpu")
-        else:
-            env_ids = env_ids.cpu()
-
-        selected_env_ids = [int(env_idx) for env_idx in env_ids]
+        selected_env_ids = self._selected_env_ids(env, env_ids)
         num_reuse = len(self._reuse_state)  # 1 if shared, else num_envs
         if num_reuse == 0 or not selected_env_ids:
             return
@@ -910,10 +1026,14 @@ class randomize_visual_material(Functor):
         is_articulation = isinstance(self.entity, Articulation)
         tiers = None if is_articulation else self._sample_tiers(num_plan)
         articulation_tiers = (
-            self._sample_articulation_tiers() if is_articulation else None
+            self._sample_articulation_tiers([0] if self._shared else selected_env_ids)
+            if is_articulation
+            else None
         )
 
-        def _apply(reuse_i: int, env_idx: int, plan_i: int) -> None:
+        def _apply(
+            reuse_i: int, env_idx: int, plan_i: int, update_properties: bool = True
+        ) -> None:
             if is_articulation:
                 self._apply_tier_articulation(
                     reuse_i,
@@ -921,21 +1041,26 @@ class randomize_visual_material(Functor):
                     articulation_tiers[reuse_i],
                     plan,
                     plan_i,
+                    update_properties=update_properties,
                 )
             else:
                 tier = int(tiers[plan_i].item())
                 self._apply_tier_rigid(
-                    self._reuse_state[reuse_i], env_idx, tier, plan, plan_i
+                    self._reuse_state[reuse_i],
+                    env_idx,
+                    tier,
+                    plan,
+                    plan_i,
+                    update_properties=update_properties,
                 )
 
         if self._shared:
-            # single reuse state applied to every env
-            for env_idx in selected_env_ids:
-                _apply(0, env_idx, 0)
+            # Sample and mutate the shared instance once; only attachment repeats.
+            for i, env_idx in enumerate(selected_env_ids):
+                _apply(0, env_idx, 0, update_properties=i == 0)
         else:
             for plan_i, env_idx in enumerate(selected_env_ids):
-                reuse_i = env_idx if env_idx < num_reuse else 0
-                _apply(reuse_i, env_idx, plan_i)
+                _apply(env_idx, env_idx, plan_i)
 
     def _sample_plan(
         self, num, base_color_range, metallic_range, roughness_range, ior_range
@@ -975,13 +1100,16 @@ class randomize_visual_material(Functor):
         )
         return torch.multinomial(probs, num_samples=num_reuse, replacement=True)
 
-    def _sample_articulation_tiers(self) -> list[dict[str, int]]:
-        """Sample an independent material tier for every articulation link."""
-        tier_plans = []
-        for link_map in self._reuse_state:
+    def _sample_articulation_tiers(
+        self, env_ids: list[int]
+    ) -> dict[int, dict[str, int]]:
+        """Sample only selected environments and their articulation links."""
+        tier_plans = {}
+        for env_idx in env_ids:
+            link_map = self._reuse_state[env_idx]
             link_names = list(link_map)
             sampled = self._sample_tiers(len(link_names)).tolist()
-            tier_plans.append(dict(zip(link_names, sampled)))
+            tier_plans[env_idx] = dict(zip(link_names, sampled))
         return tier_plans
 
     def _apply_inst(self, env_idx, mat_inst, mesh_id, link_name=None) -> None:
@@ -993,16 +1121,19 @@ class randomize_visual_material(Functor):
                 env_idx, mat_inst, link_name, mesh_id
             )
 
-    def _apply_tier_rigid(self, segments, env_idx, tier, plan, idx) -> None:
+    def _apply_tier_rigid(
+        self, segments, env_idx, tier, plan, idx, *, update_properties: bool = True
+    ) -> None:
         if not segments:
             return
         if tier == 0:  # original
             self._restore_original(segments, env_idx)
             return
-        if tier == 1 and self._library_textures:  # library
-            self._apply_library_props(segments[0].working_inst, plan, idx)
-        else:  # solid (or library with empty library)
-            self._apply_solid_props(segments[0].working_inst, plan, idx)
+        if update_properties:
+            if tier == 1 and self._library_textures:  # library
+                self._apply_library_props(segments[0].working_inst, plan, idx)
+            else:  # solid (or library with empty library)
+                self._apply_solid_props(segments[0].working_inst, plan, idx)
         self._attach_working(segments, env_idx)
 
     def _apply_library_props(self, working_inst, plan, idx) -> None:
@@ -1013,8 +1144,14 @@ class randomize_visual_material(Functor):
     def _apply_solid_props(self, working_inst, plan, idx) -> None:
         texture_idx = torch.randint(0, len(self._solid_textures), (1,)).item()
         working_inst.set_base_color([1.0, 1.0, 1.0, 1.0])
-        working_inst.set_metallic(0.0)
-        working_inst.set_roughness(0.7)
+        working_inst.set_metallic(
+            plan["metallic"][idx].item() if "metallic" in plan else 0.0
+        )
+        working_inst.set_roughness(
+            plan["roughness"][idx].item() if "roughness" in plan else 0.7
+        )
+        if "ior" in plan:
+            working_inst.set_ior(plan["ior"][idx].item())
         working_inst.set_base_color_texture(
             texture_obj=self._solid_textures[texture_idx]
         )
@@ -1038,7 +1175,9 @@ class randomize_visual_material(Functor):
         if "ior" in plan:
             working_inst.set_ior(plan["ior"][idx].item())
 
-    def _apply_tier_articulation(self, reuse_i, env_idx, tiers, plan, plan_i) -> None:
+    def _apply_tier_articulation(
+        self, reuse_i, env_idx, tiers, plan, plan_i, *, update_properties: bool = True
+    ) -> None:
         link_map = self._reuse_state[reuse_i]  # Dict[str, List[ReuseSegmentState]]
         for link_name, segments in link_map.items():
             if not segments:
@@ -1047,10 +1186,11 @@ class randomize_visual_material(Functor):
             if tier == 0:  # original
                 self._restore_original(segments, env_idx, link_name)
                 continue
-            if tier == 1 and self._library_textures:  # library
-                self._apply_library_props(segments[0].working_inst, plan, plan_i)
-            else:  # solid
-                self._apply_solid_props(segments[0].working_inst, plan, plan_i)
+            if update_properties:
+                if tier == 1 and self._library_textures:  # library
+                    self._apply_library_props(segments[0].working_inst, plan, plan_i)
+                else:  # solid
+                    self._apply_solid_props(segments[0].working_inst, plan, plan_i)
             self._attach_working(segments, env_idx, link_name)
 
     def _call_legacy(
@@ -1067,11 +1207,9 @@ class randomize_visual_material(Functor):
         if self.entity_cfg.uid != "default_plane" and self.entity is None:
             return
 
-        if env_ids is None:
-            env_ids = torch.arange(env.num_envs, device="cpu")
-        else:
-            env_ids = env_ids.cpu()
-
+        env_ids = self._selected_env_ids(env, env_ids)
+        if not env_ids:
+            return
         if self.entity_cfg.uid == "default_plane":
             env_ids = [0]
 
@@ -1080,30 +1218,30 @@ class randomize_visual_material(Functor):
             base_color = sample_uniform(
                 lower=torch.tensor(base_color_range[0], dtype=torch.float32),
                 upper=torch.tensor(base_color_range[1], dtype=torch.float32),
-                size=(len(env_ids), 3),
+                size=(1 if self._shared else len(env_ids), 3),
             )
-            alpha_channel = torch.ones((len(env_ids), 1), dtype=torch.float32)
+            alpha_channel = torch.ones((base_color.shape[0], 1), dtype=torch.float32)
             base_color = torch.cat((base_color, alpha_channel), dim=1)
             randomize_plan["base_color"] = base_color
         if metallic_range:
             metallic = sample_uniform(
                 lower=torch.tensor(metallic_range[0], dtype=torch.float32),
                 upper=torch.tensor(metallic_range[1], dtype=torch.float32),
-                size=(len(env_ids), 1),
+                size=(1 if self._shared else len(env_ids), 1),
             )
             randomize_plan["metallic"] = metallic
         if roughness_range:
             roughness = sample_uniform(
                 lower=torch.tensor(roughness_range[0], dtype=torch.float32),
                 upper=torch.tensor(roughness_range[1], dtype=torch.float32),
-                size=(len(env_ids), 1),
+                size=(1 if self._shared else len(env_ids), 1),
             )
             randomize_plan["roughness"] = roughness
         if ior_range:
             ior = sample_uniform(
                 lower=torch.tensor(ior_range[0], dtype=torch.float32),
                 upper=torch.tensor(ior_range[1], dtype=torch.float32),
-                size=(len(env_ids), 1),
+                size=(1 if self._shared else len(env_ids), 1),
             )
             randomize_plan["ior"] = ior
 
@@ -1121,7 +1259,9 @@ class randomize_visual_material(Functor):
 
         selected_env_ids = [int(env_idx) for env_idx in env_ids]
         if isinstance(self.entity, RigidObject):
-            self.entity.set_visual_material(self._legacy_mat, env_ids=selected_env_ids)
+            self.entity.set_visual_material(
+                self._legacy_mat, env_ids=selected_env_ids, shared=self._shared
+            )
             self._mat_insts = self.entity.get_visual_material_inst(
                 env_ids=selected_env_ids
             )
@@ -1130,13 +1270,16 @@ class randomize_visual_material(Functor):
                 self._legacy_mat,
                 env_ids=selected_env_ids,
                 link_names=self.entity_cfg.link_names,
+                shared=self._shared,
             )
             self._mat_insts = self.entity.get_visual_material_inst(
                 env_ids=selected_env_ids,
                 link_names=self.entity_cfg.link_names,
             )
 
-        for i, data in enumerate(self._mat_insts):
+        for i, data in enumerate(
+            self._mat_insts[:1] if self._shared else self._mat_insts
+        ):
             if isinstance(self.entity, RigidObject):
                 mat: VisualMaterialInst = data
             elif isinstance(self.entity, Articulation):

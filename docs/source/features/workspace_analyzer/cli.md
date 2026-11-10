@@ -12,10 +12,10 @@ generation), and visualizes the result in the simulation window.
 # Predefined robot: control parts + solver come from the preset, so only
 # --control-part (optional) is needed.
 embodichain analyze-workspace \
-    --robot franka_panda --mode joint_space --num-samples 20000
+    --robot FrankaPanda --mode joint_space --num-samples 20000
 
 embodichain analyze-workspace \
-    --robot cobotmagic --control-part left_arm \
+    --robot CobotMagic --control-part left_arm \
     --mode cartesian_space --bounds -0.5 0.5 -0.5 0.5 0.6 1.5
 
 # Generic URDF asset: requires --ee-link (and --joints for arms with grippers)
@@ -30,28 +30,32 @@ including when previewing an existing cache.
 
 ## Predefined robots (`--robot`)
 
-Use `--robot NAME` to analyze one of EmbodiChain's built-in robots
-(`embodichain/lab/sim/robots/`). The preset already defines the URDF, control
-parts, and kinematics solver, so `--ee-link` and `--joints` are **not** needed --
-just pick the control part to analyze with `--control-part` (optional; defaults
-to `left_arm`/`right_arm` or the first available part).
+Use `--robot NAME` to select an installed robot catalog ID. Official concrete
+presets live in `embodichain_robots/`; `embodichain list-robot` lists the IDs,
+variants, and default control groups. The preset already defines the URDF,
+control parts, and kinematics solver, so pick the part to analyze with
+`--control-part` (optional; defaults to `left_arm`/`right_arm` or the first
+available part).
 
 | Argument | Description |
 |----------|-------------|
-| `--robot NAME` | Predefined robot. Choices: `franka_panda`, `cobotmagic`, `dexforce_w1`, `ur`. |
+| `--robot NAME` | Registered ID, such as `FrankaPanda`, `CobotMagic`, `DexforceW1`, `URRobot`, or `ur5`. See `embodichain list-robot` for installed families and variants. |
 | `--robot-params JSON` | JSON dict of variant overrides, e.g. `{"robot_type":"ur5"}` or `{"version":"v025","with_default_eef":false}`. |
 | `--control-part NAME` | Control part to analyze (e.g. `arm`, `left_arm`, `right_arm`). Optional; auto-selected if omitted. |
 
 ```bash
 embodichain analyze-workspace \
-    --robot dexforce_w1 \
+    --robot DexforceW1 \
     --robot-params '{"version":"v025","with_default_eef":false}' \
     --control-part left_arm --mode joint_space --num-samples 20000
 ```
 
-Available control parts per robot: `franka_panda` (`arm`, `hand`), `cobotmagic`
-(`left_arm`, `left_eef`, `right_arm`, `right_eef`), `dexforce_w1`
-(`left_arm`, `left_eef`, `right_arm`, `right_eef`), `ur` (`arm`).
+Default control groups include `FrankaPanda` (`arm`, `eef`), `CobotMagic`
+(`left_arm`, `left_eef`, `right_arm`, `right_eef`), `DexforceW1`
+(`torso`, `head`, `left_arm`, `right_arm`, `dual_arm`, `left_eef`,
+`right_eef`, `full_body`), and `URRobot` (`arm`). Use a part with a configured
+kinematics solver for workspace analysis; attached end-effector groups depend
+on the selected variant.
 
 ## Generic asset (`--asset`)
 
@@ -142,16 +146,16 @@ window.
 ```bash
 # By cache entry directory (the path printed after a run)
 embodichain analyze-workspace \
-    --robot ur --robot-params '{"robot_type":"ur5"}' \
+    --robot URRobot --robot-params '{"robot_type":"ur5"}' \
     --preview-cache ~/.cache/embodichain_data/robot_workspace/<cache-name>
 
 # By results.npz file directly
 embodichain analyze-workspace \
-    --robot franka_panda --preview-cache /path/to/results.npz
+    --robot FrankaPanda --preview-cache /path/to/results.npz
 
 # By cache key (looked up under --cache-dir)
 embodichain analyze-workspace \
-    --robot franka_panda --preview-cache <cache-name>
+    --robot FrankaPanda --preview-cache <cache-name>
 ```
 
 Reachable points are shown green and unreachable points red (Cartesian/plane
@@ -163,7 +167,7 @@ of the native window:
 
 ```bash
 embodichain analyze-workspace \
-    --robot franka_panda \
+    --robot FrankaPanda \
     --preview-cache <cache-name> \
     --viser
 ```
@@ -229,7 +233,7 @@ simulation headlessly:
 
 ```bash
 embodichain analyze-workspace \
-    --robot ur --robot-params '{"robot_type":"ur5"}' \
+    --robot URRobot --robot-params '{"robot_type":"ur5"}' \
     --mode joint_space --num-samples 20000 \
     --viser --viser-port 8080
 ```

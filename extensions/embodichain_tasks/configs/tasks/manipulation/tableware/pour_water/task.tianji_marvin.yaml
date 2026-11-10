@@ -1,0 +1,20 @@
+id: PourWater-TianjiMarvin-v1
+
+environment:
+  component: env.tianji_marvin.yaml
+
+task_program:
+  program: task_program/program.tianji_marvin.yaml
+  integration: task_program/integration.tianji_marvin.yaml
+  execution_policy:
+    component: ../../../../components/execution_policies/trajectory_open_loop_dual_arm_manipulation.yaml
+    overrides:
+      motion:
+        sample_count: 160
+      recovery:
+        goal_rotation_threshold: 3.141592653589793
+
+embodiment:
+  component: ../../../../components/embodiments/tianji_marvin.yaml
+  overrides:
+    init_pos: [0.1, 0.0, 0.0]

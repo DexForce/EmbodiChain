@@ -10,8 +10,10 @@
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
 | Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
-| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact_sensor.py` |
-| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/_warp/contact.py` |
+| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact/sensor.py` |
+| Joint and contact acquisition windows | `embodichain/lab/sim/sensors/contact/observation.py` |
+| Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
+| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
 
 Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
 a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`
@@ -25,19 +27,55 @@ Create sensors through `SimulationManager.add_sensor()`. The explicit manager
 owns the World, ordered Arenas, preparation and semantic parent resolution;
 sensors must not rediscover a singleton manager. Cameras are render features
 on both physics backends. Contact availability is a backend capability checked
-before preparation and again after Newton AutoSolver selection.
+before preparation and again after DexUni's scene-based dispatch.
 
-Componentized Gym deployments select the robot and its sensor suite together
-through an embodiment component. The component/inline exclusion rules and
-resolver belong to [environment configuration](../env-framework/configuration.md),
-not sensor classes. Use
+Robot-mounted cameras are declared in `RobotCfg.sensors` with robot-local
+parent links. `SimulationManager.add_robot()` initializes them only when the
+robot's sensor switch is enabled, qualifies parents using the final robot UID,
+and registers them through `add_sensor()`. Sensor UIDs remain scene-wide;
+multiple robots need distinct sensor UIDs. Camera creation and rebuilds retain
+the same manager-owned lifecycle. Removing a robot destroys its automatically
+initialized cameras before rebuilding the physical scene.
+
+Componentized Gym deployments select the robot and independent sensors through
+an embodiment component. The component/inline exclusion rules, Gym acquisition
+switch and effective suite belong to
+[environment configuration](../env-framework/configuration.md), not sensor
+classes. Use
 [add-embodiment-component](../../../.agents/skills/add-embodiment-component/SKILL.md)
-when changing a reusable mounted sensor suite.
+when changing embodiment selection or independent sensor declarations; change
+the robot configuration for a reusable mounted camera suite.
 
 Shared pose and backend contracts belong to
 [simulation](../simulation-system/simulation-system.md). Camera offsets are
 parent-relative; `parent=None` leaves manager-created views in arena space.
 The camera's extrinsics decoder owns look-at versus explicit-pose precedence.
+For explicit camera poses, `Camera.reset()` passes parent-mounted transforms
+to the native OpenGL view unchanged (-Z forward, +Y up). Unparented explicit
+poses are converted from optical axes (+Z forward, +Y down) by flipping Y/Z.
+Convert optical-frame mount calibration before storing a parented `pos/quat`;
+do not infer image direction from `get_arena_pose()` without this conversion.
+
+## Camera ground visibility
+
+`CameraCfg.ground_plane_visible` and `Camera.set_ground_plane_visibility(...,
+env_ids=...)` filter the manager-owned shared Mesh ground per camera instance;
+stereo applies the same policy to both eyes. The global manager switch remains
+a master gate. Collision, picking, Viser grids and floor embedded in scanned
+assets are separate. The manager reserves category bit 1 for its default plane.
+
+Filtering requires the DexSim Mesh-category/camera-exclusion APIs; the default
+visible configuration remains usable with older SDKs. Camera reset restores the
+configured policy for selected environments. Parent reattachment resets only
+extrinsics, preserving runtime visibility through topology changes. The ground
+category belongs to the Spawn descriptor, so rematerialization retains it.
+
+`render_camera_group` snapshots policy after rendering; `Camera.update` publishes
+that metadata only after successful image reads. Direct camera updates snapshot
+their own render. `get_capture_metadata()` returns a copy, separately from image
+TensorDict values. A policy change invalidates the camera's published metadata;
+a failed render/read cannot be presented as a new successful capture. Callers
+using `fetch_only=True` should render through the manager to obtain metadata.
 
 ## Camera attachment boundary
 

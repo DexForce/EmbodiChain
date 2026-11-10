@@ -34,7 +34,7 @@ from embodichain.lab.task_program import (
     SegmentCfg,
     SequenceCfg,
 )
-from embodichain.lab.sim.atomic_actions import EntityState
+from embodichain.lab.sim.atomic_skills import EntityState
 from embodichain.lab.task_program.semantics.calls import Pick
 from embodichain.lab.task_program.semantics.scene import (
     SceneEntityRegistration,
@@ -144,11 +144,20 @@ def test_parallel_compiles_independent_ordered_lanes_and_explicit_join() -> None
 
 def test_segment_may_wrap_one_parallel_block() -> None:
     segment = tuple(
-        _compiler().compile(_config(SegmentCfg(name="dual_pick", steps=_parallel())))
+        _compiler().compile(
+            _config(
+                SegmentCfg(
+                    name="dual_pick",
+                    steps=_parallel(),
+                    instruction="Pick up both cubes in parallel.",
+                )
+            )
+        )
     )[0]
 
     assert not segment.implicit
     assert segment.name == "dual_pick"
+    assert segment.instruction == "Pick up both cubes in parallel."
     assert segment.parallel_block is not None
     assert len(segment.calls) == 4
 

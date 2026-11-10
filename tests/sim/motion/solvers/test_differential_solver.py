@@ -16,52 +16,21 @@
 
 from __future__ import annotations
 
-import os
 import torch
 import pytest
+
+from solver_support import create_w1_solver_scene
 import numpy as np
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
-from embodichain.data import get_data_path
+from embodichain.lab.sim import SimulationManager
 
 
 # Base test class for differential solver
 class BaseSolverTest:
     sim = None  # Define as a class attribute
 
-    def setup_simulation(self, solver_type: str):
-        # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, device="cpu")
-        self.sim = SimulationManager(config)
-
-        # Load robot URDF file
-        urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
-        assert os.path.isfile(urdf)
-
-        cfg_dict = {
-            "fpath": urdf,
-            "control_parts": {
-                "left_arm": [f"LEFT_J{i+1}" for i in range(7)],
-                "right_arm": [f"RIGHT_J{i+1}" for i in range(7)],
-            },
-            "solver_cfg": {
-                "left_arm": {
-                    "class_type": solver_type,
-                    "end_link_name": "left_ee",
-                    "root_link_name": "left_arm_base",
-                },
-                "right_arm": {
-                    "class_type": solver_type,
-                    "end_link_name": "right_ee",
-                    "root_link_name": "right_arm_base",
-                },
-            },
-        }
-
-        self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
-        self.sim.prepare()
+    def setup_simulation(self, solver_type: str) -> None:
+        self.sim, self.robot = create_w1_solver_scene(solver_type)
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_differential_solver(self, arm_name: str):

@@ -47,6 +47,7 @@ class _FakeServerClient:
         cancel_error: Exception | None = None,
         download_error: Exception | None = None,
     ) -> None:
+        self.closed = False
         self.statuses = statuses
         self.request_id = request_id
         self.submit_error = submit_error
@@ -56,6 +57,9 @@ class _FakeServerClient:
         self.cancelled: list[str] = []
         self.downloaded: list[tuple[str, str]] = []
         self.submitted: list[str] = []
+
+    def close(self) -> None:
+        self.closed = True
 
     def health(self) -> dict[str, Any]:
         return {"status": "ready"}
@@ -80,6 +84,7 @@ class _FakeServerClient:
         return {"request_id": request_id, "status": "cancelled"}
 
     def download(self, request_id: str, artifact: str, destination: Path) -> Path:
+        assert not self.closed, "client must remain open through artifact download"
         if self.download_error is not None:
             raise self.download_error
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -314,6 +319,7 @@ def test_remote_server_success_starts_viser_preview(
     assert "Interactive Viser preview: ready" in results[-1][2]
     assert results[-1][4] == "<iframe>Viser</iframe>"
     assert client.downloaded == [(REQUEST_ID, "usdc")]
+    assert client.closed
     assert viewer_calls == [("remote-success", artifact.resolve())]
     assert artifact.read_bytes() == b"usdc"
 

@@ -1,0 +1,5 @@
+schema_version: 1
+seed: 42
+candidate_count: 20
+max_attempts: 1000
+collision_margin_m: 0.02

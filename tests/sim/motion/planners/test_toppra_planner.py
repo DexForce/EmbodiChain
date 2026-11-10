@@ -27,7 +27,7 @@ from embodichain.lab.sim.motion.planners.toppra_planner import (
 )
 from embodichain.lab.sim.motion.planners.utils import PlanState, TrajectorySampleMethod
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain_robots import CobotMagicCfg
 from embodichain.lab.sim.cfg import RenderCfg
 
 
@@ -80,6 +80,7 @@ class TestToppraPlanner:
         ]
 
         opts = ToppraPlanOptions(
+            control_part="left_arm",
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.1,
             constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -97,7 +98,6 @@ class TestToppraPlanner:
             )
             is True
         )
-        assert self.planner._pool is None
 
 
 if __name__ == "__main__":

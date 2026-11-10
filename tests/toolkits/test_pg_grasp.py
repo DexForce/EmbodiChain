@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from unittest.mock import Mock
+import math
 
 import numpy as np
 import open3d as o3d
@@ -28,7 +29,10 @@ import torch
 from embodichain.toolkits.graspkit.pg_grasp._antipodal_backend import (
     _AntipodalMeshBackend,
 )
-from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import AntipodalSampler
+from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
+    AntipodalSampler,
+    AntipodalSamplerCfg,
+)
 
 
 def _box_geometry(*, subdivide_end: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
@@ -60,13 +64,15 @@ def _box_geometry(*, subdivide_end: bool = False) -> tuple[torch.Tensor, torch.T
 
 
 def _prepared_backend(
-    vertices: torch.Tensor, pairs: torch.Tensor
+    vertices: torch.Tensor, pairs: torch.Tensor, *, center_mode: str = "bounds"
 ) -> _AntipodalMeshBackend:
     """Bypass sampling and collision construction to test prepared-pair logic."""
     backend = _AntipodalMeshBackend.__new__(_AntipodalMeshBackend)
     backend.device = vertices.device
     backend.vertices = vertices
     backend._hit_point_pairs = pairs
+    backend._center_mode = center_mode
+    backend._approach_alignment_angle = None
     return backend
 
 
@@ -82,10 +88,13 @@ def _object_pose() -> torch.Tensor:
     )
 
 
-def test_default_grasp_mode_ranks_by_transformed_bounding_box_center() -> None:
+@pytest.mark.parametrize("second_center_x", [0.08, 0.0])
+def test_default_grasp_mode_ranks_by_transformed_bounding_box_center(
+    second_center_x,
+) -> None:
     vertices, _ = _box_geometry(subdivide_end=True)
     # One pair is at the geometric center; another is near the densely meshed end.
-    centers = torch.tensor([[0.0, 0.0, 0.0], [0.08, 0.0, 0.0]])
+    centers = torch.tensor([[0.0, 0.0, 0.0], [second_center_x, 0.0, 0.0]])
     contact_offset = torch.tensor([0.0, 0.02, 0.0])
     pairs = torch.stack([centers - contact_offset, centers + contact_offset], dim=1)
     backend = _prepared_backend(vertices, pairs)
@@ -94,9 +103,9 @@ def test_default_grasp_mode_ranks_by_transformed_bounding_box_center() -> None:
     backend._max_candidates = 10
     backend._filter_ground_collision = False
     backend._collision_checker = Mock()
-    backend._collision_checker.query.return_value = (
-        torch.zeros(len(pairs), dtype=torch.bool),
-        torch.zeros(len(pairs)),
+    backend._collision_checker.query.side_effect = lambda obj, poses, **kwargs: (
+        torch.zeros(len(poses), dtype=torch.bool),
+        torch.zeros(len(poses)),
     )
     object_pose = _object_pose()
 
@@ -108,8 +117,91 @@ def test_default_grasp_mode_ranks_by_transformed_bounding_box_center() -> None:
     assert success
     assert torch.isfinite(costs).all()
     torch.testing.assert_close(poses[costs.argmin(), :3, 3], object_pose[:3, 3])
-    torch.testing.assert_close(widths, torch.full((2,), 0.04))
+    torch.testing.assert_close(widths, torch.full((len(poses),), 0.04))
     assert costs.min() == pytest.approx(0.0, abs=1.0e-6)
+
+
+@pytest.mark.parametrize("hard_angle", [None, math.radians(10)])
+def test_hard_approach_filter_precedes_nms_and_top_candidate(
+    monkeypatch, hard_angle
+) -> None:
+    """An 11degree representative cannot suppress a nearby legal9degree grasp."""
+    from embodichain.toolkits.graspkit.pg_grasp import _antipodal_backend as module
+    from embodichain.utils.math import axis_angle_to_rotation_matrix
+
+    centers = torch.tensor([[0.01, 0, 0], [0.011, 0, 0], [0.1, 0, 0]])
+    widths = torch.tensor([0.04, 0.02, 0.03])
+    delta = torch.zeros_like(centers)
+    delta[:, 0] = widths / 2
+    pairs = torch.stack((centers - delta, centers + delta), dim=1)
+    backend = _prepared_backend(torch.tensor([[-0.1, 0, 0], [0.1, 0, 0]]), pairs)
+    backend._max_deviation_angle = math.pi / 6
+    backend._approach_alignment_angle = hard_angle
+    backend._approach_direction_samples = 1
+    backend._max_candidates = 1
+    backend._filter_ground_collision = False
+    backend._collision_checker = Mock()
+    backend._collision_checker.query.side_effect = lambda obj, poses, **kwargs: (
+        torch.zeros(len(poses), dtype=torch.bool),
+        torch.zeros(len(poses)),
+    )
+    poses = torch.eye(4).repeat(3, 1, 1)
+    poses[:, :3, 3] = centers
+    rotation = axis_angle_to_rotation_matrix(
+        torch.tensor([[math.radians(d), 0, 0] for d in [11, 9, 20]])
+    )
+    poses[:, :3, :3] = rotation @ torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    monkeypatch.setattr(
+        _AntipodalMeshBackend,
+        "_grasp_pose_from_approach_direction",
+        staticmethod(lambda *args: poses),
+    )
+    nms = Mock(wraps=module.pose_nms)
+    monkeypatch.setattr(module, "pose_nms", nms)
+    success, selected, selected_width, cost = backend.get_valid_grasp_poses(
+        object_pose=torch.eye(4), approach_direction=torch.tensor([0.0, 0.0, -1.0])
+    )
+    index = 0 if hard_angle is None else 1
+    assert success and len(selected) == 1 and torch.isfinite(cost).all()
+    torch.testing.assert_close(selected[0], poses[index])
+    torch.testing.assert_close(selected_width, widths[index : index + 1])
+    assert len(nms.call_args.args[0]) == (3 if hard_angle is None else 1)
+    backend._approach_alignment_angle = math.radians(5)
+    nms.reset_mock()
+    backend._collision_checker.query.reset_mock()
+    success, *_ = backend.get_valid_grasp_poses(
+        object_pose=torch.eye(4), approach_direction=torch.tensor([0.0, 0.0, -1.0])
+    )
+    assert not success
+    nms.assert_not_called()
+    backend._collision_checker.query.assert_not_called()
+
+
+def test_centroid_mode_preserves_vertex_weighted_ranking() -> None:
+    vertices, _ = _box_geometry(subdivide_end=True)
+    centers = torch.tensor([[0.0, 0.0, 0.0], [0.08, 0.0, 0.0]])
+    contact_offset = torch.tensor([0.0, 0.02, 0.0])
+    pairs = torch.stack([centers - contact_offset, centers + contact_offset], dim=1)
+    backend = _prepared_backend(vertices, pairs, center_mode="centroid")
+    backend._max_deviation_angle = 0.1
+    backend._approach_direction_samples = 1
+    backend._max_candidates = 10
+    backend._filter_ground_collision = False
+    backend._collision_checker = Mock()
+    backend._collision_checker.query.return_value = (
+        torch.zeros(len(pairs), dtype=torch.bool),
+        torch.zeros(len(pairs)),
+    )
+    object_pose = _object_pose()
+
+    success, poses, _, costs = backend.get_valid_grasp_poses(
+        object_pose=object_pose,
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+
+    assert success
+    expected = centers[1] @ object_pose[:3, :3].T + object_pose[:3, 3]
+    torch.testing.assert_close(poses[costs.argmin(), :3, 3], expected)
 
 
 @pytest.mark.parametrize(
@@ -173,6 +265,35 @@ def test_dual_arm_gap_excludes_middle_and_boundaries_by_pair_center(
         torch.testing.assert_close(call.kwargs["mesh_center"], expected_center)
 
 
+def test_centroid_dual_arm_partition_does_not_duplicate_crossing_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vertices, _ = _box_geometry()
+    vertices[:, 0] *= 10.0
+    backend = _prepared_backend(
+        vertices,
+        # Both contacts lie beyond the gap, but their center lies inside it.
+        torch.tensor([[[-0.9, 0.0, 0.0], [0.9, 0.0, 0.0]]]),
+        center_mode="centroid",
+    )
+    filter_poses = Mock(
+        return_value=(True, torch.eye(4)[None], torch.ones(1), torch.zeros(1))
+    )
+    monkeypatch.setattr(backend, "_filter_valid_grasp_poses", filter_poses)
+
+    result = backend.get_dual_arm_valid_grasp_poses(
+        object_pose=torch.eye(4),
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+        left_to_right_arm_direction=torch.tensor([1.0, 0.0, 0.0]),
+        middle_empty_ratio=0.8,
+    )
+
+    assert result is not None
+    assert filter_poses.call_count == 2
+    assert filter_poses.call_args_list[0].kwargs["origin_points_"].numel() == 0
+    assert filter_poses.call_args_list[1].kwargs["origin_points_"].numel() == 0
+
+
 def _raycast_box(*, subdivide_end: bool) -> tuple[torch.Tensor, torch.Tensor]:
     vertices, triangles = _box_geometry(subdivide_end=subdivide_end)
     sampler = AntipodalSampler()
@@ -205,3 +326,29 @@ def test_fibonacci_raycast_zero_samples_preserves_shape_and_dtype() -> None:
     assert points.shape == normals.shape == (0, 3)
     assert points.dtype == normals.dtype == vertices.dtype
     assert points.device == normals.device == vertices.device
+
+
+def test_antipodal_ray_deviation_adds_bounded_reproducible_contact_directions() -> None:
+    """Honor configured coverage while retaining the original normal-ray pairs."""
+    vertices, triangles = _box_geometry()
+    cfg = AntipodalSamplerCfg(n_sample=512, max_angle=0.0, max_length=0.3)
+    normal = AntipodalSampler(cfg).sample(vertices, triangles)
+    assert len(normal) > 0
+    cfg = cfg.replace(max_angle=float(np.pi / 12))
+    torch.manual_seed(43001)
+    state = torch.random.get_rng_state()
+    varied = AntipodalSampler(cfg).sample(vertices, triangles)
+    assert torch.equal(torch.random.get_rng_state(), state)
+    torch.manual_seed(43002)
+    repeated = AntipodalSampler(cfg).sample(vertices, triangles)
+    torch.testing.assert_close(varied, repeated, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(varied[: len(normal)], normal)
+    assert len(varied) > len(normal)
+    axes = torch.nn.functional.normalize(varied[:, 1] - varied[:, 0], dim=1)
+    assert ((axes.abs() > 1.0e-4).sum(dim=1) > 1).any()
+    deviation = torch.acos(axes.abs().amax(dim=1).clamp(0.0, 1.0))
+    assert (deviation <= cfg.max_angle + 1.0e-5).all()
+    half_extents = torch.tensor([0.1, 0.02, 0.02])
+    assert (varied.abs() <= half_extents + 2.0e-6).all()
+    surface_distance = (varied.abs() - half_extents).abs().amin(dim=2)
+    assert (surface_distance < 2.0e-6).all()

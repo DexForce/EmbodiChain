@@ -19,12 +19,23 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Literal, Sequence
+from dataclasses import dataclass
+import inspect
+from typing import Callable, Protocol, TYPE_CHECKING, Literal, Sequence, Mapping
 
 import torch
 
-from embodichain.compute.trajectory import retime_to_control_grid
+from embodichain.compute.trajectory import (
+    retime_to_control_grid,
+    differentiate_positions,
+)
+from .planners.utils import PlanResult
 from embodichain.utils import configclass
+
+from .expansion.contracts import CommitReceipt, ExpertEpisode, ValidationResult
+from .expansion.combined import PhysicalSlotPool
+from .expansion.coordinator import CandidateCoordinator, CandidateWorkItem
+from .expansion.session import ExpansionSession
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -35,6 +46,13 @@ JointCommandMode = Literal["position", "position_velocity"]
 __all__ = [
     "JointTrajectoryPlaybackCfg",
     "play_joint_trajectory",
+    "InitialStatePort",
+    "MeasuredExecutor",
+    "EpisodeSink",
+    "FixedSceneInitialStatePort",
+    "SingleSlotOutcome",
+    "SingleSlotRunner",
+    "MultiSlotRunner",
 ]
 
 
@@ -45,6 +63,8 @@ class JointTrajectoryPlaybackCfg:
     Args:
         control_dt: Command period, or ``None`` for one physics period.
         joint_command_mode: Whether to write qpos alone or qpos and qvel.
+        preserve_source_grid: Preserve already aligned samples and their source
+            indices instead of resampling; required for source callbacks and holds.
     """
 
     control_dt: float | None = None
@@ -53,7 +73,12 @@ class JointTrajectoryPlaybackCfg:
     joint_command_mode: JointCommandMode = "position"
     """Whether playback writes qpos alone or qpos and qvel targets."""
 
+    preserve_source_grid: bool = False
+    """Execute already aligned samples and zero-time joins without resampling."""
+
     def __post_init__(self) -> None:
+        if not isinstance(self.preserve_source_grid, bool):
+            raise TypeError("preserve_source_grid must be a bool.")
         if self.control_dt is not None and (
             isinstance(self.control_dt, bool)
             or not isinstance(self.control_dt, (int, float))
@@ -102,12 +127,15 @@ def play_joint_trajectory(
     dt: torch.Tensor,
     joint_ids: Sequence[int],
     cfg: JointTrajectoryPlaybackCfg | None = None,
-) -> None:
+    on_step: Callable[[int, int], None] | None = None,
+    hold_durations: Mapping[int, float] | None = None,
+) -> PlanResult:
     """Play a timed joint path without changing the simulation physics period.
 
     Planner timing is first quantized to the configured fixed command period.
     Every command interval advances an integer number of unchanged physics
-    substeps. Velocity targets are recomputed on that executed grid.
+    substeps. Velocity targets use that executed grid and preserve each row's
+    initial/terminal rest and explicit holds.
 
     Args:
         sim: Simulation manager in explicit-update mode.
@@ -116,6 +144,14 @@ def play_joint_trajectory(
         dt: Source arrival intervals with shape ``(B, N)``.
         joint_ids: Full-robot joint columns addressed by ``positions``.
         cfg: Playback settings. Defaults to position-only at ``physics_dt``.
+        on_step: Callback after each source command and its following interval.
+        hold_durations: Explicit additional holds after source command indices,
+            in seconds. Each hold must align with the physics period. Source-index
+            callbacks and holds require ``cfg.preserve_source_grid=True``.
+
+    Returns:
+        Executed positions, velocities and arrival intervals, including holds.
+        The final hold, when present, appears as a repeated terminal sample.
     """
     if cfg is None:
         cfg = JointTrajectoryPlaybackCfg()
@@ -139,23 +175,482 @@ def play_joint_trajectory(
         sim,
         cfg.control_dt,
     )
-    positions, velocities, _, _ = retime_to_control_grid(
-        positions,
-        dt,
-        control_dt,
-    )
-    for waypoint in range(positions.shape[1] - 1):
-        robot.set_qpos(
-            positions[:, waypoint],
-            joint_ids=resolved_joint_ids,
+    if not cfg.preserve_source_grid and (on_step is not None or hold_durations):
+        raise ValueError(
+            "source-index callbacks and holds require preserve_source_grid=True"
         )
-        if cfg.joint_command_mode == "position_velocity":
-            robot.set_qvel(
-                velocities[:, waypoint],
-                joint_ids=resolved_joint_ids,
+    if not cfg.preserve_source_grid:
+        positions, velocities, dt, _ = retime_to_control_grid(positions, dt, control_dt)
+    else:
+        if dt.shape != positions.shape[:2] or not torch.isfinite(positions).all():
+            raise ValueError(
+                "dt and finite positions must share the batch and sample axes"
             )
-        sim.update(physics_dt, physics_steps)
+        if (
+            not torch.isfinite(dt).all()
+            or bool((dt < 0).any())
+            or bool((dt[:, 0] != 0).any())
+        ):
+            raise ValueError(
+                "source intervals must be finite, nonnegative and start at zero"
+            )
+        zero_changes = (dt[:, 1:] == 0) & (
+            positions.diff(dim=1).abs().amax(dim=-1) > 1e-5
+        )
+        if bool(zero_changes.any()):
+            raise ValueError("source trajectory changes position in zero time")
+    count = positions.shape[1]
+    if count == 0:
+        raise ValueError("trajectory must contain at least one sample")
+    if on_step is not None and not callable(on_step):
+        raise TypeError("on_step must be callable or None")
+    for duration in dt.max(dim=0).values.detach().cpu().tolist():
+        ratio = duration / control_dt
+        if not math.isclose(ratio, round(ratio), rel_tol=1e-6, abs_tol=1e-7):
+            raise ValueError("source intervals must align with the control grid")
+    holds = {} if hold_durations is None else dict(hold_durations)
+    for index, duration in holds.items():
+        if type(index) is not int or not 0 <= index < count:
+            raise ValueError("hold indices must select source commands")
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError("hold durations must be finite and nonnegative")
+        ratio = duration / physics_dt
+        if not math.isclose(ratio, round(ratio), rel_tol=1e-6, abs_tol=1e-7):
+            raise ValueError("hold durations must align with the physics grid")
+    # All environments share one physical clock. Short/padded rows hold while
+    # their peers execute the corresponding command interval.
+    intervals = dt.max(dim=0).values.detach().cpu().tolist()
+    elapsed = [0.0] + [
+        intervals[index] + holds.get(index - 1, 0.0) for index in range(1, count)
+    ]
+    terminal_hold = holds.get(count - 1, 0.0)
+    durations = elapsed[1:] + [terminal_hold]
+    step_counts = []
+    for duration in durations:
+        ratio = duration / physics_dt
+        steps = round(ratio)
+        if not math.isclose(ratio, steps, rel_tol=1e-6, abs_tol=1e-7):
+            raise ValueError("playback intervals must align with the physics grid")
+        step_counts.append(steps)
+    executed_dt = (
+        dt.new_tensor(elapsed).unsqueeze(0).expand(positions.shape[0], -1).clone()
+    )
+    if cfg.preserve_source_grid:
+        # Near-equal zero-time joins stay exact in commands; use their preceding
+        # sample only for numerical differentiation.
+        derivative_positions = positions.clone()
+        for index in range(1, count):
+            if elapsed[index] == 0:
+                derivative_positions[:, index] = derivative_positions[:, index - 1]
+        velocities = differentiate_positions(derivative_positions, executed_dt)
+        indices = torch.arange(count, device=dt.device)
+        last_arrivals = torch.where(dt > 0, indices, 0).amax(dim=1)
+        terminal_holds = indices.unsqueeze(0) >= last_arrivals.unsqueeze(1)
+        velocities.masked_fill_(terminal_holds.unsqueeze(-1), 0)
+        velocities[:, 0] = 0
+    # An explicit hold must not retain a moving velocity target during physics.
+    for index, duration in holds.items():
+        if duration > 0:
+            velocities[:, index] = 0
+    for waypoint in range(count):
+        robot.set_qpos(positions[:, waypoint], joint_ids=resolved_joint_ids)
+        if cfg.joint_command_mode == "position_velocity":
+            robot.set_qvel(velocities[:, waypoint], joint_ids=resolved_joint_ids)
+        if step_counts[waypoint]:
+            sim.update(physics_dt, step_counts[waypoint])
+        if on_step is not None:
+            on_step(waypoint, count)
+    if terminal_hold:
+        positions = torch.cat((positions, positions[:, -1:]), dim=1)
+        velocities = torch.cat(
+            (velocities, torch.zeros_like(velocities[:, -1:])), dim=1
+        )
+        executed_dt = torch.cat(
+            (executed_dt, dt.new_full((positions.shape[0], 1), terminal_hold)), dim=1
+        )
+    return PlanResult(
+        success=torch.ones(
+            positions.shape[0], dtype=torch.bool, device=positions.device
+        ),
+        positions=positions,
+        velocities=velocities,
+        dt=executed_dt,
+    )
 
-    robot.set_qpos(positions[:, -1], joint_ids=resolved_joint_ids)
-    if cfg.joint_command_mode == "position_velocity":
-        robot.set_qvel(velocities[:, -1], joint_ids=resolved_joint_ids)
+
+class InitialStatePort(Protocol):
+    """Restore and verify one candidate's complete initial state."""
+
+    def restore(self, item: CandidateWorkItem, *, slot_id: int | None = None) -> object:
+        """Restore a candidate and return an opaque prepared binding."""
+
+
+class MeasuredExecutor(Protocol):
+    """Plan-check and execute one prepared candidate."""
+
+    def validate_plan(self, item: CandidateWorkItem) -> ValidationResult:
+        """Return host-owned planning/path validation evidence."""
+
+    def execute(
+        self,
+        item: CandidateWorkItem,
+        prepared: object,
+        *,
+        episode_id: str,
+        commit_id: str,
+        on_rollout_started: Callable[[], None],
+        slot_id: int | None = None,
+    ) -> ExpertEpisode:
+        """Execute and report the first actual command through the callback."""
+
+
+class EpisodeSink(Protocol):
+    """Persist one accepted episode and return its final receipt."""
+
+    def submit(
+        self,
+        episode: ExpertEpisode,
+        *,
+        submission_id: int,
+    ) -> CommitReceipt:
+        """Persist and confirm one episode synchronously or through a bounded sink."""
+
+
+class FixedSceneInitialStatePort:
+    """Adapt fixed-scene restore/verify methods to :class:`InitialStatePort`."""
+
+    def __init__(self, host: object) -> None:
+        if not callable(getattr(host, "restore_initial", None)):
+            raise TypeError("host must provide restore_initial()")
+        if not callable(getattr(host, "verify_initial", None)):
+            raise TypeError("host must provide verify_initial(binding)")
+        self._host = host
+
+    def restore(self, item: CandidateWorkItem) -> object:
+        """Restore and verify the host-owned fixed initial state."""
+        del item
+        binding = self._host.restore_initial()
+        result = self._host.verify_initial(binding)
+        if not getattr(result, "accepted", False):
+            raise RuntimeError("fixed-scene initial-state verification failed")
+        return binding
+
+
+@dataclass(frozen=True)
+class SingleSlotOutcome:
+    """Result of one coordinator-driven physical candidate attempt."""
+
+    status: str
+    candidate_id: str | None = None
+    receipt: CommitReceipt | None = None
+    reason: str | None = None
+    episode_id: str | None = None
+    commit_id: str | None = None
+    submission_id: int | None = None
+
+
+class SingleSlotRunner:
+    """Drive one candidate through host restore, execution, and persistence."""
+
+    def __init__(
+        self,
+        coordinator: CandidateCoordinator,
+        restorer: InitialStatePort,
+        executor: MeasuredExecutor,
+        sink: EpisodeSink,
+        *,
+        episode_byte_budget: int,
+        slot_id: int | None = None,
+    ) -> None:
+        if not isinstance(coordinator, CandidateCoordinator):
+            raise TypeError("coordinator must be a CandidateCoordinator")
+        for name, value in (
+            ("restorer", restorer),
+            ("executor", executor),
+            ("sink", sink),
+        ):
+            if value is None:
+                raise TypeError(f"{name} must be supplied")
+        if type(episode_byte_budget) is not int or episode_byte_budget <= 0:
+            raise ValueError("episode_byte_budget must be a positive integer")
+        if episode_byte_budget > coordinator.session.pending_max_bytes:
+            raise ValueError(
+                "episode_byte_budget must be within session pending_max_bytes"
+            )
+        self._coordinator = coordinator
+        self._restorer = restorer
+        self._executor = executor
+        self._sink = sink
+        self._episode_byte_budget = episode_byte_budget
+        self._slot_id = slot_id
+
+    @staticmethod
+    def _call_host(
+        method: Callable[..., object],
+        *args: object,
+        slot_id: int | None,
+        **kwargs: object,
+    ) -> object:
+        """Call a host port with a slot only when its contract accepts it."""
+        parameters = inspect.signature(method).parameters
+        if "slot_id" in parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        ):
+            return method(*args, slot_id=slot_id, **kwargs)
+        if slot_id not in (None, 0):
+            raise RuntimeError("host port must accept slot_id for multi-slot execution")
+        return method(*args, **kwargs)
+
+    @staticmethod
+    def _release_if_uncommitted(
+        session: ExpansionSession,
+        item: CandidateWorkItem,
+        *,
+        reason: str,
+    ) -> None:
+        """Release a candidate unless its owning operation already did so."""
+        try:
+            session.release(item.spec.identity, reason=reason)
+        except ValueError:
+            pass
+
+    def run_next(self, *, slot_id: int | None = None) -> SingleSlotOutcome:
+        """Execute the next FIFO candidate, or report an empty queue."""
+        if slot_id is not None and self._slot_id not in (None, slot_id):
+            raise RuntimeError("runner is bound to a different physical slot")
+        active_slot_id = self._slot_id if slot_id is None else slot_id
+        item = self._coordinator.take_next()
+        if item is None:
+            return SingleSlotOutcome("no_candidate")
+        identity = item.spec.identity
+        candidate_id = identity.candidate_id
+        session = self._coordinator.session
+        try:
+            validation = self._executor.validate_plan(item)
+            self._coordinator.admit_planned(item, validation)
+        except Exception as error:
+            self._release_if_uncommitted(
+                session,
+                item,
+                reason="planning_failed",
+            )
+            return SingleSlotOutcome(
+                "planning_rejected",
+                candidate_id=candidate_id,
+                reason=str(error),
+            )
+
+        try:
+            ready = session.take_ready(
+                identity.scene_case_id,
+                identity.initial_state_id,
+                episode_byte_budget=self._episode_byte_budget,
+                candidate_id=candidate_id,
+            )
+        except Exception:
+            self._release_if_uncommitted(
+                session,
+                item,
+                reason="assignment_failed",
+            )
+            raise
+        if ready is None:
+            session.release(identity, reason="execution_capacity_unavailable")
+            return SingleSlotOutcome("capacity_unavailable", candidate_id=candidate_id)
+        if ready.identities != (identity,):
+            session.release(identity, reason="assigned_candidate_mismatch")
+            raise RuntimeError("session assigned a different candidate")
+
+        episode_id, commit_id = session.episode_ids(identity)
+        started = False
+
+        def on_rollout_started() -> None:
+            nonlocal started
+            if started:
+                raise RuntimeError("rollout start callback may run only once")
+            session.mark_rollout_started(identity)
+            started = True
+
+        try:
+            prepared = self._call_host(
+                self._restorer.restore, item, slot_id=active_slot_id
+            )
+            episode = self._call_host(
+                self._executor.execute,
+                item,
+                prepared,
+                episode_id=episode_id,
+                commit_id=commit_id,
+                on_rollout_started=on_rollout_started,
+                slot_id=active_slot_id,
+            )
+            if not started:
+                raise RuntimeError("executor returned before starting the rollout")
+        except Exception:
+            self._release_if_uncommitted(
+                session,
+                item,
+                reason="execution_failed",
+            )
+            raise
+
+        try:
+            accepted = session.accept_episode(episode)
+        except Exception:
+            self._release_if_uncommitted(
+                session,
+                item,
+                reason="measured_admission_failed",
+            )
+            raise
+        if not accepted:
+            return SingleSlotOutcome("measured_rejected", candidate_id=candidate_id)
+
+        submission_id = 0
+        try:
+            receipt = self._sink.submit(
+                episode,
+                submission_id=submission_id,
+            )
+        except Exception as error:
+            return SingleSlotOutcome(
+                "write_pending",
+                candidate_id=candidate_id,
+                reason=str(error),
+                episode_id=episode_id,
+                commit_id=commit_id,
+                submission_id=submission_id,
+            )
+        expected_receipt_identity = (
+            episode.episode_id,
+            identity.candidate_id,
+            identity.attempt_id,
+            episode.commit_id,
+            identity.scene_case_id,
+            submission_id,
+        )
+        receipt_identity = (
+            (
+                receipt.episode_id,
+                receipt.candidate_id,
+                receipt.attempt_id,
+                receipt.commit_id,
+                receipt.scene_case_id,
+                receipt.submission_id,
+            )
+            if isinstance(receipt, CommitReceipt)
+            else None
+        )
+        if receipt_identity != expected_receipt_identity:
+            return SingleSlotOutcome(
+                "write_pending",
+                candidate_id=candidate_id,
+                reason="sink receipt does not match submitted episode",
+                episode_id=episode_id,
+                commit_id=commit_id,
+                submission_id=submission_id,
+            )
+        session.apply_receipt(receipt)
+        return SingleSlotOutcome(
+            "committed" if receipt.confirmed else "write_failed",
+            candidate_id=candidate_id,
+            receipt=receipt,
+            reason=receipt.error or None,
+            episode_id=episode_id,
+            commit_id=commit_id,
+            submission_id=submission_id,
+        )
+
+    def run_until_empty(
+        self,
+        *,
+        max_attempts: int | None = None,
+    ) -> tuple[SingleSlotOutcome, ...]:
+        """Consume the current bounded queue through the same single slot."""
+        if max_attempts is not None and (
+            type(max_attempts) is not int or max_attempts < 0
+        ):
+            raise ValueError("max_attempts must be a non-negative integer or None")
+        outcomes: list[SingleSlotOutcome] = []
+        while self._coordinator.pending_count:
+            if max_attempts is not None and len(outcomes) >= max_attempts:
+                raise RuntimeError("single-slot attempt budget exhausted")
+            outcomes.append(self.run_next())
+        return tuple(outcomes)
+
+    @property
+    def coordinator(self) -> CandidateCoordinator:
+        """Return the coordinator owned by this runner."""
+        return self._coordinator
+
+
+class MultiSlotRunner:
+    """Assign queued candidates to compatible slots around a single host runner.
+
+    The current implementation drains FIFO synchronously; the slot pool and
+    exact reservation lifecycle are independent of that execution policy, so a
+    host can replace the inner runner with a concurrent implementation later.
+    """
+
+    def __init__(
+        self,
+        runner: SingleSlotRunner,
+        slot_pool: PhysicalSlotPool,
+    ) -> None:
+        if not isinstance(runner, SingleSlotRunner):
+            raise TypeError("runner must be a SingleSlotRunner")
+        if not isinstance(slot_pool, PhysicalSlotPool):
+            raise TypeError("slot_pool must be a PhysicalSlotPool")
+        self._runner = runner
+        self._slot_pool = slot_pool
+
+    @property
+    def slot_pool(self) -> PhysicalSlotPool:
+        """Return the host-owned physical slot pool."""
+        return self._slot_pool
+
+    def run_next(self) -> SingleSlotOutcome:
+        """Reserve a compatible slot, run one candidate, and release it."""
+        item = self._runner.coordinator.peek_next()
+        if item is None:
+            return SingleSlotOutcome("no_candidate")
+        candidate_id = item.spec.identity.candidate_id
+        try:
+            reservation = self._slot_pool.reserve(
+                candidate_id,
+                item.spec.compatibility_key,
+            )
+        except BufferError:
+            return SingleSlotOutcome(
+                "capacity_unavailable",
+                candidate_id=candidate_id,
+                reason="no compatible physical slot is available",
+            )
+        try:
+            outcome = self._runner.run_next(slot_id=reservation.slot_id)
+            if outcome.candidate_id != candidate_id:
+                raise RuntimeError("runner consumed a different reserved candidate")
+            return outcome
+        finally:
+            self._slot_pool.release(reservation)
+
+    def run_until_empty(
+        self,
+        *,
+        max_attempts: int | None = None,
+    ) -> tuple[SingleSlotOutcome, ...]:
+        """Drain FIFO candidates while respecting the optional attempt bound."""
+        if max_attempts is not None and (
+            type(max_attempts) is not int or max_attempts < 0
+        ):
+            raise ValueError("max_attempts must be a non-negative integer or None")
+        outcomes: list[SingleSlotOutcome] = []
+        while self._runner.coordinator.pending_count:
+            if max_attempts is not None and len(outcomes) >= max_attempts:
+                raise RuntimeError("multi-slot attempt budget exhausted")
+            outcome = self.run_next()
+            if outcome.status == "capacity_unavailable":
+                break
+            outcomes.append(outcome)
+        return tuple(outcomes)

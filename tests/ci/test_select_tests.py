@@ -16,7 +16,11 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -75,12 +79,24 @@ def test_repository_manifest_selectors_resolve() -> None:
     ("source_path", "expected_selector"),
     [
         (
+            "extensions/embodichain_robots/franka/panda.py",
+            "tests/sim/robots/test_entrypoints.py",
+        ),
+        (
+            "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.json",
+            "tests/test_task_program_package_data.py",
+        ),
+        (
             "embodichain/lab/scripts/preview_joint_control.py",
             "tests/lab/scripts/test_preview_joint_control.py",
         ),
         (
-            "scripts/tutorials/atomic_action/pickup.py",
-            "tests/sim/atomic_actions/test_core.py",
+            "embodichain/lab/scripts/run_task.py",
+            "tests/lab/scripts/test_run_task.py",
+        ),
+        (
+            "scripts/tutorials/atomic_skill/single_arm.py",
+            "tests/visualization/test_example_tutorial_coverage.py",
         ),
         (
             "scripts/tutorials/visualization/viser_scene.py",
@@ -106,6 +122,47 @@ def test_repository_manifest_maps_supported_scripts(
     assert expected_selector in plan.selectors
 
 
+@pytest.mark.parametrize(
+    "source_path",
+    [
+        "examples/sim/atomic_skill/defaults.py",
+        "examples/sim/atomic_skill/host.py",
+        "embodichain/cli/run_example.py",
+        "embodichain/cli/_example_runner.py",
+        "examples/sim/motion/planners/curobo_planner.py",
+    ],
+)
+def test_example_changes_keep_launch_package_and_physical_smoke_coverage(
+    source_path: str,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    plan = build_plan(
+        root,
+        [ChangedPath(source_path)],
+        load_manifest(root / ".ci/test-impact.toml"),
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "partial"
+    assert {
+        "tests/cli/test_run_example.py",
+        "tests/test_example_package.py",
+        "tests/examples/atomic_skill/test_run.py",
+        "tests/examples/atomic_skill/test_host.py",
+    } <= set(plan.selectors)
+    smoke = "tests/examples/atomic_skill/test_smoke.py"
+    assert smoke in plan.selectors
+    # Source-only changes keep the normal non-slow PR policy. An edited slow
+    # smoke must still run in the dedicated GPU lane, as in this repair.
+    updated_smoke = build_plan(
+        root,
+        [ChangedPath(source_path), ChangedPath(smoke)],
+        load_manifest(root / ".ci/test-impact.toml"),
+        map_data={"topics": []},
+    )
+    assert smoke in updated_smoke.slow_lanes["slow-gpu"]
+
+
 def test_repository_manifest_maps_ik_tutorial_to_its_behavior_contracts() -> None:
     root = Path(__file__).resolve().parents[2]
     manifest = load_manifest(root / ".ci/test-impact.toml")
@@ -129,7 +186,7 @@ def test_repository_manifest_maps_ik_tutorial_to_its_behavior_contracts() -> Non
     "source_path",
     [
         "embodichain/lab/scripts/preview_widgets/new_unknown.py",
-        "scripts/tutorials/atomic_action/nested/new_unknown.py",
+        "scripts/tutorials/atomic_skill/nested/new_unknown.py",
         "scripts/tutorials/visualization/nested/new_unknown.py",
     ],
 )
@@ -169,6 +226,79 @@ def test_data_pipeline_rule_covers_dataset_functor_consumer() -> None:
         map_data={},
     )
     assert "tests/gym/envs/managers/test_dataset_functors.py" in plan.selectors
+
+
+@pytest.mark.parametrize(
+    ("asset_path", "payload"),
+    [
+        ("tests/data_pipeline/assets/depth.mp4", b"\x00\xff\x99"),
+        ("tests/data_pipeline/assets/test_depth.mp4", b"\x00\xff\x99"),
+        ("tests/data_pipeline/assets/annotations.json", b'{"fps": 30}\n'),
+    ],
+)
+@pytest.mark.parametrize("global_change", [False, True])
+def test_changed_test_asset_selects_full_coverage_without_parsing_media(
+    tmp_path: Path, asset_path: str, payload: bytes, global_change: bool
+) -> None:
+    _write(tmp_path, asset_path)
+    (tmp_path / asset_path).write_bytes(payload)
+    _write(tmp_path, "tests/test_reader.py", "def test_read(): pass\n")
+    changed = [ChangedPath(asset_path)]
+    if global_change:
+        changed.append(ChangedPath(".github/workflows/main.yml"))
+
+    plan = build_plan(
+        tmp_path,
+        changed,
+        _manifest(full_pr_if=[".github/**"]),
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "full-pr"
+    assert plan.selectors == ["tests"]
+    assert all(asset_path not in selectors for selectors in plan.lanes.values())
+
+
+def test_changed_test_asset_preserves_explicit_slow_test_coverage(
+    tmp_path: Path,
+) -> None:
+    asset_path = "tests/assets/depth.mp4"
+    _write(tmp_path, asset_path)
+    (tmp_path / asset_path).write_bytes(b"\xff")
+    slow_test = "tests/test_slow_reader.py"
+    _write(
+        tmp_path,
+        slow_test,
+        "import pytest\n@pytest.mark.slow\ndef test_read(): pass\n",
+    )
+
+    plan = build_plan(
+        tmp_path,
+        [ChangedPath(asset_path), ChangedPath(slow_test)],
+        _manifest(),
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "full-pr"
+    assert plan.slow_lanes == {"slow-fast": [slow_test]}
+
+
+def test_documentation_media_keeps_documentation_only_coverage(tmp_path: Path) -> None:
+    asset_path = "tests/docs/assets/preview.png"
+    _write(tmp_path, asset_path)
+    (tmp_path / asset_path).write_bytes(b"\xff")
+    _write(tmp_path, "tests/docs/test_preview.py", "def test_preview(): pass\n")
+
+    plan = build_plan(
+        tmp_path,
+        [ChangedPath(asset_path)],
+        _manifest(),
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "docs-only"
+    assert plan.lanes == {"docs": ["tests/docs"]}
+    assert plan.slow_lanes == {}
 
 
 def test_manifest_rejects_partial_rule_without_tests(tmp_path: Path) -> None:
@@ -824,14 +954,91 @@ def test_runner_rejects_unexpanded_globs() -> None:
         build_commands(plan)
 
 
+@pytest.mark.parametrize("slow", [False, True], ids=["fast", "slow-fast"])
+@pytest.mark.parametrize("override", [None, "3"], ids=["default", "override"])
+def test_runner_budgets_cpu_threads_without_changing_parent_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slow: bool, override: str | None
+) -> None:
+    variables = (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    )
+    for variable in variables:
+        if override is None:
+            monkeypatch.delenv(variable, raising=False)
+        else:
+            monkeypatch.setenv(variable, override)
+    monkeypatch.setenv("EMBODICHAIN_TEST_ENV_SENTINEL", "inherited")
+    parent_environment = dict(os.environ)
+    environments: list[dict[str, str] | None] = []
+
+    def run(
+        *_args: object, env: dict[str, str] | None = None, **_kwargs: object
+    ) -> SimpleNamespace:
+        environments.append(env)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": {} if slow else {"fast": ["tests/test_sample.py"]},
+        "slow_lanes": {"slow-fast": ["tests/test_sample.py"]} if slow else {},
+    }
+
+    assert run_test_plan.run_plan(plan, root=tmp_path, lanes=["fast"]) == 0
+    assert len(environments) == 1
+    assert environments[0] == {
+        **parent_environment,
+        **{
+            variable: override if override is not None else "1"
+            for variable in variables
+        },
+    }
+    assert environments[0] is not os.environ
+    assert dict(os.environ) == parent_environment
+
+
+def test_runner_preserves_environment_in_serial_resource_lanes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environments: list[dict[str, str] | None] = []
+
+    def run(
+        command: list[str], env: dict[str, str] | None = None, **_kwargs: object
+    ) -> SimpleNamespace:
+        environments.append(env)
+        _write_collection_manifest(command, ["tests/test_sample.py"])
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    selectors = {
+        "docs": ["tests/docs/test_sample.py"],
+        "distributed": ["tests/learning/test_rl_distributed.py"],
+        "gpu": ["tests/test_sample.py"],
+        "sim": ["tests/test_sample.py"],
+    }
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": selectors,
+        "slow_lanes": {f"slow-{lane}": paths for lane, paths in selectors.items()},
+    }
+
+    assert run_test_plan.run_plan(plan, root=tmp_path) == 0
+    assert environments == [None] * 12
+
+
 def test_runner_distinguishes_empty_optional_lane_from_docs(
     tmp_path: Path, monkeypatch
 ) -> None:
-    monkeypatch.setattr(
-        run_test_plan.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=5),
-    )
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        _write_collection_manifest(command, [])
+        return SimpleNamespace(returncode=5)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
     plan = {
         "version": 1,
         "mode": "partial",
@@ -859,3 +1066,220 @@ def test_runner_distinguishes_empty_optional_lane_from_docs(
         "slow_lanes": {"slow-docs": ["tests/docs/test_sample.py"]},
     }
     assert run_test_plan.run_plan(slow_docs_plan, root=tmp_path, lanes=["docs"]) == 5
+
+
+def _write_collection_manifest(command: list[str], files: list[str]) -> Path | None:
+    option = next(
+        (arg for arg in command if arg.startswith("--ci-collect-manifest=")), None
+    )
+    if option is None:
+        return None
+    path = Path(option.split("=", 1)[1])
+    nodes = [f"{file}::TestContract::test_selected" for file in files]
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": files,
+                "nodeids": nodes,
+                "markers": {node: ["requires_sim"] for node in nodes},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize(
+    "lane",
+    ["gpu", "sim", "slow-gpu", "slow-sim"],
+    ids=["accelerator", "simulation", "slow-accelerator", "slow-simulation"],
+)
+@pytest.mark.parametrize("no_finalize_resource_lanes", [False, True])
+def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lane: str,
+    no_finalize_resource_lanes: bool,
+) -> None:
+    original_selectors = [
+        "tests/empty.py",
+        "tests/resources",
+        "tests/selected.py::TestContract::test_selected",
+    ]
+    files = [
+        "tests/resources/test_first.py",
+        "tests/resources/test_second.py",
+        "tests/selected.py",
+    ]
+    calls = []
+
+    def run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        manifest = _write_collection_manifest(command, files)
+        if manifest is None:
+            expected = next(
+                arg for arg in command if arg.startswith("--ci-expected-collection=")
+            )
+            assert (
+                json.loads(Path(expected.split("=", 1)[1]).read_text())["files"]
+                == files
+            )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    slow = lane.startswith("slow-")
+    base_lane = lane.removeprefix("slow-")
+    plan = {
+        "version": 1,
+        "mode": "partial" if slow else "full",
+        "lanes": {} if slow else {lane: original_selectors},
+        "slow_lanes": {lane: original_selectors} if slow else {},
+    }
+    original = dict(build_commands(plan, lanes=[base_lane]))[lane]
+
+    assert (
+        run_test_plan.run_plan(
+            plan,
+            root=tmp_path,
+            lanes=[base_lane],
+            no_finalize_resource_lanes=no_finalize_resource_lanes,
+        )
+        == 0
+    )
+
+    assert len(calls) == 2
+    discovery, execution = calls[0][0], calls[1][0]
+    assert discovery[: len(original)] == original
+    assert execution[2] == (
+        "scripts.ci.pytest_no_finalize" if no_finalize_resource_lanes else "pytest"
+    )
+    assert "--collect-only" in discovery and "--collect-only" not in execution
+    marker_index = execution.index("-m", 3)
+    assert execution[4:marker_index] == [
+        f"{file}::TestContract::test_selected" for file in files
+    ]
+    assert execution[marker_index:-1] == original[original.index("-m", 3) :]
+    assert all(
+        kwargs["env"] is None and kwargs["cwd"] == tmp_path for _, kwargs in calls
+    )
+
+
+@pytest.mark.parametrize("exit_code", [1, 2, 4])
+def test_runner_stops_before_execution_when_resource_discovery_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int
+) -> None:
+    calls = []
+
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(command)
+        return SimpleNamespace(returncode=exit_code)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
+
+    assert run_test_plan.run_plan(plan, root=tmp_path) == exit_code
+    assert len(calls) == 1 and "--collect-only" in calls[0]
+
+
+@pytest.mark.parametrize(
+    "problem", ["missing", "version", "unsafe", "order", "markers"]
+)
+def test_runner_rejects_invalid_resource_collection_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, problem: str
+) -> None:
+    calls = []
+
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(command)
+        path = _write_collection_manifest(command, ["tests/test_sample.py"])
+        assert path is not None
+        if problem == "missing":
+            path.unlink()
+        else:
+            data = json.loads(path.read_text())
+            if problem == "version":
+                data["version"] = 99
+            elif problem == "unsafe":
+                data["files"] = ["/tmp/outside.py"]
+            elif problem == "order":
+                data["files"] = ["tests/other.py"]
+            else:
+                data["markers"] = {}
+            path.write_text(json.dumps(data))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
+
+    with pytest.raises(RuntimeError):
+        run_test_plan.run_plan(plan, root=tmp_path)
+    assert len(calls) == 1
+
+
+def test_runner_counts_resource_discovery_and_fresh_execution_in_lane_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    clock = [0.0]
+    calls = []
+
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(command)
+        discovery = _write_collection_manifest(command, ["tests/test_sample.py"])
+        clock[0] += 2 if discovery is not None else 5
+        return SimpleNamespace(returncode=0 if discovery is not None else 1)
+
+    monkeypatch.setattr(run_test_plan.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
+
+    assert run_test_plan.run_plan(plan, root=tmp_path) == 1
+    assert len(calls) == 2
+    assert "completed in 7.0s (exit 1)" in capsys.readouterr().out
+
+
+def test_runner_dry_run_does_not_discover_or_execute_resource_tests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def run(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("dry-run must not start pytest")
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
+
+    assert run_test_plan.run_plan(plan, root=tmp_path, dry_run=True) == 0
+
+
+@pytest.mark.parametrize(
+    ("assertion", "summary", "exit_code"),
+    [("True", "1 passed", 0), ("False", "1 failed", 1)],
+)
+def test_no_finalize_runner_preserves_pytest_result(
+    tmp_path: Path, assertion: str, summary: str, exit_code: int
+) -> None:
+    test_file = tmp_path / "test_contract.py"
+    finalizer_marker = tmp_path / "atexit-ran"
+    test_file.write_text(
+        "import atexit\n"
+        "from pathlib import Path\n"
+        f"atexit.register(lambda: Path({str(finalizer_marker)!r}).write_text('ran'))\n"
+        f"def test_contract():\n    assert {assertion}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.ci.pytest_no_finalize",
+            "-q",
+            str(test_file),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert summary in result.stdout
+    assert not finalizer_marker.exists()

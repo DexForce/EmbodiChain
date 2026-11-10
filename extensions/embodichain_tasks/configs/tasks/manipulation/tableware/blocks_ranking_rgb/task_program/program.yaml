@@ -1,0 +1,102 @@
+program_id: rank_blocks_rgb
+instruction: Arrange the red, green, and blue blocks from left to right while keeping
+  the green block stationary.
+targets: {}
+program:
+  kind: sequence
+  items:
+  - kind: segment
+    name: pick_red_block
+    instruction: Grasp and lift red block clear of the table.
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: block_1
+        grasp: block_1_grasp
+        resources:
+          primary: primary_manipulator
+    validators:
+    - kind: object_lifted
+      object: block_1
+      minimum_lift: 0.05
+  - kind: segment
+    name: place_red_block
+    instruction: Place the red block left of the green block, release it, and let
+      it settle.
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: block_1
+        'on': red_placement
+        resources:
+          primary: primary_manipulator
+    post:
+    - kind: wait_stable
+      entity: block_1
+    validators:
+    - kind: object_relative_position
+      object: block_1
+      reference: block_2
+      position_offset:
+      - -0.08
+      - 0.0
+      - 0.0
+      position_tolerance:
+      - 0.035
+      - 0.03
+      - null
+  - kind: segment
+    name: pick_blue_block
+    instruction: Grasp and lift blue block clear of the table.
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: block_3
+        grasp: block_3_grasp
+        resources:
+          primary: secondary_manipulator
+    validators:
+    - kind: object_lifted
+      object: block_3
+      minimum_lift: 0.05
+  - kind: segment
+    name: place_blue_block
+    instruction: Place the blue block right of the green block, release it, and let
+      it settle.
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: block_3
+        'on': blue_placement
+        resources:
+          primary: secondary_manipulator
+    post:
+    - kind: wait_stable
+      entity: block_3
+    validators:
+    - kind: object_relative_position
+      object: block_3
+      reference: block_2
+      position_offset:
+      - 0.08
+      - 0.0
+      - 0.0
+      position_tolerance:
+      - 0.035
+      - 0.03
+      - null
+    - kind: object_relative_position
+      object: block_1
+      reference: block_2
+      position_offset:
+      - -0.08
+      - 0.0
+      - 0.0
+      position_tolerance:
+      - 0.035
+      - 0.03
+      - null

@@ -35,13 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-try:  # Python 3.11 (the CI planner runtime) has this in the standard library.
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised only on Python 3.10.
-    try:
-        import tomli as tomllib  # type: ignore[import-not-found]
-    except ModuleNotFoundError:
-        tomllib = None  # type: ignore[assignment]
+import tomllib
 
 __all__ = [
     "ChangedPath",
@@ -58,7 +52,7 @@ DEFAULT_MANIFEST = ".ci/test-impact.toml"
 DEFAULT_MAP = "agent_context/MAP.yaml"
 TEST_ROOT = "tests"
 _GLOB_CHARS = "*?["
-_SOURCE_ROOTS = ("embodichain", "embodichain_tasks", "scripts", "examples", "tests")
+_SOURCE_ROOTS = ("embodichain", "extensions", "scripts", "examples", "tests")
 _DOC_PATTERNS = (
     "docs/**",
     "docs/scripts/**",
@@ -249,10 +243,6 @@ def collect_changed_paths(
 
 def load_manifest(path: str | Path) -> dict[str, Any]:
     """Load and validate the CI impact manifest."""
-    if tomllib is None:  # pragma: no cover - Python 3.10 without tomli.
-        raise RuntimeError(
-            "Python 3.11 or the tomli package is required to read the impact manifest"
-        )
     manifest_path = Path(path)
     try:
         data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
@@ -655,7 +645,7 @@ def _content_risk(changed: Sequence[ChangedPath], diff_text: str | None = None) 
             path = _normalize_path(path_value)
             if path.endswith("/__init__.py") or path in {
                 "embodichain/__init__.py",
-                "embodichain_tasks/embodichain_tasks/__init__.py",
+                "extensions/embodichain_tasks/embodichain_tasks/__init__.py",
             }:
                 risk = "high"
     return risk
@@ -1067,7 +1057,9 @@ def build_plan(
             _normalize_path(path)
             for change in changed
             for path in change.paths
-            if _is_test_path(path) and _selector_has_slow_marker(repository_root, path)
+            if _is_test_path(path)
+            and Path(path).suffix == ".py"
+            and _selector_has_slow_marker(repository_root, path)
         }
     )
 
@@ -1105,6 +1097,26 @@ def build_plan(
                 topics=topic_ids,
                 slow_selectors=slow_selectors,
             )
+
+    for change in changed:
+        for path in change.paths:
+            if (
+                _is_test_path(path)
+                and Path(path).suffix != ".py"
+                and not _is_doc_path(path)
+            ):
+                # Fixture consumers can live outside the asset's directory.
+                # Do not parse media as Python or pass assets to pytest.
+                return _full_plan(
+                    repository_root,
+                    mode="full-pr",
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    changed=changed,
+                    reason=f"changed test asset requires consumer coverage: {path}",
+                    topics=topic_ids,
+                    slow_selectors=slow_selectors,
+                )
 
     docs_changed = any(
         _is_doc_path(path) for change in changed for path in change.paths

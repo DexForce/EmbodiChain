@@ -16,20 +16,28 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+__all__: list[str] = []
 
-from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
-    GeometryGenerationClient,
+from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
+from embodichain.gen_sim.services.compat import (
+    VisionFacade,
+    GeometryFacade,
+    ImageFacade,
+    SegmentationFacade,
+    ArticulationFacade,
 )
-from embodichain.gen_sim.scene_engine.clients.image_generation import (
-    ImageGenerationClient,
-)
-from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
-    ImageSegmentationClient,
-)
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.scene.expansion import SceneRandomizationJobCfg
+
+from embodichain.gen_sim.services.compat import GeometryClient
+from embodichain.gen_sim.services.compat import ImageClient
+from embodichain.gen_sim.services.compat import SegmentationClient
+from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
     SceneExportImporter,
 )
@@ -52,17 +60,20 @@ from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_layout_generat
 from embodichain.utils.logger import log_info, log_warning
 
 
+@service_entry
 def edit_scene(
     *,
     output_root: str | Path,
     edit_prompt: str,
+    scene_randomization: SceneRandomizationJobCfg | dict | str | Path | None = None,
+    services: GenSimServices | None = None,
 ) -> None:
     """Apply one text edit instruction to an existing Scene Engine output."""
     resolved_output_root = Path(output_root).expanduser().resolve()
     resolved_output_root.mkdir(parents=True, exist_ok=True)
 
     # Initialize the VLM client that will interpret the edit instruction.
-    vlm_client = OpenAICompatibleVLM.from_dotenv()
+    vlm_client = VisionFacade(services, "scene_edit")
     scene_importer = SceneExportImporter(output_root=output_root)
     # Validate scene_export, write scene.json, and return Scene; failures raise before editing.
     scene, scene_graph = scene_importer.import_scene_and_graph()
@@ -82,28 +93,30 @@ def edit_scene(
     # 2. Prepare Objects
     log_info("Starting Objects Preparation")
     # Initialize all the clients and then check.
-    image_generation_client = ImageGenerationClient.from_dotenv()
-    geometry_generation_client = GeometryGenerationClient.from_dotenv()
-    image_segmentation_client = ImageSegmentationClient.from_dotenv()
-    try:
-        image_generation_client.check_health()
-        geometry_generation_client.check_health()
-        image_segmentation_client.check_health()
-        # Return a list of added SceneObjects assets.
-        # Now do not support editing the table.
-        added_assets = prepare_scene_edit_assets(
-            scene_edit_plan=scene_edit_plan,
-            output_root=resolved_output_root,
-            image_generation_client=image_generation_client,
-            geometry_generation_client=geometry_generation_client,
-            image_segmentation_client=image_segmentation_client,
-            vlm_client=vlm_client,
-        )
-    finally:
-        image_generation_client.close()
-        geometry_generation_client.close()
-        image_segmentation_client.close()
-    log_info("Completed Objects Preparation")
+    added_assets = []
+    if any(op.op == "add" for op in scene_edit_plan.operations):
+        image_generation_client = ImageFacade(services)
+        geometry_generation_client = GeometryFacade(services)
+        image_segmentation_client = SegmentationFacade(services)
+        try:
+            image_generation_client.check_health()
+            geometry_generation_client.check_health()
+            image_segmentation_client.check_health()
+            # Return a list of added SceneObjects assets.
+            # Now do not support editing the table.
+            added_assets = prepare_scene_edit_assets(
+                scene_edit_plan=scene_edit_plan,
+                output_root=resolved_output_root,
+                image_generation_client=image_generation_client,
+                geometry_generation_client=geometry_generation_client,
+                image_segmentation_client=image_segmentation_client,
+                vlm_client=vlm_client,
+            )
+        finally:
+            image_generation_client.close()
+            geometry_generation_client.close()
+            image_segmentation_client.close()
+        log_info("Completed Objects Preparation")
 
     # 3. Layout Generation
     log_info("Starting Layout Generation")
@@ -133,4 +146,10 @@ def edit_scene(
         log_warning(f"Skipped whole-scene USD export: {exc}")
     log_info("Completed Scene Export")
 
+    if scene_randomization is not None:
+        from embodichain.gen_sim.scene_engine.randomization.adapter import (
+            randomize_scene_export,
+        )
+
+        randomize_scene_export(resolved_output_root, scene_randomization)
     return None

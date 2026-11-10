@@ -1,0 +1,175 @@
+{
+  "status": "correctness_passed_strict_performance_gate_incomplete",
+  "comparison": [
+    {
+      "variant": "Original",
+      "resident_episodes": 32,
+      "p50_overhead": -0.005685686267195678,
+      "p95_overhead": -0.009856949375238844,
+      "mean_overhead": 0.0028462291787532124,
+      "five_percent_p50_p95_gate": true
+    },
+    {
+      "variant": "Original",
+      "resident_episodes": 256,
+      "p50_overhead": 0.12993077428383892,
+      "p95_overhead": 0.13553713858076533,
+      "mean_overhead": 0.12732361168481465,
+      "five_percent_p50_p95_gate": false
+    },
+    {
+      "variant": "Fixed capacity hint: dict below64, blocked otherwise",
+      "resident_episodes": 32,
+      "selected_backend": "dict",
+      "p50_overhead": 0.051272263926348094,
+      "p95_overhead": 0.04685347208027091,
+      "mean_overhead": 0.050746220674389164,
+      "five_percent_p50_p95_gate": false
+    },
+    {
+      "variant": "Fixed capacity hint: dict below64, blocked otherwise",
+      "resident_episodes": 256,
+      "selected_backend": "blocked",
+      "p50_overhead": 0.0357727660916507,
+      "p95_overhead": 0.03923594332575986,
+      "mean_overhead": 0.035385595386278945,
+      "five_percent_p50_p95_gate": true
+    }
+  ],
+  "cross_revision_parity": {
+    "32": {
+      "input_sha256": true,
+      "target_ids_sha256": true,
+      "final_model_sha256": true,
+      "final_optimizer_sha256": true,
+      "final_rng_sha256": true
+    },
+    "256": {
+      "input_sha256": true,
+      "target_ids_sha256": true,
+      "final_model_sha256": true,
+      "final_optimizer_sha256": true,
+      "final_rng_sha256": true
+    }
+  },
+  "focused_tests_passed": 84,
+  "randomized_reference_comparisons": 960,
+  "source_unchanged_during_profiles": true,
+  "sdk_unchanged_during_profiles": true,
+  "resource_sampler_included": false,
+  "final_source_unchanged_during_profile": true,
+  "final_sdk_unchanged_during_profile": true,
+  "backend_api": "UsageTracker(*, episode_capacity_hint: int | None = None); counter_backend read-only property; default/<64 dict, >=64 blocked; chosen once; no dynamic migration",
+  "capacity_cutoff_evidence": "CPU 16/32/64/128/256 p50 block/dict ratios0.880/0.875/0.687/0.534/0.418; cutoff64 conservatively preserves original small-capacity path and selects first measured size with >25% CPU gain",
+  "final_profile": "/tmp/ods-offline-accounting-audit/consumer-selected-backends/results.json",
+  "integration_focused_tests_passed": 133,
+  "pilot_source_revision": "3cd6379a092f8106f08ea6073f13bec9a4bd6f63",
+  "integration_review": "independent_read_only_no_actionable_findings",
+  "integration_smokes": {
+    "source_revision": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+    "scope": "single update integration only; no learning/performance estimate",
+    "checks": {
+      "full": {
+        "completed": true,
+        "source_unchanged": true,
+        "backend": true,
+        "one_update": true,
+        "chunks": true,
+        "no_survivors": true,
+        "gpu_isolation": true,
+        "no_forced_cleanup": true,
+        "accounted_all_sources": true
+      },
+      "g1": {
+        "completed": true,
+        "source_unchanged": true,
+        "backend": true,
+        "one_update": true,
+        "chunks": true,
+        "no_survivors": true,
+        "gpu_isolation": true,
+        "no_forced_cleanup": true,
+        "accounted_all_sources": true,
+        "only_g1_consumed": true
+      }
+    },
+    "arms": {
+      "full": {
+        "backend": "blocked",
+        "status": {
+          "state": "complete",
+          "returncode": 0,
+          "source_unchanged": true,
+          "watchdog": {
+            "triggered": false,
+            "finished": false,
+            "forced_cleanup": false
+          },
+          "source_revision_before": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+          "source_revision_after": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+          "process_start_monotonic_seconds": 1512382.175784921,
+          "process_end_monotonic_seconds": 1512475.069580585,
+          "process_seconds": 92.89379566395655,
+          "observed_owned_pids": [
+            252539,
+            252578,
+            252580,
+            252925,
+            253054
+          ],
+          "surviving_owned_pids": [],
+          "monitor_samples": 38,
+          "monitor_errors": [],
+          "wrong_gpu_allocation_observations": 0,
+          "external_gpu_allocation_samples": 0
+        },
+        "source_rows": 256,
+        "consumed_generations": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "g1": {
+        "backend": "dict",
+        "status": {
+          "state": "complete",
+          "returncode": 0,
+          "source_unchanged": true,
+          "watchdog": {
+            "triggered": false,
+            "finished": false,
+            "forced_cleanup": false
+          },
+          "source_revision_before": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+          "source_revision_after": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+          "process_start_monotonic_seconds": 1512480.333737856,
+          "process_end_monotonic_seconds": 1512570.932380652,
+          "process_seconds": 90.59864279604517,
+          "observed_owned_pids": [
+            253469,
+            253522,
+            253524,
+            253870,
+            253988
+          ],
+          "surviving_owned_pids": [],
+          "monitor_samples": 37,
+          "monitor_errors": [],
+          "wrong_gpu_allocation_observations": 0,
+          "external_gpu_allocation_samples": 0
+        },
+        "source_rows": 256,
+        "consumed_generations": [
+          1
+        ]
+      }
+    },
+    "passed": true
+  }
+}

@@ -16,9 +16,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import gymnasium as gym
+import pytest
 import torch
 
 from embodichain.learning.rl.evaluation import (
@@ -29,6 +32,9 @@ from embodichain.learning.rl.utils.trainer import Trainer
 
 
 class _DeterministicPolicy(torch.nn.Module):
+    obs_dim = 1
+    action_dim = 1
+
     def __init__(self) -> None:
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.zeros(()))
@@ -91,6 +97,57 @@ class _MixedDeviceEnv:
     def __init__(self) -> None:
         self.device = torch.device("meta")
         self.action_manager = _DeviceCheckingActionManager(self.device)
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+def test_trainer_without_eval_env_ignores_empty_eval_events(
+    tmp_path: Path, rank: int
+) -> None:
+    """Disabled evaluation and non-evaluating ranks need no eval manager."""
+    trainer = Trainer(
+        policy=_DeterministicPolicy(),
+        env=_AsyncAutoResetEnv(),
+        algorithm=SimpleNamespace(device=torch.device("cpu")),
+        buffer_size=2,
+        batch_size=2,
+        writer=None,
+        eval_freq=0,
+        save_freq=0,
+        checkpoint_dir=str(tmp_path),
+        exp_name="no_eval",
+        use_wandb=False,
+        event_cfg={},
+        eval_event_cfg={},
+        distributed=True,
+        rank=rank,
+        world_size=2,
+    )
+
+    assert trainer.eval_env is None
+    assert not hasattr(trainer, "eval_event_manager")
+    assert trainer.event_manager._env is trainer.env
+
+
+def test_trainer_with_eval_env_creates_eval_event_manager(tmp_path: Path) -> None:
+    """An enabled evaluation environment retains its own event manager."""
+    eval_env = _AsyncAutoResetEnv()
+    trainer = Trainer(
+        policy=_DeterministicPolicy(),
+        env=_AsyncAutoResetEnv(),
+        algorithm=SimpleNamespace(device=torch.device("cpu")),
+        buffer_size=2,
+        batch_size=2,
+        writer=None,
+        eval_freq=10,
+        save_freq=0,
+        checkpoint_dir=str(tmp_path),
+        exp_name="with_eval",
+        use_wandb=False,
+        eval_env=eval_env,
+        eval_event_cfg={},
+    )
+
+    assert trainer.eval_event_manager._env is eval_env
 
 
 def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None:

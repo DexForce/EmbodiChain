@@ -27,7 +27,7 @@ from typing import ClassVar, TypeAlias
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     DisjointResourceSlots,
     DisjointSlotEndpoints,
     SkillBindingContract,
@@ -436,11 +436,12 @@ class HandOver(SemanticCallSpec):
     """Pick up, transfer, and place an object with two robot resources.
 
     Args:
-        object: Authoritative scene-object reference. The object must not
-            already be held when the unified action starts.
+        object: Authoritative scene-object reference. A policy preset with
+            ``HandOverOptions.release_at_target=False`` requires an incoming
+            verified source attachment and transfers it to ``destination``.
         final_target: Optional final object-space delivery pose.
-        resources: Optional skill-local resource overrides. Select the second
-            candidate with the ``destination`` slot when needed.
+        resources: Optional skill-local resource overrides. ``source`` and
+            ``destination`` are authoritative for a continuation transfer.
     """
 
     call_kind: ClassVar[str] = "hand_over"
@@ -781,16 +782,16 @@ def _builtin_call_target(
     spec_type: type[SemanticCallSpec],
 ) -> SkillDescriptor:
     """Return the non-overridable atomic target for one curated call type."""
-    from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
-        HandOver as HandOverAction,
+    from embodichain.lab.sim.atomic_skills.primitives.hand_over import (
+        HandOver as HandOverSkill,
     )
-    from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
-    from embodichain.lab.sim.atomic_actions.primitives.place import Place as PlaceAction
+    from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUp
+    from embodichain.lab.sim.atomic_skills.primitives.place import Place as PlaceSkill
 
     targets = {
         Pick: PickUp.descriptor(),
-        Place: PlaceAction.descriptor(),
-        HandOver: HandOverAction.descriptor(),
+        Place: PlaceSkill.descriptor(),
+        HandOver: HandOverSkill.descriptor(),
     }
     try:
         return targets[spec_type]

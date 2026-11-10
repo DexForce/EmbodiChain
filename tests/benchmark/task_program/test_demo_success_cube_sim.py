@@ -106,26 +106,24 @@ def test_live_repeated_cube_completes_three_trajectory_cycles(
     assert episode["terminal_reason"] == "success"
     segments = episode["segments"]
     assert isinstance(segments, list)
-    assert len(segments) == 3
+    assert [segment["name"] for segment in segments] == ["pick_cube", "place_cube"] * 3
 
     for segment_index, segment in enumerate(segments):
         assert isinstance(segment, dict)
         assert segment["segment_id"] == segment_index
-        assert segment["name"] == "move_cube"
         metadata = segment["metadata"]
         assert isinstance(metadata, dict)
         runtime = metadata["runtime"]
         assert runtime["status"] == "completed"
         assert runtime["masks"]["success"] == [True]
         calls = runtime["calls"]
-        assert [call["semantic_id"] for call in calls] == ["pick", "place"]
+        assert [call["semantic_id"] for call in calls] == [
+            "pick" if segment_index % 2 == 0 else "place"
+        ]
         assert all(call["status"] == "completed" for call in calls)
-        assert all(call["effects"] == [] for call in calls)
 
-        assert metadata["post_policies"] == []
         validation = metadata["validation"]
         assert validation["accepted_mask"] == [True]
-        assert validation["validators"] == []
 
     aggregates = aggregate_demo_success_trials(decoded_trials)
     metrics = aggregates.success_and_metrics[0]

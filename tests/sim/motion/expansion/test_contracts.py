@@ -22,7 +22,9 @@ import pytest
 import torch
 
 from embodichain.lab.sim.motion.expansion import (
+    CandidateCoordinator,
     CandidateIdentity,
+    CandidateSpec,
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
@@ -33,16 +35,211 @@ from embodichain.lab.sim.motion.expansion import (
     ValidationCheck,
     ValidationResult,
 )
+from embodichain.lab.sim.motion.expansion.source import (
+    PlanResultSourceAdapter,
+    SourceContext,
+    TemplateSourceAdapter,
+)
+from embodichain.lab.sim.motion.expansion.cfg import TrajectoryExpansionJobCfg
+from embodichain.lab.sim.motion.expansion.session import ExpansionSession
+from embodichain.lab.sim.motion.planners import PlanResult
 
 
 def _case() -> SceneCase:
     return SceneCase("case", "initial", "signature", "task", "robot")
 
 
+def _source_context() -> SourceContext:
+    return SourceContext("motion", "revision", "unit", _case(), 0.1)
+
+
 def _identity(candidate_id: str = "candidate") -> CandidateIdentity:
     return CandidateIdentity(
         "case", "initial", candidate_id, "geometry", "source", "revision", "template"
     )
+
+
+def test_candidate_spec_keeps_physical_identity_separate_from_observation_fanout():
+    spec = CandidateSpec(
+        identity=_identity(),
+        affordance_selection={"geometry_family": "grasp_a", "ordinal": 2},
+        trajectory_variant={"operator": "via_points", "ordinal": 1},
+        compatibility_key="case:initial:dt:validator",
+        estimated_cost=1.25,
+        observation_profiles=("rgb_train_aug_v1", "depth_eval_v1"),
+    )
+
+    assert spec.identity.candidate_id == "candidate"
+    assert spec.affordance_selection["geometry_family"] == "grasp_a"
+    assert spec.trajectory_variant["operator"] == "via_points"
+    assert spec.observation_profiles == ("rgb_train_aug_v1", "depth_eval_v1")
+    with pytest.raises(TypeError):
+        spec.affordance_selection["new"] = "mutation"  # type: ignore[index]
+
+
+def test_source_context_keeps_provider_and_physical_clock_explicit():
+    context = SourceContext(
+        source_id="atomic_pick",
+        source_revision="git:abc",
+        unit_id="call_0",
+        scene_case=_case(),
+        control_dt=0.02,
+    )
+    assert context.scene_case.scene_case_id == "case"
+    assert context.control_dt == pytest.approx(0.02)
+
+
+def test_source_adapters_share_one_template_contract():
+    context = SourceContext(
+        source_id="motion",
+        source_revision="git:abc",
+        unit_id="unit_0",
+        scene_case=_case(),
+        control_dt=0.1,
+    )
+    source_template = _template()
+    handwritten = TemplateSourceAdapter().export_template(
+        source_template, context=context
+    )
+    generated = PlanResultSourceAdapter(
+        joint_names=("arm", "tool"),
+    ).export_template(
+        PlanResult(
+            success=True,
+            positions=source_template.positions.unsqueeze(0),
+            dt=source_template.dt.unsqueeze(0),
+        ),
+        context=context,
+    )
+
+    assert handwritten.template_id == generated.template_id == "unit_0"
+    torch.testing.assert_close(handwritten.positions, generated.positions)
+    torch.testing.assert_close(handwritten.dt, generated.dt)
+
+
+def test_plan_result_source_normalizes_representable_arrival_intervals() -> None:
+    result = PlanResult(
+        success=True,
+        positions=torch.tensor([[[0.0], [0.0], [1.0], [1.0]]]),
+        dt=torch.tensor([[0.2, 0.0, 0.3, 0.0]]),
+    )
+    phase = TrajectoryPhase("free", 0, 4, "free", ("joint_residual",))
+
+    template = PlanResultSourceAdapter(
+        ("joint",),
+        phases=(phase,),
+    ).export_template(result, context=_source_context())
+
+    assert template.dt.tolist() == pytest.approx([0.0, 0.2, 0.3])
+    assert template.positions[:, 0].tolist() == [0.0, 0.0, 1.0]
+    assert template.phases == (
+        TrajectoryPhase("free", 0, 3, "free", ("joint_residual",)),
+    )
+    assert template.allowed_operators == ("joint_residual",)
+
+
+def test_plan_result_source_rejects_zero_duration_motion() -> None:
+    result = PlanResult(
+        success=True,
+        positions=torch.tensor([[[0.0], [1.0]]]),
+        dt=torch.tensor([[0.0, 0.0]]),
+    )
+
+    with pytest.raises(ValueError, match="zero-duration position change"):
+        PlanResultSourceAdapter(("joint",)).export_template(
+            result,
+            context=_source_context(),
+        )
+
+
+def test_plan_result_source_allows_explicit_template_permissions() -> None:
+    result = PlanResult(
+        success=True,
+        positions=torch.tensor([[[0.0], [0.5], [1.0]]]),
+        dt=torch.tensor([[0.0, 0.1, 0.1]]),
+    )
+    phase = TrajectoryPhase("free", 0, 3, "free", ("joint_residual",))
+
+    template = PlanResultSourceAdapter(
+        ("joint",),
+        phases=(phase,),
+        allowed_operators=("via_points",),
+    ).export_template(result, context=_source_context())
+
+    assert template.allowed_operators == ("via_points",)
+
+
+def test_plan_result_source_rejects_duplicate_template_permissions() -> None:
+    result = PlanResult(
+        success=True,
+        positions=torch.tensor([[[0.0], [0.5], [1.0]]]),
+        dt=torch.tensor([[0.0, 0.1, 0.1]]),
+    )
+
+    with pytest.raises(ValueError, match="allowed_operators must be unique"):
+        PlanResultSourceAdapter(
+            ("joint",),
+            allowed_operators=("via_points", "via_points"),
+        ).export_template(result, context=_source_context())
+
+
+def test_candidate_coordinator_queues_source_variants_with_session_identity():
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
+        {
+            "augmentation": {
+                "factors": {
+                    "spatial": {
+                        "enabled": True,
+                        "method": ["joint_residual"],
+                        "joint_offset_scale": 0.1,
+                    }
+                },
+                "coverage": {"joint_dedup_normalized_tol": 0.001},
+            },
+            "scheduling": {"candidate_budget": 4},
+        }
+    )
+    case = _case()
+    session = ExpansionSession(cfg)
+    limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
+    session.register_case(case, limits, joint_names=("arm", "tool"))
+    context = SourceContext(
+        source_id="handwritten",
+        source_revision="test",
+        unit_id="unit_0",
+        scene_case=case,
+        control_dt=0.1,
+    )
+    coordinator = CandidateCoordinator(
+        cfg,
+        session=session,
+        source_adapter=TemplateSourceAdapter(),
+        source_context=context,
+        joint_limits=limits,
+    )
+
+    source_template = _template(
+        phases=(TrajectoryPhase("free", 0, 3, "free", ("joint_residual",)),),
+        allowed_operators=("joint_residual",),
+        controlled_joint_indices=(0, 1),
+    )
+    items = coordinator.enqueue_source(source_template, count=2)
+
+    assert len(items) == 2
+    assert coordinator.pending_count == 2
+    assert len({item.spec.identity.candidate_id for item in items}) == 2
+    assert all(item.spec.identity.source_id == "handwritten" for item in items)
+    first = coordinator.take_next()
+    assert first == items[0]
+    assert first.to_batch().identities[0] == first.spec.identity
+    coordinator.admit_planned(
+        first,
+        ValidationResult((ValidationCheck("path_collision", "passed"),)),
+    )
+    ready = session.take_ready("case", "initial", episode_byte_budget=1024)
+    assert ready is not None
+    assert ready.identities[0] == first.spec.identity
+    assert coordinator.pending_count == 1
 
 
 def _template(**changes: object) -> TrajectoryTemplate:
@@ -56,6 +253,143 @@ def _template(**changes: object) -> TrajectoryTemplate:
     )
     fields.update(changes)
     return TrajectoryTemplate(**fields)
+
+
+def _coordinator_fixture(
+    *,
+    max_proposals: int = 100,
+) -> tuple[
+    ExpansionSession,
+    CandidateCoordinator,
+    TrajectoryTemplate,
+]:
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
+        {
+            "augmentation": {
+                "factors": {
+                    "spatial": {
+                        "enabled": True,
+                        "method": ["joint_residual"],
+                        "joint_offset_scale": 0.1,
+                    }
+                },
+                "coverage": {"joint_dedup_normalized_tol": 0.001},
+            },
+            "scheduling": {"candidate_budget": 8},
+            "collection": {"max_proposals": max_proposals},
+        }
+    )
+    case = _case()
+    limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
+    session = ExpansionSession(cfg)
+    session.register_case(case, limits, joint_names=("arm", "tool"))
+    coordinator = CandidateCoordinator(
+        cfg,
+        session=session,
+        source_adapter=TemplateSourceAdapter(),
+        source_context=SourceContext(
+            "handwritten",
+            "test",
+            "unit_0",
+            case,
+            0.1,
+        ),
+        joint_limits=limits,
+    )
+    template = _template(
+        phases=(TrajectoryPhase("free", 0, 3, "free", ("joint_residual",)),),
+        allowed_operators=("joint_residual",),
+        controlled_joint_indices=(0, 1),
+    )
+    return session, coordinator, template
+
+
+def test_candidate_coordinator_refills_with_novel_variants() -> None:
+    _, coordinator, template = _coordinator_fixture()
+
+    first = coordinator.enqueue_source(template, count=2)
+    second = coordinator.enqueue_source(template, count=2)
+
+    assert len(first) == 2
+    assert len(second) == 1
+    assert not torch.equal(first[1].template.positions, second[0].template.positions)
+
+
+def test_candidate_coordinator_namespaces_affordance_geometry() -> None:
+    _, coordinator, template = _coordinator_fixture()
+    first_template = replace(
+        template,
+        positions=torch.tensor([[0.0, 0.0], [0.5, 0.0], [1.0, 0.0]]),
+    )
+    second_template = replace(
+        template,
+        positions=torch.tensor([[0.0, 0.0], [-0.5, 0.0], [1.0, 0.0]]),
+    )
+
+    first = coordinator.enqueue_source(
+        first_template,
+        count=1,
+        affordance_selection={"grasp": "left"},
+    )[0]
+    second = coordinator.enqueue_source(
+        second_template,
+        count=1,
+        affordance_selection={"grasp": "right"},
+    )[0]
+
+    assert first.spec.identity.candidate_id != second.spec.identity.candidate_id
+    assert (
+        first.spec.identity.geometry_family_id
+        != second.spec.identity.geometry_family_id
+    )
+
+
+def test_candidate_coordinator_enqueue_is_atomic() -> None:
+    session, coordinator, template = _coordinator_fixture(max_proposals=1)
+
+    with pytest.raises(RuntimeError, match="Proposal budget"):
+        coordinator.enqueue_source(template, count=2)
+
+    assert coordinator.pending_count == 0
+    assert session.snapshot()["counts"]["proposed"] == 0
+    assert session.snapshot()["audit"] == ()
+
+
+def test_candidate_coordinator_populates_strict_compatibility_metadata() -> None:
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
+        {
+            "observation": {"enabled": True, "profiles": ["rgb_train"]},
+            "scheduling": {"candidate_budget": 2},
+        }
+    )
+    case = _case()
+    limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
+    template = _template(controlled_joint_indices=(0, 1))
+
+    def build(backend_id: str) -> CandidateWorkItem:
+        session = ExpansionSession(cfg)
+        session.register_case(case, limits, joint_names=("arm", "tool"))
+        coordinator = CandidateCoordinator(
+            cfg,
+            session=session,
+            source_adapter=TemplateSourceAdapter(),
+            source_context=SourceContext(
+                "handwritten",
+                "revision",
+                "unit",
+                case,
+                0.1,
+            ),
+            joint_limits=limits,
+            backend_id=backend_id,
+        )
+        return coordinator.enqueue_source(template, count=1)[0]
+
+    first = build("default")
+    second = build("newton")
+
+    assert first.spec.observation_profiles == ("rgb_train",)
+    assert first.spec.compatibility_key != second.spec.compatibility_key
 
 
 def _batch(**changes: object) -> CandidateTrajectoryBatch:
@@ -156,7 +490,7 @@ def test_snapshot_rejects_incomplete_joint_state() -> None:
         {"controlled_joint_indices": (0, 0)},
         {"representation": "eef_delta"},
         {"phases": (TrajectoryPhase("transit", 0, 4),)},
-        {"phases": (TrajectoryPhase("a", 0, 2), TrajectoryPhase("b", 1, 3))},
+        {"phases": (TrajectoryPhase("a", 0, 2), TrajectoryPhase("b", 0, 3))},
     ],
 )
 def test_template_rejects_invalid_representation_timing_and_indices(
@@ -299,3 +633,80 @@ def test_receipts_use_stable_ids_and_distinct_write_attempts() -> None:
         replace(receipt, error="inconsistent")
     with pytest.raises(ValueError, match="submission_id"):
         replace(receipt, submission_id=-1)
+
+
+@pytest.mark.parametrize("task_space", [False, True])
+def test_coordinator_uses_registered_guidance_reference_and_keeps_selection_evidence(
+    task_space: bool,
+) -> None:
+    from embodichain.lab.sim.motion.expansion.cfg import TrajectoryExpansionCfg
+
+    cfg = TrajectoryExpansionCfg.from_mapping(
+        {
+            "augmentation": {
+                "factors": {
+                    "task_space": {"enabled": task_space, "max_rotation_rad": 0.0},
+                    "manipulability": {
+                        "enabled": True,
+                        "guided_proposals": 4,
+                        "jacobian_rows": "translational",
+                    },
+                },
+                "coverage": {"joint_dedup_normalized_tol": 1e-6},
+            },
+        }
+    )
+    positions = torch.zeros(7, 4, dtype=torch.float64)
+    positions[:, 0] = torch.linspace(0, 0.5, 7)
+    positions[:, 3] = 0.1
+    dt = torch.full((7,), 0.1, dtype=torch.float64)
+    dt[0] = 0
+    source = TrajectoryTemplate(
+        "source",
+        "one",
+        "template",
+        ("x", "y", "z", "hand"),
+        positions,
+        dt,
+        phases=(
+            TrajectoryPhase(
+                "move", 0, 7, "free", ("joint_residual", "task_space_residual")
+            ),
+        ),
+        allowed_operators=("joint_residual", "task_space_residual"),
+        controlled_joint_indices=(0, 1, 2),
+    )
+
+    def kinematics(q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        poses = torch.eye(4, dtype=q.dtype).repeat(len(q), 1, 1)
+        poses[:, :3, 3] = q
+        jac = torch.zeros(len(q), 6, 3, dtype=q.dtype)
+        jac[:, :3] = torch.eye(3, dtype=q.dtype)
+        return poses, jac
+
+    session = ExpansionSession(cfg)
+    limits = torch.tensor([[-1.0, 1.0]] * 4)
+    session.register_case(
+        _case(), limits, joint_names=source.joint_names, manipulability_reference=4.0
+    )
+    assert session.manipulability_reference(_case()) == 4.0
+    with pytest.raises(ValueError, match="registered case"):
+        session.manipulability_reference(replace(_case(), initial_state_id="missing"))
+    coordinator = CandidateCoordinator(
+        cfg,
+        session=session,
+        source_adapter=TemplateSourceAdapter(),
+        source_context=_source_context(),
+        joint_limits=limits,
+        kinematics=kinematics,
+    )
+    items = coordinator.enqueue_source(source, count=2)
+    assert len(items) == 2
+    evidence = items[1].spec.trajectory_variant
+    # J has score 1. A host normalizer of 4 places it in band 0; deriving a
+    # fresh normalizer from this source instead would incorrectly give band 2.
+    assert evidence["manipulability"] == pytest.approx(1.0)
+    assert evidence["manipulability_band"] == 0
+    assert evidence["manipulability_matched"] == 1
+    assert ("task_space_operator" in evidence) == task_space
+    assert torch.equal(items[1].template.positions[:, 3], source.positions[:, 3])

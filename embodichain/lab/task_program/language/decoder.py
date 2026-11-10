@@ -33,7 +33,11 @@ from .schema import (
     TaskProgramIntegrationCfg,
     HandOverCfg,
     InvokeCfg,
+    ObjectNearRelativeTargetValidatorCfg,
     ObjectNearTargetValidatorCfg,
+    ObjectLiftedValidatorCfg,
+    ObjectRelativePositionValidatorCfg,
+    ObjectUprightValidatorCfg,
     ParallelCfg,
     PickCfg,
     PlaceCfg,
@@ -215,6 +219,15 @@ def _clone_untrusted_value(
             raise _error("non_finite_number", path, "Floats must be finite.")
         return value
     if type(value) is str:
+        # Instructions are inert text. A registered call's arguments remain
+        # subject to the executable-payload checks even if a key has this name.
+        if path == ("instruction",) or (
+            path
+            and path[0] == "program"
+            and path[-1] == "instruction"
+            and "call" not in path
+        ):
+            return value
         stripped = value.strip()
         lowered = stripped.lower()
         if lowered.startswith(("__import__(", "eval(", "exec(", "import ", "from ")):
@@ -640,8 +653,36 @@ def _decode_validator(
     kind = _expect_discriminator(
         mapping,
         path=path,
-        supported=("object_near_target", "articulation_joint_position"),
+        supported=(
+            "object_near_target",
+            "object_near_relative_target",
+            "articulation_joint_position",
+            "object_lifted",
+            "object_relative_position",
+            "object_upright",
+        ),
     )
+    state_validator_types = {
+        "object_lifted": (ObjectLiftedValidatorCfg, {"minimum_lift"}),
+        "object_relative_position": (
+            ObjectRelativePositionValidatorCfg,
+            {"reference", "position_offset", "position_tolerance", "reference_frame"},
+        ),
+        "object_upright": (ObjectUprightValidatorCfg, {"maximum_tilt_degrees"}),
+    }
+    if kind in state_validator_types:
+        config_type, fields = state_validator_types[kind]
+        _validate_fields(
+            mapping,
+            allowed=frozenset({"kind", "object"} | fields),
+            required=frozenset(
+                {"kind", "object"}
+                | ({"reference"} if kind == "object_relative_position" else set())
+            ),
+            path=path,
+        )
+        return _construct(config_type, path=path, **mapping)  # type: ignore[return-value]
+
     if kind == "articulation_joint_position":
         _validate_fields(
             mapping,
@@ -680,6 +721,58 @@ def _decode_validator(
             joint=_expect_identifier(mapping["joint"], path=(*path, "joint")),
             minimum_position=minimum,
             maximum_position=maximum,
+        )  # type: ignore[return-value]
+
+    if kind == "object_near_relative_target":
+        _validate_fields(
+            mapping,
+            allowed=frozenset(
+                {
+                    "kind",
+                    "object",
+                    "reference",
+                    "displacement",
+                    "position_tolerance",
+                }
+            ),
+            required=frozenset({"kind", "object", "reference", "displacement"}),
+            path=path,
+        )
+        displacement = _expect_list(
+            mapping["displacement"],
+            path=(*path, "displacement"),
+        )
+        if len(displacement) != 3:
+            raise _error(
+                "invalid_vector_shape",
+                (*path, "displacement"),
+                "displacement must contain exactly three numbers.",
+            )
+        for index, number in enumerate(displacement):
+            if type(number) not in (int, float):
+                raise _error(
+                    "invalid_number",
+                    (*path, "displacement", index),
+                    "Displacement components must be finite numbers, not bool values.",
+                )
+        tolerance = mapping.get("position_tolerance", 0.03)
+        if type(tolerance) not in (int, float):
+            raise _error(
+                "invalid_number",
+                (*path, "position_tolerance"),
+                "position_tolerance must be a finite number, not bool.",
+            )
+        return _construct(
+            ObjectNearRelativeTargetValidatorCfg,
+            path=path,
+            kind=kind,
+            object=_expect_identifier(mapping["object"], path=(*path, "object")),
+            reference=_expect_identifier(
+                mapping["reference"],
+                path=(*path, "reference"),
+            ),
+            displacement=tuple(displacement),
+            position_tolerance=tolerance,
         )  # type: ignore[return-value]
 
     _validate_fields(
@@ -819,7 +912,9 @@ def _decode_program_node(
     if kind == "segment":
         _validate_fields(
             mapping,
-            allowed=frozenset({"kind", "name", "steps", "post", "validators"}),
+            allowed=frozenset(
+                {"kind", "name", "steps", "post", "validators", "instruction"}
+            ),
             required=frozenset({"kind", "name", "steps"}),
             path=path,
         )
@@ -847,6 +942,13 @@ def _decode_program_node(
             path=path,
             kind=kind,
             name=_expect_identifier(mapping["name"], path=(*path, "name")),
+            instruction=(
+                None
+                if mapping.get("instruction") is None
+                else _expect_identifier(
+                    mapping["instruction"], path=(*path, "instruction")
+                )
+            ),
             steps=_decode_program_node(
                 mapping["steps"],
                 path=(*path, "steps"),
@@ -1032,12 +1134,37 @@ def validate_task_program(
                     validator,
                     path=validator_path,
                 )
-                if type(validator) is ObjectNearTargetValidatorCfg:
+                if type(validator) in (
+                    ObjectNearTargetValidatorCfg,
+                    ObjectLiftedValidatorCfg,
+                    ObjectRelativePositionValidatorCfg,
+                    ObjectUprightValidatorCfg,
+                ):
                     _call_context(
                         context.validate_scene_reference,
                         validator.object,
                         role="object",
                         path=(*validator_path, "object"),
+                    )
+                    if type(validator) is ObjectRelativePositionValidatorCfg:
+                        _call_context(
+                            context.validate_scene_reference,
+                            validator.reference,
+                            role="object",
+                            path=(*validator_path, "reference"),
+                        )
+                elif type(validator) is ObjectNearRelativeTargetValidatorCfg:
+                    _call_context(
+                        context.validate_scene_reference,
+                        validator.object,
+                        role="object",
+                        path=(*validator_path, "object"),
+                    )
+                    _call_context(
+                        context.validate_scene_reference,
+                        validator.reference,
+                        role="object",
+                        path=(*validator_path, "reference"),
                     )
                 elif type(validator) is ArticulationJointPositionValidatorCfg:
                     _call_context(
@@ -1079,7 +1206,9 @@ def decode_task_program(
     mapping = _expect_mapping(owned, path=())
     _validate_fields(
         mapping,
-        allowed=frozenset({"program_id", "integration", "targets", "program"}),
+        allowed=frozenset(
+            {"program_id", "integration", "targets", "program", "instruction"}
+        ),
         required=frozenset({"program_id", "integration", "targets", "program"}),
         path=(),
     )
@@ -1130,6 +1259,11 @@ def decode_task_program(
         TaskProgramCfg,
         path=(),
         program_id=_expect_identifier(mapping["program_id"], path=("program_id",)),
+        instruction=(
+            None
+            if mapping.get("instruction") is None
+            else _expect_identifier(mapping["instruction"], path=("instruction",))
+        ),
         integration=integration,
         targets=targets,
         program=program,

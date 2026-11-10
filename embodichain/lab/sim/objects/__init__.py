@@ -16,13 +16,14 @@
 
 """Scene-object classes spawned into the ``SimulationManager``.
 
-Covers lights, rigid bodies (and groups), articulations, robots, deformables (soft/cloth), gizmos, and rigid constraints; every object derives from ``BatchEntity``.
+Covers lights, render-only objects, rigid bodies (and groups), articulations, robots, deformables (soft/cloth), gizmos, and rigid constraints; every object derives from ``BatchEntity``.
 """
 
 from __future__ import annotations
 
 from ..common import BatchEntity
 from .rigid_object import CollisionShapeDesc, RigidObject, RigidBodyData, RigidObjectCfg
+from .visual_object import VisualObject, VisualObjectCfg
 from .rigid_object_group import (
     RigidObjectGroup,
     RigidBodyGroupData,

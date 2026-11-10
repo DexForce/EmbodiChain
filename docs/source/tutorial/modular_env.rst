@@ -95,7 +95,7 @@ The main environment configuration inherits from :class:`envs.EmbodiedEnvCfg` an
 
 **Robot Configuration**
 
-.. currentmodule:: embodichain.lab.sim.robots
+.. currentmodule:: embodichain_robots
 
 .. literalinclude:: ../../../scripts/tutorials/gym/modular_env.py
    :language: python
@@ -247,5 +247,5 @@ Next Steps
 
 - :doc:`task_program` — Compose a modular environment with a declarative Task
   Program, embodiment, scene binding, and execution policy.
-- :doc:`data_generation` — Record expert demonstrations from modular
+- :doc:`data_expansion` — Record expert demonstrations from modular
   environments.

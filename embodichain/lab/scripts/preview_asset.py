@@ -60,6 +60,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from embodichain.cli.sim import add_sim_args_to_parser
+from embodichain.lab.scripts import _preview
 from embodichain.utils.logger import log_info, log_warning, log_error
 
 if TYPE_CHECKING:
@@ -79,20 +80,7 @@ def build_sim_cfg(args: argparse.Namespace) -> SimulationManagerCfg:
     Returns:
         SimulationManagerCfg: Simulation configuration.
     """
-    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
-    from embodichain.lab.sim.sim_manager import SimulationManagerCfg
-    from embodichain.lab.visualization import visualization_cfg_from_args
-
-    return SimulationManagerCfg(
-        headless=args.headless,
-        device=args.device,
-        render_cfg=RenderCfg(renderer=args.renderer),
-        physics_cfg=physics_cfg_for_backend(args.physics),
-        gpu_id=args.gpu_id,
-        num_envs=args.num_envs,
-        arena_space=args.arena_space,
-        visualization=visualization_cfg_from_args(args),
-    )
+    return _preview._build_sim_cfg(args)
 
 
 def load_assets(
@@ -243,8 +231,7 @@ def _publish_loaded_assets(sim: SimulationManager, args: argparse.Namespace) -> 
         sim: Simulation manager containing the newly loaded assets.
         args: Parsed CLI arguments.
     """
-    if getattr(args, "viser", False):
-        sim.capture_visualization_safely(force=True)
+    _preview._publish_loaded_assets(sim, args)
 
 
 def _setup_viser_joint_control(
@@ -253,37 +240,7 @@ def _setup_viser_joint_control(
     args: argparse.Namespace,
 ) -> ArticulationPreviewController | None:
     """Register articulation joint controls with the active Viser runtime."""
-    if not getattr(args, "viser", False) or not getattr(
-        args,
-        "joint_control",
-        True,
-    ):
-        return None
-
-    from embodichain.lab.scripts.preview_joint_control import (
-        ArticulationPreviewController,
-    )
-    from embodichain.lab.sim.objects import Articulation
-
-    articulations = [asset for asset in assets if isinstance(asset, Articulation)]
-    if not articulations:
-        return None
-    runtime = sim.visualization_runtime
-    if runtime is None:
-        log_warning("Viser is enabled but its visualization runtime is unavailable.")
-        return None
-
-    controller = ArticulationPreviewController(articulations, runtime)
-    if not controller.has_controls:
-        log_warning("No supported independent articulation joints were found.")
-        return None
-    controller.update()
-    runtime.set_joint_control_provider(controller)
-    log_info(
-        "Viser articulation joint controls enabled.",
-        color="green",
-    )
-    return controller
+    return _preview._setup_viser_joint_control(sim, assets, args)
 
 
 def _step_preview_simulation(
@@ -293,10 +250,7 @@ def _step_preview_simulation(
     step: int = 1,
 ) -> None:
     """Apply pending preview controls before every physics step."""
-    for _ in range(step):
-        if joint_controller is not None:
-            joint_controller.update()
-        sim.update(step=1)
+    _preview._step_preview_simulation(sim, joint_controller, step=step)
 
 
 def _run_preview_mode(
@@ -323,11 +277,7 @@ def _run_preview_mode(
 
     target = "Viser browser preview" if viser_enabled else "Simulation window"
     log_info(f"{target} open. Press Ctrl+C to exit.", color="green")
-    try:
-        while True:
-            _step_preview_simulation(sim, joint_controller)
-    except KeyboardInterrupt:
-        pass
+    _preview._run_preview_loop(sim, joint_controller, interactive=True)
 
 
 def main(args: argparse.Namespace) -> None:

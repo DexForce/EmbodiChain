@@ -175,6 +175,33 @@ def test_collect_documented_exports_parses_all_api_pages(tmp_path: Path) -> None
     }
 
 
+def test_python_class_declarations_cover_explicit_public_imports(
+    tmp_path: Path,
+) -> None:
+    api_root = tmp_path / "api_reference"
+    modules = (
+        PublicModule("sample", ("Alpha", "Beta", "Missing"), tmp_path / "sample"),
+    )
+    _write(
+        api_root / "classes.rst",
+        """.. currentmodule:: sample
+
+.. py:class:: Alpha(value=None)
+
+   The configurable alpha implementation.
+
+.. py:class:: sample.Beta
+
+   The beta implementation. See :class:`Missing` for another type.
+""",
+    )
+
+    assert collect_documented_exports(api_root, modules) == {
+        "sample.Alpha",
+        "sample.Beta",
+    }
+
+
 def test_find_missing_exports_reports_public_import_path(tmp_path: Path) -> None:
     modules = (PublicModule("sample", ("Alpha", "Beta"), tmp_path / "sample.py"),)
 
@@ -234,3 +261,28 @@ def test_main_writes_missing_json_to_stdout(
     assert exit_code == 1
     assert json.loads(captured.out)["missing_count"] == 1
     assert captured.err == ""
+
+
+@pytest.mark.parametrize(
+    "package,module,exports",
+    [
+        (
+            "embodichain_benchmarks",
+            "embodichain_benchmarks.motion_generation",
+            {"run_benchmark", "PlannerAdapter"},
+        ),
+        (
+            "embodichain_models",
+            "embodichain_models.dynamics.nerd.model",
+            {"NeRDModel", "NeRDModelCfg"},
+        ),
+    ],
+)
+def test_default_inventory_includes_bundled_extension_public_exports(
+    package, module, exports
+):
+    """Moving evaluation to an extension must not remove it from API coverage."""
+    roots = [root for root in _checker.DEFAULT_PACKAGE_ROOTS if root.module == package]
+    assert len(roots) == 1
+    modules = {module.name: module for module in discover_public_modules(roots)}
+    assert exports <= set(modules[module].exports)

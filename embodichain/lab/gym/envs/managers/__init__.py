@@ -19,8 +19,12 @@
 Each manager owns a typed ``@configclass`` config whose attributes are ``FunctorCfg`` instances; the config attribute name becomes the functor's unique identifier.
 """
 
+from __future__ import annotations
+
 from .cfg import (
     FunctorCfg,
+    ConditionCfg,
+    RLTaskCfg,
     SceneEntityCfg,
     EventCfg,
     ObservationCfg,
@@ -29,6 +33,7 @@ from .cfg import (
     DatasetFunctorCfg,
 )
 from .manager_base import Functor, ManagerBase
+from .termination_manager import TerminationManager
 from .event_manager import EventManager
 from .observation_manager import ObservationManager
 from .reward_manager import RewardManager
@@ -41,6 +46,9 @@ from .async_datasets import AsyncLeRobotRecorder
 
 __all__ = [
     "FunctorCfg",
+    "ConditionCfg",
+    "RLTaskCfg",
+    "TerminationManager",
     "SceneEntityCfg",
     "EventCfg",
     "ObservationCfg",
@@ -64,7 +72,11 @@ __all__ = [
     "JointPositionToLimitsAction",
     "JointVelocityAction",
     "ParallelGripperAction",
+    "RelativeEefDlsAction",
+    "RelativeEefPoseAction",
     "RelativeJointPositionAction",
+    "register_action_contract",
+    "resolve_action_contract",
     "DatasetManager",
     "LeRobotRecorder",
     "AsyncLeRobotRecorder",

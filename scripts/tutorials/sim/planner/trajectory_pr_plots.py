@@ -13,13 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Plot the trajectory PR's main features without starting simulation."""
+"""Plot trajectory geometry and timing features without starting simulation."""
 
 from __future__ import annotations
 
 import argparse
 import os
 from pathlib import Path
+from functools import partial
 from typing import Literal
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/embodichain-matplotlib")
@@ -30,10 +31,12 @@ from matplotlib.figure import Figure
 
 from embodichain.lab.sim.motion.planners.bezier import BezierPath
 from embodichain.lab.sim.motion.planners.se3 import plan_se3_line
-from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
-    TrapezoidalPlanOptions,
-    _plan_linear_profiles,
-)
+
+if __package__:
+    from ._profile_examples import plan_example
+else:
+    from _profile_examples import plan_example
+
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 Scenario = Literal[
@@ -41,29 +44,7 @@ Scenario = Literal[
 ]
 
 
-def _plan(
-    waypoints: torch.Tensor,
-    profile: Literal["trapezoidal", "double_s"],
-    *,
-    blend_tolerance: float = 0.0,
-    minimum_duration: float | None = None,
-) -> PlanResult:
-    return _plan_linear_profiles(
-        waypoints,
-        TrapezoidalPlanOptions(
-            profile=profile,
-            constraints={
-                "velocity": [0.8, 0.6],
-                "acceleration": [1.5, 1.2],
-                "jerk": [4.0, 3.0],
-            },
-            sample_interval=501,
-            stop_at_waypoints=blend_tolerance == 0.0,
-            blend_tolerance=blend_tolerance,
-            minimum_duration=minimum_duration,
-            backend="torch",
-        ),
-    )
+_plan = partial(plan_example, samples=501)
 
 
 def _time(result: PlanResult) -> torch.Tensor:

@@ -31,7 +31,8 @@ from dexsim.spawn import (
 )
 from dexsim.types import ActorType
 
-from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg, VisualObjectCfg
+from embodichain.lab.sim.cfg.source import _asset_file_path, _source_prim_path
 from embodichain.lab.sim.spawn.descriptors import (
     _apply_newton_gap_default,
     _compile_default_collision,
@@ -46,7 +47,7 @@ from embodichain.lab.sim.spawn.descriptors import (
     _vector3,
 )
 
-__all__ = ["articulation_desc_from_usd", "rigid_desc_from_usd"]
+__all__ = ["articulation_desc_from_usd", "rigid_desc_from_usd", "visual_desc_from_usd"]
 
 _PropertyCfgT = TypeVar("_PropertyCfgT")
 
@@ -105,16 +106,56 @@ def _overlay_collision_properties(
     source.newton = _overlay_optional_properties(source.newton, configured.newton)
 
 
+def visual_desc_from_usd(
+    cfg: VisualObjectCfg, *, per_env: bool = True
+) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
+    """Select a USD object's appearance, explicitly omitting its physics.
+
+    Args:
+        cfg: Source asset, optional exact prim path, and visual transform.
+        per_env: Replicate the visual in each environment.
+
+    Returns:
+        Render-only descriptor and referenced material templates.
+    """
+    cfg.validate()
+    scene, desc = _parse_singleton(
+        _asset_file_path(cfg),
+        "mesh_objects",
+        "visual object",
+        prim_path=_source_prim_path(cfg),
+    )
+    desc.name = _required_uid(cfg.uid, "Visual object")
+    desc.pose = _pose_from_cfg(cfg)
+    desc.per_env = per_env
+    desc.physics = None
+    desc.collisions = []
+    scale = _vector3(cfg.body_scale, field_name="body_scale")
+    desc.body_scale = scale
+    materials = _namespace_materials(desc.renders, scene.materials, desc.name)
+    material_ref, material_entry = _compile_visual_material(
+        desc.name, getattr(cfg.shape, "visual_material", None)
+    )
+    if material_entry is not None:
+        materials = {material_entry[0]: material_entry[1]}
+        for render in desc.renders:
+            render.material = None
+            render.material_ref = material_ref
+    return desc, materials
+
+
 def rigid_desc_from_usd(
     cfg: RigidObjectCfg,
     *,
     per_env: bool = True,
     newton_solver_type: str | None = None,
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
-    """Select the sole rigid object in a USD stage."""
+    """Select a rigid object by exact prim path, or require a singleton stage."""
     uid = _required_uid(cfg.uid, "Rigid object")
-    path = getattr(cfg.shape, "fpath", None)
-    scene, desc = _parse_singleton(path, "mesh_objects", "rigid object")
+    path = _asset_file_path(cfg)
+    scene, desc = _parse_singleton(
+        path, "mesh_objects", "rigid object", prim_path=_source_prim_path(cfg)
+    )
 
     desc.name = uid
     desc.pose = _pose_from_cfg(cfg)
@@ -160,7 +201,7 @@ def rigid_desc_from_usd(
     _apply_newton_gap_default(desc.collisions, newton_solver_type)
     material_ref, material_entry = _compile_visual_material(
         uid,
-        cfg.shape.visual_material,
+        getattr(cfg.shape, "visual_material", None),
     )
     if material_entry is not None:
         materials = {material_entry[0]: material_entry[1]}
@@ -177,15 +218,18 @@ def articulation_desc_from_usd(
     source_path: str | None = None,
     newton_solver_type: str | None = None,
 ) -> tuple[ArticulationDesc, dict[str, MaterialDesc]]:
-    """Select the sole articulation in a USD stage."""
+    """Select an articulation by exact prim path, or require a singleton stage."""
     preserve_asset_physics = cfg.resolve_asset_physics_mode() == "preserve"
     if not preserve_asset_physics:
         _validate_articulation_rigid_physics(
             cfg,
             newton_solver_type=newton_solver_type,
         )
-    path = source_path or cfg.fpath
-    scene, desc = _parse_singleton(path, "articulations", "articulation")
+    configured_path = _asset_file_path(cfg)
+    path = source_path or configured_path
+    scene, desc = _parse_singleton(
+        path, "articulations", "articulation", prim_path=_source_prim_path(cfg)
+    )
     uid = _required_uid(
         cfg.uid or os.path.splitext(os.path.basename(str(path)))[0],
         "Articulation",
@@ -209,7 +253,9 @@ def articulation_desc_from_usd(
     return desc, materials
 
 
-def _parse_singleton(path: object, collection: str, label: str):
+def _parse_singleton(
+    path: object, collection: str, label: str, *, prim_path: str | None = None
+):
     if path is None:
         raise ValueError(f"A USD path is required for the {label}.")
 
@@ -217,13 +263,20 @@ def _parse_singleton(path: object, collection: str, label: str):
 
     scene = parse_usd(str(path))
     candidates = getattr(scene, collection)
+    if prim_path is not None:
+        candidates = [
+            item
+            for item in candidates
+            if item.usd is not None and item.usd.prim_path == prim_path
+        ]
     if len(candidates) != 1:
         found = [
             (item.name, None if item.usd is None else item.usd.prim_path)
             for item in candidates
         ]
+        selection = "" if prim_path is None else f" at prim path {prim_path!r}"
         raise ValueError(
-            f"Expected exactly one {label} in USD file {path!r}, found "
+            f"Expected exactly one {label} in USD file {path!r}{selection}, found "
             f"{len(candidates)}: {found}."
         )
     return scene, candidates[0]

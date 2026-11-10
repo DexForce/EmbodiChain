@@ -35,7 +35,7 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain_robots import URRobotCfg
 
 NUM_ENVS = 4
 CONTACT_TEST_WIDTH = 320

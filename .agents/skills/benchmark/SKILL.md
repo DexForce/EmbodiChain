@@ -10,6 +10,7 @@ This skill guides you through writing well-structured benchmark scripts for Embo
 ## Usage
 
 Invoke this skill when:
+
 - A user asks to write or extend a benchmark script for any EmbodiChain module
 - Comparing CPU vs GPU implementations (e.g., Warp CUDA vs pure-Python)
 - Measuring throughput of samplers, metrics, FK/IK solvers, or data pipelines
@@ -26,8 +27,8 @@ scripts/benchmark/<domain>/<benchmark_name>.py
 ```
 
 Examples:
-- `scripts/benchmark/robotics/kinematic_solver/opw_solver.py`
-- `scripts/benchmark/workspace_analyzer/benchmark_workspace_analyzer.py`
+- `scripts/benchmark/robotics/kinematic_solver/ur_solver.py`
+- `scripts/benchmark/scene/geometry_kernels.py`
 
 ### File Header
 
@@ -64,9 +65,17 @@ Run: python -m scripts.benchmark.<domain>.<benchmark_name>
 ### 1. Identify What to Benchmark
 
 Ask yourself:
+
 - **What implementations are being compared?** (e.g., Warp CUDA vs. CPU, vectorized vs. loop-based)
-- **What is the primary metric?** (wall-clock time, mean error, throughput)
-- **What sample sizes cover realistic usage?** Typically: `[100, 1000, 10000, 100000]`
+- **What is the primary metric?** Latency, throughput or memory, with a stated correctness/quality threshold.
+- **What sizes cover the caller's workload?** Include single-item/small batches when used, typical sizes and a larger supported size within the memory budget.
+- **What is timed?** Distinguish device-resident computation, transfer-inclusive calls and end-to-end execution. Measure first-call/setup cost separately when relevant to the caller.
+
+Record hardware, software versions, device, dtype, shapes, seeds, CPU thread
+counts, warmup/repeats, synchronization method and measurement scope. For a
+performance-sensitive implementation, use
+[implement-performance](../implement-performance/SKILL.md) to establish the
+workload and baseline before choosing an optimization.
 
 ### 2. Structure the Script
 
@@ -81,82 +90,98 @@ run_all_benchmarks()        # calls all of the above + prints header/footer
 
 ### 3. Write Individual Benchmark Functions
 
-Each benchmark function follows this pattern:
+Use `time.perf_counter()` for wall latency on CPU and GPU. For asynchronous
+device work, synchronize the participating backend/device before starting and
+before stopping the clock. Torch synchronization is sufficient only when all
+participating work is ordered on its streams; otherwise synchronize the owning
+backend or establish explicit dependencies. Synchronization belongs in the
+benchmark harness, not in the production implementation to make timing easier.
+
+Warm each implementation and relevant shape before steady-state measurement;
+exclude compilation, lazy initialization and input generation from that scope.
+Repeat measurements and report median latency and repetition count. Add
+dispersion or tail latency when relevant; use enough samples for a meaningful
+tail estimate. Measure throughput with a separate repeated-work window when
+per-call synchronization would disrupt the workload's intended overlap.
+
+This helper measures completed-call wall latency. The caller supplies a no-op
+for synchronous CPU work or a synchronization callback for the actual backend:
 
 ```python
-def benchmark_<name>():
-    """One-line description of what is being measured."""
-    from embodichain.<module.path> import SomeClass, SomeCfg
+from collections.abc import Callable
+import statistics
+import time
 
-    # --- Setup (not timed) ---
-    cfg = SomeCfg(...)
-    obj = cfg.init_solver(...)  # or SomeClass(cfg)
 
-    print("\n=== <Name> Benchmark ===")
-    for n in [100, 1000, 10000, 100000]:
-        # Prepare inputs (not timed)
-        inputs = ...
+def measure_latency(
+    operation: Callable[[], object],
+    synchronize: Callable[[], None],
+    *,
+    warmup: int = 5,
+    repeats: int = 20,
+) -> dict[str, object]:
+    """Measure repeated completed calls; release outputs outside timing."""
+    if warmup < 1 or repeats < 1:
+        raise ValueError("warmup and repeats must be positive")
+    for _ in range(warmup):
+        result = operation()
+        synchronize()
+        del result
 
-        # --- Timed block ---
+    samples_ms: list[float] = []
+    for _ in range(repeats):
+        synchronize()
         start = time.perf_counter()
-        result = obj.compute(inputs)       # or obj.get_ik(...) etc.
-        elapsed = time.perf_counter() - start
-
-        print(f"  n={n:>7d}: {elapsed*1000:>10.2f} ms (...)")
+        result = operation()
+        synchronize()
+        samples_ms.append((time.perf_counter() - start) * 1000)
+        del result
+    return {
+        "cost_time_ms": statistics.median(samples_ms),
+        "repeats": repeats,
+        "samples_ms": samples_ms,
+    }
 ```
 
-Key rules:
-- Use `time.perf_counter()` for high-resolution wall-clock timing, **not** `time.time()`.
-- Only time the core computation — exclude setup, data preparation, and print statements.
-- Print results in milliseconds (`elapsed * 1000`) with consistent column alignment using `>` format specs.
+For Torch CUDA, pass `lambda: torch.cuda.synchronize(device)` with the explicit
+target device; for Warp-owned work use a matching Warp synchronization callback.
+CUDA events are an alternative for device elapsed time when all measured work
+is ordered between the events; label that scope separately from wall latency.
 
-> **Exception**: When benchmarking GPU (Warp/CUDA) code alongside a CPU baseline, it is acceptable to use `time.time()` for coarser comparison timing, as seen in `opw_solver.py`. Prefer `time.perf_counter()` for CPU-only benchmarks.
+Keep logging, correctness checks and memory profiling outside latency samples.
+Use the caller's intended autograd/inference mode. Reset mutable inputs/state
+between samples outside timing, unless resetting is part of the measured API.
+For extremely short calls, use repeated-work windows and report the window size
+and synchronization policy rather than relying on timer-resolution noise.
 
 ### 4. Comparing Two Implementations
 
-When the benchmark compares two backends (e.g., Warp CUDA vs. Python OPW):
+Use equivalent seeded inputs, precision, quality thresholds, convergence
+budgets and success semantics for baseline and proposed implementations.
+Disclose differing settings as a quality/performance tradeoff. Warm each backend
+independently and apply the same timing scope; repeat or alternate comparison
+order when shared-machine load or thermal drift affects the result.
 
-```python
-def check_<name>(solver_a, solver_b, n_samples=1000):
-    """Run both solvers and return timing + accuracy metrics."""
-    # shared input generation
-    qpos = ...
+For device-resident comparison, prepare inputs on each device before timing.
+Measure host-to-device and device-to-host copies separately or include them in
+an explicitly labeled end-to-end case that consumes the result. Kernel speedup
+does not establish application speedup. Report latency/throughput and memory
+changes for each relevant size, including regressions and CPU/GPU crossover.
 
-    # --- Solver A (e.g., Warp CUDA) ---
-    start = time.time()
-    success_a, result_a = solver_a.get_ik(xpos, ...)
-    time_a = time.time() - start
-    t_err_a, r_err_a = get_poses_err(...)
-
-    # --- Solver B (e.g., CPU) ---
-    start = time.time()
-    success_b, result_b = solver_b.get_ik(xpos, ...)
-    time_b = time.time() - start
-    t_err_b, r_err_b = get_poses_err(...)
-
-    return time_a, t_err_a, r_err_a, time_b, t_err_b, r_err_b
-
-
-def benchmark_<name>():
-    cfg = ...
-    solver_a = cfg.init_solver(device=torch.device("cuda"), ...)
-    solver_b = cfg.init_solver(device=torch.device("cpu"),  ...)
-
-    for n in [100, 1000, 10000, 100000]:
-        time_a, t_err_a, r_err_a, time_b, t_err_b, r_err_b = check_<name>(
-            solver_a, solver_b, n_samples=n
-        )
-        print(f"**** Test over {n} samples:")
-        print(f"===Impl A time:  {time_a * 1000:.6f} ms")
-        print(f"   Translation mean error: {t_err_a * 1000:.6f} mm")
-        print(f"   Rotation mean error:    {r_err_a * 180 / np.pi:.6f} degrees")
-        print(f"===Impl B time:  {time_b * 1000:.6f} ms")
-        ...
-```
+Use the synchronized timing and separate memory passes in
+`scripts/benchmark/robotics/kinematic_solver/ur_solver.py` as a Torch/Warp example.
+`scripts/benchmark/scene/geometry_kernels.py` illustrates separate resident and
+transfer-inclusive cases. Verify measurement scope rather than copying results.
 
 ### 5. Report Accuracy Alongside Speed
 
 For FK/IK solvers, always verify correctness by running FK on the IK output and measuring pose error:
+
+Report success rate over all attempted inputs. Evaluate pose errors on valid
+outputs, explicitly handle no-success cases, and count nonfinite/invalid outputs
+as failures. Use an independent reference where practical. Preserve candidate
+ordering, joint limits and failure-mask semantics; include gradient checks when
+the API promises differentiability. Run these checks outside the timed region.
 
 ```python
 def get_pose_err(matrix_a: np.ndarray, matrix_b: np.ndarray) -> tuple[float, float]:
@@ -310,7 +335,7 @@ def write_markdown_report(
         lines.extend(["", "## Notes", ""])
         lines.extend([f"- {note}" for note in notes])
 
-    report_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return report_path
 ```
 
@@ -338,7 +363,7 @@ def run_all_benchmarks() -> None:
         perf_rows=perf_rows,
         metric_rows=metric_rows,
         leaderboard_rows=leaderboard_rows,
-        notes=["CPU/GPU memory fields are deltas measured around timed calls."],
+        notes=["Memory uses a separate warmed call; latency is median completed-call wall time."],
     )
     print(f"Markdown report saved: {report_path}")
 ```
@@ -362,94 +387,66 @@ def run_all_benchmarks() -> None:
 
 ## Measuring Memory Usage
 
-Always measure **both GPU VRAM and CPU RAM** alongside wall-clock time. Use the helpers below.
+Measure memory in a separate representative call after warming the implementation
+and releasing earlier outputs. Keep inputs and retained-output policy equivalent
+across implementations; allocator reuse is part of the stated steady-state
+scope. Report persistent buffer/cache storage separately when warmup allocated
+it. A cold-start or capacity-growth case needs its own labeled measurement.
 
-### GPU VRAM (via PyTorch CUDA)
+Use process RSS for CPU retained-memory delta. Before/after RSS does not measure
+transient peak memory; use an appropriate peak profiler when CPU peak memory is
+material. Torch allocated/peak statistics cover its CUDA allocator, not all
+Warp/native allocations or total device usage. State allocator coverage and use
+backend-specific accounting or explicit buffer sizes where needed. Mark
+unavailable or inapplicable metrics as such rather than reporting zero usage.
+
+This example retains one output and reports total Torch peak allocated memory
+plus the additional peak above the warmed baseline. Synchronization must cover
+all participating work, as in the latency helper:
 
 ```python
+from collections.abc import Callable
+import psutil
 import torch
 
-def get_gpu_memory_mb() -> float:
-    """Return current GPU VRAM allocated by PyTorch in MB."""
-    if torch.cuda.is_available():
-        return torch.cuda.memory_allocated() / 1024 ** 2
-    return 0.0
 
-# Usage pattern inside a benchmark loop:
-torch.cuda.reset_peak_memory_stats()          # reset peak counter before timed block
-mem_before = get_gpu_memory_mb()
+def measure_memory(
+    operation: Callable[[], object],
+    synchronize: Callable[[], None],
+    *,
+    device: torch.device | None = None,
+) -> tuple[object, dict[str, float | None]]:
+    """Measure a separate warmed call, retaining one output for validation."""
+    synchronize()
+    process = psutil.Process()
+    mib = 1024**2
+    cpu_before = process.memory_info().rss
+    cuda = device is not None and device.type == "cuda"
+    gpu_before = torch.cuda.memory_allocated(device) if cuda else 0
+    if cuda:
+        torch.cuda.reset_peak_memory_stats(device)
 
-start = time.perf_counter()
-result = obj.compute(inputs)
-elapsed = time.perf_counter() - start
-
-mem_after = get_gpu_memory_mb()
-peak_vram = torch.cuda.max_memory_allocated() / 1024 ** 2  # peak during timed block
-
-print(
-    f"  n={n:>7d}: {elapsed*1000:>10.2f} ms | "
-    f"VRAM delta={mem_after - mem_before:+.1f} MB  peak={peak_vram:.1f} MB"
-)
+    result = operation()
+    synchronize()
+    metrics: dict[str, float | None] = {
+        "cpu_delta_mb": (process.memory_info().rss - cpu_before) / mib,
+        "gpu_delta_mb": None,
+        "peak_gpu_mb": None,
+        "peak_gpu_delta_mb": None,
+    }
+    if cuda:
+        peak = torch.cuda.max_memory_allocated(device)
+        metrics.update(
+            gpu_delta_mb=(torch.cuda.memory_allocated(device) - gpu_before) / mib,
+            peak_gpu_mb=peak / mib,
+            peak_gpu_delta_mb=(peak - gpu_before) / mib,
+        )
+    return result, metrics
 ```
 
-### CPU RAM (via `psutil`)
-
-```python
-import psutil, os
-
-def get_cpu_memory_mb() -> float:
-    """Return current process RSS (resident set size) in MB."""
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / 1024 ** 2
-
-# Usage pattern:
-mem_before = get_cpu_memory_mb()
-
-start = time.perf_counter()
-result = obj.compute(inputs)
-elapsed = time.perf_counter() - start
-
-mem_after = get_cpu_memory_mb()
-
-print(
-    f"  n={n:>7d}: {elapsed*1000:>10.2f} ms | "
-    f"RAM delta={mem_after - mem_before:+.1f} MB"
-)
-```
-
-### Combined Helper (recommended)
-
-For benchmarks that use both CPU and GPU, combine into a single snapshot:
-
-```python
-import os, psutil, torch
-
-def memory_snapshot() -> dict:
-    """Return a dict with current CPU RSS and GPU allocated memory in MB."""
-    process = psutil.Process(os.getpid())
-    cpu_mb = process.memory_info().rss / 1024 ** 2
-    gpu_mb = torch.cuda.memory_allocated() / 1024 ** 2 if torch.cuda.is_available() else 0.0
-    return {"cpu_mb": cpu_mb, "gpu_mb": gpu_mb}
-
-# Usage:
-torch.cuda.reset_peak_memory_stats()
-before = memory_snapshot()
-
-start = time.perf_counter()
-result = obj.compute(inputs)
-elapsed = time.perf_counter() - start
-
-after = memory_snapshot()
-peak_gpu = torch.cuda.max_memory_allocated() / 1024 ** 2
-
-print(
-    f"  n={n:>7d}: {elapsed*1000:>10.2f} ms | "
-    f"CPU Δ={after['cpu_mb'] - before['cpu_mb']:+.1f} MB  "
-    f"GPU Δ={after['gpu_mb'] - before['gpu_mb']:+.1f} MB  peak GPU={peak_gpu:.1f} MB"
-)
-```
-
-> Add `psutil` to the project's dev-dependencies if not already present (`pip install psutil`).
+Use existing project dependencies for optional instrumentation. Missing hardware
+or instrumentation must produce an explicit skipped/unmeasured field and scope
+limitation, not a fabricated result or a default dependency change.
 
 ---
 
@@ -463,7 +460,7 @@ import numpy as np
 import torch
 import warp as wp                          # only when GPU kernels are benchmarked
 from scipy.spatial.transform import Rotation  # only when needed
-from typing import Tuple, List             # or use built-in generics (Python ≥ 3.10)
+from collections.abc import Callable       # when building measurement helpers
 ```
 
 ---
@@ -475,11 +472,16 @@ Before finishing a benchmark script:
 - [ ] Apache 2.0 copyright header is present
 - [ ] Module-level docstring with `Run:` line
 - [ ] Each function has a one-line docstring
-- [ ] Setup code is **outside** the timed block
-- [ ] Timing uses `time.perf_counter()` (or `time.time()` when comparing GPU/CPU coarsely)
-- [ ] CPU RAM measured with `psutil` (delta MB before/after timed block)
-- [ ] GPU VRAM measured with `torch.cuda.memory_allocated()` + `torch.cuda.max_memory_allocated()` (delta + peak)
-- [ ] `torch.cuda.reset_peak_memory_stats()` called before each timed block
+- [ ] Workload sizes, dtype/device, hardware/software and CPU thread counts recorded
+- [ ] Equivalent seeded inputs, quality settings and success criteria for comparisons
+- [ ] Warmup is excluded from repeated steady-state samples; cold-start cost labeled if measured
+- [ ] Wall timing uses `time.perf_counter()` with explicit backend/device synchronization
+- [ ] Median, repeats and relevant variability/tail metrics reported
+- [ ] Device-resident, transfer-inclusive and end-to-end scopes distinguished
+- [ ] Memory measured in a separate warmed call with equivalent output lifetime
+- [ ] CPU RSS delta labeled as retained delta, not transient peak
+- [ ] GPU allocator coverage and total versus incremental peak clearly labeled
+- [ ] Persistent buffers/caches and unavailable metrics explicitly accounted for
 - [ ] Accuracy metrics reported alongside timing (for solver benchmarks)
 - [ ] Graceful skip for benchmarks that need unavailable hardware
 - [ ] `run_all_benchmarks()` orchestrator with formatted separators

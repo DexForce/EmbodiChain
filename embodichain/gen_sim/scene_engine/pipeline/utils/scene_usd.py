@@ -37,6 +37,9 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import VisualizationCfg
+from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
+    _read_revolute_qpos_limits,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
     UsdSceneBinding,
@@ -95,7 +98,7 @@ def _mesh_collision_cfg(max_convex_hull_num: object) -> MeshCollisionCfg:
     return MeshCollisionCfg(
         approximation="convex_decomposition",
         max_hulls=hull_count,
-        acd_method="vhacd",
+        acd_method="visacd",
     )
 
 
@@ -645,6 +648,7 @@ def _add_articulations(
             usdc_path = runtime_path
         if entry.get("fix_base", True) is not True:
             raise ValueError(f"Articulation entry {uid!r} must set fix_base=true.")
+        joint_limits = _read_revolute_qpos_limits(usdc_path) or None
         articulations.append(
             sim.add_articulation(
                 ArticulationCfg(
@@ -660,6 +664,8 @@ def _add_articulations(
                     ),
                     root_props=ArticulationRootPropertiesCfg(fixed_base=True),
                     build_pk_chain=False,
+                    asset_physics_mode="overlay" if joint_limits else "preserve",
+                    qpos_limits=joint_limits,
                 )
             )
         )
@@ -950,7 +956,11 @@ def _export_material_without_texture(
     material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
     _set_safe_material_input(
         source_material=source_material,
-        getter_name="get_base_color",
+        getter_name=(
+            "get_base_color_linear"
+            if callable(getattr(source_material, "get_base_color_linear", None))
+            else "get_base_color"
+        ),
         shader=shader,
         input_name="diffuseColor",
         value_type=Sdf.ValueTypeNames.Color3f,
@@ -969,6 +979,14 @@ def _export_material_without_texture(
         getter_name="get_roughness",
         shader=shader,
         input_name="roughness",
+        value_type=Sdf.ValueTypeNames.Float,
+        converter=float,
+    )
+    _set_safe_material_input(
+        source_material=source_material,
+        getter_name="get_metallic",
+        shader=shader,
+        input_name="metallic",
         value_type=Sdf.ValueTypeNames.Float,
         converter=float,
     )
@@ -995,7 +1013,14 @@ def _set_safe_material_input(
     """Set a scalar material input without making USD export fragile."""
     try:
         value = getattr(source_material, getter_name)()
-    except (MemoryError, SystemError, RuntimeError, TypeError, ValueError):
+    except (
+        AttributeError,
+        MemoryError,
+        SystemError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ):
         return
     if value is not None:
         shader.CreateInput(input_name, value_type).Set(converter(value))
@@ -1059,6 +1084,7 @@ def _apply_runtime_textures_to_usd(
                         texture_root=texture_root,
                         scene_usd_root=scene_usd_root,
                         uid=uid,
+                        flip_vertical=True,
                     )
                     for channel, source_texture in texture_paths.items()
                 }
@@ -1223,8 +1249,9 @@ def _copy_runtime_texture(
     texture_root: Path,
     scene_usd_root: Path,
     uid: str,
+    flip_vertical: bool = False,
 ) -> str:
-    """Copy one package-local texture and return its scene-USD-relative URI."""
+    """Copy a texture, optionally baking the glTF-to-USD image origin change."""
     safe_uid = _validate_uid(uid, label="Scene USD texture")
     target_texture = _resolve_contained_path(
         texture_root,
@@ -1232,7 +1259,17 @@ def _copy_runtime_texture(
         label="Scene USD texture",
     )
     texture_root.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_texture, target_texture)
+    if flip_vertical:
+        from PIL import Image
+
+        # glTF uses a top-left image origin; USD samples from the bottom left.
+        # Bake the conversion into the copied image for all PBR channels.
+        # This works with DexSim 0.5.1rc1, which does not apply UsdTransform2d,
+        # and preserves mesh UVs and their normal-map tangent basis.
+        with Image.open(source_texture) as image:
+            image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(target_texture)
+    else:
+        shutil.copy2(source_texture, target_texture)
     return target_texture.relative_to(scene_usd_root).as_posix()
 
 
@@ -1331,7 +1368,7 @@ def _usd_texture_shader(
     relative_texture: str,
     st_reader: object,
 ) -> object:
-    """Define one USD UV texture node with a shared ``st`` reader."""
+    """Define one USD UV texture node with a shared coordinate source."""
     from pxr import Sdf, UsdShade
 
     texture = UsdShade.Shader.Define(

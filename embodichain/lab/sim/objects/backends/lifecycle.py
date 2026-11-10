@@ -100,7 +100,7 @@ def finalize_articulation_spawn(articulation: object, result: object) -> None:
 
 
 def apply_rigid_initial_state(rigid_object: object) -> None:
-    """Apply backend-specific initial-state handling after rigid construction."""
+    """Apply backend-specific initial state without advancing physics."""
     if rigid_object.is_spawn_bound:
         if rigid_object._spawn_result.backend == "dexsim":
             rigid_object.reset()
@@ -117,5 +117,6 @@ def apply_rigid_initial_state(rigid_object: object) -> None:
         return
 
     if rigid_object.device.type == "cuda":
-        rigid_object._world.update(0.001)
+        # Publish pending native state without moving existing scene objects.
+        rigid_object._world.update(0.0)
     rigid_object.reset()

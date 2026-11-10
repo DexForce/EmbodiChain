@@ -23,10 +23,10 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
     AntipodalAffordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     ControlPartCommandProfile,
@@ -86,7 +86,7 @@ _MOTION_CAPABILITIES = frozenset(
 )
 
 
-def _action_option_templates() -> dict[str, object]:
+def _skill_option_templates() -> dict[str, object]:
     """Return exact built-in semantic-call option declarations."""
     return {
         "pick": PickUpOptions(),
@@ -97,7 +97,7 @@ def _action_option_templates() -> dict[str, object]:
 
 def _preset(preset_id: str, **kwargs: object) -> SkillPolicyPreset:
     """Build one complete test preset."""
-    kwargs.setdefault("action_option_templates", _action_option_templates())
+    kwargs.setdefault("skill_option_templates", _skill_option_templates())
     kwargs.setdefault("effect_assurance", EffectAssurance.VERIFIED)
     return SkillPolicyPreset(preset_id, **kwargs)
 
@@ -250,7 +250,7 @@ def _engine_for_integration(
     integration: SemanticIntegrationManifest,
     *,
     supports_dynamic_collision_world: bool = False,
-) -> AtomicActionEngine:
+) -> AtomicSkillEngine:
     """Build a minimal live engine whose resource graph matches the manifest."""
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -270,9 +270,9 @@ def _engine_for_integration(
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
     generator.supports_dynamic_collision_world = supports_dynamic_collision_world
-    return AtomicActionEngine(
+    return AtomicSkillEngine(
         generator,
-        control_profiles=integration.robot_profile.action_control_profiles(),
+        control_profiles=integration.robot_profile.skill_control_profiles(),
     )
 
 
@@ -517,7 +517,7 @@ def test_semantic_integration_rejects_monitor_for_unknown_call_with_path() -> No
     )
 
 
-def test_semantic_integration_rejects_unknown_action_option_call() -> None:
+def test_semantic_integration_rejects_unknown_skill_option_call() -> None:
     registry, _ = _scene_registry(with_default=True)
 
     with pytest.raises(SemanticValidationError) as error:
@@ -526,14 +526,14 @@ def test_semantic_integration_rejects_unknown_action_option_call() -> None:
             preset=SkillPolicyPreset(
                 "safe",
                 effect_assurance=EffectAssurance.VERIFIED,
-                action_option_templates={"vendor.unknown": PickUpOptions()},
+                skill_option_templates={"vendor.unknown": PickUpOptions()},
             ),
         )
 
     diagnostic = error.value.diagnostic
-    assert diagnostic.code == "unknown_action_option_call"
+    assert diagnostic.code == "unknown_skill_option_call"
     assert diagnostic.path[-2:] == (
-        "action_option_templates",
+        "skill_option_templates",
         "vendor.unknown",
     )
 
@@ -547,11 +547,11 @@ def test_semantic_integration_validates_exact_action_option_type() -> None:
             preset=SkillPolicyPreset(
                 "safe",
                 effect_assurance=EffectAssurance.VERIFIED,
-                action_option_templates={"pick": PlaceOptions()},
+                skill_option_templates={"pick": PlaceOptions()},
             ),
         )
 
-    assert error.value.diagnostic.code == "incompatible_action_option_template"
+    assert error.value.diagnostic.code == "incompatible_skill_option_template"
     assert error.value.diagnostic.path[-1] == "pick"
 
 
@@ -564,24 +564,24 @@ def test_semantic_integration_rejects_compiler_owned_option_fields() -> None:
             preset=SkillPolicyPreset(
                 "safe",
                 effect_assurance=EffectAssurance.VERIFIED,
-                action_option_templates={
+                skill_option_templates={
                     "pick": PickUpOptions(
                         downstream_object_target_poses=(torch.eye(4),)
                     )
                 },
             ),
         )
-    assert pick_error.value.diagnostic.code == "reserved_action_option_field"
+    assert pick_error.value.diagnostic.code == "reserved_skill_option_field"
     assert pick_error.value.diagnostic.path[-1] == ("downstream_object_target_poses")
 
 
-def test_static_link_requires_selected_preset_action_option_template() -> None:
+def test_static_link_requires_selected_preset_skill_option_template() -> None:
     registry, _ = _scene_registry(with_default=True)
     integration = _semantic_integration(
         registry,
         preset=SkillPolicyPreset(
             "safe",
-            action_option_templates={},
+            skill_option_templates={},
             effect_assurance=EffectAssurance.VERIFIED,
         ),
     )
@@ -589,13 +589,13 @@ def test_static_link_requires_selected_preset_action_option_template() -> None:
     with pytest.raises(SemanticValidationError) as error:
         integration.link_call(Pick(object=SceneObjectRef("cube")))
 
-    assert error.value.diagnostic.code == "missing_action_option_template"
+    assert error.value.diagnostic.code == "missing_skill_option_template"
     assert error.value.diagnostic.path == (
         "integration",
         "robot_profile",
         "presets",
         "safe",
-        "action_option_templates",
+        "skill_option_templates",
         "pick",
     )
     assert "selected at call" in error.value.diagnostic.message
@@ -722,7 +722,7 @@ def test_bound_semantic_call_is_factory_owned_by_installed_profile() -> None:
     result = bound_integration.link_call(Pick(object=SceneObjectRef("cube")))
 
     assert result.robot_profile is bound_integration.robot_profile
-    assert result.binding.action_binding.owner_id == engine.binding_owner_id
+    assert result.binding.skill_binding.owner_id == engine.binding_owner_id
     with pytest.raises(TypeError, match="created by"):
         BoundSemanticCall()
 
@@ -937,7 +937,7 @@ def test_bind_rejects_invalid_engine_before_safe_capability_lookup() -> None:
         ),
     )
 
-    with pytest.raises(TypeError, match="engine must be an AtomicActionEngine"):
+    with pytest.raises(TypeError, match="engine must be an AtomicSkillEngine"):
         integration.bind(registry, object())  # type: ignore[arg-type]
 
     assert provider.calls == 0
@@ -1056,3 +1056,102 @@ def test_bound_semantic_integration_rejects_manifest_subclass_behavior() -> None
             robot_profile=bound_profile,
             engine=engine,
         )
+
+
+def test_pose_source_revision_survives_projection_and_rejects_live_identity_drift() -> (
+    None
+):
+    """Provider pose declarations participate in static/live identity matching."""
+    provider = _NeverObservedStateProvider()
+
+    def registry(revision: str | None) -> SceneRegistry:
+        return SceneRegistry(
+            (
+                SceneEntityRegistration(
+                    ref=SceneObjectRef("cube"),
+                    state_provider=provider,
+                    pose_source_revision=revision,
+                ),
+            )
+        )
+
+    original = registry("pose-v1")
+    projected = SceneEntityMetadata.from_registration(original.registrations[0])
+    assert projected.pose_source_revision == "pose-v1"
+    manifest = SceneManifest.from_registry(original)
+    assert manifest.entries[0].pose_source_revision == "pose-v1"
+    manifest.validate_registry(registry("pose-v1"))
+    for changed_revision in ("pose-v2", None):
+        with pytest.raises(SemanticValidationError) as error:
+            manifest.validate_registry(registry(changed_revision))
+        assert error.value.diagnostic.code == "scene_manifest_mismatch"
+    assert provider.calls == 0
+
+
+@pytest.mark.parametrize("revision", ["", " padded", "padded ", 1, True])
+def test_pose_source_revision_requires_an_identifier(revision: object) -> None:
+    """Static metadata and live registration share revision validation."""
+    with pytest.raises((TypeError, ValueError), match="pose_source_revision"):
+        SceneEntityMetadata(ref=SceneObjectRef("cube"), pose_source_revision=revision)
+    with pytest.raises((TypeError, ValueError), match="pose_source_revision"):
+        SceneEntityRegistration(
+            ref=SceneObjectRef("cube"),
+            state_provider=_NeverObservedStateProvider(),
+            pose_source_revision=revision,
+        )
+
+
+def test_pose_source_revision_requires_a_provider_and_defaults_to_none() -> None:
+    """Existing parent-relative affordances remain compatible without revisions."""
+    declaration = {
+        "ref": SceneAffordanceRef("cube.grasp"),
+        "parent": SceneObjectRef("cube"),
+        "native_name": "grasp",
+        "relative_pose": torch.eye(4),
+        "affordance": Affordance(),
+    }
+    assert SceneEntityRegistration(**declaration).pose_source_revision is None
+    with pytest.raises(
+        ValueError, match="pose_source_revision requires state_provider"
+    ):
+        SceneEntityRegistration(**declaration, pose_source_revision="pose-v1")
+
+
+def test_uninstalled_recovery_is_static_preflight_error_without_acquisition():
+    from embodichain.lab.sim.atomic_skills import PlanningRecovery, RecoveryPolicy
+
+    registry, provider = _scene_registry(with_default=True)
+    integration = _semantic_integration(
+        registry,
+        preset=_preset(
+            "default",
+            recovery_policy=RecoveryPolicy(
+                planning_recovery=PlanningRecovery("not_installed", "pick_up", 1)
+            ),
+        ),
+    )
+    with pytest.raises(SemanticValidationError) as failure:
+        integration.link_call(Pick(object=SceneObjectRef("cube")))
+    assert failure.value.diagnostic.code == "incompatible_planning_recovery"
+    assert provider.calls == 0
+
+
+def test_segment_recovery_without_handler_is_rejected_by_static_preflight():
+    registry, provider = _scene_registry(with_default=True)
+    integration = _semantic_integration(
+        registry,
+        preset=_preset(
+            "default",
+            motion_policy=MotionPolicy(
+                strategy="ik_interp",
+                interpolation_mode="fixed_grid",
+                ik_seed_mode="sequential",
+                acceleration_limit=None,
+                segment_sample_count_retries=(4, 6),
+            ),
+        ),
+    )
+    with pytest.raises(SemanticValidationError) as failure:
+        integration.link_call(Pick(object=SceneObjectRef("cube")))
+    assert failure.value.diagnostic.code == "incompatible_motion_policy"
+    assert provider.calls == 0

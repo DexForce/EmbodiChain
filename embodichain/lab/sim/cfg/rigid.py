@@ -28,6 +28,17 @@ from dexsim.types import PhysicalAttr
 from embodichain.utils import configclass
 from embodichain.utils.math import quat_wxyz_to_xyzw, quat_xyzw_to_wxyz
 
+__all__ = [
+    "MassPropertiesCfg",
+    "DefaultRigidBodyPropertiesCfg",
+    "CollisionPropertiesCfg",
+    "DefaultCollisionPropertiesCfg",
+    "NewtonCollisionPropertiesCfg",
+    "RigidBodyMaterialCfg",
+    "NewtonRigidBodyMaterialCfg",
+    "RigidBodyPhysicsCfg",
+]
+
 
 @configclass
 class MassPropertiesCfg:
@@ -223,6 +234,9 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     <https://newton-physics.github.io/newton/latest/concepts/collisions.html#shape-configuration>`_.
     """
 
+    priority: int | None = None
+    """MuJoCo contact-parameter priority; None preserves the source value."""
+
     condim: int | None = None
     """MuJoCo contact dimension: 1, 3, 4, or 6.
 
@@ -231,6 +245,12 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     friction is also required. Author before scene preparation so MuJoCo
     can allocate the corresponding constraint storage.
     """
+
+    contype: int | None = None
+    """MuJoCo collision-type bitmask; None preserves the source value."""
+
+    conaffinity: int | None = None
+    """MuJoCo collision-affinity bitmask; None preserves the source value."""
 
     has_particle_collision: bool | None = None
     """Whether Newton particles collide with this shape.
@@ -308,6 +328,19 @@ class NewtonRigidBodyMaterialCfg(RigidBodyMaterialCfg):
 
     kd: float | None = None
     """Normal contact damping coefficient."""
+
+    solref: tuple[float, float] | None = None
+    """Raw MuJoCo contact reference, overriding stiffness/damping conversion.
+
+    Both positive time-constant/damping-ratio and non-positive direct modes
+    retain their native meaning. Unsupported solvers reject explicit values.
+    """
+
+    solimp: tuple[float, float, float, float, float] | None = None
+    """Raw MuJoCo contact impedance; None preserves the source value."""
+
+    solmix: float | None = None
+    """MuJoCo weight for mixing contact parameters between colliding shapes."""
 
     kf: float | None = None
     """Tangential/friction damping coefficient."""

@@ -39,6 +39,9 @@ import trimesh
 
 from embodichain.data import get_data_path
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
+    get_parallel_jaw_collision_geometry,
+)
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
@@ -211,14 +214,13 @@ def _make_grasp_generator(
             model_id="benchmark_parallel_jaw",
             min_opening_width=0.003,
             max_opening_width=0.088,
-            finger_length=0.078,
         ),
+        collision_geometry=get_parallel_jaw_collision_geometry("dh_pgi_140_80"),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample,
             max_candidates=n_top_grasps,
         ),
         collision_cfg=ParallelJawGraspCollisionCfg(
-            point_sample_density=0.012,
             filter_ground_collision=True,
         ),
         annotation_cfg=GraspAnnotationCfg(force_refresh=force_refresh),

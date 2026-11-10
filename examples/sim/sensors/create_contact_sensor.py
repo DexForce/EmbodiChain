@@ -98,7 +98,7 @@ def create_cube(
 def robot_grasp_pose(robot: Robot, cube: RigidObject, sim: SimulationManager):
     sim.update(step=100)
     arm_ids = robot.get_joint_ids("arm")
-    gripper_ids = robot.get_joint_ids("hand")
+    gripper_ids = robot.get_joint_ids("eef")
     rest_arm_qpos = robot.get_qpos()[:, arm_ids]
     ee_xpos = robot.compute_fk(qpos=rest_arm_qpos, name="arm", to_matrix=True)
     target_xpos = ee_xpos.clone()
@@ -191,7 +191,7 @@ def create_robot(
                 ],
             }
         },
-        "control_parts": {"arm": ["Joint[1-6]"], "hand": ["finger[1-2]_joint"]},
+        "control_parts": {"arm": ["Joint[1-6]"], "eef": ["finger[1-2]_joint"]},
     }
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(robot_cfg_dict))
     return robot

@@ -17,6 +17,9 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
+from threading import Lock
 from pathlib import Path
 import numpy as np
 import torch
@@ -26,10 +29,10 @@ import gymnasium
 import gymnasium as gym
 
 from collections.abc import Mapping
-from typing import Callable, Dict, Any, List, Tuple, Union, Sequence
+from typing import TYPE_CHECKING, Callable, Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
-from tensordict import TensorDict
+from tensordict import TensorDict, TensorDictBase
 
 from embodichain.lab.sim.types import Device, Array
 from embodichain.lab.sim.objects import Robot
@@ -37,9 +40,15 @@ from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
 
+if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.cfg import RLTaskCfg
+    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab.sim.sensors import SensorCfg
+
 # Default manager modules for config parsing
 DEFAULT_MANAGER_MODULES = [
     "embodichain.lab.gym.envs.managers.actions",
+    "embodichain.lab.gym.envs.managers.conditions",
     "embodichain.lab.gym.envs.managers.datasets",
     "embodichain.lab.gym.envs.managers.async_datasets",
     "embodichain.lab.gym.envs.managers.randomization",
@@ -52,6 +61,16 @@ DEFAULT_MANAGER_MODULES = [
 # Extra manager modules registered by third-party packages via init hooks
 _EXTRA_MANAGER_MODULES: list[str] = []
 _PHYSICS_BACKENDS = frozenset({"default", "newton"})
+_RL_REGISTRATION_LOCK = Lock()
+
+# Pretrained policy bundles keep the training and Gym configuration snapshots
+# that were used to produce their checkpoints.  The published locomotion
+# bundles predate stable action contracts and still contain this implementation
+# name.  Keep the migration narrow: unsupported legacy protocols must continue
+# to fail instead of being guessed at.
+_LEGACY_ACTION_CONTRACTS = {
+    "DefaultJointPositionTerm": "joint_position.default_offset@1",
+}
 
 
 def _declared_physics_backend(config: Mapping[str, object]) -> str:
@@ -411,12 +430,180 @@ def cat_tensor_with_ids(
     return out
 
 
+def _robot_cfg_from_dict(config: dict) -> RobotCfg:
+    """Decode the shared robot declaration without constructing an environment."""
+    from embodichain.lab.sim.cfg import RobotCfg
+
+    robot_config = deepcopy(config)
+    robot_class_type = robot_config.pop("class_type", None)
+    if robot_class_type is None and "robot_type" in robot_config:
+        robot_class_type = robot_config.pop("robot_type")
+    if robot_class_type is not None:
+        from embodichain.robot_registry import resolve_robot_cfg
+
+        return resolve_robot_cfg(robot_class_type, robot_config)
+    return RobotCfg.from_dict(robot_config)
+
+
+def _collect_sensor_cfgs(
+    robot_cfg: RobotCfg | None, sensors: Sequence[SensorCfg]
+) -> list[SensorCfg]:
+    """Collect independent then mounted declarations, rejecting duplicate UIDs."""
+    combined = [*sensors, *getattr(robot_cfg, "sensors", [])]
+    seen = set()
+    for sensor in combined:
+        if sensor.uid is not None:
+            if sensor.uid in seen:
+                raise ValueError(f"Duplicate sensor uid {sensor.uid!r}.")
+            seen.add(sensor.uid)
+    return combined
+
+
+def _decode_rl_task(value: object, modules: Sequence[str]) -> RLTaskCfg:
+    from embodichain.lab.gym.envs.managers.cfg import (
+        ConditionCfg,
+        RLTaskCfg,
+        SceneEntityCfg,
+    )
+
+    if not isinstance(value, Mapping) or set(value) - {
+        "success",
+        "failure",
+        "truncation",
+    }:
+        raise ValueError(
+            "rl_task accepts only success, failure and truncation mappings."
+        )
+    groups = {}
+    for group in ("success", "failure", "truncation"):
+        entries = value.get(group, {})
+        if not isinstance(entries, Mapping):
+            raise TypeError(f"rl_task.{group} must be a mapping.")
+        groups[group] = {}
+        for name, declaration in entries.items():
+            if not isinstance(name, str) or not name or name != name.strip():
+                raise ValueError("Condition names must be nonempty strings.")
+            if (
+                not isinstance(declaration, Mapping)
+                or set(declaration) - {"func", "params"}
+                or "func" not in declaration
+            ):
+                raise ValueError(
+                    f"rl_task.{group}.{name} requires func and optional params."
+                )
+            func_name = declaration["func"]
+            if not isinstance(func_name, str):
+                raise TypeError(
+                    "Condition func must name a registered function or class."
+                )
+            params = deepcopy(declaration.get("params", {}))
+            if not isinstance(params, dict):
+                raise TypeError("Condition params must be a mapping.")
+            for key in tuple(params):
+                if key.endswith("entity_cfg") and isinstance(params[key], Mapping):
+                    params[key] = SceneEntityCfg(**params[key])
+            groups[group][name] = ConditionCfg(
+                func=find_function_from_modules(
+                    func_name, list(modules), raise_if_not_found=True
+                ),
+                params=params,
+            )
+    return RLTaskCfg(**groups)
+
+
+def _register_configured_rl(config: Mapping[str, Any], max_episode_steps: int) -> None:
+    from gymnasium.envs.registration import registry as gym_registry
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.utils.registration import (
+        REGISTERED_ENVS,
+        register_env_function,
+    )
+
+    env_id = config["id"]
+    if not isinstance(env_id, str) or not env_id or env_id != env_id.strip():
+        raise ValueError("Configured RL id must be a nonempty string.")
+    if type(max_episode_steps) is not int or max_episode_steps <= 0:
+        raise ValueError("Configured RL max_episode_steps must be a positive integer.")
+    signature = {
+        "rl_task": config["rl_task"],
+        "env": {
+            key: value
+            for key, value in config["env"].items()
+            if key
+            in {
+                "events",
+                "observations",
+                "rewards",
+                "actions",
+                "extensions",
+                "control_parts",
+                "active_joint_ids",
+                "sim_steps_per_control",
+                "target_control_frequency",
+            }
+        },
+        "physics": config["physics"],
+        "max_episode_steps": max_episode_steps,
+    }
+    signature["manager_order"] = {
+        name: list(config["env"].get(name, {}))
+        for name in ("events", "observations", "rewards", "actions")
+    }
+    signature["condition_order"] = {
+        name: list(config["rl_task"].get(name, {}))
+        for name in ("success", "failure", "truncation")
+    }
+    signature["scene"] = {
+        key: config[key]
+        for key in (
+            "robot",
+            "sensor",
+            "light",
+            "background",
+            "visual_object",
+            "rigid_object",
+            "rigid_object_group",
+            "articulation",
+            "physics_config",
+        )
+        if key in config
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(signature, sort_keys=True, allow_nan=False).encode()
+    ).hexdigest()
+    with _RL_REGISTRATION_LOCK:
+        existing = REGISTERED_ENVS.get(env_id)
+        if existing is not None:
+            if (
+                existing.cls is not EmbodiedEnv
+                or getattr(existing, "_configured_rl_fingerprint", None) != fingerprint
+            ):
+                raise ValueError(
+                    f"Configured RL environment ID {env_id!r} already has a different declaration."
+                )
+            if env_id not in gym_registry:
+                raise RuntimeError(
+                    f"Configured RL environment {env_id!r} lost its Gym registration."
+                )
+            return
+        if env_id in gym_registry:
+            raise ValueError(f"Gymnasium already owns configured RL ID {env_id!r}.")
+        register_env_function(
+            EmbodiedEnv,
+            env_id,
+            max_episode_steps=max_episode_steps,
+            supports_rl=True,
+        )
+        REGISTERED_ENVS[env_id]._configured_rl_fingerprint = fingerprint
+
+
 def config_to_cfg(
     config: dict,
     manager_modules: list | None = None,
     *,
     source_path: str | os.PathLike[str] | None = None,
     task_program_path_override: str | os.PathLike[str] | None = None,
+    component_sources: Mapping[str, Mapping[str, object]] | None = None,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -449,18 +636,24 @@ def config_to_cfg(
         task_program_path_override: Optional explicit program path. This is
             selected instead of the Gym-config path and resolves from the
             process working directory.
+        component_sources: Optional verified physical component snapshot passed
+            to the public component resolver. Selected component files are not
+            reopened; external asset resolution keeps its existing owner rules.
 
     Returns:
         EmbodiedEnvCfg: A configuration object for initializing the environment.
     """
 
     from embodichain.lab.sim.cfg import (
-        RobotCfg,
+        DenoisingCfg,
         RigidObjectCfg,
+        VisualObjectCfg,
+        MeshCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
         DLSSCfg,
+        NRDCfg,
         RenderCfg,
         physics_cfg_for_backend,
     )
@@ -478,6 +671,18 @@ def config_to_cfg(
     )
     from embodichain.utils import configclass
     from embodichain.data import get_data_path
+    from embodichain.lab.sim.cfg.source import _asset_file_path
+
+    def resolve_asset_paths(
+        asset: RigidObjectCfg | VisualObjectCfg | ArticulationCfg,
+    ) -> None:
+        path = _asset_file_path(asset)
+        if getattr(asset, "source", None) is not None:
+            asset.source.file_path = get_data_path(path)
+        elif isinstance(getattr(asset, "shape", None), MeshCfg) and path is not None:
+            asset.shape.fpath = get_data_path(path)
+        elif isinstance(asset, ArticulationCfg) and path is not None:
+            asset.fpath = get_data_path(path)
 
     @configclass
     class ComponentCfg:
@@ -487,6 +692,10 @@ def config_to_cfg(
         """
 
         pass
+
+    if "rl_task" in config:
+        if "task_program" in config or task_program_path_override is not None:
+            raise ValueError("rl_task and task_program cannot share one deployment.")
 
     env_cfg = EmbodiedEnvCfg()
 
@@ -513,8 +722,16 @@ def config_to_cfg(
     base_dir = (
         Path.cwd() if source_path is None else Path(source_path).expanduser().parent
     )
-    component_resolution = _resolve_gym_components(config, base_dir=base_dir)
+    component_resolution = _resolve_gym_components(
+        config, base_dir=base_dir, component_sources=component_sources
+    )
     config = component_resolution.config
+    if "objective" in config:
+        from embodichain.lab.gym.envs.objectives.config import load_objective_component
+
+        env_cfg.objective = load_objective_component(
+            config["objective"], base_dir=base_dir
+        )
 
     physics_backend = _declared_physics_backend(config)
     physics_config_value = config.get("physics_config", {})
@@ -544,6 +761,7 @@ def config_to_cfg(
     configured_task_program_selection = None
     configured_task_program_id: str | None = None
     configured_task_program_path: Path | None = None
+    configured_task_program_deployment = None
     if "task_program" in config:
         if not component_resolution.embodiment_selected:
             raise ValueError(
@@ -578,6 +796,7 @@ def config_to_cfg(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,
         )
+        configured_task_program_deployment = deployment
         configured_task_program_integration = deployment.integration
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
@@ -587,23 +806,31 @@ def config_to_cfg(
 
     if (
         task_program_path_override is not None
-        or configured_task_program_path is not None
+        or configured_task_program_deployment is not None
     ):
-        if task_program_path_override is not None:
+        inline_deployment = (
+            task_program_path_override is None
+            and configured_task_program_deployment is not None
+            and configured_task_program_deployment.program_path is None
+        )
+        if inline_deployment:
+            task_program_path_text = None
+        elif task_program_path_override is not None:
             task_program_path = task_program_path_override
             if not isinstance(task_program_path, (str, os.PathLike)):
                 raise TypeError("task_program_path must be a string or path.")
         else:
             assert configured_task_program_path is not None
             task_program_path = configured_task_program_path
-        task_program_path_text = os.fspath(task_program_path)
-        if not task_program_path_text or (
-            task_program_path_text != task_program_path_text.strip()
-        ):
-            raise ValueError(
-                "task_program_path must be a non-empty string without outer "
-                "whitespace."
-            )
+        if not inline_deployment:
+            task_program_path_text = os.fspath(task_program_path)
+            if not task_program_path_text or (
+                task_program_path_text != task_program_path_text.strip()
+            ):
+                raise ValueError(
+                    "task_program_path must be a non-empty string without outer "
+                    "whitespace."
+                )
         from embodichain.lab.task_program.language.loader import (
             load_task_program,
         )
@@ -616,11 +843,16 @@ def config_to_cfg(
             registration = configured_task_program_integration.registration
         if registration is not None:
             registration.assert_unchanged()
-        task_program = load_task_program(
-            task_program_path_text,
-            integration=configured_task_program_selection,
-            validation_context=(None if registration is None else registration.catalog),
-        )
+        if inline_deployment:
+            task_program = configured_task_program_deployment.load_program()
+        else:
+            task_program = load_task_program(
+                task_program_path_text,
+                integration=configured_task_program_selection,
+                validation_context=(
+                    None if registration is None else registration.catalog
+                ),
+            )
         if (
             configured_task_program_id is not None
             and task_program.program_id != configured_task_program_id
@@ -638,10 +870,18 @@ def config_to_cfg(
     env_cfg.num_envs = config.get("num_envs", 1)
     env_cfg.seed = config.get("seed", None)
     env_cfg.enable_sensor = config.get("enable_sensor", True)
+    ground_plane_visible = config.get("ground_plane_visible")
+    if ground_plane_visible is not None and type(ground_plane_visible) is not bool:
+        raise TypeError("ground_plane_visible must be a bool or None.")
+    env_cfg.ground_plane_visible = ground_plane_visible
 
     render_config = deepcopy(config.get("render_cfg", {}))
+    if isinstance(render_config.get("denoising"), dict):
+        render_config["denoising"] = DenoisingCfg(**render_config["denoising"])
     if isinstance(render_config.get("dlss"), dict):
         render_config["dlss"] = DLSSCfg(**render_config["dlss"])
+    if isinstance(render_config.get("nrd"), dict):
+        render_config["nrd"] = NRDCfg(**render_config["nrd"])
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]
@@ -675,25 +915,10 @@ def config_to_cfg(
         ),
     )
 
-    # Parse the robot config. ``class_type`` selects a RobotCfg subclass while
-    # leaving subtype-specific fields such as URRobotCfg.robot_type intact.
-    # Keep ``robot_type`` as a backward-compatible class selector for existing
-    # configs such as {"robot_type": "CobotMagic"}.
-    robot_config = deepcopy(config["robot"])
-    robot_class_type = robot_config.pop("class_type", None)
-    if robot_class_type is None and "robot_type" in robot_config:
-        robot_class_type = robot_config.pop("robot_type")
-
-    if robot_class_type is not None:
-        robot_cfg = get_class_instance(
-            "embodichain.lab.sim.robots",
-            robot_class_type + "Cfg",
-        )
-        robot_cfg = robot_cfg.from_dict(robot_config)
-    else:
-        robot_cfg = RobotCfg.from_dict(robot_config)
-
-    env_cfg.robot = robot_cfg
+    env_cfg.robot = _robot_cfg_from_dict(config["robot"])
+    env_cfg.robot.enable_sensor = env_cfg.enable_sensor
+    if env_cfg.robot.source is not None:
+        resolve_asset_paths(env_cfg.robot)
 
     # Parse source-neutral expert trajectory settings owned by the environment.
     # Keep this under ``env`` so deployment configs do not duplicate runtime
@@ -707,6 +932,7 @@ def config_to_cfg(
 
     # parser sensor config
     env_cfg.sensor = [SensorCfg.from_dict(s) for s in config.get("sensor", [])]
+    _collect_sensor_cfgs(env_cfg.robot, env_cfg.sensor)
 
     # parser light config
     if "light" in config:
@@ -716,49 +942,62 @@ def config_to_cfg(
         ]
         env_cfg.light.indirect = config["light"].get("indirect", None)
 
+    for visual_dict in config.get("visual_object", []):
+        visual = VisualObjectCfg.from_dict(visual_dict)
+        resolve_asset_paths(visual)
+        env_cfg.visual_object.append(visual)
+
     # parser background objects config
     if "background" in config:
         for obj_dict in config["background"]:
-            shape_type = obj_dict["shape"]["shape_type"]
-            if shape_type == "Mesh":
-                obj_dict["shape"]["fpath"] = get_data_path(obj_dict["shape"]["fpath"])
             # Set to static object if not specified.
             obj_dict["body_type"] = (
                 "static" if "body_type" not in obj_dict else obj_dict["body_type"]
             )
             cfg = RigidObjectCfg.from_dict(obj_dict)
+            resolve_asset_paths(cfg)
             env_cfg.background.append(cfg)
 
     # parser scene objects config
     if "rigid_object" in config:
         for obj_dict in config["rigid_object"]:
-            shape_type = obj_dict["shape"]["shape_type"]
-            if shape_type == "Mesh":
-                obj_dict["shape"]["fpath"] = get_data_path(obj_dict["shape"]["fpath"])
             cfg = RigidObjectCfg.from_dict(obj_dict)
+            resolve_asset_paths(cfg)
             env_cfg.rigid_object.append(cfg)
 
     if "rigid_object_group" in config:
         for obj_dict in config["rigid_object_group"]:
             if "folder_path" in obj_dict:
                 obj_dict["folder_path"] = get_data_path(obj_dict["folder_path"])
-            for rigid_obj in obj_dict["rigid_objects"].values():
-                shape_type = rigid_obj["shape"]["shape_type"]
-                if shape_type == "Mesh" and "fpath" in rigid_obj["shape"]:
-                    rigid_obj["shape"]["fpath"] = get_data_path(
-                        rigid_obj["shape"]["fpath"]
-                    )
             cfg = RigidObjectGroupCfg.from_dict(obj_dict)
+            for member in cfg.rigid_objects.values():
+                resolve_asset_paths(member)
             env_cfg.rigid_object_group.append(cfg)
 
     if "articulation" in config:
         for obj_dict in config["articulation"]:
-            obj_dict["fpath"] = get_data_path(obj_dict["fpath"])
             cfg = ArticulationCfg.from_dict(obj_dict)
+            resolve_asset_paths(cfg)
             env_cfg.articulation.append(cfg)
 
     env_cfg.control_parts = config["env"].get("control_parts", None)
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
+    ignore_terminations = config["env"].get(
+        "ignore_terminations", env_cfg.ignore_terminations
+    )
+    if type(ignore_terminations) is not bool:
+        raise TypeError("env.ignore_terminations must be a bool.")
+    env_cfg.ignore_terminations = ignore_terminations
+    task_instruction = config["env"].get("task_instruction")
+    if task_instruction is not None and (
+        type(task_instruction) is not str
+        or not task_instruction
+        or task_instruction != task_instruction.strip()
+    ):
+        raise ValueError(
+            "env.task_instruction must be a non-empty string without outer whitespace or None."
+        )
+    env_cfg.task_instruction = task_instruction
     env_cfg.target_control_frequency = config["env"].get(
         "target_control_frequency", None
     )
@@ -810,11 +1049,11 @@ def config_to_cfg(
         # parser env events config
         for event_name, event_params in config["env"]["events"].items():
             event_params_modified = deepcopy(event_params)
-            if "entity_cfg" in event_params["params"]:
-                entity_cfg = SceneEntityCfg(
-                    **event_params_modified["params"]["entity_cfg"]
-                )
-                event_params_modified["params"]["entity_cfg"] = entity_cfg
+            for key in ("entity_cfg", "reference_entity_cfg"):
+                if key in event_params["params"]:
+                    event_params_modified["params"][key] = SceneEntityCfg(
+                        **event_params_modified["params"][key]
+                    )
             if "entity_cfgs" in event_params["params"]:
                 entity_cfgs = [
                     SceneEntityCfg(**cfg)
@@ -855,11 +1094,28 @@ def config_to_cfg(
                 raise_if_not_found=True,
             )
 
+            consumers = obs_params_modified.get("consumers", ("policy",))
+            if (
+                not isinstance(consumers, (list, tuple))
+                or not consumers
+                or any(
+                    not isinstance(value, str) or value not in {"policy", "recording"}
+                    for value in consumers
+                )
+                or len(set(consumers)) != len(consumers)
+            ):
+                raise ValueError(f"Invalid observation consumers for {obs_name!r}.")
+            if obs_params_modified["mode"] == "modify" and tuple(consumers) != (
+                "policy",
+            ):
+                raise ValueError("Modify functors apply only to policy observations.")
             observation = ObservationCfg(
                 func=obs_func,
                 mode=obs_params_modified["mode"],
                 name=obs_params_modified["name"],
                 params=obs_params_modified["params"],
+                consumers=tuple(consumers),
+                extra=obs_params_modified.get("extra", {}),
             )
 
             setattr(env_cfg.observations, obs_name, observation)
@@ -912,24 +1168,81 @@ def config_to_cfg(
                     f"Action term {term_name!r} uses removed field 'mode'; "
                     "action terms now process and apply in configuration order."
                 )
-            term_class_name = term_params["func"]
-            if term_class_name.endswith("Term"):
+            if term_params.get("contract") is not None and "func" in term_params:
                 raise ValueError(
-                    f"Action term {term_name!r} uses removed class "
-                    f"{term_class_name!r}; concrete action classes must use "
-                    "the new *Action protocol and naming."
+                    f"Action term {term_name!r} cannot declare both 'func' and "
+                    "'contract'; choose one action declaration."
+                )
+            term_contract = term_params.get("contract")
+            term_class_name = term_params.get("func")
+            is_legacy_default_position = term_class_name == "DefaultJointPositionTerm"
+            if term_contract is None and isinstance(term_class_name, str):
+                term_contract = _LEGACY_ACTION_CONTRACTS.get(term_class_name)
+            if term_contract is not None:
+                if not isinstance(term_contract, str):
+                    raise TypeError(
+                        f"Action term {term_name!r} contract must be a string."
+                    )
+                from embodichain.lab.gym.envs.managers.actions import (
+                    resolve_action_contract,
+                )
+
+                term_func = resolve_action_contract(term_contract)
+            else:
+                if not isinstance(term_class_name, str):
+                    raise ValueError(
+                        f"Action term {term_name!r} must declare a contract or "
+                        "implementation class."
+                    )
+                if term_class_name.endswith("Term"):
+                    raise ValueError(
+                        f"Action term {term_name!r} uses removed class "
+                        f"{term_class_name!r}; declare a stable action contract "
+                        "or use the new *Action protocol and naming."
+                    )
+                term_func = find_function_from_modules(
+                    term_class_name,
+                    manager_modules,
+                    raise_if_not_found=True,
                 )
             term_params_modified = deepcopy(term_params)
-            term_func = find_function_from_modules(
-                term_class_name,
-                manager_modules,
-                raise_if_not_found=True,
-            )
+            term_params_modified.pop("contract", None)
+            term_params_modified.pop("func", None)
+            if is_legacy_default_position:
+                legacy_params = term_params_modified.get("params", {})
+                if not isinstance(legacy_params, dict):
+                    raise TypeError(
+                        f"Action term {term_name!r} params must be a mapping."
+                    )
+                # The removed term treated an omitted or null clip as unbounded.
+                # Preserve that behavior when loading persisted policy snapshots.
+                legacy_params.setdefault("clip", None)
+                term_params_modified["params"] = legacy_params
             action_term = ActionTermCfg(
                 func=term_func,
                 params=term_params_modified.get("params", {}),
+                contract=term_contract,
             )
             setattr(env_cfg.actions, term_name, action_term)
+
+    if "rl_task" in config:
+        env_cfg.rl_task = _decode_rl_task(config["rl_task"], manager_modules)
+        target_keys = {
+            cfg.params["target_pose_key"]
+            for group in ("success", "failure", "truncation")
+            for cfg in getattr(env_cfg.rl_task, group).values()
+            if "target_pose_key" in cfg.params
+        }
+        for event in config["env"].get("events", {}).values():
+            if (
+                event.get("params", {}).get("store_key", "target_pose") in target_keys
+                and event.get("func") == "randomize_target_pose"
+                and event.get("mode") != "reset"
+            ):
+                raise ValueError(
+                    "Configured RL virtual targets must be sampled in reset mode."
+                )
+        _register_configured_rl(config, env_cfg.max_episode_steps)
 
     if configured_task_program_integration is not None:
         from embodichain.lab.gym.envs.task_program.registration import (
@@ -1091,6 +1404,7 @@ def add_env_launcher_args_to_parser(
 
     parser.add_argument(
         "--gym_config",
+        "--gym-config",
         type=str,
         help="Path to gym config file (.json, .yaml, or .yml).",
         default="",
@@ -1116,6 +1430,7 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--filter_dataset_saving",
+        "--filter-dataset-saving",
         help="Whether to filter out dataset saving.",
         default=False,
         action="store_true",
@@ -1209,6 +1524,34 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["max_episodes"] = args.max_episodes
     if getattr(args, "disable_sensor", False):
         merged_config["enable_sensor"] = False
+    dataset_dir = getattr(args, "expansion_dataset_dir", None)
+    if (
+        dataset_dir is not None
+        and getattr(args, "real2sim_profile", None) is None
+        and "real2sim" not in merged_config
+    ):
+        if type(dataset_dir) is not str or not dataset_dir.strip():
+            raise ValueError("--dataset-dir must be a nonempty path")
+        env_config = merged_config.get("env")
+        if not isinstance(env_config, Mapping):
+            raise ValueError("--dataset-dir requires an env.dataset configuration")
+        datasets = env_config.get("dataset")
+        if not isinstance(datasets, Mapping) or not datasets:
+            raise ValueError("--dataset-dir requires at least one dataset manager")
+        updated_datasets = deepcopy(dict(datasets))
+        for dataset_name, dataset_config in updated_datasets.items():
+            if not isinstance(dataset_config, Mapping):
+                raise ValueError(
+                    f"env.dataset.{dataset_name} must be a mapping when using "
+                    "--dataset-dir"
+                )
+            params = deepcopy(dict(dataset_config.get("params", {})))
+            params["save_path"] = dataset_dir
+            dataset_config = deepcopy(dict(dataset_config))
+            dataset_config["params"] = params
+            updated_datasets[dataset_name] = dataset_config
+        merged_config["env"] = deepcopy(dict(env_config))
+        merged_config["env"]["dataset"] = updated_datasets
     if viser_enabled:
         from embodichain.lab.visualization.cli import visualization_cfg_from_args
 
@@ -1237,11 +1580,154 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     return merged_config
 
 
+def _resolve_expansion_config_path(value: object, *, base_dir: Path) -> Path:
+    """Resolve one task-owned expansion declaration path."""
+    from embodichain.utils.config_paths import resolve_config_path
+
+    if type(value) is not str or not value.strip() or value != value.strip():
+        raise ValueError("expansion.config must be a nonempty path")
+    path = Path(value).expanduser()
+    resolved = resolve_config_path(path, base_dir=base_dir).resolve()
+    if resolved.suffix.lower() not in {".yaml", ".yml", ".json"}:
+        raise ValueError(f"expansion.config must be a YAML or JSON file: {resolved}")
+    if not resolved.is_file():
+        raise FileNotFoundError(f"expansion.config is not a file: {resolved}")
+    return resolved
+
+
+def _merge_expansion_config(
+    base: Mapping[str, Any], patch: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Deep-merge a referenced expansion config with task-local overrides."""
+    merged = deepcopy(dict(base))
+    for key, value in patch.items():
+        if isinstance(value, Mapping):
+            current = merged.get(key, {})
+            if not isinstance(current, Mapping):
+                raise ValueError(f"expansion.{key} cannot replace a scalar")
+            merged[key] = _merge_expansion_config(current, value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _load_expansion_declaration(
+    binding: Mapping[str, Any], *, base_dir: Path
+) -> tuple[dict[str, Any], Path | None]:
+    """Load an optional task-referenced expansion declaration.
+
+    A task may keep the expansion declaration inline or point ``expansion``
+    at a sibling YAML/JSON file with ``config``. The referenced file contains
+    the fields below ``expansion`` directly; a single outer ``expansion``
+    mapping is accepted as a migration convenience. Only one level of
+    references is resolved so malformed chains fail early.
+    """
+    if not isinstance(binding, Mapping):
+        raise ValueError("expansion must be a mapping")
+    if "config" not in binding:
+        return deepcopy(dict(binding)), None
+    config_value = binding["config"]
+
+    from embodichain.utils.utility import load_config
+
+    config_path = _resolve_expansion_config_path(config_value, base_dir=base_dir)
+    referenced = load_config(config_path)
+    if not isinstance(referenced, Mapping):
+        raise TypeError("expansion config must contain a mapping")
+    referenced = dict(referenced)
+    if "expansion" in referenced:
+        if set(referenced) != {"expansion"}:
+            raise ValueError(
+                "expansion config may contain either expansion fields or one "
+                "outer expansion mapping"
+            )
+        nested = referenced["expansion"]
+        if not isinstance(nested, Mapping):
+            raise TypeError("expansion config.expansion must be a mapping")
+        referenced = dict(nested)
+    if "config" in referenced:
+        raise ValueError("expansion.config cannot reference another expansion config")
+    local_overrides = {key: value for key, value in binding.items() if key != "config"}
+    return _merge_expansion_config(referenced, local_overrides), config_path
+
+
+def _apply_expansion_runtime_overlay(
+    config: dict[str, Any], *, base_dir: Path | None = None
+) -> dict[str, Any]:
+    """Apply task-owned expansion host values after environment expansion.
+
+    Physical scene and backend values remain owned by the selected environment
+    component. Expansion deployments may add recorder/reset managers and
+    batch runtime values without maintaining a duplicate expansion-owned
+    physical scene file.
+    """
+    expansion = config.get("expansion")
+    if not isinstance(expansion, Mapping):
+        return config
+    expansion, _ = _load_expansion_declaration(
+        expansion,
+        base_dir=Path.cwd() if base_dir is None else base_dir,
+    )
+    runtime = expansion.get("runtime")
+    if runtime is None:
+        return config
+    if not isinstance(runtime, Mapping):
+        raise ValueError("expansion.runtime must be a mapping")
+    allowed = {
+        "max_episodes",
+        "max_episode_steps",
+        "num_envs",
+        "arena_space",
+        "ground_plane_visible",
+        "env",
+    }
+    unknown = set(runtime) - allowed
+    if unknown:
+        raise ValueError(
+            f"expansion.runtime contains unsupported fields: {sorted(unknown)}"
+        )
+
+    def merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+        merged = deepcopy(dict(base))
+        for key, value in patch.items():
+            if isinstance(value, Mapping):
+                current = merged.get(key, {})
+                if not isinstance(current, Mapping):
+                    raise ValueError(f"expansion.runtime.{key} cannot replace a scalar")
+                merged[key] = merge(current, value)
+            else:
+                merged[key] = deepcopy(value)
+        return merged
+
+    resolved = deepcopy(config)
+    for key in (
+        "max_episodes",
+        "max_episode_steps",
+        "num_envs",
+        "arena_space",
+        "ground_plane_visible",
+    ):
+        if key in runtime:
+            resolved[key] = deepcopy(runtime[key])
+    for key in ("env",):
+        if key in runtime:
+            current = resolved.get(key, {})
+            if not isinstance(current, Mapping) or not isinstance(
+                runtime[key], Mapping
+            ):
+                raise ValueError(f"expansion.runtime.{key} must be a mapping")
+            resolved[key] = merge(current, runtime[key])
+    return resolved
+
+
 def build_env_cfg_from_args(
     args: argparse.Namespace,
     gym_config_modifier: Callable[[dict], None] | None = None,
 ) -> tuple["EmbodiedEnvCfg", dict, dict]:
     """Build environment configuration from command-line arguments.
+
+    A deployment's ``real2sim.profile`` resolves from its source directory and
+    remains in the returned launcher metadata, outside ``EmbodiedEnvCfg``.
 
     Args:
         args (argparse.Namespace): The parsed command-line arguments.
@@ -1258,6 +1744,20 @@ def build_env_cfg_from_args(
 
     gym_config_source_path = resolve_config_path(args.gym_config)
     gym_config = load_config(gym_config_source_path)
+    if "real2sim" in gym_config:
+        binding = gym_config["real2sim"]
+        if not isinstance(binding, Mapping) or set(binding) != {"profile"}:
+            raise ValueError("real2sim must declare exactly one profile path")
+        profile = binding["profile"]
+        if not isinstance(profile, str) or not profile.strip():
+            raise ValueError("real2sim.profile must be a nonempty path")
+        gym_config["real2sim"] = {
+            "profile": str(
+                resolve_config_path(
+                    profile, base_dir=gym_config_source_path.parent
+                ).resolve()
+            )
+        }
     if "environment" in gym_config:
         from embodichain.lab.gym.utils._component_composition import (
             _resolve_environment_component,
@@ -1266,17 +1766,29 @@ def build_env_cfg_from_args(
         gym_config = _resolve_environment_component(
             gym_config,
             base_dir=gym_config_source_path.parent,
+            selected_backend=getattr(args, "physics", None),
         )
+    gym_config = _apply_expansion_runtime_overlay(
+        gym_config, base_dir=gym_config_source_path.parent
+    )
     gym_config = merge_args_with_gym_config(args, gym_config)
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)
 
-    cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config,
-        manager_modules=get_manager_modules(),
-        source_path=gym_config_source_path,
-        task_program_path_override=getattr(args, "task_program", None),
-    )
+    collection_config = gym_config.pop("collection", None)
+    real2sim_config = gym_config.pop("real2sim", None)
+    try:
+        cfg: EmbodiedEnvCfg = config_to_cfg(
+            gym_config,
+            manager_modules=get_manager_modules(),
+            source_path=gym_config_source_path,
+            task_program_path_override=getattr(args, "task_program", None),
+        )
+    finally:
+        if collection_config is not None:
+            gym_config["collection"] = collection_config
+        if real2sim_config is not None:
+            gym_config["real2sim"] = real2sim_config
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
     if getattr(args, "disable_sensor", False):
@@ -1330,6 +1842,14 @@ def init_rollout_buffer_from_gym_space(
 
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
+
+    Note:
+        Observation and action payloads are allocated without initialization.
+        Only entries marked by ``valid`` may be consumed; invalid payload
+        contents are unspecified. Avoiding a full image-buffer fill keeps CPU
+        recording startup proportional to written frames rather than the
+        configured episode capacity. Annotation and validity fields remain
+        initialized independently of the payloads.
     """
 
     def _convert_space_dtype_to_torch_dtype(space: spaces.Space) -> torch.dtype:
@@ -1363,7 +1883,7 @@ def init_rollout_buffer_from_gym_space(
                 device=device,
             )
         elif isinstance(space, spaces.Box):
-            return torch.zeros(
+            return torch.empty(
                 (num_envs, max_episode_steps, *space.shape[1:]),
                 dtype=_convert_space_dtype_to_torch_dtype(space),
                 device=device,
@@ -1464,6 +1984,7 @@ def init_rollout_buffer_from_config(
     batch_size: int,
     state_dim: int,
     device: Union[str, torch.device] = "cpu",
+    action_dim: int | None = None,
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
@@ -1479,10 +2000,19 @@ def init_rollout_buffer_from_config(
         max_episode_steps (int): The number of steps in an episode.
         batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
+        action_dim: Stored action width, defaulting to state_dim.
 
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
     """
+
+    from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
+    from embodichain.lab.sim.sensors import SensorCfg
+
+    if action_dim is not None and (type(action_dim) is not int or action_dim < 1):
+        raise ValueError("action_dim must be a positive integer or None")
+
+    config = _resolve_gym_components(config, base_dir=Path.cwd()).config
 
     # TODO: Currently we use this method to pre-allocate a rollout buffer with fixed size for simplicity.
     # Parse extra observations from observation functors in 'add' mode
@@ -1491,7 +2021,9 @@ def init_rollout_buffer_from_config(
     if "observations" in env_config:
         for obs_name, obs_params in env_config["observations"].items():
             obs_mode = obs_params.get("mode", "modify")
-            if obs_mode == "add":
+            if obs_mode == "add" and "policy" in obs_params.get(
+                "consumers", ("policy",)
+            ):
                 obs_extra = obs_params.get("extra", {})
                 shape = obs_extra.get("shape", None)
                 if shape is not None:
@@ -1513,7 +2045,16 @@ def init_rollout_buffer_from_config(
     # Parse sensor
     sensor_desc = {}
     if config.get("enable_sensor", True):
-        for cfg in config.get("sensor", []):
+        robot_cfg = _robot_cfg_from_dict(config["robot"]) if "robot" in config else None
+        sensor_cfgs = _collect_sensor_cfgs(
+            robot_cfg,
+            [
+                SensorCfg.from_dict({"sensor_type": "Camera", **s})
+                for s in config.get("sensor", [])
+            ],
+        )
+        for sensor_cfg in sensor_cfgs:
+            cfg = sensor_cfg.to_dict()
             desc = {}
             width = cfg.get("width", 640)
             height = cfg.get("height", 480)
@@ -1614,7 +2155,11 @@ def init_rollout_buffer_from_config(
             # TODO: For action, we may support TensorDict structure in the future, which may include
             # qpos, qvel and qf.
             "actions": torch.zeros(
-                (batch_size, max_episode_steps, state_dim),
+                (
+                    batch_size,
+                    max_episode_steps,
+                    state_dim if action_dim is None else action_dim,
+                ),
                 dtype=torch.float32,
                 device=device,
             ),
@@ -1857,3 +2402,491 @@ def load_trajectory(trajectory: str | os.PathLike[str] | dict) -> dict:
         )
 
     return data
+
+
+# Raw observations are fields of the existing rollout store. These operations
+# deliberately keep their state in that TensorDict, not in a second manager.
+def _init_raw_rollout(
+    storage: TensorDictBase,
+    context: Any,
+    fields: Mapping[str, torch.Tensor],
+    actions: torch.Tensor,
+) -> None:
+    count, capacity = actions.shape[:2]
+    if len(context.episode_ids) != count or tuple(storage.batch_size) != (count,):
+        raise ValueError("Raw rollout rows must match their episode owner.")
+    if "raw_obs" in storage.keys():
+        raise ValueError("Raw rollout observations are already initialized.")
+    if storage.device not in (None, actions.device):
+        raise ValueError("Raw rollout storage has another device policy.")
+    for values in fields.values():
+        if (
+            tuple(values.shape[:2]) != (count, capacity + 1)
+            or values.device != actions.device
+        ):
+            raise ValueError(
+                "Raw observations require T+1 state slots on the action device."
+            )
+    storage["raw_actions"] = actions
+    storage["raw_obs"] = TensorDict(
+        dict(fields), batch_size=[count, capacity + 1], device=actions.device
+    )
+    storage["raw_valid"] = TensorDict(
+        {}, batch_size=[count, capacity + 1], device=actions.device
+    )
+    storage["raw_steps"] = torch.zeros(count, dtype=torch.long, device=actions.device)
+    storage["raw_revision"] = torch.full(
+        (count, capacity + 1), -1, dtype=torch.long, device=actions.device
+    )
+    storage["raw_timestamp"] = torch.full(
+        (count, capacity + 1), float("nan"), dtype=torch.float64, device=actions.device
+    )
+    storage.set_non_tensor("raw_acquisition_errors", {})
+    storage.set_non_tensor(
+        "raw_state",
+        {
+            "context": context,
+            "episodes": (-1,) * count,
+            "latest_revision": -1,
+            "closed": False,
+            "layout": None,
+        },
+    )
+
+
+def _raw_rollout_state(storage: TensorDictBase | None, context: Any) -> dict[str, Any]:
+    if storage is None or "raw_state" not in storage.keys():
+        raise RuntimeError("Raw rollout observations are unavailable.")
+    state = storage.get_non_tensor("raw_state")
+    if state["closed"]:
+        raise RuntimeError("Raw observations are unavailable after close.")
+    if state["context"] is not context:
+        raise ValueError("Raw rollout belongs to another episode owner.")
+    return state
+
+
+def _write_raw_rollout(
+    storage, context, frame, *, field_ids=(), env_ids=None, action=None, active=None
+) -> None:
+    state = _raw_rollout_state(storage, context)
+    if frame.episode_owner is not context:
+        raise ValueError("Observation frame belongs to another episode owner.")
+    if frame.episode_ids != context.episode_ids:
+        raise ValueError("Observation frame belongs to another episode.")
+    if frame.revision < 0 or frame.clock_domain not in (
+        "simulation_time",
+        "unavailable",
+    ):
+        raise ValueError("Raw rollout requires an explicit observation boundary.")
+    actions = storage["raw_actions"]
+    steps, revisions, timestamps = (
+        storage["raw_steps"],
+        storage["raw_revision"],
+        storage["raw_timestamp"],
+    )
+    count, capacity = actions.shape[:2]
+    device = actions.device
+    if action is None:
+        values, valid = storage["raw_obs"], storage["raw_valid"]
+        errors = storage.get_non_tensor("raw_acquisition_errors")
+        if state["layout"] is None:
+            if values.keys() - set(field_ids):
+                raise ValueError(
+                    "Observation boundary is missing required rollout fields."
+                )
+            layout = []
+            for name in field_ids:
+                sample = frame.fields[name]
+                if name not in values.keys():
+                    values[name] = torch.zeros(
+                        (count, capacity + 1, *sample.values.shape[1:]),
+                        dtype=sample.values.dtype,
+                        device=device,
+                    )
+                valid[name] = torch.zeros(
+                    (count, capacity + 1), dtype=torch.bool, device=device
+                )
+                errors[name] = {}
+                layout.append(
+                    (
+                        name,
+                        values[name],
+                        valid[name],
+                        errors[name],
+                        (count, *values[name].shape[2:]),
+                        values[name].dtype,
+                    )
+                )
+            state["layout"] = tuple(layout)
+        ids = context._ids(env_ids).to(device)
+        rows = set(ids.cpu().tolist())
+        if not all(row["initialized"] for row in context.snapshot(sorted(rows))):
+            raise ValueError("Raw rollout requires initialized episode rows.")
+    else:
+        if tuple(action.shape) != (count, *actions.shape[2:]):
+            raise ValueError("Action does not match the raw rollout layout.")
+        mask = steps < capacity
+        if active is not None:
+            if active.shape != (count,) or active.dtype != torch.bool:
+                raise ValueError("Raw recording selection requires one bool per row.")
+            mask &= active.to(device)
+        ids = mask.nonzero(as_tuple=False).flatten()
+        if not ids.numel():
+            return
+        if state["episodes"] != frame.episode_ids:
+            for row in ids.cpu().tolist():
+                if state["episodes"][row] < 0:
+                    raise ValueError("Raw rollout requires an initial observation.")
+                if state["episodes"][row] != frame.episode_ids[row]:
+                    raise ValueError("Raw rollout belongs to another episode.")
+    if state["layout"] is None:
+        raise RuntimeError("Raw rollout fields have not been initialized.")
+    for name, target, _, _, shape, dtype in state["layout"]:
+        sample = frame.fields[name].values
+        if sample.shape != shape or sample.device != device or sample.dtype != dtype:
+            raise ValueError(f"Raw rollout values differ from storage for {name!r}.")
+    if action is None:
+        epochs = list(state["episodes"])
+        for row in rows:
+            epochs[row] = frame.episode_ids[row]
+        state["episodes"] = tuple(epochs)
+        steps[ids] = 0
+        revisions[ids] = -1
+        timestamps[ids] = float("nan")
+        for _, _, availability, reasons, _, _ in state["layout"]:
+            availability[ids] = False
+            for key in list(reasons):
+                if key[0] in rows:
+                    del reasons[key]
+        slots = steps[ids]
+    else:
+        slots = steps[ids] + 1
+        if frame.revision <= state["latest_revision"] and bool(
+            (revisions[ids, slots - 1] >= frame.revision).any()
+        ):
+            raise ValueError("Each transition requires a new observation acquisition.")
+    selected_rows = selected_slots = None
+    for name, target, availability, reasons, _, _ in state["layout"]:
+        sample = frame.fields[name]
+        target[ids, slots] = sample.values[ids]
+        availability[ids, slots] = sample.valid[ids]
+        if any(error is not None for error in sample.acquisition_errors):
+            if selected_rows is None:
+                selected_rows, selected_slots = ids.cpu().tolist(), slots.cpu().tolist()
+            for row, slot in zip(selected_rows, selected_slots, strict=True):
+                if sample.acquisition_errors[row] is not None:
+                    reasons[row, slot] = sample.acquisition_errors[row]
+    revisions[ids, slots] = frame.revision
+    timestamps[ids, slots] = (
+        frame.timestamp if frame.timestamp is not None else float("nan")
+    )
+    if action is not None:
+        actions[ids, slots - 1] = action[ids].to(device)
+        steps[ids] += 1
+    state["latest_revision"] = max(state["latest_revision"], frame.revision)
+
+
+def _read_raw_rollout(
+    storage,
+    context,
+    frame_indices=None,
+    *,
+    fields=None,
+    episode_ids=None,
+    env_ids=None,
+    device="cpu",
+):
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationHistorySnapshot,
+    )
+
+    state = _raw_rollout_state(storage, context)
+    ids = context._ids(env_ids).to(storage["raw_actions"].device)
+    rows = tuple(ids.cpu().tolist())
+    episodes = (
+        tuple(state["episodes"][row] for row in rows)
+        if episode_ids is None
+        else tuple(episode_ids)
+    )
+    if (
+        not rows
+        or len(episodes) != len(rows)
+        or any(type(episode) is not int or episode < 0 for episode in episodes)
+    ):
+        raise ValueError("Raw rollout queries require exact episode IDs per row.")
+
+    def check():
+        _raw_rollout_state(storage, context)
+        current = context.snapshot(rows)
+        if (
+            tuple(row["episode"] for row in current) != episodes
+            or not all(row["initialized"] for row in current)
+            or tuple(state["episodes"][row] for row in rows) != episodes
+        ):
+            raise ValueError(
+                "Raw observations belong to another or uninitialized episode."
+            )
+
+    check()
+    lengths = storage["raw_steps"][ids].detach().cpu()
+    errors = storage.get_non_tensor("raw_acquisition_errors")
+    if frame_indices is None:
+        size = int(lengths.max()) + 1
+        revisions = storage["raw_revision"][ids, :size].detach().to(device)
+        timestamps = storage["raw_timestamp"][ids, :size].detach().to(device)
+        written = revisions >= 0
+        exported = {}
+        for name, values, valid, reasons, _, _ in state["layout"] or ():
+            data = values[ids, :size].detach().to(device)
+            data.masked_fill_(
+                ~written.reshape(*written.shape, *((1,) * (data.ndim - 2))), 0
+            )
+            availability = valid[ids, :size].detach().to(device) & written
+            cpu_valid = availability.cpu().tolist()
+            exported[name] = {
+                "values": data,
+                "valid": availability,
+                "acquisition_errors": [
+                    {
+                        slot: reasons.get(
+                            (row, slot),
+                            "Raw observation acquisition is unavailable or nonfinite.",
+                        )
+                        for slot in range(int(lengths[index]) + 1)
+                        if not cpu_valid[index][slot]
+                    }
+                    for index, row in enumerate(rows)
+                ],
+            }
+        check()
+        return {
+            "schema_version": 1,
+            "env_ids": rows,
+            "episode_ids": episodes,
+            "lengths": lengths,
+            "revisions": revisions,
+            "timestamps": timestamps,
+            "clock_domain": (
+                "simulation_time"
+                if bool(torch.isfinite(timestamps[written]).all())
+                else "unavailable"
+            ),
+            "timestamp_valid": torch.isfinite(timestamps) & written,
+            "fields": exported,
+        }
+    frames, names = tuple(frame_indices), tuple(fields or ())
+    capacity = storage["raw_actions"].shape[1]
+    if (
+        len(frames) != len(rows)
+        or any(
+            type(frame) is not int or frame < 0 or frame > capacity for frame in frames
+        )
+        or not names
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError("Raw rollout queries require exact fields and frames per row.")
+    slots = torch.tensor(frames, dtype=torch.long, device=ids.device)
+    if bool((slots > storage["raw_steps"][ids]).any()) or bool(
+        (storage["raw_revision"][ids, slots] < 0).any()
+    ):
+        raise ValueError("The requested boundary is not fully recorded.")
+    values, validity, reasons = {}, {}, {}
+    for name in names:
+        valid = storage["raw_valid"][name][ids, slots].detach().cpu()
+        values[name] = storage["raw_obs"][name][ids, slots].detach().cpu()
+        validity[name] = valid
+        reasons[name] = tuple(
+            (
+                None
+                if ok
+                else errors[name].get(
+                    (row, slot),
+                    "Raw observation acquisition is unavailable or nonfinite.",
+                )
+            )
+            for row, slot, ok in zip(rows, frames, valid.tolist(), strict=True)
+        )
+    revisions = tuple(storage["raw_revision"][ids, slots].cpu().tolist())
+    times = tuple(
+        None if value != value else value
+        for value in storage["raw_timestamp"][ids, slots].cpu().tolist()
+    )
+    check()
+    return ObservationHistorySnapshot(
+        values,
+        validity,
+        reasons,
+        rows,
+        episodes,
+        frames,
+        revisions,
+        times,
+        "simulation_time" if all(time is not None for time in times) else "unavailable",
+    )
+
+
+def _read_raw_rollout_step_counts(
+    storage: TensorDictBase | None,
+    context: Any,
+    *,
+    episode_ids: Sequence[int],
+    env_ids: Sequence[int] | None = None,
+) -> tuple[int, ...]:
+    """Copy completed boundaries from the raw owner without copying field history."""
+    state = _raw_rollout_state(storage, context)
+    ids = context._ids(env_ids).to(storage["raw_actions"].device)
+    rows, episodes = tuple(ids.cpu().tolist()), tuple(episode_ids)
+    if (
+        not rows
+        or len(episodes) != len(rows)
+        or any(type(value) is not int or value < 0 for value in episodes)
+    ):
+        raise ValueError("Raw history boundaries require exact episode IDs per row.")
+
+    def check() -> None:
+        _raw_rollout_state(storage, context)
+        current = context.snapshot(rows)
+        _raw_rollout_state(storage, context)
+        if (
+            tuple(row["episode"] for row in current) != episodes
+            or not all(row["initialized"] for row in current)
+            or tuple(state["episodes"][row] for row in rows) != episodes
+        ):
+            raise ValueError(
+                "Raw observations belong to another or uninitialized episode."
+            )
+
+    check()
+    counts = tuple(storage["raw_steps"][ids].detach().cpu().tolist())
+    capacity = storage["raw_actions"].shape[1]
+    if any(type(value) is not int or not 0 <= value <= capacity for value in counts):
+        raise ValueError("Raw history completed boundaries exceed their storage.")
+    slots = torch.tensor(counts, dtype=torch.long, device=ids.device)
+    if bool((storage["raw_revision"][ids, slots] < 0).any()):
+        raise ValueError("The requested boundary is not fully recorded.")
+    check()
+    return counts
+
+
+def _read_raw_rollout_window(
+    storage: TensorDictBase | None,
+    context: Any,
+    start_frames: Sequence[int],
+    end_frames: Sequence[int],
+    *,
+    fields: Sequence[str],
+    episode_ids: Sequence[int],
+    env_ids: Sequence[int] | None = None,
+    device: str | torch.device = "cpu",
+) -> dict[str, Any]:
+    """Copy selected inclusive slices from the existing raw observation owner."""
+    state = _raw_rollout_state(storage, context)
+    ids = context._ids(env_ids).to(storage["raw_actions"].device)
+    rows = tuple(ids.cpu().tolist())
+    starts, ends, episodes, names = (
+        tuple(start_frames),
+        tuple(end_frames),
+        tuple(episode_ids),
+        tuple(fields),
+    )
+    capacity = storage["raw_actions"].shape[1]
+    if (
+        not rows
+        or any(len(values) != len(rows) for values in (starts, ends, episodes))
+        or any(
+            type(value) is not int or value < 0
+            for values in (starts, ends, episodes)
+            for value in values
+        )
+        or any(
+            start > end or end > capacity
+            for start, end in zip(starts, ends, strict=True)
+        )
+        or not names
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError(
+            "Raw history windows require exact fields and inclusive boundaries per row."
+        )
+
+    def check() -> None:
+        _raw_rollout_state(storage, context)
+        current = context.snapshot(rows)
+        _raw_rollout_state(storage, context)
+        if (
+            tuple(row["episode"] for row in current) != episodes
+            or not all(row["initialized"] for row in current)
+            or tuple(state["episodes"][row] for row in rows) != episodes
+        ):
+            raise ValueError(
+                "Raw observations belong to another or uninitialized episode."
+            )
+
+    check()
+    completed = storage["raw_steps"][ids].detach().cpu().tolist()
+    if any(end > complete for end, complete in zip(ends, completed, strict=True)):
+        raise ValueError("The requested window is not fully recorded.")
+    selections = tuple(
+        slice(start, end + 1) for start, end in zip(starts, ends, strict=True)
+    )
+    revisions, timestamps = [], []
+    for row, slots in zip(rows, selections, strict=True):
+        revision = (
+            storage["raw_revision"][row, slots].detach().to(device=device, copy=True)
+        )
+        if bool((revision < 0).any()):
+            raise ValueError("The requested window is not fully recorded.")
+        revisions.append(revision)
+        timestamps.append(
+            storage["raw_timestamp"][row, slots].detach().to(device=device, copy=True)
+        )
+    errors = storage.get_non_tensor("raw_acquisition_errors")
+    result = {}
+    for name in names:
+        values, validity, reasons = [], [], []
+        for row, start, slots in zip(rows, starts, selections, strict=True):
+            values.append(
+                storage["raw_obs"][name][row, slots]
+                .detach()
+                .to(device=device, copy=True)
+            )
+            valid = (
+                storage["raw_valid"][name][row, slots]
+                .detach()
+                .to(device=device, copy=True)
+            )
+            validity.append(valid)
+            row_errors: list[str | None] = [None] * valid.numel()
+            for offset in (~valid).nonzero(as_tuple=False).flatten().cpu().tolist():
+                row_errors[offset] = errors[name].get(
+                    (row, start + offset),
+                    "Raw observation acquisition is unavailable or nonfinite.",
+                )
+            reasons.append(tuple(row_errors))
+        result[name] = {
+            "values": tuple(values),
+            "valid": tuple(validity),
+            "acquisition_errors": tuple(reasons),
+        }
+    check()
+    timestamp_valid = tuple(torch.isfinite(times) for times in timestamps)
+    return {
+        "fields": result,
+        "env_ids": rows,
+        "episode_ids": episodes,
+        "start_frames": starts,
+        "end_frames": ends,
+        "revisions": tuple(revisions),
+        "timestamps": tuple(timestamps),
+        "timestamp_valid": timestamp_valid,
+        "clock_domain": (
+            "simulation_time"
+            if all(bool(valid.all()) for valid in timestamp_valid)
+            else "unavailable"
+        ),
+    }
+
+
+def _close_raw_rollout(storage: TensorDictBase | None) -> None:
+    if storage is not None and "raw_state" in storage.keys():
+        storage.get_non_tensor("raw_state")["closed"] = True

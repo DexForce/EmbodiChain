@@ -282,7 +282,7 @@ def test_cli_exposes_compact_constrained_sobol_defaults():
     )
 
     args = parse_args(
-        ["--robot", "cobotmagic", "--compact-results", "--sample-within-constraints"]
+        ["--robot", "CobotMagic", "--compact-results", "--sample-within-constraints"]
     )
     cfg = build_analyzer_config(args, "left_arm")
     assert cfg.sampling.strategy == SamplingStrategy.SOBOL
@@ -308,7 +308,7 @@ def test_cli_exposes_manipulability_visualization_without_narrowing_metrics():
         parse_args(
             [
                 "--robot",
-                "ur",
+                "URRobot",
                 "--vis-type",
                 "manipulability",
                 "--manipulability-log-scale",
@@ -324,7 +324,7 @@ def test_cli_exposes_manipulability_visualization_without_narrowing_metrics():
     assert cfg.visualization.manipulability_percentile_clip == (0.0, 100.0)
     # The default metric set already computes manipulability; selecting the
     # visualization must not silently switch the other metrics off.
-    default = build_analyzer_config(parse_args(["--robot", "ur"]), "arm")
+    default = build_analyzer_config(parse_args(["--robot", "URRobot"]), "arm")
     assert cfg.metric.enabled_metrics == default.metric.enabled_metrics
     assert not default.visualization.manipulability_log_scale
 

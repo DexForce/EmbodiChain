@@ -29,6 +29,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -48,24 +49,35 @@ def load_versions_manifest(
     *,
     site_base_url: str | None = None,
     published_root: Path | None = None,
+    required: bool = False,
 ) -> dict[str, Any] | None:
     """Load ``versions.json`` from a local tree or the live site URL."""
     if published_root is not None:
         manifest_path = published_root / "versions.json"
         if not manifest_path.is_file():
+            if required:
+                raise FileNotFoundError(manifest_path)
             return None
         return json.loads(manifest_path.read_text(encoding="utf-8"))
 
     if not site_base_url:
         return None
 
-    manifest_url = f"{site_base_url.rstrip('/')}/versions.json"
+    manifest_url = f"{site_base_url.rstrip('/')}/versions.json?fresh={time.time_ns()}"
     try:
         with urlopen(manifest_url, timeout=30) as response:
             if response.status != 200:
+                if required:
+                    raise RuntimeError(
+                        f"Cannot read published manifest: {response.status}"
+                    )
                 return None
             return json.loads(response.read().decode("utf-8"))
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        if required:
+            raise RuntimeError(
+                f"Cannot read published manifest at {manifest_url}"
+            ) from exc
         print(f"No published manifest at {manifest_url}: {exc}", file=sys.stderr)
         return None
 
@@ -165,7 +177,9 @@ def flatten_nested_version_dirs(build_dir: Path) -> list[tuple[Path, Path | None
     return changes
 
 
-def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None:
+def _download_version_wget(
+    site_base_url: str, version: str, dest: Path, *, required: bool = False
+) -> None:
     """Download one version subtree with wget (available in CI containers)."""
     url = f"{site_base_url.rstrip('/')}/{version}/"
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +191,8 @@ def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None
         [
             "wget",
             "-q",
+            "--timeout=30",
+            "--tries=2",
             "-r",
             "-l",
             "50",
@@ -189,6 +205,10 @@ def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None
         check=False,
     )
     if result.returncode != 0:
+        if required:
+            raise RuntimeError(
+                f"Incomplete download of {url} (exit {result.returncode})"
+            )
         print(f"wget failed for {url} (exit {result.returncode})", file=sys.stderr)
 
     # wget may create dest.parent/<version>/ or preserve extra URL path
@@ -222,6 +242,8 @@ def merge_published_site(
     site_base_url: str | None = None,
     published_root: Path | None = None,
     skip_versions: frozenset[str] | None = None,
+    refresh_versions: frozenset[str] = frozenset(),
+    required: bool = False,
 ) -> list[str]:
     """Copy missing version dirs from published site into ``build_dir``.
 
@@ -230,6 +252,8 @@ def merge_published_site(
         site_base_url: Live Pages base, e.g. ``https://org.github.io/Repo``.
         published_root: Local published tree for tests (``versions.json`` + dirs).
         skip_versions: Version names to leave for a fresh build (e.g. ``main``).
+        refresh_versions: Existing versions to replace with their published tree.
+        required: Fail if the manifest or a published version homepage is unavailable.
 
     Returns:
         Names of versions merged from the published site.
@@ -246,6 +270,7 @@ def merge_published_site(
     manifest = load_versions_manifest(
         site_base_url=site_base_url,
         published_root=published_root,
+        required=required,
     )
     if not manifest:
         print("No published versions manifest; skipping merge.")
@@ -254,14 +279,23 @@ def merge_published_site(
     merged: list[str] = []
     for entry in manifest.get("versions", []):
         name = entry.get("name")
+        if name and (Path(name).name != name or name in {".", ".."}):
+            raise ValueError(f"Invalid published version: {name!r}")
         if not name or name in skip:
             continue
-        if (build_dir / name).is_dir():
+        exists = (
+            (build_dir / name / "index.html").is_file()
+            if required
+            else (build_dir / name).is_dir()
+        )
+        if exists and name not in refresh_versions:
             continue
 
         if published_root is not None:
             src = published_root / name
             if not src.is_dir():
+                if required:
+                    raise FileNotFoundError(src)
                 print(
                     f"Published root missing directory {name}; skip.", file=sys.stderr
                 )
@@ -271,7 +305,9 @@ def merge_published_site(
             merged.append(name)
         elif site_base_url:
             print(f"Downloading published version: {name}")
-            _download_version_wget(site_base_url, name, build_dir / name)
+            _download_version_wget(
+                site_base_url, name, build_dir / name, required=required
+            )
             if (build_dir / name).is_dir():
                 merged.append(name)
         else:
@@ -279,6 +315,8 @@ def merge_published_site(
                 "Neither published_root nor site_base_url set; cannot merge.",
                 file=sys.stderr,
             )
+        if required and not (build_dir / name / "index.html").is_file():
+            raise RuntimeError(f"Published version {name} has no downloaded homepage")
 
     final_changes = normalize_artifact_paths(build_dir)
     if final_changes:

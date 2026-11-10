@@ -6,6 +6,10 @@ Adding a New Robot
 This guide provides a practical checklist and reference for adding a new robot
 to EmbodiChain.
 
+Official concrete presets live in ``embodichain_robots``; generic robot runtime
+and dual-arm composition remain in the core. Use :doc:`robot_catalog` for
+catalog registration, display metadata, and canonical import paths.
+
 The protocol
 ------------
 
@@ -31,52 +35,85 @@ Serialization (``to_dict`` / ``to_string`` / ``save_to_file``) is inherited from
 Checklist
 ---------
 
-1. **Prepare the URDF** — place the URDF (+ meshes) in the assets directory.
+1. **Prepare the URDF** — publish versioned URDF/mesh resources and declare their asset class in
+   the owning vendor/model package. Register the class through the lightweight
+   robot asset catalog; reuse the core download/cache implementation.
 2. **Override** ``_build_defaults(self, init_dict=None)`` — set variant fields from
    ``init_dict``, then populate ``urdf_cfg`` / ``control_parts`` / ``solver_cfg`` /
    ``joint_drive_props`` / ``attrs``.
-3. **Define control parts** — group joints into logical sets (e.g. ``arm``, ``gripper``).
+3. **Define control parts** — use ``arm`` / ``eef`` for official single-arm
+   defaults and ``left_arm`` / ``right_arm`` / ``left_eef`` / ``right_eef`` for
+   dual-arm defaults. Custom names remain valid.
 4. **Configure the IK solver** — ``OPWSolverCfg`` (6-DOF), ``SRSSolverCfg`` (7-DOF),
    or a generic ``SolverCfg``.
 5. **Set drive properties** — stiffness/damping/max_effort per joint group.
 6. **Implement** ``build_pk_serial_chain`` reading from ``_pk_urdf_path``.
 7. **Keep** ``from_dict`` as the 3-line template — do not reimplement.
-8. **Register** in ``embodichain/lab/sim/robots/__init__.py`` (and set ``__all__``).
-9. **Add documentation** — ``docs/source/resources/robot/<name>.md`` + update
-   ``resources/robot/index.rst``.
+8. **Register** the official preset's lazy export in
+   ``embodichain_robots/__init__.py`` and its ID, class import path, defaults,
+   and control metadata in ``embodichain_robots/_catalog.py``. External packages
+   advertise a catalog through an ``embodichain.robots`` entry point.
+9. **Add documentation** — create
+   ``docs/source/resources/robot/<vendor>/<model>.md`` and include it in the
+   owning vendor's ``index.rst`` and the Supported Robots overview. Reuse the
+   source namespace; community projects with an unknown manufacturer use their
+   project namespace. Add an index for a new vendor or project and link it from
+   ``resources/robot/index.rst``. Generic composition remains separate.
 10. **Test** — a ``__main__`` smoke test + the DOF drift guard + ``preview-asset`` CLI.
+
+Refresh the editable install after changing package entry-point metadata, then
+run ``embodichain list-robot`` and verify variants, independent DOFs, default
+control groups, and mimic followers against the selected URDF/configuration.
+Keep catalog modules and package initializers lightweight so discovery does not
+load robot implementations or download assets.
 
 Approaches
 ----------
 
-- **Single-file** (variant-less robots): one ``my_robot.py`` with everything.
-- **Package** (robots with variants — versions/arm-kinds/hand-brands): a directory
-  with ``types.py`` (enums), ``cfg.py`` (a variant-aware ``_build_defaults``),
-  optional ``params.py`` / ``utils.py`` helpers, and ``__init__.py``.
+- **Single-file**: ``<vendor>/<model>.py`` when archives are shared at vendor level.
+- **Package**: ``<vendor>/<model>/`` for model-owned assets, revisions or calibrations.
+  Keep ``cfg.py``, ``assets.py``, optional specification/type helpers, and a lazy
+  ``__init__.py`` together. Asset imports must not load configuration modules.
+
+Asset classes register through ``embodichain_robots/_asset_catalog.py`` and the
+``embodichain.assets`` entry point. Each asset ID declares a ``class_path`` and
+``category``. Keep source versions, checksums and cache prefixes with the asset;
+the core owns reusable download, locking and extraction machinery.
 
 Key parameters
 --------------
 
-+---------------------+----------------------------------+----------------------------------+
-| Parameter           | Type                             | Description                      |
-+=====================+==================================+==================================+
-| ``uid``             | str                              | Unique robot identifier          |
-+---------------------+----------------------------------+----------------------------------+
-| ``urdf_cfg``        | URDFCfg                          | URDF file and components         |
-+---------------------+----------------------------------+----------------------------------+
-| ``control_parts``   | Dict[str, List[str]]             | Joint groups for control         |
-+---------------------+----------------------------------+----------------------------------+
-| ``solver_cfg``      | Dict[str, SolverCfg]             | IK solver configurations         |
-+---------------------+----------------------------------+----------------------------------+
-| ``joint_drive_props``      | JointDrivePropertiesCfg          | Joint drive, limits, friction    |
-+---------------------+----------------------------------+----------------------------------+
-| ``attrs``           | RigidBodyPhysicsCfg               | Grouped rigid-body physics       |
-+---------------------+----------------------------------+----------------------------------+
-| variant fields      | enum / str / bool                | Optional subclass fields         |
-|                     |                                  | (e.g. ``version``)               |
-+---------------------+----------------------------------+----------------------------------+
-| ``_pk_urdf_path``   | property or method → str         | URDF for the FK/IK serial chain  |
-+---------------------+----------------------------------+----------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 35 40
+
+   * - Parameter
+     - Type
+     - Description
+   * - ``uid``
+     - str
+     - Unique robot identifier
+   * - ``urdf_cfg``
+     - URDFCfg
+     - URDF file and components
+   * - ``control_parts``
+     - Dict[str, List[str]]
+     - Joint groups for control
+   * - ``solver_cfg``
+     - Dict[str, SolverCfg]
+     - IK solver configurations
+   * - ``joint_drive_props``
+     - JointDrivePropertiesCfg
+     - Joint drive, limits, friction
+   * - ``attrs``
+     - RigidBodyPhysicsCfg
+     - Grouped rigid-body physics
+   * - variant fields
+     - enum / str / bool
+     - Optional subclass fields, such as ``version``
+   * - ``_pk_urdf_path``
+     - property or method → str
+     - URDF for the FK/IK serial chain
 
 Common mistakes
 ---------------

@@ -63,6 +63,17 @@ def _sim(physics_cfg=None):
     )
 
 
+def test_auto_no_render_summary_preserves_request_and_reason() -> None:
+    summary = importlib.import_module("embodichain.lab.sim._startup_summary")
+    sim = _sim()
+    sim.sim_config.render_cfg.renderer = "no-render"
+    sim._renderer_selection_reason = "no native render consumers"
+    rows = summary.simulation_rows(sim)
+    assert ("Rendering", "Renderer", "auto -> no-render") in rows
+    assert ("Rendering", "Renderer selection", "no native render consumers") in rows
+    assert ("Rendering", "Render GPU", "OFF") in rows
+
+
 def test_startup_configuration_defaults_and_validation():
     cfg = SimulationManagerCfg()
     assert getattr(cfg, "startup_summary", None) == "compact"

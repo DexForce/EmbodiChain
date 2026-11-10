@@ -18,10 +18,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.optimize import minimize
+from embodichain.lab.sim.scene.layout import (
+    LayoutCfg,
+    LayoutProblem,
+    PlanarRelation,
+    solve_layout,
+)
 
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraphRelation
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
@@ -42,6 +48,13 @@ if TYPE_CHECKING:
     )
 
 
+__all__ = [
+    "ParentSurfaceLayoutProblem",
+    "ParentSurfaceLayoutOptimizerConfig",
+    "ParentSurfaceLayoutOptimizer",
+]
+
+
 @dataclass
 class ParentSurfaceLayoutProblem:
     """All geometry and layout-state inputs for one parent-surface solve."""
@@ -54,6 +67,7 @@ class ParentSurfaceLayoutProblem:
     parent_aabb_xy: list[list[float]]
     parent_top_z: float
     child_relations: list[SceneGraphRelation]
+    support_uid: str = "parent"
 
     @classmethod
     def from_layout_problem(
@@ -88,6 +102,7 @@ class ParentSurfaceLayoutProblem:
                 parent_center_xy if inherited_xy is None else list(inherited_xy)
             )
         return cls(
+            support_uid=parent.id,
             assets_by_id=assets_by_id,
             child_ids=group.child_ids,
             child_seed_xy_by_id=child_seed_xy_by_id,
@@ -156,39 +171,48 @@ class ParentSurfaceLayoutOptimizer:
             config if config is not None else ParentSurfaceLayoutOptimizerConfig()
         )
 
-    def optimize(
-        self,
-        problem: ParentSurfaceLayoutProblem,
-    ) -> dict[str, list[float]]:
-        """Return sibling XY centers inside the parent AABB without overlap."""
-        child_half_extents_xy = _asset_half_extents_xy(
+    def optimize(self, problem: ParentSurfaceLayoutProblem) -> dict[str, list[float]]:
+        """Adapt GenSim semantics to the shared arena-frame layout service."""
+        half_extents = _asset_half_extents_xy(
             assets_by_id=problem.assets_by_id,
             object_ids=problem.child_ids,
         )
-        inequality_constraints, equality_constraints = _build_constraints(
-            problem=problem,
-            child_half_extents_xy=child_half_extents_xy,
-            config=self.config,
+        parent_bounds = _bounds_from_points(problem.parent_aabb_xy)
+        bounds = {uid: parent_bounds for uid in problem.child_ids}
+        solution = solve_layout(
+            LayoutProblem(
+                support_uid=problem.support_uid,
+                seed_xy_by_uid=problem.child_seed_xy_by_id,
+                half_extents_xy_by_uid=half_extents,
+                bounds_xy_by_uid=bounds,
+                fixed_xy_by_uid={
+                    uid: xy
+                    for uid, xy in problem.fixed_child_xy_by_id.items()
+                    if xy is not None
+                },
+                preferred_uids=tuple(problem.imported_child_ids),
+                relations=tuple(
+                    PlanarRelation(r.source_id, r.relation, r.target_id)
+                    for r in problem.child_relations
+                ),
+                skip_fixed_collisions=True,
+            ),
+            LayoutCfg(
+                relation_clearance_m=self.config.relation_clearance_m,
+                collision_margin_m=self.config.collision_margin_m,
+                max_slsqp_iterations=self.config.max_slsqp_iterations,
+                slsqp_ftol=self.config.slsqp_ftol,
+                max_collision_rounds=self.config.max_collision_rounds,
+                max_added_collision_pairs=self.config.max_added_collision_pairs,
+                imported_seed_weight=self.config.imported_seed_weight,
+                enforce_all_clearances=False,
+            ),
         )
-        solved_child_xy_by_id = _solve_root_xy(
-            root_ids=problem.child_ids,
-            root_seed_xy_by_id=problem.child_seed_xy_by_id,
-            imported_root_ids=problem.imported_child_ids,
-            inequality_constraints=inequality_constraints,
-            equality_constraints=equality_constraints,
-            config=self.config,
-        )
-        return _refine_root_collisions(
-            root_ids=problem.child_ids,
-            root_seed_xy_by_id=problem.child_seed_xy_by_id,
-            imported_root_ids=problem.imported_child_ids,
-            root_half_extents_xy=child_half_extents_xy,
-            inequality_constraints=inequality_constraints,
-            equality_constraints=equality_constraints,
-            fixed_root_xy_by_id=problem.fixed_child_xy_by_id,
-            solved_root_xy_by_id=solved_child_xy_by_id,
-            config=self.config,
-        )
+        if solution.status != "solved":
+            raise ValueError(
+                f"Parent layout optimization failed ({solution.status}): {solution.message}"
+            )
+        return {uid: list(xy) for uid, xy in solution.xy_by_uid.items()}
 
     def settle_dynamic_children(
         self,
@@ -231,53 +255,6 @@ class ParentSurfaceLayoutOptimizer:
         ).settle()
 
 
-class _LayoutInfeasibleError(ValueError):
-    """Internal marker for an SLSQP failure while testing one collision direction."""
-
-
-def _build_constraints(
-    *,
-    problem: ParentSurfaceLayoutProblem,
-    child_half_extents_xy: dict[str, np.ndarray],
-    config: ParentSurfaceLayoutOptimizerConfig,
-) -> tuple[list[tuple[np.ndarray, float]], list[tuple[np.ndarray, float]]]:
-    """Build hard parent-AABB, planar-relation, and fixed-child constraints."""
-    root_index = {child_id: index for index, child_id in enumerate(problem.child_ids)}
-    parent_bounds = _bounds_from_points(problem.parent_aabb_xy)
-    inequality_constraints: list[tuple[np.ndarray, float]] = []
-    equality_constraints: list[tuple[np.ndarray, float]] = []
-    for child_id in problem.child_ids:
-        # Keep each child's 2D AABB inside the parent AABB support proxy.
-        _append_aabb_center_bounds(
-            constraints=inequality_constraints,
-            root_index=root_index,
-            root_id=child_id,
-            bounds=parent_bounds,
-            half_extents_xy=child_half_extents_xy[child_id],
-        )
-        fixed_xy = problem.fixed_child_xy_by_id[child_id]
-        if fixed_xy is not None:
-            _append_fixed_root_constraints(
-                constraints=equality_constraints,
-                root_index=root_index,
-                root_id=child_id,
-                fixed_xy=fixed_xy,
-            )
-    for relation in problem.child_relations:
-        # Apply planar relations between direct on-children of this parent.
-        _append_planar_relation_constraint(
-            constraints=inequality_constraints,
-            root_index=root_index,
-            source_id=relation.source_id,
-            relation=relation.relation,
-            target_id=relation.target_id,
-            source_half_extents_xy=child_half_extents_xy[relation.source_id],
-            target_half_extents_xy=child_half_extents_xy[relation.target_id],
-            relation_clearance_m=config.relation_clearance_m,
-        )
-    return inequality_constraints, equality_constraints
-
-
 def _asset_half_extents_xy(
     *, assets_by_id: dict[str, SceneObject], object_ids: list[str]
 ) -> dict[str, np.ndarray]:
@@ -303,289 +280,3 @@ def _bounds_from_points(points: list[list[float]]) -> np.ndarray:
     ):
         raise ValueError("XY bounds must contain at least two finite points.")
     return np.stack([coordinates.min(axis=0), coordinates.max(axis=0)])
-
-
-def _append_aabb_center_bounds(
-    *,
-    constraints: list[tuple[np.ndarray, float]],
-    root_index: dict[str, int],
-    root_id: str,
-    bounds: np.ndarray,
-    half_extents_xy: np.ndarray,
-) -> None:
-    """Constrain one child AABB center to lie completely inside XY bounds."""
-    minimum, maximum = bounds[0] + half_extents_xy, bounds[1] - half_extents_xy
-    if np.any(minimum > maximum):
-        raise ValueError(f"Asset {root_id!r} cannot fit inside its parent AABB.")
-    # root_id is the child whose center is constrained in this AABB bound.
-    offset, count = 2 * root_index[root_id], 2 * len(root_index)
-    # offset selects this child's XY pair; count is the full flattened XY vector size.
-    for axis in range(2):
-        upper, lower = np.zeros(count), np.zeros(count)
-        upper[offset + axis], lower[offset + axis] = 1.0, -1.0
-        constraints.extend(
-            [(upper, float(maximum[axis])), (lower, -float(minimum[axis]))]
-        )
-
-
-def _append_fixed_root_constraints(
-    *,
-    constraints: list[tuple[np.ndarray, float]],
-    root_index: dict[str, int],
-    root_id: str,
-    fixed_xy: list[float],
-) -> None:
-    """Lock one fixed child's center to its imported XY coordinates."""
-    offset, count = 2 * root_index[root_id], 2 * len(root_index)
-    for axis, coordinate in enumerate(fixed_xy):
-        row = np.zeros(count)
-        row[offset + axis] = 1.0
-        constraints.append((row, float(coordinate)))
-
-
-def _append_planar_relation_constraint(
-    *,
-    constraints: list[tuple[np.ndarray, float]],
-    root_index: dict[str, int],
-    source_id: str,
-    relation: str,
-    target_id: str,
-    source_half_extents_xy: np.ndarray,
-    target_half_extents_xy: np.ndarray,
-    relation_clearance_m: float,
-) -> None:
-    """Append one world-XY separation constraint for sibling planar semantics."""
-    axis, sign = {
-        "left_of": (0, 1.0),
-        "right_of": (0, -1.0),
-        "behind": (1, 1.0),
-        "in_front_of": (1, -1.0),
-    }.get(relation, (None, None))
-    if axis is None or source_id not in root_index or target_id not in root_index:
-        raise ValueError(f"Unsupported parent-child planar relation {relation!r}.")
-    row = np.zeros(2 * len(root_index))
-    row[2 * root_index[source_id] + axis] = sign
-    row[2 * root_index[target_id] + axis] = -sign
-    constraints.append(
-        (
-            row,
-            -float(
-                source_half_extents_xy[axis]
-                + target_half_extents_xy[axis]
-                + relation_clearance_m
-            ),
-        )
-    )
-
-
-def _solve_root_xy(
-    *,
-    root_ids: list[str],
-    root_seed_xy_by_id: dict[str, list[float]],
-    imported_root_ids: set[str],
-    inequality_constraints: list[tuple[np.ndarray, float]],
-    equality_constraints: list[tuple[np.ndarray, float]],
-    config: ParentSurfaceLayoutOptimizerConfig,
-) -> dict[str, list[float]]:
-    """Solve one parent child-group's XY positions with SLSQP."""
-    initial = np.asarray(
-        [root_seed_xy_by_id[root_id] for root_id in root_ids], dtype=float
-    )
-
-    def objective(values: np.ndarray) -> float:
-        xy = values.reshape(-1, 2)
-        loss = 0.0
-        for index, root_id in enumerate(root_ids):
-            if root_id in imported_root_ids:
-                delta = xy[index] - initial[index]
-                loss += config.imported_seed_weight * float(delta @ delta)
-        return loss
-
-    constraints = [
-        {
-            "type": "ineq",
-            "fun": lambda values, row=row, bound=bound: bound - float(row @ values),
-        }
-        for row, bound in inequality_constraints
-    ] + [
-        {
-            "type": "eq",
-            "fun": lambda values, row=row, bound=bound: float(row @ values) - bound,
-        }
-        for row, bound in equality_constraints
-    ]
-    result = minimize(
-        objective,
-        initial.reshape(-1),
-        method="SLSQP",
-        constraints=constraints,
-        options={
-            "maxiter": config.max_slsqp_iterations,
-            "ftol": config.slsqp_ftol,
-            "disp": False,
-        },
-    )
-    if not result.success:
-        raise _LayoutInfeasibleError(
-            f"Parent layout optimization failed: {result.message}"
-        )
-    return {
-        root_id: [float(result.x[2 * index]), float(result.x[2 * index + 1])]
-        for index, root_id in enumerate(root_ids)
-    }
-
-
-def _refine_root_collisions(
-    *,
-    root_ids: list[str],
-    root_seed_xy_by_id: dict[str, list[float]],
-    imported_root_ids: set[str],
-    root_half_extents_xy: dict[str, np.ndarray],
-    inequality_constraints: list[tuple[np.ndarray, float]],
-    equality_constraints: list[tuple[np.ndarray, float]],
-    fixed_root_xy_by_id: dict[str, list[float] | None],
-    solved_root_xy_by_id: dict[str, list[float]],
-    config: ParentSurfaceLayoutOptimizerConfig,
-) -> dict[str, list[float]]:
-    """Iteratively add separation constraints for overlapping child AABBs."""
-    current = solved_root_xy_by_id
-    seen: set[tuple[str, str]] = set()
-    for _ in range(config.max_collision_rounds):
-        overlaps = [
-            pair
-            for pair in _root_aabb_overlaps(
-                root_ids=root_ids, half_extents=root_half_extents_xy, xy_by_id=current
-            )
-            if fixed_root_xy_by_id[pair[1]] is None
-            or fixed_root_xy_by_id[pair[2]] is None
-        ]
-        if not overlaps:
-            return current
-        added = 0
-        for _, first_id, second_id in overlaps[: config.max_added_collision_pairs]:
-            key = tuple(sorted((first_id, second_id)))
-            if key in seen:
-                continue
-            # Earlier pair updates may already have separated this stale overlap.
-            if key not in {
-                tuple(sorted((first, second)))
-                for _, first, second in _root_aabb_overlaps(
-                    root_ids=root_ids,
-                    half_extents=root_half_extents_xy,
-                    xy_by_id=current,
-                )
-            }:
-                continue
-            for separation_constraint in _aabb_separation_constraints(
-                root_ids=root_ids,
-                first_id=first_id,
-                second_id=second_id,
-                half_extents=root_half_extents_xy,
-                xy_by_id=current,
-                margin=config.collision_margin_m,
-            ):
-                # Keep a candidate only when it is compatible with all hard constraints.
-                try:
-                    solved_xy_by_id = _solve_root_xy(
-                        root_ids=root_ids,
-                        root_seed_xy_by_id=current,
-                        imported_root_ids=imported_root_ids,
-                        inequality_constraints=[
-                            *inequality_constraints,
-                            separation_constraint,
-                        ],
-                        equality_constraints=equality_constraints,
-                        config=config,
-                    )
-                except _LayoutInfeasibleError:
-                    continue
-                inequality_constraints.append(separation_constraint)
-                current = solved_xy_by_id
-                seen.add(key)
-                added += 1
-                break
-            else:
-                raise ValueError(
-                    "Parent-child AABB pair has no feasible separation direction: "
-                    f"{first_id!r}, {second_id!r}."
-                )
-        if not added:
-            break
-    raise ValueError("Parent-child AABB collisions remain after layout refinement.")
-
-
-def _root_aabb_overlaps(
-    *,
-    root_ids: list[str],
-    half_extents: dict[str, np.ndarray],
-    xy_by_id: dict[str, list[float]],
-) -> list[tuple[float, str, str]]:
-    """Return overlapping child pairs with their minimum XY overlap distance."""
-    result = []
-    for index, first_id in enumerate(root_ids):
-        for second_id in root_ids[index + 1 :]:
-            overlap = np.minimum(
-                np.asarray(xy_by_id[first_id]) + half_extents[first_id],
-                np.asarray(xy_by_id[second_id]) + half_extents[second_id],
-            ) - np.maximum(
-                np.asarray(xy_by_id[first_id]) - half_extents[first_id],
-                np.asarray(xy_by_id[second_id]) - half_extents[second_id],
-            )
-            if np.all(overlap > 1e-9):
-                result.append((float(np.min(overlap)), first_id, second_id))
-    return sorted(result, reverse=True)
-
-
-def _aabb_separation_constraints(
-    *,
-    root_ids: list[str],
-    first_id: str,
-    second_id: str,
-    half_extents: dict[str, np.ndarray],
-    xy_by_id: dict[str, list[float]],
-    margin: float,
-) -> list[tuple[np.ndarray, float]]:
-    """Return ordered feasible-direction candidates for one overlapping AABB pair."""
-    first, second = np.asarray(xy_by_id[first_id]), np.asarray(xy_by_id[second_id])
-    overlap = np.minimum(
-        first + half_extents[first_id], second + half_extents[second_id]
-    ) - np.maximum(first - half_extents[first_id], second - half_extents[second_id])
-    axes = np.argsort(overlap)
-    constraints = []
-    for axis in axes:
-        current_order = first[axis] < second[axis] or (
-            first[axis] == second[axis] and first_id < second_id
-        )
-        for first_is_lower in (current_order, not current_order):
-            constraints.append(
-                _aabb_separation_constraint_for_direction(
-                    root_ids=root_ids,
-                    first_id=first_id,
-                    second_id=second_id,
-                    half_extents=half_extents,
-                    axis=int(axis),
-                    first_is_lower=first_is_lower,
-                    margin=margin,
-                )
-            )
-    return constraints
-
-
-def _aabb_separation_constraint_for_direction(
-    *,
-    root_ids: list[str],
-    first_id: str,
-    second_id: str,
-    half_extents: dict[str, np.ndarray],
-    axis: int,
-    first_is_lower: bool,
-    margin: float,
-) -> tuple[np.ndarray, float]:
-    """Return one directed AABB separation inequality on a selected axis."""
-    index = {root_id: i for i, root_id in enumerate(root_ids)}
-    row = np.zeros(2 * len(root_ids))
-    sign = 1.0 if first_is_lower else -1.0
-    row[2 * index[first_id] + axis], row[2 * index[second_id] + axis] = sign, -sign
-    return row, -float(
-        half_extents[first_id][axis] + half_extents[second_id][axis] + margin
-    )

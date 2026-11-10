@@ -20,10 +20,51 @@ from __future__ import annotations
 
 import pytest
 import torch
+from types import SimpleNamespace
 
 from unittest.mock import MagicMock, Mock, call
 
 from embodichain.lab.sim.cfg import ArticulationCfg
+
+
+@pytest.mark.parametrize("selection", [None, [1]])
+def test_information_registration_only_publishes_by_default(selection) -> None:
+    from embodichain.lab.gym.envs.managers.events import register_info_to_env
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(sync_render_state=Mock(), update=Mock()),
+    )
+    register_info_to_env(env, selection, registry=[])
+    env.sim.update.assert_not_called()
+    env.sim.sync_render_state.assert_called_once()
+
+
+def test_information_registration_rejects_partial_legacy_settling() -> None:
+    from embodichain.lab.gym.envs.managers.events import register_info_to_env
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(sync_render_state=Mock(), update=Mock()),
+    )
+    with pytest.raises(ValueError, match="requires all environments"):
+        register_info_to_env(env, [1], registry=[], sim_update=True)
+    env.sim.update.assert_not_called()
+    env.sim.sync_render_state.assert_not_called()
+
+
+def test_information_registration_retains_explicit_full_world_settling() -> None:
+    from embodichain.lab.gym.envs.managers.events import register_info_to_env
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(sync_render_state=Mock(), update=Mock()),
+    )
+    register_info_to_env(env, [1, 0], registry=[], sim_update=True)
+    env.sim.update.assert_called_once_with(step=100)
 
 
 class MockRobot:
@@ -467,6 +508,7 @@ class MockEnv:
 from embodichain.lab.gym.envs.managers.events import (
     resolve_uids,
     resolve_dict,
+    set_visual_object_pose_from_env,
     set_detached_uids_for_env_reset,
     wait_for_dynamic_objects_to_settle,
 )
@@ -484,6 +526,53 @@ from embodichain.lab.gym.envs.managers.randomization.visual import (
 from embodichain.lab.gym.envs.managers.cfg import EventCfg, SceneEntityCfg
 from embodichain.lab.gym.envs.managers import EventManager, FunctorCfg
 from embodichain.utils.module_utils import find_function_from_modules
+
+
+@pytest.mark.parametrize(
+    "selection, selected_rows",
+    [(None, [0, 1]), (slice(None), [0, 1]), ([1], [1]), ([1, 0], [1, 0]), ([], [])],
+)
+def test_visual_pose_from_env_updates_only_selected_rows(
+    selection, selected_rows
+) -> None:
+    marker_pose = torch.eye(4).repeat(2, 1, 1)
+
+    def set_pose(pose, env_ids):
+        marker_pose[env_ids] = pose
+
+    marker = SimpleNamespace(set_local_pose=set_pose)
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        desired_pose=torch.eye(4).repeat(2, 1, 1),
+        sim=SimpleNamespace(
+            has_native_renderer=True,
+            get_visual_object=lambda uid: marker if uid == "marker" else None,
+            update=Mock(),
+        ),
+    )
+    env.desired_pose[:, :3, 3] = torch.tensor([[0.2, 0.1, 0.01], [0.4, -0.1, 0.02]])
+    env.desired_pose[1, :3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+    source_before = env.desired_pose.clone()
+    expected = marker_pose.clone()
+    expected[selected_rows] = source_before[selected_rows]
+    set_visual_object_pose_from_env(
+        env, selection, SceneEntityCfg(uid="marker"), pose_key="desired_pose"
+    )
+
+    torch.testing.assert_close(marker_pose, expected)
+    torch.testing.assert_close(env.desired_pose, source_before)
+    env.sim.update.assert_not_called()
+
+
+def test_visual_pose_from_env_skips_unbound_no_render_declarations() -> None:
+    env = SimpleNamespace(
+        sim=SimpleNamespace(has_native_renderer=False, get_visual_object=Mock())
+    )
+    set_visual_object_pose_from_env(
+        env, [0], SceneEntityCfg(uid="marker"), pose_key="desired_pose"
+    )
+    env.sim.get_visual_object.assert_not_called()
 
 
 class TestResolveUids:
@@ -1846,3 +1935,112 @@ def test_asset_replacement_failure_preserves_original_config() -> None:
     replacement = env.sim.replace_rigid_object.call_args.kwargs["cfg"]
     assert replacement.shape.fpath == "new.ply"
     env.sim.remove_asset.assert_not_called()
+
+
+def test_expansion_profile_reset_applies_selected_scene_and_visual_rows() -> None:
+    from embodichain.lab.gym.envs.managers.events import (
+        apply_expansion_profile_reset,
+    )
+
+    class Cube:
+        def __init__(self) -> None:
+            self.pose = None
+            self.env_ids = None
+
+        def set_local_pose(self, pose, env_ids=None):
+            self.pose = pose
+            self.env_ids = env_ids
+
+    class Sim:
+        def __init__(self, cube) -> None:
+            self.cube = cube
+
+        def get_rigid_object(self, uid):
+            assert uid == "cube"
+            return self.cube
+
+    class Registry:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def apply_to_environment(self, env, assignments, *, seed):
+            self.calls.append((env, dict(assignments), seed))
+
+    cube = Cube()
+    registry = Registry()
+    env = Mock(num_envs=4, sim=Sim(cube))
+    pose = torch.arange(28, dtype=torch.float32).reshape(4, 7)
+
+    apply_expansion_profile_reset(
+        env,
+        torch.tensor([1, 3]),
+        cube_pose=pose,
+        visual_registry=registry,
+        visual_assignments={0: "canonical", 1: "camera", 2: "light", 3: "material"},
+        visual_seed=11,
+    )
+
+    assert torch.equal(cube.pose, pose[[1, 3]])
+    assert torch.equal(cube.env_ids, torch.tensor([1, 3]))
+    assert registry.calls == [(env, {1: "camera", 3: "material"}, 11)]
+
+
+def test_directory_replacement_constructor_and_sampling_remain_compatible(monkeypatch):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.managers import FunctorCfg
+    from embodichain.lab.gym.envs.managers import events
+    from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    class Body:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+    asset = Body(RigidObjectCfg(uid="fork", shape=MeshCfg(fpath="original.ply")))
+    sim = SimpleNamespace(get_asset=lambda uid: asset, replace_rigid_object=Mock())
+    env = SimpleNamespace(sim=sim)
+    monkeypatch.setattr(events, "RigidObject", Body)
+    monkeypatch.setattr(events, "get_data_path", lambda path: path)
+    monkeypatch.setattr(
+        events, "get_all_files_in_directory", lambda path: ["b.ply", "a.ply"]
+    )
+    sampled = []
+    monkeypatch.setattr(
+        events.random, "choice", lambda paths: sampled.append(list(paths)) or paths[0]
+    )
+    entity = SceneEntityCfg(uid="fork")
+    term = events.replace_assets_from_group(
+        FunctorCfg(params={"entity_cfg": entity, "folder_path": "fork/"}), env
+    )
+    term(env, None, entity, "fork/")
+    assert sampled == [["a.ply", "b.ply"]]
+    selected = sim.replace_rigid_object.call_args.kwargs["cfg"]
+    assert selected.uid == "fork" and selected.shape.fpath == "a.ply"
+    assert asset.cfg.shape.fpath == "original.ply"
+
+
+@pytest.mark.parametrize("env_ids", [[], [1], [0, 0], [False], [0.0], slice(1, 1)])
+def test_prepared_asset_event_rejects_partial_or_invalid_rows(env_ids):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.managers import FunctorCfg
+    from embodichain.lab.gym.envs.managers.events import replace_assets_from_group
+
+    env = SimpleNamespace(num_envs=1)
+    term = replace_assets_from_group(FunctorCfg(params={"deployment": None}), env)
+    with pytest.raises(ValueError, match="B=1|integer rows"):
+        term(env, env_ids, deployment=object())
+
+
+def test_prepared_asset_event_idle_is_safe_and_modes_are_exclusive():
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.managers import FunctorCfg
+    from embodichain.lab.gym.envs.managers.events import replace_assets_from_group
+
+    env = SimpleNamespace(num_envs=1)
+    term = replace_assets_from_group(FunctorCfg(params={"deployment": None}), env)
+    term(env, None, deployment=None)
+    with pytest.raises(ValueError, match="Choose deployment"):
+        replace_assets_from_group(
+            FunctorCfg(params={"deployment": None, "folder_path": "meshes/"}), env
+        )

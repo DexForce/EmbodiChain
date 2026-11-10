@@ -2,7 +2,7 @@
 
 CuroboPlanner is EmbodiChain's optional, CUDA-accelerated and collision-aware
 motion-planning backend. It implements the normal MotionGenerator and
-atomic-action interfaces while cuRobo performs collision-aware inverse
+atomic-skill interfaces while cuRobo performs collision-aware inverse
 kinematics and trajectory optimization. It supports Cartesian EEF_MOVE and
 joint-space JOINT_MOVE requests for one configured control part at a time.
 
@@ -57,7 +57,7 @@ Lock non-controlled joints (for example gripper joints) in the cuRobo robot
 profile so they are not exposed as active planner joints. The simulator values of
 those joints must remain equal to the V2 profile's `lock_joints` values while a
 plan is executed; the adapter intentionally preserves non-control simulator
-joints in the full-DoF atomic-action output. For example, the Panda V2 profile
+joints in the full-DoF atomic-skill output. For example, the Panda V2 profile
 locks both fingers at `0.04`, so use the same simulated finger state or include
 the fingers in the planned control part. A mismatch means cuRobo validates a
 different collision geometry from the one replayed in DexSim.
@@ -364,7 +364,7 @@ representations read back from those caches, call
 transformed by the simulator's live link poses. The interactive cuRobo example
 calls this once after planner initialization; close the Open3D window to continue.
 
-## Atomic actions and supported scope
+## Atomic Skills and supported scope
 
 Single-arm MoveEndEffector is supported through the normal
 `strategy="motion_gen"` route. MoveJoints can opt in to collision-aware
@@ -388,7 +388,6 @@ Supported scope is limited as follows:
 - Non-control joints must remain at the matching cuRobo V2 `lock_joints`
   values. The adapter does not yet validate cross-model locked-joint name/value
   equivalence automatically.
-- The legacy Gym ActionBank path is unsupported.
 - CPU execution of cuRobo itself and cuRobo V1 compatibility are unsupported.
   CPU physics is supported because tensors are transferred to CUDA only for
   planning and the resulting trajectory is copied back to the simulation

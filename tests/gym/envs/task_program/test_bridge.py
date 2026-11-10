@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from typing import Any
 from unittest.mock import Mock
@@ -24,6 +24,8 @@ from unittest.mock import Mock
 import pytest
 import torch
 from tensordict import TensorDict
+
+from task_program_support import completed_runtime
 
 from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.gym.envs.task_program.bridge import (
@@ -38,31 +40,35 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 import embodichain.lab.gym.envs.task_program.bridge as bridge_module
 from embodichain.lab.gym.envs.types import ControllerAction
-from embodichain.lab.sim.atomic_actions.bindings import (
+from embodichain.lab.gym.envs.expert_trajectory import (
+    ExpertActionSpec,
+    encode_expert_action,
+)
+from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.execution import (
+from embodichain.lab.sim.atomic_skills.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
-from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
-from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
-from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
-from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_skills.primitives.place import PlaceOptions
+from embodichain.lab.sim.atomic_skills.runner import ExecutionRunnerCfg
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
 )
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.state import (
     PlanningContext,
     RobotObservation,
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
 from embodichain.lab.task_program.semantics.calls import (
     Pick,
     Place,
@@ -250,6 +256,7 @@ class _FakeSegment:
     segment_index: int = 0
     segment_id: str = "segment-0"
     name: str = "pick-and-place"
+    instruction: str | None = None
     calls: tuple[_FakeCompiledCall, ...] = (
         _FakeCompiledCall(0, "pick"),
         _FakeCompiledCall(1, "place"),
@@ -514,7 +521,7 @@ class _TerminalFailedRuntime(_FakeRuntime):
             task_state=running.task_state,
             events=(
                 ExecutionEvent(
-                    kind=ExecutionEventKind.ACTION_PLANNING_FAILED,
+                    kind=ExecutionEventKind.SKILL_PLANNING_FAILED,
                     timestamp=self.clock.now(),
                     skill_id="slide",
                     invocation_id="open-drawer-call",
@@ -896,13 +903,27 @@ def _bridge(
     validator_port: object | None = None,
     parallel_safety_validator: object | None = None,
     runner_cfg: ExecutionRunnerCfg | None = None,
+    isolate_policy_sessions: bool = False,
+    joint_command_mode: str = "position",
 ) -> tuple[TaskProgramDemoBridge, _FakeRuntime, EnvironmentStepClock]:
     clock = EnvironmentStepClock(STEP_DT)
     encoder = RuntimeCommandFrameEncoder(
-        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF)),
+        joint_command_mode=joint_command_mode,
     )
     sink = BufferedGymCommandSink(encoder, clock)
-    runtime = _FakeRuntime(sink, clock, _joint_frame(duration=duration))
+    runtime = _FakeRuntime(
+        sink,
+        clock,
+        _joint_frame(
+            duration=duration,
+            velocities=(
+                torch.ones(BATCH_SIZE, 2)
+                if joint_command_mode == "position_velocity"
+                else None
+            ),
+        ),
+    )
     bridge = TaskProgramDemoBridge(
         _FakeProgram(_FakeSegment() if segment is None else segment),
         runtime,
@@ -912,8 +933,109 @@ def _bridge(
         validator_port=validator_port,
         runner_cfg=runner_cfg,
         parallel_safety_validator=parallel_safety_validator,
+        isolate_policy_sessions=isolate_policy_sessions,
     )
     return bridge, runtime, clock
+
+
+def test_bridge_gives_shared_policy_and_validator_one_fresh_session() -> None:
+    class SharedPort(_PostPolicyPort, _ValidatorPort):
+        def __init__(self) -> None:
+            _PostPolicyPort.__init__(self, torch.zeros(BATCH_SIZE, ROBOT_DOF))
+            _ValidatorPort.__init__(self, torch.ones(BATCH_SIZE, dtype=torch.bool))
+            self.sessions = []
+
+        def new_task_program_session(self):
+            session = SharedPort()
+            self.sessions.append(session)
+            return session
+
+    port = SharedPort()
+    native, _, _ = _bridge(duration=STEP_DT, post_policy_port=port, validator_port=port)
+    assert native._post_policy_port is native._validator_port is port
+    first, _, _ = _bridge(
+        duration=STEP_DT,
+        post_policy_port=port,
+        validator_port=port,
+        isolate_policy_sessions=True,
+    )
+    second, _, _ = _bridge(
+        duration=STEP_DT,
+        post_policy_port=port,
+        validator_port=port,
+        isolate_policy_sessions=True,
+    )
+    assert len(port.sessions) == 2
+    assert first._post_policy_port is first._validator_port is port.sessions[0]
+    assert second._post_policy_port is second._validator_port is port.sessions[1]
+    assert first._validator_port is not second._validator_port
+
+
+def test_execution_trace_records_only_consumed_actions_and_rejects_unknown_frames() -> (
+    None
+):
+    bridge = TaskProgramDemoBridge.__new__(TaskProgramDemoBridge)
+    bridge._clock = EnvironmentStepClock(0.1)
+    bridge._execution_trace = []
+    bridge._row_rejection = None
+    bridge._row_hold = None
+    bridge._pending_rejected_ids = ()
+    lifecycle = bridge_module._SegmentLifecycle()
+    action = ControllerAction(
+        torch.zeros(1, 1),
+        metadata={
+            "bridge_action_kind": "runtime_command",
+            "plan_reference": {
+                "call_index": 0,
+                "plan_index": 3,
+                "invocation_id": "pick",
+            },
+        },
+    )
+    pending = bridge._yield_and_advance(action, lifecycle)
+    next(pending)
+    assert bridge.execution_trace == ()
+    with pytest.raises(StopIteration):
+        next(pending)
+    assert bridge.execution_trace == (
+        {
+            "step": 0,
+            "call_index": 0,
+            "plan_index": 3,
+            "invocation_id": "pick",
+            "kind": "runtime_command",
+        },
+    )
+
+    post_policy = ControllerAction(
+        torch.zeros(1, 1),
+        metadata={
+            "bridge_action_kind": "program_post_policy",
+            "plan_reference": {
+                "call_index": 0,
+                "plan_index": 3,
+                "invocation_id": "pick",
+            },
+        },
+    )
+    bridge._record_consumed_action(post_policy)
+    assert bridge.execution_trace[-1]["plan_index"] == -1
+
+    unknown = bridge._yield_and_advance(
+        ControllerAction(
+            torch.zeros(1, 1), metadata={"bridge_action_kind": "runtime_command"}
+        ),
+        bridge_module._SegmentLifecycle(),
+    )
+    next(unknown)
+    with pytest.raises(TaskProgramBridgeError, match="no plan reference"):
+        next(unknown)
+
+
+def test_bridge_without_expansion_provider_has_no_records() -> None:
+    bridge, _, _ = _bridge(duration=STEP_DT)
+
+    assert bridge.expansion_records == ()
 
 
 @pytest.mark.parametrize(
@@ -945,7 +1067,7 @@ def test_bridge_progress_counts_only_fixed_pick_place_calls(
     )
     policies = {
         "motion_policy": MotionPolicy(sample_count=PROGRESS_SAMPLE_COUNT),
-        "recovery_policy": RecoveryPolicy(max_replans=0, max_action_retries=0),
+        "recovery_policy": RecoveryPolicy(max_replans=0, max_skill_retries=0),
         "tracking_policy": TrackingPolicy.timed(),
         **overrides,
     }
@@ -953,7 +1075,7 @@ def test_bridge_progress_counts_only_fixed_pick_place_calls(
     compiler.integration.link_call.return_value.preset = SkillPolicyPreset(
         "progress",
         effect_assurance=EffectAssurance.PROJECTED,
-        action_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
+        skill_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
         **policies,
     )
     runtime.compiler = compiler
@@ -1025,6 +1147,29 @@ def test_joint_encoder_emits_full_qpos_and_holds_inactive_rows() -> None:
     assert torch.equal(action[1], qpos[1])
 
 
+def test_joint_encoder_holds_unaddressed_joints_at_controller_targets() -> None:
+    """A scoped command must not chase measured drift on another resource."""
+    current = torch.zeros(BATCH_SIZE, ROBOT_DOF)
+    controller_targets = torch.full_like(current, 0.5)
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(current),
+        hold_qpos_provider=lambda env_ids: controller_targets.clone(),
+    )
+
+    action = encoder.encode(
+        _joint_frame(
+            duration=STEP_DT,
+            active_mask=torch.tensor([True, False]),
+        )
+    )
+
+    assert torch.equal(action[0, torch.tensor([1, 3])], torch.tensor([10.0, 30.0]))
+    assert torch.equal(
+        action[0, torch.tensor([0, 2, 4])], controller_targets[0, [0, 2, 4]]
+    )
+    assert torch.equal(action[1], controller_targets[1])
+
+
 def test_joint_encoder_emits_full_qpos_qvel_and_zeros_inactive_rows() -> None:
     qpos = torch.arange(BATCH_SIZE * ROBOT_DOF, dtype=torch.float32).reshape(
         BATCH_SIZE, ROBOT_DOF
@@ -1048,6 +1193,134 @@ def test_joint_encoder_emits_full_qpos_qvel_and_zeros_inactive_rows() -> None:
     assert torch.equal(action["qpos"][1], qpos[1])
     assert torch.equal(action["qvel"][0], torch.tensor([0.0, 1.0, 0.0, 3.0, 0.0]))
     assert torch.equal(action["qvel"][1], torch.zeros(ROBOT_DOF))
+
+
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+def test_joint_encoder_retains_targets_through_observed_drift_and_row_reordering(
+    mode: str,
+) -> None:
+    """Idle joints retain intent by stable env ID while inactive rows stay fresh."""
+    provider = _QposProvider(
+        torch.arange(BATCH_SIZE * ROBOT_DOF, dtype=torch.float32).reshape(
+            BATCH_SIZE, ROBOT_DOF
+        )
+    )
+    encoder = RuntimeCommandFrameEncoder(provider, joint_command_mode=mode)
+    frame = _joint_frame(duration=STEP_DT, velocities=torch.ones(BATCH_SIZE, 2))
+    first_action = encoder.encode(frame)
+    first = (
+        first_action if isinstance(first_action, torch.Tensor) else first_action["qpos"]
+    )
+    retained = first.clone()
+    first.zero_()  # Caller mutation must not change the encoder's retained targets.
+    provider.qpos = provider.qpos.flip(0) + 0.01
+    reordered = replace(
+        frame,
+        env_ids=frame.env_ids.flip(0),
+        active_mask=torch.tensor([True, False]),
+    )
+
+    action = encoder.encode(reordered)
+    qpos = action if isinstance(action, torch.Tensor) else action["qpos"]
+
+    assert torch.equal(qpos[0, [0, 2, 4]], retained[1, [0, 2, 4]])
+    assert torch.equal(qpos[1], provider.qpos[1])
+    if mode == "position_velocity":
+        assert torch.equal(action["qvel"][0, [0, 2, 4]], torch.zeros(3))
+        assert torch.equal(action["qvel"][1], torch.zeros(ROBOT_DOF))
+
+    # Reactivating the previously inactive row must not restore stale targets.
+    provider.qpos += 0.02
+    reactivated = encoder.encode(
+        replace(reordered, active_mask=torch.tensor([True, True]))
+    )
+    reactivated_qpos = (
+        reactivated if isinstance(reactivated, torch.Tensor) else reactivated["qpos"]
+    )
+    assert torch.equal(reactivated_qpos[1, [0, 2, 4]], provider.qpos[1, [0, 2, 4]])
+
+
+def test_joint_encoder_preserves_previous_endpoint_targets_and_rebases_safe_holds() -> (
+    None
+):
+    provider = _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))
+    encoder = RuntimeCommandFrameEncoder(provider)
+    first = _joint_frame(duration=STEP_DT)
+    encoder.encode(first)
+    provider.qpos += 0.01
+    second = replace(
+        first,
+        commands=(
+            EndpointCommand(
+                target=JointPositionTarget(control_part="other", joint_ids=(0, 2)),
+                payload=JointPositionPayload(
+                    positions=torch.full((BATCH_SIZE, 2), 5.0)
+                ),
+            ),
+        ),
+    )
+
+    action = encoder.encode(second)
+    assert torch.equal(action[:, [1, 3]], first.commands[0].payload.positions)
+    assert torch.equal(action[:, 4], torch.zeros(BATCH_SIZE))
+
+    observed = torch.full((BATCH_SIZE, ROBOT_DOF), 0.5)
+    held = encoder.encode_hold(
+        first.targets, _context(qpos=observed, env_ids=first.env_ids)
+    )
+    assert torch.equal(held, observed)
+    provider.qpos += 0.01
+    resumed = encoder.encode(second)
+    assert torch.equal(resumed[:, [1, 3, 4]], observed[:, [1, 3, 4]])
+
+    # A fresh episode/bridge owns a fresh encoder, rather than old hold targets.
+    fresh = RuntimeCommandFrameEncoder(provider).encode(second)
+    assert torch.equal(fresh[:, [1, 3, 4]], provider.qpos[:, [1, 3, 4]])
+
+
+def test_joint_encoder_retains_omitted_rows_when_new_ids_join() -> None:
+    provider = _QposProvider(
+        torch.arange(BATCH_SIZE * ROBOT_DOF).float().reshape(BATCH_SIZE, ROBOT_DOF)
+    )
+    encoder = RuntimeCommandFrameEncoder(provider)
+    first = _joint_frame(duration=STEP_DT)
+    original = encoder.encode(first).clone()
+    provider.qpos += 0.01
+    joined = encoder.encode(replace(first, env_ids=torch.tensor([3, 1001])))
+    assert torch.equal(joined[0, [0, 2, 4]], original[1, [0, 2, 4]])
+    assert torch.equal(joined[1, [0, 2, 4]], provider.qpos[1, [0, 2, 4]])
+    provider.qpos += 0.01
+    resumed = encoder.encode(first)
+    assert torch.equal(resumed[0, [0, 2, 4]], original[0, [0, 2, 4]])
+    assert torch.equal(resumed[1, [0, 2, 4]], original[1, [0, 2, 4]])
+
+
+def test_joint_encoder_cache_does_not_read_one_host_scalar_per_row() -> None:
+    """Host scalar extraction must stay bounded as the vector batch grows."""
+    batch = 64
+    provider = _QposProvider(torch.zeros(batch, ROBOT_DOF))
+    encoder = RuntimeCommandFrameEncoder(provider)
+    command = EndpointCommand(
+        target=JointPositionTarget(control_part="arm", joint_ids=(1, 3)),
+        payload=JointPositionPayload(positions=torch.ones(batch, 2)),
+    )
+    frame = RuntimeCommandFrame(
+        commands=(command,),
+        active_mask=torch.ones(batch, dtype=torch.bool),
+        env_ids=torch.arange(batch),
+        hold_duration=torch.full((batch,), STEP_DT),
+    )
+    encoder.encode(frame)
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU]
+    ) as profile:
+        encoder.encode(frame)
+    scalar_reads = sum(
+        event.count
+        for event in profile.key_averages()
+        if event.key == "aten::_local_scalar_dense"
+    )
+    assert scalar_reads <= 4
 
 
 def test_position_velocity_joint_encoder_rejects_missing_velocity() -> None:
@@ -1291,6 +1564,10 @@ def test_atomic_demo_bridge_is_lazy_and_waits_with_hold_actions() -> None:
 def test_bridge_publishes_completion_only_after_normal_program_exhaustion() -> None:
     """Task success cannot observe a partial segment lifecycle as completion."""
     bridge, _, _ = _bridge(duration=STEP_DT)
+    assert bridge.program_id == "demo-program"
+    selected = bridge.env_ids
+    selected.zero_()
+    assert bridge.env_ids.tolist() == [7, 3]
     segments = iter(bridge.iter_segments())
 
     demo_segment = next(segments)
@@ -1305,6 +1582,7 @@ def test_bridge_publishes_completion_only_after_normal_program_exhaustion() -> N
     with pytest.raises(StopIteration):
         next(segments)
     assert bridge.program_completed is True
+    assert bridge.execution_finished
     completion = bridge.completion_mask
     completion[0] = False
     assert bridge.completion_mask.tolist() == [True, True]
@@ -1318,17 +1596,21 @@ def test_closing_without_abort_handshake_fails_loudly_and_does_not_ack() -> None
     with pytest.raises(TaskProgramBridgeError, match="abort_actions"):
         actions.close()
 
+    assert not bridge.execution_finished
     assert clock.step_index == 0
     assert runtime.cancel_count == 1
 
 
 def test_abort_handshake_discards_unconsumed_command_and_yields_safe_hold() -> None:
     bridge, runtime, clock = _bridge(duration=2 * STEP_DT)
-    segment = next(bridge.iter_segments())
+    segments = bridge.iter_segments()
+    segment = next(segments)
     actions = iter(segment.actions)
 
     command = next(actions)
     assert command.metadata["bridge_action_kind"] == "runtime_command"
+    segments.close()
+    assert not bridge.execution_finished
     assert segment.abort_actions is not None
     emergency = iter(segment.abort_actions("operator stop", last_action_consumed=False))
     hold = next(emergency)
@@ -1352,6 +1634,7 @@ def test_abort_handshake_discards_unconsumed_command_and_yields_safe_hold() -> N
             )
         )
     actions.close()
+    assert bridge.execution_finished
 
 
 def test_abort_handshake_acknowledges_consumed_command_exactly_once() -> None:
@@ -1559,7 +1842,7 @@ def test_zero_command_terminal_runtime_failure_preserves_trace_and_validates_onc
     )
     assert runtime_trace["events"] == [
         {
-            "kind": "action_planning_failed",
+            "kind": "skill_planning_failed",
             "timestamp": 0.0,
             "skill_id": "slide",
             "invocation_id": "open-drawer-call",
@@ -1597,7 +1880,7 @@ def test_sequential_start_failure_before_first_command_preserves_cause() -> None
     bridge = TaskProgramDemoBridge(_FakeProgram(_FakeSegment()), runtime, sink, clock)
     env = _BridgeExecutorEnv(bridge)
 
-    with pytest.raises(RuntimeError, match="action generation") as error:
+    with pytest.raises(RuntimeError, match="action expansion") as error:
         execute_demo_episode(env)
 
     assert isinstance(error.value.__cause__, RuntimeError)
@@ -1637,7 +1920,7 @@ def test_parallel_construction_failure_before_first_command_preserves_cause(
         classmethod(fail_construction),
     )
 
-    with pytest.raises(RuntimeError, match="action generation") as error:
+    with pytest.raises(RuntimeError, match="action expansion") as error:
         execute_demo_episode(env)
 
     assert isinstance(error.value.__cause__, RuntimeError)
@@ -1702,7 +1985,7 @@ def test_post_policy_generator_error_replays_safe_hold_before_propagating() -> N
     )
     env = _BridgeExecutorEnv(bridge)
 
-    with pytest.raises(RuntimeError, match="action generation") as error:
+    with pytest.raises(RuntimeError, match="action expansion") as error:
         execute_demo_episode(env)
 
     assert isinstance(error.value.__cause__, RuntimeError)
@@ -1788,7 +2071,8 @@ def test_row_independent_partial_failure_does_not_abort_healthy_peer() -> None:
     assert runtime.sink.pending_count == 0
 
 
-def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+def test_post_policy_and_validator_ports_stay_at_demo_boundary(mode) -> None:
     post_policy = object()
     validator = object()
     segment = _FakeSegment(
@@ -1802,6 +2086,7 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
         segment=segment,
         post_policy_port=post_port,
         validator_port=validator_port,
+        joint_command_mode=mode,
     )
     demo_segment = next(bridge.iter_segments())
     actions = iter(demo_segment.actions)
@@ -1811,6 +2096,24 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
     post_action = next(actions)
     assert clock.step_index == 1
     assert post_action.metadata["bridge_action_kind"] == "program_post_policy"
+    if mode == "position_velocity":
+        assert runtime_action.value["qvel"].any()
+        assert torch.equal(post_action.value["qpos"], post_port.action)
+        assert not post_action.value["qvel"].any()
+    else:
+        assert torch.equal(post_action.value, post_port.action)
+    encoded = encode_expert_action(
+        post_action.value,
+        spec=ExpertActionSpec(
+            joint_command_mode=mode,
+            joint_names=tuple(f"joint_{i}" for i in range(ROBOT_DOF)),
+        ),
+        active_joint_ids=tuple(range(ROBOT_DOF)),
+    )
+    assert encoded.shape == (
+        BATCH_SIZE,
+        ROBOT_DOF * (2 if mode == "position_velocity" else 1),
+    )
     with pytest.raises(StopIteration):
         next(actions)
 
@@ -1820,6 +2123,61 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary() -> None:
     assert post_port.active_masks[0].tolist() == [True, True]
     assert demo_segment.validator().tolist() == [True, False]
     assert validator_port.seen == [validator]
+
+
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+@pytest.mark.parametrize("reject_tick", [0, 2])
+def test_row_rejection_holds_commands_without_disrupting_policy_clock(
+    mode, reject_tick
+) -> None:
+    class ExactClockPolicy(_PostPolicyPort):
+        def actions(self, policy, *, segment, active_mask):
+            self.active_masks.append(active_mask.clone())
+            start = clock.step_index
+            for tick in range(3):
+                assert clock.step_index == start + tick
+                yield self.action * (tick + 1)
+                assert clock.step_index == start + tick + 1
+
+    port = ExactClockPolicy(torch.ones(BATCH_SIZE, ROBOT_DOF))
+    bridge, _, clock = _bridge(
+        duration=STEP_DT,
+        segment=_FakeSegment(post_policies=(object(),)),
+        post_policy_port=port,
+        joint_command_mode=mode,
+    )
+    segment = next(bridge.iter_segments())
+    policy_commands = []
+    stopped = False
+    holds = 0
+    for action in segment.actions:
+        positions = action.value if mode == "position" else action.value["qpos"]
+        if stopped:
+            torch.testing.assert_close(positions[0], torch.full((ROBOT_DOF,), 9.0))
+            if mode == "position_velocity":
+                assert not action.value["qvel"][0].any()
+        if action.metadata.get("rejected_env_ids"):
+            assert action.metadata["rejected_env_ids"] == [7]
+            holds += 1
+        if action.metadata["bridge_action_kind"] == "program_post_policy":
+            policy_commands.append(positions[1].clone())
+            if len(policy_commands) == reject_tick + 1:
+                hold = action.value.clone()
+                if mode == "position":
+                    hold[0] = 9.0
+                else:
+                    hold["qpos"][0] = 9.0
+                    hold["qvel"][0] = 0.0
+                bridge.request_row_rejection(
+                    (7,), ControllerAction(hold), reason="measured failure"
+                )
+                stopped = True
+    assert holds == 1
+    torch.testing.assert_close(
+        torch.stack(policy_commands),
+        torch.arange(1.0, 4.0)[:, None].expand(3, ROBOT_DOF),
+    )
+    assert segment.validator().tolist() == [False, True]
 
 
 def test_post_policy_receives_only_rows_surviving_partial_runtime_failure() -> None:
@@ -2053,7 +2411,7 @@ def test_sequential_segment_analyzes_downstream_calls_but_executes_own_prefix() 
         RuntimeCommandFrameEncoder(_QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))),
         clock,
     )
-    runtime = _FakeRuntime(sink, clock, _joint_frame(duration=STEP_DT))
+    runtime = completed_runtime(torch.tensor([7, 3], dtype=torch.long))
     bridge = TaskProgramDemoBridge(_FakeProgram(first, second), runtime, sink, clock)
     segments = iter(bridge.iter_segments())
 
@@ -2061,12 +2419,16 @@ def test_sequential_segment_analyzes_downstream_calls_but_executes_own_prefix() 
     tuple(first_demo.actions)
     assert first_demo.validator().tolist() == [True, True]
 
-    assert runtime.calls == ("pick", "place")
-    assert runtime.execution_prefix_lengths == [1]
+    assert runtime.start.call_args.args[0] == ("pick", "place")
+    assert [
+        item.kwargs["execution_prefix_length"] for item in runtime.start.call_args_list
+    ] == [1]
 
     tuple(next(segments).actions)
-    assert runtime.calls == ("place",)
-    assert runtime.execution_prefix_lengths == [1, 1]
+    assert runtime.start.call_args.args[0] == ("place",)
+    assert [
+        item.kwargs["execution_prefix_length"] for item in runtime.start.call_args_list
+    ] == [1, 1]
 
 
 def test_parallel_segment_preserves_branches_barrier_and_adopts_state(
@@ -2265,3 +2627,72 @@ def test_parallel_segment_fails_closed_without_safety_validator() -> None:
         tuple(next(bridge.iter_segments()).actions)
 
     assert runtime.start_count == 0
+
+
+@pytest.mark.parametrize(
+    "instruction", [None, "Pick up the cube and place it on the table."]
+)
+def test_bridge_preserves_segment_instruction(instruction: str | None) -> None:
+    bridge, _, _ = _bridge(
+        duration=STEP_DT, segment=_FakeSegment(instruction=instruction)
+    )
+    demo_segment = next(bridge.iter_segments())
+    assert demo_segment.instruction == instruction
+
+
+def test_bridge_uses_program_instruction_for_unannotated_segment() -> None:
+    bridge, _, _ = _bridge(duration=STEP_DT, segment=_FakeSegment(instruction=None))
+    bridge._program.instruction = "Program task"
+    segment = next(bridge.iter_segments())
+    assert segment.instruction == "Program task"
+    assert segment.instruction_source == "task_fallback"
+
+
+def test_validator_baseline_is_captured_lazily_before_runtime_start() -> None:
+    """A lift baseline belongs to execution start, after the preceding segment."""
+    baselines: list[tuple[object, torch.Tensor | None]] = []
+
+    class _LifecycleValidatorPort(_ValidatorPort):
+        def begin_segment(
+            self, *, segment: object, active_mask: torch.Tensor | None
+        ) -> None:
+            assert runtime.result.status is SemanticExecutionStatus.IDLE
+            baselines.append((segment, active_mask))
+
+    declaration = _FakeSegment(validators=(object(),))
+    port = _LifecycleValidatorPort(torch.ones(BATCH_SIZE, dtype=torch.bool))
+    bridge, runtime, _ = _bridge(
+        duration=STEP_DT, segment=declaration, validator_port=port
+    )
+    demo_segment = next(bridge.iter_segments())
+    assert baselines == []
+    tuple(demo_segment.actions)
+    assert baselines == [(declaration, None)]
+    assert demo_segment.validator().all()
+
+
+def test_environment_bridge_scope_restores_binding_after_failure() -> None:
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    bridge, _, _ = _bridge(duration=STEP_DT)
+    previous = object()
+    environment = SimpleNamespace(_active_task_program_bridge=previous)
+    with pytest.raises(RuntimeError, match="injected"):
+        with EmbodiedEnv.task_program_bridge_scope(environment, bridge):
+            assert environment._active_task_program_bridge is bridge
+            raise RuntimeError("injected execution failure")
+    assert environment._active_task_program_bridge is previous
+
+
+def test_fresh_bridge_reports_physical_binding_before_runtime_grounding():
+    from types import SimpleNamespace
+    from dataclasses import replace
+
+    bridge, runtime, _ = _bridge(duration=STEP_DT)
+    runtime._result = replace(runtime.result, env_ids=torch.tensor([0, 1]))
+    runtime.observation_provider = SimpleNamespace(env_ids=torch.tensor([7, 3]))
+    assert bridge.env_ids.tolist() == [7, 3]
+    owned = bridge.env_ids
+    owned.zero_()
+    assert runtime.observation_provider.env_ids.tolist() == [7, 3]

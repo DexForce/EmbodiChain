@@ -50,15 +50,14 @@ def test_build_engine_configures_a_named_renderer(
         def start(self) -> None:
             captured["started"] = True
 
-    monkeypatch.setattr(
-        "embodichain.utils.utility.load_config",
-        lambda _path: {"id": "SimpleTask-v1"},
-    )
     monkeypatch.setattr(demo, "OnlineDataEngine", FakeEngine)
 
     demo._build_engine(SimpleNamespace(device="cpu"))
 
     assert captured["cfg"].gym_config["renderer"] == "hybrid"
+    assert captured["cfg"].gym_config["id"] == "TaskProgramRepeatedPickPlace-Franka-v1"
+    assert captured["cfg"].state_dim == 9
+    assert captured["cfg"].gym_config["enable_sensor"] is False
     assert captured["started"] is True
 
 

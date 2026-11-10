@@ -20,18 +20,26 @@ name = "embodichain"
 description = "An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence."
 readme = "README.md"
 authors = [ { name = "EmbodiChain Developers" } ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
-  "dexsim_engine==0.5.0",
+  "dexsim_engine==0.6.0rc1",
+  # DexSim and LeRobot require different OpenCV distributions sharing cv2.
+  # Keep their bindings on the same release to avoid mixed Python/native APIs.
+  "opencv-python==4.12.0.88; python_version < '3.12'",
+  "opencv-python-headless==4.12.0.88; python_version < '3.12'",
+  "opencv-python==4.13.0.92; python_version >= '3.12'",
+  "opencv-python-headless==4.13.0.92; python_version >= '3.12'",
+  "shapely>=2.0",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
-  "huggingface_hub>=0.35.3,<1.0",
+  "huggingface_hub>=0.35.3,<0.36; python_version < '3.12'",
+  "huggingface_hub>=1.6,<2; python_version >= '3.12'",
   "langchain",
   "langchain-openai",
-  "toppra==0.6.3",
+  "scipy",
   "pin",
   "pin-pink",
   "casadi",
@@ -44,32 +52,51 @@ dependencies = [
   "ortools",
   "prettytable",
   "psutil>=5.9",
-  "black==26.3.1",
+  "black==26.10.1",
   "fvcore",
   "h5py",
-  "tensordict",
+  "tensordict>=0.13,<0.15; python_version < '3.12'",
+  "tensordict>=0.15.3,<0.16; python_version >= '3.12'",
   "viser==1.0.21",
-  "lerobot>=0.4.4,<0.5"
+  "lerobot==0.4.4; python_version < '3.12'",
+  "lerobot[training]==0.6.1; python_version >= '3.12'",
+  # TorchCodec's binary interface follows torch, not the LeRobot SDK version.
+  # Keep each Python profile's torch/torchvision/TorchCodec versions paired.
+  "torch>=2.7,<2.8; python_version < '3.12'",
+  "torchvision>=0.22,<0.23; python_version < '3.12'",
+  "torchcodec>=0.5,<0.6; python_version < '3.12'",
+  "torch>=2.11,<2.12; python_version >= '3.12'",
+  "torchvision>=0.26,<0.27; python_version >= '3.12'",
+  "torchcodec>=0.11.1,<0.12; python_version >= '3.12'"
 ]
 
 [project.optional-dependencies]
+geometry = [
+  # Optional mesh inputs for pure numerical geometry; no simulation/FCL backend.
+  "trimesh>=4.9",
+]
+rigidformer = [
+  "einops>=0.8.1",
+  "roma==1.5.4",
+  "pyarrow>=15",
+  "trimesh>=4.9",
+]
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",
 ]
 gensim = [
-  "bpy",
+  # Blender runs in a separate Python 3.11 runtime; see docker/README.md.
   "gradio>=6.17.3,<6.18",
   "pyrender==0.1.45",
   "requests",
   "Pillow",
-  "scipy",
   "matplotlib",
 ]
 
 [project.scripts]
 # Unified EmbodiChain CLI with sub-commands (mirrors ``python -m embodichain``).
-# ``embodichain run-env`` discovers all installed task packages (via the
+# ``embodichain run-task`` discovers all installed task packages (via the
 # ``embodichain.tasks`` entry points) and runs their init hooks (via
 # ``embodichain.init``) before building and launching the environment.
 # Other commands cover environment discovery, data assets, SimReady generation,
@@ -80,12 +107,19 @@ embodichain = "embodichain.__main__:main"
 [project.entry-points."embodichain.tasks"]
 embodichain_tasks = "embodichain_tasks"
 
+[project.entry-points."embodichain.robots"]
+official = "embodichain_robots._catalog:ROBOT_CONFIGS"
+
+[project.entry-points."embodichain.assets"]
+official_robots = "embodichain_robots._asset_catalog:ROBOT_ASSETS"
+
 [tool.uv.sources]
 bpy = { index = "blender" }
 
 [[tool.uv.index]]
 name = "blender"
 url = "https://download.blender.org/pypi/"
+explicit = true
 
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }

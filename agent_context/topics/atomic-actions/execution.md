@@ -1,4 +1,4 @@
-# Atomic Action planning and execution
+# Atomic Skill planning and execution
 
 Read this when the request needs these details. [Topic overview](atomic-actions.md).
 
@@ -6,13 +6,13 @@ Read this when the request needs these details. [Topic overview](atomic-actions.
 
 ### 1. Construct the engine
 
-`AtomicActionEngine` owns one `ActionPlanningServices` snapshot: robot, motion
+`AtomicSkillEngine` owns one `SkillPlanningServices` snapshot: robot, motion
 generator, device, planner backend, trajectory builder, and command profiles.
 Built-ins are installed through the engine catalog. An engine is not a global
 process registry.
 
 The standard simulation composition root is
-`create_simulation_atomic_action_engine()` in `sim_adapter.py`.
+`create_simulation_atomic_skill_engine()` in `sim_adapter.py`.
 
 ### 2. Bind resources
 
@@ -26,7 +26,7 @@ targets. They do not contain live planners or mutable controller state.
 
 ### 3. Build an invocation
 
-`ActionInvocation` contains:
+`SkillInvocation` contains:
 
 - exact action `skill_id`;
 - an action-owned frozen goal;
@@ -35,13 +35,13 @@ targets. They do not contain live planners or mutable controller state.
 - motion, tracking, and recovery policy; and
 - a monotonic revision when replacing a compatible in-flight request.
 
-The engine resolves the invocation into `ResolvedActionRequest`. The action's
+The engine resolves the invocation into `ResolvedSkillRequest`. The action's
 framework-owned `plan()` validates exact goal/options types and then calls the
 implementation `_plan(request, context)` hook.
 
 ### 4. Choose planning or execution
 
-- `engine.plan(invocation, context)` returns one `ActionPlan`.
+- `engine.plan(invocation, context)` returns one `SkillPlan`.
 - `engine.compile(invocations, context)` performs a fixed offline projection.
 - `engine.start(invocations, context)` creates an observed `ExecutionSession`.
 - `ExecutionRunner` drives that session against observation, command, and clock
@@ -64,8 +64,8 @@ object guards, phase gates, retries, or later calls.
 
 Focused regression coverage:
 
-- `tests/sim/atomic_actions/test_engine_per_env.py`
-- `tests/sim/atomic_actions/test_endpoint_runtime_e2e.py`
+- `tests/sim/atomic_skills/test_engine_per_env.py`
+- `tests/sim/atomic_skills/test_endpoint_runtime_e2e.py`
 
 ## Execution and verification
 
@@ -111,40 +111,101 @@ resample fractional durations.
 
 `MotionPolicy` forwards the explicit strategy unchanged. `ik_interp` rejects
 backend `plan_opts`; `motion_gen` always invokes the backend. Segments requesting
-`cartesian_linear=True` preserve caller-supplied Cartesian samples and currently
-require `ik_interp`, including Press, Slide, PushObject and OpenDoor. A planner
-policy for such a segment raises instead of silently bypassing backend timing.
+`cartesian_linear=True` preserve caller-supplied Cartesian samples and require
+`ik_interp`. PushObject, Slide, Press, OpenDoor and Twist fail closed under
+`motion_gen`: endpoint-only backend planning cannot certify their straight-line
+or articulated contact paths, and the action must not silently fall back to IK.
+Each phase retains its native time profile while retiming to the control grid;
+requested phase counts are minima, so long phases expand rather than speeding
+up. Composite phases use terminal holds to align lengths; they do not
+distance-resample a longer native plan back into the requested count. Press
+validates its final assembled arm samples through a capable backend.
+Exact validation needs poses for every configured dynamic obstacle. Missing
+poses fail the plan with diagnostics; they never permit unchecked success.
+`dynamic_collision_mode=off` forbids filling missing poses from the scene, so
+such validation requires complete explicit obstacle poses or a backend world
+without dynamic obstacles.
+It does not promise continuous collision freedom, a straight path between
+endpoints, or a fallback to IK.
 
 Primitive planner results are explicitly retimed before their controlled-joint
 paths are embedded into a full-robot `TimedTrajectory`. Off-grid duration rounds
 up to a whole control interval, qvel is recomputed from the executed samples,
-and now-invalid native acceleration samples are discarded. Composite primitives
-that combine planner output with fixed-length hand or multi-part phases may
-also resample the planner's position path to the phase count before assembly;
-the final composite trajectory then derives its velocity targets from the
-assembled positions and timing.
+and now-invalid native acceleration samples are discarded. Default `ik_interp`
+policies use rest-to-rest minimum-jerk joint segments. Omitted velocity follows
+the Robot's ordered per-joint caps, while an explicit scalar request is
+intersected with those caps; acceleration remains a planner-owned scalar budget.
+`sample_count` remains a lower bound. Exact Cartesian
+paths use one global minimum-jerk progress law and batch IK for every expanded
+sample, so enforcing limits does not replace contact geometry with joint-space
+interpolation. Articulated paths whose geometry cannot be reconstructed from
+Cartesian chords provide an exact normalized-progress sampler; OpenDoor and
+Twist regenerate every expanded pose around their configured external axis.
+CoordinatedPickment
+uses sparse IK only as a seed, then batch-projects every shared-object waypoint
+for both arms so joint interpolation cannot break the closed chain.
+
+HandOver plans the two arm assignments from independent phase-length maps. A
+mixed batch terminal-pads corresponding phases to their shared maximum before
+selecting rows, which preserves handover boundaries when one assignment needs
+more retimed samples. It holds both closed hands for `hold_steps` before source
+release. Pour
+splits rotation and return at the poured pose and inserts a physical-time dwell.
+Free-hand approaches interpolate from the observed state. Place continues the
+bound closing command for held rows until explicit release: a contact-blocked
+measured finger position does not retain grasp pressure. Free rows keep their
+observed hand state until the release segment.
+
+Physical monitors read `ExecutionSession.active_expected_effects` and
+`active_effect_candidates`, which return owned effect snapshots independently
+of trajectory length. `active_plan` remains a full diagnostics snapshot; using
+it in every command-cycle guard copies the complete command stream repeatedly.
 
 Tracking recovery is separate from task-level semantic recovery:
 
-- Atomic Actions owns planning failure, target/collision revision, transport
+- Atomic Skills owns planning failure, target/collision revision, transport
   acknowledgement, tracking error, timeout, retry, and safe stop.
 - Task Program may perform bounded workflow recovery after the action reaches
-  a semantic effect boundary.
+a semantic effect boundary.
+
+`MotionPolicy.velocity_limit` and `acceleration_limit` forward finite positive
+scalar budgets to `MotionGenOptions` for both strategies. Omitted velocity
+preserves Robot caps; the default acceleration budget is 0.5. Typed `plan_opts`
+require `motion_gen`; each backend owns how they consume scalar budgets.
+For `motion_gen`, an explicit `acceleration_limit=None` preserves the backend's
+configured budget; `ik_interp` still requires a positive scalar. The benchmark
+uses this delegation when injecting selected-planner options so task defaults
+do not replace the suite's per-joint limits or invalidate prepared backends.
+Configured execution policies expose the same fields under `motion`, and
+requested budgets are retained in execution metadata. Use these fields when a
+physically qualified task needs a lower speed than the selected robot's limits.
 
 ## Velocity target contract
 
 `MotionPolicy.velocity_targets` selects `auto` (use trajectory velocities,
 default) or `zero` (explicit position-only control).
 Configured execution policies decode the same field under `motion`.
-`AtomicAction.build_plan` derives missing velocities after composite skills
-have assembled their final full-robot positions and timing. Stationary joint
-intervals and terminal settling commands use zero velocity; failed rows remain
-held. MoveHeldObject and Pour preserve native arm derivatives when embedding
-unchanged timed planner output. Differentiation does not retime composite
-paths to enforce robot velocity/acceleration limits.
+`AtomicSkill.build_plan` derives missing velocities after composite skills
+have assembled their final full-robot positions and timing. The first command,
+both ends of every stationary joint interval, and terminal settling commands
+use zero velocity; failed rows remain held.
 
 `SimulationExecutionAdapter` always clears absent velocity references to zero;
 it never substitutes observed velocities or depends on peer active masks.
 It writes position and velocity targets through the existing `set_qpos` and
 `set_qvel` APIs. Inactive rows hold observed positions with zero target velocity.
 A nonzero damping gain is needed for the velocity error to contribute to tracking.
+Active rows in one runtime frame must share one positive hold duration; zero is
+reserved for terminal padding. The runner rejects mismatched durations instead
+of choosing the maximum. Simulation control periods and sleeps must be integer
+multiples of `physics_dt`; the adapter never rounds a motion-command request
+upward. Passive runner polling, including physical-effect waits, rounds the
+configured minimum cycle up to an advertised clock quantum before sleeping.
+
+## Benchmark physical replay evidence
+
+The benchmark extension's `scenarios/_replay_diagnostics.py` and
+`atomic_replay.py` collect optional Atomic replay evidence without changing
+stage scoring or controller commands. The
+[benchmark README](../../../extensions/embodichain_benchmarks/motion_generation/README.md#physical-replay-diagnostics)
+owns the configuration, recorded fields and timing interpretation.

@@ -1,0 +1,33 @@
+program_id: tabletop_hand_over
+instruction: Pass the can from the left gripper to the right gripper and place it on the table.
+targets:
+  delivery_pose:
+    kind: cyclic_pose
+    values:
+      - position: [0.45, -0.18, 0.825]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+  delivery_rest_pose:
+    kind: cyclic_pose
+    values:
+      - position: [0.45, -0.18, 0.782]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+program:
+  kind: segment
+  name: hand_over_can
+  instruction: Transfer the can between the grippers and place it at the delivery position.
+  steps:
+    kind: invoke
+    call:
+      kind: hand_over
+      object: can
+      final_target:
+        kind: target_ref
+        target: delivery_pose
+  post:
+    - kind: wait_stable
+      entity: can
+  validators:
+    - kind: object_near_target
+      object: can
+      target: delivery_rest_pose
+      position_tolerance: 0.05

@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import dexsim
+import operator
+import weakref
 import torch
 import dexsim.render as dr
 
@@ -47,6 +49,10 @@ class CameraCfg(SensorCfg):
 
         SimulationManager resolves ``parent`` as a Robot or Articulation link
         name. Use ``"<asset_uid>/<link_name>"`` when the link name is ambiguous.
+        Explicit mounted poses use OpenGL axes (-Z forward, +Y up).
+        Unparented explicit poses use optical axes (+Z forward, +Y down) and
+        are converted in :meth:`Camera.reset`. Look-at inputs specify viewing
+        direction directly in either case.
         """
 
         eye: Tuple[float, float, float] | None = None
@@ -82,6 +88,13 @@ class CameraCfg(SensorCfg):
     enable_mask: bool = False
     enable_normal: bool = False
     enable_position: bool = False
+    ground_plane_visible: bool = True
+    """Include the shared default ground in this camera (both stereo eyes).
+
+    The manager's global ground visibility remains a master switch. Hiding
+    the ground requires DexSim camera render-category support; collision
+    geometry and ground embedded in scanned assets are unaffected.
+    """
 
     fx: float = intrinsics[0]
     fy: float = intrinsics[1]
@@ -146,6 +159,16 @@ class Camera(BaseSensor):
         *,
         owner: SimulationManager,
     ) -> None:
+        owner._require_native_renderer("Native cameras")
+        if not isinstance(config.ground_plane_visible, bool):
+            raise ValueError("ground_plane_visible must be a bool")
+        if not config.ground_plane_visible:
+            owner._require_ground_plane_filtering()
+        self._owner_ref = weakref.ref(owner)
+        self._ground_plane_visibility = [True] * owner.num_envs
+        self._capture_metadata: dict[str, object] | None = None
+        self._capture_sequence = 0
+        self._pending_capture_metadata: dict[str, object] | None = None
         self._world = owner.get_world()
         self._arenas = [owner.get_env(i) for i in range(owner.num_envs)]
         if len(self._arenas) == 0:
@@ -215,6 +238,83 @@ class Camera(BaseSensor):
 
         self.cfg: CameraCfg = config
 
+    def set_ground_plane_visibility(
+        self, visible: bool, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Include or exclude the shared ground for selected camera instances.
+
+        This changes every image output, shadow and reflection consistently.
+        It preserves collisions and other cameras. ``reset`` restores the
+        configured policy; topology reattachment preserves the current policy.
+
+        Args:
+            visible: Whether this camera permits rendering the default ground.
+            env_ids: Environment indices, or all instances when omitted.
+
+        Raises:
+            ValueError: The flag or environment indices are invalid.
+            RuntimeError: The camera is destroyed or the SDK lacks filtering.
+        """
+        if self._is_destroyed:
+            raise RuntimeError("Camera is destroyed")
+        if not isinstance(visible, bool):
+            raise ValueError("visible must be a bool")
+        if isinstance(env_ids, torch.Tensor):
+            if env_ids.ndim != 1:
+                raise ValueError("env_ids must be one-dimensional")
+            # One host transfer for a selected reset, rather than one .item()
+            # synchronization per environment when the indices are on CUDA.
+            env_ids = env_ids.detach().cpu().tolist()
+        if env_ids is not None and any(isinstance(index, bool) for index in env_ids):
+            raise ValueError("env_ids must contain integers, not a boolean mask")
+        try:
+            ids = (
+                list(range(self.num_instances))
+                if env_ids is None
+                else [operator.index(index) for index in env_ids]
+            )
+        except TypeError as error:
+            raise ValueError("env_ids must contain integers") from error
+        if any(index < 0 or index >= self.num_instances for index in ids):
+            raise ValueError("env_ids contains an out-of-range environment")
+        if len(set(ids)) != len(ids):
+            raise ValueError("env_ids must not contain duplicates")
+        changed = [
+            index for index in ids if self._ground_plane_visibility[index] != visible
+        ]
+        if not changed:
+            return
+        owner = self._owner_ref()
+        if owner is None:
+            raise RuntimeError("Camera owner is unavailable")
+        owner._require_ground_plane_filtering()
+        excluded = 0 if visible else owner._GROUND_RENDER_CATEGORY
+        self._capture_metadata = None
+        for index in changed:
+            self._entities[index].set_excluded_render_categories(excluded)
+            self._ground_plane_visibility[index] = visible
+
+    def get_capture_metadata(self) -> dict[str, object] | None:
+        """Return a copy of metadata for the last successful image update.
+
+        ``ground_plane_visible`` records the effective per-environment policy,
+        including the global switch; it does not assert floor pixel coverage.
+        Metadata is unavailable before acquisition or after a policy change.
+        """
+        return None if self._capture_metadata is None else dict(self._capture_metadata)
+
+    def _snapshot_render_metadata(self) -> None:
+        owner = self._owner_ref()
+        global_visible = owner is not None and owner._spawn_default_plane_visibility
+        self._capture_sequence += 1
+        self._pending_capture_metadata = {
+            "capture_sequence": self._capture_sequence,
+            "camera_uid": self.cfg.uid,
+            "ground_plane_visible": tuple(
+                visible and global_visible for visible in self._ground_plane_visibility
+            ),
+        }
+
     @cached_property
     def group_id(self) -> int:
         """Get the camera group ID in the dexsim world.
@@ -246,9 +346,12 @@ class Camera(BaseSensor):
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
+        self._capture_metadata = None
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
+            self._pending_capture_metadata = None
             self._frame_buffer.apply()
+            self._snapshot_render_metadata()
         self.cfg: CameraCfg
 
         if self.cfg.enable_color:
@@ -277,6 +380,8 @@ class Camera(BaseSensor):
             self._data_buffer["position"] = (
                 self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
             )
+
+        self._capture_metadata = self._pending_capture_metadata
 
     def _detach_from_parent_nodes(self) -> None:
         """Retain camera views while their Spawn-owned parents are rebuilt."""
@@ -307,7 +412,7 @@ class Camera(BaseSensor):
             entity.attach_node(parent)
         # Extrinsics are expressed in the parent frame. Reapply them after
         # reparenting because the camera was initially reset in Arena space.
-        self.reset()
+        self._reset_pose()
         self._is_attached = True
 
     def set_local_pose(
@@ -315,7 +420,8 @@ class Camera(BaseSensor):
     ) -> None:
         """Set the local pose of the camera.
 
-        Note: The pose should be in the OpenGL coordinate system, which means the Y is up and Z is forward.
+        Note:
+            The pose uses OpenGL camera axes: +Y is up and -Z is forward.
 
         Args:
             pose (torch.Tensor): The local pose as ``(N, 4, 4)`` matrices or
@@ -392,6 +498,7 @@ class Camera(BaseSensor):
         if self._is_destroyed:
             return
         self._is_destroyed = True
+        self._capture_metadata = None
         for arena, camera_name in self._camera_names:
             try:
                 arena.remove_camera(camera_name)
@@ -425,7 +532,9 @@ class Camera(BaseSensor):
             env_ids (Sequence[int] | None): The environment IDs to set the look at for. If None, set for all environments.
         """
         if up is None:
-            up = torch.tensor([[0.0, 0.0, 1.0]]).repeat(eye.shape[0], 1)
+            up = torch.tensor([[0.0, 0.0, 1.0]], device=eye.device).repeat(
+                eye.shape[0], 1
+            )
 
         pose = look_at_to_pose(eye, target, up)
         # To opengl coordinate system.
@@ -481,29 +590,49 @@ class Camera(BaseSensor):
         return torch.stack(intrinsics, dim=0).to(self.device)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Restore configured extrinsics and ground visibility for selected views."""
+        self.set_ground_plane_visibility(self.cfg.ground_plane_visible, env_ids)
+        self._reset_pose(env_ids)
+
+    def _reset_pose(self, env_ids: Sequence[int] | None = None) -> None:
         self.cfg: CameraCfg
+        ids = (
+            None
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        )
 
         if self.cfg.extrinsics.eye is not None:
             eye = (
-                torch.tensor(self.cfg.extrinsics.eye, dtype=torch.float32)
+                torch.tensor(
+                    self.cfg.extrinsics.eye, dtype=torch.float32, device=self.device
+                )
                 .squeeze_(0)
                 .repeat(self.num_instances, 1)
             )
             target = (
-                torch.tensor(self.cfg.extrinsics.target, dtype=torch.float32)
+                torch.tensor(
+                    self.cfg.extrinsics.target, dtype=torch.float32, device=self.device
+                )
                 .squeeze_(0)
                 .repeat(self.num_instances, 1)
             )
             up = (
-                torch.tensor(self.cfg.extrinsics.up, dtype=torch.float32)
+                torch.tensor(
+                    self.cfg.extrinsics.up, dtype=torch.float32, device=self.device
+                )
                 .squeeze_(0)
                 .repeat(self.num_instances, 1)
                 if self.cfg.extrinsics.up is not None
                 else None
             )
+            if ids is not None:
+                eye, target = eye[ids], target[ids]
+                if up is not None:
+                    up = up[ids]
             self.look_at(eye, target, up, env_ids=env_ids)
         else:
-            pose = self.cfg.extrinsics.transformation
+            pose = self.cfg.extrinsics.transformation.to(self.device)
             pose = pose.unsqueeze_(0).repeat(self.num_instances, 1, 1)
 
             if self.cfg.extrinsics.parent is None:
@@ -511,4 +640,4 @@ class Camera(BaseSensor):
                 pose[:, :3, 1] = -pose[:, :3, 1]
                 pose[:, :3, 2] = -pose[:, :3, 2]
 
-            self.set_local_pose(pose, env_ids=env_ids)
+            self.set_local_pose(pose if ids is None else pose[ids], env_ids=env_ids)

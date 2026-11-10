@@ -1,0 +1,298 @@
+# Scene services
+
+`embodichain.lab.sim.scene` supplies configuration composition, procedural
+proposals, geometric layout, physical state and validation. It consumes existing
+entity UIDs and configurations; it owns no native scene, resource registry,
+semantic scene graph, generation model client or task lifecycle.
+
+## Entry points and boundaries
+
+| Request | Owner |
+|---|---|
+| Compose existing configurations and anchors | `embodichain/lab/sim/scene/composition.py` |
+| Seeded proposals and measured XY layout checks | `embodichain/lab/sim/scene/procedural.py` |
+| UID-based support geometry and group placement | `embodichain/lab/sim/scene/geometry.py`, `placement.py` |
+| Fixed-orientation XY constraints and solution status | `embodichain/lab/sim/scene/layout.py` |
+| Existing binding selection and cloned poses | `embodichain/lab/sim/scene/query.py` |
+| Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
+| Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
+| Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
+| Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
+| Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
+| Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
+| Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
+| Explicit control roles, collider inputs and source lineage | `embodichain/lab/sim/scene/control_semantics.py`, `revolute_geometry.py`, `control_source.py`, `control_mass_source.py` |
+| Shared authored source reads and link-local collider inputs | `embodichain/lab/sim/spawn/source_geometry.py`; Scene retains its `LinkMesh` import |
+| Batched tensor geometry kernels | `embodichain/compute/geometry/` |
+| CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
+| Robot-aware object proposals and full-pose IK/FK checks | `embodichain/lab/sim/scene/workspace.py` |
+| Existing-entity expansion proposals and host integration | [Scene expansion](../scene-expansion/scene-expansion.md) |
+
+The package facade resolves services lazily. Expansion has its own
+`scene.expansion` namespace. `compute.geometry` takes numerical geometry, never
+simulation or GenSim models. Its `contact_support.py` computes a contact patch
+and COM distance from arrays; native acquisition and witness lifetimes belong
+to the [sensor integration](../sensor-system/contact-history.md). Its `landing.py`
+CPU routines additionally consume Trimesh meshes and Shapely polygons for
+triangle-union floor and silhouette measurements. Scene CPU strategies own
+support selection, polygon search, greedy packing and SciPy SLSQP optimization.
+
+Pure grasp samples, release clearances, ordered footprint proposals, source-axis
+adaptation, held-object alignment targets and distal staging also live in
+`compute.geometry`. They consume explicit arrays, tensors or mesh/polygon inputs
+and retain no scene, Robot or semantic graph. `alignment.py` takes supplied poses,
+axes and held/root transforms. Runtime acquisition, policy selection, ownership
+and physical acceptance remain with their consuming subsystems.
+`pose_checks.as_rigid_matrix` only validates one input transform; it neither
+repairs it nor invokes FK/IK.
+
+`rigid_mesh.capture_rigid_mesh` snapshots scaled native input vertices and
+matching triangles as owned CPU data with the environment axis intact. It reads
+no poses, preserves duplicates/winding/order and never substitutes a hull or box
+for missing topology. Callers recapture after model/scale changes. This separate
+API leaves the lightweight mesh-envelope path unchanged and supplies
+`NativePlanarPlacement` and exact silhouette/Pour consumers.
+
+`native_hand.py` captures cooked convex/box geometry and explicitly requested
+rest/contact offsets for the exact simulation-owned Robot and native rigid UIDs.
+It requires Default/B1/env0, checks named FK against native frames, and validates
+original owners before subsequent rigid reads. Strict shape conversion and offset
+reads belong to `objects/backends/collision.py`; closing FK reuses
+[hand geometry](../robot-system/robot-system.md#sampled-hand-geometry).
+It creates no collision query and selects no grasp policy. Geometric qualification
+belongs to [GraspKit](../motion-planning/motion-planning.md); query composition and
+cleanup belong to `SkillPlanningServices` in [Atomic Skills](../atomic-actions/atomic-actions.md).
+Captured shapes and nominal queries do not establish physical acquisition/release.
+
+Static control readers consume explicit authored roles, keep source mesh frames
+and identity, and never build semantic graphs or select execution/recovery
+budgets. Acceptance thresholds and semantic link IDs belong to their callers.
+They consume the shared [Object/Spawn source reader](../simulation-system/simulation-system.md)
+and may explicitly share one `UsdSourceSnapshot` within an assembly. Source
+freshness checks reuse captured identities without repeating role parsing at
+the end of each inspection. Scene retains control-specific qualification,
+source-label targets and geometry derivation; live state uses Object APIs.
+`control_mass_source` retains the Default-only two-attribute mass compensation
+in a content-addressed derived source; it never edits the original asset.
+`control_source` rejects source/sidecar drift, including newly present optional
+sidecars. Source mesh proofs do not certify native cooked shapes or paths.
+
+`NativePlanarPlacement` owns geometry for two explicit native rigid-object UIDs;
+recreate it after replacing either object or changing its model/scale. Queries
+take explicit observed poses and return footprint containment, area and vertical
+gap, without accepting a task or inferring contact support. Exact silhouette mode
+retains concavities and holes; convex-hull mode remains explicit. Acquisition
+errors remain unavailable evidence. Callers own thresholds, invocation/episode
+association, observation timing and evidence publication.
+
+`mesh_snapshot.py` captures scaled rigid visual vertices and ordered articulation
+collision-input components from explicit UID/link mappings. It reads no live
+poses and keeps unavailable geometry distinct from usable components. Neutral
+planner roles are metadata: `none` does not remove a selected physical input.
+Connected nonconvex inputs remain unavailable in this capture path. The separate
+`collision_sources.py` link-box adapter retains its conservative component AABB
+policy; it is not a native cooked-shape/contact oracle.
+`snapshot_collision_sources()` combines common shape descriptors and explicitly
+supplied same-observation poses through `world_to_frame`. Batched inputs require
+matching pose/transform batch axes and equal projected obstacle poses; otherwise
+the helper rejects them rather than selecting row zero. It returns B=1 providers
+for the declared shared geometry/world, not per-environment world providers.
+It preserves topology/shape order,
+applies no second scale, and supplies owned providers to existing planner APIs.
+See [collision worlds](../motion-planning/collision-worlds.md) for cuRobo query lifetimes.
+
+## Construction and proposal flow
+
+Resolved asset configurations → owned `SceneFragment` → optional anchor/frame
+composition → `SceneRecipe` → seeded XY proposal → existing Spawn declaration
+or allowed state changes → host physics steps → measured checks.
+
+Fragments deep-copy configurations and preserve body scales. Composition may
+namespace entity/anchor names and align a named anchor, but does not select or
+override physics. `declare_fragment` declares through the existing manager;
+its caller owns `prepare()` and any recovery after a native declaration failure.
+
+Recipes provide explicit proxy geometry, versioned identity, constraints and
+asset choices. Seed and logical ordinal determine proposal sampling independently
+of environment slots. Generation changes XY translations only; authored height
+and orientation remain. Virtual fixed entries can represent keep-out regions.
+An unsuccessful layout has no fragment or applicable variant.
+
+For group proxies, the layout UID names a configured root and the AABB covers
+all members. Generation moves only listed movable entities by their solved
+center displacement; consumers expand the root and every member from a common
+baseline and include all changed UIDs in the movable permissions. The shared
+recipe does not traverse a GenSim support graph.
+
+Scene layout uses complete AABB bounds, fixed centers, planar relations and
+weighted displacement preferences. Only `frame="arena"` relations are supported;
+unsupported frames are reported instead of reinterpreted. `solved`,
+`no_solution`, `budget_exhausted` and `unsupported` distinguish outcomes.
+Failure does not prove mathematical infeasibility. Geometry checks do not prove
+mesh collision freedom, vertical support, stability, reachability or task success.
+
+## Tensor batching and CPU strategies
+
+The geometry kernels preserve CPU/CUDA device and float32/float64 dtype. They
+compute AABB overlap and containment violations, affine AABB bounds, triangle
+normals/areas, and masked group-height reductions. Shape/dtype/device checks use
+host metadata; numeric invalidity is represented by outputs on the input device.
+
+`B` indexes independent layouts; `N` indexes objects in one layout. An `(N, 2, 3)`
+AABB collection is one object set, not N independent environments. Kernels
+broadcast leading dimensions; callers introduce separate object-pair axes when
+requesting pairwise comparisons. Group-height reduction consumes `(..., N, 2, 3)`
+and an optional boolean `(..., N)` validity mask, retaining independent leading
+batches. Padding is excluded; empty/all-padding batches return invalid evidence.
+
+Scene strategies still run on CPU and use Shapely, Trimesh and SciPy. Their
+Torch-kernel calls do not offload polygon search or SLSQP to CUDA. Scene state services support explicit B>1 selections independently of proposal
+kernels. Host stepping and task collection remain separate integration contracts.
+
+`compute.geometry._sampling` additionally supplies counter-addressed rectangular
+AABB rejection batches on CPU/CUDA. It returns numeric XY proposals and validity
+masks only. GenSim owns their group/asset adaptation, candidate materialization
+and persistence; this sampler does not replace the constrained SLSQP strategy.
+`_hierarchical` adds integer-indexed postorder subtree XY/yaw batches with whole
+support-cell coverage certificates and dynamic outer envelopes. It consumes
+numeric geometry only; fixed-order matrix reductions and area scans preserve batch-prefix
+reproducibility on CUDA. `_support_grid.py` owns the parent-local CPU policy:
+explicit support transforms, child-contact-guided near-planar layers, unions with
+holes/islands, evidence-checked overrides, conservative layer height bounds and
+whole-cell rasterization. The hierarchical sampler partitions free AABB center
+rectangles and samples by area without placement retries.
+The table detector retains its default outer-contour behavior. Shared scene
+expansion enables `SupportSurfaceConfig.preserve_holes` and caches a rectangle
+covered by the selected mesh component, excluding openings during preparation.
+
+## Frames and runtime invariants
+
+- Geometry is already scaled/oriented in arena-local Z-up metres. Rigid poses
+  use proper 4x4 transforms or position plus `xyzw`; replication offsets do not
+  enter proposals. [GenSim](../gen-sim/gen-sim.md) owns its Y-up conversion and
+  editable scene model.
+- Mesh support detection selects the largest contour at one main horizontal
+  level; `preserve_holes` retains its mesh openings. Explicit polygon inputs retain holes and
+  disconnected regions. Group translation and height alignment preserve
+  relative poses; independent AABB separation uses a separate strategy.
+- `SceneView` wraps existing rigid objects, robots and articulations. Nonempty,
+  unique `env_ids` retain their declared order in reads and physical snapshots.
+  Restore preflights every selected row before writes and leaves other rows
+  untouched. Changes to world capacity invalidate the view. Rigid groups,
+  deformables and explicit rigid constraints remain unsupported.
+- Physical snapshots own numeric poses, velocities, joints, targets and efforts;
+  restore checks original ownership, binding, backend and topology. It does not
+  restore solver internals, task progress or a full backend checkpoint. Host
+  integrations retain control-period and episode identity contracts.
+  `restore_render_state` is a separate physics-disabled publication path for
+  complete measured states, including solver excursions beyond command limits.
+  It temporarily admits those positions and restores the exact original limits;
+  it must never be used as a physical reset. Offline collection ownership is in
+  [Expansion Engine](../expansion-engine/expansion-engine.md).
+  Restoration rejects saved joint positions or targets outside current limits
+  by default. An explicit `qpos_tolerance` allows bounded measured-position
+  clipping followed by caller-owned round-trip validation; targets remain strict.
+- `scene.physics` captures immutable selected-row mass, principal inertia and
+  friction baselines for ready dynamic rigid bodies on Default and Newton.
+  Mass scaling also scales inertia; absolute friction changes and restoration
+  verify actual backend readback. Repeated application derives from the original
+  baseline. All requested values are checked before mutation. Other parameters,
+  including damping, are outside this operation's capability contract. Native
+  or readback failures require the host to stop the batch.
+- Change sets preflight all UIDs and movable permissions, apply rigid poses,
+  clear dynamics and publish render state without stepping. Native write errors
+  propagate without guaranteed rollback. The host handles reported planner and
+  observation invalidations even when the simulation clock has not advanced.
+- Required checks are `passed`, `failed` or `unverified`; empty or unverified
+  reports cannot accept a candidate. Fixed-step settling is unverified stability.
+  Opt-in convergence checks consecutive low-velocity measurements. Supplied
+  step callbacks advance the whole world, so settling requires a full-world
+  selection and checks convergence across all rows. A shared `SceneChangeSet`
+  applies its declared poses to every selected row. `apply_changes_batch` takes
+  distinct change sets keyed by environment ID, preflights all rows first, then
+  groups native writes by entity without touching unselected rows.
+- `check_layout` reads actual poses after settling. Supplied measured arena XY
+  AABBs update individual proxies and allow checking changed orientations.
+  Missing poses, changed support, or changed orientation without a measured
+  proxy yield unverified evidence. Moving fixed entities fails validation;
+  vertical support and task acceptance still need separate measurements.
+  Group consumers supply the union of every member's measured AABB under the
+  root UID and separately verify internal structure and fixed member poses.
+  A root-only pose check cannot establish that the whole group moved correctly.
+
+## Robot workspace adapter
+
+`RobotSceneWorkspace` uses an explicit Robot control part and object-local grasp
+to derive scene poses from valid workspace samples. It independently verifies
+actual targets using IK, current joint limits and full-pose FK residuals,
+returning `SceneCheckReport`. It does not choose task roles, apply poses, reset,
+step or accept task success. Task Program retains a compatibility adapter that
+converts checks to its execution validation contract.
+
+The UR5 demonstration and its private helpers live in `scripts/tutorials/scene/`;
+run `robot_workspace.py`. They call the scene services directly and are not SDK
+APIs. Scene mode exercises these services
+without importing Gym or Task Program; task mode adds preparation, real Pick/Place,
+first-frame and measured outcome checks. Views are Viser, native window,
+offscreen camera/video and no-render. Native renderer/device availability is
+separate from geometric and task correctness. A tabletop grid checks upright
+object origins with the same fixed grasp, current joint limits and full-pose FK.
+The shared physical input is a 2.4 m diameter round table with a central
+pedestal and robot. Support and grid inclusion check the entire cube footprint
+inside the faceted circular collision surface, rather than its bounding box.
+`workspace_reachability.npz` saves actual green/pass and red/fail results; they
+are not inferred from FK-cache density. Viser and the native Hybrid renderer
+show the same red/green point cloud. The cube initializes at a red point first
+and is rejected before execution, then initializes at green points for successful
+pose checks and Task Program trials. Offscreen runs retain the control-cadence
+`preview.mp4` and post-process saved camera evidence into
+`workspace_explained.mp4` with labelled inspection pauses. Presentation does not
+advance physics.
+
+The user-facing showcase, recorded video, commands and measured acceptance are
+documented in `docs/source/tutorial/robot_workspace.rst`.
+
+## Consumers and change sites
+
+[GenSim](../gen-sim/gen-sim.md) keeps image/text understanding, assets, edit graph,
+model calls, temporary simulation ownership, diagnostics and export. Its
+existing support/group optimizers adapt the shared geometry algorithms; the
+tabletop and parent-surface optimizers adapt shared `solve_layout`. Its layout
+constructor retains hierarchy traversal and pose propagation.
+
+[Task Program expansion](../scene-expansion/scene-expansion.md) delegates
+physical state and changes here while keeping Gym reset order, observations,
+bridge recreation, initial-state identity and persistence eligibility. General
+[simulation lifecycle](../simulation-system/simulation-system.md) remains owned
+by Spawn and SimulationManager.
+
+CPU strategies use SciPy and Trimesh supplied by DexSim; EmbodiChain's core
+dependency requires Shapely 2 or newer. The `geometry` extra declares Trimesh
+for standalone numerical mesh consumers; it adds no FCL or simulation backend.
+Torch-only `mesh_bounds` entry points do not load that optional dependency.
+No scene-specific extra is needed. The standalone
+`scripts/tutorials/scene/tabletop_recipe.py` demonstrates a workbench, two
+panel-built containers, parts and a keep-out region with native preparation,
+settling, measured layout and restoration; it requires the installed simulation
+runtime and does not call a model provider.
+
+The standalone `scripts/benchmark/scene/geometry_kernels.py` measures geometry
+kernels separately from solver/host execution. Report its actual device, dtype,
+batch shape and synchronization policy; do not treat kernel throughput as
+end-to-end layout or simulator throughput.
+
+## Focused validation
+
+Use `tests/compute/geometry/` and `tests/sim/scene/` for
+geometry, constraints, recipes and runtime contracts. GenSim adapter regressions
+live in `tests/gen_sim/scene_engine/`; Task Program host regressions live in
+`tests/gym/envs/task_program/test_simulation_scene_expansion.py`. Native settling
+and restoration need an explicit supported simulator run beyond CPU port tests.
+
+`compute.geometry.pouring` owns explicit numeric tilt arcs, gravity-top staging
+and per-candidate grasp projection. It accepts arrays/tensors, actual pad lines
+and configured clearance, not scene/robot/task objects. It preserves owned
+snapshots, source order and masks and establishes no physical pour success.
+`compute.geometry.projection.triangle_mesh_xy_projection` retains all positive
+area triangles in authored order, including holes and disconnected regions;
+it does not reduce the mesh to a convex hull or choose a support floor.

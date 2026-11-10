@@ -28,7 +28,7 @@ test('browse subsystem views and restore a module with its documentation', async
     ['simulation', 'Simulation', 'Gizmo', 'FIG. 03'],
     ['simulation', 'Simulation', 'Object backend views', 'FIG. 03'],
     ['data-learning', 'Data & Learning', 'LeRobot recording', 'FIG. 04'],
-    ['generation-tooling', 'Generation & Toolkits', 'SimReady pipeline', 'FIG. 05'],
+    ['generation-tooling', 'Generation & Toolkits', 'Asset Engine', 'FIG. 05'],
     ['toolkits', 'Toolkits', 'Antipodal grasp generator', 'FIG. 06'],
     ['toolkits', 'Toolkits', 'URDF connections', 'FIG. 06'],
     ['toolkits', 'Toolkits', 'URDF collision processor', 'FIG. 06'],
@@ -56,10 +56,10 @@ test('navigate both views, inspect evidence, and restore a shared selection', as
     page.getByRole('heading', { name: 'Architecture Explorer', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Task Program', exact: true }).click();
-  await page.getByRole('button', { name: 'Select AtomicActionEngine', exact: true }).click();
+  await page.getByRole('button', { name: 'Select AtomicSkillEngine', exact: true }).click();
   const details = page.getByRole('complementary', { name: 'Node details' });
   await expect(
-    details.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
+    details.getByRole('heading', { name: 'AtomicSkillEngine', exact: true }),
   ).toBeVisible();
   await expect(details.getByRole('link', { name: 'View source', exact: true })).toHaveAttribute(
     'href',
@@ -68,7 +68,7 @@ test('navigate both views, inspect evidence, and restore a shared selection', as
   await details.getByRole('button', { name: 'Holds MotionGenerator', exact: true }).click();
   await expect(
     details.getByRole('button', {
-      name: 'Incoming: AtomicActionEngine holds this module',
+      name: 'Incoming: AtomicSkillEngine holds this module',
       exact: true,
     }),
   ).toBeVisible();
@@ -81,7 +81,7 @@ test('navigate both views, inspect evidence, and restore a shared selection', as
   ).toBeVisible();
   await page.goBack();
   await expect(
-    details.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
+    details.getByRole('heading', { name: 'AtomicSkillEngine', exact: true }),
   ).toBeVisible();
 });
 
@@ -94,9 +94,7 @@ test('search has clear empty state and relationship filters keep selected detail
   await page.getByRole('searchbox', { name: 'Search modules' }).fill('');
   await page.getByRole('button', { name: 'Relationships', exact: true }).click();
   await page.getByRole('button', { name: 'Clear relationship filters', exact: true }).click();
-  await expect(
-    page.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'AtomicSkillEngine', exact: true })).toBeVisible();
   await expect(page.locator('.react-flow__edge')).toHaveCount(0);
 });
 
@@ -131,7 +129,8 @@ test('reading view keeps text legible and local focus survives navigation', asyn
   await expect(
     page.getByRole('button', { name: 'Direct neighbours only', exact: true }),
   ).toBeDisabled();
-  await page.getByRole('button', { name: 'Select Trajectory augmentation', exact: true }).click();
+  const session = snapshot.nodes.find((node) => node.id === 'augmentation')!;
+  await page.getByRole('button', { name: `Select ${session.label}`, exact: true }).click();
   await expect(page.getByText('Relationships not yet mapped in this view.')).toBeVisible();
 });
 
@@ -146,9 +145,7 @@ test('mobile readers can hide details, focus neighbours, and reopen the same sel
   await focus.click();
   await expect(page.locator('.react-flow__node-module')).toHaveCount(6);
   await page.getByRole('button', { name: 'Open node details', exact: true }).click();
-  await expect(
-    page.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'AtomicSkillEngine', exact: true })).toBeVisible();
 });
 
 test('large neighbourhoods keep the selected module readable above the fold', async ({ page }) => {
@@ -162,8 +159,8 @@ test('large neighbourhoods keep the selected module readable above the fold', as
   };
   await expect.poll(titleIsInsideCanvas).toBe(true);
   await page.getByRole('button', { name: 'Direct neighbours only', exact: true }).click();
-  // The expanded overview includes DatasetManager as a direct neighbour.
-  await expect(page.locator('.react-flow__node-module')).toHaveCount(13);
+  // Scene expansion adds another caller of EmbodiedEnv to the overview.
+  await expect(page.locator('.react-flow__node-module')).toHaveCount(14);
   await expect.poll(titleIsInsideCanvas).toBe(true);
 });
 

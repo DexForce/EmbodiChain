@@ -1,0 +1,412 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from dataclasses import replace
+import json
+
+import numpy as np
+import pytest
+import torch
+
+from embodichain.lab.sim.scene.expansion import (
+    SceneLayoutInput,
+    SceneRandomizationPolicyCfg,
+    ScenePoseChange,
+    SceneVariant,
+    apply_scene_variants,
+    generate_scene_variants,
+    load_scene_variants,
+    prepare_scene_randomization,
+    save_scene_variants,
+    scene_layout_input_from_sim,
+)
+
+
+from scene_layout_support import make_source, make_policy, SimPort
+
+
+def test_owned_geometry_and_support_topology() -> None:
+    source = make_source()
+    with pytest.raises(ValueError):
+        source.vertices["mug"][0, 0] = 10
+    with pytest.raises(ValueError, match="acyclic"):
+        replace(
+            source,
+            parent_by_uid={"tray": "mug", "mug": "tray", "z_target": "workbench"},
+        )
+
+
+@pytest.mark.parametrize("batch_size", [1, 7, 64])
+def test_prefix_fixed_group_and_subtree_sampling(batch_size: int) -> None:
+    source = make_source()
+    expected = generate_scene_variants(
+        prepare_scene_randomization(source, make_policy(batch_size=1)),
+        seed=27,
+        candidate_count=8,
+        max_attempts=5000,
+    )
+    result = generate_scene_variants(
+        prepare_scene_randomization(source, make_policy(batch_size=batch_size)),
+        seed=27,
+        candidate_count=8,
+        max_attempts=5000,
+    )
+    assert result.status == "completed"
+    assert result.attempts == expected.attempts
+    assert [v.variant_id for v in result.variants] == [
+        v.variant_id for v in expected.variants
+    ]
+    assert all(
+        {c.entity_uid for c in v.pose_changes} == {"tray", "mug"}
+        for v in result.variants
+    )
+    offsets = [np.asarray(v.pose_changes[0].arena_pose)[:2, 3] for v in result.variants]
+    assert not np.allclose(offsets[0], offsets[-1])
+
+
+def test_continuation_consumes_same_logical_stream() -> None:
+    prepared = prepare_scene_randomization(make_source(), make_policy())
+    first = generate_scene_variants(prepared, seed=5, candidate_count=3)
+    second = generate_scene_variants(
+        prepared, seed=5, candidate_count=3, start_ordinal=first.next_ordinal
+    )
+    together = generate_scene_variants(prepared, seed=5, candidate_count=6)
+    assert [v.variant_id for v in (*first.variants, *second.variants)] == [
+        v.variant_id for v in together.variants
+    ]
+
+
+def test_group_only_and_intra_only() -> None:
+    source = make_source()
+    for policy in (make_policy(intra_group=None), make_policy(randomize_groups=False)):
+        result = generate_scene_variants(
+            prepare_scene_randomization(source, policy), candidate_count=3
+        )
+        assert result.status == "completed"
+        if not policy.get("randomize_groups", True):
+            assert all(
+                [c.entity_uid for c in v.pose_changes] == ["mug"]
+                for v in result.variants
+            )
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        [[-0.04, -0.03], [0.04, 0.03]],
+        [[0.0, -0.03], [0.0, 0.03]],
+        [[0.0, 0.0], [0.0, 0.0]],
+    ],
+)
+def test_root_offset_bounds_preserve_batch_prefix_and_saved_poses(
+    bounds: list[list[float]], tmp_path
+) -> None:
+    source = make_source()
+    results = [
+        generate_scene_variants(
+            prepare_scene_randomization(
+                source,
+                make_policy(batch_size=size, group_xy_offset_bounds_m={"tray": bounds}),
+            ),
+            seed=17,
+            candidate_count=5,
+            max_attempts=100,
+        )
+        for size in (1, 37)
+    ]
+    assert all(result.status == "completed" for result in results)
+    assert results[0].attempts == results[1].attempts
+    assert tuple(results[0].variants) == tuple(results[1].variants)
+    for variant in results[0].variants:
+        poses = {
+            change.entity_uid: change.arena_pose for change in variant.pose_changes
+        }
+        delta = (
+            np.asarray(poses.get("tray", source.poses["tray"]))[:2, 3]
+            - np.asarray(source.poses["tray"])[:2, 3]
+        )
+        assert np.all(delta >= np.asarray(bounds)[0] - 1e-10)
+        assert np.all(delta <= np.asarray(bounds)[1] + 1e-10)
+    run = save_scene_variants(results[0], tmp_path / "run")
+    assert tuple(load_scene_variants(run).variants) == tuple(results[0].variants)
+
+
+def test_fixed_descendant_permission_is_not_implicitly_relaxed() -> None:
+    source = replace(make_source(), movable_entity_ids=("tray",))
+    with pytest.raises(ValueError, match="fixed"):
+        prepare_scene_randomization(source, make_policy())
+
+
+@pytest.mark.parametrize("storage", ["json", "packed"])
+def test_v4_roundtrip_and_full_validation_before_consumption(
+    tmp_path, storage: str
+) -> None:
+    source = make_source()
+    result = generate_scene_variants(
+        prepare_scene_randomization(source, make_policy()), candidate_count=5
+    )
+    run = save_scene_variants(result, tmp_path / "run", storage=storage)
+    loaded = load_scene_variants(run, scene_input=source)
+    assert [v.variant_id for v in loaded.variants] == [
+        v.variant_id for v in result.variants
+    ]
+    candidate = next((run / "layouts").iterdir())
+    values = json.loads(candidate.read_text())
+    values[0]["poses"]["mug"][0][3] = 200
+    candidate.write_text(json.dumps(values))
+    with pytest.raises(ValueError, match="changed"):
+        load_scene_variants(run)
+
+
+def test_selected_rows_have_independent_poses_and_unchanged_other_state() -> None:
+    source = make_source()
+    sim = SimPort(source)
+    result = generate_scene_variants(
+        prepare_scene_randomization(source, make_policy()), candidate_count=2
+    )
+    applied = apply_scene_variants(
+        sim, result.variants, env_ids=[3, 1], movable_entity_ids=("tray", "mug")
+    )
+    assert applied.env_ids == (3, 1)
+    assert sim.time == 0 and sim.syncs == 1
+    for uid in ("tray", "mug"):
+        entity = sim.entities[uid]
+        assert torch.equal(entity.poses[0], torch.tensor(np.array(source.poses[uid])))
+        assert torch.equal(entity.poses[2], entity.poses[0])
+        assert torch.equal(entity.velocity[[0, 2]], torch.ones(2, 3))
+        assert torch.equal(entity.velocity[[1, 3]], torch.zeros(2, 3))
+    assert not sim.entities["z_target"].writes
+
+
+def test_all_rows_preflight_before_any_write() -> None:
+    source = make_source()
+    sim = SimPort(source)
+    valid = generate_scene_variants(
+        prepare_scene_randomization(source, make_policy()), candidate_count=1
+    ).variants[0]
+    invalid = SceneVariant(
+        source.scene_id, 0, 99, (ScenePoseChange("missing", np.eye(4)),)
+    )
+    with pytest.raises(ValueError, match="permitted"):
+        apply_scene_variants(
+            sim, [valid, invalid], env_ids=[0, 1], movable_entity_ids=("tray", "mug")
+        )
+    assert not any(entity.writes for entity in sim.entities.values())
+
+
+def test_runtime_source_uses_complete_scaled_geometry() -> None:
+    source = make_source()
+    extracted = scene_layout_input_from_sim(
+        SimPort(source),
+        support_uid=source.support_uid,
+        parent_by_uid=source.parent_by_uid,
+        scene_id=source.scene_id,
+    )
+    assert extracted.fingerprint == source.fingerprint
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_main_support_rectangle_excludes_mesh_openings(tmp_path, device) -> None:
+    from shapely.geometry import MultiPoint, box
+
+    original = make_source()
+    uids = ("workbench", "tray", "mug")
+    vertices = {uid: original.vertices[uid] for uid in uids}
+    faces = {uid: original.faces[uid] for uid in uids}
+    vertices["workbench"] = np.array(
+        [
+            [-0.75, -0.6, 0.05],
+            [0.75, -0.6, 0.05],
+            [0.75, 0.6, 0.05],
+            [-0.75, 0.6, 0.05],
+            [-0.15, -0.15, 0.05],
+            [0.15, -0.15, 0.05],
+            [0.15, 0.15, 0.05],
+            [-0.15, 0.15, 0.05],
+        ]
+    )
+    faces["workbench"] = np.array(
+        [
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
+        ]
+    )
+    source = SceneLayoutInput(
+        "table-with-opening",
+        "workbench",
+        {uid: original.poses[uid] for uid in uids},
+        vertices,
+        faces,
+        {"tray": "workbench", "mug": "tray"},
+    )
+    evidence = box(-0.75, -0.6, 0.75, 0.6).difference(box(-0.15, -0.15, 0.15, 0.15))
+    policy = make_policy(device=device)
+    prepared = prepare_scene_randomization(source, policy, cache_dir=tmp_path)
+    assert evidence.covers(box(*np.asarray(prepared._table).ravel()))
+    # An older cache can contain the filled outer contour. It must neither be
+    # reused nor overwritten by the corrected extractor.
+    from embodichain.lab.sim.scene.expansion.layout import _digest
+
+    legacy_key = _digest(
+        {
+            "source": source.fingerprint,
+            "extractor": "scene-layout-support/v2",
+            "intra": prepared.policy["intra_group"],
+        }
+    )
+    legacy_payload = {
+        "geometry": prepared._geometry,
+        "table": [[-0.75, -0.6], [0.75, 0.6]],
+    }
+    for path in tmp_path.glob("*.json"):
+        path.unlink()
+    legacy_path = tmp_path / (legacy_key + ".json")
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "key": legacy_key,
+                "sha256": _digest(legacy_payload),
+                **legacy_payload,
+            }
+        )
+    )
+    legacy_bytes = legacy_path.read_bytes()
+    cached = prepare_scene_randomization(source, policy, cache_dir=tmp_path)
+    assert cached._table == prepared._table
+    assert legacy_path.read_bytes() == legacy_bytes
+    result = generate_scene_variants(cached, seed=7, candidate_count=20)
+    assert result.status == "completed"
+    for variant in result.variants:
+        poses = {
+            change.entity_uid: np.asarray(change.arena_pose)
+            for change in variant.pose_changes
+        }
+        cloud = np.concatenate(
+            [
+                source.vertices[uid] @ poses[uid][:3, :3].T + poses[uid][:3, 3]
+                for uid in ("tray", "mug")
+            ]
+        )
+        assert evidence.covers(MultiPoint(cloud[:, :2]).convex_hull)
+
+
+@pytest.mark.parametrize("storage", ["json", "packed"])
+@pytest.mark.parametrize("parent_yaw", [0.0, 30.0])
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_float32_native_rotations_generate_and_replay(
+    storage, parent_yaw, tmp_path, device
+) -> None:
+    from scipy.spatial.transform import Rotation
+
+    source = make_source()
+    sim = SimPort(source)
+    sim.entities["tray"].poses[:, :3, :3] = torch.tensor(
+        Rotation.from_euler("z", parent_yaw, degrees=True).as_matrix()
+    )
+    sim.entities["mug"].poses[:, :3, :3] = torch.tensor(
+        Rotation.from_euler("XYZ", [5, -3, 30], degrees=True).as_matrix()
+    )
+    for entity in sim.entities.values():
+        entity.poses = entity.poses.to(torch.float32)
+    native = scene_layout_input_from_sim(
+        sim,
+        support_uid=source.support_uid,
+        parent_by_uid=source.parent_by_uid,
+    )
+    result = generate_scene_variants(
+        prepare_scene_randomization(native, make_policy(device=device)),
+        seed=7,
+        candidate_count=5,
+    )
+    assert result.status == "completed"
+    run = save_scene_variants(result, tmp_path / "run", storage=storage)
+    assert tuple(load_scene_variants(run).variants) == tuple(result.variants)
+
+    # Source roundoff must not permit an actual change to the authored tilt.
+    first = result.variants[0]
+    changes = []
+    for change in first.pose_changes:
+        pose = np.array(change.arena_pose)
+        if change.entity_uid == "mug":
+            pose[:3, :3] = pose[:3, :3] @ Rotation.from_rotvec([1e-4, 0, 0]).as_matrix()
+        changes.append(ScenePoseChange(change.entity_uid, pose))
+    invalid = replace(first, pose_changes=tuple(changes))
+    with pytest.raises(ValueError, match="yaw/tilt"):
+        save_scene_variants(
+            replace(result, variants=(invalid, *result.variants[1:])),
+            tmp_path / "invalid",
+            storage=storage,
+        )
+
+
+def test_prepared_cache_skips_all_support_detection(tmp_path, monkeypatch) -> None:
+    from embodichain.lab.sim.scene.expansion import layout
+
+    source = make_source()
+    prepared = prepare_scene_randomization(source, make_policy(), cache_dir=tmp_path)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("A support cache hit must not extract or rasterize geometry.")
+
+    monkeypatch.setattr(layout, "detect_support_region", forbidden)
+    monkeypatch.setattr(layout, "_prepare_support", forbidden)
+    cached = prepare_scene_randomization(source, make_policy(), cache_dir=tmp_path)
+    assert cached.geometry_sha256 == prepared.geometry_sha256
+    assert cached._table == prepared._table
+    assert tuple(
+        generate_scene_variants(cached, seed=7, candidate_count=3).variants
+    ) == tuple(generate_scene_variants(prepared, seed=7, candidate_count=3).variants)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "bounds", [None, [[-0.04, -0.03], [0.04, 0.03]], [[0.0, -0.03], [0.0, 0.03]]]
+)
+def test_cuda_matches_cpu_geometry_and_prefix(bounds, tmp_path) -> None:
+    source = make_source()
+    ranges = {} if bounds is None else {"group_xy_offset_bounds_m": {"tray": bounds}}
+    cpu = generate_scene_variants(
+        prepare_scene_randomization(source, make_policy(**ranges)),
+        seed=12,
+        candidate_count=8,
+    )
+    gpu = generate_scene_variants(
+        prepare_scene_randomization(
+            source, make_policy(device="cuda:0", batch_size=1, **ranges)
+        ),
+        seed=12,
+        candidate_count=8,
+    )
+    assert cpu.attempts == gpu.attempts
+    save_scene_variants(gpu, tmp_path / "run")
+    assert tuple(load_scene_variants(tmp_path / "run").variants) == tuple(gpu.variants)
+    for left, right in zip(cpu.variants, gpu.variants):
+        for first, second in zip(left.pose_changes, right.pose_changes):
+            np.testing.assert_allclose(
+                first.arena_pose, second.arena_pose, atol=1e-10, rtol=0
+            )

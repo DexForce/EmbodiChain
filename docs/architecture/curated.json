@@ -241,7 +241,7 @@
     },
     {
       "id": "atomic-engine",
-      "label": "AtomicActionEngine",
+      "label": "AtomicSkillEngine",
       "kind": "class",
       "topic_ids": [
         "atomic-actions"
@@ -252,24 +252,53 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/lab/sim/atomic_actions/engine.py",
-          "symbol": "AtomicActionEngine",
+          "path": "embodichain/lab/sim/atomic_skills/engine.py",
+          "symbol": "AtomicSkillEngine",
           "start_line": 45,
           "end_line": 45,
-          "excerpt": "class AtomicActionEngine:"
+          "excerpt": "class AtomicSkillEngine:"
         }
       ],
       "documentation": [
         {
-          "docname": "overview/sim/atomic_actions/index",
+          "docname": "overview/sim/atomic_skills/index",
           "label": "Atomic Skills guide"
         },
         {
-          "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_actions",
-          "label": "AtomicActionEngine documentation"
+          "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_skills",
+          "label": "AtomicSkillEngine documentation"
         }
       ],
       "details": "Atomic Skills form the typed boundary between semantic intent and executable action plans. The engine owns planning resources and creates execution sessions. A runner and command sink dispatch commands; the engine itself does not advance the environment."
+    },
+    {
+      "id": "motion-benchmarks",
+      "label": "Motion benchmarks",
+      "kind": "package",
+      "topic_ids": [
+        "motion-planning",
+        "atomic-actions"
+      ],
+      "summary": "Evaluates motion planners and Atomic Skills using installed suites and external adapters.",
+      "details": "Call run_benchmark from another Python project, or use the motion-generation CLI, to select a packaged suite and planner adapters. The benchmark owns seeded case generation, simulation lifetime, evaluation, and report artifacts. Motion Planning and Atomic Skills retain separate evaluation criteria.",
+      "boundaries": [
+        "Loading a suite does not construct a simulator. Run evaluations serially within a process."
+      ],
+      "evidence": [
+        {
+          "path": "extensions/embodichain_benchmarks/motion_generation/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 21,
+          "excerpt": "\"\"\"Evaluate motion planners using installed suites and external adapters.\n\nConfiguration and evaluation contracts load on access. Importing the package\nor loading a suite does not construct a simulator.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/benchmarks",
+          "label": "Benchmark API and external adapters"
+        }
+      ]
     },
     {
       "id": "motion-generator",
@@ -316,7 +345,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/lab/sim/atomic_actions/runner.py",
+          "path": "embodichain/lab/sim/atomic_skills/runner.py",
           "symbol": "ExecutionRunner",
           "start_line": 335,
           "end_line": 335,
@@ -325,11 +354,11 @@
       ],
       "documentation": [
         {
-          "docname": "overview/sim/atomic_actions/index",
+          "docname": "overview/sim/atomic_skills/index",
           "label": "Atomic Skills execution guide"
         },
         {
-          "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_actions",
+          "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_skills",
           "label": "ExecutionRunner documentation"
         }
       ],
@@ -556,7 +585,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain_tasks/embodichain_tasks/__init__.py",
+          "path": "extensions/embodichain_tasks/embodichain_tasks/__init__.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 23,
@@ -789,7 +818,7 @@
       ],
       "documentation": [
         {
-          "docname": "overview/sim/viser_visualization",
+          "docname": "overview/sim/visualization/viser",
           "label": "Browser visualization guide"
         }
       ],
@@ -821,7 +850,7 @@
           "label": "Compute API reference"
         }
       ],
-      "details": "Compute provides reusable numerical routines for kinematics, trajectories, geometry, and images. Its dependency boundary excludes lab objects and environment managers, allowing higher-level robotics modules to share algorithms without owning their runtime lifecycle."
+      "details": "Compute provides reusable numerical routines for kinematics, trajectories, geometry, and images. The geometry facade exposes Torch kernels with broadcast batch dimensions; scene-specific CPU search and solver policies stay in sim.scene. Its dependency boundary excludes lab objects and environment managers, allowing higher-level robotics modules to share algorithms without owning their runtime lifecycle."
     },
     {
       "id": "rl",
@@ -946,7 +975,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 994,
           "end_line": 994,
@@ -955,11 +984,11 @@
       ],
       "documentation": [
         {
-          "docname": "guides/run_env",
+          "docname": "guides/run_task",
           "label": "Environment launch guide"
         }
       ],
-      "details": "The run-env launcher discovers task packages, decodes the selected deployment, and creates the registered Gym environment. Use its launch guide to inspect a task, configure a run, and understand where configuration becomes a live environment."
+      "details": "The run-task launcher discovers task packages, decodes the selected deployment, and creates the registered Gym environment. Use its launch guide to inspect a task, configure a run, and understand where configuration becomes a live environment."
     },
     {
       "id": "config-loader",
@@ -976,8 +1005,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1210,
-          "end_line": 1210,
+          "start_line": 1457,
+          "end_line": 1457,
           "excerpt": "def build_env_cfg_from_args("
         }
       ],
@@ -1022,10 +1051,11 @@
       "label": "Data assets",
       "kind": "module",
       "topic_ids": [
-        "data-assets"
+        "data-assets",
+        "asset-generalization"
       ],
       "summary": "Resolves asset paths and coordinates registered dataset downloads and caches.",
-      "details": "Asset lookup can resolve a local path or instantiate a registered dataset to download and extract its assets. This layer owns asset discovery and cache roots; online trajectory sampling and demonstration recording are separate workflows.",
+      "details": "Asset lookup can resolve a local path or instantiate a registered dataset to download and extract its assets. This layer owns asset discovery and cache roots; online trajectory sampling and demonstration recording are separate workflows. Provider-neutral asset catalog contracts describe normalized rigid resources and prepared snapshots; Task Program owns the role requirements used to select compatible assets.",
       "boundaries": [
         "Asset lookup may trigger downloads; it does not generate or record demonstrations."
       ],
@@ -1036,12 +1066,23 @@
           "start_line": 17,
           "end_line": 17,
           "excerpt": "from __future__ import annotations"
+        },
+        {
+          "path": "embodichain/data/asset_catalog/contracts.py",
+          "symbol": "AssetDescriptor",
+          "start_line": 182,
+          "end_line": 182,
+          "excerpt": "class AssetDescriptor(_Record):"
         }
       ],
       "documentation": [
         {
           "docname": "resources/assets",
           "label": "Data assets documentation"
+        },
+        {
+          "docname": "api_reference/asset_generalization",
+          "label": "Asset catalog and task role contracts"
         }
       ]
     },
@@ -1185,29 +1226,94 @@
     },
     {
       "id": "augmentation",
-      "label": "Trajectory augmentation",
+      "label": "Expansion session",
       "kind": "class",
       "topic_ids": [
+        "expansion-engine",
         "motion-planning"
       ],
-      "summary": "Tracks trajectory candidates, generation budgets, coverage, and commit receipts.",
-      "details": "The expansion package provides candidate contracts, residual and retiming operators, coverage metrics, and bounded session bookkeeping. Host integrations supply rollout execution, initial-state restoration, physical validation, and durable recording.",
+      "summary": "Owns bounded candidate lifecycles, collection budgets and final commit receipts.",
+      "details": "The canonical lab.expansion session has no simulation or trajectory dependency. Motion configurations project shared limits and supply a trajectory-owned coverage adapter. Native hosts own World preparation, execution and recorded evidence; sinks own persistence.",
       "boundaries": [
-        "GenerationSession does not step or reset environments and does not write datasets."
+        "ExpansionSession does not step or reset environments and does not write datasets."
       ],
       "evidence": [
         {
-          "path": "embodichain/lab/sim/motion/expansion/session.py",
-          "symbol": "GenerationSession",
-          "start_line": 108,
-          "end_line": 108,
-          "excerpt": "class GenerationSession:"
+          "path": "embodichain/lab/expansion/session.py",
+          "symbol": "ExpansionSession",
+          "start_line": 121,
+          "end_line": 121,
+          "excerpt": "class ExpansionSession:"
         }
       ],
       "documentation": [
         {
           "docname": "api_reference/embodichain/embodichain.lab.sim.motion.expansion",
           "label": "Trajectory augmentation documentation"
+        }
+      ]
+    },
+    {
+      "id": "scene-expansion",
+      "label": "Scene expansion contracts",
+      "kind": "package",
+      "topic_ids": [
+        "scene-expansion"
+      ],
+      "summary": "Defines immutable arena-local scene proposals and bounded authored candidate sources.",
+      "details": "The scene expansion core represents existing-entity pose changes with stable proposal identity, movable-entity permissions, provenance, and a bounded fixed-candidate source. Task semantics, physical preparation, execution, and persistence remain host responsibilities. The package is sim.scene.expansion.",
+      "boundaries": [
+        "The core does not import Task Program, GenSim or Gym and does not reset, step or validate task success."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/expansion/__init__.py",
+          "symbol": "<module>",
+          "start_line": 25,
+          "end_line": 27,
+          "excerpt": "from .cfg import SceneExpansionCfg\nfrom .contracts import ScenePoseChange, SceneVariant\nfrom .source import FixedSceneCandidateSource"
+        },
+        {
+          "path": "embodichain/lab/sim/scene/expansion/source.py",
+          "symbol": "FixedSceneCandidateSource",
+          "start_line": 30,
+          "end_line": 30,
+          "excerpt": "class FixedSceneCandidateSource:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.scene.expansion",
+          "label": "Scene expansion contracts and fixed candidates"
+        }
+      ]
+    },
+    {
+      "id": "scene-expansion-integration",
+      "label": "Scene expansion attempt",
+      "kind": "function",
+      "topic_ids": [
+        "scene-expansion",
+        "task-programs"
+      ],
+      "summary": "Prepares one scene candidate and executes a Task Program with separate measured acceptance.",
+      "details": "execute_scene_variant connects a scene proposal to injected preparation and measurement callbacks. For a valid initial state it creates the canonical Task Program segments and uses the existing Gym demo executor, recording separate initial-state, program, and measured-outcome evidence.",
+      "boundaries": [
+        "One B=1 attempt; the caller supplies physical preparation, measured task evidence, retry policy, and the reset-time persistence transaction."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
+          "symbol": "execute_scene_variant",
+          "start_line": 195,
+          "end_line": 195,
+          "excerpt": "def execute_scene_variant("
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.task_program.integrations.scene_expansion",
+          "label": "Task Program scene preparation and measured acceptance"
         }
       ]
     },
@@ -1466,10 +1572,11 @@
       "label": "Kinematics computation",
       "kind": "package",
       "topic_ids": [
-        "ik-solvers"
+        "ik-solvers",
+        "learning-layers"
       ],
       "summary": "Shared numerical kinematics and manipulability algorithms.",
-      "details": "This package owns reusable numerical routines and private Warp kernels. Stateful robot solving remains in motion.solvers, while workspace analysis consumes shared metrics and kinematic computation.",
+      "details": "This package owns reusable numerical routines and private Warp kernels. Differentiable fixed-step IK, SE(3) residuals, and serial-chain FK/Jacobians provide simulation-independent computation for Torch learning layers. Stateful robot solving remains in motion.solvers, while workspace analysis consumes shared metrics and kinematic computation.",
       "boundaries": [
         "Numerical kernels do not own live robot or environment state."
       ],
@@ -1478,8 +1585,8 @@
           "path": "embodichain/compute/kinematics/__init__.py",
           "symbol": "<module>",
           "start_line": 17,
-          "end_line": 22,
-          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\"\"\""
+          "end_line": 24,
+          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\nDifferentiable fixed-step IK, SE(3) residuals and serial-chain FK/Jacobians\nprovide simulation-independent computation for Torch learning layers.\"\"\""
         }
       ],
       "documentation": [
@@ -1699,7 +1806,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/policy.py",
+          "path": "embodichain/learning/rl/policies/policy.py",
           "symbol": "Policy",
           "start_line": 35,
           "end_line": 35,
@@ -1883,29 +1990,38 @@
     },
     {
       "id": "simready",
-      "label": "SimReady pipeline",
+      "label": "Asset Engine",
       "kind": "module",
       "topic_ids": [
         "gen-sim"
       ],
-      "summary": "Ingests raw assets through parsing and conversion stages into SimReady outputs.",
-      "details": "The general asset-ingest pipeline coordinates parser capabilities and persisted processing state for supported input formats. Scene Engine also has an internal asset-preparation flow; these are distinct entry points.",
+      "summary": "Prepares an existing mesh through source conversion, semantic/physics inference, and mesh/USD export.",
+      "details": "The Asset Engine uses the asset-engine CLI and asset_engine Python namespace. Each run archives one input directory in a new UUID asset directory. Mesh inputs run source preparation and parser stages; configured URDF/USD inputs are copied directly without parser execution. The shipped source conversion mode is trimesh, while later Blender cleanup is configured separately. Source geometry metrics and the final mesh have separate acquisition paths. Scene Engine's graph-conditioned preparation and the asset package's articulated-generation service are distinct integrations.",
       "boundaries": [
-        "A converted asset is not a complete runnable Gym deployment."
+        "The CLI consumes one existing asset directory and owns asset/registry metadata; scene layout and task deployment belong to downstream callers.",
+        "General mesh inference uses OPENAI_* and gen_config.json; articulated generation has a separate service client and dotenv configuration.",
+        "Processing completion does not establish physical validation or task success; direct-copy mode produces no inferred SimReady mesh."
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
-          "symbol": "<module>",
-          "start_line": 17,
-          "end_line": 17,
-          "excerpt": "from __future__ import annotations"
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
+          "symbol": "ingest_one_asset",
+          "start_line": 164,
+          "end_line": 170,
+          "excerpt": "    if ingest_mode == \"direct_copy\":\n        shutil.copytree(asset_dir, asset_source)\n        asset.identity[\"normalized_source\"] = \"raw_copy\"\n        asset.identity[\"source_file\"] = None\n        asset.identity[\"source_type\"] = \"direct_copy\"\n        store.save_asset(asset)\n        return asset  # no parser"
+        },
+        {
+          "path": "embodichain/gen_sim/asset_engine/configs/gen_config.json",
+          "symbol": "<document>",
+          "start_line": 4,
+          "end_line": 6,
+          "excerpt": "    \"source_preparation\": {\n      \"mode\": \"trimesh\"\n    },"
         }
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
-          "label": "SimReady pipeline documentation"
+          "docname": "features/generative_sim/asset_engine",
+          "label": "Asset Engine guide"
         }
       ]
     },
@@ -2513,7 +2629,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0\u2026DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on supported Python 3.11--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -2671,23 +2787,23 @@
         "gen-sim"
       ],
       "summary": "Dispatches inspector, geometry, physics, USD, and internal asset parsers.",
-      "details": "ParserManager registers the supported parser implementations and runs the selected stage names for an ingested asset. Individual parsers own their metadata and resume behavior; the manager records parsed status after the pipeline completes.",
+      "details": "ParserManager registers inspector, geometry, physics, USD, and internal parsers and runs their selected sequence. Geometry measures the canonical source, while physics finalization rereads the archived selected mesh. Individual parsers record their own outputs and errors; parsed status records sequence completion without per-stage caching or physical validation.",
       "boundaries": [
         "Pipeline stages belong to single-asset ingestion, not the Scene Engine geometry processor."
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/parser/base.py",
+          "path": "embodichain/gen_sim/asset_engine/parser/base.py",
           "symbol": "ParserManager",
-          "start_line": 46,
-          "end_line": 46,
-          "excerpt": "class ParserManager:"
+          "start_line": 53,
+          "end_line": 59,
+          "excerpt": "    DEFAULT_PIPELINE: List[str] = [\n        \"inspector\",\n        \"geometry\",\n        \"physics\",\n        \"usd\",\n        \"internal\",\n    ]"
         }
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
-          "label": "SimReady pipeline documentation"
+          "docname": "features/generative_sim/asset_engine",
+          "label": "Asset Engine guide"
         }
       ]
     },
@@ -2817,7 +2933,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/actor_critic.py",
+          "path": "embodichain/learning/rl/policies/actor_critic.py",
           "symbol": "ActorCritic",
           "start_line": 34,
           "end_line": 34,
@@ -2826,7 +2942,7 @@
       ],
       "documentation": [
         {
-          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
+          "docname": "api_reference/embodichain/embodichain.learning.rl.policies",
           "label": "ActorCritic documentation"
         }
       ]
@@ -2845,7 +2961,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/actor_only.py",
+          "path": "embodichain/learning/rl/policies/actor_only.py",
           "symbol": "ActorOnly",
           "start_line": 31,
           "end_line": 31,
@@ -2854,7 +2970,7 @@
       ],
       "documentation": [
         {
-          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
+          "docname": "api_reference/embodichain/embodichain.learning.rl.policies",
           "label": "ActorOnly documentation"
         }
       ]
@@ -2927,8 +3043,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator",
-          "start_line": 172,
-          "end_line": 172,
+          "start_line": 282,
+          "end_line": 282,
           "excerpt": "class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):"
         }
       ],
@@ -2953,8 +3069,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend",
-          "start_line": 56,
-          "end_line": 56,
+          "start_line": 70,
+          "end_line": 70,
           "excerpt": "class _AntipodalMeshBackend:"
         }
       ],
@@ -3198,6 +3314,310 @@
           "label": "Convex decomposition documentation"
         }
       ]
+    },
+    {
+      "id": "scene-services",
+      "label": "Shared scene services",
+      "kind": "package",
+      "topic_ids": [
+        "scene-services"
+      ],
+      "summary": "Composes explicit configurations, proposes layouts, and operates on caller-owned physical state.",
+      "details": "Scene services are shared by standalone recipes, GenSim adapters, Gym reset events, Task Program and Expansion Engine hosts. They compose existing entity configurations, solve fixed-orientation XY layouts, query or change selected-row physical state, and collect measured validation. Compute owns reusable tensor geometry kernels; scene services retain CPU support, polygon-placement, packing and SLSQP strategies. Spawn and SimulationManager retain native resource and topology ownership; callers retain stepping, task lifecycle and persistence.",
+      "boundaries": [
+        "Arena-local Z-up geometry in metres; AABB layout is not exact mesh collision or task-success evidence.",
+        "Basic state capture, restoration and rigid pose changes support explicit ordered environment selections with fixed topology; snapshots remain owner-bound physical state, not complete backend checkpoints.",
+        "GenSim retains model calls, assets, editing semantics, temporary simulation lifetime and export formats.",
+        "Tensor geometry and expansion sampling have separate CPU/CUDA batch contracts; CPU strategies do not become GPU solvers. Settling requires full-world selection, while the Task Program scene expansion host remains B=1."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 22,
+          "excerpt": "\"\"\"Shared scene construction, layout and runtime services.\n\nSubmodules are loaded on first access. Scene services own no simulator, task\nlifecycle, semantic registry, or model-generation clients. Expansion contracts\nare available separately in :mod:`embodichain.lab.sim.scene.expansion`.\n\"\"\""
+        },
+        {
+          "path": "embodichain/lab/sim/scene/query.py",
+          "symbol": "SceneView.__init__",
+          "start_line": 40,
+          "end_line": 44,
+          "excerpt": "        self.sim = sim\n        self.env_ids = tuple(env_ids)\n        self._num_envs = getattr(sim, \"num_envs\", 1)\n        self._validate_selection()\n        self.topology = self.describe_entities()"
+        },
+        {
+          "path": "embodichain/lab/sim/scene/operations.py",
+          "symbol": "apply_changes_batch",
+          "start_line": 123,
+          "end_line": 130,
+          "excerpt": "def apply_changes_batch(\n    view: SceneView, changes: Mapping[int, SceneChangeSet]\n) -> SceneChangeResult:\n    \"\"\"Apply distinct per-arena changes after preflighting the entire selection.\n\n    Args:\n        view: Ordered set of physical rows to prepare.\n        changes: Exactly one change set for every selected environment index."
+        },
+        {
+          "path": "embodichain/lab/sim/scene/validation.py",
+          "symbol": "settle_scene",
+          "start_line": 250,
+          "end_line": 253,
+          "excerpt": "    if set(view.env_ids) != set(range(view._num_envs)):\n        raise ValueError(\n            \"Settling requires a full-world selection because physics advances every row\"\n        )"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/sim/scene/index",
+          "label": "Scene services architecture and capabilities"
+        },
+        {
+          "docname": "overview/sim/scene/workflows",
+          "label": "Scene construction and preparation workflows"
+        },
+        {
+          "docname": "overview/sim/scene/integrations",
+          "label": "Production scene service integrations"
+        },
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.scene",
+          "label": "Scene composition, layout, state and validation"
+        },
+        {
+          "docname": "api_reference/embodichain/embodichain.compute.scene_geometry",
+          "label": "Shared numerical geometry and layout"
+        }
+      ]
+    },
+    {
+      "id": "neural-dynamics",
+      "label": "NeRD model extension",
+      "kind": "package",
+      "topic_ids": [
+        "neural-dynamics"
+      ],
+      "summary": "Bundles the causal NeRD network, physical codec, trajectory windows and supervised recipe in the main wheel.",
+      "details": "embodichain_models.dynamics.nerd owns the concrete model, portable checkpoints, physical representations, HDF5 windows and installable SL recipe. Generic MLP/normalization and supervised orchestration stay in core. The model extension imports neither the showcase nor simulation; collection, historical training and reference research belong to the example.",
+      "boundaries": [
+        "The core does not import concrete model implementations.",
+        "Data/model/reference-asset payloads are external resources; numerical and physical identities remain explicit."
+      ],
+      "evidence": [
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/nerd/model.py",
+          "symbol": "NeRDModel",
+          "start_line": 201,
+          "end_line": 201,
+          "excerpt": "class NeRDModel(nn.Module):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/model_catalogs",
+          "label": "Official model library"
+        },
+        {
+          "docname": "features/neural_dynamics/nerd",
+          "label": "NeRD data and training workflow"
+        }
+      ]
+    },
+    {
+      "id": "nerd-showcase",
+      "label": "NeRD showcase",
+      "kind": "module",
+      "topic_ids": [
+        "neural-dynamics"
+      ],
+      "summary": "Prepares pinned external resources and routes default NeRD training through shared SL.",
+      "details": "run-example learning/nerd owns preparation, train/export/eval/generate commands and private teacher, historical-trainer and reference-research workflows. The default train preset resolves the installable model SL factory; explicit historical configurations retain their checkpoint protocol. Downloads are verified outside Git and the wheel.",
+      "boundaries": [
+        "Historical reports remain bound to the source and runtime that produced them.",
+        "Reference assets and teacher/domain metadata are not production model registrations."
+      ],
+      "evidence": [
+        {
+          "path": "examples/learning/nerd/__main__.py",
+          "symbol": "main",
+          "start_line": 81,
+          "end_line": 81,
+          "excerpt": "def main(argv: Sequence[str] | None = None) -> None:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/neural_dynamics/nerd",
+          "label": "NeRD showcase commands"
+        }
+      ]
+    },
+    {
+      "id": "supervised-learning",
+      "label": "Supervised learning (SL)",
+      "kind": "package",
+      "topic_ids": [
+        "supervised-learning"
+      ],
+      "summary": "Shares structured batches, objective-owned losses, optimizer updates and offline recovery across policy and dynamics fitting.",
+      "details": "The SL learner commits finite single-device optimizer updates; the offline trainer owns sampling, validation, logging and checkpoint recovery. Concrete model packages supply codecs, normalization, objectives and installable recipe factories. The core does not import those implementations. Training does not create a simulation World or data producer.",
+      "boundaries": [
+        "Source identity and recipe signatures bind feature/action semantics before recovery.",
+        "Policy execution, physics collection and APG rollout scheduling remain separate consumers."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/sl/learner.py",
+          "symbol": "SupervisedLearner",
+          "start_line": 34,
+          "end_line": 34,
+          "excerpt": "class SupervisedLearner:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.sl",
+          "label": "SL batches, updates and recovery"
+        }
+      ]
+    },
+    {
+      "id": "robot-world-model",
+      "label": "Robot world model (RWM)",
+      "kind": "package",
+      "topic_ids": [
+        "robot-world-model"
+      ],
+      "summary": "Owns action-conditioned robot-state prediction, differentiable rollout objectives and bounded transition replay.",
+      "details": "embodichain_models.dynamics.rwm owns frame-local state increments and SO(3) integration, graph-connected prediction state, autoregressive objectives and fixed-byte-budget replay. Its installable build_rwm_trainer recipe composes these contracts with the shared SL learner and offline trainer. The learning/rwm example owns controlled corpus generation and fitting qualification.",
+      "boundaries": [
+        "The model family imports neither simulation nor example helpers; acquisition and execution remain caller-owned.",
+        "Fixed control period, action semantics and ordered joints bind model and checkpoint identity.",
+        "Shared SL owns optimizer updates and run recovery; controlled fitting evidence does not qualify robot policy performance."
+      ],
+      "evidence": [
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/model.py",
+          "symbol": "RobotWorldModel",
+          "start_line": 73,
+          "end_line": 73,
+          "excerpt": "class RobotWorldModel(nn.Module):"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/predictor.py",
+          "symbol": "RWMPredictor",
+          "start_line": 31,
+          "end_line": 31,
+          "excerpt": "class RWMPredictor:"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/replay.py",
+          "symbol": "TransitionReplay",
+          "start_line": 35,
+          "end_line": 35,
+          "excerpt": "class TransitionReplay:"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/supervised.py",
+          "symbol": "RobotWorldModelObjective",
+          "start_line": 59,
+          "end_line": 59,
+          "excerpt": "class RobotWorldModelObjective:"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/sl_recipe.py",
+          "symbol": "build_rwm_trainer",
+          "start_line": 39,
+          "end_line": 39,
+          "excerpt": "def build_rwm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/rwm",
+          "label": "RWM state, objectives, prediction, replay and SL recipe"
+        },
+        {
+          "docname": "features/neural_dynamics/rwm",
+          "label": "RWM principles and usage"
+        }
+      ]
+    },
+    {
+      "id": "task-spec",
+      "label": "TaskSpec",
+      "kind": "module",
+      "topic_ids": [
+        "task-spec"
+      ],
+      "summary": "Defines simulator-independent task requirements, milestones, semantic identity and evidence evaluation.",
+      "details": "TaskSpec describes required outcomes independently of an action sequence, robot or simulator. It validates normative declarations, caches them by semantic hash and evaluates supplied observations; runtime acquisition and execution belong to integrations.",
+      "boundaries": [
+        "TaskSpec owns normative task semantics and evaluation, not simulation state acquisition, motion planning or program execution."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_spec/spec.py",
+          "symbol": "TaskSpec",
+          "start_line": 335,
+          "end_line": 335,
+          "excerpt": "class TaskSpec:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/public_api",
+          "label": "TaskSpec protocol API"
+        }
+      ]
+    },
+    {
+      "id": "task-engine",
+      "label": "Task Engine",
+      "kind": "module",
+      "topic_ids": [
+        "task-engine"
+      ],
+      "summary": "Interprets instructions and image evidence into candidates, TaskSpec requirements and canonical Semantic Call graphs.",
+      "details": "Task Engine's image CLI interprets the complete instruction, grounds logical image references, and plans calls from the data-only Task Program catalog. It publishes source provenance, candidate and TaskSpec declarations, recomputable semantic/visual coverage, pending runtime bindings, raw model attempts and an offline viewer. Pure Python contracts also validate authored declarations and prepare explicit program/bundle snapshots. Scene/robot integration, motion planning, execution and measured physical acceptance remain with their owning systems.",
+      "boundaries": [
+        "Image planning ends at an unbound semantic graph: execution_ready is false and runtime_evidence_status is not_run, even when visual evidence is complete.",
+        "Image bounds and logical object identities are not calibrated physical bindings. Missing or ambiguous evidence remains explicit until a runtime integration resolves it.",
+        "This semantic front end does not implement Atomic Skills, motion planning or physics observation. Declaration coverage is not a physical-success certificate."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_engine/agent.py",
+          "symbol": "TaskAgent",
+          "start_line": 69,
+          "end_line": 69,
+          "excerpt": "class TaskAgent:"
+        },
+        {
+          "path": "embodichain/gen_sim/task_engine/task_spec.py",
+          "symbol": "task_spec_from_candidate",
+          "start_line": 186,
+          "end_line": 186,
+          "excerpt": "    template = TaskSpec("
+        },
+        {
+          "path": "embodichain/gen_sim/task_engine/cli.py",
+          "symbol": "main",
+          "start_line": 104,
+          "end_line": 108,
+          "excerpt": "            \"pending_bindings\": len(result[\"binding_requirements\"]),\n            \"execution_ready\": False,\n            \"runtime_evidence_status\": \"not_run\",\n            \"image_sha256\": result[\"image_grounding\"][\"image_sha256\"],\n            \"integration_status\": \"unbound\","
+        },
+        {
+          "path": "embodichain/gen_sim/task_engine/semantic_plan_validation.py",
+          "symbol": "validate_semantic_plan",
+          "start_line": 549,
+          "end_line": 556,
+          "excerpt": "        \"status\": \"covered\",\n        \"semantic_status\": \"valid\",\n        \"visual_status\": (\"complete\" if observed == total else \"pending\"),\n        \"pending_bindings\": len(bindings),\n        \"visual_observed_entities\": observed,\n        \"visual_total_entities\": total,\n        \"execution_ready\": False,\n        \"runtime_evidence_status\": \"not_run\","
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/task_engine",
+          "label": "Task Engine workflow and artifact guide"
+        },
+        {
+          "docname": "api_reference/embodichain/embodichain.gen_sim.task_engine",
+          "label": "Task Engine semantic contracts"
+        }
+      ]
     }
   ],
   "edges": [
@@ -3213,9 +3633,9 @@
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
           "symbol": "TaskProgramCompiler.compile",
-          "start_line": 1701,
-          "end_line": 1705,
-          "excerpt": "        if type(config) is not TaskProgramCfg:\n            raise TypeError(\"config must be exactly TaskProgramCfg.\")\n        targets = self._compile_targets(config.targets)\n        root = self._compile_node(\n            config.program,"
+          "start_line": 1738,
+          "end_line": 1740,
+          "excerpt": "        targets = self._compile_targets(config.targets)\n        root = self._compile_node(\n            config.program,"
         }
       ]
     },
@@ -3231,16 +3651,16 @@
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
           "symbol": "TaskProgramCompiler.compile",
-          "start_line": 1716,
-          "end_line": 1720,
-          "excerpt": "        return _materialize_program(\n            program_id=config.program_id,\n            integration=integration,\n            targets=targets,\n            root=root,"
+          "start_line": 1751,
+          "end_line": 1756,
+          "excerpt": "        return _materialize_program(\n            program_id=config.program_id,\n            instruction=config.instruction,\n            integration=integration,\n            targets=targets,\n            root=root,"
         },
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
           "symbol": "_materialize_program",
-          "start_line": 1172,
-          "end_line": 1176,
-          "excerpt": "    return CompiledTaskProgram._create(\n        program_id=program_id,\n        integration=integration,\n        segments=tuple(segments),\n    )"
+          "start_line": 1195,
+          "end_line": 1200,
+          "excerpt": "    return CompiledTaskProgram._create(\n        program_id=program_id,\n        instruction=instruction,\n        integration=integration,\n        segments=tuple(segments),\n    )"
         }
       ]
     },
@@ -3294,7 +3714,7 @@
           "symbol": "EmbodiedEnv.create_task_program_bridge",
           "start_line": 2242,
           "end_line": 2242,
-          "excerpt": "        return self._checked_task_program_adapter().create_bridge(program)"
+          "excerpt": "        return self._checked_task_program_adapter().create_bridge("
         }
       ]
     },
@@ -3309,10 +3729,10 @@
       "evidence": [
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
-          "symbol": "SimulationTaskProgramFactory.create_atomic_action_engine",
-          "start_line": 647,
-          "end_line": 651,
-          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,\n            control_profiles=profile.action_control_profiles(),\n            grasp_pose_generators=self._grasp_pose_generators,\n        )"
+          "symbol": "SimulationTaskProgramFactory.create_atomic_skill_engine",
+          "start_line": 926,
+          "end_line": 927,
+          "excerpt": "        engine = AtomicSkillEngine(\n            motion_generator,"
         }
       ]
     },
@@ -3328,9 +3748,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory._create_motion_generator",
-          "start_line": 788,
-          "end_line": 788,
-          "excerpt": "            generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))"
+          "start_line": 1094,
+          "end_line": 1095,
+          "excerpt": "            generator = MotionGenerator(\n                MotionGenCfg(planner_cfg=planner_cfg), **selection_kwargs"
         }
       ]
     },
@@ -3341,11 +3761,11 @@
       "relation": "holds",
       "description": "Expose the engine-owned generator through its planning services.",
       "provenance": "source-reviewed",
-      "scope": "Indirect reference through ActionPlanningServices.",
+      "scope": "Indirect reference through SkillPlanningServices.",
       "evidence": [
         {
-          "path": "embodichain/lab/sim/atomic_actions/engine.py",
-          "symbol": "AtomicActionEngine.motion_generator",
+          "path": "embodichain/lab/sim/atomic_skills/engine.py",
+          "symbol": "AtomicSkillEngine.motion_generator",
           "start_line": 92,
           "end_line": 92,
           "excerpt": "        return self._planning_services.motion_generator"
@@ -3364,8 +3784,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 666,
-          "end_line": 666,
+          "start_line": 704,
+          "end_line": 704,
           "excerpt": "        clock = EnvironmentStepClock(self._step_dt)"
         }
       ]
@@ -3382,8 +3802,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 736,
-          "end_line": 736,
+          "start_line": 775,
+          "end_line": 775,
           "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
         }
       ]
@@ -3400,9 +3820,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 740,
-          "end_line": 747,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n        )"
+          "start_line": 779,
+          "end_line": 780,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
     },
@@ -3418,9 +3838,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
-          "start_line": 811,
-          "end_line": 816,
-          "excerpt": "        return TaskProgramDemoBridge(\n            program,\n            assembly.runtime,\n            assembly.command_sink,\n            assembly.clock,\n            post_policy_port=self._post_policy_port,"
+          "start_line": 1019,
+          "end_line": 1024,
+          "excerpt": "        bridge = TaskProgramDemoBridge(\n            program,\n            assembly.runtime,\n            assembly.command_sink,\n            assembly.clock,\n            post_policy_port=self._post_policy_port,"
         }
       ]
     },
@@ -3479,9 +3899,9 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 940,
-          "end_line": 944,
-          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n        )"
+          "start_line": 1130,
+          "end_line": 1136,
+          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n            plan_transform=plan_transform,\n            nominal_source=nominal_source,\n        )"
         }
       ]
     },
@@ -3522,9 +3942,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter.create_bridge",
-          "start_line": 811,
-          "end_line": 813,
-          "excerpt": "        return TaskProgramDemoBridge(\n            program,\n            assembly.runtime,"
+          "start_line": 1019,
+          "end_line": 1021,
+          "excerpt": "        bridge = TaskProgramDemoBridge(\n            program,\n            assembly.runtime,"
         }
       ]
     },
@@ -3547,8 +3967,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 740,
-          "end_line": 741,
+          "start_line": 779,
+          "end_line": 780,
           "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,"
         }
       ]
@@ -3635,7 +4055,7 @@
       "scope": "In the shown Gym assembly the port is BufferedGymCommandSink; other runtimes may supply another sink.",
       "evidence": [
         {
-          "path": "embodichain/lab/sim/atomic_actions/runner.py",
+          "path": "embodichain/lab/sim/atomic_skills/runner.py",
           "symbol": "ExecutionRunner._dispatch",
           "start_line": 944,
           "end_line": 948,
@@ -3644,8 +4064,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 736,
-          "end_line": 736,
+          "start_line": 775,
+          "end_line": 775,
           "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
         }
       ]
@@ -3680,9 +4100,9 @@
         {
           "path": "embodichain/lab/gym/envs/base_env.py",
           "symbol": "BaseEnv._setup_scene",
-          "start_line": 534,
-          "end_line": 534,
-          "excerpt": "        self.sim = SimulationManager(self.sim_cfg, defer_startup_summary=True)"
+          "start_line": 556,
+          "end_line": 560,
+          "excerpt": "            self.sim = SimulationManager(\n                self.sim_cfg,\n                defer_startup_summary=True,\n                requires_native_renderer=requires_native_renderer,\n            )"
         }
       ]
     },
@@ -3691,8 +4111,8 @@
       "source": "cli",
       "target": "env-launcher",
       "relation": "calls",
-      "description": "Dispatch the run-env command to the environment launcher.",
-      "scope": "Lazy command dispatch for run-env (and its run-task alias), not an unconditional startup call.",
+      "description": "Dispatch the run-task command to the environment launcher.",
+      "scope": "Lazy command dispatch for run-task, not an unconditional startup call.",
       "provenance": "source-reviewed",
       "evidence": [
         {
@@ -3700,7 +4120,7 @@
           "symbol": "<module>",
           "start_line": 68,
           "end_line": 68,
-          "excerpt": "        target=\"embodichain.lab.scripts.run_env:cli\","
+          "excerpt": "        target=\"embodichain.lab.scripts.run_task:cli\","
         },
         {
           "path": "embodichain/cli/main.py",
@@ -3760,7 +4180,7 @@
       "provenance": "source-reviewed",
       "evidence": [
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 1018,
           "end_line": 1018,
@@ -3817,10 +4237,10 @@
       "provenance": "source-reviewed",
       "evidence": [
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
-          "start_line": 1023,
-          "end_line": 1023,
+          "start_line": 1628,
+          "end_line": 1628,
           "excerpt": "    env_cfg, gym_config, action_config = build_env_cfg_from_args(args)"
         }
       ]
@@ -3837,9 +4257,9 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "config_to_cfg",
-          "start_line": 514,
-          "end_line": 515,
-          "excerpt": "    component_resolution = _resolve_gym_components(config, base_dir=base_dir)\n    config = component_resolution.config"
+          "start_line": 725,
+          "end_line": 728,
+          "excerpt": "    component_resolution = _resolve_gym_components(\n        config, base_dir=base_dir, component_sources=component_sources\n    )\n    config = component_resolution.config"
         }
       ]
     },
@@ -3855,22 +4275,22 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "config_to_cfg",
-          "start_line": 489,
-          "end_line": 489,
+          "start_line": 696,
+          "end_line": 696,
           "excerpt": "    env_cfg = EmbodiedEnvCfg()"
         },
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1244,
-          "end_line": 1249,
-          "excerpt": "    cfg: EmbodiedEnvCfg = config_to_cfg(\n        gym_config,\n        manager_modules=get_manager_modules(),\n        source_path=gym_config_source_path,\n        task_program_path_override=getattr(args, \"task_program\", None),\n    )"
+          "start_line": 1497,
+          "end_line": 1502,
+          "excerpt": "        cfg: EmbodiedEnvCfg = config_to_cfg(\n            gym_config,\n            manager_modules=get_manager_modules(),\n            source_path=gym_config_source_path,\n            task_program_path_override=getattr(args, \"task_program\", None),\n        )"
         },
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
-          "start_line": 1028,
-          "end_line": 1028,
+          "start_line": 1680,
+          "end_line": 1680,
           "excerpt": "    env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
         }
       ]
@@ -3887,9 +4307,9 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.start_visualization",
-          "start_line": 999,
-          "end_line": 1003,
-          "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        runtime.start()"
+          "start_line": 1075,
+          "end_line": 1080,
+          "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        self._visualization_runtime = runtime\n        runtime.start()"
         }
       ]
     },
@@ -3930,9 +4350,9 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 3021,
-          "end_line": 3024,
-          "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        return robot"
+          "start_line": 3287,
+          "end_line": 3292,
+          "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        for sensor_cfg in mounted_sensors:\n            self.add_sensor(sensor_cfg)\n        return robot"
         }
       ]
     },
@@ -3942,15 +4362,15 @@
       "target": "simulation-manager",
       "relation": "calls",
       "description": "Delegate robot declaration to the simulation manager.",
-      "scope": "EmbodiedEnv._declare_robot uses the robot configuration owned by the assembled environment.",
+      "scope": "EmbodiedEnv._declare_robot passes an isolated configuration with the Gym acquisition switch to SimulationManager.add_robot.",
       "provenance": "source-reviewed",
       "evidence": [
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv._declare_robot",
-          "start_line": 1987,
-          "end_line": 1987,
-          "excerpt": "        return self.sim.add_robot(self.cfg.robot)"
+          "start_line": 2609,
+          "end_line": 2609,
+          "excerpt": "        return self.sim.add_robot(robot_cfg)"
         }
       ]
     },
@@ -4103,7 +4523,7 @@
       "source": "cli",
       "target": "simready",
       "relation": "calls",
-      "description": "Dispatches the general SimReady asset-ingest command.",
+      "description": "Dispatches the asset-engine command for general asset ingestion.",
       "provenance": "source-reviewed",
       "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
       "evidence": [
@@ -4112,7 +4532,7 @@
           "symbol": "<module>",
           "start_line": 48,
           "end_line": 48,
-          "excerpt": "        target=\"embodichain.gen_sim.simready_pipeline.cli.start:main\","
+          "excerpt": "        target=\"embodichain.gen_sim.asset_engine.cli.start:main\","
         }
       ]
     },
@@ -4979,11 +5399,11 @@
       "scope": "Caller supplies the ParserManager instance.",
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "ingest_one_asset",
-          "start_line": 178,
-          "end_line": 178,
-          "excerpt": "    manager.parse(asset, asset_root)"
+          "start_line": 186,
+          "end_line": 186,
+          "excerpt": "    manager.parse(asset, asset_root, services=services)"
         }
       ]
     },
@@ -5033,7 +5453,7 @@
       "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/actor_critic.py",
+          "path": "embodichain/learning/rl/policies/actor_critic.py",
           "symbol": "ActorCritic",
           "start_line": 34,
           "end_line": 34,
@@ -5051,7 +5471,7 @@
       "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/actor_only.py",
+          "path": "embodichain/learning/rl/policies/actor_only.py",
           "symbol": "ActorOnly",
           "start_line": 31,
           "end_line": 31,
@@ -5161,8 +5581,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 303,
-          "end_line": 303,
+          "start_line": 386,
+          "end_line": 386,
           "excerpt": "        backend = _AntipodalMeshBackend("
         }
       ]
@@ -5179,8 +5599,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 299,
-          "end_line": 299,
+          "start_line": 382,
+          "end_line": 382,
           "excerpt": "        model = self._gripper_model"
         }
       ]
@@ -5215,8 +5635,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend.__init__",
-          "start_line": 118,
-          "end_line": 118,
+          "start_line": 152,
+          "end_line": 152,
           "excerpt": "        self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)"
         }
       ]
@@ -5226,16 +5646,16 @@
       "source": "grasp-backend",
       "target": "grasp-collision",
       "relation": "constructs",
-      "description": "Creates the mesh-specific sampling or collision service.",
+      "description": "Constructs the fixed-hand collision service for validated queries; explicit proposals omit it.",
       "provenance": "source-reviewed",
-      "scope": "Private mesh backend composition behind the public generator.",
+      "scope": "Private mesh backend composition behind the public generator, guarded by the validated-query mode.",
       "evidence": [
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend.__init__",
-          "start_line": 105,
-          "end_line": 105,
-          "excerpt": "        self._collision_checker = GripperCollisionChecker("
+          "start_line": 135,
+          "end_line": 136,
+          "excerpt": "        if check_collision:\n            self._collision_checker = GripperCollisionChecker("
         }
       ]
     },
@@ -5346,6 +5766,279 @@
           "excerpt": "    generate_urdf_collision_convexes("
         }
       ]
+    },
+    {
+      "id": "scene-attempt-imports-scene-contracts",
+      "source": "scene-expansion-integration",
+      "target": "scene-expansion",
+      "relation": "imports",
+      "description": "Consumes the shared SceneVariant proposal contract.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit module import; does not move task or execution ownership into the scene proposal core.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
+          "symbol": "<module>",
+          "start_line": 33,
+          "end_line": 33,
+          "excerpt": "from embodichain.lab.sim.scene.expansion import SceneVariant"
+        }
+      ]
+    },
+    {
+      "id": "scene-attempt-calls-task-program-segments",
+      "source": "scene-expansion-integration",
+      "target": "embodied-env",
+      "relation": "calls",
+      "description": "Creates canonical Task Program segments for the selected program.",
+      "provenance": "source-reviewed",
+      "scope": "After injected scene preparation and initial validation pass; the existing demo executor consumes the resulting segments.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
+          "symbol": "execute_scene_variant",
+          "start_line": 294,
+          "end_line": 296,
+          "excerpt": "            segments = EmbodiedEnv.create_demo_segments("
+        }
+      ]
+    },
+    {
+      "id": "scene-layout-calls-scene-services",
+      "source": "scene-layout",
+      "target": "scene-services",
+      "relation": "calls",
+      "description": "Delegates each edited parent support group to the shared layout solver.",
+      "provenance": "source-reviewed",
+      "scope": "Selected indirect call through SceneLayoutConstructor and ParentSurfaceLayoutOptimizer; GenSim retains hierarchy traversal and edit semantics.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/utils/scene_layout_constructor.py",
+          "symbol": "SceneLayoutConstructor._optimize_parent_group",
+          "start_line": 275,
+          "end_line": 277,
+          "excerpt": "        solved_child_xy_by_id = self.parent_surface_layout_optimizer.optimize(\n            parent_surface_problem\n        )"
+        },
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/utils/parent_surface_layout_optimizer.py",
+          "symbol": "ParentSurfaceLayoutOptimizer.optimize",
+          "start_line": 182,
+          "end_line": 182,
+          "excerpt": "        solution = solve_layout("
+        }
+      ]
+    },
+    {
+      "id": "scene-assets-calls-scene-services",
+      "source": "scene-assets",
+      "target": "scene-services",
+      "relation": "calls",
+      "description": "Reuses the shared layout service for generated parent-child support groups.",
+      "provenance": "source-reviewed",
+      "scope": "Selected generation refinement path through the existing parent-surface adapter; asset generation and group-policy orchestration remain in GenSim.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
+          "symbol": "_refine_on_children_bfs",
+          "start_line": 882,
+          "end_line": 884,
+          "excerpt": "        solved_child_xy_by_id = parent_surface_optimizer.optimize(\n            parent_surface_problem\n        )"
+        },
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/utils/parent_surface_layout_optimizer.py",
+          "symbol": "ParentSurfaceLayoutOptimizer.optimize",
+          "start_line": 182,
+          "end_line": 182,
+          "excerpt": "        solution = solve_layout("
+        }
+      ]
+    },
+    {
+      "id": "scene-services-calls-compute-layout",
+      "source": "scene-services",
+      "target": "compute",
+      "relation": "calls",
+      "description": "Reuses batched tensor geometry kernels inside CPU scene strategies.",
+      "provenance": "source-reviewed",
+      "scope": "Scene retains support-selection, polygon-search and SLSQP policies. Tensor batches represent independent numeric inputs, not B>1 simulator-host support.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/_support_cpu.py",
+          "symbol": "SupportSurfaceDetector.detect",
+          "start_line": 142,
+          "end_line": 142,
+          "excerpt": "        face_normals, _, valid_faces = triangle_geometry("
+        }
+      ]
+    },
+    {
+      "id": "scene-services-declares-manager-entities",
+      "source": "scene-services",
+      "target": "simulation-manager",
+      "relation": "calls",
+      "description": "Declares composed entity configurations through the existing manager.",
+      "provenance": "source-reviewed",
+      "scope": "Caller-owned manager and Spawn retain native entity ownership and prepare/commit boundaries; declaration failures do not imply rollback.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/composition.py",
+          "symbol": "declare_fragment",
+          "start_line": 205,
+          "end_line": 205,
+          "excerpt": "            sim.add_rigid_object(cfg)"
+        }
+      ]
+    },
+    {
+      "id": "scene-services-references-manager",
+      "source": "scene-services",
+      "target": "simulation-manager",
+      "relation": "holds",
+      "description": "Keeps a non-owning reference to the caller-supplied simulation manager.",
+      "provenance": "source-reviewed",
+      "scope": "SceneView selects existing bindings; this reference does not create a second resource registry or transfer world ownership.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/query.py",
+          "symbol": "SceneView.__init__",
+          "start_line": 40,
+          "end_line": 40,
+          "excerpt": "        self.sim = sim"
+        }
+      ]
+    },
+    {
+      "id": "scene-recipes-import-expansion-contracts",
+      "source": "scene-services",
+      "target": "scene-expansion",
+      "relation": "imports",
+      "description": "Represents recipe proposals using the shared immutable expansion contracts.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit procedural-module import; generating a proposal does not execute a task or commit persistence.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/procedural.py",
+          "symbol": "<module>",
+          "start_line": 29,
+          "end_line": 29,
+          "excerpt": "from .expansion import ScenePoseChange, SceneVariant"
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-motion-benchmarks",
+      "source": "cli",
+      "target": "motion-benchmarks",
+      "relation": "calls",
+      "description": "Dispatch motion-generation evaluation to the installed benchmark package.",
+      "provenance": "source-reviewed",
+      "scope": "The motion-generation subcommand uses _run_motion_generation_cli; other benchmark subcommands have separate handlers.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/benchmark.py",
+          "symbol": "_run_motion_generation_cli",
+          "start_line": 57,
+          "end_line": 59,
+          "excerpt": "    from embodichain_benchmarks.motion_generation.cli import run_from_args\n\n    run_from_args(args)"
+        }
+      ]
+    },
+    {
+      "id": "motion-benchmarks-constructs-simulation",
+      "source": "motion-benchmarks",
+      "target": "simulation-manager",
+      "relation": "constructs",
+      "description": "Create a simulation manager for a fixed benchmark scenario batch.",
+      "provenance": "source-reviewed",
+      "scope": "BenchmarkRunner._create_simulation.",
+      "evidence": [
+        {
+          "path": "extensions/embodichain_benchmarks/motion_generation/runner.py",
+          "symbol": "BenchmarkRunner._create_simulation",
+          "start_line": 166,
+          "end_line": 173,
+          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n            )\n        )"
+        }
+      ]
+    },
+    {
+      "id": "nerd-recipe-constructs-sl-learner",
+      "source": "neural-dynamics",
+      "target": "supervised-learning",
+      "relation": "constructs",
+      "description": "The NeRD recipe constructs the shared learner with its physical objective and numerical policy.",
+      "provenance": "source-reviewed",
+      "scope": "The installable NeRD supervised recipe only; the core does not resolve or import model families eagerly.",
+      "evidence": [
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/nerd/sl_recipe.py",
+          "symbol": "build_supervised_trainer",
+          "start_line": 167,
+          "end_line": 167,
+          "excerpt": "    learner = SupervisedLearner("
+        }
+      ]
+    },
+    {
+      "id": "nerd-showcase-calls-sl-workflow",
+      "source": "nerd-showcase",
+      "target": "supervised-learning",
+      "relation": "calls",
+      "description": "The showcase delegates a factory-based training configuration to the common offline workflow.",
+      "provenance": "source-reviewed",
+      "scope": "The train command when its selected configuration declares a factory; explicit historical configurations take the historical trainer path.",
+      "evidence": [
+        {
+          "path": "examples/learning/nerd/__main__.py",
+          "symbol": "main",
+          "start_line": 273,
+          "end_line": 273,
+          "excerpt": "                result = train_from_config("
+        }
+      ]
+    },
+    {
+      "id": "rwm-recipe-constructs-sl-trainer",
+      "source": "robot-world-model",
+      "target": "supervised-learning",
+      "relation": "constructs",
+      "description": "The RWM recipe constructs the shared learner and offline trainer for its model-specific autoregressive objective and corpus.",
+      "provenance": "source-reviewed",
+      "scope": "The installable RWM supervised recipe only; acquisition and simulation are outside this factory, and the core does not import the model family.",
+      "evidence": [
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/sl_recipe.py",
+          "symbol": "build_rwm_trainer",
+          "start_line": 108,
+          "end_line": 108,
+          "excerpt": "    learner = SupervisedLearner(model, objective, optimizer, max_grad_norm=maximum_norm)"
+        },
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/sl_recipe.py",
+          "symbol": "build_rwm_trainer",
+          "start_line": 138,
+          "end_line": 138,
+          "excerpt": "    return SupervisedTrainer("
+        }
+      ]
+    },
+    {
+      "id": "task-engine-constructs-task-spec",
+      "source": "task-engine",
+      "target": "task-spec",
+      "relation": "constructs",
+      "description": "Projects validated task candidates into normative TaskSpec declarations.",
+      "provenance": "source-reviewed",
+      "scope": "TaskSpec construction from semantic intent; independent identity validation and evidence evaluation stay with TaskSpec.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_engine/task_spec.py",
+          "symbol": "task_spec_from_candidate",
+          "start_line": 186,
+          "end_line": 186,
+          "excerpt": "    template = TaskSpec("
+        }
+      ]
     }
   ],
   "views": [
@@ -5372,14 +6065,17 @@
         "semantic-executor",
         "environment-adapter",
         "gym-bridge",
+        "scene-expansion-integration",
         "mllm",
         "atomic-engine",
+        "motion-benchmarks",
         "motion-generator",
         "planners",
         "solvers",
         "workspace",
         "augmentation",
         "simulation-manager",
+        "scene-expansion",
         "robot",
         "sensors",
         "physics",
@@ -5435,7 +6131,14 @@
         "device-controller",
         "grasp-tools",
         "urdf-assembly",
-        "convex-decomposition"
+        "convex-decomposition",
+        "scene-services",
+        "neural-dynamics",
+        "supervised-learning",
+        "nerd-showcase",
+        "robot-world-model",
+        "task-spec",
+        "task-engine"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -5511,7 +6214,21 @@
         "differentiable-trainer-constructs-observation-normalizer",
         "rl-algorithms-holds-ppo",
         "rl-algorithms-holds-grpo",
-        "rl-algorithms-holds-apg"
+        "rl-algorithms-holds-apg",
+        "scene-attempt-imports-scene-contracts",
+        "scene-attempt-calls-task-program-segments",
+        "scene-layout-calls-scene-services",
+        "scene-assets-calls-scene-services",
+        "scene-services-calls-compute-layout",
+        "scene-services-declares-manager-entities",
+        "scene-services-references-manager",
+        "scene-recipes-import-expansion-contracts",
+        "cli-calls-motion-benchmarks",
+        "motion-benchmarks-constructs-simulation",
+        "nerd-recipe-constructs-sl-learner",
+        "nerd-showcase-calls-sl-workflow",
+        "rwm-recipe-constructs-sl-trainer",
+        "task-engine-constructs-task-spec"
       ],
       "groups": [
         {
@@ -5542,6 +6259,7 @@
             "semantic-executor",
             "environment-adapter",
             "gym-bridge",
+            "scene-expansion-integration",
             "mllm"
           ]
         },
@@ -5550,6 +6268,7 @@
           "label": "Motion capabilities",
           "node_ids": [
             "atomic-engine",
+            "motion-benchmarks",
             "motion-generator",
             "planners",
             "solvers",
@@ -5562,6 +6281,7 @@
           "label": "Simulation world",
           "node_ids": [
             "simulation-manager",
+            "scene-expansion",
             "robot",
             "sensors",
             "physics",
@@ -5572,7 +6292,8 @@
             "deformables",
             "lights",
             "rigid-constraints",
-            "gizmo"
+            "gizmo",
+            "scene-services"
           ]
         },
         {
@@ -5614,7 +6335,9 @@
             "scene-export",
             "simready",
             "asset-parsers",
-            "gen-sim-sessions"
+            "gen-sim-sessions",
+            "task-spec",
+            "task-engine"
           ]
         },
         {
@@ -5636,7 +6359,11 @@
             "differentiable-trainer",
             "differentiable-collector",
             "observation-normalizer",
-            "policy-evaluation"
+            "policy-evaluation",
+            "neural-dynamics",
+            "supervised-learning",
+            "nerd-showcase",
+            "robot-world-model"
           ]
         },
         {
@@ -5666,6 +6393,7 @@
         "mllm",
         "program-input",
         "scene-registry",
+        "scene-expansion",
         "skill-profile",
         "integration-catalog",
         "task-program-config",
@@ -5681,6 +6409,7 @@
         "parallel-execution",
         "effect-evidence",
         "gym-bridge",
+        "scene-expansion-integration",
         "command-sink",
         "step-clock",
         "embodied-env",
@@ -5715,7 +6444,9 @@
         "base-constructs-simulation",
         "env-calls-add-robot",
         "mllm-imports-program-input",
-        "mllm-calls-environment-adapter"
+        "mllm-calls-environment-adapter",
+        "scene-attempt-imports-scene-contracts",
+        "scene-attempt-calls-task-program-segments"
       ],
       "groups": [
         {
@@ -5725,6 +6456,7 @@
             "mllm",
             "program-input",
             "scene-registry",
+            "scene-expansion",
             "skill-profile",
             "integration-catalog"
           ]
@@ -5770,6 +6502,7 @@
           "label": "Gym integration & simulation",
           "node_ids": [
             "gym-bridge",
+            "scene-expansion-integration",
             "command-sink",
             "step-clock",
             "embodied-env",
@@ -5791,6 +6524,7 @@
         "robot",
         "articulations",
         "rigid-objects",
+        "scene-expansion",
         "rigid-object-groups",
         "deformables",
         "surface-deformables",
@@ -5801,6 +6535,7 @@
         "batch-entity",
         "object-backends",
         "atomic-engine",
+        "motion-benchmarks",
         "motion-generator",
         "planners",
         "solvers",
@@ -5813,11 +6548,13 @@
         "differentiable-env",
         "autograd-bridge",
         "configuration",
+        "scene-expansion-integration",
         "data-assets",
         "event-manager",
         "randomization",
         "devices",
-        "device-controller"
+        "device-controller",
+        "scene-services"
       ],
       "edge_ids": [
         "engine-holds-motion",
@@ -5848,7 +6585,13 @@
         "rigid-object-groups-inherits-batch-entity",
         "articulations-inherits-batch-entity",
         "deformables-inherits-batch-entity",
-        "lights-inherits-batch-entity"
+        "lights-inherits-batch-entity",
+        "scene-attempt-imports-scene-contracts",
+        "scene-services-calls-compute-layout",
+        "scene-services-declares-manager-entities",
+        "scene-services-references-manager",
+        "scene-recipes-import-expansion-contracts",
+        "motion-benchmarks-constructs-simulation"
       ],
       "groups": [
         {
@@ -5858,7 +6601,8 @@
             "simulation-manager",
             "physics",
             "sensors",
-            "visualization"
+            "visualization",
+            "scene-services"
           ]
         },
         {
@@ -5868,6 +6612,7 @@
             "robot",
             "articulations",
             "rigid-objects",
+            "scene-expansion",
             "rigid-object-groups",
             "deformables",
             "surface-deformables",
@@ -5890,6 +6635,7 @@
           "label": "Motion & reachability",
           "node_ids": [
             "atomic-engine",
+            "motion-benchmarks",
             "motion-generator",
             "planners",
             "solvers",
@@ -5914,6 +6660,7 @@
           "label": "Configuration & control",
           "node_ids": [
             "configuration",
+            "scene-expansion-integration",
             "data-assets",
             "event-manager",
             "randomization",
@@ -5926,7 +6673,7 @@
     {
       "id": "data-learning",
       "label": "Data & Learning",
-      "description": "Demonstration recording, online sampling, and separate standard and differentiable training routes.",
+      "description": "Demonstration recording, online sampling, shared supervised training and concrete model recipes, alongside standard and differentiable RL routes.",
       "node_ids": [
         "embodied-env",
         "managers",
@@ -5956,7 +6703,11 @@
         "rollout-buffer",
         "differentiable-trainer",
         "differentiable-collector",
-        "observation-normalizer"
+        "observation-normalizer",
+        "supervised-learning",
+        "neural-dynamics",
+        "nerd-showcase",
+        "robot-world-model"
       ],
       "edge_ids": [
         "cli-calls-training-assembly",
@@ -5983,7 +6734,10 @@
         "differentiable-trainer-constructs-observation-normalizer",
         "rl-algorithms-holds-ppo",
         "rl-algorithms-holds-grpo",
-        "rl-algorithms-holds-apg"
+        "rl-algorithms-holds-apg",
+        "nerd-recipe-constructs-sl-learner",
+        "nerd-showcase-calls-sl-workflow",
+        "rwm-recipe-constructs-sl-trainer"
       ],
       "groups": [
         {
@@ -6023,7 +6777,11 @@
             "cli",
             "rl-routing",
             "learning-env",
-            "policy-evaluation"
+            "policy-evaluation",
+            "supervised-learning",
+            "neural-dynamics",
+            "nerd-showcase",
+            "robot-world-model"
           ]
         },
         {
@@ -6084,7 +6842,12 @@
         "convex-decomposition",
         "simulation-manager",
         "robot",
-        "workspace-analyzer"
+        "workspace-analyzer",
+        "scene-services",
+        "compute",
+        "scene-expansion",
+        "task-spec",
+        "task-engine"
       ],
       "edge_ids": [
         "simulation-constructs-robot",
@@ -6101,7 +6864,14 @@
         "scene-assets-constructs-scene-simready",
         "scene-editing-constructs-scene-import",
         "scene-editing-calls-scene-layout",
-        "simready-calls-asset-parsers"
+        "simready-calls-asset-parsers",
+        "scene-layout-calls-scene-services",
+        "scene-assets-calls-scene-services",
+        "scene-services-calls-compute-layout",
+        "scene-services-declares-manager-entities",
+        "scene-services-references-manager",
+        "scene-recipes-import-expansion-contracts",
+        "task-engine-constructs-task-spec"
       ],
       "groups": [
         {
@@ -6159,6 +6929,23 @@
             "simulation-manager",
             "robot",
             "workspace-analyzer"
+          ]
+        },
+        {
+          "id": "shared-scene-services",
+          "label": "Shared scene construction & numerics",
+          "node_ids": [
+            "scene-services",
+            "compute",
+            "scene-expansion"
+          ]
+        },
+        {
+          "id": "task-specification",
+          "label": "Normative task specification",
+          "node_ids": [
+            "task-spec",
+            "task-engine"
           ]
         }
       ]

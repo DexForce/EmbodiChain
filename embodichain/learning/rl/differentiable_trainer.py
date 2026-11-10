@@ -38,17 +38,16 @@ from embodichain.learning.rl.env import (
     ScheduledDifferentiableVecEnv,
 )
 from embodichain.learning.rl.evaluation import evaluate_episodes
-from embodichain.learning.rl.models import Policy
+from embodichain.learning.rl.policies import Policy
 from embodichain.learning.rl.normalization import RunningObservationNormalizer
-from embodichain.learning.rl.utils import LRSchedulerCfg, build_lr_scheduler
+from embodichain.learning.rl.checkpoint import _load, _save
+from embodichain.learning.rl.utils import scheduler_needs_horizon
 from embodichain.utils import configclass
 
 if TYPE_CHECKING:
     from torch.utils.tensorboard import SummaryWriter
 
 __all__ = ["DifferentiableTrainer", "DifferentiableTrainerCfg"]
-
-_CHECKPOINT_SCHEMA_VERSION = 1
 
 
 @configclass
@@ -149,6 +148,7 @@ class DifferentiableTrainer:
         self.best_checkpoint_path: str | None = None
         self.best_eval_value: float | None = None
         self.start_time = time.time()
+        self._start_step = 0
         self.ret_window: deque[float] = deque(maxlen=100)
         self.len_window: deque[float] = deque(maxlen=100)
         self._episode_return = torch.zeros(
@@ -192,9 +192,24 @@ class DifferentiableTrainer:
         if total_updates is not None and total_updates < 0:
             raise ValueError("total_updates cannot be negative.")
 
+        scheduled = self.cfg.rollout_mode == "complete" and isinstance(
+            self.env, ScheduledDifferentiableVecEnv
+        )
         if total_updates is not None:
-            if total_updates > 0:
-                self.algorithm.bind_schedule(total_updates=total_updates)
+            estimated_updates = total_updates
+            remaining_updates = max(0, total_updates - self.num_updates)
+        elif scheduled:
+            if self.global_step < total_timesteps and scheduler_needs_horizon(
+                self.algorithm._lr_scheduler_cfg
+            ):
+                raise ValueError(
+                    "Variable-horizon APG requires total_updates or an explicit scheduler horizon."
+                )
+            # Environment-provided horizons are known only when collecting.
+            # Check the explicit LR horizon before each actual update.
+            estimated_updates = remaining_updates = int(
+                self.global_step < total_timesteps
+            )
         else:
             assert total_timesteps is not None
             steps_per_update = (
@@ -206,9 +221,13 @@ class DifferentiableTrainer:
                     else 1
                 )
             )
-            if total_timesteps > 0 and steps_per_update > 0:
-                estimated_updates = math.ceil(total_timesteps / steps_per_update)
-                self.algorithm.bind_schedule(total_updates=estimated_updates)
+            estimated_updates = math.ceil(total_timesteps / steps_per_update)
+            remaining_updates = math.ceil(
+                max(0, total_timesteps - self.global_step) / steps_per_update
+            )
+        self.algorithm._prepare_schedule(estimated_updates, remaining_updates)
+        self.start_time = time.time()
+        self._start_step = self.global_step
 
         self.policy.train()
         while (
@@ -216,6 +235,7 @@ class DifferentiableTrainer:
             if total_updates is not None
             else self.global_step < total_timesteps
         ):
+            self.algorithm._check_schedule_horizon(1)
             if self.cfg.rollout_mode == "complete":
                 collected_steps, metrics = self._complete_rollout_update()
             else:
@@ -233,7 +253,7 @@ class DifferentiableTrainer:
             entry = {
                 "global_step": float(self.global_step),
                 "num_updates": float(self.num_updates),
-                "charts/SPS": float(self.global_step / elapsed),
+                "charts/SPS": float((self.global_step - self._start_step) / elapsed),
                 "charts/episode_reward_avg_100": (
                     float(sum(self.ret_window) / len(self.ret_window))
                     if self.ret_window
@@ -249,17 +269,21 @@ class DifferentiableTrainer:
             self.train_history.append(entry)
             self._log(metrics)
 
+            saved_best = False
             if (
                 self._next_eval_step is not None
                 and self.eval_env is not None
                 and self.global_step >= self._next_eval_step
             ):
+                previous_best = self.best_checkpoint_path
                 self._evaluate()
+                saved_best = self.best_checkpoint_path != previous_best
                 while self._next_eval_step <= self.global_step:
                     self._next_eval_step += self.cfg.eval_frequency_steps
 
             if (
-                self.cfg.save_frequency_updates > 0
+                not saved_best
+                and self.cfg.save_frequency_updates > 0
                 and self.num_updates % self.cfg.save_frequency_updates == 0
             ):
                 self.save_checkpoint()
@@ -341,75 +365,42 @@ class DifferentiableTrainer:
         self.observation_normalizer.update(alive_observations.detach())
 
     def save_checkpoint(self, path: str | Path | None = None) -> str:
-        """Save policy, optimizer, and trainer counters."""
+        """Atomically save learning state and update the run index.
+
+        Args:
+            path: Destination, or the current step's default checkpoint path.
+
+        Returns:
+            Saved checkpoint path.
+        """
         if path is None:
             path = (
                 Path(self.cfg.checkpoint_dir)
                 / f"{self.cfg.experiment_name}_step_{self.global_step}.pt"
             )
-        checkpoint_path = Path(path)
-        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "schema_version": _CHECKPOINT_SCHEMA_VERSION,
-            "global_step": self.global_step,
-            "num_updates": self.num_updates,
-            "policy": self.policy.state_dict(),
-            "optimizer": self.algorithm.optimizer.state_dict(),
-            "best_eval_value": self.best_eval_value,
-            "rollout_index": self._rollout_index,
-        }
+        extra = {"rollout_index": self._rollout_index}
         if self.observation_normalizer is not None:
-            payload["observation_normalizer"] = self.observation_normalizer.state_dict()
-        if self.algorithm.lr_scheduler is not None:
-            payload["lr_scheduler"] = self.algorithm.lr_scheduler.state_dict()
-            payload["lr_scheduler_cfg"] = {
-                "name": self.algorithm._lr_scheduler_cfg.name,
-                "kwargs": dict(self.algorithm._lr_scheduler_cfg.kwargs),
-            }
-        torch.save(payload, checkpoint_path)
-        self.latest_checkpoint_path = str(checkpoint_path)
-        return self.latest_checkpoint_path
+            extra["observation_normalizer"] = self.observation_normalizer.state_dict()
+        return _save(self, path, extra)
 
-    def load_checkpoint(self, path: str | Path) -> None:
-        """Restore policy, optimizer, and trainer counters."""
-        try:
-            checkpoint = torch.load(
-                path,
-                map_location=self.algorithm.device,
-                weights_only=True,
-            )
-        except TypeError:
-            checkpoint = torch.load(path, map_location=self.algorithm.device)
-        version = checkpoint.get("schema_version")
-        if version != _CHECKPOINT_SCHEMA_VERSION:
-            raise ValueError(
-                f"Unsupported checkpoint schema version {version!r}; "
-                f"expected {_CHECKPOINT_SCHEMA_VERSION}."
-            )
-        self.policy.load_state_dict(checkpoint["policy"])
-        self.algorithm.optimizer.load_state_dict(checkpoint["optimizer"])
-        sched_cfg_data = checkpoint.get("lr_scheduler_cfg")
-        if sched_cfg_data is not None and checkpoint.get("lr_scheduler") is not None:
-            bound_cfg = LRSchedulerCfg(**sched_cfg_data)
-            self.algorithm._lr_scheduler_cfg = bound_cfg
-            self.algorithm.lr_scheduler = build_lr_scheduler(
-                self.algorithm.optimizer,
-                bound_cfg,
-            )
-            self.algorithm.lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
-        self.global_step = int(checkpoint["global_step"])
-        self.num_updates = int(checkpoint["num_updates"])
-        self.best_eval_value = checkpoint.get("best_eval_value")
+    def load_checkpoint(
+        self, path: str | Path, *, resume_scheduler: str = "restore"
+    ) -> None:
+        """Validate and restore learning state, starting with a fresh rollout.
+
+        Args:
+            path: Checkpoint file, including existing APG schema-v1 files.
+            resume_scheduler: Restore the saved LR curve or restart the
+                configured curve while preserving optimizer momentum.
+        """
+        checkpoint = _load(self, path, resume_scheduler)
         self._rollout_index = int(checkpoint.get("rollout_index", self.num_updates))
-        normalizer_state = checkpoint.get("observation_normalizer")
-        if normalizer_state is not None:
-            if self.observation_normalizer is None:
-                raise ValueError(
-                    "Checkpoint contains observation normalization state, but the "
-                    "trainer has normalization disabled."
-                )
-            self.observation_normalizer.load_state_dict(normalizer_state)
-        self.latest_checkpoint_path = str(path)
+        frequency = self.cfg.eval_frequency_steps
+        self._next_eval_step = (
+            (self.global_step // frequency + 1) * frequency if frequency > 0 else None
+        )
+        self.start_time = time.time()
+        self._start_step = self.global_step
 
     def get_summary(self) -> dict[str, Any]:
         """Return the current in-memory training summary."""
@@ -418,7 +409,7 @@ class DifferentiableTrainer:
             "global_step": self.global_step,
             "num_updates": self.num_updates,
             "elapsed_time_sec": float(elapsed),
-            "training_fps": float(self.global_step / elapsed),
+            "training_fps": float((self.global_step - self._start_step) / elapsed),
             "last_train_metrics": (
                 dict(self.train_history[-1]) if self.train_history else {}
             ),
@@ -484,16 +475,22 @@ class DifferentiableTrainer:
                 self.best_eval_value = candidate
                 path = (
                     Path(self.cfg.checkpoint_dir)
-                    / f"{self.cfg.experiment_name}_best.pt"
+                    / f"{self.cfg.experiment_name}_best_step_{self.global_step}.pt"
                 )
-                self.best_checkpoint_path = self.save_checkpoint(path)
+                previous_best = self.best_checkpoint_path
+                self.best_checkpoint_path = str(path)
+                try:
+                    self.save_checkpoint(path)
+                except Exception:
+                    self.best_checkpoint_path = previous_best
+                    raise
         return metrics
 
     def _log(self, metrics: dict[str, float]) -> None:
         elapsed = max(time.time() - self.start_time, 1e-6)
         values = {
             **{f"train/{key}": value for key, value in metrics.items()},
-            "charts/SPS": self.global_step / elapsed,
+            "charts/SPS": (self.global_step - self._start_step) / elapsed,
         }
         if self.ret_window:
             values["charts/episode_reward_avg_100"] = sum(self.ret_window) / len(

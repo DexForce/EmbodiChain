@@ -1,0 +1,214 @@
+{
+  "status": "passed_with_documented_native_runtime",
+  "checks": {
+    "all_documented_runtime_commands_passed": true,
+    "no_runtime_timeouts": true,
+    "no_surviving_owned_processes": true,
+    "source_unchanged_during_validation": true,
+    "online_updates": true,
+    "online_chunks": true,
+    "online_weights_changed": true,
+    "online_normalization_frozen": true,
+    "online_optimizer_and_rng_saved": true,
+    "online_cleanup": true,
+    "offline_updates": true,
+    "offline_chunks": true,
+    "offline_weights_changed": true,
+    "offline_normalization_frozen": true,
+    "offline_optimizer_and_rng_saved": true,
+    "offline_cleanup": true,
+    "resume_updates": true,
+    "resume_chunks": true,
+    "resume_weights_changed": true,
+    "resume_normalization_frozen": true,
+    "resume_optimizer_and_rng_saved": true,
+    "resume_cleanup": true,
+    "online_consumed_both_generations": true,
+    "resume_restores_exact_model": true,
+    "resume_keeps_sampler_rng": true,
+    "resume_new_source_run_id": true,
+    "offline_quota_bound": true,
+    "offline_direct_streaming": true,
+    "offline_episode_count": true,
+    "offline_no_pt_dataset": true,
+    "independent_eval": true
+  },
+  "environment": {
+    "python": "/root/miniconda3/envs/py311/bin/python",
+    "prefix": "/root/miniconda3/envs/py311",
+    "conda_default_env": "py311",
+    "gpu_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+    "cpu_affinity": "32-47",
+    "overlay": "/tmp/ods-dexsim-runtime",
+    "versions": {
+      "torch": "2.7.0+cu128",
+      "lerobot": "0.4.4",
+      "numpy": "2.4.6",
+      "gymnasium": "1.3.0",
+      "black": "26.3.1"
+    }
+  },
+  "tested_source_revision": "d54cfc8a71538c954044d326f58e948992b23351",
+  "raw_artifact_directory": "/tmp/pr809-simple-bc-py311-validation-20261019-v1",
+  "native_runtime_precondition": {
+    "unmodified_installed_import_passed": false,
+    "error": "reconstruct_cable_rings_kernel missing in installed DexSim Newton facade",
+    "compatible_runtime": "/tmp/ods-dexsim-runtime",
+    "physics_backend": "default"
+  },
+  "unit_tests": {
+    "production_data_pipeline_api_and_context": 482
+  },
+  "runtime_results": {
+    "module-help": {
+      "returncode": 0,
+      "seconds": 2.275383580941707,
+      "timeout": false,
+      "observed_owned_pids": [],
+      "surviving_owned_pids": []
+    },
+    "file-help": {
+      "returncode": 0,
+      "seconds": 2.2747112109791487,
+      "timeout": false,
+      "observed_owned_pids": [],
+      "surviving_owned_pids": []
+    },
+    "configure": {
+      "returncode": 0,
+      "seconds": 1.2581079278606921,
+      "timeout": false,
+      "observed_owned_pids": [],
+      "surviving_owned_pids": []
+    },
+    "online": {
+      "returncode": 0,
+      "seconds": 169.5551985099446,
+      "timeout": false,
+      "observed_owned_pids": [
+        497237,
+        497245,
+        497247,
+        497424,
+        497461,
+        497462
+      ],
+      "surviving_owned_pids": []
+    },
+    "offline": {
+      "returncode": 0,
+      "seconds": 131.7121039519552,
+      "timeout": false,
+      "observed_owned_pids": [
+        499918,
+        499926,
+        499928,
+        500116,
+        500117,
+        500557,
+        500702
+      ],
+      "surviving_owned_pids": []
+    },
+    "resume": {
+      "returncode": 0,
+      "seconds": 161.74166607297957,
+      "timeout": false,
+      "observed_owned_pids": [
+        500900,
+        500908,
+        500910,
+        501737,
+        501738,
+        503509,
+        503796
+      ],
+      "surviving_owned_pids": []
+    },
+    "evaluation": {
+      "returncode": 0,
+      "seconds": 37.68938138592057,
+      "timeout": false,
+      "observed_owned_pids": [
+        504065,
+        504066,
+        504235
+      ],
+      "surviving_owned_pids": []
+    },
+    "compare": {
+      "returncode": 0,
+      "seconds": 0.7547900869976729,
+      "timeout": false,
+      "observed_owned_pids": [],
+      "surviving_owned_pids": []
+    }
+  },
+  "offline_episodes": 4,
+  "offline_frames": 1330,
+  "independent_evaluation_successes": 2,
+  "resume_steps": [
+    10,
+    25
+  ],
+  "observed_owned_pids": [
+    497237,
+    497245,
+    497247,
+    497424,
+    497461,
+    497462,
+    499918,
+    499926,
+    499928,
+    500116,
+    500117,
+    500557,
+    500702,
+    500900,
+    500908,
+    500910,
+    501737,
+    501738,
+    503509,
+    503796,
+    504065,
+    504066,
+    504235
+  ],
+  "scope": "Engineering correctness and a retained trained-checkpoint regression; no full learning benchmark or formal held-out test.",
+  "integration": {
+    "pull_request": 809,
+    "base_revision": "929fd94ca2337d2184a0f54b536709e72550399a",
+    "public_implementation_and_tests_unchanged": true,
+    "historical_json_records_unchanged": 7,
+    "function_extraction_parity": "Geometry/statistics/checkpoint/evaluation functions match base ASTs; trainer changes are imports, paths and recorded-source ownership."
+  },
+  "unit_test_attempts": [
+    {
+      "log": "/tmp/pr809-simple-bc-unit-tests.log",
+      "sha256": "168303762190dbd7a8bb7d897c6ac0d334b9a0a9ae5019c3a675e3215fe058be",
+      "passed": 481,
+      "failed": 1,
+      "scope": "Context links were being relocated; final context checks rerun after the candidate was committed."
+    },
+    {
+      "log": "/tmp/pr809-simple-bc-candidate-unit-tests.log",
+      "sha256": "415921f713d368b41d92f2e58e9f3c59f15ec59860c1bfb1cdc9ba5e5d327865",
+      "passed": 476,
+      "failed": 6,
+      "scope": "CUDA hidden; installed Open3D lacks its CPU module. No implementation changes followed this setup failure."
+    },
+    {
+      "log": "/tmp/pr809-simple-bc-final-unit-tests.log",
+      "sha256": "56a58514e992e2f622714106ed1313b487f612be8f773205a27287fb4f2bbb75",
+      "passed": 482,
+      "failed": 0,
+      "scope": "Final immutable candidate with documented runtime overlay and CUDA visibility; production numerical tests retain CPU tensors."
+    }
+  ],
+  "public_api_documentation": {
+    "documented": 2691,
+    "exports": 2691
+  }
+}

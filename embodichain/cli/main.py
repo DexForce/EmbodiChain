@@ -34,24 +34,48 @@ class Command:
     name: str
     target: str
     help: str
-    aliases: tuple[str, ...] = ()
 
 
 COMMANDS = (
+    Command(
+        name="expansion",
+        target="embodichain.cli.expansion:main",
+        help="Preflight, collect, resume and inspect expert expansion jobs.",
+    ),
+    Command(
+        name="train-sl",
+        target="embodichain.learning.sl.workflow:cli",
+        help="Train a supervised policy or dynamics recipe from YAML or JSON.",
+    ),
     Command(
         name="data",
         target="embodichain.data.download:main",
         help="List and download EmbodiChain data assets.",
     ),
     Command(
-        name="simready",
-        target="embodichain.gen_sim.simready_pipeline.cli.start:main",
+        name="asset-engine",
+        target="embodichain.gen_sim.asset_engine.cli.start:main",
         help="Convert a raw asset directory into a SimReady asset.",
+    ),
+    Command(
+        name="task-engine",
+        target="embodichain.gen_sim.task_engine.cli:main",
+        help="Generate an image-grounded semantic task graph without simulation.",
     ),
     Command(
         name="scene-engine",
         target="embodichain.gen_sim.scene_engine.cli.start:main",
         help="Generate a scene export from an input image using gen_sim/.env.",
+    ),
+    Command(
+        name="search-scene-feasibility",
+        target="embodichain.lab.task_program.integrations.feasibility:cli",
+        help="Search task-conditioned scene layouts and robot installations.",
+    ),
+    Command(
+        name="scene-randomization",
+        target="embodichain.gen_sim.scene_engine.cli.randomization:main",
+        help="Generate and save grouped scene layouts from an existing output root.",
     ),
     Command(
         name="preview-scene",
@@ -64,10 +88,34 @@ COMMANDS = (
         help="Preview a USD, URDF, or mesh asset in simulation.",
     ),
     Command(
-        name="run-env",
-        target="embodichain.lab.scripts.run_env:cli",
-        help="Run an environment for data generation or preview.",
-        aliases=("run-task",),
+        name="preview-robot",
+        target="embodichain.lab.scripts.preview_robot:cli",
+        help="Preview a robot with control-part Gizmos and Viser joint controls.",
+    ),
+    Command(
+        name="preview-material",
+        target="embodichain.lab.scripts.preview_material:cli",
+        help="Preview default materials or export rendered images and galleries.",
+    ),
+    Command(
+        name="run-task",
+        target="embodichain.lab.scripts.run_task:cli",
+        help="Run a task for data generation or preview.",
+    ),
+    Command(
+        name="run-example",
+        target="embodichain.cli.run_example:main",
+        help="List and run Python scripts from the examples directory.",
+    ),
+    Command(
+        name="run-atomic-action",
+        target="embodichain.cli.run_example:atomic_skill_cli",
+        help="Deprecated alias for run-atomic-skill.",
+    ),
+    Command(
+        name="run-atomic-skill",
+        target="embodichain.cli.run_example:atomic_skill_cli",
+        help="Alias for run-example sim/atomic_skill.",
     ),
     Command(
         name="list-task",
@@ -75,9 +123,24 @@ COMMANDS = (
         help="List tasks by category, deployment, and capability.",
     ),
     Command(
+        name="list-robot",
+        target="embodichain.cli.list_robot:main",
+        help="List robot families, variants, independent control DOFs, and mimic joints.",
+    ),
+    Command(
         name="show-task",
         target="embodichain.cli.show_task:main",
         help="Inspect a logical task and its deployments.",
+    ),
+    Command(
+        name="dataset",
+        target="embodichain.cli.dataset:main",
+        help="Validate, split, and recover recorded expert datasets.",
+    ),
+    Command(
+        name="real2sim",
+        target="embodichain.data_pipeline.real2sim.cli:main",
+        help="Prepare and validate annotated real-to-simulation motion prototypes.",
     ),
     Command(
         name="preview_lerobot_data",
@@ -106,7 +169,7 @@ COMMANDS = (
     ),
     Command(
         name="benchmark",
-        target="scripts.benchmark.__main__:main",
+        target="embodichain.cli.benchmark:main",
         help="Run EmbodiChain performance benchmarks.",
     ),
     Command(
@@ -147,7 +210,6 @@ def build_parser() -> argparse.ArgumentParser:
         # ``embodichain <command> --help`` reach that complete parser.
         subparsers.add_parser(
             command.name,
-            aliases=command.aliases,
             add_help=False,
             help=command.help,
             description=command.help,
@@ -184,11 +246,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.parse_args(arguments)
         return
 
-    command_by_name = {
-        name: command
-        for command in COMMANDS
-        for name in (command.name, *command.aliases)
-    }
+    command_by_name = {command.name: command for command in COMMANDS}
     command = command_by_name.get(arguments[0])
     if command is None:
         parser.error(

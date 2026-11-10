@@ -5,24 +5,30 @@ This tutorial deploys Task Program's built-in Semantic Calls through explicit
 environment, integration, embodiment, and execution-policy configuration. The
 calls are declarative language instructions, not an independent execution API.
 
-For a smaller introduction to the language itself, first complete
-:doc:`task_program_python`, which constructs and compiles the same typed schema
-in Python without starting a Gym environment.
+This page is for **integration authors** who bind scenes, robot profiles and
+execution policies. To customize an existing task by editing only its program,
+start with :doc:`/overview/task_program/quickstart`.
 
-Use :doc:`atomic_actions` instead when Python code should construct and execute
-typed ``ActionInvocation`` values directly. The architecture and ownership
-rules are described in :doc:`/overview/task_program/index`.
+The optional :doc:`task_program_python` introduces the typed language without
+starting simulation; it is not a prerequisite for the Quickstart.
+
+Use :doc:`atomic_skills` instead when Python code should construct and execute
+typed ``SkillInvocation`` values directly. The architecture and ownership
+rules are described in :doc:`/overview/task_program/architecture`.
 
 What you will configure
 -----------------------
 
-A supported configuration-defined Task Program has six explicit owners:
+A supported configuration-defined Task Program has six core owners. A task that
+also collects augmented trajectories may add a separate expansion declaration:
 
 1. ``program.yaml`` owns the embodiment-independent task flow and targets;
 2. ``integration.yaml`` owns task-specific semantic requirements, its nested
    ``scene_binding``, resource defaults, action options, effect monitors, and
    runtime services;
-3. ``env.yaml`` owns the physical scene and ordinary Gym environment values;
+3. a reusable environment component (for example
+   ``envs/default.yaml`` and ``envs/newton.yaml``) owns the
+   physical scene and ordinary Gym environment values;
 4. an embodiment component owns one robot, its sensors, and optional semantic
    skill profile;
 5. an execution-policy component owns motion, recovery, runner, and effect
@@ -31,21 +37,26 @@ A supported configuration-defined Task Program has six explicit owners:
    Gym ID.
 
 There is no separate physical ``scene.yaml`` or task component. In particular,
-``env.yaml`` contains no ``id`` or ``task_program`` field, so the same physical
-environment can also be selected by a handwritten-trajectory deployment.
+the reusable environment component contains no ``id`` or ``task_program``
+field, so the same physical environment can also be selected by a
+handwritten-trajectory deployment.
 
 The shared ``EmbodiedEnv`` and Task Program adapter then lower Semantic Calls
 to Atomic Skills while retaining the normal stepping, recording, and reset
 lifecycle.
 
-The official repeated Pick/Place example is a complete reference:
+In a source checkout, the official repeated Pick/Place example is a complete
+reference. Its physical backends live under ``envs/``; the UR5 deployment additionally
+references ``expansion/repeated_pick_place.yaml`` through ``expansion.config``:
 
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.yaml``;
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/``;
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``;
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``;
-* ``embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml``;
-* ``embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml``.
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml``
+  and ``envs/newton.yaml``;
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/``;
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``;
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``;
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/expansion/repeated_pick_place.yaml``;
+* ``extensions/embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml``;
+* ``extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml``.
 
 These files have explicit ownership rather than generic deep-merge semantics.
 The deployment must select components that satisfy the task's scene and
@@ -96,42 +107,18 @@ defaults, and the selected embodiment supplies compatible concrete endpoints.
 Compose the deployment
 ----------------------
 
-The reusable environment contains only physical simulation entities and
-ordinary environment values. This abbreviated shape is intentionally free of
-Task Program and embodiment fields:
+The reusable environment owns physical simulation entities and ordinary
+environment values, including its explicit physics backend. Here is the complete
+Default environment used by the Quickstart:
 
-.. code-block:: yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml
+   :language: yaml
 
-   environment_id: repeated_pick_place
-   max_episode_steps: 1200
+The complete Franka deployment selects environment variants, Task Program
+components and an embodiment. It does not enable expansion:
 
-   simulation:
-     rigid_object:
-       - uid: cube
-         # Physical shape, dynamics, and initial pose.
-
-   env:
-     sim_steps_per_control: 4
-     events: {}
-     dataset: {}
-
-The thin runnable deployment chooses that environment, all three Task Program
-files, and one embodiment without copying any of them:
-
-.. code-block:: yaml
-
-   id: TaskProgramRepeatedPickPlace-v1
-
-   environment:
-     component: env.yaml
-
-   task_program:
-     program: task_program/program.yaml
-     integration: task_program/integration.yaml
-     execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
-
-   embodiment:
-     component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
+   :language: yaml
 
 During ``config_to_cfg()``, the component resolver expands these selections,
 checks that every semantic ``simulation_uid`` exists in the physical scene,
@@ -176,8 +163,9 @@ monitor. Command acknowledgement alone is not physical evidence.
 Load and validate without simulation
 ------------------------------------
 
-The provider-independent API performs strict file decoding before any live
-environment is constructed:
+From the source checkout root, the provider-independent API performs strict
+file decoding before any live environment is constructed. Unlike the CLI,
+``load_task_program()`` takes a filesystem path, not a package-resource reference:
 
 .. code-block:: python
 
@@ -187,7 +175,7 @@ environment is constructed:
    )
 
    program = load_task_program(
-       "embodichain_tasks/configs/tasks/manipulation/"
+       "extensions/embodichain_tasks/configs/tasks/manipulation/"
        "repeated_pick_place/task_program/program.yaml",
        integration=TaskProgramIntegrationCfg(
            robot_profile="ur5_dh_pgi_140_80",
@@ -215,7 +203,7 @@ Run the complete configuration with the normal environment CLI:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
      --gym_config \
      embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
      --headless
@@ -224,7 +212,7 @@ To select another compatible program while keeping the trusted integration:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
      --gym_config path/to/task.ur5.yaml \
      --task-program path/to/program.yaml \
      --headless
@@ -273,7 +261,7 @@ factory and fingerprints its call ID, revision, and target atomic descriptor.
 
 Do not place a callable, dotted import, simulator object, or task-local motion
 generator in the program. If a reusable behavior is fundamentally a new motion
-primitive, add it to Atomic Actions first and then expose a declarative
+primitive, add it to Atomic Skills first and then expose a declarative
 registered call through Task Program.
 
 Next steps
@@ -285,5 +273,5 @@ Next steps
   command presets, and effect assurance;
 * :doc:`/overview/task_program/index` — schema, compilation,
   parallel safety, and adapter lifecycle;
-* :doc:`/overview/sim/atomic_actions/builtin_actions` — the atomic primitives
+* :doc:`/overview/sim/atomic_skills/builtin_skills` — the atomic primitives
   reached after lowering.

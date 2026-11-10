@@ -10,7 +10,7 @@ and current source code when this matrix and the repository diverge.
 - [Simulation core and scene objects](#simulation-core-and-scene-objects)
 - [Gym environments, managers, functors, and randomization](#gym-environments-managers-functors-and-randomization)
 - [Task Programs and configured deployments](#task-programs-and-configured-deployments)
-- [Atomic actions, motion planning, and IK](#atomic-actions-motion-planning-and-ik)
+- [Atomic Skills, motion planning, and IK](#atomic-skills-motion-planning-and-ik)
 - [Robots, sensors, and visualization](#robots-sensors-and-visualization)
 - [Reinforcement learning and data pipelines](#reinforcement-learning-and-data-pipelines)
 - [Official tasks and configuration packages](#official-tasks-and-configuration-packages)
@@ -38,7 +38,9 @@ and current source code when this matrix and the repository diverge.
   at the earliest owning boundary with a useful error and without partially
   initialized state.
 - Check that tests target observable contracts and include boundary, negative,
-  partial-batch, or cleanup cases appropriate to the change.
+  partial-batch, or cleanup cases appropriate to the change. Apply the shared
+  [test necessity review](../../add-test/SKILL.md#test-necessity-review) to added
+  or extended cases; accept sufficient existing coverage.
 - Prefer focused tests. Treat GPU, renderer, real-simulation, and distributed
   paths as separate resource classes and report them as residual risk when they
   cannot be run.
@@ -70,7 +72,7 @@ simulation-marked test.
 ## Gym environments, managers, functors, and randomization
 
 **Paths:** `embodichain/lab/gym/**`, especially `envs/managers/**`,
-`action_bank/**`, and wrappers.
+wrappers.
 
 Check:
 
@@ -125,9 +127,9 @@ Evidence surfaces: language decoder/validation, compiler, semantic catalog,
 configured composition/services, Gym registration/bridge, package-data tests,
 and the `$add-task-program` read-only deployment inspector.
 
-## Atomic actions, motion planning, and IK
+## Atomic Skills, motion planning, and IK
 
-**Paths:** `embodichain/lab/sim/atomic_actions/**`, `planners/**`,
+**Paths:** `embodichain/lab/sim/atomic_skills/**`, `planners/**`,
 `solvers/**`, and grasp/workspace utilities that feed plans.
 
 Check:
@@ -154,7 +156,7 @@ Check:
 
 Evidence surfaces: typed core contracts, engine/runner, simulation adapter,
 planner/solver base class, registration/export modules, and the nearest
-`tests/sim/atomic_actions/**`, planner, solver, or toolkit test.
+`tests/sim/atomic_skills/**`, planner, solver, or toolkit test.
 
 ## Robots, sensors, and visualization
 
@@ -210,7 +212,7 @@ tests. Run GPU/distributed tests serially and only when justified.
 
 ## Official tasks and configuration packages
 
-**Paths:** `embodichain_tasks/**` and reusable task components.
+**Paths:** `extensions/embodichain_tasks/**` and reusable task components.
 
 Check:
 

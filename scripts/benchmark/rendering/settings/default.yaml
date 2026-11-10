@@ -1,0 +1,15 @@
+# Rendering benchmark settings. The scene is fixed for the current benchmark.
+scene: fixed_reflective
+resolution: 640x360
+camera_count: 1
+num_envs: 1
+renderer: fast-rt
+spp: 1
+denoising_modes: [optix, dlss, nrd]
+reference_mode: optix
+warmup_frames: 12
+measure_frames: 40
+quality_frames: 12
+dlss_quality: 3
+gpu_id: 0
+device: cuda:0

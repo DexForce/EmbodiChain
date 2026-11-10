@@ -33,7 +33,14 @@ import pytest
 def test_motion_import_order_and_config_resolution(first_module: str) -> None:
     script = """
 import importlib
+import importlib.abc
 import sys
+
+class BlockExternalToppra(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "toppra" or fullname.startswith("toppra."):
+            raise AssertionError("External toppra must not be imported")
+sys.meta_path.insert(0, BlockExternalToppra())
 import dexsim
 
 importlib.import_module(sys.argv[1])
@@ -49,6 +56,15 @@ assert MotionGenerator.__module__ == generator_path
 assert MotionGenCfg.__module__ == generator_path
 assert MotionGenOptions().strategy == "motion_gen"
 from embodichain.lab.sim import motion
+from embodichain.lab.sim.motion import expansion
+from embodichain.lab.sim.motion.execution import (
+    EpisodeSink,
+    FixedSceneInitialStatePort,
+    InitialStatePort,
+    MeasuredExecutor,
+    SingleSlotOutcome,
+    SingleSlotRunner,
+)
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.motion.solvers import SolverCfg, URSolverCfg
 from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
@@ -65,6 +81,21 @@ for name in motion.__all__:
     module = getattr(motion, name)
     assert module is importlib.import_module("embodichain.lab.sim.motion." + name)
 assert "solvers" in dir(motion)
+for name in (
+    "InitialStatePort",
+    "MeasuredExecutor",
+    "EpisodeSink",
+    "FixedSceneInitialStatePort",
+    "SingleSlotOutcome",
+    "SingleSlotRunner",
+):
+    assert not hasattr(expansion, name)
+assert InitialStatePort.__module__ == "embodichain.lab.sim.motion.execution"
+assert MeasuredExecutor.__module__ == "embodichain.lab.sim.motion.execution"
+assert EpisodeSink.__module__ == "embodichain.lab.sim.motion.execution"
+assert FixedSceneInitialStatePort.__module__ == "embodichain.lab.sim.motion.execution"
+assert SingleSlotOutcome.__module__ == "embodichain.lab.sim.motion.execution"
+assert SingleSlotRunner.__module__ == "embodichain.lab.sim.motion.execution"
 try:
     motion.unknown_motion_module
 except AttributeError:
@@ -78,5 +109,65 @@ assert dexsim.get_world_num() == 0
         capture_output=True,
         text=True,
         timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_toppra_planning_and_backward_work_without_external_package() -> None:
+    script = """
+import importlib.abc
+import sys
+class BlockExternalToppra(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "toppra" or fullname.startswith("toppra."):
+            raise AssertionError("External toppra must not be imported")
+sys.meta_path.insert(0, BlockExternalToppra())
+import numpy as np
+import torch
+from embodichain.compute.trajectory._toppra import _NumpyToppra
+from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
+points = torch.tensor([[[0.0], [0.73]]], dtype=torch.float64, requires_grad=True)
+acceleration = torch.tensor(1.7, dtype=torch.float64, requires_grad=True)
+reference = _NumpyToppra(points.detach().numpy()[0], 1.0, 1.7)
+result = _retime_toppra_warp(points, 1.0, acceleration, sample_dt=0.13)
+assert result["success"].all()
+assert np.isclose(result["dt"].sum().item(), reference.duration)
+result["dt"].sum().backward()
+assert torch.isfinite(points.grad).all() and torch.isfinite(acceleration.grad)
+assert "toppra" not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_warp_toppra_does_not_import_the_offline_numpy_solver() -> None:
+    script = """
+import importlib.abc
+import sys
+class BlockReference(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'embodichain.compute.trajectory._toppra':
+            raise AssertionError('Production Warp must not load the offline solver')
+        if fullname == 'toppra' or fullname.startswith('toppra.'):
+            raise AssertionError('External toppra must not be imported')
+sys.meta_path.insert(0, BlockReference())
+import torch
+from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
+points = torch.linspace(0, .73, 4, dtype=torch.float64).view(1, 4, 1).expand(32, 4, 7).contiguous()
+result = _retime_toppra_warp(points, 1., 1.7, sample_count=17)
+assert result['success'].all()
+points.requires_grad_()
+result = _retime_toppra_warp(points, 1., 1.7, sample_dt=.13)
+result['dt'].sum().backward()
+assert torch.isfinite(points.grad).all()
+assert 'embodichain.compute.trajectory._toppra' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
     )
     assert result.returncode == 0, result.stdout + result.stderr

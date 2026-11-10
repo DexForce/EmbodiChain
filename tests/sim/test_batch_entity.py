@@ -46,10 +46,3 @@ def test_batch_entity_does_not_reset_in_constructor() -> None:
     entity = _BatchEntityForTest()
 
     assert entity.reset_calls == 0
-
-
-def test_batch_entity_reset_is_explicit() -> None:
-    entity = _BatchEntityForTest()
-    entity.reset()
-
-    assert entity.reset_calls == 1

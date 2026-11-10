@@ -21,14 +21,14 @@ Usage examples::
     # Predefined EmbodiChain robot -- control parts + solver come from the
     # preset, so only --control-part (optional) is needed.
     embodichain analyze-workspace \\
-        --robot franka_panda --mode joint_space --num-samples 20000
+        --robot FrankaPanda --mode joint_space --num-samples 20000
 
     embodichain analyze-workspace \\
-        --robot cobotmagic --control-part left_arm --mode cartesian_space \\
+        --robot CobotMagic --control-part left_arm --mode cartesian_space \\
         --bounds -0.5 0.5 -0.5 0.5 0.6 1.5 --ik-samples-per-point 5
 
     embodichain analyze-workspace \\
-        --robot dexforce_w1 \\
+        --robot DexforceW1 \\
         --robot-params '{"version":"v025","with_default_eef":false}' \\
         --control-part left_arm --mode joint_space
 
@@ -45,12 +45,12 @@ Usage examples::
 
     # Preview an already-computed workspace cache with its robot in EmbodiChain
     embodichain analyze-workspace \\
-        --robot franka_panda \\
+        --robot FrankaPanda \\
         --preview-cache ~/.cache/embodichain_data/robot_workspace/<key>
 
     # Analyze or preview with the robot and workspace in a Viser browser
     embodichain analyze-workspace \\
-        --robot franka_panda --mode joint_space --viser
+        --robot FrankaPanda --mode joint_space --viser
 
 Results are cached to disk (``--cache-dir``, default
 ``~/.cache/embodichain_data/robot_workspace``) keyed by the robot + parameters,
@@ -61,6 +61,7 @@ without recomputing. Pass ``--output`` to export a copy to a user path.
 from __future__ import annotations
 
 import argparse
+import time
 import os
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -90,9 +91,6 @@ __all__ = [
 # Mapping from ``--solver`` choice to solver config class (resolved lazily).
 _SOLVER_CHOICES = ("pytorch", "pinocchio", "pink")
 
-# Predefined EmbodiChain robots selectable via ``--robot``.
-_ROBOT_CHOICES = ("franka_panda", "cobotmagic", "dexforce_w1", "ur")
-
 
 def _viser_enabled(args: argparse.Namespace) -> bool:
     """Whether the Viser browser backend was requested."""
@@ -102,30 +100,6 @@ def _viser_enabled(args: argparse.Namespace) -> bool:
 def _visualization_enabled(args: argparse.Namespace) -> bool:
     """Whether workspace visualization has an active display backend."""
     return bool(args.visualize and (_viser_enabled(args) or not args.headless))
-
-
-def _robot_cfg_cls(name: str):
-    """Resolve a ``--robot`` choice to its RobotCfg subclass (lazy import).
-
-    Args:
-        name: One of :data:`_ROBOT_CHOICES`.
-
-    Returns:
-        The RobotCfg subclass for the preset.
-    """
-    from embodichain.lab.sim.robots import (
-        CobotMagicCfg,
-        DexforceW1Cfg,
-        FrankaPandaCfg,
-        URRobotCfg,
-    )
-
-    return {
-        "franka_panda": FrankaPandaCfg,
-        "cobotmagic": CobotMagicCfg,
-        "dexforce_w1": DexforceW1Cfg,
-        "ur": URRobotCfg,
-    }[name]
 
 
 def _resolve_control_part(robot, requested: str | None) -> str | None:
@@ -261,9 +235,10 @@ def build_preset_robot_cfg(
     """
     import json
 
-    cfg_cls = _robot_cfg_cls(args.robot)
+    from embodichain.robot_registry import resolve_robot_cfg
+
     params = json.loads(args.robot_params) if args.robot_params else {}
-    cfg = cfg_cls.from_dict(params)
+    cfg = resolve_robot_cfg(args.robot, params)
     if args.uid:
         cfg.uid = args.uid
 
@@ -682,7 +657,9 @@ def main(args: argparse.Namespace) -> None:
                     f"'{control_part}' has {len(joint_ids)} joints; skipping."
                 )
             else:
-                robot.set_qpos(qpos=qpos, joint_ids=joint_ids)
+                robot.set_qpos(qpos=qpos, joint_ids=joint_ids, target=False)
+                robot.set_qpos(qpos=qpos, joint_ids=joint_ids, target=True)
+                sim.sync_render_state()
 
         analyzer_cfg = build_analyzer_config(args, control_part)
         analyzer = WorkspaceAnalyzer(robot=robot, config=analyzer_cfg, sim_manager=sim)
@@ -724,7 +701,9 @@ def main(args: argparse.Namespace) -> None:
                 )
             try:
                 while True:
-                    sim.update(step=1)
+                    with sim.render_frame():
+                        pass
+                    time.sleep(0.01)
             except KeyboardInterrupt:
                 pass
     finally:
@@ -761,6 +740,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
+    from embodichain.robot_registry import list_robot_cfgs
+
     # --- Source (choose one) ------------------------------------------------
     robot = parser.add_argument_group("Source (choose one)")
     source = robot.add_mutually_exclusive_group(required=True)
@@ -774,12 +755,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     source.add_argument(
         "--robot",
         type=str,
-        choices=_ROBOT_CHOICES,
+        choices=list_robot_cfgs(),
         default=None,
         help="Use a predefined EmbodiChain robot. The control parts and "
         "kinematics solver come from the preset, so --ee-link/--joints are not "
-        "needed -- only --control-part (optional). Choices: franka_panda, "
-        "cobotmagic, dexforce_w1, ur.",
+        "needed -- only --control-part (optional). Installed robot catalogs "
+        "supply the available choices.",
     )
     robot.add_argument(
         "--robot-params",

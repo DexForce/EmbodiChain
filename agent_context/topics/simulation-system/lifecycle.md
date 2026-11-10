@@ -12,7 +12,8 @@ readiness; `spawn/scene.py` owns declaration coordination. The ordering is:
    native parents. Resolve/configure sources and commit Spawn topology.
 2. Apply Default articulation root properties before Direct GPU buffers capture
    them. Delegate runtime setup to `PhysicsBackend.prepare_spawn_runtime()`.
-3. Bind declared facades in place; publish their state through
+3. Replay the current per-segment [material assignments](materials.md) captured
+   before rebuilding, then bind declared facades in place; publish their state through
    `PhysicsBackend.sync_render_state()` without a physics step.
 4. Attach parented cameras and publish the ready topology revision only after
    every stage succeeds.
@@ -62,7 +63,12 @@ Other resource exclusions and environment selections remain honored.
 
 `destroy(exit_process=False)` queues native cleanup. Flush with
 `SimulationManager.flush_cleanup_queue()` after caller scene/object locals
-unwind. `_deferred_destroy()` stops recording/window rendering, calls
+unwind. Constructor failure before World allocation removes only the failed
+manager's registry entry; after allocation it queues that manager's cleanup.
+Teardown state exists before native allocation, and the manager owns the Viser
+runtime before starting it so partial startup can be stopped. Registry removal
+checks object identity and leaves other live managers intact.
+`_deferred_destroy()` stops recording/window rendering, calls
 `PhysicsBackend.prepare_for_teardown()`, and runs GC while parents still live.
 Newton synchronizes its resolved Warp CUDA device and releases render-link
 views before Spawn closes skeletons. Cameras and result-scoped facade/batch

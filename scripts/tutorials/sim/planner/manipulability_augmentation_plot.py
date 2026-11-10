@@ -69,7 +69,7 @@ from embodichain.lab.sim.motion.expansion.manipulability import (
     describe_manipulability,
     manipulability_guided_residual,
 )
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain_robots import URRobotCfg
 from embodichain.utils import logger
 
 DEFAULT_OUTPUT = Path("docs/source/_static/tutorials/manipulability_augmentation.png")

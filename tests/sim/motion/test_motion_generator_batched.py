@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import math
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import Mock, patch
@@ -27,6 +29,9 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     CollisionWorldInfo,
     PlanOptions,
 )
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+    CuroboPlanOptions,
+)
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
@@ -34,6 +39,10 @@ from embodichain.lab.sim.motion.motion_generator import (
 from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanner,
     TrapezoidalPlanOptions,
+)
+from embodichain.lab.sim.motion.planners.toppra_planner import (
+    ToppraPlanner,
+    ToppraPlanOptions,
 )
 from embodichain.lab.sim.motion.planners.utils import PlanState, PlanResult, MoveType
 
@@ -80,11 +89,8 @@ def _timed_result(
 def test_generate_preserves_trapezoidal_constraint_report(
     sample_count: int | None,
 ) -> None:
-    planner = object.__new__(TrapezoidalPlanner)
-    planner.device = torch.device("cpu")
-    generator = object.__new__(MotionGenerator)
-    generator.planner = planner
-    generator.device = torch.device("cpu")
+    generator = _timing_generator()
+    planner = generator.planner
     targets = [
         PlanState.from_qpos(torch.tensor([qpos], dtype=torch.float64))
         for qpos in ([0.0, 0.0], [1.0, 0.0], [1.0, 1.0])
@@ -106,23 +112,43 @@ def test_generate_preserves_trapezoidal_constraint_report(
         assert torch.equal(result.constraint_report[name], value)
 
 
-def _trapezoidal_generator() -> MotionGenerator:
+def _timing_generator(
+    robot: object | None = None, *, planner_type: str = "trapezoidal"
+) -> MotionGenerator:
     """Build the real CPU planner behind the MotionGenerator facade."""
-    planner = object.__new__(TrapezoidalPlanner)
-    planner.cfg = SimpleNamespace(planner_type="trapezoidal")
+    planner = object.__new__(
+        ToppraPlanner if planner_type == "toppra" else TrapezoidalPlanner
+    )
+    planner.cfg = SimpleNamespace(planner_type=planner_type, grid_size=100)
     planner.device = torch.device("cpu")
+    planner.robot = (
+        robot
+        if robot is not None
+        else SimpleNamespace(
+            joint_names=["first", "second"],
+            mimic_ids=(),
+            mimic_parents=(),
+            mimic_multipliers=(),
+            num_instances=1,
+            get_qvel_limits=lambda **kwargs: torch.tensor([[0.2, 0.2]]),
+        )
+    )
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
+    generator.robot = planner.robot
     generator.device = torch.device("cpu")
     return generator
 
 
-def test_trapezoidal_generator_prepends_observed_start_for_sparse_joint_goal() -> None:
-    """A joint-only backend must start from the observed robot configuration."""
-    generator = _trapezoidal_generator()
-    generator.interpolate_trajectory = Mock(
-        side_effect=AssertionError("sparse joint targets must bypass interpolation")
-    )
+@pytest.mark.parametrize("planner_type", ["trapezoidal", "toppra"])
+@pytest.mark.parametrize("is_interpolate", [False, True])
+def test_generator_prepends_explicit_start_for_sparse_joint_goal(
+    planner_type: str,
+    is_interpolate: bool,
+) -> None:
+    """An explicit start takes precedence over the current robot configuration."""
+    generator = _timing_generator(planner_type=planner_type)
+    generator.robot.get_qpos = Mock(side_effect=AssertionError("Unexpected state read"))
 
     start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
     goal = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
@@ -130,7 +156,8 @@ def test_trapezoidal_generator_prepends_observed_start_for_sparse_joint_goal() -
         [PlanState.from_qpos(goal)],
         MotionGenOptions(
             start_qpos=start,
-            plan_opts=TrapezoidalPlanOptions(sample_interval=21, backend="torch"),
+            sample_count=21,
+            is_interpolate=is_interpolate,
         ),
     )
 
@@ -139,16 +166,50 @@ def test_trapezoidal_generator_prepends_observed_start_for_sparse_joint_goal() -
     torch.testing.assert_close(result.positions[:, -1], goal)
 
 
-def test_trapezoidal_generator_holds_stationary_sparse_joint_goal() -> None:
+@pytest.mark.parametrize("planner_type", ["trapezoidal", "toppra"])
+@pytest.mark.parametrize("goal_count", [1, 2])
+def test_generator_observes_start_for_interpolated_sparse_joint_goals(
+    planner_type: str,
+    goal_count: int,
+) -> None:
+    """Interpolation without an explicit start includes the initial move per row."""
+    generator = _timing_generator(planner_type=planner_type)
+    start = torch.tensor([[0.1, -0.05], [-0.2, 0.1]], dtype=torch.float64)
+    goals = [
+        start + torch.tensor([0.2, -0.1], dtype=start.dtype) * index
+        for index in range(1, goal_count + 1)
+    ]
+    generator.robot.num_instances = start.shape[0]
+    generator.robot.get_joint_ids = Mock(return_value=[0, 1])
+    generator.robot.get_qvel_limits = Mock(return_value=torch.full_like(start, 0.2))
+    generator.robot.get_qpos = Mock(return_value=start)
+    options = MotionGenOptions(
+        control_part="arm",
+        is_interpolate=True,
+        sample_count=21,
+    )
+
+    result = generator.generate([PlanState.from_qpos(goal) for goal in goals], options)
+
+    assert result.success.tolist() == [True, True]
+    assert result.positions is not None
+    torch.testing.assert_close(result.positions[:, 0], start)
+    torch.testing.assert_close(result.positions[:, -1], goals[-1])
+    generator.robot.get_qpos.assert_called_once_with(name="arm")
+    assert options.start_qpos is None
+
+
+@pytest.mark.parametrize("planner_type", ["trapezoidal", "toppra"])
+def test_generator_holds_stationary_sparse_joint_goal(planner_type: str) -> None:
     """A stationary single goal still forms a valid two-waypoint hold."""
-    generator = _trapezoidal_generator()
+    generator = _timing_generator(planner_type=planner_type)
 
     start = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
     result = generator.generate(
         [PlanState.from_qpos(start)],
         MotionGenOptions(
             start_qpos=start,
-            plan_opts=TrapezoidalPlanOptions(sample_interval=2, backend="torch"),
+            sample_count=2,
         ),
     )
 
@@ -167,35 +228,122 @@ def test_trapezoidal_generator_holds_stationary_sparse_joint_goal() -> None:
 
 
 def test_trapezoidal_generator_covers_dense_ik_waypoints() -> None:
-    """Quantity sampling grows to retain all Cartesian-to-joint waypoints."""
-    generator = _trapezoidal_generator()
-    generator.robot = SimpleNamespace(
-        compute_fk=lambda *, qpos, name, to_matrix: torch.eye(
-            4, dtype=qpos.dtype, device=qpos.device
-        ).expand(qpos.shape[0], -1, -1)
-    )
-    dense_qpos = torch.linspace(0.0, 0.5, 6, dtype=torch.float64).reshape(1, 6, 1)
-    dense_qpos = dense_qpos.expand(-1, -1, 2).clone()
-    generator._interpolate_waypoints = Mock(
-        return_value=(dense_qpos, None, torch.ones(1, dtype=torch.bool))
-    )
+    """An explicit Cartesian line retains its required dense IK waypoints."""
+    generator = _timing_generator(robot=_CartesianRobot())
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 0, 3] = 0.5
 
     result = generator.generate(
-        [PlanState.from_xpos(torch.eye(4, dtype=torch.float64).unsqueeze(0))],
+        [PlanState.from_xpos(goal)],
         MotionGenOptions(
-            start_qpos=torch.zeros(1, 2, dtype=torch.float64),
+            start_qpos=torch.zeros(2, 1),
+            control_part="arm",
             sample_count=3,
             is_interpolate=True,
+            is_linear=True,
+            # A 0.5 m line at 0.125 m spacing requests four IK samples.
+            interpolate_position_step=0.125,
         ),
     )
 
+    assert result.success.tolist() == [True, True]
     assert result.positions is not None
-    assert result.positions.shape[1] == dense_qpos.shape[1]
+    expected = torch.linspace(0.0, 0.5, 4).view(1, 4, 1).expand(2, -1, -1)
+    torch.testing.assert_close(result.positions, expected)
+
+
+@pytest.mark.parametrize("explicit_options", [False, True])
+@pytest.mark.parametrize("planner_type", ["trapezoidal", "toppra"])
+def test_cartesian_goals_keep_sparse_joint_timing(
+    explicit_options: bool,
+    planner_type: str,
+) -> None:
+    """IK preparation must not turn free-motion samples into mandatory stops."""
+    generator = _timing_generator(robot=_CartesianRobot(), planner_type=planner_type)
+    start = torch.zeros(2, 1)
+    goals = [torch.eye(4).repeat(2, 1, 1) for _ in range(2)]
+    for goal, position in zip(goals, (0.1, 0.2)):
+        goal[:, 0, 3] = position
+    options = MotionGenOptions(
+        start_qpos=start,
+        control_part="arm",
+        sample_count=9,
+        is_interpolate=True,
+        interpolate_position_step=0.01,
+        acceleration_limit=0.5,
+        plan_opts=(
+            (
+                ToppraPlanOptions(
+                    stop_at_waypoints=True,
+                    sample_interval=0.04,
+                    constraints={"velocity": 0.2, "acceleration": 0.5},
+                )
+                if planner_type == "toppra"
+                else TrapezoidalPlanOptions(sample_interval=9, backend="torch")
+            )
+            if explicit_options
+            else None
+        ),
+    )
+    expected = generator.generate(
+        [PlanState.from_qpos(goal[:, 0, 3:4]) for goal in goals], options
+    )
+
+    result = generator.generate([PlanState.from_xpos(goal) for goal in goals], options)
+
+    assert result.success.tolist() == [True, True]
+    torch.testing.assert_close(result.dt, expected.dt)
+    torch.testing.assert_close(result.positions, expected.positions)
+    torch.testing.assert_close(result.velocities, expected.velocities)
+    torch.testing.assert_close(result.accelerations, expected.accelerations)
+    if explicit_options and planner_type == "toppra":
+        # Each 0.1 move takes 0.1/0.2 + 0.2/0.5 = 0.9 seconds,
+        # rounded up to 0.92 seconds on the 40 ms control clock.
+        torch.testing.assert_close(
+            result.duration, torch.full_like(result.duration, 1.84)
+        )
+
+
+@pytest.mark.parametrize("joint_goal", [False, True])
+def test_toppra_explicit_cartesian_line_keeps_required_samples(
+    joint_goal: bool,
+) -> None:
+    """Sparse free-motion preparation must still honor an explicit line."""
+    generator = _timing_generator(robot=_CartesianRobot(), planner_type="toppra")
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 0, 3] = 0.5
+    result = generator.generate(
+        [
+            (
+                PlanState.from_qpos(goal[:, 0, 3:4])
+                if joint_goal
+                else PlanState.from_xpos(goal)
+            )
+        ],
+        MotionGenOptions(
+            start_qpos=torch.zeros(2, 1),
+            control_part="arm",
+            is_interpolate=True,
+            is_linear=True,
+            interpolate_position_step=0.125,
+            plan_opts=ToppraPlanOptions(
+                stop_at_waypoints=True,
+                sample_interval=0.04,
+                constraints={"velocity": 0.2, "acceleration": 0.5},
+            ),
+        ),
+    )
+    assert result.success.tolist() == [True, True]
+    # The explicit line requests four IK nodes, including its start.
+    for position in torch.linspace(0.0, 0.5, 4):
+        at_rest = (result.positions[..., 0] - position).abs() < 1e-6
+        at_rest &= result.velocities[..., 0] == 0
+        assert at_rest.any(dim=1).all()
 
 
 def test_trapezoidal_generator_preserves_native_derivatives() -> None:
     """Native Trapezoidal samples and derivatives survive normalization."""
-    generator = _trapezoidal_generator()
+    generator = _timing_generator()
     start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
     goal = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
     target_states = [PlanState.from_qpos(start), PlanState.from_qpos(goal)]
@@ -312,6 +460,94 @@ class _DirectCartesianPlanner:
         return _timed_result(
             torch.zeros(1, 3, 2),
             success=torch.tensor([True]),
+        )
+
+
+@pytest.mark.parametrize("pack", [False, True])
+def test_multi_part_facade_preserves_independent_rows_timing_and_options(pack: bool):
+    """Dispatch and normalization must agree with independent single-part calls."""
+
+    class Planner(_DirectCartesianPlanner):
+        supports_multi_part = pack
+
+        def __init__(self):
+            self.calls = []
+
+        def with_motion_context(self, options, *, start_qpos, control_part):
+            return SimpleNamespace(start_qpos=start_qpos, control_part=control_part)
+
+        def raw(self, options):
+            start = options.start_qpos
+            left = options.control_part == "left_arm"
+            result = _timed_result(
+                torch.stack([start, start + (0.1 if left else 0.2)], dim=1),
+                success=torch.tensor([True, False] if left else [False, True]),
+                step_dt=0.03 if left else 0.07,
+            )
+            return result
+
+        def plan(self, target_states, options):
+            self.calls.append(options.control_part)
+            return self.raw(options)
+
+        def plan_multi_part(self, target_states, options):
+            self.calls.append(tuple(target_states))
+            results = {part: self.raw(opts) for part, opts in options.items()}
+            for result in results.values():
+                result.policy_batching = {
+                    "scene_batch_size": 2,
+                    "control_part_count": 2,
+                    "actor_batch_size": 4,
+                    "policy_forward_calls": 1,
+                }
+            return results
+
+    generator = object.__new__(MotionGenerator)
+    generator.planner = Planner()
+    generator.device = torch.device("cpu")
+    targets = {
+        part: [PlanState.from_xpos(torch.eye(4).repeat(2, 1, 1))]
+        for part in ("left_arm", "right_arm")
+    }
+    options = {
+        part: MotionGenOptions(start_qpos=torch.full((2, 3), float(index)))
+        for index, part in enumerate(targets)
+    }
+    expected = {
+        part: generator.generate(
+            states,
+            MotionGenOptions(start_qpos=options[part].start_qpos, control_part=part),
+        )
+        for part, states in targets.items()
+    }
+    generator.planner.calls.clear()
+
+    actual = generator.generate_multi_part(targets, options)
+
+    assert generator.planner.calls == (
+        [("left_arm", "right_arm")] if pack else ["left_arm", "right_arm"]
+    )
+    for part, result in actual.items():
+        assert options[part].control_part is None
+        assert options[part].plan_opts is None
+        for field in ("success", "positions", "velocities", "dt"):
+            torch.testing.assert_close(
+                getattr(result, field), getattr(expected[part], field)
+            )
+        if pack:
+            assert result.policy_batching["actor_batch_size"] == 4
+            assert result.policy_batching["scene_batch_size"] == 2
+        else:
+            assert result.policy_batching is None
+
+
+def test_multi_part_facade_rejects_mismatched_control_part():
+    generator = object.__new__(MotionGenerator)
+    generator.planner = _DirectCartesianPlanner()
+    targets = {"left_arm": [PlanState.from_xpos(torch.eye(4)[None])]}
+    with pytest.raises(ValueError, match="control_part must match"):
+        generator.generate_multi_part(
+            targets, {"left_arm": MotionGenOptions(control_part="right_arm")}
         )
 
 
@@ -630,6 +866,300 @@ def test_resolve_trapezoidal_limits_without_sample_count() -> None:
     assert options.constraints["acceleration"] == 0.02
 
 
+def test_resolve_trapezoidal_preserves_omitted_velocity_limit() -> None:
+    planner = Mock()
+    planner.cfg.planner_type = "trapezoidal"
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    options = generator.resolve_plan_options(
+        plan_opts=None,
+        sample_count=20,
+        velocity_limit=None,
+        acceleration_limit=None,
+    )
+
+    assert isinstance(options, TrapezoidalPlanOptions)
+    assert options.constraints["velocity"] is None
+    assert options.constraints["acceleration"] is None
+
+
+def test_resolve_curobo_forwards_per_invocation_motion_limits() -> None:
+    planner = Mock()
+    planner.cfg.planner_type = "curobo"
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    resolved = generator.resolve_plan_options(
+        plan_opts=None,
+        sample_count=20,
+        velocity_limit=0.3,
+        acceleration_limit=0.8,
+    )
+
+    assert isinstance(resolved, CuroboPlanOptions)
+    assert resolved.max_velocity == pytest.approx(0.3)
+    assert resolved.max_acceleration == pytest.approx(0.8)
+
+    supplied = CuroboPlanOptions(max_velocity=1.0, max_acceleration=2.0)
+    overridden = generator.resolve_plan_options(
+        supplied,
+        sample_count=20,
+        velocity_limit=0.4,
+        acceleration_limit=0.9,
+    )
+    assert overridden is not supplied
+    assert overridden.max_velocity == pytest.approx(0.4)
+    assert overridden.max_acceleration == pytest.approx(0.9)
+    assert supplied.max_velocity == pytest.approx(1.0)
+    assert supplied.max_acceleration == pytest.approx(2.0)
+
+
+def test_ik_velocity_limits_preserve_caps_and_intersect_scalar_request() -> None:
+    limits = torch.tensor([[0.08, 1.2], [0.05, 1.4]], dtype=torch.float64)
+    robot = SimpleNamespace(
+        joint_names=["slow", "fast"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        control_parts={"arm": object()},
+        get_joint_ids=lambda name: [0, 1],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.robot = robot
+    reference = torch.zeros(2, 2, dtype=torch.float64)
+
+    omitted = generator._resolve_velocity_limits(
+        control_part="arm",
+        batch_size=2,
+        dof=2,
+        requested=None,
+        reference=reference,
+    )
+    explicit = generator._resolve_velocity_limits(
+        control_part="arm",
+        batch_size=2,
+        dof=2,
+        requested=0.2,
+        reference=reference,
+    )
+
+    torch.testing.assert_close(omitted, torch.tensor([0.05, 1.2], dtype=torch.float64))
+    torch.testing.assert_close(explicit, torch.tensor([0.05, 0.2], dtype=torch.float64))
+
+
+def test_ik_velocity_limits_apply_mimic_caps_in_control_part_order() -> None:
+    limits = torch.tensor([[1.2, 2.0, 0.1]], dtype=torch.float64)
+    robot = SimpleNamespace(
+        joint_names=["parent", "other", "follower"],
+        mimic_ids=[2],
+        mimic_parents=[0],
+        mimic_multipliers=[2.0],
+        control_parts={"arm": object()},
+        get_joint_ids=lambda name: [1, 0],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.robot = robot
+
+    resolved = generator._resolve_velocity_limits(
+        control_part="arm",
+        batch_size=1,
+        dof=2,
+        requested=None,
+        reference=torch.zeros(1, 2, dtype=torch.float64),
+    )
+
+    torch.testing.assert_close(resolved, torch.tensor([2.0, 0.05], dtype=torch.float64))
+
+
+def _write_velocity_urdf(tmp_path: Path, limits: dict[str, float]) -> Path:
+    """Write authored joint limits without loading a simulation asset."""
+    joints = "".join(
+        f'<link name="{name}_link"/>'
+        f'<joint name="{name}" type="revolute">'
+        f'<parent link="base"/><child link="{name}_link"/>'
+        f'<limit lower="-3" upper="3" effort="1" velocity="{limit}"/>'
+        "</joint>"
+        for name, limit in limits.items()
+    )
+    path = tmp_path / "velocity_limits.urdf"
+    path.write_text(
+        f'<robot name="velocity_limits"><link name="base"/>{joints}</robot>',
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        pytest.param(None, [0.0, 0.15, 0.1, 0.2], id="omitted"),
+        pytest.param(0.05, [0.0, 0.05, 0.05, 0.05], id="stricter-request"),
+        pytest.param(1.0, [0.0, 0.15, 0.1, 1.0], id="looser-request"),
+    ],
+)
+def test_ik_velocity_limits_fill_only_missing_runtime_caps_from_urdf(
+    tmp_path: Path, requested: float | None, expected: list[float]
+) -> None:
+    """URDF caps fill placeholders; zero and other runtime caps remain authoritative."""
+    path = _write_velocity_urdf(
+        tmp_path, {"stationary": 0.1, "runtime": 0.1, "authored": 0.1, "unknown": 0.0}
+    )
+    limits = torch.tensor([[0.0, 0.15, 1.0e10, 1.0e10]], dtype=torch.float64)
+    generator = object.__new__(MotionGenerator)
+    generator.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=path),
+        joint_names=["stationary", "runtime", "authored", "unknown"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+
+    resolved = generator._resolve_velocity_limits(
+        control_part=None,
+        batch_size=1,
+        dof=4,
+        requested=requested,
+        reference=torch.zeros(1, 4, dtype=torch.float64),
+    )
+
+    torch.testing.assert_close(resolved, torch.tensor(expected, dtype=torch.float64))
+
+
+def test_ik_velocity_limits_apply_urdf_mimic_cap_in_control_part_order(
+    tmp_path: Path,
+) -> None:
+    path = _write_velocity_urdf(tmp_path, {"follower": 0.1})
+    limits = torch.tensor([[1.2, 2.0, 1.0e10]], dtype=torch.float64)
+    generator = object.__new__(MotionGenerator)
+    generator.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=path),
+        joint_names=["parent", "other", "follower"],
+        mimic_ids=[2],
+        mimic_parents=[0],
+        mimic_multipliers=[-2.0],
+        control_parts={"arm": object()},
+        get_joint_ids=lambda name: [1, 0],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+
+    resolved = generator._resolve_velocity_limits(
+        control_part="arm",
+        batch_size=1,
+        dof=2,
+        requested=None,
+        reference=torch.zeros(1, 2, dtype=torch.float64),
+    )
+
+    # The follower moves twice as fast as its parent, with reversed sign.
+    torch.testing.assert_close(resolved, torch.tensor([2.0, 0.05], dtype=torch.float64))
+
+
+def test_ik_interpolation_respects_authored_velocity_cap(tmp_path: Path) -> None:
+    authored_limit = 0.1
+    path = _write_velocity_urdf(tmp_path, {"joint": authored_limit})
+    generator = object.__new__(MotionGenerator)
+    generator.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=path),
+        joint_names=["joint"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        get_qvel_limits=lambda *, joint_ids: torch.full((1, 1), 1.0e10),
+    )
+    keyframes = torch.tensor([[[0.0], [0.2]]], dtype=torch.float64)
+    interpolation_dt = 0.1
+
+    positions = generator._interpolate_ik_keyframes(
+        keyframes,
+        MotionGenOptions(
+            strategy="ik_interp",
+            sample_count=3,
+            interpolation_dt=interpolation_dt,
+            velocity_limit=1.0,
+            acceleration_limit=100.0,
+        ),
+    )
+
+    peak_velocity = (positions.diff(dim=1) / interpolation_dt).abs().amax()
+    assert peak_velocity <= authored_limit + 1.0e-6
+    torch.testing.assert_close(positions[:, 0], keyframes[:, 0])
+    torch.testing.assert_close(positions[:, -1], keyframes[:, -1])
+
+
+def test_ik_authored_velocity_limits_preserve_cuda_reference_type(
+    tmp_path: Path,
+) -> None:
+    path = _write_velocity_urdf(tmp_path, {"joint": 0.1})
+    limits = torch.full((1, 1), 1.0e10, device="cuda", dtype=torch.float32)
+    reference = torch.zeros(1, 1, device="cuda", dtype=torch.float64)
+    generator = object.__new__(MotionGenerator)
+    generator.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=path),
+        joint_names=["joint"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+
+    resolved = generator._resolve_velocity_limits(
+        control_part=None,
+        batch_size=1,
+        dof=1,
+        requested=1.0,
+        reference=reference,
+    )
+
+    torch.testing.assert_close(resolved, reference.new_tensor([0.1]))
+
+
+def test_ik_interpolation_respects_robot_per_joint_velocity_caps() -> None:
+    limits = torch.tensor([[0.05, 1.2], [0.08, 1.4]], dtype=torch.float64)
+    robot = SimpleNamespace(
+        joint_names=["slow", "fast"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        control_parts={"arm": object()},
+        get_joint_ids=lambda name: [0, 1],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.robot = robot
+    keyframes = torch.tensor(
+        [[[0.0, 0.0], [0.2, 0.2]], [[0.0, 0.0], [0.2, 0.2]]],
+        dtype=torch.float64,
+    )
+
+    positions = generator._interpolate_ik_keyframes(
+        keyframes,
+        MotionGenOptions(
+            strategy="ik_interp",
+            sample_count=3,
+            interpolation_dt=0.1,
+            control_part="arm",
+            acceleration_limit=100.0,
+        ),
+    )
+
+    peak_velocity = (positions.diff(dim=1) / 0.1).abs().amax(dim=(0, 1))
+    assert peak_velocity[0] <= 0.05 + 1.0e-6
+    assert peak_velocity[1] <= 1.2 + 1.0e-6
+
+
+@pytest.mark.parametrize("planner_type", ["toppra", "trapezoidal"])
+def test_sample_count_preserves_robot_limit_resolution(planner_type: str) -> None:
+    generator = object.__new__(MotionGenerator)
+    generator.planner = SimpleNamespace(cfg=SimpleNamespace(planner_type=planner_type))
+    options = generator.resolve_plan_options(None, sample_count=100, velocity_limit=0.1)
+    assert options.constraints["velocity"] == 0.1
+    assert options.constraints["acceleration"] is None
+
+
 def _mock_generator(
     *,
     batch_size: int = 2,
@@ -643,9 +1173,14 @@ def _mock_generator(
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.num_instances = batch_size
-    robot.compute_ik.return_value = (
-        torch.ones(batch_size, dtype=torch.bool),
-        torch.zeros(batch_size, controlled_dof),
+    robot.get_solver.return_value = SimpleNamespace(supports_continuous_batch_ik=False)
+    robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[:2], dtype=torch.bool),
+        torch.zeros(*pose.shape[:2], controlled_dof),
+    )
+    robot.get_qvel_limits.return_value = torch.full(
+        (batch_size, controlled_dof),
+        10.0,
     )
     planner = Mock()
     planner.cfg.planner_type = "toppra"
@@ -759,9 +1294,9 @@ class TestMotionStrategy:
 
     def test_ik_interp_solves_batched_poses_without_calling_backend(self):
         generator = _mock_generator()
-        generator.robot.compute_ik.return_value = (
-            torch.tensor([1, 0], dtype=torch.int64),
-            torch.ones(BATCH_SIZE, CONTROLLED_DOF),
+        generator.robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+            torch.tensor([[1], [0]], dtype=torch.int64).expand(*pose.shape[:2]),
+            torch.ones(*pose.shape[:2], CONTROLLED_DOF),
         )
         start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)
         start[1] = 0.5
@@ -799,12 +1334,13 @@ class TestMotionStrategy:
             pose: torch.Tensor,
             name: str,
             joint_seed: torch.Tensor,
+            continuous: bool = False,
         ) -> tuple[torch.Tensor, torch.Tensor]:
             qpos = joint_seed.clone()
-            qpos[:, :3] = pose[:, :3, 3]
-            return torch.ones(BATCH_SIZE, dtype=torch.bool), qpos
+            qpos[..., :3] = pose[..., :3, 3]
+            return torch.ones(pose.shape[:2], dtype=torch.bool), qpos
 
-        generator.robot.compute_ik.side_effect = encode_position
+        generator.robot.compute_batch_ik.side_effect = encode_position
         weights = torch.linspace(1.0 / (SAMPLE_COUNT - 1), 1.0, SAMPLE_COUNT - 1)
         targets = []
         for weight in weights:
@@ -835,8 +1371,172 @@ class TestMotionStrategy:
         assert torch.allclose(
             result.positions[:, :, 0], expected_x.expand(BATCH_SIZE, -1)
         )
-        assert generator.robot.compute_ik.call_count == SAMPLE_COUNT - 1
+        assert generator.robot.compute_batch_ik.call_count == 2
+        calls = generator.robot.compute_batch_ik.call_args_list
+        assert sum(call.kwargs["pose"].shape[1] for call in calls) == SAMPLE_COUNT - 1
+        generator.robot.compute_ik.assert_not_called()
         generator.planner.plan.assert_not_called()
+
+    def test_limited_cartesian_motion_expands_exact_ik_path(self):
+        generator = _mock_generator()
+        generator.robot.compute_fk.return_value = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+
+        def encode_position(
+            pose: torch.Tensor,
+            name: str,
+            joint_seed: torch.Tensor,
+            continuous: bool = False,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            qpos = joint_seed.clone()
+            qpos[..., 0] = pose[..., 0, 3]
+            return torch.ones(pose.shape[:2], dtype=torch.bool), qpos
+
+        generator.robot.compute_batch_ik.side_effect = encode_position
+        weights = torch.linspace(0.25, 1.0, 4)
+        targets = []
+        for weight in weights:
+            pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+            pose[:, 0, 3] = weight
+            targets.append(PlanState.from_xpos(pose))
+
+        result = generator.generate(
+            targets,
+            MotionGenOptions(
+                strategy="ik_interp",
+                sample_count=5,
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                control_part="arm",
+                is_linear=True,
+                interpolation_dt=0.05,
+                preserve_cartesian_samples=True,
+                velocity_limit=1.0,
+                acceleration_limit=2.0,
+            ),
+        )
+
+        assert result.positions is not None
+        assert result.positions.shape[1] > 5
+        interval_velocity = result.positions.diff(dim=1) / 0.05
+        boundary_acceleration = (
+            torch.cat(
+                [
+                    interval_velocity[:, :1],
+                    interval_velocity.diff(dim=1),
+                    -interval_velocity[:, -1:],
+                ],
+                dim=1,
+            )
+            / 0.05
+        )
+        assert interval_velocity.abs().max() <= 1.0 + 1.0e-5
+        assert boundary_acceleration.abs().max() <= 2.0 + 1.0e-4
+        assert torch.all(result.positions[:, 1:, 0] >= result.positions[:, :-1, 0])
+        generator.planner.plan.assert_not_called()
+
+    def test_limited_cartesian_motion_resamples_external_rotation_exactly(self):
+        generator = _mock_generator()
+        start_pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+        start_pose[:, 0, 3] = 1.0 - 2.5e-4
+        generator.robot.compute_fk.return_value = start_pose
+        generator.robot.get_solver.return_value = SimpleNamespace(
+            supports_continuous_batch_ik=False,
+            cfg=SimpleNamespace(pos_eps=5.0e-4, rot_eps=5.0e-4),
+        )
+
+        def encode_angle(
+            pose: torch.Tensor,
+            name: str,
+            joint_seed: torch.Tensor,
+            continuous: bool = False,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            del name, continuous
+            qpos = joint_seed.clone()
+            qpos[..., 0] = torch.atan2(pose[..., 1, 3], pose[..., 0, 3])
+            return torch.ones(pose.shape[:2], dtype=torch.bool), qpos
+
+        sampled_paths: list[torch.Tensor] = []
+
+        def sample_quarter_circle(progress: torch.Tensor) -> torch.Tensor:
+            angles = (math.pi / 2.0) * progress
+            poses = torch.eye(4).repeat(BATCH_SIZE, progress.numel(), 1, 1)
+            poses[..., 0, 3] = torch.cos(angles)
+            poses[..., 1, 3] = torch.sin(angles)
+            sampled_paths.append(poses.clone())
+            return poses
+
+        generator.robot.compute_batch_ik.side_effect = encode_angle
+        targets = []
+        for angle in torch.linspace(math.pi / 8.0, math.pi / 2.0, 4):
+            pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+            pose[:, 0, 3] = torch.cos(angle)
+            pose[:, 1, 3] = torch.sin(angle)
+            targets.append(PlanState.from_xpos(pose))
+
+        result = generator.generate(
+            targets,
+            MotionGenOptions(
+                strategy="ik_interp",
+                sample_count=5,
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                control_part="arm",
+                is_linear=True,
+                interpolation_dt=0.05,
+                preserve_cartesian_samples=True,
+                cartesian_path_sampler=sample_quarter_circle,
+                velocity_limit=1.0,
+                acceleration_limit=2.0,
+            ),
+        )
+
+        assert result.positions is not None
+        assert result.positions.shape[1] > 5
+        assert sampled_paths
+        radii = torch.linalg.vector_norm(sampled_paths[-1][..., :2, 3], dim=-1)
+        assert torch.allclose(radii, torch.ones_like(radii))
+        assert torch.allclose(
+            result.positions[:, -1, 0],
+            torch.full((BATCH_SIZE,), math.pi / 2.0),
+        )
+        generator.planner.plan.assert_not_called()
+
+    def test_dense_float32_cartesian_progress_is_monotonic_and_dtype_stable(self):
+        generator = _mock_generator()
+        sample_count = 10_001
+        generator.robot.compute_fk.return_value = torch.eye(
+            4, dtype=torch.float32
+        ).repeat(BATCH_SIZE, 1, 1)
+        target_poses = torch.eye(4, dtype=torch.float32).repeat(BATCH_SIZE, 1, 1, 1)
+        target_poses[:, 0, 0, 3] = 1.0
+        solved_keyframes = torch.zeros(BATCH_SIZE, 2, CONTROLLED_DOF)
+        solved_keyframes[:, 1, 0] = 1.0
+        observed_progress = None
+
+        def sample_path(progress: torch.Tensor) -> torch.Tensor:
+            nonlocal observed_progress
+            observed_progress = progress
+            poses = torch.eye(4, dtype=progress.dtype, device=progress.device).repeat(
+                BATCH_SIZE, progress.numel(), 1, 1
+            )
+            poses[..., 0, 3] = progress
+            return poses
+
+        result = generator._sample_cartesian_path(
+            target_poses,
+            solved_keyframes,
+            sample_count,
+            "arm",
+            path_sampler=sample_path,
+        )
+
+        assert observed_progress is not None
+        assert observed_progress.dtype == target_poses.dtype
+        assert observed_progress.device == target_poses.device
+        assert torch.all(observed_progress.diff() >= 0.0)
+        assert observed_progress[0] == 0.0
+        assert observed_progress[-1] == 1.0
+        assert result.dtype == target_poses.dtype
+        assert result.device == target_poses.device
+        assert torch.equal(result[..., 0, 3], observed_progress.expand(BATCH_SIZE, -1))
 
     def test_motion_gen_delegates_and_resamples_backend_result(self):
         raw_sample_count = 5
@@ -991,7 +1691,10 @@ def test_ik_interpolation_materializes_reference_velocity() -> None:
         ),
     )
     assert result.velocities is not None
-    torch.testing.assert_close(result.velocities, torch.ones_like(result.positions))
+    expected = torch.ones_like(result.positions)
+    expected[:, 0] = 0.0
+    expected[:, -1] = 0.0
+    torch.testing.assert_close(result.velocities, expected)
 
 
 def test_normalization_preserves_native_derivatives_and_zeros_failed_rows() -> None:
@@ -1012,6 +1715,34 @@ def test_normalization_preserves_native_derivatives_and_zeros_failed_rows() -> N
     )
     torch.testing.assert_close(result.velocities[0], native[0])
     assert torch.equal(result.velocities[1], torch.zeros_like(native[1]))
+
+
+def test_toppra_native_sampling_preserves_the_solved_profile() -> None:
+    """A solved parabola retains acceleration1 instead of interpolation spikes."""
+    from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanner
+
+    positions = torch.tensor([[[0.0], [0.5], [2.0]]])
+    dt = torch.tensor([[0.0, 1.0, 1.0]])
+    raw = PlanResult(
+        success=True,
+        positions=positions,
+        dt=dt,
+        velocities=torch.tensor([[[0.0], [1.0], [2.0]]]),
+        accelerations=torch.ones_like(positions),
+    )
+    generator = _mock_generator(
+        batch_size=1,
+        controlled_dof=1,
+        preserve_plan_samples=ToppraPlanner.preserve_plan_samples,
+    )
+    result = generator._normalize_plan_result(
+        raw,
+        [PlanState.from_qpos(positions[:, -1])],
+        MotionGenOptions(start_qpos=positions[:, 0], sample_count=5),
+    )
+    torch.testing.assert_close(result.positions, positions, rtol=0, atol=0)
+    torch.testing.assert_close(result.dt, dt, rtol=0, atol=0)
+    torch.testing.assert_close(result.accelerations, torch.ones_like(positions))
 
 
 def test_normalization_resamples_by_time_and_recomputes_derivatives() -> None:
@@ -1042,8 +1773,22 @@ def test_normalization_resamples_by_time_and_recomputes_derivatives() -> None:
 class _CartesianRobot:
     """CPU kinematics double: one joint translates the TCP along x."""
 
+    mimic_ids = ()
+    mimic_parents = ()
+    mimic_multipliers = ()
+    joint_names = ["joint"]
+
     device = torch.device("cpu")
     num_instances = 2
+
+    def get_joint_ids(self, name: str) -> list[int]:
+        return [0]
+
+    def get_qvel_limits(self, *, joint_ids: list[int]) -> torch.Tensor:
+        return torch.full((self.num_instances, 1), 0.2)[:, joint_ids]
+
+    def get_solver(self, name: str) -> SimpleNamespace:
+        return SimpleNamespace(supports_continuous_batch_ik=False)
 
     def compute_fk(self, *, qpos: torch.Tensor, **kwargs: object) -> torch.Tensor:
         pose = torch.eye(4, device=qpos.device).repeat(qpos.shape[0], 1, 1)
@@ -1070,11 +1815,146 @@ class _CartesianRobot:
         return valid, pose[..., 0, 3:4].clone()
 
 
+@pytest.mark.parametrize(
+    "batch_size, count", [(1, 1), (1, 7), (1, 65), (2, 9), (16, 65), (64, 65)]
+)
+def test_cartesian_ik_batches_both_environments_and_waypoints(
+    batch_size: int, count: int
+) -> None:
+    generator = _mock_generator(batch_size=batch_size, controlled_dof=1)
+    poses = torch.eye(4).repeat(batch_size, count, 1, 1)
+    poses[..., 0, 3] = torch.linspace(0.1, 0.5, count)
+    generator.robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[:2], dtype=torch.bool),
+        pose[..., 0, 3:4].clone(),
+    )
+
+    success, positions = generator._solve_cartesian_waypoints(
+        poses, torch.zeros(batch_size, 1), "arm"
+    )
+
+    assert success.all()
+    torch.testing.assert_close(positions, poses[..., 0, 3:4])
+    calls = generator.robot.compute_batch_ik.call_args_list
+    assert sum(call.kwargs["pose"].shape[1] for call in calls) == count
+    assert all(call.kwargs["pose"].shape[0] == batch_size for call in calls)
+    assert all(call.kwargs["pose"].shape[1] <= 32 for call in calls)
+    assert all(call.kwargs["pose"].numel() // 16 <= 512 for call in calls)
+    if count > 2:
+        assert len(calls) < count
+    generator.robot.compute_ik.assert_not_called()
+
+
+def test_independent_batch_ik_interpolates_seeds_and_carries_chunk_end() -> None:
+    generator = _mock_generator(controlled_dof=1)
+    start = torch.tensor([[0.0], [10.0]])
+    poses = torch.eye(4).repeat(2, 9, 1, 1)
+    poses[..., 0, 3] = start + torch.arange(1, 10)
+    generator.robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[:2], dtype=torch.bool),
+        pose[..., 0, 3:4].clone(),
+    )
+    with patch("embodichain.lab.sim.motion.motion_generator._MAX_IK_BATCH_TARGETS", 8):
+        success, positions = generator._solve_cartesian_waypoints(poses, start, "arm")
+
+    assert success.all()
+    torch.testing.assert_close(positions, poses[..., 0, 3:4])
+    calls = generator.robot.compute_batch_ik.call_args_list
+    assert [call.kwargs["pose"].shape[1] for call in calls] == [1, 3, 1, 3, 1]
+    torch.testing.assert_close(calls[0].kwargs["joint_seed"], start[:, None])
+    torch.testing.assert_close(calls[1].kwargs["joint_seed"], poses[:, :3, 0, 3:4])
+    torch.testing.assert_close(calls[2].kwargs["joint_seed"], poses[:, 3:4, 0, 3:4])
+    torch.testing.assert_close(calls[3].kwargs["joint_seed"], poses[:, 4:7, 0, 3:4])
+    torch.testing.assert_close(calls[4].kwargs["joint_seed"], poses[:, 7:8, 0, 3:4])
+    assert all(call.kwargs.get("continuous", False) is False for call in calls)
+
+
+def test_continuous_batch_ik_uses_capability_and_path_seed_across_chunks() -> None:
+    generator = _mock_generator(controlled_dof=1)
+    generator.robot.get_solver.return_value.supports_continuous_batch_ik = True
+    poses = torch.eye(4).repeat(2, 9, 1, 1)
+    poses[..., 0, 3] = torch.arange(1, 10)
+    generator.robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[:2], dtype=torch.bool),
+        pose[..., 0, 3:4].clone(),
+    )
+    with patch("embodichain.lab.sim.motion.motion_generator._MAX_IK_BATCH_TARGETS", 8):
+        success, positions = generator._solve_cartesian_waypoints(
+            poses, torch.zeros(2, 1), "arm"
+        )
+
+    assert success.all()
+    torch.testing.assert_close(positions, poses[..., 0, 3:4])
+    calls = generator.robot.compute_batch_ik.call_args_list
+    assert [call.kwargs["pose"].shape[1] for call in calls] == [4, 4, 1]
+    assert all(call.kwargs["continuous"] is True for call in calls)
+    assert all(call.kwargs["joint_seed"].shape == (2, 1) for call in calls)
+    torch.testing.assert_close(calls[1].kwargs["joint_seed"], poses[:, 3, 0, 3:4])
+    torch.testing.assert_close(calls[2].kwargs["joint_seed"], poses[:, 7, 0, 3:4])
+
+
+@pytest.mark.parametrize("continuous", [False, True])
+def test_batch_ik_failure_keeps_last_valid_seed_at_chunk_boundary(
+    continuous: bool,
+) -> None:
+    generator = _mock_generator(controlled_dof=1)
+    generator.robot.get_solver.return_value.supports_continuous_batch_ik = continuous
+    poses = torch.eye(4).repeat(2, 8, 1, 1)
+    poses[..., 0, 3] = torch.arange(1, 9)
+
+    def solve(*, pose: torch.Tensor, joint_seed: torch.Tensor, **kwargs: object):
+        assert torch.isfinite(joint_seed).all()
+        qpos = pose[..., 0, 3:4].clone()
+        valid = torch.ones(pose.shape[:2], dtype=torch.bool)
+        valid[1] = qpos[1, :, 0] != 4.0
+        qpos[1, ~valid[1]] = float("nan")
+        return valid, qpos
+
+    generator.robot.compute_batch_ik.side_effect = solve
+    with patch("embodichain.lab.sim.motion.motion_generator._MAX_IK_BATCH_TARGETS", 8):
+        success, positions = generator._solve_cartesian_waypoints(
+            poses, torch.zeros(2, 1), "arm"
+        )
+
+    assert success.tolist() == [True, False]
+    torch.testing.assert_close(positions[0], poses[0, :, 0, 3:4])
+    torch.testing.assert_close(positions[1], torch.zeros_like(positions[1]))
+    calls = generator.robot.compute_batch_ik.call_args_list
+    boundary_seed = calls[1 if continuous else 2].kwargs["joint_seed"]
+    torch.testing.assert_close(
+        boundary_seed.reshape(2, 1), torch.tensor([[4.0], [3.0]])
+    )
+
+
+@pytest.mark.parametrize("malformed", ["success_shape", "qpos_shape", "nonbinary_mask"])
+def test_batch_ik_rejects_malformed_solver_results(malformed: str) -> None:
+    generator = _mock_generator(controlled_dof=1)
+    generator.robot.compute_batch_ik.side_effect = None
+    valid = torch.ones(2, 1, dtype=torch.bool)
+    qpos = torch.zeros(2, 1, 1)
+    error = ValueError
+    match = "IK success"
+    if malformed == "success_shape":
+        valid = valid[:, 0]
+    elif malformed == "qpos_shape":
+        qpos = qpos[:, 0]
+        match = "IK qpos"
+    else:
+        valid = torch.full((2, 1), 2, dtype=torch.int64)
+        error = TypeError
+        match = "binary integer"
+    generator.robot.compute_batch_ik.return_value = valid, qpos
+    with pytest.raises(error, match=match):
+        generator._solve_cartesian_waypoints(
+            torch.eye(4).repeat(2, 1, 1, 1), torch.zeros(2, 1), "arm"
+        )
+    generator.robot.compute_ik.assert_not_called()
+
+
 @pytest.mark.parametrize("strategy", ["motion_gen", "ik_interp"])
 def test_cartesian_ik_failure_holds_only_failed_environment(strategy: str) -> None:
     """A failed final target cannot turn into a successful truncated path."""
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _timing_generator(robot=_CartesianRobot())
     goal = torch.eye(4).repeat(2, 1, 1)
     goal[:, 0, 3] = 1.0
     options = MotionGenOptions(
@@ -1097,11 +1977,142 @@ def test_cartesian_ik_failure_holds_only_failed_environment(strategy: str) -> No
     )
 
 
+@pytest.mark.parametrize("pose_dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("entry_point", ["generate", "interpolate_trajectory"])
+def test_cartesian_preparation_accepts_mixed_pose_and_fk_precision(
+    pose_dtype: torch.dtype, entry_point: str
+) -> None:
+    """Cartesian input precision may differ from the robot's FK buffers."""
+    generator = _timing_generator(robot=_CartesianRobot())
+    poses = torch.eye(4, dtype=pose_dtype).repeat(2, 2, 1, 1)
+    poses[:, 1, 0, 3] = 0.5
+    original_poses = poses.clone()
+    start = torch.zeros(2, 1, dtype=torch.float32)
+    options = MotionGenOptions(
+        start_qpos=start,
+        control_part="arm",
+        sample_count=20,
+        is_interpolate=True,
+        interpolate_position_step=0.25,
+    )
+
+    if entry_point == "generate":
+        result = generator.generate([PlanState.from_xpos(poses[:, 1])], options)
+        assert result.success.tolist() == [True, True]
+        positions = result.positions
+    else:
+        positions, targets = generator.interpolate_trajectory(
+            control_part="arm", xpos_list=poses, options=options
+        )
+        assert targets.dtype == pose_dtype
+
+    assert positions.dtype == start.dtype
+    torch.testing.assert_close(positions[:, 0], start)
+    torch.testing.assert_close(positions[:, -1], torch.full((2, 1), 0.5))
+    torch.testing.assert_close(poses, original_poses)
+
+
+@pytest.mark.parametrize("continuous", [False, True])
+def test_cartesian_preparation_preserves_fk_confirmed_singular_start(
+    continuous: bool,
+) -> None:
+    """An observed start needs no new IK solution, even at a singularity."""
+    generator = _timing_generator(robot=_CartesianRobot())
+    generator.robot.get_solver = lambda name: SimpleNamespace(
+        supports_continuous_batch_ik=continuous
+    )
+    solved_poses = []
+
+    def solve(*, pose, joint_seed, **kwargs):
+        solved_poses.append(pose.clone())
+        qpos = pose[..., 0, 3:4].clone()
+        # Model an analytic solver that fails only at the zero wrist pose.
+        return qpos[..., 0] > 0.0, qpos
+
+    generator.robot.compute_batch_ik = solve
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 0, 3] = 0.5
+    start = torch.zeros(2, 1)
+    result = generator.generate(
+        [PlanState.from_xpos(goal)],
+        MotionGenOptions(
+            start_qpos=start,
+            control_part="arm",
+            sample_count=20,
+            is_interpolate=True,
+            interpolate_position_step=0.25,
+        ),
+    )
+
+    assert result.success.tolist() == [True, True]
+    assert solved_poses and all(
+        bool((pose[..., 0, 3] > 0.0).all()) for pose in solved_poses
+    )
+    torch.testing.assert_close(result.positions[:, 0], start)
+    torch.testing.assert_close(result.positions[:, -1], torch.full((2, 1), 0.5))
+    torch.testing.assert_close(start, torch.zeros_like(start))
+
+
+@pytest.mark.parametrize("continuous", [False, True])
+@pytest.mark.parametrize("max_targets", [2, 512])
+def test_cartesian_preparation_requires_ik_for_unconfirmed_start_rows(
+    continuous: bool, max_targets: int
+) -> None:
+    """Reusing one row's known start cannot hide another row's IK failure."""
+    generator = _timing_generator(robot=_CartesianRobot())
+    generator.robot.get_solver = lambda name: SimpleNamespace(
+        supports_continuous_batch_ik=continuous
+    )
+
+    def solve(*, pose, joint_seed, **kwargs):
+        qpos = pose[..., 0, 3:4].clone()
+        return qpos[..., 0] > 0.25, qpos
+
+    generator.robot.compute_batch_ik = solve
+    poses = torch.eye(4).repeat(2, 2, 1, 1)
+    poses[1, 0, 0, 3] = 0.25  # This row's first pose differs from its seed FK.
+    poses[:, 1, 0, 3] = 0.5
+    with patch(
+        "embodichain.lab.sim.motion.motion_generator._MAX_IK_BATCH_TARGETS", max_targets
+    ):
+        positions, _, success = generator._interpolate_waypoints(
+            control_part="arm",
+            xpos_list=poses,
+            options=MotionGenOptions(
+                start_qpos=torch.zeros(2, 1), interpolate_position_step=0.5
+            ),
+        )
+
+    assert success.tolist() == [True, False]
+    torch.testing.assert_close(positions[0, 0], torch.zeros(1))
+    torch.testing.assert_close(positions[0, -1], torch.full((1,), 0.5))
+    torch.testing.assert_close(positions[1], torch.zeros_like(positions[1]))
+
+
+@pytest.mark.parametrize("continuous", [False, True])
+def test_batch_ik_accepts_fk_confirmed_only_waypoint(continuous: bool) -> None:
+    """A path containing only its observed start does not dispatch IK."""
+    generator = _mock_generator(controlled_dof=1)
+    generator.robot.get_solver.return_value.supports_continuous_batch_ik = continuous
+    generator.robot.compute_batch_ik.side_effect = AssertionError(
+        "An FK-confirmed start must not require IK"
+    )
+    start = torch.tensor([[0.2], [0.4]])
+    poses = torch.eye(4).repeat(2, 1, 1, 1)
+    poses[:, 0, 0, 3] = start[:, 0]
+    success, positions = generator._solve_cartesian_waypoints(
+        poses, start, "arm", known_start=torch.ones(2, dtype=torch.bool)
+    )
+    assert success.all()
+    torch.testing.assert_close(positions, start[:, None, :])
+    generator.robot.compute_batch_ik.assert_not_called()
+    generator.robot.compute_ik.assert_not_called()
+
+
 def test_motion_gen_rejects_fixed_cartesian_samples_instead_of_bypassing_limits() -> (
     None
 ):
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _timing_generator(robot=_CartesianRobot())
     goals = [torch.eye(4).repeat(2, 1, 1) for _ in range(2)]
     for goal, position in zip(goals, (0.1, 0.2)):
         goal[:, 0, 3] = position
@@ -1124,25 +2135,34 @@ def test_motion_gen_rejects_fixed_cartesian_samples_instead_of_bypassing_limits(
 
 
 @pytest.mark.parametrize(
-    "unused_option",
+    "limit_option",
     [
-        {"plan_opts": TrapezoidalPlanOptions()},
         {"velocity_limit": 0.1},
         {"acceleration_limit": 0.2},
     ],
 )
-def test_ik_interp_rejects_unused_backend_constraints(unused_option: dict) -> None:
-    generator = _trapezoidal_generator()
-    with pytest.raises(ValueError, match="ik_interp"):
-        generator.generate(
-            [PlanState.from_qpos(torch.ones(1, 1))],
-            MotionGenOptions(
-                strategy="ik_interp",
-                start_qpos=torch.zeros(1, 1),
-                sample_count=3,
-                interpolation_dt=0.01,
-                **unused_option,
-            ),
+def test_ik_interp_consumes_backend_neutral_motion_limits(limit_option: dict) -> None:
+    generator = _timing_generator(robot=_CartesianRobot())
+    result = generator.generate(
+        [PlanState.from_qpos(torch.ones(1, 1))],
+        MotionGenOptions(
+            strategy="ik_interp",
+            start_qpos=torch.zeros(1, 1),
+            sample_count=3,
+            interpolation_dt=0.01,
+            **limit_option,
+        ),
+    )
+
+    assert result.positions is not None
+    assert result.positions.shape[1] > 3
+
+
+def test_ik_interp_still_rejects_backend_specific_plan_options() -> None:
+    with pytest.raises(ValueError, match="plan_opts"):
+        MotionGenOptions(
+            strategy="ik_interp",
+            plan_opts=TrapezoidalPlanOptions(),
         )
 
 
@@ -1201,9 +2221,8 @@ def test_resampled_collision_trajectory_is_checked_on_the_output_grid(
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
 def test_cartesian_preinterpolation_accepts_cpu_seed_on_gpu() -> None:
-    generator = _trapezoidal_generator()
+    generator = _timing_generator(robot=_CartesianRobot())
     generator.device = torch.device("cuda:0")
-    generator.robot = _CartesianRobot()
     poses = torch.eye(4, device=generator.device).repeat(2, 2, 1, 1)
     poses[:, 1, 0, 3] = 1.0
     positions, _, success = generator._interpolate_waypoints(
@@ -1223,20 +2242,17 @@ def test_cartesian_preinterpolation_accepts_cpu_seed_on_gpu() -> None:
 def test_intermediate_ik_failure_stays_failed_after_reachable_goal(
     strategy: str,
 ) -> None:
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
-    previous_seed = torch.zeros(2, 1)
+    generator = _timing_generator(robot=_CartesianRobot())
+    solved_positions: list[torch.Tensor] = []
 
     def solve(*, pose, joint_seed, **kwargs):
-        nonlocal previous_seed
-        torch.testing.assert_close(joint_seed, previous_seed)
-        qpos = pose[:, 0, 3:4].clone()
-        success = torch.ones(2, dtype=torch.bool)
-        success[1] = not torch.isclose(qpos[1, 0], torch.tensor(0.5))
-        previous_seed = torch.where(success[:, None], qpos, previous_seed)
+        qpos = pose[..., 0, 3:4].clone()
+        solved_positions.append(qpos)
+        success = torch.ones(pose.shape[:2], dtype=torch.bool)
+        success[1] = ~torch.isclose(qpos[1, :, 0], torch.tensor(0.5))
         return success, qpos
 
-    generator.robot.compute_ik = solve
+    generator.robot.compute_batch_ik = solve
     goals = [torch.eye(4).repeat(2, 1, 1) for _ in range(2)]
     for pose, position in zip(goals, (0.5, 1.0)):
         pose[:, 0, 3] = position
@@ -1252,7 +2268,9 @@ def test_intermediate_ik_failure_stays_failed_after_reachable_goal(
             interpolate_position_step=0.25,
         ),
     )
-    torch.testing.assert_close(previous_seed, torch.ones(2, 1))
+    solved_positions = torch.cat(solved_positions, dim=1)
+    assert (solved_positions[1, :, 0] == 0.5).any()
+    assert (solved_positions[1, :, 0] == 1.0).any()
     assert result.success.tolist() == [True, False]
     torch.testing.assert_close(result.positions[0, -1], torch.ones(1))
     torch.testing.assert_close(
@@ -1266,8 +2284,7 @@ def test_ik_interp_rejects_ambiguous_linear_path_request() -> None:
 
 
 def test_public_interpolation_rejects_failed_required_waypoints() -> None:
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _timing_generator(robot=_CartesianRobot())
     poses = torch.eye(4).repeat(2, 2, 1, 1)
     poses[:, 1, 0, 3] = 1.0
     with pytest.raises(ValueError, match="required IK waypoints"):
@@ -1282,9 +2299,8 @@ def test_public_interpolation_rejects_failed_required_waypoints() -> None:
 
 @pytest.mark.parametrize("strategy", ["motion_gen", "ik_interp"])
 def test_nonfinite_ik_solution_fails_only_its_environment(strategy: str) -> None:
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
-    original_ik = generator.robot.compute_ik
+    generator = _timing_generator(robot=_CartesianRobot())
+    original_ik = generator.robot.compute_batch_ik
 
     def nonfinite_ik(**kwargs):
         success, qpos = original_ik(**kwargs)
@@ -1292,7 +2308,7 @@ def test_nonfinite_ik_solution_fails_only_its_environment(strategy: str) -> None
         qpos[1] = float("nan")
         return success, qpos
 
-    generator.robot.compute_ik = nonfinite_ik
+    generator.robot.compute_batch_ik = nonfinite_ik
     goal = torch.eye(4).repeat(2, 1, 1)
     goal[:, 0, 3] = 0.5
     result = generator.generate(
@@ -1322,3 +2338,36 @@ def test_mutated_options_cannot_restore_implicit_planner_bypass() -> None:
         generator.generate(
             [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))], options
         )
+
+
+def test_cartesian_timing_budget_exhaustion_returns_failed_safe_hold(monkeypatch):
+    from embodichain.lab.sim.motion.motion_generator import (
+        MotionGenerator,
+        MotionGenOptions,
+    )
+
+    generator = object.__new__(MotionGenerator)
+    monkeypatch.setattr(
+        generator,
+        "_resolve_velocity_limits",
+        lambda **kwargs: torch.tensor([1e-6, 1e-6]),
+    )
+    monkeypatch.setattr(
+        generator,
+        "_sample_cartesian_path",
+        lambda *args, **kwargs: pytest.fail("allocated over-budget path"),
+    )
+    q = torch.tensor([[[0.1, 0.2], [1.0, 1.0]]])
+    success, positions = generator._interpolate_cartesian_with_limits(
+        torch.eye(4)[None, None].repeat(1, 2, 1, 1),
+        q,
+        MotionGenOptions(
+            control_part="arm",
+            sample_count=2,
+            interpolation_dt=0.01,
+            velocity_limit=1e-6,
+            acceleration_limit=1.0,
+        ),
+    )
+    assert success.tolist() == [False]
+    assert torch.equal(positions, q[:, :1].repeat(1, 2, 1))

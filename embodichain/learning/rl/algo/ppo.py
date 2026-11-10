@@ -83,14 +83,18 @@ class PPO(BaseAlgorithm[TensorDict]):
 
     def update(self, rollout: TensorDict) -> Dict[str, float]:
         """Update the policy using a collected rollout."""
-        rollout = rollout.clone()
+        # GAE adds fields but does not mutate the collected tensors. A shallow
+        # clone isolates those fields without copying the entire GPU rollout.
+        rollout = rollout.clone(recurse=False)
         compute_gae(rollout, gamma=self.cfg.gamma, gae_lambda=self.cfg.gae_lambda)
         flat_rollout = transition_view(rollout, flatten=True)
 
         if not self.cfg.normalize_advantage_per_mini_batch:
             advantages = flat_rollout["advantage"]
+            # Preserve the sample standard deviation for larger batches while
+            # using a finite zero variance for a singleton.
             flat_rollout["advantage"] = (advantages - advantages.mean()) / (
-                advantages.std() + 1e-8
+                advantages.std(unbiased=advantages.numel() > 1) + 1e-8
             )
 
         total_actor_loss = 0.0
@@ -108,7 +112,8 @@ class PPO(BaseAlgorithm[TensorDict]):
                 batch_advantages = batch["advantage"]
                 if self.cfg.normalize_advantage_per_mini_batch:
                     batch_advantages = (batch_advantages - batch_advantages.mean()) / (
-                        batch_advantages.std() + 1e-8
+                        batch_advantages.std(unbiased=batch_advantages.numel() > 1)
+                        + 1e-8
                     )
                 batch_advantages = batch_advantages.detach()
 
@@ -140,6 +145,7 @@ class PPO(BaseAlgorithm[TensorDict]):
 
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
+                self._sync_gradients()
                 self._clip_gradients()
                 self.optimizer.step()
 
@@ -230,6 +236,10 @@ class PPO(BaseAlgorithm[TensorDict]):
             - 0.5,
             dim=-1,
         ).mean()
+        if isinstance(self.policy, torch.nn.parallel.DistributedDataParallel):
+            kl = kl.detach()
+            torch.distributed.all_reduce(kl)
+            kl.div_(torch.distributed.get_world_size())
         mean_kl = float(kl)
         learning_rate = self.current_learning_rate()
         if mean_kl > desired_kl * 2.0:

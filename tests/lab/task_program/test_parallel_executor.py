@@ -24,7 +24,7 @@ import json
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     ArticulationJointState,
     CommandAcknowledgement,
     EndpointCommand,
@@ -523,7 +523,8 @@ def test_parallel_runtime_merges_one_frame_and_hold_pads_short_lane() -> None:
     assert metadata["elapsed_steps"] == 3
 
 
-def test_deferred_command_waits_for_clock_after_padding_hold() -> None:
+@pytest.mark.parametrize("reject_first_row", [False, True])
+def test_deferred_command_waits_for_clock_after_padding_hold(reject_first_row) -> None:
     left = _branch(
         "left",
         0,
@@ -561,12 +562,26 @@ def test_deferred_command_waits_for_clock_after_padding_hold() -> None:
     assert not outbound.frames
     assert (left.executor.step_count, right.executor.step_count) == lane_steps
 
+    if reject_first_row:
+        rejected = runtime.deactivate_rows(
+            _mask(True, False), reason="measured failure"
+        )
+        assert rejected.failure_mask.tolist() == [True, False]
+        assert rejected.pending_mask.tolist() == [False, True]
+
     clock.time = 0.1
     runtime.step()
 
     assert outbound.operations == ["hold", "send"]
     assert len(outbound.frames) == 1
     assert (left.executor.step_count, right.executor.step_count) == lane_steps
+    assert outbound.frames[0].active_mask.tolist() == [not reject_first_row, True]
+    if reject_first_row:
+        clock.time = 0.2
+        runtime.step()
+        assert all(
+            frame.active_mask.tolist() == [False, True] for frame in outbound.frames
+        )
 
 
 def test_completion_hold_waits_for_clock_after_accepted_command() -> None:

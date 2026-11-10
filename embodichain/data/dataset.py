@@ -16,6 +16,13 @@
 
 from __future__ import annotations
 
+__all__ = [
+    "EmbodiChainDataset",
+    "DEFAULT_DATA_MODULES",
+    "get_data_class",
+    "get_data_path",
+]
+
 import os
 import sys
 import shutil
@@ -175,8 +182,8 @@ DEFAULT_DATA_MODULES = [
 ]
 
 
-def get_data_class(dataset_name: str, extra_modules: list[str] | None = None):
-    """Retrieve the dataset class from the available modules.
+def get_data_class(dataset_name: str, extra_modules: list[str] | None = None) -> type:
+    """Resolve a dataset class from the shared asset catalog or extra modules.
 
     Args:
         dataset_name (str): The name of the dataset class.
@@ -188,15 +195,15 @@ def get_data_class(dataset_name: str, extra_modules: list[str] | None = None):
     Raises:
         AttributeError: If the dataset class is not found in any module.
     """
-    module_names = DEFAULT_DATA_MODULES + (
-        extra_modules if extra_modules is not None else []
-    )
+    from embodichain.data._asset_registry import _get_asset_class
 
-    for module_name in module_names:
-        try:
-            return getattr(sys.modules[module_name], dataset_name)
-        except AttributeError:
-            continue
+    registered = _get_asset_class(dataset_name)
+    if registered is not None:
+        return registered
+    for module_name in extra_modules or ():
+        module = sys.modules.get(module_name)
+        if module is not None and hasattr(module, dataset_name):
+            return getattr(module, dataset_name)
 
     raise AttributeError(f"Dataset class '{dataset_name}' not found in any module.")
 

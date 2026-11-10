@@ -36,25 +36,51 @@ from setup import get_package_dir
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
-_CONFIG_SOURCE = _REPOSITORY_ROOT / "embodichain_tasks" / "configs"
-_PROGRAMS = {
+_CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
+_PROGRAMS = (
+    Path("tasks/manipulation/carton_stocking/task_program/program.yaml"),
+    Path("tasks/manipulation/hand_over/task_program/program.bar.yaml"),
+    Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"),
+    Path("tasks/manipulation/repeated_pick_place/task_program/program.workbench.yaml"),
+    Path("tasks/manipulation/hand_over/task_program/program.tabletop.yaml"),
+    Path("tasks/manipulation/tableware/stack_blocks_two/task_program/program.yaml"),
+    Path("tasks/manipulation/tableware/blocks_ranking_rgb/task_program/program.yaml"),
+    Path("tasks/manipulation/tableware/pour_water/task_program/program.workbench.yaml"),
+    Path("tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"),
+    Path("tasks/manipulation/repeated_pick_place/task_program/program.yaml"),
+    Path("tasks/manipulation/open_drawer/task_program/program.yaml"),
+    Path("tasks/manipulation/hand_over/task_program/program.yaml"),
+    Path("tasks/manipulation/tableware/pour_water/task_program/program.yaml"),
     Path(
-        "tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"
-    ): "rubiks_cube_pick_place",
-    Path("tasks/manipulation/repeated_pick_place/task_program/program.yaml"): (
-        "repeated_cube_pick_place"
+        "tasks/manipulation/tableware/pour_water/task_program/program.tianji_marvin.yaml"
     ),
-    Path(
-        "tasks/manipulation/open_drawer/task_program/program.yaml"
-    ): "slide_open_drawer",
-    Path(
-        "tasks/manipulation/hand_over/task_program/program.yaml"
-    ): "dual_ur5_hand_over",
-    Path(
-        "tasks/manipulation/tableware/pour_water/task_program/program.yaml"
-    ): "pour_water_with_right_arm",
-}
+)
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml"): (
+        "repeated_tabletop_cube_pick_place",
+        "repeated_pick_place_tabletop",
+        "tianji_marvin",
+    ),
+    Path("tasks/manipulation/hand_over/task.tianji_marvin.yaml"): (
+        "tabletop_hand_over",
+        "tabletop_handover",
+        "tianji_marvin",
+    ),
+    Path("tasks/manipulation/tableware/pour_water/task.tianji_marvin.yaml"): (
+        "pour_water_with_right_arm",
+        "pour_water_tianji_marvin",
+        "tianji_marvin",
+    ),
+    Path("tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"): (
+        "stack_two_blocks",
+        "task_program_stack_blocks_two",
+        "cobotmagic",
+    ),
+    Path("tasks/manipulation/tableware/blocks_ranking_rgb/task.cobotmagic.yaml"): (
+        "rank_blocks_rgb",
+        "task_program_blocks_ranking_rgb",
+        "cobotmagic",
+    ),
     Path("tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml"): (
         "rubiks_cube_pick_place",
         "task_program_rubiks_cube_pick_place",
@@ -65,7 +91,7 @@ _DEPLOYMENTS = {
         "task_program_repeated_pick_place",
         "ur5_dh_pgi_140_80",
     ),
-    Path("tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml"): (
+    Path("tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
         "ur5_dh_pgi_140_80",
@@ -75,17 +101,7 @@ _DEPLOYMENTS = {
         "task_program_repeated_pick_place",
         "franka_panda",
     ),
-    Path("tasks/manipulation/repeated_pick_place/task.franka.newton.yaml"): (
-        "repeated_cube_pick_place",
-        "task_program_repeated_pick_place",
-        "franka_panda",
-    ),
     Path("tasks/manipulation/open_drawer/task.ur5.yaml"): (
-        "slide_open_drawer",
-        "task_program_open_drawer",
-        "ur5_dh_pgi_140_80",
-    ),
-    Path("tasks/manipulation/open_drawer/task.ur5.newton.yaml"): (
         "slide_open_drawer",
         "task_program_open_drawer",
         "ur5_dh_pgi_140_80",
@@ -106,42 +122,167 @@ _DEPLOYMENTS = {
         "cobotmagic",
     ),
 }
+_DUAL_ARM_VARIANTS = (
+    "dual_ur5_dh_pgi_140_80",
+    "tianji_marvin",
+    "dexforce_w1_030_pika",
+)
+_DUAL_ARM_PROGRAMS = {
+    "hand_over": ("tabletop_hand_over", "tabletop_handover"),
+    "repeated_pick_place": (
+        "repeated_tabletop_cube_pick_place",
+        "repeated_pick_place_tabletop",
+    ),
+    "tableware/pour_water": ("pour_water_with_right_arm", "pour_water_tianji_marvin"),
+    "tableware/stack_blocks_two": ("stack_two_blocks", "task_program_stack_blocks_two"),
+    "tableware/blocks_ranking_rgb": (
+        "rank_blocks_rgb",
+        "task_program_blocks_ranking_rgb",
+    ),
+}
+for _task, (_program, _scene) in _DUAL_ARM_PROGRAMS.items():
+    for _variant in _DUAL_ARM_VARIANTS:
+        _DEPLOYMENTS.setdefault(
+            Path(f"tasks/manipulation/{_task}/task.{_variant}.yaml"),
+            (_program, _scene, _variant),
+        )
+_DEPLOYMENTS[Path("tasks/manipulation/hand_over/task.dual_ur5.yaml")] = (
+    "tabletop_hand_over",
+    "tabletop_handover",
+    "dual_ur5_dh_pgi_140_80",
+)
+_DEPLOYMENTS[Path("tasks/manipulation/hand_over/task.dexforce_w1_030_pika.yaml")] = (
+    "tabletop_hand_over",
+    "tabletop_bar_handover",
+    "dexforce_w1_030_pika",
+)
+_DUAL_ARM_RESOURCES = {
+    Path("components/embodiments/dexforce_w1_030_pika.yaml"),
+    *(
+        Path(f"tasks/manipulation/{task}/env.dexforce_w1_030_pika.yaml")
+        for task in (
+            *_DUAL_ARM_PROGRAMS,
+            "tableware/blocks_ranking_size",
+            "tableware/match_object_container",
+            "tableware/place_object_drawer",
+            "tableware/stack_cups",
+        )
+    ),
+    *(
+        Path(
+            f"tasks/manipulation/{task}/task_program/integration.dexforce_w1_030_pika.yaml"
+        )
+        for task in _DUAL_ARM_PROGRAMS
+    ),
+    Path(
+        "tasks/manipulation/tableware/pour_water/task_program/integration.dual_ur5.yaml"
+    ),
+    Path("components/execution_policies/motion_gen_projected_manipulation.yaml"),
+    Path(
+        "components/execution_policies/trajectory_open_loop_dual_arm_manipulation.yaml"
+    ),
+    Path(
+        "tasks/manipulation/repeated_pick_place/task_program/integration.dual_ur.yaml"
+    ),
+    *(
+        Path(
+            f"tasks/manipulation/tableware/{task}/task_program/integration.{kind}.yaml"
+        )
+        for task in ("stack_blocks_two", "blocks_ranking_rgb")
+        for kind in ("dual_ur", "tianji_marvin")
+    ),
+    *(
+        Path(f"tasks/manipulation/tableware/{task}/{filename}")
+        for task in (
+            "blocks_ranking_size",
+            "match_object_container",
+            "place_object_drawer",
+            "stack_cups",
+        )
+        for filename in (
+            "env.json",
+            "env.yaml",
+            *(f"task.{variant}.yaml" for variant in _DUAL_ARM_VARIANTS),
+        )
+    ),
+}
+
 _RESOURCE_PATHS = frozenset(
     {
+        *(
+            Path("tasks/manipulation/carton_stocking") / name
+            for name in (
+                "README.md",
+                "catalog.yaml",
+                "env.yaml",
+                "task.panda.yaml",
+                "task_program/integration.yaml",
+                "real2sim/collection.yaml",
+            )
+        ),
+        Path("components/execution_policies/real2sim_verified.yaml"),
+        *_DUAL_ARM_RESOURCES,
         *_PROGRAMS,
         *_DEPLOYMENTS,
+        *(
+            Path("tasks/manipulation/tableware") / task_name / relative_path
+            for task_name in ("stack_blocks_two", "blocks_ranking_rgb")
+            for relative_path in (
+                "env.yaml",
+                "catalog.yaml",
+                "README.md",
+                "task_program/integration.yaml",
+            )
+        ),
         Path("tasks/manipulation/repeated_pick_place/catalog.yaml"),
         Path("tasks/manipulation/repeated_pick_place/README.md"),
-        Path("tasks/manipulation/repeated_pick_place/task.franka.rlinf.yaml"),
-        Path("tasks/manipulation/repeated_pick_place/task.franka.rlinf_expert.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/objective.yaml"),
         Path("tasks/manipulation/push_cube/catalog.yaml"),
         Path("tasks/manipulation/push_cube/README.md"),
         Path("tasks/manipulation/tableware/stack_cups/catalog.yaml"),
         Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
         Path("components/execution_policies/trajectory_open_loop.yaml"),
-        Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
+        Path("components/expansion_policies/task_program_episode.yaml"),
+        Path("components/randomization_profiles/cube_initial_pose.yaml"),
+        Path("components/randomization_profiles/rgb_visual.yaml"),
         Path("components/embodiments/cobotmagic.yaml"),
         Path("components/embodiments/dual_ur5_dh_pgi_140_80.yaml"),
         Path("components/embodiments/franka_panda.yaml"),
-        Path("components/embodiments/franka_panda_vla.yaml"),
+        Path("components/embodiments/tianji_marvin.yaml"),
         Path("components/embodiments/ur5_dh_pgi_140_80.yaml"),
         Path("tasks/manipulation/hand_over/env.yaml"),
+        Path("tasks/manipulation/hand_over/README.md"),
+        Path("tasks/manipulation/hand_over/envs/tabletop.default.yaml"),
+        Path(
+            "tasks/manipulation/hand_over/task_program/integration.tianji_marvin.yaml"
+        ),
         Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
-        Path("tasks/manipulation/open_drawer/env.yaml"),
-        Path("tasks/manipulation/open_drawer/env.newton.yaml"),
+        Path("tasks/manipulation/open_drawer/envs/default.yaml"),
+        Path("tasks/manipulation/open_drawer/envs/newton.yaml"),
+        Path("tasks/manipulation/open_drawer/expansion/open_drawer.yaml"),
+        Path("tasks/manipulation/open_drawer/README.md"),
         Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
-        Path("tasks/manipulation/repeated_pick_place/env.yaml"),
-        Path("tasks/manipulation/repeated_pick_place/env.rlinf.yaml"),
-        Path("tasks/manipulation/repeated_pick_place/env.rlinf_expert.yaml"),
-        Path("tasks/manipulation/repeated_pick_place/env.rlinf_joint.yaml"),
-        Path("tasks/manipulation/repeated_pick_place/task.franka.rlinf_joint.yaml"),
-        Path("tasks/manipulation/repeated_pick_place/env.newton.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/envs/default.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/envs/tabletop.default.yaml"),
+        Path(
+            "tasks/manipulation/repeated_pick_place/task_program/integration.tianji_marvin.yaml"
+        ),
+        Path("tasks/manipulation/repeated_pick_place/envs/newton.yaml"),
+        Path(
+            "tasks/manipulation/repeated_pick_place/expansion/"
+            "repeated_pick_place.yaml"
+        ),
         Path("tasks/manipulation/repeated_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/rubiks_cube_pick_place/env.yaml"),
         Path("tasks/manipulation/rubiks_cube_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/env.tianji_marvin.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
+        Path(
+            "tasks/manipulation/tableware/pour_water/task_program/integration.tianji_marvin.yaml"
+        ),
     }
 )
 
@@ -231,7 +372,7 @@ def test_setup_stages_all_official_task_programs(
 ) -> None:
     """The actual setup patterns put nested Task Programs in wheel staging."""
     assert staged_config_package.include_package_data is False
-    assert get_package_dir()[_CONFIG_PACKAGE] == "embodichain_tasks/configs"
+    assert get_package_dir()[_CONFIG_PACKAGE] == "extensions/embodichain_tasks/configs"
     assert staged_config_package.package_data[_CONFIG_PACKAGE] == [
         "**/*.json",
         "**/*.yaml",
@@ -261,6 +402,17 @@ import json
 from pathlib import Path
 import sys
 
+build_lib = Path(sys.argv[1]).resolve()
+expected_deployments = json.loads(sys.argv[2])
+# An installed ``embodichain_tasks`` parent package can shadow the staged
+# namespace package. Pin its search path to the isolated build output
+# so this subprocess really exercises the staged package resources.
+import types
+
+staged_namespace = types.ModuleType("embodichain_tasks")
+staged_namespace.__path__ = [str(build_lib / "embodichain_tasks")]
+sys.modules["embodichain_tasks"] = staged_namespace
+
 import embodichain_tasks.configs as config_package
 from embodichain.lab.task_program import load_task_program
 from embodichain.lab.task_program.integrations._configured_composition import (
@@ -270,8 +422,6 @@ from embodichain.lab.gym.utils._component_composition import _resolve_gym_compon
 from embodichain.utils.utility import load_config
 from embodichain_tasks.configs import get_config_path
 
-build_lib = Path(sys.argv[1]).resolve()
-expected_deployments = json.loads(sys.argv[2])
 module_path = Path(config_package.__file__).resolve()
 assert module_path.is_relative_to(build_lib), (module_path, build_lib)
 decoded_deployments = {}
@@ -303,7 +453,11 @@ print(json.dumps(decoded_deployments, sort_keys=True))
 """
     environment = os.environ.copy()
     environment["PYTHONPATH"] = os.pathsep.join(
-        (str(staged_config_package.build_lib), str(_REPOSITORY_ROOT))
+        (
+            str(staged_config_package.build_lib),
+            str(_REPOSITORY_ROOT),
+            environment.get("PYTHONPATH", ""),
+        )
     )
     completed = subprocess.run(
         [

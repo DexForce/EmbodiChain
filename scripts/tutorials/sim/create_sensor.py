@@ -216,7 +216,7 @@ def create_robot(sim):
         "arm": [
             "joint[1-6]",  # Matches JOINT1, JOINT2, ..., JOINT6
         ],
-        "hand": ["LEFT_.*"],  # Matches all joints starting with L_
+        "eef": ["LEFT_.*"],  # Matches all joints starting with L_
     }
 
     # Define transformation for hand attachment

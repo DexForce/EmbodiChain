@@ -69,7 +69,7 @@ components/execution_policies/*.yaml
   motion, tracking, recovery, runner, effect assurance
 
 task.<embodiment>.yaml
-  runnable ID and component selections
+  runnable ID, component selections and allowlisted deployment overrides
 ```
 
 Never put robot IDs or an integration selection into serialized
@@ -118,7 +118,7 @@ Run the bundled read-only inspector for complete configured deployments:
 
 ```bash
 python .agents/skills/add-task-program/scripts/inspect_deployment.py \
-  embodichain_tasks/configs/tasks/<category_path>/<task_name>/task.<embodiment>.yaml
+  extensions/embodichain_tasks/configs/tasks/<category_path>/<task_name>/task.<embodiment>.yaml
 ```
 
 This command performs levels 1-4 without constructing a simulator. It does not

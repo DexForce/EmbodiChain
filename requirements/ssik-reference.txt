@@ -1,0 +1,2 @@
+# Optional pinned CPU reference; intentionally excluded from wheel metadata.
+ssik @ git+https://github.com/personalrobotics/ssik.git@4109147f37a7ca3e2516c83853aca583612783f3

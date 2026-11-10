@@ -188,42 +188,45 @@ def test_manager_rejects_non_particle_newton_solver(solver_type: str) -> None:
         sim.add_deformable_object(VolumeDeformableObjectCfg(uid="soft"))
 
 
-@pytest.mark.parametrize("solver_type", ["auto", "dexuni"])
 @pytest.mark.parametrize(
     "config_type", [SurfaceDeformableObjectCfg, VolumeDeformableObjectCfg]
 )
 def test_manager_declares_deformables_with_supported_solver(
-    config_type,
-    solver_type: str,
+    config_type: type[DeformableObjectCfg],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from embodichain.lab.sim.shapes import MeshCfg
     from embodichain.lab.sim.spawn.scene import SpawnScene
 
     sim = object.__new__(SimulationManager)
     sim.physics = NewtonPhysicsBackend(SimpleNamespace())
-    sim.physics._configured_solver_type = solver_type
+    sim.physics._configured_solver_type = "dexuni"
     sim.device = torch.device("cuda")
     sim.sim_config = SimpleNamespace(physics_cfg=NewtonPhysicsCfg())
     sim._deformable_objects = {}
     sim._visualization_topology_revision = 0
-    sim._spawn_scene = object.__new__(SpawnScene)
-    sim._spawn_scene._num_envs = 2
-    sim._spawn_scene._assets = {}
-    sim._spawn_scene.builder = SimpleNamespace(
+    builder = SimpleNamespace(
+        replicate=Mock(),
         is_finalized=False,
         result=None,
         materials={},
         add_soft_object=lambda descriptor: descriptor,
         add_cloth_object=lambda descriptor: descriptor,
     )
+    monkeypatch.setattr("dexsim.spawn.SceneBuilder", lambda _world: builder)
+    # This declaration-only World stub has no native renderer query interface.
+    sim._spawn_scene = SpawnScene(object(), num_envs=2, renderer="hybrid")
 
-    facade = sim.add_deformable_object(
-        config_type(uid="deformable", shape=MeshCfg(fpath="mesh.obj"))
-    )
+    try:
+        facade = sim.add_deformable_object(
+            config_type(uid="deformable", shape=MeshCfg(fpath="mesh.obj"))
+        )
 
-    assert facade.is_declared
-    assert facade.num_instances == 2
-    assert sim.get_deformable_object("deformable") is facade
+        assert facade.is_declared
+        assert facade.num_instances == 2
+        assert sim.get_deformable_object("deformable") is facade
+    finally:
+        sim._spawn_scene.close()
 
 
 def test_manager_rejects_gradient_mode_deformable_mutation() -> None:

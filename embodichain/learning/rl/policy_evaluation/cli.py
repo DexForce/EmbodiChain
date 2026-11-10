@@ -105,7 +105,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--physics-backend")
     parser.add_argument(
         "--renderer",
-        choices=("hybrid", "fast-rt", "rt"),
+        choices=("no-render", "hybrid", "fast-rt", "rt"),
     )
     parser.add_argument("--gpu-id", type=int, default=0)
     parser.add_argument("--scene-config")
@@ -361,6 +361,10 @@ def _build_native_runtime(
     if viewer and not uses_simulator:
         raise ValueError("--viewer requires a simulator training task")
     renderer = args.renderer or str(trainer.get("renderer", "hybrid"))
+    if viewer and renderer == "no-render":
+        if args.renderer is not None:
+            raise ValueError("--viewer requires a native renderer.")
+        renderer = "hybrid"
     num_envs = (
         1
         if viewer
@@ -406,6 +410,8 @@ def _build_native_runtime(
 
 
 def _validate_native_options(args: argparse.Namespace) -> None:
+    if args.viewer and args.renderer == "no-render":
+        raise ValueError("--viewer requires a native renderer.")
     profile_options = {
         "--resource-root": args.resource_root,
         "--physics-backend": args.physics_backend,

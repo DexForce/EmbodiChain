@@ -33,10 +33,14 @@ return merge_robot_cfg(cfg, init_dict)
 
 ## Two Layouts
 
+Concrete configs live in the `extensions/embodichain_robots/` import package, bundled
+with the core distribution/version. Generic robot runtime, configuration,
+solvers, and composition stay in `embodichain/lab/sim/`.
+
 | Layout | When | Files |
 |--------|------|-------|
-| Single-file | Variant-less robot | `my_robot.py` |
-| Package | Robot with variants (versions / arm kinds / hand brands) | `types.py`, `cfg.py`, optional `params.py`/`utils.py`, `__init__.py` |
+| Single-file | Model using a vendor-shared archive | `<vendor>/<model>.py` |
+| Package | Model-owned assets or versions/calibrations | `<vendor>/<model>/cfg.py`, `assets.py`, optional specifications, lazy `__init__.py` |
 
 ## The Contract (read first)
 
@@ -49,14 +53,20 @@ A cfg's `_build_defaults` must populate:
 - `joint_drive_props` (JointDrivePropertiesCfg)
 - `attrs` (RigidBodyPhysicsCfg)
 
+Use `arm` / `eef` for default single-arm control groups and `left_arm`,
+`right_arm`, `left_eef`, `right_eef` for dual-arm defaults. Add an EEF group
+only when the robot has controllable end-effector joints. These names are a
+convention: user-defined names remain valid, without automatic aliases or a
+reserved-name validator. Keep asset component, link and joint identifiers intact.
+
 `build_pk_serial_chain` must read from `_pk_urdf_path` (a property for
 constant-path robots, a method for variant-dependent paths). The PK chain's DOF
 must match the matching `control_parts` entry (the test stub asserts this).
 
 ## Steps
 
-1. **Pick a layout** using the table above. Single-file for variant-less robots;
-   package for robots with variants.
+1. **Pick a vendor/model owner** and a layout from the table above. Keep vendor
+   and model initializers lazy. Asset-only imports must not load configurations.
 2. **Create the cfg file(s).** Subclass `RobotCfg`. Declare variant fields (enums)
    if using the package layout.
 3. **Implement `_build_defaults(self, init_dict=None)`.** Set variant fields from
@@ -98,15 +108,40 @@ must match the matching `control_parts` entry (the test stub asserts this).
    ```
 
 5. **Keep `from_dict` as the 3-line template** — do not reimplement it.
-6. **Add `__all__` and register** in `embodichain/lab/sim/robots/__init__.py`:
+6. **Add `__all__` and register** the class in
+   `extensions/embodichain_robots/_catalog.py`, then add its lazy export to
+   `extensions/embodichain_robots/__init__.py` (`_EXPORTS` and `__all__`):
 
    ```python
-   from .my_robot import MyRobotCfg
-   __all__ = ["MyRobotCfg"]
+   # Catalog entry; importing the catalog must not import the robot module.
+   "MyRobot": {"class_path": "embodichain_robots.my_vendor.my_robot:MyRobotCfg"}
    ```
 
-7. **Add documentation:** create `docs/source/resources/robot/<name>.md` and add
-   it to `docs/source/resources/robot/index.rst`.
+   The main wheel already advertises this catalog through `embodichain.robots`.
+   Gym, workspace CLI, and dual-arm composition use its shared resolver.
+   Variant defaults belong in the catalog. Concrete robots use only the
+   canonical package; no core compatibility module or CLI class map is needed.
+   Supply optional control metadata when known: `dof` counts unique independent
+   default control joints, excluding mimic followers; `control_parts` records
+   raw per-part counts. `mimic_joints` maps followers to leaders, and
+   `control_part_mimics` records follower membership by group. Overlapping groups
+   must not inflate DOF. Declare `supports_dual_arm` only for a compatible default
+   single-arm URDF/control-part/solver contract. Families may declare `variants`
+   with control profiles and a `default_variant`; flat preset IDs use `variant_of`.
+   Add explicit `vendor`, `morphology` and `arm_count` metadata when known;
+   unknown fields stay `None`. Variant classification inherits parent values
+   unless explicitly overridden. Keep the catalog free of runtime imports.
+   Put model-owned asset classes in `assets.py` (shared archives at vendor level)
+   and register their unchanged asset IDs, class paths and categories in
+   `_asset_catalog.py`. The `embodichain.assets` entry point connects them to
+   the core resolver and data CLI; listing must not construct datasets.
+
+7. **Add documentation:** create
+   `docs/source/resources/robot/<vendor>/<model>.md`, matching the source
+   namespace. Include the model in its vendor's `index.rst` and the Supported
+   Robots overview. Add an index for a new vendor and link it from
+   `docs/source/resources/robot/index.rst`. Community projects with an unknown
+   manufacturer use their project namespace; keep generic composition separate.
 8. **Add a test stub** with a `__main__` smoke test + the DOF drift guard. Use
    `/add-test` for full test scaffolding; the guard snippet is:
 
@@ -121,12 +156,16 @@ must match the matching `control_parts` entry (the test stub asserts this).
 ## Reusable embodiment handoff
 
 `RobotCfg` owns simulation construction, control parts, solvers, and physical
-properties. It does not own a task, sensor suite, or Task Program skill
-profile.
+properties, plus optional mounted camera configurations in `sensors`.
+Use robot-local parent link names and stable sensor UIDs. Standalone simulation
+creates these cameras only with `enable_sensor=True`; Gym overrides that
+switch with its environment acquisition setting. An explicit sensor list
+replaces defaults and `sensors: []` clears them. Keep independent cameras,
+task declarations and Task Program skill profiles outside the robot class.
 
 If the user also wants the robot selectable from task deployments, invoke
 `$add-embodiment-component` after the robot config passes its own tests. That
-component selects the robot, owns its sensors, and optionally maps stable
+component selects the robot, declares additional independent sensors, and maps stable
 logical resources/endpoints/capabilities/commands into `skill_profile`.
 Do not copy those semantic declarations into the robot class.
 
@@ -156,9 +195,10 @@ Do not copy those semantic declarations into the robot class.
 
 **File locations:**
 
-- Config: `embodichain/lab/sim/robots/<name>.py` or `embodichain/lab/sim/robots/<name>/`
-- Registry: `embodichain/lab/sim/robots/__init__.py`
-- Docs: `docs/source/resources/robot/<name>.md`
+- Config: `extensions/embodichain_robots/<vendor>/<model>.py` or `<vendor>/<model>/`
+- Catalog / lazy exports: `extensions/embodichain_robots/_catalog.py`, `extensions/embodichain_robots/__init__.py`
+- Shared resolver: `embodichain/robot_registry.py`
+- Docs: `docs/source/resources/robot/<vendor>/<model>.md` and the owning index
 - Tests: `tests/sim/objects/test_robot_cfg.py`
 - Base class: `embodichain/lab/sim/cfg/robot.py` (`RobotCfg`)
 - Guide: `docs/source/guides/add_robot.rst` · Tutorial: `docs/source/tutorial/add_robot.rst`

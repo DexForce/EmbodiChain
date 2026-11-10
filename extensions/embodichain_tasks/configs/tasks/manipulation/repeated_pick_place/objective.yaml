@@ -1,0 +1,17 @@
+# These regions describe the cube's settled center, not the gripper release pose.
+# Stability in a region is measured; gripper detachment is not asserted.
+type: ordered_stable_regions
+object_uid: cube
+hold_seconds: 0.1
+max_linear_speed: 0.05
+max_angular_speed: 0.2
+regions:
+  - name: first_a
+    lower: [-0.45, 0.43, 0.015]
+    upper: [-0.35, 0.53, 0.04]
+  - name: then_b
+    lower: [-0.47, -0.13, 0.015]
+    upper: [-0.37, -0.03, 0.04]
+  - name: final_a
+    lower: [-0.45, 0.43, 0.015]
+    upper: [-0.35, 0.53, 0.04]

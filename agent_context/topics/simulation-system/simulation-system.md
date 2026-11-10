@@ -7,9 +7,11 @@
 | Public simulation facade | `embodichain/lab/sim/__init__.py` |
 | World, registries, readiness and stepping | `embodichain/lab/sim/sim_manager.py` → `SimulationManager`, `SimulationManagerCfg` |
 | Declaration, source resolution and binding | `embodichain/lab/sim/spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` |
+| Fresh static USD reads and owned authored link meshes | `embodichain/lab/sim/spawn/source_geometry.py` |
 | Manager-level backend hooks and capabilities | `embodichain/lab/sim/physics/` |
 | Object-level Scene batch adapters | `embodichain/lab/sim/objects/backends/scene.py`, `newton.py` |
 | Object, renderer and physics configuration | `embodichain/lab/sim/cfg/` (`cfg/__init__.py` is the public facade) |
+| Visual material configuration, templates and native instances | `embodichain/lab/sim/material.py`; [material identity and lifetime](materials.md) |
 | Gym lifecycle and task scene construction | `embodichain/lab/gym/envs/base_env.py`, `embodied_env.py` |
 
 `embodichain.cli.sim` owns standalone simulation arguments without importing
@@ -26,11 +28,58 @@ and readiness for each committed topology revision. DexSim `SceneBuilder` and
 and backend handles. `add_*()` returns a declared facade; `prepare()` binds
 that same object in place. UIDs identify resources in the manager registry.
 
+`VisualObject` owns render-only root poses, visibility and material assignments,
+with no rigid-body buffers or collision API. Its config lives in
+`cfg/visual_object.py`; mesh files use `MeshCfg.fpath`, as for rigid objects.
+`cfg/source.py:UsdSourceCfg` owns the source file and exact `source_prim_path`;
+visual, rigid and articulation configs accept it through `source`, exclusively
+with their existing shape/file input. `ObjectBaseCfg` keeps runtime identity
+and initial pose independent of file formats. `add_visual_object()` compiles mesh/primitive appearance or
+selects a USD object's appearance. Whole-scene `add_usd()`
+preserves physical types and wraps only objects without physics and colliders
+as visuals. Conflicting visual UIDs receive the scene-name prefix while returned
+keys preserve source prim paths. Other import UID conflicts fail before declaration.
+Imported facades retain their source address in `cfg.source`. This metadata
+does not request a second spawn or bind an unrelated existing scene entity.
+Visuals retain facade-owned pose/visibility/material-assignment state across native
+topology rebuilds, with separate reset baselines. They use the same prepare,
+replication, selective reset, removal and teardown owners as physical assets. They do not enter physical scene snapshots or planners.
+Pose I/O uses pure-visual `World.fetch_object_transform` / `apply_object_transform`
+tensor batches through the private Scene visual adapter. That boundary converts
+world matrices to arena-local poses and refreshes parent transforms and native
+IDs after topology changes.
+
+`objects/backends/collision.py` owns physical collision descriptors and strict
+cooked convex/box snapshots through `capture_physical_collision_geometry`.
+Strict snapshots preserve float64 geometry and requested native body offsets;
+ordinary descriptor getters keep their existing precision and shape support.
+[Scene services](../scene-services/scene-services.md) assemble observed frames and
+native ownership around those values without duplicating SDK geometry reads.
+
+`spawn/_usd_assets.py` materializes package textures into `SpawnScene`-owned
+files. They survive topology rebuilds and are deleted after native Scene closure;
+facade source configs retain the original package address.
+
 `BaseEnv` owns Gym reset/step timing; `EmbodiedEnv` translates task composition
 into manager declarations. Scene replication and collision isolation belong
 to Spawn, not per-object collision-group calculations. Backend differences
 belong in physics hooks/capabilities or object adapters, not task-side native
 access. Contact sensors use the finalized Scene's `ContactQuery` boundary.
+
+`spawn.source_geometry` owns `UsdSourceSnapshot`, `read_usd_source` and
+`LinkMesh` for Object source adapters and static Scene consumers. Reads use fresh
+anonymous USD layers and recheck captured bytes. Explicit snapshots can be
+shared within one assembly; there is no process-wide source cache. Polygon
+inputs and fan-triangulated owner-local meshes preserve order and apply the
+deployment scale once. Source meshes retain their input identity and do not
+certify native cooked shapes. Current poses, effective joint limits and physical
+collision shapes remain Object/Articulation queries; control-role interpretation
+and stricter surface qualification remain Scene services.
+
+[Scene services](../scene-services/scene-services.md) compose existing configs,
+propose layouts and read/change physical state through these owners. They do
+not add a registry or commit topology. Runtime scene services currently accept
+only B=1 selections; Spawn still owns replication and isolation.
 
 ## Lifecycle
 
@@ -51,6 +100,18 @@ state, or physics use. `BaseEnv` supplies it between scene setup and dependent
 initialization; standalone callers supply it explicitly. `update()` also
 prepares defensively. See [lifecycle](lifecycle.md) for retries, replacement,
 reset ordering, runtime controls and teardown.
+
+`simulation_time` is a read-only manager-relative clock: successful `update()`
+substeps add their actual durations before `after_substep` callbacks. Explicit
+warmup updates count; preparation/render synchronization at zero duration does
+not advance time, and object/environment reset does not rewind it. A fresh
+manager starts at zero. Episode-relative Task Program clocks can have an offset;
+physical evidence must validate that mapping instead of mixing timestamp domains.
+
+`physics_step_index` counts completed manager substeps before each
+`after_substep` callback, including runs without rendering. Reads, selected
+resets and topology rebuilds leave it unchanged. Consumers that cache
+topology-dependent state must also validate their binding, not only this count.
 
 ## Quaternion and pose convention
 
@@ -96,12 +157,12 @@ tests need non-symmetric rotations to expose component-order mistakes.
 | Backend/device selection, source overlays, collision/mass policy | [Physics configuration](physics-configuration.md); `cfg/`, `spawn/descriptors.py` |
 | Joint state order, drive lowering, mimic coupling, native adaptation | [Articulation and batch adapters](articulation-adapters.md); `objects/backends/`, `objects/articulation.py` |
 | Volume/surface state, topology and kinematic nodes | [Deformables](deformables.md); `cfg/deformable.py`, `objects/deformable/` |
-| Camera synchronization, native window, DLSS, startup readiness | [Rendering and diagnostics](rendering.md); manager, `cfg/simulation.py`, `_startup_summary.py` |
+| Camera synchronization, native window/offscreen denoising, startup readiness | [Rendering and diagnostics](rendering.md); manager, `cfg/simulation.py`, `_startup_summary.py` |
 | Robot definition, control parts, robot presets | [Robot system](../robot-system/robot-system.md) |
 | Camera attachment resolution or contact sensors | [Sensor system](../sensor-system/sensor-system.md) |
 | Browser export or native gizmos | [Visualization](../sim-visualization/sim-visualization.md), [native gizmos](../sim-visualization/native-gizmos.md) |
 | Solvers, planners, workspace, augmentation | [IK](../ik-solvers/ik-solvers.md), [motion](../motion-planning/motion-planning.md), [workspace](../robot-workspace/robot-workspace.md) |
-| Semantic geometry and action execution | [Atomic Actions](../atomic-actions/atomic-actions.md), [Task Programs](../task-programs/task-programs.md) |
+| Semantic geometry and action execution | [Atomic Skills](../atomic-actions/atomic-actions.md), [Task Programs](../task-programs/task-programs.md) |
 
 `motion/__init__.py` and workspace analyzer exports remain lazy: Robot imports
 solver/workspace types while planners resolve robots through the manager.

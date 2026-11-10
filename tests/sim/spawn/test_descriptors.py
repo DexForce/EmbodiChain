@@ -648,6 +648,39 @@ def test_newton_contact_dimension_survives_config_and_descriptor(condim: int) ->
     assert descriptor.collisions[0].newton.condim == condim
 
 
+@pytest.mark.parametrize("solref", [(0.02, 1.0), (-1000.0, -20.0)])
+def test_newton_raw_contact_parameters_survive_config_and_descriptor(
+    solref: tuple[float, float],
+) -> None:
+    solimp = (0.9, 0.95, 0.001, 0.5, 2.0)
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "cube",
+            "shape": {"shape_type": "Cube", "size": [0.1, 0.1, 0.1]},
+            "attrs": {
+                "collision_props": {"contype": 2, "conaffinity": 4},
+                "material_props": {
+                    "backend": "newton",
+                    "solref": list(solref),
+                    "solimp": list(solimp),
+                    "solmix": 0.5,
+                },
+            },
+        }
+    )
+    descriptor, _ = rigid_desc_from_cfg(
+        RigidObjectCfg.from_dict(cfg.to_dict()), newton_solver_type="mujoco_warp"
+    )
+    native = descriptor.collisions[0].newton
+    assert native.contype == 2
+    assert native.conaffinity == 4
+    assert native.solref == pytest.approx(solref)
+    assert native.solimp == pytest.approx(solimp)
+    assert native.solmix == pytest.approx(0.5)
+    assert NewtonCollisionPropertiesCfg().contype is None
+    assert NewtonRigidBodyMaterialCfg().solref is None
+
+
 def test_procedural_rigid_collision_defaults_compile_to_both_backends() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
@@ -772,7 +805,7 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
     )
     scene = SimpleNamespace(materials={})
 
-    def parse_singleton(path, collection, label):
+    def parse_singleton(path, collection, label, *, prim_path=None):
         return scene, source
 
     monkeypatch.setattr(
@@ -817,7 +850,10 @@ def test_rigid_usd_can_recompute_source_inertia(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label: (SimpleNamespace(materials={}), source),
+        lambda path, collection, label, *, prim_path=None: (
+            SimpleNamespace(materials={}),
+            source,
+        ),
     )
     cfg = RigidObjectCfg(
         uid="cube",
@@ -850,7 +886,10 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label: (SimpleNamespace(materials={}), source),
+        lambda path, collection, label, *, prim_path=None: (
+            SimpleNamespace(materials={}),
+            source,
+        ),
     )
     cfg = RigidObjectCfg(
         uid="cube",
@@ -1193,7 +1232,7 @@ def test_imported_rigid_gap_default_is_owned_by_embodichain(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda *_args: (SimpleNamespace(materials={}), source),
+        lambda *_args, **_kwargs: (SimpleNamespace(materials={}), source),
     )
     cfg = RigidObjectCfg(
         uid="cube", shape=MeshCfg(fpath="cube.usd"), asset_physics_mode=mode
@@ -1460,7 +1499,7 @@ def test_non_mode_aware_newton_position_fallback_is_explicit() -> None:
         configure_articulation_desc(descriptor, cfg, newton_solver_type="xpbd")
 
 
-def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
+def test_dexuni_solver_consumes_position_mode_without_warning() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
@@ -1475,7 +1514,7 @@ def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        configure_articulation_desc(descriptor, cfg, newton_solver_type="auto")
+        configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
 
     assert not caught
 
@@ -1632,6 +1671,40 @@ def test_articulation_array_qpos_limits_compile_before_backend_build() -> None:
     joint = descriptor.get_joint_desc("arm_joint")
     assert joint.lower_limit == pytest.approx(-0.5)
     assert joint.upper_limit == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto"])
+@pytest.mark.parametrize("authored_velocity", [0.05, None])
+def test_robot_default_drive_preserves_authored_velocity_limit(
+    solver_type: str | None,
+    authored_velocity: float | None,
+) -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.velocity_limit = authored_velocity
+    joint.dexsim = DexsimJointDesc(max_velocity=authored_velocity)
+    cfg = RobotCfg(
+        uid="robot", fpath="robot.urdf", control_parts={"arm": ["arm_joint"]}
+    )
+    configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+    assert joint.velocity_limit == authored_velocity
+    assert joint.dexsim.max_velocity == authored_velocity
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto"])
+def test_explicit_zero_speed_override_is_preserved(solver_type: str | None) -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.velocity_limit = None
+    cfg = RobotCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        control_parts={"arm": ["arm_joint"]},
+        joint_drive_props=JointDrivePropertiesCfg(max_velocity=0.0),
+    )
+    configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+    assert joint.velocity_limit == 0.0
+    assert joint.dexsim.max_velocity == 0.0
 
 
 def test_robot_control_part_drive_rule_expands_before_spawn() -> None:

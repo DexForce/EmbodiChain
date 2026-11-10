@@ -24,19 +24,20 @@ import pytest
 import torch
 
 from embodichain.lab.sim.motion.expansion.cfg import (
-    TrajectoryGenerationJobCfg,
+    TrajectoryExpansionJobCfg,
 )
 from embodichain.lab.sim.motion.expansion.contracts import (
     CandidateIdentity,
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
+    ProposalRequest,
     SceneCase,
     TrajectoryPhase,
     ValidationCheck,
     ValidationResult,
 )
-from embodichain.lab.sim.motion.expansion.session import GenerationSession
+from embodichain.lab.sim.motion.expansion.session import ExpansionSession
 
 CASE = SceneCase("case", "initial", "scene_v1", "lift", "robot")
 JOINT_NAMES = ("joint_a", "joint_b")
@@ -50,9 +51,9 @@ ROLLOUT_VALID = ValidationResult(
 )
 
 
-def _session(**overrides: object) -> GenerationSession:
-    cfg = TrajectoryGenerationJobCfg.from_mapping(overrides)
-    session = GenerationSession(cfg)
+def _session(**overrides: object) -> ExpansionSession:
+    cfg = TrajectoryExpansionJobCfg.from_mapping(overrides)
+    session = ExpansionSession(cfg)
     reference = 1.0 if cfg.augmentation.factors.manipulability.enabled else None
     session.register_case(
         CASE, LIMITS, joint_names=JOINT_NAMES, manipulability_reference=reference
@@ -60,7 +61,7 @@ def _session(**overrides: object) -> GenerationSession:
     return session
 
 
-def _propose(session: GenerationSession, case: SceneCase = CASE, **kwargs: object):
+def _propose(session: ExpansionSession, case: SceneCase = CASE, **kwargs: object):
     return session.propose(
         case.scene_case_id,
         case.initial_state_id,
@@ -70,6 +71,44 @@ def _propose(session: GenerationSession, case: SceneCase = CASE, **kwargs: objec
         operator_id="joint_residual",
         **kwargs,
     )
+
+
+def test_expansion_streams_advance_and_replay_across_sessions() -> None:
+    def draw(session: ExpansionSession) -> torch.Tensor:
+        generator = session.expansion_generator(
+            "case",
+            "initial",
+            source_id="source",
+            source_revision="revision",
+            template_id="template",
+            operation_id="trajectory_expansion",
+        )
+        return torch.rand(4, generator=generator)
+
+    left = _session()
+    right = _session()
+
+    left_first = draw(left)
+    left_second = draw(left)
+    right_first = draw(right)
+
+    assert torch.equal(left_first, right_first)
+    assert not torch.equal(left_first, left_second)
+
+
+def test_propose_many_is_atomic_when_budget_is_insufficient() -> None:
+    session = _session(collection={"max_proposals": 1})
+    requests = (
+        ProposalRequest("case", "initial", "source", "r1", "template", "nominal"),
+        ProposalRequest("case", "initial", "source", "r1", "template", "residual"),
+    )
+
+    with pytest.raises(RuntimeError, match="Proposal budget"):
+        session.propose_many(requests)
+
+    snapshot = session.snapshot()
+    assert snapshot["counts"]["proposed"] == 0
+    assert snapshot["audit"] == ()
 
 
 def _batch(*identities: CandidateIdentity) -> CandidateTrajectoryBatch:
@@ -86,7 +125,7 @@ def _batch(*identities: CandidateIdentity) -> CandidateTrajectoryBatch:
 
 
 def _episode(
-    session: GenerationSession,
+    session: ExpansionSession,
     identity: CandidateIdentity,
     *,
     position: float = 0.5,
@@ -124,7 +163,7 @@ def _receipt(episode: ExpertEpisode, **kwargs: object) -> CommitReceipt:
 
 
 def _start(
-    session: GenerationSession,
+    session: ExpansionSession,
     case: SceneCase = CASE,
     *,
     episode_byte_budget: int | None = 4096,
@@ -186,6 +225,15 @@ def test_planning_failure_and_assigned_cancellation_do_not_count_rollouts() -> N
     assert session.take_ready("case", "initial") is not None
     session.release(ready)
     assert session.snapshot()["counts"]["rollout_attempted"] == 0
+
+
+def test_gym_joint_position_commands_share_the_expansion_episode_contract() -> None:
+    session = _session()
+    identity = _start(session)
+    episode = replace(
+        _episode(session, identity), action_representation="joint_position"
+    )
+    assert session.accept_episode(episode)
 
 
 def test_failed_validation_statuses_and_release_reason_survive_payload_discard() -> (
@@ -552,7 +600,7 @@ def test_diagnostics_keep_bounded_failure_metrics_and_detail() -> None:
 
 def test_wall_time_uses_injected_clock_and_still_allows_final_receipt() -> None:
     now = [0.0]
-    session = GenerationSession(TrajectoryGenerationJobCfg(), clock=lambda: now[0])
+    session = ExpansionSession(TrajectoryExpansionJobCfg(), clock=lambda: now[0])
     session.register_case(CASE, LIMITS, joint_names=JOINT_NAMES)
     episode = _episode(session, _start(session))
     assert session.accept_episode(episode)
@@ -579,7 +627,7 @@ def test_proposal_budget_exhaustion_and_case_conditions_do_not_reset_history() -
         )
 
 
-def _banded_session(**overrides: object) -> GenerationSession:
+def _banded_session(**overrides: object) -> ExpansionSession:
     return _session(
         collection={"target_committed_episodes": 3},
         augmentation={
@@ -665,11 +713,11 @@ def test_negative_manipulability_evidence_is_rejected() -> None:
 
 @pytest.mark.parametrize("reference", [None, 0.0, -1.0, float("nan")])
 def test_banded_coverage_requires_a_positive_reference(reference: float | None) -> None:
-    cfg = TrajectoryGenerationJobCfg.from_mapping(
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
         {"augmentation": {"factors": {"manipulability": {"enabled": True}}}}
     )
     with pytest.raises(ValueError, match="positive manipulability_reference"):
-        GenerationSession(cfg).register_case(
+        ExpansionSession(cfg).register_case(
             CASE, LIMITS, joint_names=JOINT_NAMES, manipulability_reference=reference
         )
 
@@ -687,3 +735,25 @@ def test_unbanded_coverage_rejects_a_reference_and_reports_no_bands() -> None:
     assert session.accept_episode(episode)
     session.apply_receipt(_receipt(episode))
     assert session.snapshot()["manipulability_bands"] == {"case": {}}
+
+
+def test_job_namespace_separates_physical_ids_without_changing_recipe_randomness():
+    records = []
+    for namespace in ("job-a", "job-b", "job-a"):
+        session = ExpansionSession(
+            TrajectoryExpansionJobCfg(), episode_namespace=namespace
+        )
+        session.register_case(CASE, LIMITS, joint_names=JOINT_NAMES)
+        identity, generator = _propose(session)
+        records.append(
+            (
+                identity,
+                torch.rand(4, generator=generator),
+                session.episode_ids(identity),
+            )
+        )
+    assert records[0][0] == records[1][0] == records[2][0]
+    assert torch.equal(records[0][1], records[1][1])
+    assert torch.equal(records[0][1], records[2][1])
+    assert records[0][2] == records[2][2]
+    assert records[0][2] != records[1][2]

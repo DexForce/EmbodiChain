@@ -21,13 +21,9 @@ from __future__ import annotations
 import importlib
 from importlib.util import find_spec
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock
-
 import pytest
-import torch
 
-from embodichain.lab.gym.envs.managers import ActionManager
+from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import (
     REGISTERED_ENVS,
@@ -39,27 +35,22 @@ from embodichain.utils.utility import load_config
 from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
 EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
-    "BlocksRankingRGB-v1": "embodichain_tasks.manipulation.tableware.blocks_ranking_rgb",
     "BlocksRankingSize-v1": "embodichain_tasks.manipulation.tableware.blocks_ranking_size",
     "CartPoleRL": "embodichain_tasks.classic_control.cart_pole",
     "MatchObjectContainer-v1": "embodichain_tasks.manipulation.tableware.match_object_container",
     "PlaceObjectDrawer-v1": "embodichain_tasks.manipulation.tableware.place_object_drawer",
     "PushCubeRL": "embodichain_tasks.manipulation.push_cube",
-    "RepeatedPickPlaceRlinf-Franka-v1": "embodichain_tasks.manipulation.repeated_pick_place",
-    "RepeatedPickPlaceRlinfJoint-Franka-v1": "embodichain_tasks.manipulation.repeated_pick_place",
-    "ScoopIce-v1": "embodichain_tasks.manipulation.tableware.scoop_ice",
-    "SimpleTask-v1": "embodichain_tasks.special.simple_task",
-    "StackBlocksTwo-v1": "embodichain_tasks.manipulation.tableware.stack_blocks_two",
     "StackCups-v1": "embodichain_tasks.manipulation.tableware.stack_cups",
-    "StayStillSave-v1": "embodichain_tasks.special.stay_still_save",
 }
 REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3", "RearrangementAgent-v3"}
-CONFIG_DEFINED_TASK_PROGRAM_TASKS = {"pour_water"}
+CONFIG_DEFINED_TASK_PROGRAM_TASKS = {
+    "pour_water",
+    "stack_blocks_two",
+    "blocks_ranking_rgb",
+}
 RL_SIMULATOR_ENV_IDS = {
     "CartPoleRL",
     "PushCubeRL",
-    "RepeatedPickPlaceRlinf-Franka-v1",
-    "RepeatedPickPlaceRlinfJoint-Franka-v1",
 }
 TABLEWARE_CONFIG_TASKS = {
     "blocks_ranking_rgb",
@@ -67,36 +58,12 @@ TABLEWARE_CONFIG_TASKS = {
     "match_object_container",
     "place_object_drawer",
     "pour_water",
-    "scoop_ice",
     "stack_blocks_two",
     "stack_cups",
 }
 TASK_CONFIG_ROOT = (
-    Path(__file__).resolve().parents[3] / "embodichain_tasks/configs/tasks"
+    Path(__file__).resolve().parents[3] / "extensions/embodichain_tasks/configs/tasks"
 )
-
-
-def _action_env() -> SimpleNamespace:
-    """Return the robot surface needed to construct RLinf action terms."""
-    joint_names = [f"joint_{index}" for index in range(8)]
-    robot = SimpleNamespace(
-        joint_names=joint_names,
-        body_data=SimpleNamespace(
-            qpos_limits=torch.tensor([[[-1.0, 1.0]] * len(joint_names)]),
-        ),
-        get_joint_ids=lambda name, remove_mimic=False: (
-            list(range(7)) if name == "arm" else [7]
-        ),
-        get_qpos=MagicMock(return_value=torch.zeros(2, len(joint_names))),
-        compute_ik=MagicMock(),
-        set_qpos=MagicMock(),
-    )
-    return SimpleNamespace(
-        num_envs=2,
-        device=torch.device("cpu"),
-        robot=robot,
-        active_joint_ids=list(range(len(joint_names))),
-    )
 
 
 def test_official_gym_configs_own_one_explicit_physics_backend() -> None:
@@ -114,16 +81,36 @@ def test_official_gym_configs_own_one_explicit_physics_backend() -> None:
             assert "physics_config" not in config, config_path
             owner_path = config_path.parent / environment["component"]
             owner = load_config(owner_path)
+            owners = (("component", owner_path, owner),)
+        elif type(environment) is dict and (
+            "default" in environment or "newton" in environment
+        ):
+            assert "physics" not in config, config_path
+            assert "physics_config" not in config, config_path
+            assert "default" in environment, config_path
+            owners = tuple(
+                (
+                    backend,
+                    config_path.parent / environment[backend],
+                    load_config(config_path.parent / environment[backend]),
+                )
+                for backend in ("default", "newton")
+                if backend in environment
+            )
         else:
             owner_path = config_path
             owner = config
+            owners = (("inline", owner_path, owner),)
 
-        backend = owner.get("physics")
-        assert backend in {"default", "newton"}, owner_path
-        physics_config = owner.get("physics_config", {})
-        assert type(physics_config) is dict, owner_path
-        config_type = type(physics_cfg_for_backend(backend))
-        config_type(**physics_config)
+        for variant, owner_path, owner in owners:
+            backend = owner.get("physics")
+            assert backend in {"default", "newton"}, (variant, owner_path)
+            if variant in {"default", "newton"}:
+                assert backend == variant, (variant, owner_path)
+            physics_config = owner.get("physics_config", {})
+            assert type(physics_config) is dict, owner_path
+            config_type = type(physics_cfg_for_backend(backend))
+            config_type(**physics_config)
 
 
 def test_official_action_configs_use_new_classes_only() -> None:
@@ -135,9 +122,11 @@ def test_official_action_configs_use_new_classes_only() -> None:
         if not isinstance(config, dict):
             continue
         for term in config.get("env", {}).get("actions", {}).values():
-            assert term["func"].endswith("Action"), config_path
+            assert "func" not in term or term["func"].endswith("Action"), config_path
             assert "mode" not in term, config_path
-            if term["func"] == "DefaultJointPositionAction":
+            if term.get("contract") == "joint_position.default_offset@1":
+                assert "func" not in term, config_path
+            if term.get("func") == "DefaultJointPositionAction":
                 assert "part_name" not in term.get("params", {}), config_path
 
 
@@ -164,24 +153,6 @@ def test_action_docs_and_context_use_new_public_contract() -> None:
         "ParallelGripperAction",
     ):
         assert public_name in text
-
-
-@pytest.mark.parametrize(
-    ("filename", "expected_shape"),
-    [("task.franka.rlinf.yaml", (7,)), ("task.franka.rlinf_joint.yaml", (8,))],
-)
-def test_repeated_pick_place_actions_compose_flat_manager(
-    filename: str,
-    expected_shape: tuple[int, ...],
-) -> None:
-    """RLinf deployments compose ordered arm and gripper action slices."""
-    config_path = TASK_CONFIG_ROOT / "manipulation/repeated_pick_place" / filename
-    cfg = config_to_cfg(load_config(config_path), source_path=config_path)
-    manager = ActionManager(cfg.actions, _action_env())
-
-    assert manager.active_functors == ["arm_action", "gripper_action"]
-    assert manager.single_action_space.shape == expected_shape
-    assert cfg.control_parts == ["arm", "hand"]
 
 
 def test_import_registered_gym_ids_resolve_to_flat_task_modules() -> None:
@@ -260,3 +231,28 @@ def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
         assert integration_path.is_file()
         assert "scene_binding" in load_config(integration_path)
         assert not (config_root / "task_program/scene_binding.yaml").exists()
+
+
+@pytest.mark.parametrize("task_name", sorted(CONFIG_DEFINED_TASK_PROGRAM_TASKS))
+def test_task_program_deployments_configure_overall_instructions(
+    task_name: str,
+) -> None:
+    """Task Program goals remain available independently of recording."""
+    path = (
+        TASK_CONFIG_ROOT / "manipulation/tableware" / task_name / "task.cobotmagic.yaml"
+    )
+    cfg = config_to_cfg(load_config(path), source_path=path)
+    assert "instruction" not in cfg.dataset.lerobot.params
+    instruction = cfg.task_instruction or cfg.task_program.instruction
+    assert isinstance(instruction, str) and instruction.strip()
+    assert instruction != "unknown_task"
+
+
+@pytest.mark.parametrize("instruction", ["", "  ", " padded ", True, 7])
+def test_task_instruction_rejects_invalid_configuration(instruction) -> None:
+    path = TASK_CONFIG_ROOT / "manipulation/tableware/stack_cups/env.json"
+    payload = load_config(path)
+    payload = _resolve_gym_components(payload, base_dir=path.parent).config
+    payload["env"]["task_instruction"] = instruction
+    with pytest.raises(ValueError, match="env.task_instruction"):
+        config_to_cfg(payload, source_path=path)

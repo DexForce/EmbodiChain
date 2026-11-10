@@ -28,6 +28,8 @@ from embodichain.learning.rl.runtime import (
     _build_gym_environment,
     build_gym_policy_runtime,
 )
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg
 
 
 def _policy_config() -> dict:
@@ -101,6 +103,42 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
     assert runtime.env_cfg.sim_cfg.render_cfg.renderer == "hybrid"
 
 
+@pytest.mark.parametrize("authored", ["auto", "hybrid", "no-render"])
+@pytest.mark.parametrize("override", [None, "fast-rt"])
+def test_gym_runtime_preserves_task_renderer_when_override_is_omitted(
+    tmp_path, monkeypatch, authored, override
+) -> None:
+    gym_config = tmp_path / "gym.yaml"
+    gym_config.write_text("id: Example\n", encoding="utf-8")
+    env_cfg = SimpleNamespace(
+        num_envs=1,
+        sim_cfg=SimulationManagerCfg(render_cfg=RenderCfg(renderer=authored)),
+    )
+    original_render_cfg = env_cfg.sim_cfg.render_cfg
+    monkeypatch.setattr(
+        "embodichain.learning.rl.runtime.config_to_cfg",
+        lambda value, manager_modules: env_cfg,
+    )
+    monkeypatch.setattr(
+        "embodichain.learning.rl.runtime.build_env",
+        lambda env_id, base_env_cfg: GymEnvironment(),
+    )
+
+    runtime = _build_gym_environment(
+        {"trainer": {"gym_config": "gym.yaml"}},
+        simulation_device=torch.device("cpu"),
+        num_envs=None,
+        headless=True,
+        renderer=override,
+        gpu_id=0,
+        config_dir=tmp_path,
+    )
+
+    assert runtime.env_cfg.sim_cfg.render_cfg.renderer == (override or authored)
+    if override is None:
+        assert runtime.env_cfg.sim_cfg.render_cfg is original_render_cfg
+
+
 @pytest.mark.parametrize(
     ("manager_dim", "action_dim"),
     [
@@ -146,3 +184,60 @@ def test_gym_runtime_uses_the_same_task_spaces_for_policy_build(
     sampled = runtime.policy(TensorDict({"obs": torch.zeros(1, 3)}, batch_size=[1]))
     assert sampled["action"].shape == env.action_space.shape
     assert torch.isfinite(sampled["action"]).all()
+
+
+@pytest.mark.parametrize(
+    "event_name,cameras,needs_renderer",
+    [
+        ("record_camera_data", None, True),
+        ("record_camera_data_async", None, True),
+        ("validation_cameras", [], False),
+        ("validation_cameras", [{"uid": "validation"}], True),
+    ],
+)
+@pytest.mark.parametrize("authored", ["auto", "no-render", "fast-rt"])
+def test_active_trainer_cameras_reserve_renderer_before_environment_build(
+    tmp_path, monkeypatch, event_name, cameras, needs_renderer, authored
+) -> None:
+    from embodichain.lab.gym.envs.managers import record
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+    from embodichain.lab.sim import cfg as sim_cfg
+
+    monkeypatch.setattr(sim_cfg, "DEFAULT_RENDERER", "auto")
+    env_cfg = SimpleNamespace(
+        num_envs=1,
+        sim_cfg=SimulationManagerCfg(render_cfg=RenderCfg(renderer=authored)),
+    )
+    monkeypatch.setattr(
+        "embodichain.learning.rl.runtime.load_config", lambda _: {"id": "Example"}
+    )
+    monkeypatch.setattr(
+        "embodichain.learning.rl.runtime.config_to_cfg",
+        lambda *_args, **_kwargs: env_cfg,
+    )
+
+    def build(_id, *, base_env_cfg):
+        assert base_env_cfg.sim_cfg.render_cfg.renderer == (
+            "hybrid" if authored == "auto" and needs_renderer else authored
+        )
+        return object()
+
+    monkeypatch.setattr("embodichain.learning.rl.runtime.build_env", build)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer",
+        lambda _: "hybrid",
+    )
+    _build_gym_environment(
+        {"trainer": {"gym_config": "task.yaml"}},
+        simulation_device=torch.device("cpu"),
+        num_envs=1,
+        headless=True,
+        renderer=None,
+        gpu_id=0,
+        trainer_events=[
+            EventCfg(
+                func=getattr(record, event_name),
+                params={} if cameras is None else {"cameras": cameras},
+            )
+        ],
+    )

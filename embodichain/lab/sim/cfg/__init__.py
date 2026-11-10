@@ -39,6 +39,7 @@ from .articulation import (
     link_attrs_from_dict,
 )
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .source import UsdSourceCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -63,24 +64,24 @@ from .rigid import (
     RigidBodyPhysicsCfg,
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
+from .visual_object import VisualObjectCfg
 from .scene import LightCfg, RigidConstraintCfg
-from .simulation import (
+from .physics import (
     DefaultPhysicsCfg,
-    DLSSCfg,
     GPUMemoryCfg,
     NewtonCollisionPipelineCfg,
     NewtonPhysicsCfg,
     PhysicsBackendCfg,
-    RenderCfg,
     physics_backend_from_cfg,
     physics_cfg_for_backend,
     validate_physics_cfg,
 )
+from .rendering import DenoisingCfg, DenoisingMode, DLSSCfg, NRDCfg, RenderCfg
 from .urdf import URDFCfg
 from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowCaptureCfg, WindowRecordCfg
 
 # The renderer selection code intentionally mutates this package-level value.
-DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
+DEFAULT_RENDERER: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "auto"
 
 # Robot imports are kept last because SolverCfg discovery imports simulation
 # modules that themselves rely on the public facade above.
@@ -89,7 +90,10 @@ from .robot import RobotCfg, RobotPresetCfg  # noqa: E402
 __all__ = [
     "DEFAULT_RENDERER",
     "AssetPhysicsMode",
+    "DenoisingCfg",
+    "DenoisingMode",
     "DLSSCfg",
+    "NRDCfg",
     "RenderCfg",
     "GPUMemoryCfg",
     "PhysicsBackendCfg",
@@ -116,8 +120,10 @@ __all__ = [
     "NewtonRigidBodyMaterialCfg",
     "RigidBodyPhysicsCfg",
     "ObjectBaseCfg",
+    "UsdSourceCfg",
     "LightCfg",
     "RigidObjectCfg",
+    "VisualObjectCfg",
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",

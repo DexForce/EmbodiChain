@@ -1,5 +1,4 @@
 embodichain.compute
-===================
 
 Shared array and tensor computations
 ------------------------------------
@@ -20,7 +19,7 @@ not load Torch or Warp. Domain packages load their required dependencies.
 
 Private ``_warp`` modules are implementation details, not a backend registry.
 Simulation-specific contact scattering belongs to
-``embodichain.lab.sim.sensors._warp.contact``.
+``embodichain.lab.sim.sensors.contact._warp.scatter``.
 
 Trajectory API
 --------------
@@ -30,6 +29,11 @@ Trajectory API
 and may omit interior input samples. ``warp_trajectory_qpos`` changes a joint
 trajectory using interpolated offsets at supplied keyframes; warping here
 means trajectory deformation.
+
+Use ``resample_with_distance(..., backend="torch")`` for dtype-preserving
+Torch resampling without entering Warp. The default ``auto`` path retains its
+float32 Warp implementation and Torch fallback. Both operate on batched paths;
+stationary paths and repeated endpoints remain valid inputs.
 
 .. code-block:: python
 
@@ -44,9 +48,12 @@ means trajectory deformation.
 
 .. autosummary::
 
+   retime_joint_paths
+   PositionRangeMonitor
    differentiate_positions
    resample_in_time
    interpolate_with_distance
+   interpolate_minimum_jerk
    interpolate_with_nums
    resample_with_distance
    sort_and_padding_key_frame
@@ -63,8 +70,26 @@ or motion limits. ``resample_in_time`` preserves endpoints and total duration
 while sampling the original time profile; callers must recompute derivatives
 after changing samples or timing.
 
+``retime_joint_paths`` fits and times a joint path with explicit shared velocity
+and acceleration budgets. Its plain tensor tuple retains gradients
+and explicit validity/length tensors. Duration is the sum of arrival intervals;
+solver success does not certify geometric task success.
+
+Fixed-count speed allocation
+----------------------------
+
+``interpolate_velocity_grid`` allocates each B=1 keyframe edge enough original
+control intervals for its slowest joint, then distributes spare intervals in
+input order. It retains all keyframe endpoints and rejects an insufficient fixed
+sample count instead of lengthening duration. This explicitly selected numeric
+helper does not change minimum-jerk interpolation or planner timing defaults.
+
 Implementation modules
 ----------------------
+
+.. automodule:: embodichain.compute.trajectory.toppra
+   :members:
+
 
 .. automodule:: embodichain.compute.trajectory.interpolation
    :members:
@@ -77,6 +102,21 @@ Implementation modules
 
 .. automodule:: embodichain.compute.trajectory.warping
    :members:
+
+Sampled coordinate windows
+--------------------------
+
+``PositionRangeMonitor`` separates numerical window tracking from observation
+and execution. The caller supplies coordinates and an independently chosen
+pointwise target mask. Candidate-window drift resets the complete range;
+initial samples and duplicate step counters never add elapsed intervals.
+Missing intervals reject rather than fabricating stability. Success is current,
+not latched, and periodic joint coordinates are not unwrapped implicitly.
+This monitor imports no Robot, simulator, environment or TaskSpec.
+
+.. automodule:: embodichain.compute.trajectory.stability
+   :members:
+   :no-index:
 
 Kinematics API
 --------------
@@ -127,3 +167,70 @@ Pure trajectory functions formerly defined in
 compatibility. New consumers should import from ``compute.trajectory``.
 ``get_trajectory_object_offset_qpos`` remains in the simulation utility module
 because it calls a stateful solver's FK and IK interfaces.
+
+Geometry tensor kernels
+-----------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.compute.scene_geometry
+
+Differentiable kinematics
+-------------------------
+
+The fixed-step DLS implementation preserves target and seed gradients through
+both FK and the geometric Jacobian. ``SerialChainKinematics`` adapts a copied
+PK chain without loading simulation. Its ``forward_kinematics`` method computes
+only TCP poses, while ``evaluate`` also constructs differentiable Jacobians in
+the same FK pass. ``DifferentiableIKCfg`` configures the
+compute function and Torch layer; failed solves retain their last iterate.
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autosummary::
+
+   damped_least_squares_step
+   solve_dls_ik
+   pose_error
+   SerialChainKinematics
+   DifferentiableIKCfg
+   DifferentiableIKResult
+
+.. automodule:: embodichain.compute.kinematics.dls
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.pose_error
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.serial_chain
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.types
+   :members:
+
+
+Planar floor and silhouette geometry
+------------------------------------
+
+.. currentmodule:: embodichain.compute.geometry.landing
+
+These CPU routines preserve actual floor triangles and payload silhouettes,
+including holes. They consume explicit numerical geometry without reading a
+robot or simulator. Landing selection retains its ordered clearance margins;
+measurements leave task acceptance and support thresholds to callers.
+
+.. autosummary::
+
+   planar_floor_region
+   select_container_landing
+   planar_placement_metrics
+   validate_planar_pose
+
+.. autofunction:: planar_floor_region
+
+.. autofunction:: select_container_landing
+
+.. autofunction:: planar_placement_metrics
+
+.. autofunction:: validate_planar_pose

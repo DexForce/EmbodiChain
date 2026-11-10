@@ -79,7 +79,7 @@ from embodichain.lab.sim.motion.workspace.visualizers import (
     select_inspection_indices,
 )
 from embodichain.lab.sim.objects.robot import Robot
-from embodichain.lab.sim.robots import CobotMagicCfg, URRobotCfg
+from embodichain_robots import CobotMagicCfg, URRobotCfg
 from embodichain.utils import logger
 from embodichain.utils.utility import reset_all_seeds
 

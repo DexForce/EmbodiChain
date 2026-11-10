@@ -29,6 +29,8 @@ import pytest
 import torch
 import yaml
 
+from task_program_support import completed_runtime
+
 from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.sim.cfg import (
@@ -43,7 +45,10 @@ from embodichain.lab.task_program.integrations import (
 from embodichain.lab.task_program.integrations._configured_composition import (
     _load_configured_task_program_deployment,
 )
-from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
+from embodichain.lab.gym.utils._component_composition import (
+    _resolve_environment_component,
+    _resolve_gym_components,
+)
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.gym.envs.task_program.bridge import (
@@ -52,27 +57,22 @@ from embodichain.lab.gym.envs.task_program.bridge import (
     EnvironmentStepClock,
     RuntimeCommandFrameEncoder,
 )
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
     ArticulationAffordanceGeometry,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     DynamicCollisionMode,
     EntityState,
     ObjectSemantics,
     Slide,
     SlideAffordance,
     SlideOptions,
-    TaskState,
     TimedTerminalAcceptance,
 )
 from embodichain.lab.task_program.semantics.calls import (
     Pick,
     Place,
     RegisteredSemanticCall,
-)
-from embodichain.lab.task_program.runtime.results import (
-    SemanticExecutionResult,
-    SemanticExecutionStatus,
 )
 from embodichain.lab.task_program.semantics.scene import (
     SceneAffordanceRef,
@@ -91,20 +91,11 @@ _REPEATED_CUBE_INTEGRATION = Path(
     "tasks/manipulation/repeated_pick_place/task_program/integration.yaml"
 )
 _REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml")
-_REPEATED_CUBE_NEWTON_GYM_CONFIG = Path(
-    "tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml"
-)
-_REPEATED_CUBE_FRANKA_NEWTON_GYM_CONFIG = Path(
-    "tasks/manipulation/repeated_pick_place/task.franka.newton.yaml"
-)
 _RUBIKS_CUBE_GYM_CONFIG = Path(
     "tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml"
 )
 _OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/task_program/program.yaml")
 _OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/task.ur5.yaml")
-_OPEN_DRAWER_NEWTON_GYM_CONFIG = Path(
-    "tasks/manipulation/open_drawer/task.ur5.newton.yaml"
-)
 _TRAJECTORY_POLICY = Path("components/execution_policies/trajectory_open_loop.yaml")
 _UR5_COMPONENT = Path("components/embodiments/ur5_dh_pgi_140_80.yaml")
 _OPEN_DRAWER_CALL_ID = "simulation.articulation_link_slide"
@@ -177,132 +168,9 @@ class _NeverObserveProvider:
         raise AssertionError("Task configuration compilation must not observe state.")
 
 
-class _FixedQposProvider:
-    """Return a finite full-qpos hold for the bridge's unused command sink."""
-
-    def current_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
-        return torch.zeros(
-            (env_ids.numel(), _LIFECYCLE_ROBOT_DOF),
-            dtype=torch.float32,
-            device=env_ids.device,
-        )
-
-
-class _FreshObservationPort:
-    """Issue one distinct observation generation for every segment runtime."""
-
-    def __init__(self) -> None:
-        self.generations: list[int] = []
-
-    def capture(self) -> int:
-        generation = len(self.generations) + 1
-        self.generations.append(generation)
-        return generation
-
-
-class _CompletedSegmentRuntime:
-    """Complete each semantic prefix from one freshly captured observation."""
-
-    def __init__(
-        self,
-        observation: _FreshObservationPort,
-        lifecycle_events: list[tuple[str, int]],
-    ) -> None:
-        self._observation = observation
-        self._lifecycle_events = lifecycle_events
-        self._status = SemanticExecutionStatus.IDLE
-        self._result = self._make_result(
-            status=SemanticExecutionStatus.IDLE,
-            workflow_id=None,
-            eligible_mask=torch.ones(_LIFECYCLE_BATCH_SIZE, dtype=torch.bool),
-            generation=0,
-        )
-        self.analysis_window_lengths: list[int] = []
-        self.executed_semantic_ids: list[str] = []
-        self.eligible_masks: list[torch.Tensor | None] = []
-
-    @staticmethod
-    def _make_result(
-        *,
-        status: SemanticExecutionStatus,
-        workflow_id: str | None,
-        eligible_mask: torch.Tensor,
-        generation: int,
-    ) -> SemanticExecutionResult:
-        terminal = status is SemanticExecutionStatus.COMPLETED
-        return SemanticExecutionResult(
-            status=status,
-            workflow_id=workflow_id,
-            current_call_index=None,
-            env_ids=torch.arange(_LIFECYCLE_BATCH_SIZE, dtype=torch.long),
-            success_mask=(
-                eligible_mask.clone() if terminal else torch.zeros_like(eligible_mask)
-            ),
-            failure_mask=torch.zeros_like(eligible_mask),
-            cancelled_mask=torch.zeros_like(eligible_mask),
-            eligible_mask=eligible_mask,
-            task_state=TaskState.empty(_LIFECYCLE_BATCH_SIZE, "cpu"),
-            message=f"observation_generation={generation}",
-        )
-
-    @property
-    def result(self) -> SemanticExecutionResult:
-        return self._result
-
-    @property
-    def status(self) -> SemanticExecutionStatus:
-        return self._status
-
-    def start(
-        self,
-        *calls: object,
-        workflow_id: str = "semantic_workflow",
-        eligible_mask: torch.Tensor | None = None,
-        execution_prefix_length: int | None = None,
-    ) -> SemanticExecutionResult:
-        call_values = tuple(calls[0]) if len(calls) == 1 else tuple(calls)
-        if execution_prefix_length is None:
-            raise AssertionError("A packaged sequential segment requires a prefix.")
-        selected = (
-            torch.ones(_LIFECYCLE_BATCH_SIZE, dtype=torch.bool)
-            if eligible_mask is None
-            else eligible_mask.clone()
-        )
-        execution_calls = call_values[:execution_prefix_length]
-        generation = self._observation.capture()
-        self._lifecycle_events.append(("observe", generation))
-        self.analysis_window_lengths.append(len(call_values))
-        self.executed_semantic_ids.extend(
-            str(getattr(call, "semantic_id")) for call in execution_calls
-        )
-        self.eligible_masks.append(
-            None if eligible_mask is None else eligible_mask.clone()
-        )
-        self._status = SemanticExecutionStatus.COMPLETED
-        self._result = self._make_result(
-            status=SemanticExecutionStatus.COMPLETED,
-            workflow_id=workflow_id,
-            eligible_mask=selected,
-            generation=generation,
-        )
-        return self._result
-
-    def step(self) -> SemanticExecutionResult:
-        raise AssertionError("A terminal fake runtime must not be stepped.")
-
-    def cancel(self, reason: str) -> SemanticExecutionResult:
-        raise AssertionError(f"A completed fake runtime cannot be cancelled: {reason}")
-
-    def adopt_verified_task_state(
-        self, task_state: TaskState
-    ) -> SemanticExecutionResult:
-        del task_state
-        return self._result
-
-
 def _read_payload(relative_path: Path) -> dict[str, object]:
     """Load one packaged JSON/YAML example as inert data."""
-    path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
     if path.suffix == ".json":
         payload = json.loads(path.read_text(encoding="utf-8"))
     else:
@@ -313,7 +181,7 @@ def _read_payload(relative_path: Path) -> dict[str, object]:
 
 def _deployment(relative_path: Path):
     """Compose one packaged environment deployment."""
-    path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
     payload = _read_payload(relative_path)
     physical = _resolve_gym_components(payload, base_dir=path.parent)
     assert physical.embodiment_skill_profile is not None
@@ -365,16 +233,26 @@ def _drawer_robot_profile_binding() -> SimulationRobotSkillProfileBinding:
 
 def _configure_cube_environment():
     """Load the packaged config and register its declared integration."""
-    path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / _REPEATED_CUBE_GYM_CONFIG
+    path = (
+        _REPOSITORY_ROOT
+        / "extensions/embodichain_tasks/configs"
+        / _REPEATED_CUBE_GYM_CONFIG
+    )
     payload = _read_payload(_REPEATED_CUBE_GYM_CONFIG)
     cfg = config_to_cfg(payload, source_path=path)
     return payload, cfg, REGISTERED_ENVS[str(payload["id"])]
 
 
-def _configure_packaged_environment(relative_path: Path):
+def _configure_packaged_environment(relative_path: Path, *, physics: str | None = None):
     """Load one packaged deployment and its selected physical component."""
-    path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
     payload = _read_payload(relative_path)
+    if physics is not None:
+        payload = _resolve_environment_component(
+            payload,
+            base_dir=path.parent,
+            selected_backend=physics,
+        )
     return payload, config_to_cfg(payload, source_path=path)
 
 
@@ -383,14 +261,20 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     default_payload, default_cfg = _configure_packaged_environment(
         _REPEATED_CUBE_GYM_CONFIG
     )
-    assert default_payload["environment"] == {"component": "env.yaml"}
+    assert default_payload["environment"] == {
+        "default": "envs/default.yaml",
+        "newton": "envs/newton.yaml",
+    }
     assert isinstance(default_cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
     assert default_cfg.rigid_object[0].attrs.collision_props is None
     assert (
         default_cfg.robot.link_attrs["newton_gripper_contacts"].attrs.mass_props is None
     )
 
-    _, cube_cfg = _configure_packaged_environment(_REPEATED_CUBE_NEWTON_GYM_CONFIG)
+    _, cube_cfg = _configure_packaged_environment(
+        _REPEATED_CUBE_GYM_CONFIG,
+        physics="newton",
+    )
     assert isinstance(cube_cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
     cube_physics = cube_cfg.sim_cfg.physics_cfg
     assert cube_physics.num_substeps == 20
@@ -429,7 +313,8 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     assert robot_material.rolling_friction == pytest.approx(0.01)
 
     _, franka_cube_cfg = _configure_packaged_environment(
-        _REPEATED_CUBE_FRANKA_NEWTON_GYM_CONFIG
+        Path("tasks/manipulation/repeated_pick_place/task.franka.yaml"),
+        physics="newton",
     )
     assert isinstance(franka_cube_cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
     assert franka_cube_cfg.sim_cfg.physics_cfg.solver_cfg == cube_physics.solver_cfg
@@ -445,9 +330,10 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     )
 
     drawer_payload, drawer_cfg = _configure_packaged_environment(
-        _OPEN_DRAWER_NEWTON_GYM_CONFIG
+        _OPEN_DRAWER_GYM_CONFIG,
+        physics="newton",
     )
-    assert drawer_payload["environment"] == {"component": "env.newton.yaml"}
+    assert drawer_payload["physics"] == "newton"
     assert isinstance(drawer_cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
     drawer_physics = drawer_cfg.sim_cfg.physics_cfg
     assert drawer_physics.num_substeps == 20
@@ -463,7 +349,10 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     default_drawer_payload, default_drawer_cfg = _configure_packaged_environment(
         _OPEN_DRAWER_GYM_CONFIG
     )
-    assert default_drawer_payload["environment"] == {"component": "env.yaml"}
+    assert default_drawer_payload["environment"] == {
+        "default": "envs/default.yaml",
+        "newton": "envs/newton.yaml",
+    }
     assert isinstance(default_drawer_cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
     assert default_drawer_cfg.articulation[0].link_attrs is None
 
@@ -500,8 +389,8 @@ def _drawer_compiler() -> TaskProgramCompiler:
     return TaskProgramCompiler.from_scene_registry(registry)
 
 
-def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
-    """The packaged cube task expands to three independently scoped cycles."""
+def test_repeated_cube_program_is_six_grasp_and_placement_segments() -> None:
+    """The packaged task preserves three cycles with two semantic subgoals each."""
     config = _decode_deployed_program(
         _read_payload(_REPEATED_CUBE_PROGRAM),
         deployment_path=_REPEATED_CUBE_GYM_CONFIG,
@@ -519,96 +408,60 @@ def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
 
     segments = tuple(_cube_compiler().compile(config))
 
-    assert [segment.name for segment in segments] == ["move_cube"] * 3
-    assert [segment.segment_index for segment in segments] == [0, 1, 2]
-    assert [len(segment.calls) for segment in segments] == [2, 2, 2]
-    assert all(type(segment.calls[0].call) is Pick for segment in segments)
-    assert all(type(segment.calls[1].call) is Place for segment in segments)
+    assert [segment.name for segment in segments] == ["pick_cube", "place_cube"] * 3
+    assert [segment.segment_index for segment in segments] == list(range(6))
+    assert [len(segment.calls) for segment in segments] == [1] * 6
+    assert all(type(segment.calls[0].call) is Pick for segment in segments[::2])
+    assert all(type(segment.calls[0].call) is Place for segment in segments[1::2])
     assert [
-        segment.calls[1].target_selections[0].value_index for segment in segments
+        segment.calls[0].target_selections[0].value_index for segment in segments[1::2]
     ] == [0, 1, 0]
     assert all(segment.post_policies == () for segment in segments)
     assert all(segment.validators == () for segment in segments)
 
 
-def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
-    """The real packaged program owns three ordered observable lifecycles."""
+def test_packaged_repeated_cube_runs_six_lazy_bridge_lifecycles() -> None:
+    """The packaged six-segment program connects to the ordinary bridge contract."""
     config = _decode_deployed_program(
         _read_payload(_REPEATED_CUBE_PROGRAM),
         deployment_path=_REPEATED_CUBE_GYM_CONFIG,
     )
     compiled = _cube_compiler().compile(config)
-    lifecycle_events: list[tuple[str, int]] = []
-    observation = _FreshObservationPort()
+    runtime = completed_runtime(torch.arange(_LIFECYCLE_BATCH_SIZE))
     clock = EnvironmentStepClock(_LIFECYCLE_STEP_DT)
-    sink = BufferedGymCommandSink(
-        RuntimeCommandFrameEncoder(_FixedQposProvider()),
-        clock,
+    qpos = SimpleNamespace(
+        current_qpos=lambda ids: torch.zeros(ids.numel(), _LIFECYCLE_ROBOT_DOF)
     )
-    runtime = _CompletedSegmentRuntime(observation, lifecycle_events)
-    bridge = TaskProgramDemoBridge(
-        compiled,
-        runtime,
-        sink,
-        clock,
+    sink = BufferedGymCommandSink(RuntimeCommandFrameEncoder(qpos), clock)
+    iterator = iter(
+        TaskProgramDemoBridge(compiled, runtime, sink, clock).iter_segments()
     )
 
-    iterator = iter(bridge.iter_segments())
-    segment_names: list[str | None] = []
-    segment_metadata: list[dict[str, object]] = []
-    accepted_masks: list[list[bool]] = []
-    for segment_index in range(3):
-        observation_count = len(observation.generations)
-        demo_segment = next(iterator)
-        segment_names.append(demo_segment.name)
-
-        # Merely requesting the next lazy segment must not capture live state.
-        assert len(observation.generations) == observation_count
-        actions = tuple(demo_segment.actions)
-
-        assert observation.generations == list(range(1, segment_index + 2))
-        assert actions == ()
-        assert demo_segment.metadata["validation"] is None
-        accepted_masks.append(demo_segment.validator().tolist())
-        segment_metadata.append(dict(demo_segment.metadata))
+    for index, expected_name in enumerate(["pick_cube", "place_cube"] * 3):
+        segment = next(iterator)
+        assert segment.name == expected_name
+        assert runtime.start.call_count == index  # Requesting a segment stays lazy.
+        assert tuple(segment.actions) == ()
+        assert segment.validator().tolist() == [True, True]
+        metadata = segment.metadata
+        assert metadata["task_program_id"] == compiled.program_id
+        assert metadata["program_segment_index"] == index
+        assert metadata["segment_count"] == 6
+        assert metadata["semantic_call_indices"] == [index]
+        assert metadata["validation"]["eligible_mask_before_validation"] == [True, True]
+        assert metadata["validation"]["accepted_mask"] == [True, True]
 
     with pytest.raises(StopIteration):
         next(iterator)
-
-    assert segment_names == ["move_cube"] * 3
-    assert runtime.analysis_window_lengths == [6, 4, 2]
-    assert runtime.executed_semantic_ids == ["pick", "place"] * 3
-    assert observation.generations == [1, 2, 3]
-    assert lifecycle_events == [("observe", 1), ("observe", 2), ("observe", 3)]
-    assert runtime.eligible_masks[0] is None
-    assert [mask.tolist() for mask in runtime.eligible_masks[1:]] == [
-        [True, True],
-        [True, True],
-    ]
-    assert accepted_masks == [[True, True]] * 3
-
-    for segment_index, metadata in enumerate(segment_metadata):
-        assert metadata["task_program_id"] == compiled.program_id
-        assert metadata["program_segment_index"] == segment_index
-        assert metadata["segment_count"] == 3
-        assert metadata["semantic_call_indices"] == [
-            2 * segment_index,
-            2 * segment_index + 1,
-        ]
-        assert metadata["post_policy_count"] == 0
-        assert metadata["validator_count"] == 0
-        runtime_metadata = metadata["runtime"]
-        assert isinstance(runtime_metadata, dict)
-        assert runtime_metadata["message"] == (
-            f"observation_generation={segment_index + 1}"
-        )
-        assert metadata["post_policies"] == []
-        validation = metadata["validation"]
-        assert isinstance(validation, dict)
-        assert validation["eligible_mask_before_validation"] == [True, True]
-        assert validation["accepted_mask"] == [True, True]
-        assert validation["validators"] == []
-        json.dumps(metadata, allow_nan=False, sort_keys=True)
+    starts = runtime.start.call_args_list
+    assert len(starts) == 6
+    assert [len(item.args[0]) for item in starts] == [6, 5, 4, 3, 2, 1]
+    assert [item.kwargs["execution_prefix_length"] for item in starts] == [1] * 6
+    assert [item.args[0][0].semantic_id for item in starts] == ["pick", "place"] * 3
+    assert starts[0].kwargs.get("eligible_mask") is None
+    assert [item.kwargs["eligible_mask"].tolist() for item in starts[1:]] == [
+        [True, True]
+    ] * 5
 
 
 def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
@@ -635,7 +488,7 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
     )
     segments = tuple(_cube_compiler().compile(config))
 
-    assert len(segments) == 4
+    assert len(segments) == 8
     last_place = segments[-1].calls[-1].call
     assert type(last_place) is Place
     assert last_place.at is not None
@@ -715,7 +568,7 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
         )
     )
     robot = object()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
         robot=robot,
         device=torch.device("cpu"),
@@ -840,7 +693,7 @@ def test_explicit_slide_axis_bypasses_sampling_with_non_unit_scale() -> None:
         )
     )
     robot = object()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
         robot=robot,
         device=torch.device("cpu"),
@@ -1009,7 +862,7 @@ def test_example_profiles_execute_only_open_loop_trajectories(
     assert isinstance(preset.tracking_policy.terminal, TimedTerminalAcceptance)
     assert preset.tracking_policy.terminal.settle_duration == 0.0
     assert preset.recovery_policy.max_replans == 0
-    assert preset.recovery_policy.max_action_retries == 0
+    assert preset.recovery_policy.max_skill_retries == 0
     assert preset.workflow_recovery_policy.max_recovery_attempts == 0
     assert dict(preset.effect_monitors) == {}
     assert preset.runner_cfg.hold_on_completion is False
@@ -1027,7 +880,7 @@ def test_cube_policy_and_skill_parameters_have_single_component_owners() -> None
     assert "grasp_pose_generators" not in integration.get("runtime_services", {})
     assert policy["motion"]["sample_count"] == _EXPECTED_TRAJECTORY_SAMPLE_COUNT
     services = embodiment["skill_profile"]["runtime_services"]
-    assert services["grasp_pose_generators"]["hand"]["sample_count"] == (
+    assert services["grasp_pose_generators"]["eef"]["sample_count"] == (
         _EXPECTED_GRASP_SAMPLES
     )
 
@@ -1048,14 +901,20 @@ def test_cube_registration_has_no_contact_evidence_route() -> None:
         Path("tasks/manipulation/open_drawer/task.ur5.yaml"),
     ),
 )
-def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
+def test_example_gym_configs_keep_minimal_recording_configuration(
     relative_path: Path,
 ) -> None:
-    """Runnable examples keep only deterministic simulation and motion inputs."""
+    """Runnable examples retain deterministic physics and LeRobot recording."""
     payload = _read_payload(relative_path)
-    environment = _read_payload(relative_path.parent / "env.yaml")
-
-    assert payload["environment"] == {"component": "env.yaml"}
+    if relative_path.parent.name in {"repeated_pick_place", "open_drawer"}:
+        environment = _read_payload(relative_path.parent / "envs/default.yaml")
+        assert payload["environment"] == {
+            "default": "envs/default.yaml",
+            "newton": "envs/newton.yaml",
+        }
+    else:
+        environment = _read_payload(relative_path.parent / "env.yaml")
+        assert payload["environment"] == {"component": "env.yaml"}
     assert set(payload["task_program"]) == {
         "program",
         "integration",
@@ -1068,7 +927,15 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
     assert "task_program_integration_path" not in payload
     assert "task_program_runtime" not in payload
     assert environment["env"]["events"] == {}
-    assert environment["env"]["dataset"] == {}
+    assert set(environment["env"]["dataset"]) == {"lerobot"}
+    recorder = environment["env"]["dataset"]["lerobot"]
+    assert recorder["func"] == "LeRobotRecorder"
+    assert recorder["mode"] == "save"
+    instruction = _read_payload(relative_path.parent / "task_program/program.yaml")[
+        "instruction"
+    ]
+    assert isinstance(instruction, str) and instruction.strip()
+    assert "instruction" not in recorder["params"]
     assert environment["physics"] == "default"
     assert "physics_config" not in environment
 

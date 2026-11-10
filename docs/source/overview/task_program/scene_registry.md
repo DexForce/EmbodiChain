@@ -6,7 +6,7 @@
 ```
 
 `SceneRegistry` is the canonical integration boundary between semantic scene
-identity, atomic-action snapshots, and planner collision worlds. Register an
+identity, atomic-skill snapshots, and planner collision worlds. Register an
 entity once under an authoritative ID, resolve external names at that boundary,
 then use only the canonical ID in semantic calls, snapshots, dependencies, and
 dynamic-obstacle configuration.
@@ -87,9 +87,9 @@ scene_binding:
 
 The three identities have distinct roles. The parent `entity_id` (`cube`) is
 the canonical semantic object used by calls such as `Pick(object="cube")`.
-`simulation_uid` selects the physical object declared in the reusable
-`env.yaml`. `cube_grasp` is the globally unique canonical ID of one semantic
-child that can be passed as an explicit grasp or named by
+`simulation_uid` selects the physical object declared in the selected
+environment component. `cube_grasp` is the globally unique canonical ID of a
+semantic child that can be passed as an explicit grasp or named by
 `default_grasp_affordance`. The child ID remains necessary because one entity
 may expose multiple affordances and every affordance remains directly
 addressable in the flat Scene Registry. Deployment composition rejects a
@@ -220,7 +220,7 @@ one strict selection rule:
 No compatible child, a parent mismatch, or a capability mismatch raises
 {class}`UnsupportedSceneAffordanceError`. There is no declaration-order
 fallback. Once selected, {meth}`SceneRegistry.object_semantics` creates an owned
-atomic-action `ObjectSemantics` value using the canonical object ID and a copied
+atomic-skill `ObjectSemantics` value using the canonical object ID and a copied
 affordance payload.
 
 {attr}`SceneRegistry.entity_metadata` projects provider-free
@@ -234,7 +234,7 @@ the integration contract rather than runtime pose state.
 
 ## Publish canonical snapshots
 
-For an atomic-action planning runtime, create the provider through
+For an atomic-skill planning runtime, create the provider through
 {meth}`SceneRegistry.make_planning_scene_provider` and pass it to
 `SimulationExecutionAdapter`:
 
@@ -377,6 +377,6 @@ an `obstacle_<index>` fallback). It is not the registry-backed path and does not
 provide alias normalization or registry/provider/planner construction checks.
 
 See {doc}`index` for manifest and semantic-call integration,
-{doc}`../sim/atomic_actions/index` for snapshot grounding and recovery
+{doc}`../sim/atomic_skills/index` for snapshot grounding and recovery
 semantics, and {doc}`../sim/motion/planners/curobo_planner` for cuRobo world
 representation and frame details.

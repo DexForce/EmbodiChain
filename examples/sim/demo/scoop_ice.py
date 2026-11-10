@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(description="Scoop ice task simulation")
     add_sim_args_to_parser(parser)
+    # The ice material uses authored transmission and requires OfflineRT.
+    parser.set_defaults(renderer="rt")
     add_seed_arg_to_parser(parser, default=0, scope="ice placement")
     return parser
 
@@ -64,7 +66,7 @@ from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain_robots import URRobotCfg
 
 
 def initialize_simulation(args):
@@ -163,7 +165,7 @@ def create_robot(sim):
                 ]
             },
             "control_parts": {
-                "hand": [
+                "eef": [
                     "LEFT_HAND_THUMB1",
                     "LEFT_HAND_THUMB2",
                     "LEFT_HAND_INDEX",
@@ -351,14 +353,13 @@ def create_ice_cubes(sim: SimulationManager):
     ice_cubes: RigidObjectGroup = sim.add_rigid_object_group(cfg=ice_cubes_cfg)
 
     # Set visual material for ice cubes.
-    # The material below only works for ray tracing backend.
-    # Set ior to 1.31 and material type to "BSDF" for better ice appearance.
+    # Explicit optical parameters select ice scattering in OfflineRT.
     ice_mat = sim.create_visual_material(
         cfg=VisualMaterialCfg(
             base_color=[1.0, 1.0, 1.0, 1.0],
             ior=1.31,
             roughness=0.2,
-            material_type="BSDF",
+            parameters={"transmission": 1.0},
         )
     )
     sim.prepare()
@@ -386,7 +387,7 @@ def scoop_grasp(
     """
     rest_qpos = robot.get_qpos()
     arm_ids = robot.get_joint_ids("arm")
-    hand_ids = robot.get_joint_ids("hand")
+    hand_ids = robot.get_joint_ids("eef")
     hand_open_qpos = torch.tensor([0.0, 1.5, 0.4, 0.4, 0.4, 0.4])
     hand_close_qpos = torch.tensor([0.4, 1.5, 1.0, 1.1, 1.1, 0.9])
     arm_rest_qpos = rest_qpos[:, arm_ids]

@@ -29,10 +29,10 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.robots.dexforce_w1.params import (
+from embodichain_robots.dexforce.w1.params import (
     W1ArmKineParams,
 )
-from embodichain.lab.sim.robots.dexforce_w1.types import (
+from embodichain_robots.dexforce.w1.types import (
     DexforceW1ArmSide,
     DexforceW1Version,
 )
@@ -392,6 +392,32 @@ class BaseSolverTest:
             assert torch.allclose(
                 wp.to_torch(solver.impl.ik_nearest_weight_wp).cpu(),
                 solver.impl.ik_nearest_weight_tensor.cpu(),
+            )
+
+    @pytest.mark.no_sim
+    def test_invalid_tcp_update_preserves_fk_and_ik(self):
+        solver = self.solver["left_arm"]
+        tcp = np.eye(4)
+        tcp[:3, :3] = [[0, 0, 1], [0, 1, 0], [-1, 0, 0]]
+        tcp[:3, 3] = [0.13, -0.02, 0.03]
+        solver.set_tcp(tcp)
+        qpos = torch.tensor(
+            [[0, 0, 0, -np.pi / 4, 0, 0, 0]], device=solver.device, dtype=torch.float32
+        )
+        target = solver.get_fk(qpos)
+        for invalid in (
+            np.zeros((4, 4)),
+            np.diag([2.0, 1, 1, 1]),
+            np.full((4, 4), np.nan),
+        ):
+            with pytest.raises((ValueError, np.linalg.LinAlgError)):
+                solver.set_tcp(invalid)
+            np.testing.assert_array_equal(solver.get_tcp(), tcp)
+            torch.testing.assert_close(solver.get_fk(qpos), target)
+            valid, result = solver.get_ik(target, qpos)
+            assert bool(valid.all())
+            torch.testing.assert_close(
+                solver.get_fk(result[:, 0]), target, atol=1e-3, rtol=1e-3
             )
 
 

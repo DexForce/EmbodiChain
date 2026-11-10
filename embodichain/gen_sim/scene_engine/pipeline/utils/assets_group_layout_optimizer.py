@@ -14,10 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib
@@ -26,27 +24,21 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from shapely import affinity
 from shapely.geometry import MultiPolygon, Polygon
 
+from embodichain.lab.sim.scene._packing_cpu import (
+    AABBLayoutOptimizer,
+    AABBLayoutConfig as AssetsSupportLayoutOptimizerConfig,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
     AssetsGroupSupportClamp,
     SupportGeometry,
 )
-from embodichain.utils.logger import log_info, log_warning
+
+__all__ = ["AssetsSupportLayoutOptimizerConfig", "AssetsSupportLayoutOptimizer"]
 
 
-@dataclass(frozen=True)
-class AssetsSupportLayoutOptimizerConfig:
-    """Controls for support-constrained pairwise AABB separation."""
-
-    margin_m: float = 0.0  # Required clearance between each AABB and the boundary.
-    aabb_clearance_m: float = 1e-6  # Required clearance between AABB pairs.
-    max_rounds: int = 64  # Maximum greedy pair-separation passes.
-    split_samples: int = 9  # Candidate splits between the two overlapping AABBs.
-
-
-class AssetsSupportLayoutOptimizer:
+class AssetsSupportLayoutOptimizer(AABBLayoutOptimizer):
     """Greedily separate AABBs while retaining arbitrary support containment.
 
     This reuses the previous packing algorithm's pairwise strategy: detect an
@@ -79,179 +71,20 @@ class AssetsSupportLayoutOptimizer:
         self.config = (
             config if config is not None else AssetsSupportLayoutOptimizerConfig()
         )
-        # Check config.
-        if self.config.margin_m < 0.0:
-            raise ValueError("margin_m must be non-negative.")
-        if self.config.aabb_clearance_m < 0.0:
-            raise ValueError("aabb_clearance_m must be non-negative.")
-        if self.config.max_rounds <= 0 or self.config.split_samples < 2:
-            raise ValueError(
-                "max_rounds must be positive and split_samples at least two."
-            )
+        super().__init__(config=self.config)
 
     def optimize(self) -> list[dict[str, object]]:
-        """Resolve pairwise AABB overlap and return updated y-up layouts."""
+        """Resolve overlap through shared geometry and adapt offsets to Y-up."""
         self.refined_assets_layout = None
-        # Check inputs just like the previous AssetsGroupSupportClamp step would have done.
-        aabbs_by_id = AssetsGroupSupportClamp._validate_aabbs(
-            self.assets_aabb_2d_z_up_world_corners_by_id
+        offsets_by_id = self.solve(
+            self.support_region, self.assets_aabb_2d_z_up_world_corners_by_id
         )
-        raw_support = AssetsGroupSupportClamp._coerce_support_geometry(
-            self.support_region
+        asset_ids = sorted(offsets_by_id)
+        self.refined_assets_layout = self._apply_offsets_to_y_up_layouts(
+            asset_ids=asset_ids,
+            offsets=np.stack([offsets_by_id[uid] for uid in asset_ids]),
         )
-        if raw_support is None:
-            log_warning("AABB overlap optimization failed: invalid support geometry.")
-            raise ValueError("Support region is invalid.")
-        safe_support = (
-            raw_support
-            if self.config.margin_m == 0.0
-            else AssetsGroupSupportClamp._polygonal_geometry(
-                raw_support.buffer(-self.config.margin_m)
-            )
-        )
-        if safe_support is None or safe_support.is_empty:
-            log_warning(
-                "AABB overlap optimization failed: support region is empty after "
-                f"applying a {self.config.margin_m:.4f} m boundary margin."
-            )
-            raise ValueError("Support region is empty after applying layout margin.")
-
-        asset_ids = sorted(aabbs_by_id)
-        base_aabbs = np.stack([aabbs_by_id[asset_id] for asset_id in asset_ids])
-        offsets = np.zeros((len(asset_ids), 2), dtype=float)
-        if not self._all_contained(safe_support, base_aabbs, offsets):
-            # Independently project each AABB into the rectangular optimization region.
-            offsets = self._project_aabbs_inside_rectangle(safe_support, base_aabbs)
-        initial_overlaps = self._overlaps(base_aabbs, offsets)
-        projected_asset_count = int(np.count_nonzero(np.any(offsets != 0.0, axis=1)))
-        log_info(
-            "Support-constrained AABB overlap optimization started: "
-            f"assets={len(asset_ids)}, initial_overlaps={len(initial_overlaps)}, "
-            f"initial_projections={projected_asset_count}, "
-            f"boundary_margin={self.config.margin_m:.4f} m, "
-            f"aabb_clearance={self.config.aabb_clearance_m:.4f} m, "
-            f"max_rounds={self.config.max_rounds}."
-        )
-        if not initial_overlaps:  # Return directly if there are no overlaps to resolve.
-            log_info("AABB overlap optimization succeeded without pair separation.")
-            self.refined_assets_layout = self._apply_offsets_to_y_up_layouts(
-                asset_ids=asset_ids,
-                offsets=offsets,
-            )
-            return self.refined_assets_layout
-
-        for round_index in range(self.config.max_rounds):
-            # Check whether any overlaps remain.
-            overlaps = self._overlaps(base_aabbs, offsets)
-            if not overlaps:
-                log_info(
-                    "AABB overlap optimization succeeded after "
-                    f"{round_index} rounds."
-                )
-                self.refined_assets_layout = self._apply_offsets_to_y_up_layouts(
-                    asset_ids=asset_ids,
-                    offsets=offsets,
-                )
-                return self.refined_assets_layout
-            log_info(
-                "AABB overlap optimization round "
-                f"{round_index + 1}/{self.config.max_rounds}: "
-                f"remaining_overlaps={len(overlaps)}."
-            )
-            moved = False
-            # Choose a pair once.
-            for _, first_index, second_index in overlaps:
-                # If the overlaps is handeled by a previous pair, skip it.
-                if not self._overlaps(base_aabbs, offsets, (first_index, second_index)):
-                    continue
-                candidates = self._separation_candidates(
-                    base_aabbs=base_aabbs,
-                    offsets=offsets,
-                    first_index=first_index,
-                    second_index=second_index,
-                    safe_support=safe_support,
-                )
-                if candidates:
-                    # A local separation must not blindly create a new
-                    # collision with a third asset.  Prefer candidates with
-                    # no new collisions; when every placement causes one,
-                    # retain the least-colliding state before considering
-                    # displacement from the generated layout.
-                    offsets = min(
-                        candidates,
-                        key=lambda candidate: self._candidate_score(
-                            base_aabbs=base_aabbs,
-                            current_offsets=offsets,
-                            candidate_offsets=candidate,
-                        ),
-                    )  # Choose the best candidate with score.
-                    moved = True
-                else:
-                    log_warning(
-                        "No support-valid axis-aligned separation candidate for "
-                        f"overlapping AABBs {asset_ids[first_index]!r} and "
-                        f"{asset_ids[second_index]!r}."
-                    )
-            if not moved:
-                break
-
-        unresolved_pairs = [
-            f"{asset_ids[first_index]}/{asset_ids[second_index]}"
-            for _, first_index, second_index in self._overlaps(base_aabbs, offsets)
-        ]
-        log_warning(
-            "Unable to resolve all asset AABB overlaps inside the detected support "
-            "region; unresolved pairs="
-            f"{unresolved_pairs}."
-        )
-        raise ValueError(
-            "Asset AABB overlap cannot be resolved while keeping all assets "
-            "inside the detected table support region."
-        )
-
-    @staticmethod
-    def _project_aabbs_inside_rectangle(
-        support: Polygon | MultiPolygon,
-        base_aabbs: np.ndarray,
-    ) -> np.ndarray:
-        """Return minimum per-AABB offsets that place AABBs in a rectangle."""
-        if not isinstance(support, Polygon) or support.interiors:
-            raise ValueError(
-                "Initial AABB projection requires an axis-aligned rectangular "
-                "support region."
-            )
-        minimum_x, minimum_y, maximum_x, maximum_y = support.bounds
-        rectangle = Polygon(
-            [
-                (minimum_x, minimum_y),
-                (maximum_x, minimum_y),
-                (maximum_x, maximum_y),
-                (minimum_x, maximum_y),
-            ]
-        )
-        if not support.equals(rectangle):
-            raise ValueError(
-                "Initial AABB projection requires an axis-aligned rectangular "
-                "support region."
-            )
-
-        aabb_minimums, aabb_maximums = base_aabbs.min(axis=1), base_aabbs.max(axis=1)
-        half_extents = (aabb_maximums - aabb_minimums) / 2.0
-        support_minimum = np.array([minimum_x, minimum_y], dtype=float)
-        support_maximum = np.array([maximum_x, maximum_y], dtype=float)
-        valid_center_minimums = support_minimum + half_extents
-        valid_center_maximums = support_maximum - half_extents
-        if np.any(valid_center_minimums > valid_center_maximums + 1e-9):
-            raise ValueError(
-                "An asset AABB is larger than the rectangular support region."
-            )
-
-        centers = (aabb_minimums + aabb_maximums) / 2.0
-        # A center must stay inset from each boundary by its AABB half extent.
-        projected_centers = np.clip(
-            centers, valid_center_minimums, valid_center_maximums
-        )
-        return projected_centers - centers
+        return self.refined_assets_layout
 
     def _apply_offsets_to_y_up_layouts(
         self, *, asset_ids: list[str], offsets: np.ndarray
@@ -363,100 +196,6 @@ class AssetsSupportLayoutOptimizer:
         plt.close(figure)
         return True
 
-    def _separation_candidates(
-        self,
-        *,
-        base_aabbs: np.ndarray,
-        offsets: np.ndarray,
-        first_index: int,
-        second_index: int,
-        safe_support: Polygon | MultiPolygon,
-    ) -> list[np.ndarray]:
-        # Get current aabbs.
-        current_aabbs = base_aabbs + offsets[:, None, :]
-        minimums, maximums = current_aabbs.min(axis=1), current_aabbs.max(axis=1)
-        candidates: list[np.ndarray] = []
-        for axis in (0, 1):
-            directions_and_distances = (
-                (
-                    -1.0,
-                    maximums[first_index, axis]
-                    + self.config.aabb_clearance_m
-                    - minimums[second_index, axis],
-                ),
-                (
-                    1.0,
-                    maximums[second_index, axis]
-                    + self.config.aabb_clearance_m
-                    - minimums[first_index, axis],
-                ),
-            )
-            for first_direction, required_distance in directions_and_distances:
-                if required_distance <= 0.0:
-                    continue
-                for fraction in np.linspace(0.0, 1.0, self.config.split_samples):
-                    candidate = offsets.copy()
-                    first_move = required_distance * float(fraction)
-                    candidate[first_index, axis] += first_direction * first_move
-                    candidate[second_index, axis] -= first_direction * (
-                        required_distance - first_move
-                    )
-                    if not self._overlaps(
-                        base_aabbs, candidate, (first_index, second_index)
-                    ) and self._all_contained(safe_support, base_aabbs, candidate):
-                        candidates.append(candidate)
-        return candidates
-
-    def _overlaps(
-        self,
-        base_aabbs: np.ndarray,
-        offsets: np.ndarray,
-        only_pair: tuple[int, int] | None = None,
-    ) -> list[tuple[float, int, int]]:
-        return sorted(
-            [
-                (min(overlap_x, overlap_y), first_index, second_index)
-                for overlap_x, overlap_y, first_index, second_index in self._overlap_details(
-                    base_aabbs, offsets, only_pair
-                )
-            ],
-            reverse=True,
-        )
-
-    def _overlap_details(
-        self,
-        base_aabbs: np.ndarray,
-        offsets: np.ndarray,
-        only_pair: tuple[int, int] | None = None,
-    ) -> list[tuple[float, float, int, int]]:
-        """Return positive XY penetration extents, including requested clearance."""
-        current_aabbs = base_aabbs + offsets[:, None, :]
-        minimums, maximums = current_aabbs.min(axis=1), current_aabbs.max(axis=1)
-        pairs = (
-            [only_pair]
-            if only_pair is not None
-            else [
-                (first_index, second_index)
-                for first_index in range(len(current_aabbs))
-                for second_index in range(first_index + 1, len(current_aabbs))
-            ]
-        )
-        overlaps: list[tuple[float, float, int, int]] = []
-        for first_index, second_index in pairs:
-            overlap_x = (
-                min(maximums[first_index, 0], maximums[second_index, 0])
-                - max(minimums[first_index, 0], minimums[second_index, 0])
-                + self.config.aabb_clearance_m
-            )
-            overlap_y = (
-                min(maximums[first_index, 1], maximums[second_index, 1])
-                - max(minimums[first_index, 1], minimums[second_index, 1])
-                + self.config.aabb_clearance_m
-            )
-            if overlap_x > 1e-9 and overlap_y > 1e-9:
-                overlaps.append((overlap_x, overlap_y, first_index, second_index))
-        return overlaps
-
     def _draw_overlap_state(
         self,
         axis: plt.Axes,
@@ -511,60 +250,3 @@ class AssetsSupportLayoutOptimizer:
                 linewidth=1.3,
             )
         axis.set_title(f"{title}\nremaining AABB overlaps: {len(overlaps)}")
-
-    def _candidate_score(
-        self,
-        *,
-        base_aabbs: np.ndarray,
-        current_offsets: np.ndarray,
-        candidate_offsets: np.ndarray,
-    ) -> tuple[int, int, float, float]:
-        """Rank a valid pair-separation candidate by global collision impact.
-
-        The first term is deliberately based on *new* overlap pairs: this
-        keeps a pairwise correction from simply transferring its collision to
-        a nearby third asset.  If every candidate causes a new collision, the
-        remaining terms prefer fewer total overlaps, less total penetration,
-        then less layout displacement.
-        """
-        current_pairs = {
-            (first_index, second_index)
-            for _, _, first_index, second_index in self._overlap_details(
-                base_aabbs, current_offsets
-            )
-        }
-        candidate_details = self._overlap_details(base_aabbs, candidate_offsets)
-        candidate_pairs = {
-            (first_index, second_index)
-            for _, _, first_index, second_index in candidate_details
-        }
-        new_overlap_count = len(candidate_pairs - current_pairs)
-        total_penetration_area = sum(
-            overlap_x * overlap_y for overlap_x, overlap_y, _, _ in candidate_details
-        )
-        total_squared_displacement = float(
-            np.einsum("ij,ij->", candidate_offsets, candidate_offsets)
-        )
-        return (
-            new_overlap_count,
-            len(candidate_pairs),
-            total_penetration_area,
-            total_squared_displacement,
-        )
-
-    @staticmethod
-    def _all_contained(
-        support: Polygon | MultiPolygon,
-        base_aabbs: np.ndarray,
-        offsets: np.ndarray,
-    ) -> bool:
-        return all(
-            support.covers(
-                affinity.translate(
-                    AssetsGroupSupportClamp._aabb_polygon(corners),
-                    xoff=float(offset[0]),
-                    yoff=float(offset[1]),
-                )
-            )
-            for corners, offset in zip(base_aabbs, offsets)
-        )

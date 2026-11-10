@@ -56,8 +56,9 @@ class _MockRigidObject:
         self.set_pose = pose.clone()
         self.pose[env_ids] = pose
 
-    def clear_dynamics(self):
+    def clear_dynamics(self, env_ids=None):
         self.clear_count += 1
+        self.cleared_env_ids = env_ids
 
 
 class _MockSim:
@@ -129,6 +130,7 @@ def test_workspace_randomizer_moves_only_valid_environments():
         rigid_object.set_pose[1, :3, 3], torch.tensor([1.0, 1.0, 1.0])
     )
     assert rigid_object.clear_count == 1
+    torch.testing.assert_close(rigid_object.cleared_env_ids, torch.tensor([0, 1]))
 
 
 def test_workspace_randomizer_leaves_all_poses_when_sampling_fails():

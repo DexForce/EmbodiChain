@@ -28,7 +28,9 @@ from embodichain.data.assets.solver_assets import download_neural_ik_checkpoint
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+    _create_franka_native_hand_cfg,
+)
 from embodichain.lab.sim.motion.solvers import NeuralIKSolverCfg
 from embodichain.lab.visualization import (
     add_viser_args_to_parser,
@@ -108,7 +110,7 @@ def main() -> None:
 
     checkpoint_path = download_neural_ik_checkpoint()
 
-    cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
+    cfg = _create_franka_native_hand_cfg({})
     cfg.solver_cfg["arm"] = NeuralIKSolverCfg(
         end_link_name="fr3_hand_tcp",
         root_link_name="base",

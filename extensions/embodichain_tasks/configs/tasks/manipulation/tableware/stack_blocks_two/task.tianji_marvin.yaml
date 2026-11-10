@@ -1,0 +1,20 @@
+id: StackBlocksTwo-TianjiMarvin-v1
+environment:
+  component: env.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.tianji_marvin.yaml
+  execution_policy:
+    component: ../../../../components/execution_policies/motion_gen_projected_manipulation.yaml
+    overrides:
+      motion:
+        velocity_limit: 0.2
+        acceleration_limit: 0.5
+embodiment:
+  component: ../../../../components/embodiments/tianji_marvin.yaml
+  overrides:
+    # Center the left-arm workspace over both randomized block regions.
+    init_pos:
+    - 0.125
+    - -0.15
+    - 0.125

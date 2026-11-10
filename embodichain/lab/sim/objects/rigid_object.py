@@ -20,6 +20,8 @@ import torch
 import numpy as np
 
 from copy import deepcopy
+from contextlib import contextmanager
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Sequence
 from functools import cached_property
@@ -72,6 +74,7 @@ from embodichain.lab.sim import (
 )
 from embodichain.lab.sim.material import (
     _capture_render_materials,
+    _is_same_material_inst,
     _restore_render_materials,
     _set_render_material,
     _wrap_first_render_material,
@@ -91,11 +94,13 @@ __all__ = ["CollisionShapeDesc", "RigidBodyData", "RigidObject", "RigidObjectCfg
 
 @dataclass
 class CollisionShapeDesc:
-    """Planner-independent snapshot of one DexSim physical collision shape.
+    """Planner-independent description of one owner-local collision shape.
 
-    Geometry values are copied from DexSim's runtime collision descriptor and
-    therefore already include its geometry scale. Consumers must not apply
-    :attr:`RigidObjectCfg.body_scale` again.
+    ``RigidObject`` snapshots copy values from DexSim's runtime collision
+    descriptor, including geometry scale. Explicit planning providers may also
+    construct input envelopes; their provenance belongs to that provider and
+    must not be confused with native cooked geometry. Consumers must not apply
+    :attr:`RigidObjectCfg.body_scale` again to either already-scaled description.
 
     Attributes:
         name: Stable shape name within the owning rigid object.
@@ -761,6 +766,8 @@ class RigidObject(BatchEntity):
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
         """Set local pose of the rigid object.
+
+        Pose writes do not advance physics or move other scene objects.
 
         Args:
             pose (torch.Tensor): The local pose of the rigid object with shape (N, 7) or (N, 4, 4).
@@ -1510,6 +1517,32 @@ class RigidObject(BatchEntity):
                 self._visual_material[env_idx] = wrapped
                 self._original_visual_material_inst[env_idx] = wrapped
 
+    @contextmanager
+    def preserve_visual_material(self) -> Iterator[None]:
+        """Restore exact current segmented materials after temporary appearance edits.
+
+        This preserves runtime appearance, including textures and transparency,
+        rather than replacing it with configuration defaults. Native bindings
+        must stay unchanged while the context is active.
+        """
+        entities = tuple(self._entities)
+        originals = [
+            _capture_render_materials(entity.get_render_body()) for entity in entities
+        ]
+        wrappers = list(self._visual_material)
+        shared = self.is_shared_visual_material
+        try:
+            yield
+        finally:
+            if tuple(self._entities) != entities:
+                raise RuntimeError(
+                    "Cannot restore materials after native bindings changed"
+                )
+            for entity, materials in zip(entities, originals):
+                _restore_render_materials(entity.get_render_body(), materials)
+            self._visual_material[:] = wrappers
+            self.is_shared_visual_material = shared
+
     def restore_visual_material(self, env_ids: Sequence[int] | None = None) -> None:
         """Restore the visual materials captured when the rigid object was created.
 
@@ -1583,8 +1616,10 @@ class RigidObject(BatchEntity):
                     )
                 if working_inst is None:
                     working_name = f"{self.uid}_reuse_{env_idx}"
-                    template.create_inst(working_name)
-                    working_inst = VisualMaterialInst(working_name, template)
+                    native_inst = template.create_inst(working_name)
+                    working_inst = VisualMaterialInst(
+                        working_name, template, mat_inst=native_inst
+                    )
                 segments.append(
                     ReuseSegmentState(
                         mesh_id=mesh_id,
@@ -1611,6 +1646,10 @@ class RigidObject(BatchEntity):
         _set_render_material(
             self._entities[env_idx].get_render_body(), mesh_id, mat_inst
         )
+        if mesh_id == 0:
+            current = self._visual_material[env_idx]
+            if current is None or not _is_same_material_inst(current.mat, mat_inst):
+                self._visual_material[env_idx] = _wrap_first_render_material([mat_inst])
 
     def share_visual_material_inst(self, mat_insts: List[VisualMaterialInst]) -> None:
         """Share material instances for the rigid object.
@@ -2026,6 +2065,11 @@ class RigidObject(BatchEntity):
         apply_rigid_initial_state(self)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Restore selected instances' initial state without advancing physics.
+
+        Args:
+            env_ids: Environment indices to reset. None resets all instances.
+        """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         self.restore_visual_material(env_ids=local_env_ids)

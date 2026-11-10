@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from collections.abc import Iterator
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -43,6 +45,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
     SceneExportImporter,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+    _add_objects,
     _apply_runtime_textures_to_usd,
     _copy_runtime_texture,
     _externalize_glb_textures,
@@ -225,7 +228,18 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
 
 def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_exporter
+
+    monkeypatch.setattr(
+        scene_exporter, "_articulation_root_bottom_z", lambda *args: -0.05
+    )
+    monkeypatch.setattr(
+        scene_exporter,
+        "measure_scene_object_z_up_world_aabb",
+        lambda **kwargs: [[0, 0, 0], [1, 1, 0.73]],
+    )
     table_glb = tmp_path / "table.glb"
     drawer_glb = tmp_path / "drawer.glb"
     drawer_usdc = tmp_path / "drawer.usdc"
@@ -262,6 +276,7 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     assert articulation["proxy_glb_fpath"] == "mesh_assets/drawer/drawer.glb"
     assert articulation["body_scale"] == [1.25, 2.5, 3.75]
     assert articulation["proxy_body_scale"] == [1.0, 2.0, 3.0]
+    assert articulation["init_pos"][2] == pytest.approx(0.781)
     assert (export_path.parent / articulation["fpath"]).read_bytes() == b"USDC-drawer"
     assert (
         export_path.parent / articulation["proxy_glb_fpath"]
@@ -276,6 +291,166 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
         export_path.parent / "articulated_assets" / "drawer" / "drawer.usdc"
     )
     assert imported_drawer.articulated_usdc_scale == [1.25, 2.5, 3.75]
+    assert np.allclose(imported_drawer.pos, drawer.pos)
+    assert np.allclose(imported_drawer.rot, drawer.rot)
+
+
+@pytest.mark.parametrize("max_hulls", [1, 8])
+def test_preview_forwards_visacd_collision_policy(
+    tmp_path: Path, max_hulls: int
+) -> None:
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    class FakeSimulationManager:
+        def __init__(self) -> None:
+            self.configs: list[RigidObjectCfg] = []
+
+        def add_rigid_object(self, cfg: RigidObjectCfg) -> None:
+            self.configs.append(cfg)
+
+    (tmp_path / "mesh.glb").write_bytes(b"glTF")
+    sim = FakeSimulationManager()
+    _add_objects(
+        sim=sim,  # type: ignore[arg-type]
+        entries=[
+            {
+                "uid": "mesh",
+                "shape": {"shape_type": "Mesh", "fpath": "mesh.glb"},
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "max_convex_hull_num": max_hulls,
+            }
+        ],
+        config_dir=tmp_path,
+        label="rigid_object",
+        force_static=True,
+    )
+
+    cfg = sim.configs[0]
+    assert cfg.body_type == "static"
+    collision = cfg.shape.collision
+    assert collision.acd_method == ("visacd" if max_hulls > 1 else None)
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    if max_hulls > 1:
+        assert descriptor.collisions[0].decomp_algorithm == "visacd"
+        assert descriptor.collisions[0].decomp_max_hulls == max_hulls
+
+
+@pytest.fixture
+def readable_scene_export(tmp_path: Path) -> Path:
+    """Create a portable two-object export with all required final assets."""
+    objects = []
+    for object_id, kind, body_type in [
+        ("table", "table", "kinematic"),
+        ("cup", "asset", "dynamic"),
+    ]:
+        glb_path = tmp_path / f"{object_id}.glb"
+        glb_path.write_bytes(f"glTF-{object_id}".encode())
+        objects.append(
+            _scene_object(
+                object_id=object_id,
+                kind=kind,
+                glb_path=glb_path,
+                physics=_physics(body_type),
+            )
+        )
+    scene = Scene(objects=objects)
+    output_root = tmp_path / "output"
+    SceneExporter(
+        scene=scene,
+        scene_graph=_scene_graph(scene),
+        output_root=output_root,
+    ).export()
+    return output_root
+
+
+@pytest.mark.parametrize("has_debug_snapshot", [True, False])
+def test_scene_export_read_preserves_source_files(
+    readable_scene_export: Path, has_debug_snapshot: bool
+) -> None:
+    """Read-only consumers may load an export without rewriting its snapshot."""
+    scene_export = readable_scene_export / "scene_export"
+    scene_json = scene_export / "scene.json"
+    if has_debug_snapshot:
+        # Preserve even a non-canonical snapshot instead of regenerating it.
+        scene_json.write_text('{"debug": "keep verbatim"}\n', encoding="utf-8")
+    else:
+        scene_json.unlink()
+    original_files = {
+        path.relative_to(scene_export): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_export.rglob("*")
+        if path.is_file()
+    }
+
+    scene, graph = SceneExportImporter(
+        output_root=readable_scene_export
+    ).read_scene_and_graph()
+
+    assert [scene_object.id for scene_object in scene.objects] == ["table", "cup"]
+    assert np.allclose(scene.assets[0].pos, [1.0, 2.0, 3.0])
+    assert graph.node_by_id()["cup"].parent_id == "table"
+    assert {
+        path.relative_to(scene_export): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_export.rglob("*")
+        if path.is_file()
+    } == original_files
+
+
+def test_scene_export_read_rejects_mismatched_graph(
+    readable_scene_export: Path,
+) -> None:
+    scene_export = readable_scene_export / "scene_export"
+    graph_path = scene_export / "scene_graph.json"
+    graph_data = json.loads(graph_path.read_text(encoding="utf-8"))
+    graph_data["nodes"] = graph_data["nodes"][:1]
+    graph_path.write_text(json.dumps(graph_data), encoding="utf-8")
+    scene_json = scene_export / "scene.json"
+    original_snapshot = scene_json.read_bytes()
+
+    with pytest.raises(ValueError, match="nodes must match"):
+        SceneExportImporter(output_root=readable_scene_export).read_scene_and_graph()
+
+    assert scene_json.read_bytes() == original_snapshot
+
+
+def test_scene_export_read_requires_final_asset(readable_scene_export: Path) -> None:
+    glb_path = readable_scene_export / "scene_export/mesh_assets/cup/cup.glb"
+    glb_path.unlink()
+
+    with pytest.raises(FileNotFoundError, match="GLB not found"):
+        SceneExportImporter(output_root=readable_scene_export).read_scene_and_graph()
+
+
+def test_scene_export_read_accepts_explicit_export_directory(
+    readable_scene_export: Path,
+) -> None:
+    """Export identity comes from its files rather than its directory name."""
+    export_root = readable_scene_export / "renamed_portable_scene"
+    (readable_scene_export / "scene_export").rename(export_root)
+    original_snapshot = (export_root / "scene.json").read_bytes()
+
+    scene, graph = SceneExportImporter(
+        output_root=export_root.parent,
+        scene_export_root=export_root,
+    ).read_scene_and_graph()
+
+    assert [asset.id for asset in scene.assets] == ["cup"]
+    assert graph.node_by_id()["cup"].parent_id == "table"
+    assert scene.assets[0].simready_glb_path == str(
+        export_root / "mesh_assets/cup/cup.glb"
+    )
+    assert (export_root / "scene.json").read_bytes() == original_snapshot
+
+
+def test_scene_export_importer_rejects_explicit_directory_outside_output_root(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="must stay within output root"):
+        SceneExportImporter(
+            output_root=tmp_path / "output",
+            scene_export_root=tmp_path / "outside",
+        )
 
 
 def test_scene_usd_manifest_restores_only_declared_scene_resources(
@@ -677,6 +852,7 @@ def test_scene_usd_binds_every_gltf_pbr_texture_channel(tmp_path: Path) -> None:
         "occlusion": (64, 64, 64),
         "emissive": (0, 255, 0),
     }
+    BOTTOM_ROW_COLOR = (17, 29, 43)  # A distinct second row exposes an inverted image.
     scene_usd_root = tmp_path / "scene_usd"
     runtime_root = tmp_path / "runtime"
     texture_root = runtime_root / "textures"
@@ -684,7 +860,10 @@ def test_scene_usd_binds_every_gltf_pbr_texture_channel(tmp_path: Path) -> None:
     image_specs = []
     for channel, color in CHANNEL_COLORS.items():
         filename = f"{channel}.png"
-        Image.new("RGB", (2, 2), color).save(texture_root / filename)
+        image = Image.new("RGB", (2, 2), color)
+        image.putpixel((0, 1), BOTTOM_ROW_COLOR)
+        image.putpixel((1, 1), BOTTOM_ROW_COLOR)
+        image.save(texture_root / filename)
         image_specs.append({"uri": f"textures/{filename}"})
     runtime_gltf = runtime_root / "model.gltf"
     runtime_gltf.write_text(
@@ -782,9 +961,24 @@ def test_scene_usd_binds_every_gltf_pbr_texture_channel(tmp_path: Path) -> None:
     assert _connected_texture_path("normal") == "textures/object_normal.png"
     assert _connected_texture_path("occlusion") == "textures/object_occlusion.png"
     assert _connected_texture_path("emissiveColor") == "textures/object_emissive.png"
+    for channel, color in CHANNEL_COLORS.items():
+        with Image.open(
+            scene_usd_root / "textures" / f"object_{channel}.png"
+        ) as exported:
+            assert exported.getpixel((0, 0)) == BOTTOM_ROW_COLOR
+            assert exported.getpixel((0, 1)) == color
+        with Image.open(texture_root / f"{channel}.png") as original:
+            assert original.getpixel((0, 0)) == color
+            assert original.getpixel((0, 1)) == BOTTOM_ROW_COLOR
 
 
-def test_preview_loads_exported_usdc_as_an_articulation(tmp_path: Path) -> None:
+def test_preview_loads_exported_usdc_as_an_articulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_usd
+
+    monkeypatch.setattr(scene_usd, "_read_revolute_qpos_limits", lambda path: {})
+
     class FakeSimulationManager:
         def __init__(self) -> None:
             self.articulation_cfgs: list[object] = []
@@ -1011,3 +1205,172 @@ def test_scene_export_rejects_backslash_in_object_id(tmp_path: Path) -> None:
             scene_graph=_scene_graph(scene),
             output_root=tmp_path / "output",
         ).export()
+
+
+@pytest.mark.parametrize("headless", [True, False])
+def test_preview_initial_display_does_not_integrate_physics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, headless: bool
+) -> None:
+    from embodichain.gen_sim.scene_engine.cli import preview
+
+    root = tmp_path / "export"
+    (root / "scene_export").mkdir(parents=True)
+    (root / "scene_export" / "scene_config.json").write_text("{}")
+    events: list[str] = []
+
+    class FakeSimulation:
+        def __init__(self, cfg: object) -> None:
+            self.sim_config = SimpleNamespace(
+                visualization=SimpleNamespace(backend="none")
+            )
+
+        def prepare(self) -> None:
+            events.append("prepare")
+
+        def sync_render_state(self) -> None:
+            events.append("publish")
+
+        def open_window(self) -> None:
+            assert events[-1] == "publish"
+            events.append("open")
+
+        def update(self, **kwargs: object) -> None:
+            assert "open" in events
+            events.append("explicit_preview_step")
+            raise KeyboardInterrupt
+
+        def destroy(self, **kwargs: object) -> None:
+            events.append("destroy")
+
+        @staticmethod
+        def flush_cleanup_queue() -> None:
+            events.append("flush")
+
+    monkeypatch.setattr(preview, "SimulationManager", FakeSimulation)
+    monkeypatch.setattr(preview, "load_scene_export_into_sim", lambda **_: [])
+    preview.preview_scene_export(output_root=root, headless=headless)
+
+    expected = ["prepare", "publish"]
+    if not headless:
+        expected += ["open", "explicit_preview_step"]
+    assert events == expected + ["destroy", "flush"]
+
+
+@pytest.mark.parametrize("backend", ["none", "viser"])
+def test_preview_pose_playback_renders_without_physics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    from embodichain.gen_sim.scene_engine.cli import preview
+
+    root = tmp_path / "export"
+    (root / "scene_export").mkdir(parents=True)
+    (root / "scene_export" / "scene_config.json").write_text("{}")
+    events: list[str] = []
+    callback_count = 0
+
+    class FakeSimulation:
+        def __init__(self, cfg: object) -> None:
+            self.sim_config = SimpleNamespace(
+                visualization=SimpleNamespace(backend=backend)
+            )
+
+        def prepare(self) -> None:
+            events.append("prepare")
+
+        def sync_render_state(self) -> None:
+            events.append("publish")
+
+        def open_window(self) -> None:
+            events.append("open")
+
+        @contextmanager
+        def render_frame(
+            self, *, force_visualization: bool, capture_camera_images: bool
+        ) -> Iterator[None]:
+            assert not capture_camera_images
+            events.append(f"render:{force_visualization}")
+            yield
+
+        def update(self, **kwargs: object) -> None:
+            pytest.fail("Pose playback must not integrate physics.")
+
+        def destroy(self, **kwargs: object) -> None:
+            events.append("destroy")
+
+        @staticmethod
+        def flush_cleanup_queue() -> None:
+            events.append("flush")
+
+    def on_frame(sim: object) -> bool:
+        nonlocal callback_count
+        assert isinstance(sim, FakeSimulation)
+        callback_count += 1
+        if callback_count == 3:
+            raise KeyboardInterrupt
+        events.append(f"callback:{callback_count}")
+        return callback_count == 2
+
+    monkeypatch.setattr(preview, "SimulationManager", FakeSimulation)
+    monkeypatch.setattr(
+        preview, "load_scene_export_into_sim", lambda **_: events.append("load") or []
+    )
+    monkeypatch.setattr(preview.time, "sleep", lambda _: None)
+    preview.preview_scene_export(
+        output_root=root,
+        headless=backend == "viser",
+        visualization=VisualizationCfg(backend=backend),
+        joint_control=False,
+        on_frame=on_frame,
+        advance_physics=False,
+    )
+
+    initial = ["load", "prepare"]
+    if backend == "none":
+        initial += ["publish", "open"]
+    assert events == initial + [
+        "callback:1",
+        "render:False",
+        "callback:2",
+        "render:True",
+        "destroy",
+        "flush",
+    ]
+
+
+def test_preview_converted_limits_reach_resolved_descriptor(tmp_path, monkeypatch):
+    from dexsim.engine import JointType
+    from dexsim.spawn import ArticulationDesc, LinkDesc, JointDesc
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_usd
+    from embodichain.lab.sim.spawn.descriptors import configure_articulation_desc
+
+    limits = {"hinge": [-0.25, 1.5]}
+    monkeypatch.setattr(scene_usd, "_read_revolute_qpos_limits", lambda path: limits)
+    descriptor = ArticulationDesc(
+        name="door",
+        links=[LinkDesc("base", "", np.eye(4)), LinkDesc("lid", "base", np.eye(4))],
+        joints=[JointDesc("hinge", "base", "lid", JointType.REVOLUTE)],
+        root_link_name="base",
+    )
+
+    class Simulation:
+        def add_articulation(self, cfg):
+            assert cfg.asset_physics_mode == "overlay"
+            configure_articulation_desc(descriptor, cfg)
+            return descriptor
+
+    path = tmp_path / "door.usdc"
+    path.write_bytes(b"asset")
+    scene_usd._add_articulations(
+        sim=Simulation(),
+        entries=[
+            {
+                "uid": "door",
+                "fpath": "door.usdc",
+                "init_pos": [0, 0, 0],
+                "init_rot": [0, 0, 0],
+            }
+        ],
+        config_dir=tmp_path,
+    )
+    assert descriptor.joints[0].lower_limit == pytest.approx(-0.25)
+    assert descriptor.joints[0].upper_limit == pytest.approx(1.5)

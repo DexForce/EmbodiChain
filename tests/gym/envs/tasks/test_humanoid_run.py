@@ -137,7 +137,9 @@ def test_humanoid_deployment_preserves_effort_contract(monkeypatch):
     from embodichain.utils.utility import load_config
 
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
-    path = Path("embodichain_tasks/configs/tasks/classic_control/humanoid/env.yaml")
+    path = Path(
+        "extensions/embodichain_tasks/configs/tasks/classic_control/humanoid/env.yaml"
+    )
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
     assert cfg.sim_cfg.physics_dt == pytest.approx(1 / 120)
     assert cfg.sim_steps_per_control == 2

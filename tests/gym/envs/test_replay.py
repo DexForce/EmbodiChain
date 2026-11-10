@@ -103,8 +103,9 @@ def test_record_trajectory_populates_states():
         assert "states" in env._traj_buffer.keys()
         assert env._traj_steps.tolist() == [5, 5]
         states = env._traj_buffer["states"]
-        assert tuple(states["robot"]["qpos"].shape) == (2, 100, 6)
-        assert tuple(states["rigid_objects"]["cube"]["pose"].shape) == (2, 100, 7)
+        # A 100-action buffer also owns its initial/pending state boundary.
+        assert tuple(states["robot"]["qpos"].shape) == (2, 101, 6)
+        assert tuple(states["rigid_objects"]["cube"]["pose"].shape) == (2, 101, 7)
         # Saved rows are pre-action states. The post-final state is only the
         # pending seed for a possible next action and is excluded on save.
         assert torch.allclose(states["robot"]["qpos"][:, 0], initial_qpos)
@@ -213,6 +214,7 @@ def test_position_velocity_targets_keep_fixed_env_step_and_are_saved(tmp_path):
         path = tmp_path / "position_velocity.pt"
         env.save_trajectory(str(path))
         saved = torch.load(path, weights_only=False)
+        assert saved["meta"]["action_kind"] == "expert"
         assert saved["meta"]["joint_command_mode"] == "position_velocity"
         assert saved["meta"]["step_dt"] == pytest.approx(env.step_dt)
         assert saved["meta"]["qpos_slice"] == [0, env.robot.dof]
@@ -656,7 +658,7 @@ def test_control_mode_scrubs_to_recorded_state(tmp_path):
 
 def test_control_loop_uses_single_keys_and_auto_can_be_interrupted():
     """Single-key commands act immediately and interrupt auto playback."""
-    from embodichain.lab.scripts.run_env import _run_replay_control_loop
+    from embodichain.lab.scripts.run_task import _run_replay_control_loop
 
     class FakeControlInput:
         single_key = True
@@ -692,9 +694,9 @@ def test_control_loop_uses_single_keys_and_auto_can_be_interrupted():
     assert control_input.timeouts == [0.04, 0.04]
 
 
-def test_run_env_replay_function(tmp_path):
-    """run_env.replay() drives the full trajectory without error (kinematic + dynamic)."""
-    from embodichain.lab.scripts.run_env import replay
+def test_run_task_replay_function(tmp_path):
+    """run_task.replay() drives the full trajectory without error (kinematic + dynamic)."""
+    from embodichain.lab.scripts.run_task import replay
 
     # record
     env = ReplayTestEnv(record_trajectory=True, num_envs=1, device="cpu")

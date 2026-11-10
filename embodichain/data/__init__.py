@@ -16,7 +16,11 @@
 
 """Dataset resolution, asset-download helpers, preset asset registries, and shared constants/enums used by simulation tasks and training pipelines."""
 
+from __future__ import annotations
+
 import os
+from importlib import import_module
+from types import ModuleType
 
 from .constants import EMBODICHAIN_DEFAULT_DATABASE_ROOT
 
@@ -25,5 +29,34 @@ database_2d_dir = os.path.join(database_dir, "2dasset")
 database_agent_prompt_dir = os.path.join(database_dir, "agent_prompt")
 database_demo_dir = os.path.join(database_dir, "demostration")
 
-from . import assets
 from .dataset import *
+from .default_materials import list_default_materials, get_default_material_info
+
+__all__ = [
+    "assets",
+    "EMBODICHAIN_DEFAULT_DATABASE_ROOT",
+    "database_dir",
+    "database_2d_dir",
+    "database_agent_prompt_dir",
+    "database_demo_dir",
+    "EmbodiChainDataset",
+    "DEFAULT_DATA_MODULES",
+    "get_data_class",
+    "get_data_path",
+    "list_default_materials",
+    "get_default_material_info",
+]
+
+
+def __getattr__(name: str) -> ModuleType:
+    # Asset implementations import this package's dataset base. Loading all
+    # asset re-exports here would re-enter a partially initialized provider.
+    if name != "assets":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = import_module(".assets", __name__)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

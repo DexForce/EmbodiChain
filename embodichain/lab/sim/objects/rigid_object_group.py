@@ -648,11 +648,22 @@ class RigidObjectGroup(BatchEntity):
         self,
         mat: VisualMaterial,
         env_ids: Sequence[int] | None = None,
+        *,
+        reset_properties: bool = False,
     ) -> None:
-        """Assign one material instance to all members in each selected env."""
+        """Assign one material instance to all members in each selected env.
+
+        Args:
+            mat: Material template to assign.
+            env_ids: Environments to change, or all environments.
+            reset_properties: Explicitly restore template properties on selected
+                instances, as required by deterministic material reset events.
+        """
         env, _, _ = self._selected_indices(env_ids)
         for env_id in env:
             material = mat.create_instance(f"{mat.uid}_{self.uid}_{env_id}")
+            if reset_properties:
+                mat.set_default_properties(material, mat.cfg)
             for entity in self._entities[env_id]:
                 entity.set_material(material.mat)
 

@@ -124,7 +124,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         ),
         control_parts={
             "arm": ["Joint[0-9]"],
-            "hand": ["FINGER[1-2]"],
+            "eef": ["FINGER[1-2]"],
         },
         solver_cfg=solver_cfg,
         joint_drive_props=JointDrivePropertiesCfg(

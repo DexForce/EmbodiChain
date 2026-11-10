@@ -29,7 +29,7 @@ from typing import Any, Protocol, TYPE_CHECKING, TypeVar, runtime_checkable
 import torch
 
 from embodichain.lab.sim.common import BatchEntity
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
     AntipodalAffordance,
     EntityState,
@@ -128,9 +128,15 @@ class ContainerAffordance(Affordance):
     Args:
         minimum_confidence: Minimum confidence accepted while resolving the
             late-bound target pose.
+        release_clearance: Non-negative distance in metres added along the
+            target frame's local positive z-axis while releasing the object.
+            The registered pose remains the final semantic object target; this
+            clearance offsets the commanded release before the object settles.
+            Collision planning and measured acceptance retain their own checks.
     """
 
     minimum_confidence: float = 0.0
+    release_clearance: float = 0.0
 
     def __post_init__(self) -> None:
         if isinstance(self.minimum_confidence, bool) or not isinstance(
@@ -141,6 +147,14 @@ class ContainerAffordance(Affordance):
         self.minimum_confidence = float(self.minimum_confidence)
         if not 0.0 <= self.minimum_confidence <= 1.0:
             raise ValueError("minimum_confidence must be in [0, 1].")
+        if isinstance(self.release_clearance, bool) or not isinstance(
+            self.release_clearance,
+            (int, float),
+        ):
+            raise TypeError("release_clearance must be a number.")
+        self.release_clearance = float(self.release_clearance)
+        if not math.isfinite(self.release_clearance) or self.release_clearance < 0.0:
+            raise ValueError("release_clearance must be finite and non-negative.")
 
 
 def _validate_identifier(value: str, name: str) -> None:
@@ -261,6 +275,8 @@ class SceneEntityMetadata:
         affordance_payload_type: Exact registered affordance value type.
         affordance_revision: Integrator-owned payload revision or fingerprint.
         relative_pose: Flattened parent-relative 4x4 pose, when declared.
+        pose_source_revision: Optional integrator-owned fingerprint of a
+            provider-backed pose declaration, independent of affordance schema.
     """
 
     ref: SceneEntityRef
@@ -275,6 +291,7 @@ class SceneEntityMetadata:
     affordance_payload_type: type[Affordance] | None = None
     affordance_revision: str | None = None
     relative_pose: tuple[float, ...] | None = None
+    pose_source_revision: str | None = None
 
     def __post_init__(self) -> None:
         allowed_ref_types = {
@@ -323,6 +340,8 @@ class SceneEntityMetadata:
             )
         if self.affordance_revision is not None:
             _validate_identifier(self.affordance_revision, "affordance_revision")
+        if self.pose_source_revision is not None:
+            _validate_identifier(self.pose_source_revision, "pose_source_revision")
         if self.relative_pose is not None:
             relative_pose = tuple(float(value) for value in self.relative_pose)
             if len(relative_pose) != 16 or not all(
@@ -441,6 +460,7 @@ class SceneEntityMetadata:
                 else type(registration.affordance)
             ),
             affordance_revision=registration.affordance_revision,
+            pose_source_revision=registration.pose_source_revision,
             relative_pose=(
                 None
                 if relative_pose is None
@@ -769,6 +789,9 @@ class SceneEntityRegistration:
         affordance_revision: Stable integrator-owned revision or fingerprint for
             capability-bearing affordance payload data.
         relative_pose: Optional parent-relative affordance transform.
+        pose_source_revision: Optional integrator-owned fingerprint of the
+            explicit state provider's pose declaration. Requires ``state_provider``
+            and stays separate from the affordance payload schema revision.
     """
 
     ref: SceneEntityRef
@@ -815,6 +838,9 @@ class SceneEntityRegistration:
 
     joint_state_provider: SceneArticulationJointStateProvider | None = None
     """Explicit live joint source for an articulation registration."""
+
+    pose_source_revision: str | None = None
+    """Integrator-owned fingerprint of the provider-backed pose declaration."""
 
     def __post_init__(self) -> None:
         if type(self.ref) not in {
@@ -887,6 +913,8 @@ class SceneEntityRegistration:
         )
         if self.affordance_revision is not None:
             _validate_identifier(self.affordance_revision, "affordance_revision")
+        if self.pose_source_revision is not None:
+            _validate_identifier(self.pose_source_revision, "pose_source_revision")
         if self.relative_pose is not None:
             if not isinstance(self.relative_pose, torch.Tensor):
                 raise TypeError("relative_pose must be a torch.Tensor or None.")
@@ -897,6 +925,8 @@ class SceneEntityRegistration:
             raise ValueError(
                 "state_provider and relative_pose are mutually exclusive pose sources."
             )
+        if self.pose_source_revision is not None and self.state_provider is None:
+            raise ValueError("pose_source_revision requires state_provider.")
 
         self._validate_reference_contract()
         SceneEntityMetadata.from_registration(self)
@@ -1310,7 +1340,7 @@ class SceneRegistry:
         *,
         affordance: str | SceneAffordanceRef,
     ) -> ObjectSemantics:
-        """Build one owned atomic-action semantic snapshot.
+        """Build one owned atomic-skill semantic snapshot.
 
         Args:
             object_ref: Canonical object ID, alias, or typed reference.

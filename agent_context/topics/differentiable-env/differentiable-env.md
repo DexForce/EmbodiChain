@@ -98,7 +98,7 @@ Newton dynamics are ready for end-to-end validation.
 - `embodichain/lab/gym/envs/differentiable_env.py`
 - `embodichain/lab/sim/cfg/simulation.py`
 - `embodichain/lab/sim/diff/`
-- `embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py`
+- `extensions/embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py`
 
 ## Focused validation
 

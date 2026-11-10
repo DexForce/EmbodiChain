@@ -14,7 +14,7 @@ follow the canonical routing rules in `.agents/skills/project-dev-context/`.
 - Add embodiment components: `.github/copilot/add-embodiment-component.md`
 - Add Semantic Calls: `.github/copilot/add-semantic-call.md`
 - Add functors: `.github/copilot/add-functor.md`
-- Add atomic actions: `.github/copilot/add-atomic-action.md`
+- Add atomic skills: `.github/copilot/add-atomic-skill.md`
 - Add solvers: `.github/copilot/add-solver.md`
 - Add robots: `.github/copilot/add-robot.md`
 - Add tests: `.github/copilot/add-test.md`
@@ -23,3 +23,4 @@ follow the canonical routing rules in `.agents/skills/project-dev-context/`.
 - Review pull requests and diffs: `.github/copilot/review-pr.md`
 - Draft or create pull requests: `.github/copilot/pr.md`
 - Write benchmarks: `.github/copilot/benchmark.md`
+- Implement performance-sensitive computation: `.github/copilot/implement-performance.md`

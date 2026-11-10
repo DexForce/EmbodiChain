@@ -32,12 +32,12 @@ from embodichain.lab.gym.envs.task_program.bridge import (
     EnvironmentStepClock,
     RuntimeCommandFrameEncoder,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    ActionOptions,
-    ActionPlan,
-    AtomicAction,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
+    SkillOptions,
+    SkillPlan,
+    AtomicSkill,
+    AtomicSkillEngine,
     EndpointCommand,
     EntityState,
     ExecutionRunnerCfg,
@@ -47,7 +47,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlannerDiagnostics,
     PlanningContext,
     RecoveryPolicy,
-    ResolvedActionRequest,
+    ResolvedSkillRequest,
     RobotObservation,
     RuntimeCommandFrame,
     SceneSnapshot,
@@ -81,7 +81,7 @@ class _TraceGoal:
     goal_kind: ClassVar[str] = "completion_trace"
 
 
-class _TraceAction(AtomicAction[_TraceGoal, ActionOptions]):
+class _TraceAction(AtomicSkill[_TraceGoal, SkillOptions]):
     """Emit named segments and preserve distinct diagnostics on every replan."""
 
     skill_id: ClassVar[str] = "completion_trace"
@@ -101,16 +101,16 @@ class _TraceAction(AtomicAction[_TraceGoal, ActionOptions]):
 
     def _scene_dependencies(
         self,
-        request: ResolvedActionRequest[_TraceGoal, ActionOptions],
+        request: ResolvedSkillRequest[_TraceGoal, SkillOptions],
     ) -> tuple[str, ...]:
         del request
         return ("trace_target",)
 
     def _plan(
         self,
-        request: ResolvedActionRequest[_TraceGoal, ActionOptions],
+        request: ResolvedSkillRequest[_TraceGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         self.require_goal(request)
         generation = self.plan_count
         self.plan_count += 1
@@ -246,7 +246,7 @@ class _TraceWorkflow:
 class _TraceIntegration:
     """Production engine and registry exposed through the compiler boundary."""
 
-    engine: AtomicActionEngine
+    engine: AtomicSkillEngine
     scene_registry: SceneRegistry
 
 
@@ -255,7 +255,7 @@ class _TraceGroundedCall:
     """One grounded invocation with no external effect-verification boundary."""
 
     analyzed: object
-    invocation: ActionInvocation
+    invocation: SkillInvocation
     eligible_mask: torch.Tensor
     effect_spec: None = None
     effect_monitor: None = None
@@ -266,7 +266,7 @@ class _TraceGroundedCall:
 class _TraceCompiler(SemanticCallCompiler):
     """Keep semantic boundaries real while making lowering deterministic."""
 
-    def __init__(self, engine: AtomicActionEngine) -> None:
+    def __init__(self, engine: AtomicSkillEngine) -> None:
         self._trace_integration = _TraceIntegration(engine, SceneRegistry())
 
     @property
@@ -290,6 +290,7 @@ class _TraceCompiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _TraceGroundedCall:
@@ -299,7 +300,7 @@ class _TraceCompiler(SemanticCallCompiler):
             _TraceAction.skill_id,
             {"primary": {"motion": "arm"}},
         )
-        invocation = ActionInvocation(
+        invocation = SkillInvocation(
             skill_id=_TraceAction.skill_id,
             goal=_TraceGoal(),
             binding=binding,
@@ -309,13 +310,14 @@ class _TraceCompiler(SemanticCallCompiler):
             ),
             recovery_policy=RecoveryPolicy(
                 max_replans=2,
-                max_action_retries=1,
-                action_timeout=1.0,
+                max_skill_retries=1,
+                skill_timeout=1.0,
             ),
-            invocation_id=f"{workflow.workflow_id}:{call_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{call_index}",
             revision=revision,
         )
         analyzed = SimpleNamespace(
+            policy_preset_id=None,
             call=workflow.calls[call_index],
             effect_assurance=EffectAssurance.PROJECTED,
             effect_monitor_ref=None,
@@ -357,6 +359,7 @@ class _CompiledSegment:
     validators: tuple[object, ...] = ()
     parallel_block: None = None
     implicit: bool = False
+    instruction: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,7 +402,7 @@ def _runtime_and_bridge() -> tuple[TaskProgramDemoBridge, _TraceAction]:
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "completion_trace_planner"
-    engine = AtomicActionEngine(generator, load_builtins=False)
+    engine = AtomicSkillEngine(generator, load_builtins=False)
     action = _TraceAction()
     engine.register(action)
 
@@ -456,7 +459,7 @@ def test_completion_trace_preserves_every_plan_generation_as_json_metadata() -> 
     attempts = call_trace["plan_attempts"]
     assert [attempt["attempt_generation"] for attempt in attempts] == [0, 1]
     assert [attempt["trigger"] for attempt in attempts] == [
-        "action_planned",
+        "skill_planned",
         "replanned",
     ]
     assert [attempt["planned_scene_version"] for attempt in attempts] == [
@@ -480,8 +483,8 @@ def test_completion_trace_preserves_every_plan_generation_as_json_metadata() -> 
         for attempt in attempts
     )
     assert [attempt["recovery_counters"] for attempt in attempts] == [
-        {"action_retries": [0, 0], "replans": [0, 0]},
-        {"action_retries": [0, 0], "replans": [1, 1]},
+        {"skill_retries": [0, 0], "replans": [0, 0]},
+        {"skill_retries": [0, 0], "replans": [1, 1]},
     ]
     assert [attempt["planner_diagnostics"] for attempt in attempts] == [
         {
@@ -507,6 +510,6 @@ def test_completion_trace_preserves_every_plan_generation_as_json_metadata() -> 
     assert "replanned" in event_kinds
     assert event_kinds[-3:] == [
         "trajectory_completed",
-        "action_completed",
+        "skill_completed",
         "session_completed",
     ]

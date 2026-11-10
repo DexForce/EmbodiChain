@@ -17,12 +17,19 @@
 from __future__ import annotations
 
 from typing import Callable, Iterator, List, Literal, Optional
+from collections.abc import Mapping
+from typing import Any
+
+import torch
 
 from tensordict import TensorDict
 from torch.utils.data import IterableDataset
 
 from embodichain.data_pipeline.engine.data import OnlineDataEngine
 from embodichain.data_pipeline.datasets.sampler import ChunkSizeSampler
+from .sequence_data import SequenceDataset
+from .sequence import SequenceSpecCfg
+from .sources import OnlineDataSource
 
 __all__ = [
     "OnlineDataset",
@@ -66,6 +73,17 @@ class OnlineDataset(IterableDataset):
         Multi-worker DataLoader: each worker gets its own iterator; since
         sampling is independent random draws from shared memory, this is safe.
 
+    Language-conditioned training uses the numeric ``task_index`` and
+    ``subtask_index`` fields. Call :meth:`resolve_language` on the copied item
+    or collated batch to get the overall task and current segment text, then
+    tokenize them in the consumer or a transform. The text dictionaries append
+    new entries without changing existing indices, so previously sampled items
+    retain their language when the engine refills trajectory slots.
+
+    New context consumers may use ``SequenceDataset(OnlineDataSource(...),
+    sequence, ...)`` directly. This wrapper preserves legacy chunk APIs and
+    delegates its opt-in context iteration to that same Dataset implementation.
+
     Args:
         engine: A started OnlineDataEngine whose shared buffer is used for
             sampling.
@@ -80,6 +98,13 @@ class OnlineDataset(IterableDataset):
         sampling_mode: ``"episode"`` allows chunks to cross segment boundaries,
             ``"segment"`` keeps chunks within one segment, and ``"boundary"``
             samples chunks that cross a boundary.
+        sequence: Opt-in causal context specification. Omit chunk_size and
+            configure segment mode through this specification when supplied.
+        schema: Explicit observation/action semantics required in context mode.
+        observation_transform: Optional row-local observation conversion for
+            context mode; canonical padding is restored after conversion.
+        generator: Optional context-sampling RNG; explicit generators require
+            owner-process iteration to avoid duplicated worker streams.
 
     Example — fixed chunk size, item mode::
 
@@ -123,15 +148,54 @@ class OnlineDataset(IterableDataset):
     def __init__(
         self,
         engine: OnlineDataEngine,
-        chunk_size: int | ChunkSizeSampler,
+        chunk_size: int | ChunkSizeSampler | None = None,
         batch_size: Optional[int] = None,
         transform: Optional[Callable[[TensorDict], TensorDict]] = None,
         sampling_mode: Literal["episode", "segment", "boundary"] = "episode",
+        *,
+        sequence: SequenceSpecCfg | None = None,
+        schema: Mapping[str, Any] | None = None,
+        observation_transform: Callable[[Any], torch.Tensor] | None = None,
+        generator: torch.Generator | None = None,
     ) -> None:
-        if isinstance(chunk_size, int):
+        self._context_dataset = None
+        self.source = None
+        if sequence is not None:
+            sequence._check()
+            if chunk_size is not None or sampling_mode != "episode":
+                raise ValueError(
+                    "Configure context windows and sampling_mode through sequence only"
+                )
+            if schema is None:
+                raise ValueError(
+                    "Context Dataset consumption requires an explicit schema"
+                )
+            if batch_size is not None and (
+                type(batch_size) is not int or batch_size < 1
+            ):
+                raise ValueError("batch_size must be None or a positive integer")
+            self.source = OnlineDataSource(
+                engine, schema=schema, observation_transform=observation_transform
+            )
+            self._context_dataset = SequenceDataset(
+                self.source,
+                sequence,
+                batch_size=batch_size,
+                transform=transform,
+                generator=generator,
+            )
+        elif (
+            generator is not None
+            or observation_transform is not None
+            or schema is not None
+        ):
+            raise ValueError(
+                "schema, observation_transform and generator require context sequence"
+            )
+        if sequence is None and isinstance(chunk_size, int):
             if chunk_size < 1:
                 raise ValueError(f"chunk_size must be ≥ 1, got {chunk_size}.")
-        elif not isinstance(chunk_size, ChunkSizeSampler):
+        elif sequence is None and not isinstance(chunk_size, ChunkSizeSampler):
             raise TypeError(
                 f"chunk_size must be an int or a ChunkSizeSampler, got {type(chunk_size).__name__}."
             )
@@ -164,6 +228,18 @@ class OnlineDataset(IterableDataset):
             return self._chunk_size
         return self._chunk_size()
 
+    def resolve_language(self, batch: TensorDict) -> dict[str, object]:
+        """Decode the overall and segment instructions for an item or batch.
+
+        Args:
+            batch: Copied numeric sample with task/subtask index fields.
+
+        Returns:
+            ``task`` and ``subtask`` strings nested to match batch dimensions.
+            Lookup remains valid after trajectory refills and engine shutdown.
+        """
+        return self._engine.resolve_language(batch)
+
     # ------------------------------------------------------------------
     # IterableDataset interface
     # ------------------------------------------------------------------
@@ -180,6 +256,9 @@ class OnlineDataset(IterableDataset):
             TensorDict sampled from the engine's shared buffer, optionally
             post-processed by ``transform``.
         """
+        if self._context_dataset is not None:
+            yield from self._context_dataset
+            return
         if self._batch_size is None:
             # In item mode, keep chunk_size fixed per iterator to preserve
             # consistent shapes for DataLoader collation.

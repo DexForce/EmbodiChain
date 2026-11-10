@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Host-independent grasp/qpos augmentation, coverage, and generation bookkeeping.
+"""Host-independent grasp/qpos augmentation, coverage, and expansion bookkeeping.
 
 Execution, initial-state restoration, physical validation, and durable storage
 are supplied by host integrations. These algorithms do not call Gym or a
@@ -26,15 +26,40 @@ from __future__ import annotations
 
 from .cfg import (
     SPATIAL_METHODS,
+    TrajectoryExpansionCfg,
     TrajectoryAugmentationCfg,
-    TrajectoryGenerationJobCfg,
+    TrajectoryExpansionJobCfg,
 )
+from .combined import (
+    CandidateRecipe,
+    CallRecipe,
+    CombinedExpansionProfile,
+    CubeInitialPoseProvider,
+    CycleRecipe,
+    PhysicalSlotPool,
+    ReferenceFamilySpec,
+    SlotReservation,
+    enumerate_candidate_recipes,
+    load_visual_profile_registry,
+    schedule_digest,
+)
+from .combined_runtime import (
+    CombinedAssignment,
+    CombinedEpisodeCoordinator,
+    MeasuredValidator,
+    VisualProfileApplication,
+    VisualProfileRegistry,
+    round_robin_recipes,
+)
+from .coordinator import CandidateCoordinator, CandidateWorkItem
 from .contracts import (
     CandidateIdentity,
+    CandidateSpec,
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
     MotionSnapshot,
+    ProposalRequest,
     SceneCase,
     TrajectoryPhase,
     TrajectoryTemplate,
@@ -70,18 +95,70 @@ from .operators import (
     validate_motion_limits,
     via_points,
 )
-from .session import GenerationSession
+from .session import ExpansionSession
+from .profile import load_expansion_profile
+from .source import (
+    PlanResultSourceAdapter,
+    SourceAdapter,
+    SourceContext,
+    TemplateSourceAdapter,
+)
+from .real2sim import Real2SimSourceAdapter
+from .mapped_timing import MappedRetimeResult, retime_with_time_map
+from .stitching import (
+    MinimumJerkBridgePlanner,
+    SegmentCompatibility,
+    StitchedSegmentPlacement,
+    StitchedTrajectory,
+    TrajectoryBridge,
+    TrajectoryBridgePlanner,
+    TrajectorySegment,
+    TrajectorySegmentBank,
+    compare_trajectory_segments,
+    extract_trajectory_segments,
+    stitch_trajectory_segments,
+)
+from .task_space import (
+    TASK_SPACE_RESIDUAL_OPERATOR,
+    TaskSpaceDeformationConstraint,
+    TaskSpaceProjectionResult,
+    TaskSpaceTrajectory,
+    deform_task_space_trajectory,
+    project_task_space_trajectory,
+    task_space_from_joint_template,
+)
 
 __all__ = [
+    "Real2SimSourceAdapter",
+    "MappedRetimeResult",
+    "retime_with_time_map",
     "SPATIAL_METHODS",
     "CandidateIdentity",
+    "CandidateRecipe",
+    "CallRecipe",
+    "CombinedAssignment",
+    "CombinedEpisodeCoordinator",
+    "CandidateSpec",
+    "CandidateCoordinator",
+    "CandidateWorkItem",
     "CandidateTrajectoryBatch",
     "CommitReceipt",
+    "CombinedExpansionProfile",
+    "CubeInitialPoseProvider",
+    "CycleRecipe",
+    "MeasuredValidator",
+    "PhysicalSlotPool",
     "ExpertEpisode",
     "MotionSnapshot",
+    "ProposalRequest",
+    "ReferenceFamilySpec",
+    "SlotReservation",
+    "VisualProfileApplication",
+    "VisualProfileRegistry",
     "SceneCase",
     "TrajectoryAugmentationCfg",
-    "TrajectoryGenerationJobCfg",
+    "TrajectoryExpansionCfg",
+    "TrajectoryExpansionJobCfg",
     "TrajectoryPhase",
     "TrajectoryTemplate",
     "ValidationCheck",
@@ -102,6 +179,10 @@ __all__ = [
     "expand_trajectory_variants",
     "plan_trajectory_variants",
     "sample_approach_cone",
+    "enumerate_candidate_recipes",
+    "load_visual_profile_registry",
+    "schedule_digest",
+    "round_robin_recipes",
     "TIMING_PROFILES",
     "ProposalRejected",
     "joint_residual",
@@ -111,5 +192,28 @@ __all__ = [
     "rotate_grasp_about_object_axis",
     "validate_motion_limits",
     "via_points",
-    "GenerationSession",
+    "ExpansionSession",
+    "load_expansion_profile",
+    "SourceAdapter",
+    "SourceContext",
+    "TemplateSourceAdapter",
+    "PlanResultSourceAdapter",
+    "TASK_SPACE_RESIDUAL_OPERATOR",
+    "TaskSpaceDeformationConstraint",
+    "TaskSpaceProjectionResult",
+    "TaskSpaceTrajectory",
+    "task_space_from_joint_template",
+    "deform_task_space_trajectory",
+    "project_task_space_trajectory",
+    "TrajectorySegment",
+    "SegmentCompatibility",
+    "TrajectorySegmentBank",
+    "TrajectoryBridge",
+    "TrajectoryBridgePlanner",
+    "MinimumJerkBridgePlanner",
+    "StitchedSegmentPlacement",
+    "StitchedTrajectory",
+    "extract_trajectory_segments",
+    "compare_trajectory_segments",
+    "stitch_trajectory_segments",
 ]

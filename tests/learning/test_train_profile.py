@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 import random
+import json
+from unittest.mock import Mock
+import importlib
 
 import numpy as np
 import pytest
@@ -84,6 +87,29 @@ def test_learning_env_rejects_profile(tmp_path):
         train_from_config(str(config_path), profile_output="prof.json")
 
 
+@pytest.mark.parametrize("renderer", [None, "no-render", "hybrid"])
+def test_training_passes_only_explicit_renderer_override(
+    tmp_path, monkeypatch, renderer
+):
+    module = importlib.import_module("embodichain.learning.rl.train")
+    trainer = {"gym_config": "task.yaml", "device": "cpu"}
+    if renderer is not None:
+        trainer["renderer"] = renderer
+    config_path = tmp_path / "train.json"
+    config_path.write_text(
+        json.dumps({"trainer": trainer, "policy": {}, "algorithm": {}})
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "SummaryWriter", Mock())
+    build_runtime = Mock(side_effect=RuntimeError("stop at environment construction"))
+    monkeypatch.setattr(module, "build_gym_policy_runtime", build_runtime)
+
+    with pytest.raises(RuntimeError, match="stop at environment construction"):
+        train_from_config(str(config_path))
+
+    assert build_runtime.call_args.kwargs["renderer"] == renderer
+
+
 def test_camera_recording_defaults_to_the_run_directory(tmp_path):
     params = _event_params(
         {"func": "record_camera_data_async", "params": {"name": "main"}},
@@ -92,3 +118,35 @@ def test_camera_recording_defaults_to_the_run_directory(tmp_path):
     )
 
     assert params["save_path"] == str(tmp_path / "run" / "videos" / "eval")
+
+
+@pytest.mark.parametrize(
+    "phase,enabled,expected",
+    [("train", False, 1), ("eval", True, 1), ("eval", False, 0)],
+)
+def test_active_recording_events_are_resolved_before_first_environment(
+    tmp_path, monkeypatch, phase, enabled, expected
+) -> None:
+    from embodichain.lab.gym.envs.managers.record import record_camera_data_async
+
+    module = importlib.import_module("embodichain.learning.rl.train")
+    trainer = {
+        "gym_config": "task.yaml",
+        "device": "cpu",
+        "enable_eval": enabled,
+        "events": {phase: {"record": {"func": "record_camera_data_async"}}},
+    }
+    config_path = tmp_path / "train.json"
+    config_path.write_text(
+        json.dumps({"trainer": trainer, "policy": {}, "algorithm": {}})
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "SummaryWriter", Mock())
+    build = Mock(side_effect=RuntimeError("environment boundary"))
+    monkeypatch.setattr(module, "build_gym_policy_runtime", build)
+    with pytest.raises(RuntimeError, match="environment boundary"):
+        train_from_config(str(config_path))
+    events = build.call_args.kwargs["trainer_events"]
+    assert len(events) == expected
+    if expected:
+        assert events[0].func is record_camera_data_async

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
 
@@ -27,14 +27,16 @@ import torch
 
 from embodichain.utils.math import pose_inv
 
-from embodichain.lab.sim.atomic_actions.bindings import EndpointBinding
-from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
-from embodichain.lab.sim.atomic_actions.effects import StateDelta
-from embodichain.lab.sim.atomic_actions.execution import (
+from embodichain.lab.sim.atomic_skills.bindings import EndpointBinding
+from embodichain.lab.sim.atomic_skills.engine import AtomicSkillEngine
+from embodichain.lab.sim.atomic_skills.invocation import ResolvedSkillRequest
+from embodichain.lab.sim.atomic_skills.plans import SkillPlan
+from embodichain.lab.sim.atomic_skills.effects import StateDelta
+from embodichain.lab.sim.atomic_skills.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
-from embodichain.lab.sim.atomic_actions.verification import (
+from embodichain.lab.sim.atomic_skills.verification import (
     EffectExpectationResult,
     EffectVerificationRequest,
     EffectVerificationResult,
@@ -43,11 +45,11 @@ from embodichain.lab.sim.atomic_actions.verification import (
     PhaseEffectGateRequest,
     PhaseEffectGateResult,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan
-from embodichain.lab.sim.atomic_actions.requirements import (
+from embodichain.lab.sim.atomic_skills.requirements import (
     FORWARD_KINEMATICS_CAPABILITY,
 )
-from embodichain.lab.sim.atomic_actions.runner import (
+from embodichain.lab.sim.atomic_skills.runner import (
+    CommandOperation,
     CommandSink,
     ExecutionClock,
     ExecutionRunner,
@@ -57,7 +59,7 @@ from embodichain.lab.sim.atomic_actions.runner import (
     RunnerStatus,
     RunnerStep,
 )
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.state import (
     HeldObjectState,
     PlanningContext,
     TaskState,
@@ -77,6 +79,7 @@ from embodichain.lab.task_program.semantics.effects import (
     HeldObjectRelation,
     HeldObjectStateExpectation,
     SemanticEffectSpec,
+    SemanticEffectKind,
 )
 from embodichain.lab.task_program.semantics.integration import SemanticValidationError
 from embodichain.lab.task_program.semantics.profiles import (
@@ -95,8 +98,14 @@ from .results import (
     SkillPlanAttemptTrace,
     SkillWorkflowRecoveryRole,
     SkillWorkflowRecoveryTrace,
+    _HistoryJournal,
     _snapshot_event,
     _snapshot_task_state,
+)
+from .expansion import (
+    TaskProgramNominalSourceFactory,
+    TaskProgramPlanRequest,
+    TaskProgramPlanTransformFactory,
 )
 from ..compiler.lowering import (
     GroundedHeldObjectGuard,
@@ -105,6 +114,30 @@ from ..compiler.lowering import (
     HeldObjectGuardBaseline,
     SemanticCallCompiler,
 )
+
+
+class _WorkflowCalls(Sequence[SemanticCallSpec]):
+    """Constant-size view of an analyzed workflow's remaining calls."""
+
+    def __init__(self, workflow: object, offset: int) -> None:
+        self._analyzed = workflow.calls
+        self._offset = offset
+
+    def __len__(self) -> int:
+        return len(self._analyzed) - self._offset
+
+    def __getitem__(
+        self, index: int | slice
+    ) -> SemanticCallSpec | tuple[SemanticCallSpec, ...]:
+        if isinstance(index, slice):
+            return tuple(
+                self[position] for position in range(*index.indices(len(self)))
+            )
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
+        return self._analyzed[self._offset + index].call
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -196,13 +229,20 @@ class _PrimedObservationProvider:
         delegate: ObservationProvider,
     ) -> None:
         self._context: PlanningContext | None = context
+        self._affordance_sampling = context.affordance_sampling
         self._delegate = delegate
 
     def observe(self, task_state: TaskState) -> PlanningContext:
         """Reuse the grounding snapshot for the session's first due cycle."""
         context = self._context
         if context is None:
-            return self._delegate.observe(task_state)
+            observed = self._delegate.observe(task_state)
+            if self._affordance_sampling is None:
+                return observed
+            return replace(
+                observed,
+                affordance_sampling=self._affordance_sampling,
+            )
         self._context = None
         return PlanningContext(
             robot=context.robot,
@@ -210,6 +250,7 @@ class _PrimedObservationProvider:
             scene=context.scene,
             env_ids=context.env_ids,
             control_dt=context.control_dt,
+            affordance_sampling=context.affordance_sampling,
         )
 
 
@@ -232,6 +273,8 @@ class SemanticCallExecutor:
         task_state: TaskState | None = None,
         clock: ExecutionClock | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
+        plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
     ) -> None:
         if not isinstance(compiler, SemanticCallCompiler):
             raise TypeError("compiler must be a SemanticCallCompiler.")
@@ -247,12 +290,24 @@ class SemanticCallExecutor:
             raise TypeError("clock must implement ExecutionClock.")
         if runner_cfg is not None and not isinstance(runner_cfg, ExecutionRunnerCfg):
             raise TypeError("runner_cfg must be an ExecutionRunnerCfg or None.")
+        if plan_transform_factory is not None and not isinstance(
+            plan_transform_factory,
+            TaskProgramPlanTransformFactory,
+        ):
+            raise TypeError(
+                "plan_transform_factory must implement "
+                "TaskProgramPlanTransformFactory or be None."
+            )
+        if nominal_source_factory is not None and not isinstance(
+            nominal_source_factory, TaskProgramNominalSourceFactory
+        ):
+            raise TypeError(
+                "nominal_source_factory must implement TaskProgramNominalSourceFactory or be None."
+            )
         integration = compiler.integration
         engine = integration.engine
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError(
-                "compiler.integration.engine must be an AtomicActionEngine."
-            )
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("compiler.integration.engine must be an AtomicSkillEngine.")
         initial_task = (
             engine.initial_context().task if task_state is None else task_state
         )
@@ -268,7 +323,10 @@ class SemanticCallExecutor:
         self._evidence_collector = evidence_collector
         self._clock = clock or MonotonicExecutionClock()
         self._runner_cfg_override = runner_cfg
+        self._plan_transform_factory = plan_transform_factory
+        self._nominal_source_factory = nominal_source_factory
         self._step_observer: Callable[[RunnerStep], None] | None = None
+        self._last_sent_plan_reference: tuple[int, str | None, int] | None = None
         self._task_state = _snapshot_task_state(initial_task)
         self._env_ids = torch.arange(
             self._task_state.batch_size,
@@ -279,7 +337,8 @@ class SemanticCallExecutor:
         self._status = SemanticExecutionStatus.IDLE
         self._workflow: object | None = None
         self._workflow_id: str | None = None
-        self._calls: tuple[SemanticCallSpec, ...] = ()
+        self._calls: Sequence[SemanticCallSpec] = ()
+        self._analysis_call_offset = 0
         self._execution_prefix_length = 0
         self._current_call_index: int | None = None
         self._runner: ExecutionRunner | None = None
@@ -296,11 +355,13 @@ class SemanticCallExecutor:
         self._success = torch.zeros_like(self._eligible)
         self._failed = torch.zeros_like(self._eligible)
         self._cancelled = torch.zeros_like(self._eligible)
-        self._events: list[ExecutionEvent] = []
-        self._call_traces: list[SkillCallTrace] = []
-        self._effect_traces: list[SkillEffectTrace] = []
-        self._workflow_recovery_traces: list[SkillWorkflowRecoveryTrace] = []
-        self._failures: list[SkillFailure] = []
+        self._events: _HistoryJournal[ExecutionEvent] = _HistoryJournal()
+        self._call_traces: _HistoryJournal[SkillCallTrace] = _HistoryJournal()
+        self._effect_traces: _HistoryJournal[SkillEffectTrace] = _HistoryJournal()
+        self._workflow_recovery_traces: _HistoryJournal[SkillWorkflowRecoveryTrace] = (
+            _HistoryJournal()
+        )
+        self._failures: _HistoryJournal[SkillFailure] = _HistoryJournal()
         self._call_event_offset = 0
         self._call_effect_offset = 0
         self._observation_revision = 0
@@ -316,14 +377,19 @@ class SemanticCallExecutor:
         return self._compiler
 
     @property
-    def engine(self) -> AtomicActionEngine:
-        """Return the atomic-action engine owned by this runtime."""
+    def engine(self) -> AtomicSkillEngine:
+        """Return the atomic-skill engine owned by this runtime."""
         return self._engine
 
     @property
     def observation_provider(self) -> ObservationProvider:
         """Return the observation port used for just-in-time grounding."""
         return self._observation_provider
+
+    @property
+    def evidence_collector(self) -> EffectEvidenceCollectorPort:
+        """Return the evidence port owned by this execution runtime."""
+        return self._evidence_collector
 
     @property
     def clock(self) -> ExecutionClock:
@@ -375,6 +441,10 @@ class SemanticCallExecutor:
         Returns:
             A new idle semantic runtime for one independent lane.
         """
+        if self._nominal_source_factory is not None:
+            raise ValueError(
+                "nominal source factories do not yet support parallel execution"
+            )
         if not isinstance(command_sink, CommandSink):
             raise TypeError("command_sink must implement CommandSink.")
         initial_state = self.task_state if task_state is None else task_state
@@ -396,6 +466,30 @@ class SemanticCallExecutor:
         return self._status
 
     @property
+    def current_call_index(self) -> int | None:
+        """Return the active semantic-call index without copying audit history."""
+        return self._current_call_index
+
+    @property
+    def env_ids(self) -> torch.Tensor:
+        """Return an owned environment-ID view without copying audit history."""
+        return self._env_ids.clone()
+
+    @property
+    def wait_duration(self) -> float:
+        """Return the remaining runtime wait before another due cycle."""
+        return self._wait_duration
+
+    @property
+    def last_sent_plan_reference(self) -> tuple[int, str | None, int] | None:
+        """Return the latest accepted command's call, plan and waypoint IDs.
+
+        This records sink acceptance only. A Gym bridge must separately prove
+        that the buffered action was consumed by ``env.step``.
+        """
+        return self._last_sent_plan_reference
+
+    @property
     def result(self) -> SemanticExecutionResult:
         """Return an immutable snapshot of the current workflow."""
         return SemanticExecutionResult(
@@ -408,11 +502,13 @@ class SemanticCallExecutor:
             cancelled_mask=self._cancelled,
             eligible_mask=self._eligible,
             task_state=self._task_state,
-            events=tuple(self._events),
-            calls=tuple(self._call_traces),
-            effects=tuple(self._effect_traces),
-            workflow_recoveries=tuple(self._workflow_recovery_traces),
-            failures=tuple(self._failures),
+            events=self._events.snapshot(_snapshot_event),
+            calls=self._call_traces.snapshot(SkillCallTrace.snapshot),
+            effects=self._effect_traces.snapshot(SkillEffectTrace.snapshot),
+            workflow_recoveries=self._workflow_recovery_traces.snapshot(
+                SkillWorkflowRecoveryTrace.snapshot
+            ),
+            failures=self._failures.snapshot(SkillFailure.snapshot),
             wait_duration=self._wait_duration,
             message=self._message,
         )
@@ -461,10 +557,66 @@ class SemanticCallExecutor:
             self._fail_preparation(0, exc)
         return self.result
 
+    def _start_analyzed(
+        self,
+        workflow: object,
+        *,
+        call_offset: int,
+        execution_prefix_length: int,
+        workflow_id: str,
+        eligible_mask: torch.Tensor | None,
+    ) -> SemanticExecutionResult:
+        """Execute a segment using a previously analyzed sequential stretch.
+
+        The bridge owns the cache; compiler ownership/revision checks and live
+        grounding still run before execution. Runtime indices remain local to
+        this segment, while grounding addresses the complete analyzed workflow.
+        """
+        if self._status is SemanticExecutionStatus.RUNNING:
+            raise RuntimeError("A semantic workflow is already running.")
+        self._compiler._assert_workflow_current(workflow, path=("workflow",))
+        calls = _WorkflowCalls(workflow, call_offset)
+        prefix_length = self._normalize_execution_prefix_length(
+            execution_prefix_length, call_count=len(calls)
+        )
+        self._reset_workflow(
+            calls,
+            workflow,
+            workflow_id=workflow_id,
+            eligible_mask=eligible_mask,
+            execution_prefix_length=prefix_length,
+        )
+        self._analysis_call_offset = call_offset
+        try:
+            self._prepare_call(0)
+        except Exception as exc:
+            self._fail_preparation(0, exc)
+        return self.result
+
     def step(self) -> SemanticExecutionResult:
         """Advance the current call by at most one due runner cycle."""
+        self._advance_once()
+        return self.result
+
+    def advance(self) -> SemanticExecutionStatus:
+        """Advance one due cycle without materializing the full audit snapshot.
+
+        Long-running physical calls can collect hundreds of in-flight effect
+        traces.  Consumers that only need lifecycle progress should use this
+        method and read :attr:`status`, :attr:`current_call_index`,
+        :attr:`env_ids`, and :attr:`wait_duration`; :attr:`result` remains the
+        explicit immutable audit boundary.
+
+        Returns:
+            The workflow status after the due cycle.
+        """
+        self._advance_once()
+        return self._status
+
+    def _advance_once(self) -> None:
+        """Advance the current call without constructing a result snapshot."""
         if self._status is not SemanticExecutionStatus.RUNNING:
-            return self.result
+            return
         runner = self._require_runner()
         grounded = self._require_grounded()
         monitor = grounded.effect_monitor
@@ -472,22 +624,43 @@ class SemanticCallExecutor:
             verifier = self._effect_verifier
         elif grounded.analyzed.effect_assurance is EffectAssurance.PROJECTED:
             verifier = self._project_unverified_effect
-        else:  # pragma: no cover - compiler rejects this before execution
-            raise RuntimeError(
-                "A verified semantic call reached execution without an effect "
-                "monitor."
-            )
+        else:
+            # Registered calls without symbolic effects legitimately have no
+            # monitor. If their Atomic plan unexpectedly requests verification,
+            # this verifier fails closed instead of projecting an effect.
+            verifier = self._effect_verifier
         guards = grounded.effect_guards
         guard_verifier = self._held_object_guard_verifier if guards else None
         gates = grounded.effect_gates
         gate_verifier = self._phase_effect_gate_verifier if gates else None
+        self._last_sent_plan_reference = None
         runner_step = runner.step(
             effect_verifier=verifier,
             phase_effect_gate_verifier=gate_verifier,
             held_object_guard_verifier=guard_verifier,
         )
+        plan_sample = runner.session.last_commanded_plan_sample
+        if (
+            plan_sample is not None
+            and self._current_call_index is not None
+            and any(
+                dispatch.operation is CommandOperation.SEND
+                and dispatch.acknowledgement.accepted
+                for dispatch in runner_step.dispatches
+            )
+        ):
+            self._last_sent_plan_reference = (
+                self._analysis_call_offset + self._current_call_index,
+                plan_sample[0],
+                plan_sample[1],
+            )
         if self._step_observer is not None:
-            self._step_observer(runner_step)
+            try:
+                self._step_observer(runner_step)
+            except Exception as exc:
+                self._consume_runner_step(runner_step)
+                self._abort(f"Step observer failed: {type(exc).__name__}: {exc}")
+                return
         self._consume_runner_step(runner_step)
         if (
             runner_step.status is RunnerStatus.RUNNING
@@ -499,9 +672,9 @@ class SemanticCallExecutor:
                 "The atomic invocation requested a phase-effect gate, but the "
                 "grounded semantic call did not install its monitor."
             )
-            return self.result
+            return
         if runner_step.status is RunnerStatus.RUNNING:
-            return self.result
+            return
         recovery_item = self._active_recovery_item
         trigger = (
             self._workflow_recovery_trigger()
@@ -514,7 +687,6 @@ class SemanticCallExecutor:
             self._handle_original_call_finished(finished, trigger=trigger)
         else:
             self._handle_recovery_call_finished(recovery_item, finished)
-        return self.result
 
     def run(
         self,
@@ -530,6 +702,8 @@ class SemanticCallExecutor:
             raise ValueError("max_steps must be a positive integer.")
         if on_step is not None and not callable(on_step):
             raise TypeError("on_step must be callable or None.")
+        if self._status is SemanticExecutionStatus.RUNNING:
+            raise RuntimeError("A semantic workflow is already running.")
         previous_observer = self._step_observer
         self._step_observer = on_step
         try:
@@ -546,6 +720,11 @@ class SemanticCallExecutor:
                     self._clock.sleep(result.wait_duration)
                 result = self.step()
             self._abort(f"Semantic runtime exceeded max_steps={max_steps}.")
+            return self.result
+        except Exception as exc:
+            if self._status is not SemanticExecutionStatus.RUNNING:
+                raise
+            self._abort(f"Semantic runtime failed: {type(exc).__name__}: {exc}")
             return self.result
         finally:
             self._step_observer = previous_observer
@@ -742,7 +921,7 @@ class SemanticCallExecutor:
 
     def _reset_workflow(
         self,
-        calls: tuple[SemanticCallSpec, ...],
+        calls: Sequence[SemanticCallSpec],
         workflow: object,
         *,
         workflow_id: str,
@@ -772,9 +951,11 @@ class SemanticCallExecutor:
         self._workflow = workflow
         self._workflow_id = workflow_id
         self._calls = calls
+        self._analysis_call_offset = 0
         self._execution_prefix_length = execution_prefix_length
         self._current_call_index = 0
         self._runner = None
+        self._last_sent_plan_reference = None
         self._grounded = None
         self._active_call = None
         self._active_recovery_item = None
@@ -783,11 +964,11 @@ class SemanticCallExecutor:
         self._success = torch.zeros_like(eligible)
         self._failed = torch.zeros_like(eligible)
         self._cancelled = torch.zeros_like(eligible)
-        self._events = []
-        self._call_traces = []
-        self._effect_traces = []
-        self._workflow_recovery_traces = []
-        self._failures = []
+        self._events = _HistoryJournal()
+        self._call_traces = _HistoryJournal()
+        self._effect_traces = _HistoryJournal()
+        self._workflow_recovery_traces = _HistoryJournal()
+        self._failures = _HistoryJournal()
         self._call_event_offset = 0
         self._call_effect_offset = 0
         self._observation_revision = 0
@@ -811,6 +992,7 @@ class SemanticCallExecutor:
             scene=context.scene,
             env_ids=context.env_ids,
             control_dt=context.control_dt,
+            affordance_sampling=context.affordance_sampling,
         )
         if normalized.batch_size != self._task_state.batch_size:
             raise ValueError(
@@ -836,7 +1018,7 @@ class SemanticCallExecutor:
         assert self._workflow is not None
         self._prepare_grounded_call(
             self._workflow,
-            analysis_call_index=call_index,
+            analysis_call_index=self._analysis_call_offset + call_index,
             workflow_call_index=call_index,
             call=self._calls[call_index],
             active_mask=self._eligible,
@@ -888,6 +1070,11 @@ class SemanticCallExecutor:
             analysis_call_index,
             context,
             eligible_mask=active_mask,
+            invocation_id=(
+                f"{self._workflow_id}:{workflow_call_index}"
+                if recovery_item is None
+                else None
+            ),
         )
         invocation = grounded.invocation
         grounded_eligible = grounded.eligible_mask
@@ -930,17 +1117,105 @@ class SemanticCallExecutor:
             raise ValueError("Grounded phase-effect gates require an effect spec.")
 
         self._grounded = grounded
-        runner_cfg = self._runner_cfg_override
+        runner_cfg = (
+            self._runner_cfg_override
+            if grounded.analyzed.policy_preset_id is None
+            else None
+        )
         if runner_cfg is None:
             runner_cfg = grounded.analyzed.bound.preset.runner_cfg
             if not isinstance(runner_cfg, ExecutionRunnerCfg):
                 raise TypeError(
                     "Grounded semantic call preset must own an ExecutionRunnerCfg."
                 )
+        plan_transform = None
+        nominal_source = None
+        if (
+            self._plan_transform_factory is not None
+            or self._nominal_source_factory is not None
+        ):
+            if self._workflow_id is None:
+                raise RuntimeError("A grounded call requires an active workflow ID.")
+            plan_request = TaskProgramPlanRequest(
+                workflow_id=self._workflow_id,
+                workflow_call_index=workflow_call_index,
+                analysis_call_index=analysis_call_index,
+                call=call,
+                invocation=invocation,
+            )
+            prepare_context = getattr(
+                self._plan_transform_factory,
+                "prepare_planning_context",
+                None,
+            )
+            if prepare_context is not None:
+                if not callable(prepare_context):
+                    raise TypeError(
+                        "prepare_planning_context must be callable when provided."
+                    )
+                prepared_context = prepare_context(
+                    plan_request,
+                    context,
+                    engine=self._engine,
+                )
+                if not isinstance(prepared_context, PlanningContext):
+                    raise TypeError(
+                        "prepare_planning_context() must return PlanningContext."
+                    )
+                context = prepared_context
+            if self._plan_transform_factory is not None:
+                plan_transform = self._plan_transform_factory.create_plan_transform(
+                    plan_request,
+                    engine=self._engine,
+                )
+                if plan_transform is not None and not callable(plan_transform):
+                    raise TypeError(
+                        "create_plan_transform() must return a callable or None."
+                    )
+            if self._nominal_source_factory is not None:
+                nominal_source = self._nominal_source_factory.create_nominal_source(
+                    plan_request, engine=self._engine
+                )
+        if effect_guards:
+            external_plan_transform = plan_transform
+
+            def validate_guarded_plan(
+                request: ResolvedSkillRequest,
+                planning_context: PlanningContext,
+                plan: SkillPlan,
+            ) -> SkillPlan:
+                if external_plan_transform is not None:
+                    plan = external_plan_transform(request, planning_context, plan)
+                if not isinstance(plan, SkillPlan):
+                    raise TypeError("Plan transform must return an SkillPlan.")
+                if plan.plan_success.any():
+                    names = {segment.name for segment in plan.segments}
+                    for guard in effect_guards:
+                        if (
+                            effect_spec is not None
+                            and effect_spec.effect_kind is SemanticEffectKind.ATTACH
+                            and guard.baseline
+                            is HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+                            and not plan.requires_effect_verification
+                        ):
+                            raise ValueError(
+                                "Retained attachment requires terminal effect verification."
+                            )
+                        missing = set(guard.active_segments) - names
+                        if missing:
+                            raise ValueError(
+                                f"Held-object guard {guard.guard_id!r} references "
+                                f"missing plan segments {sorted(missing)}."
+                            )
+                return plan
+
+            plan_transform = validate_guarded_plan
         session = self._engine.start(
             (invocation,),
             context,
             eligible_mask=active_mask,
+            plan_transform=plan_transform,
+            nominal_source=nominal_source,
         )
         primed = _PrimedObservationProvider(context, self._observation_provider)
         runner = ExecutionRunner(
@@ -1120,7 +1395,8 @@ class SemanticCallExecutor:
             env_mask=request.env_mask,
             expected_effects=self._phase_effect_gate_expected_effects(
                 gate,
-                session.active_plan,
+                session.active_expected_effects,
+                session.active_effect_candidates,
             ),
         )
         self._next_gate_verification_id += 1
@@ -1157,7 +1433,8 @@ class SemanticCallExecutor:
     @staticmethod
     def _phase_effect_gate_expected_effects(
         gate: GroundedPhaseEffectGate,
-        action_plan: ActionPlan,
+        expected_effects: StateDelta,
+        effect_candidates: StateDelta,
     ) -> StateDelta:
         """Project the action-owned held relation required by one gate."""
         expectation = gate.effect_spec.state_expectations[0]
@@ -1165,20 +1442,20 @@ class SemanticCallExecutor:
             raise TypeError("Built-in phase-effect gates require held-object state.")
         key = expectation.task_state_key
         if expectation.relation is HeldObjectRelation.ATTACHED:
-            candidate = action_plan.effect_candidates.held_object_updates.get(key)
+            candidate = effect_candidates.held_object_updates.get(key)
             if candidate is None:
-                candidate = action_plan.expected_effects.held_object_updates.get(key)
+                candidate = expected_effects.held_object_updates.get(key)
             if not isinstance(candidate, HeldObjectState):
                 raise ValueError(
                     f"Attached gate {gate.gate_id!r} requires an action-owned "
                     "HeldObjectState candidate."
                 )
         else:
-            if key not in action_plan.expected_effects.held_object_updates:
+            if key not in expected_effects.held_object_updates:
                 raise ValueError(
                     f"Active action does not declare gate state key {key!r}."
                 )
-            candidate = action_plan.expected_effects.held_object_updates[key]
+            candidate = expected_effects.held_object_updates[key]
             if candidate is not None:
                 raise ValueError(
                     f"Detached gate {gate.gate_id!r} requires an action-owned "
@@ -1221,14 +1498,12 @@ class SemanticCallExecutor:
         if guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE:
             candidate = session.task_state.get_held_object(guard.task_state_key)
         else:
-            candidate = session.active_plan.effect_candidates.held_object_updates.get(
+            candidate = session.active_effect_candidates.held_object_updates.get(
                 guard.task_state_key
             )
             if candidate is None:
-                candidate = (
-                    session.active_plan.expected_effects.held_object_updates.get(
-                        guard.task_state_key
-                    )
+                candidate = session.active_expected_effects.held_object_updates.get(
+                    guard.task_state_key
                 )
         covered = torch.zeros_like(request.env_mask)
         if isinstance(candidate, HeldObjectState):
@@ -2008,15 +2283,15 @@ class SemanticCallExecutor:
         if analyzed is None:
             workflow_calls = getattr(self._workflow, "calls", ())
             if call_index < len(workflow_calls):
-                analyzed = workflow_calls[call_index]
+                analyzed = workflow_calls[self._analysis_call_offset + call_index]
         bound = getattr(analyzed, "bound", None)
         if bound is None:
             return
         try:
             profile = bound.robot_profile
             preset = bound.preset
-            action_binding = (
-                bound.binding.action_binding
+            skill_binding = (
+                bound.binding.skill_binding
                 if invocation is None
                 else invocation.binding
             )
@@ -2038,7 +2313,7 @@ class SemanticCallExecutor:
                     if invocation is None
                     else invocation.recovery_policy
                 ),
-                endpoints=action_binding.endpoints,
+                endpoints=skill_binding.endpoints,
             )
             skill_id = bound.linked.descriptor.skill_id
         except (AttributeError, TypeError, ValueError):
@@ -2068,6 +2343,8 @@ class SemanticCallExecutor:
         if self._runner is not None:
             recovery_item = self._active_recovery_item
             safe_stop_step = self._runner.cancel(reason)
+            if safe_stop_step.status is RunnerStatus.FAILED and safe_stop_step.message:
+                reason = f"{reason}; safe stop failed: {safe_stop_step.message}"
             runner_step = replace(
                 safe_stop_step,
                 status=RunnerStatus.FAILED,

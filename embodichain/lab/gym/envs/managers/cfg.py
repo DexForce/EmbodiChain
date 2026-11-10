@@ -70,6 +70,20 @@ class FunctorCfg:
 
 
 @configclass
+class ConditionCfg(FunctorCfg):
+    """A measured task condition called as ``func(env, **params)``."""
+
+
+@configclass
+class RLTaskCfg:
+    """Named success (all), failure (any), and truncation (any) conditions."""
+
+    success: dict[str, ConditionCfg] = dict()
+    failure: dict[str, ConditionCfg] = dict()
+    truncation: dict[str, ConditionCfg] = dict()
+
+
+@configclass
 class EventCfg(FunctorCfg):
     """Configuration for a event functor.
 
@@ -129,6 +143,13 @@ class ObservationCfg(FunctorCfg):
     or a existing key to modify, eg:
         - `robot/qpos`: shape of (num_envs, num_dofs)
     `/` is used to separate different levels of hierarchy in the observation dictionary.
+    """
+
+    consumers: tuple[Literal["policy", "recording"], ...] = ("policy",)
+    """Consumers of this channel. Non-policy consumers require a described raw
+    :class:`~embodichain.lab.gym.envs.managers.observation_types.ObservationSample` from an add
+    functor. They never add fields to the policy observation space. Modify
+    functors apply only to the policy view, leaving raw channels unchanged.
     """
 
 
@@ -348,8 +369,14 @@ class RewardCfg(FunctorCfg):
 class ActionTermCfg(FunctorCfg):
     """Configuration for an action term.
 
-    The action term owns one ordered slice of the flat policy action.
+    The action term owns one ordered slice of the flat policy action. New
+    persisted configurations should use ``contract`` so the action semantics
+    remain stable when the implementation class is renamed. A configured
+    contract must match the selected action implementation's ``contract_id``.
     """
+
+    contract: str | None = None
+    """Stable semantic contract resolved to a current action implementation."""
 
 
 @configclass
@@ -367,8 +394,21 @@ class DatasetFunctorCfg(FunctorCfg):
     """Whether to save failed episodes.
 
     If enabled for any dataset functor, all save-mode dataset functors receive
-    both successful and failed episodes. During ``run-env`` expert generation,
+    both successful and failed episodes. During ``run-task`` expert generation,
     a non-empty failed or truncated result is committed and counts toward
     ``max_episodes`` instead of being discarded and retried. Empty plans and
     execution exceptions remain uncommitted.
     """
+
+
+__all__ = [
+    "FunctorCfg",
+    "ConditionCfg",
+    "RLTaskCfg",
+    "EventCfg",
+    "ObservationCfg",
+    "SceneEntityCfg",
+    "RewardCfg",
+    "ActionTermCfg",
+    "DatasetFunctorCfg",
+]
