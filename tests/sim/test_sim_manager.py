@@ -2075,7 +2075,10 @@ def test_robot_sensor_preflight_precedes_resource_allocation(invalid: str) -> No
 @pytest.mark.gpu
 @pytest.mark.requires_sim
 @pytest.mark.parametrize("backend", ["default", "newton"])
-def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) -> None:
+@pytest.mark.parametrize("stereo", [False, True])
+def test_robot_mounted_camera_backend_lifecycle(
+    tmp_path: Path, backend: str, stereo: bool
+) -> None:
     """Mounted cameras follow state writes and survive physical topology rebuilds."""
     urdf_path = tmp_path / "camera_robot.urdf"
     urdf_path.write_text("""<robot name="camera_robot">
@@ -2112,7 +2115,7 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
         )
     )
     try:
-        camera_cfg = CameraCfg(
+        camera_cfg = (StereoCameraCfg if stereo else CameraCfg)(
             uid="mounted",
             width=32,
             height=24,
@@ -2512,6 +2515,10 @@ def test_add_camera_uses_owning_manager_render_context(
         num_envs=len(arenas), render_cfg=RenderCfg(renderer="hybrid")
     )
     sim.device = torch.device("cpu")
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(result=object(), is_finalized=False),
+        arena_names=("arena_0", "arena_1"),
+    )
     sim._world = world
     sim._arenas = arenas
     sim._sensors = {}

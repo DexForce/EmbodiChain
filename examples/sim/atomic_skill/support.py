@@ -1488,15 +1488,16 @@ def create_tutorial_simulation(
             visualization=visualization_cfg_from_args(args),
         )
     )
-    sim.add_light(
-        cfg=LightCfg(
-            uid="main_light",
-            light_type="sun",
-            color=(0.6, 0.6, 0.6),
-            intensity=DEFAULT_TUTORIAL_SUN_INTENSITY,
-            direction=tuple(sun_direction),
+    if sim.has_native_renderer:
+        sim.add_light(
+            cfg=LightCfg(
+                uid="main_light",
+                light_type="sun",
+                color=(0.6, 0.6, 0.6),
+                intensity=DEFAULT_TUTORIAL_SUN_INTENSITY,
+                direction=tuple(sun_direction),
+            )
         )
-    )
     return sim
 
 

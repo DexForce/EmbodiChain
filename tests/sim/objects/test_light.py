@@ -314,6 +314,121 @@ class TestLightTypes:
     # Type-specific property tests
     # ------------------------------------------------------------------
 
+    @pytest.mark.parametrize("input_device", ["cpu", "cuda:0"])
+    def test_fused_light_selection_validation_and_translation_only_pose(
+        self, input_device
+    ):
+        """Fused fields preserve other rows and reject invalid writes atomically."""
+        import numpy as np
+
+        light = self.sim.add_light(
+            LightCfg(
+                uid="batched_spot",
+                light_type="spot",
+                init_pos=(0.2, 0.3, 2),
+                color=(0.1, 0.2, 0.3),
+                intensity=12,
+            )
+        )
+        self.sim.prepare()
+        rows = torch.tensor([3, 1], device=input_device)
+        color = torch.tensor([[0.8, 0.2, 0.1], [0.2, 0.7, 0.4]], device=input_device)
+        intensity = torch.tensor([30.0, 40.0], device=input_device)
+        positions = torch.tensor(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], device=input_device
+        )
+        light.apply_state(
+            color=color,
+            intensity=intensity,
+            position=positions,
+            direction=torch.tensor([1.0, 0.0, -1.0], device=input_device),
+            shadow_enabled=torch.tensor([0, 1], device=input_device),
+            env_ids=rows,
+        )
+
+        def snapshot():
+            return self.sim.spawn_result.create_light_batch(
+                light._light_handles
+            ).fetch_state(
+                fields=("color", "intensity", "position", "shadow_enabled"),
+                frame="local",
+            )
+
+        state = snapshot()
+        np.testing.assert_allclose(state["color"][[3, 1]], color.cpu())
+        np.testing.assert_allclose(state["color"][[0, 2]], [[0.1, 0.2, 0.3]] * 2)
+        np.testing.assert_allclose(state["intensity"], [12, 40, 12, 30])
+        np.testing.assert_allclose(state["position"][[3, 1]], positions.cpu())
+        np.testing.assert_array_equal(
+            state["shadow_enabled"], [True, True, True, False]
+        )
+        with pytest.raises(ValueError):
+            light.apply_state(
+                color=torch.ones_like(color),
+                intensity=torch.tensor([5.0, -1.0], device=input_device),
+                env_ids=rows,
+            )
+        for field, expected in state.items():
+            np.testing.assert_allclose(snapshot()[field], expected)
+        light.apply_state(color=color[:0], intensity=intensity[:0], env_ids=rows[:0])
+        before = light.get_local_pose(to_matrix=True)
+        matrices = torch.eye(4, device=input_device).repeat(2, 1, 1)
+        matrices[:, 0, 0] = matrices[:, 1, 1] = -1
+        matrices[:, :3, 3] = -positions
+        light.set_local_pose(matrices, env_ids=rows, to_matrix=True)
+        updated = light.get_local_pose(to_matrix=True)
+        torch.testing.assert_close(updated[:, :3, :3], before[:, :3, :3])
+        torch.testing.assert_close(updated[[3, 1], :3, 3], -positions.cpu())
+        # Old read results own their storage across later writes and reads.
+        torch.testing.assert_close(before[[3, 1], :3, 3], positions.cpu())
+        light.reset(env_ids=[3])
+        state = snapshot()
+        # Local reads round-trip float32 world coordinates through Arena offsets.
+        np.testing.assert_allclose(state["position"][3], [0.2, 0.3, 2], atol=2e-6)
+        np.testing.assert_allclose(state["position"][1], [-4, -5, -6])
+        np.testing.assert_allclose(state["color"][3], [0.1, 0.2, 0.3])
+        for selection, expected_color in (
+            ([3, 3], color[1]),
+            ([-1, 1], color[0]),
+        ):
+            light.apply_state(
+                color=color,
+                intensity=intensity,
+                env_ids=torch.tensor(selection, device=input_device),
+            )
+            torch.testing.assert_close(light.get_color()[3], expected_color.cpu())
+        torch.testing.assert_close(light.get_color()[1], color[1].cpu())
+        self.sim.remove_asset(light.uid)
+        with pytest.raises(RuntimeError, match="destroyed"):
+            light.set_intensity(torch.tensor(10.0))
+
+    def test_angle_and_rectangle_batches_preserve_unselected_rows(self):
+        """Coupled field setters validate complete pairs before mutation."""
+        import numpy as np
+
+        spot = self.sim.add_light(LightCfg(uid="angles", light_type="spot"))
+        rect = self.sim.add_light(LightCfg(uid="dimensions", light_type="rect"))
+        spot.set_spot_angle(
+            torch.tensor([10.0, 20.0]), torch.tensor([50.0, 60.0]), env_ids=[2, 0]
+        )
+        native = self.sim._spawn_scene.builder.result.create_light_batch(
+            spot._light_handles
+        )
+        np.testing.assert_allclose(native.fetch_spot_inner_angle(), [20, 30, 10, 30])
+        with pytest.raises(ValueError):
+            spot.set_spot_angle(
+                torch.tensor([10.0, 80.0]), torch.tensor([60.0, 70.0]), env_ids=[2, 0]
+            )
+        np.testing.assert_allclose(native.fetch_spot_inner_angle(), [20, 30, 10, 30])
+        rect.set_rect_wh(
+            torch.tensor([2.0, 3.0]), torch.tensor([0.5, 0.75]), env_ids=[2, 0]
+        )
+        native = self.sim._spawn_scene.builder.result.create_light_batch(
+            rect._light_handles
+        )
+        np.testing.assert_allclose(native.fetch_rect_width(), [3, 1, 2, 1])
+        np.testing.assert_allclose(native.fetch_rect_height(), [0.75, 1, 0.5, 1])
+
     @pytest.mark.parametrize("light_type", ["sun", "direction"])
     def test_reset_global_light_with_env_ids(self, light_type):
         """reset_objects_state with env_ids does not crash for global lights."""
@@ -406,3 +521,60 @@ class TestLightTypes:
             light.set_falloff(torch.tensor(100.0))
         except Exception as e:
             pytest.fail(f"set_falloff failed: {e}")
+
+
+@pytest.mark.gpu
+def test_shared_mesh_binding_preserves_legacy_selection_contract():
+    """A shared native mesh keeps the scalar API's selection and warning behavior."""
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
+    )
+    try:
+        sim.add_rigid_object(
+            RigidObjectCfg(uid="emitter", shape=CubeCfg(), body_type="static")
+        )
+        light = sim.add_light(LightCfg(uid="mesh_light", light_type="mesh"))
+        sim.prepare()
+        arena_name = sim._spawn_scene.arena_names[0]
+        mesh = sim.spawn_result.handles[f"{arena_name}/emitter"].native()
+        light.set_mesh(mesh, env_ids=[0])
+        first_binding = light._entities[0].get_render_state()["mesh_entity_id"]
+        assert first_binding >= 0
+
+        # Native sharing conflicts warn without raising; a batch must not add
+        # a stricter same-Arena ownership failure for this existing call.
+        light.set_mesh(mesh, env_ids=[2, 0])
+        assert light._entities[0].get_render_state()["mesh_entity_id"] == first_binding
+        assert light._entities[1].get_render_state()["mesh_entity_id"] == -1
+        light.set_mesh(mesh, env_ids=[])
+        light.set_mesh(mesh)
+        assert light._entities[0].get_render_state()["mesh_entity_id"] == first_binding
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.gpu
+def test_light_getters_preserve_cpu_snapshots_with_cuda_manager():
+    """Manager-created light getters keep main's device and ownership contract."""
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device="cuda:0", num_envs=3)
+    )
+    try:
+        light = sim.add_light(
+            LightCfg(uid="getter_light", color=(0.1, 0.2, 0.3), intensity=2)
+        )
+        before = light.get_color()
+        assert before.device.type == "cpu"
+        assert light.get_intensity().device.type == "cpu"
+        light.set_color(torch.tensor([0.4, 0.5, 0.6], device="cuda:0"))
+        torch.testing.assert_close(before, torch.tensor([[0.1, 0.2, 0.3]] * 3))
+        torch.testing.assert_close(
+            light.get_color(), torch.tensor([[0.4, 0.5, 0.6]] * 3)
+        )
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
