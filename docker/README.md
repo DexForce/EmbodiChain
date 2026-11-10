@@ -13,9 +13,12 @@ task assets and remote service credentials remain runtime inputs.
 
 ## Install and run
 
-Use a Linux amd64 host with an NVIDIA driver compatible with CUDA 12.8,
-Docker and NVIDIA Container Toolkit. Confirm GPU access with `nvidia-smi`
-on the host before starting the container.
+Use a Linux amd64 host with an NVIDIA driver **≥ 580.00**, Docker and NVIDIA
+Container Toolkit. The current DLSS integration uses SDK and Super Resolution
+(SR) **310.7.0** and the OVRTX-aligned Ray Reconstruction (RR) runtime
+**310.7.128**, which require this minimum host driver version. Confirm GPU
+access and the driver version with `nvidia-smi` on the host before starting
+the container.
 
 | Runtime | Published image |
 | --- | --- |
