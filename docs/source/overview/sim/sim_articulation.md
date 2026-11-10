@@ -301,17 +301,17 @@ print(f"Current Joint Positions: {articulation.get_qpos()}")
 print(f"End Effector Pose: {articulation.get_link_pose('ee_link')}")
 ```
 
-### Atomic Action Geometry Adapter
+### Atomic Skill Geometry Adapter
 
 `Articulation` exposes deterministic, domain-neutral facts through APIs such as
 `get_link_vert_face()`, `compute_fk()`, and `get_parent_joint_chain()`. Atomic
 Action integrations compose those facts with initial-state mesh transforms,
 Open3D surface sampling, and affordance-specific geometry metadata through
 `sample_initial_articulation_geometry()` in
-`embodichain.lab.sim.atomic_actions`. The adapter returns a typed value; call
+`embodichain.lab.sim.atomic_skills`. The adapter returns a typed value; call
 `to_object_geometry()` only at the `ObjectSemantics.geometry` boundary.
 
-Keeping this stochastic conversion in the Atomic Action layer means simulation
+Keeping this stochastic conversion in the Atomic Skill layer means simulation
 objects do not own private point-cloud keys or affordance interpretation.
 
 ### Visual Appearance

@@ -155,7 +155,7 @@ def test_default_instruction_transport_uses_supported_chat_parameters(
             "role": "system",
             "content": (
                 "Return only the requested structured JSON response. Never "
-                "return reasoning, coordinates, or AtomicAction nodes."
+                "return reasoning, coordinates, or AtomicSkill nodes."
             ),
         },
         {

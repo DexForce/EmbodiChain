@@ -26,12 +26,12 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
     Affordance,
     AffordanceSample,
     AntipodalAffordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     ControlPartCommandProfile,
@@ -55,7 +55,7 @@ from embodichain.lab.sim.atomic_actions import (
     SkillDescriptor,
     TaskState,
 )
-from embodichain.lab.sim.atomic_actions.tracking import (
+from embodichain.lab.sim.atomic_skills.tracking import (
     JointPositionTrackingMetric,
     TrackingPolicy,
 )
@@ -142,9 +142,9 @@ _MOTION_CAPABILITIES = frozenset(
 _PICK_TARGET = PickUp.descriptor()
 
 
-def _action_option_templates(*, registered: bool = False) -> dict[str, ActionOptions]:
+def _skill_option_templates(*, registered: bool = False) -> dict[str, SkillOptions]:
     """Return complete exact options for the test semantic catalog."""
-    templates: dict[str, ActionOptions] = {
+    templates: dict[str, SkillOptions] = {
         "pick": PickUpOptions(),
         "place": PlaceOptions(),
         "hand_over": HandOverOptions(),
@@ -162,8 +162,8 @@ def _preset(
 ) -> SkillPolicyPreset:
     """Build one complete test preset."""
     kwargs.setdefault(
-        "action_option_templates",
-        _action_option_templates(registered=registered),
+        "skill_option_templates",
+        _skill_option_templates(registered=registered),
     )
     kwargs.setdefault("effect_assurance", EffectAssurance.VERIFIED)
     kwargs.setdefault(
@@ -229,7 +229,7 @@ class _InspectLowerer(RegisteredSemanticLowerer):
     target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
     def __init__(self) -> None:
-        self.option_templates: list[ActionOptions] = []
+        self.option_templates: list[SkillOptions] = []
 
     def lower(
         self,
@@ -237,7 +237,7 @@ class _InspectLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: object,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         del call, context, bound
         self.option_templates.append(option_template)
@@ -263,7 +263,7 @@ class _EffectfulInspectLowerer(_InspectLowerer):
         *,
         context: PlanningContext,
         bound: object,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         lowering = super().lower(
             call,
@@ -302,7 +302,7 @@ class _ReleasingInspectLowerer(_InspectLowerer):
         *,
         context: PlanningContext,
         bound: object,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         lowering = super().lower(
             call,
@@ -345,7 +345,7 @@ class _AcquiringInspectLowerer(_EffectfulInspectLowerer):
         *,
         context: PlanningContext,
         bound: object,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         result = super().lower(
             call, context=context, bound=bound, option_template=option_template
@@ -411,7 +411,7 @@ class _SubclassOutputLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         del call, context, bound, option_template
         semantics = ObjectSemantics(
@@ -616,7 +616,7 @@ def _engine(
     profile: RobotSkillProfile,
     *,
     supports_dynamic_collision_world: bool = False,
-) -> AtomicActionEngine:
+) -> AtomicSkillEngine:
     robot = Mock()
     robot.device = torch.device("cpu")
     control_parts = tuple(
@@ -641,9 +641,9 @@ def _engine(
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
     generator.supports_dynamic_collision_world = supports_dynamic_collision_world
-    return AtomicActionEngine(
+    return AtomicSkillEngine(
         generator,
-        control_profiles=profile.action_control_profiles(),
+        control_profiles=profile.skill_control_profiles(),
     )
 
 
@@ -653,7 +653,7 @@ def _integration(
     registered: bool = False,
     profile: RobotSkillProfile | None = None,
     supports_dynamic_collision_world: bool = False,
-) -> tuple[SemanticIntegrationManifest, AtomicActionEngine]:
+) -> tuple[SemanticIntegrationManifest, AtomicSkillEngine]:
     selected_profile = _profile(registered=registered) if profile is None else profile
     catalog = builtin_semantic_call_catalog()
     if registered:
@@ -688,7 +688,7 @@ def _compiler(
     profile: RobotSkillProfile | None = None,
     effect_monitor_registry: EffectMonitorRegistry | None = None,
     supports_dynamic_collision_world: bool = False,
-) -> tuple[SemanticCallCompiler, AtomicActionEngine]:
+) -> tuple[SemanticCallCompiler, AtomicSkillEngine]:
     manifest, engine = _integration(
         registry,
         registered=registered,
@@ -1018,7 +1018,7 @@ def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding(
     assert constraint.expected is True
     assert constraint.source.address == ControlPartEvidenceAddress("hand", "constraint")
     assert (
-        first.analyzed.bound.binding.action_binding.endpoint(
+        first.analyzed.bound.binding.skill_binding.endpoint(
             "primary", "motion"
         ).task_state_key
         == "manipulator"
@@ -1266,13 +1266,11 @@ def test_handover_retention_requires_explicit_policy_and_verified_source() -> No
             )
         )
     assert mismatch.value.diagnostic.code == "invalid_object_state_flow"
-    templates = _action_option_templates()
+    templates = _skill_option_templates()
     templates["hand_over"] = replace(templates["hand_over"], release_at_target=False)
     compiler, _ = _compiler(
         registry,
-        profile=_dual_profile(
-            preset=_preset("safe", action_option_templates=templates)
-        ),
+        profile=_dual_profile(preset=_preset("safe", skill_option_templates=templates)),
         handover_pose_providers=(provider,),
     )
     workflow = compiler.analyze((HandOver(object=SceneObjectRef("cube")),))
@@ -1302,7 +1300,7 @@ def test_handover_retention_requires_explicit_policy_and_verified_source() -> No
     assert grounded.invocation.skill_options.release_at_target is False
     assert (
         workflow.calls[0]
-        .bound.preset.action_option_template("hand_over")
+        .bound.preset.skill_option_template("hand_over")
         .release_at_target
         is False
     )
@@ -1329,13 +1327,13 @@ def test_handover_retention_requires_explicit_policy_and_verified_source() -> No
 def test_registered_call_without_monitor_has_no_effect_contract() -> None:
     registry, _ = _scene_registry()
     factory = _CountingRelationMonitorFactory()
-    templates = _action_option_templates(registered=True)
+    templates = _skill_option_templates(registered=True)
     templates["vendor.inspect"] = PickUpOptions(pre_grasp_distance=0.07)
     profile = _profile(
         preset=_preset(
             "safe",
             registered=True,
-            action_option_templates=templates,
+            skill_option_templates=templates,
         )
     )
     lowerer = _InspectLowerer()
@@ -1421,13 +1419,13 @@ def test_registered_monitor_without_effect_grounder_fails_during_analysis() -> N
 def test_registered_effect_contract_is_grounded_by_compiler() -> None:
     """An extension declares intent while the compiler binds physical sources."""
     registry, _ = _scene_registry()
-    templates = _action_option_templates(registered=True)
+    templates = _skill_option_templates(registered=True)
     templates["vendor.inspect"] = PickUpOptions(pre_grasp_distance=0.07)
     profile = _profile(
         preset=_preset(
             "safe",
             registered=True,
-            action_option_templates=templates,
+            skill_option_templates=templates,
             effect_monitors={
                 "vendor.inspect": EffectMonitorRef(
                     COMPOSITE_EFFECT_MONITOR_ID,
@@ -1463,13 +1461,13 @@ def test_registered_acquisition_phase_contract_uses_existing_gate_and_guard(
     expectation_id: str,
 ) -> None:
     registry, _ = _scene_registry()
-    templates = _action_option_templates(registered=True)
+    templates = _skill_option_templates(registered=True)
     templates["vendor.inspect"] = PickUpOptions(pre_grasp_distance=0.07)
     profile = _profile(
         preset=_preset(
             "safe",
             registered=True,
-            action_option_templates=templates,
+            skill_option_templates=templates,
             effect_monitors={
                 "vendor.inspect": EffectMonitorRef(
                     COMPOSITE_EFFECT_MONITOR_ID, COMPOSITE_EFFECT_MONITOR_REVISION
@@ -1535,13 +1533,13 @@ def test_registered_acquisition_rejects_incomplete_or_inconsistent_schedule(
 
 def test_registered_acquisition_cannot_silently_use_projected_effects() -> None:
     registry, _ = _scene_registry()
-    templates = _action_option_templates(registered=True)
+    templates = _skill_option_templates(registered=True)
     templates["vendor.inspect"] = PickUpOptions()
     profile = _profile(
         preset=_preset(
             "safe",
             registered=True,
-            action_option_templates=templates,
+            skill_option_templates=templates,
             effect_assurance=EffectAssurance.PROJECTED,
             effect_monitors={},
         )
@@ -1587,13 +1585,13 @@ def test_registered_release_requires_object_held_in_every_eligible_row(
 ) -> None:
     """Registered release calls cannot consume inactive held-state rows."""
     registry, _ = _scene_registry()
-    templates = _action_option_templates(registered=True)
+    templates = _skill_option_templates(registered=True)
     templates["vendor.inspect"] = PickUpOptions(pre_grasp_distance=0.07)
     profile = _profile(
         preset=_preset(
             "safe",
             registered=True,
-            action_option_templates=templates,
+            skill_option_templates=templates,
             effect_monitors={
                 "vendor.inspect": EffectMonitorRef(
                     COMPOSITE_EFFECT_MONITOR_ID,
@@ -1673,7 +1671,7 @@ def test_ground_wraps_effect_monitor_factory_contract_failure_with_path() -> Non
 
 def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     registry, providers = _scene_registry()
-    templates = _action_option_templates()
+    templates = _skill_option_templates()
     templates["pick"] = PickUpOptions(
         pick_object_part="top",
         pre_grasp_distance=0.08,
@@ -1681,7 +1679,7 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     compiler, engine = _compiler(
         registry,
         profile=_profile(
-            preset=_preset("safe", action_option_templates=templates),
+            preset=_preset("safe", skill_option_templates=templates),
         ),
     )
     drop = SemanticPose((0.4, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
@@ -1716,13 +1714,11 @@ def test_pick_lookahead_reserves_the_opposite_handover_object_part() -> None:
     """A selected HandOver suffix, rather than Task Engine, chooses the grasp."""
     registry, _ = _scene_registry()
     provider = _DualCenterHandOverProvider()
-    templates = _action_option_templates()
+    templates = _skill_option_templates()
     templates["hand_over"] = replace(templates["hand_over"], release_at_target=False)
     compiler, _ = _compiler(
         registry,
-        profile=_dual_profile(
-            preset=_preset("safe", action_option_templates=templates)
-        ),
+        profile=_dual_profile(preset=_preset("safe", skill_option_templates=templates)),
         handover_pose_providers=(provider,),
     )
 
@@ -1810,12 +1806,12 @@ def test_pick_lookahead_uses_downstream_place_orientation_policy() -> None:
         )
     )
     providers[0].pose = object_pose
-    templates = _action_option_templates()
+    templates = _skill_option_templates()
     templates["place"] = PlaceOptions(preserve_current_object_orientation=True)
     compiler, _ = _compiler(
         registry,
         profile=_profile(
-            preset=_preset("safe", action_option_templates=templates),
+            preset=_preset("safe", skill_option_templates=templates),
         ),
     )
     drop = SemanticPose((0.4, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
@@ -1901,7 +1897,7 @@ def test_pick_relation_lookahead_is_not_an_active_scene_dependency() -> None:
     assert type(downstream) is SceneEntityPose
     assert downstream.entity_id == "table_top"
     request = engine.resolve(grounded.invocation)
-    action = engine.actions["pick_up"]
+    action = engine.skill_implementations["pick_up"]
     # The suffix still guides grasp selection, but Place observes and grounds
     # its destination again after Pick reaches a verified semantic boundary.
     assert action._scene_dependencies(request) == ("cube",)
@@ -1921,7 +1917,7 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
     )
     first_context = _context(registry, timestamp=0.0)
     invocation = compiler.ground(workflow, 0, first_context).invocation
-    action = engine.actions["pick_up"]
+    action = engine.skill_implementations["pick_up"]
     captured: list[torch.Tensor] = []
 
     def fail_after_capture(
@@ -2000,7 +1996,7 @@ def test_handover_uses_profile_selected_provider_for_unified_goal() -> None:
     options = handover.invocation.skill_options
     assert type(options) is HandOverOptions
     request = engine.resolve(handover.invocation)
-    action = engine.actions["hand_over"]
+    action = engine.skill_implementations["hand_over"]
     assert action._scene_dependencies(request) == ("cube", "table_top")
 
 
@@ -2057,7 +2053,7 @@ def test_relation_call_requires_exact_typed_versioned_grounder() -> None:
 
 def test_place_uses_verified_object_to_eef_transform() -> None:
     registry, _ = _scene_registry()
-    templates = _action_option_templates()
+    templates = _skill_option_templates()
     templates["place"] = PlaceOptions(
         lift_height=0.22,
         cartesian_waypoint_count=3,
@@ -2065,7 +2061,7 @@ def test_place_uses_verified_object_to_eef_transform() -> None:
     compiler, engine = _compiler(
         registry,
         profile=_profile(
-            preset=_preset("safe", action_option_templates=templates),
+            preset=_preset("safe", skill_option_templates=templates),
         ),
     )
     drop = SemanticPose((0.5, -0.2, 0.4), (0.0, 0.0, 0.0, 1.0))
@@ -2099,12 +2095,12 @@ def test_place_can_keep_observed_object_orientation_at_target() -> None:
         [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
     )
     cube_provider.pose = cube_pose
-    templates = _action_option_templates()
+    templates = _skill_option_templates()
     templates["place"] = PlaceOptions(preserve_current_object_orientation=True)
     compiler, _ = _compiler(
         registry,
         profile=_profile(
-            preset=_preset("safe", action_option_templates=templates),
+            preset=_preset("safe", skill_option_templates=templates),
         ),
     )
     pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
@@ -2322,7 +2318,7 @@ def test_occurrence_policy_is_relinked_before_grounding_and_revisions() -> None:
 
     registry, providers = _scene_registry()
     base = _profile()
-    options = _action_option_templates()
+    options = _skill_option_templates()
     options["pick"] = PickUpOptions(lift_height=0.23)
     profile = replace(
         base,
@@ -2331,7 +2327,7 @@ def test_occurrence_policy_is_relinked_before_grounding_and_revisions() -> None:
             "careful": _preset(
                 "careful",
                 motion_policy=MotionPolicy(sample_count=81),
-                action_option_templates=options,
+                skill_option_templates=options,
             ),
         },
     )
