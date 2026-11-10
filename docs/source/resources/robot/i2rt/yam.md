@@ -5,6 +5,20 @@ assembly. Its implementation and asset definition live together in
 `embodichain_robots.i2rt.yam`; the robot catalog ID is `YamI2rt`.
 Catalog listing reads metadata without loading the model or downloading assets.
 
+:::{figure} ../../../_static/robots/yam_i2rt.png
+:alt: Both YAM arms and their parallel grippers in the default joint pose
+:align: center
+:height: 440px
+
+YAM dual-arm assembly captured in DexSim OfflineRT.
+:::
+
+The captures use the default joint pose and source materials, with the bases
+placed at ground level and a soft rectangular key light.
+See the [right gripper close-up](../../../_static/robots/yam_i2rt_gripper.png)
+and the render records for the [assembly](../../../_static/robots/yam_i2rt.render.json)
+and [gripper](../../../_static/robots/yam_i2rt_gripper.render.json).
+
 ## Construction and control
 
 ```python
