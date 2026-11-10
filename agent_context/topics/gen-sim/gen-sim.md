@@ -51,6 +51,10 @@ Edit: import export → validate graph/typed edit plan → generate additions
 
 Read [pipeline details](pipeline-details.md) for stage contracts, parser resume
 behavior, Gradio artifact ownership and focused failure diagnosis.
+Use the [scripted reproduction](../../../examples/gensim/scripted_pick_place/README.md)
+for a provider-free input fixture, native execution receipts, offline graph
+display and explicitly scoped wall-clock measurements. Its scene is procedural;
+it does not qualify image reconstruction or a successful expert trajectory.
 
 The staged API persists a versioned image or edit blueprint before generating
 assets. Image materialization verifies the persisted blueprint and source/mask

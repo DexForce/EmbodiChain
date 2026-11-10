@@ -30,6 +30,19 @@ Install the `embodichain[gensim]` extra for its optional dependencies.
 
 ## Generate, bind and execute
 
+For a self-contained input fixture, see the
+[scripted pick/place reproduction](../../examples/gensim/scripted_pick_place/README.md):
+
+```bash
+embodichain run-example gensim/scripted_pick_place --output outputs/gensim-scripted-a
+```
+
+It uses scripted model responses and a procedural scene, then real native
+binding, Task Program preflight and verified execution. Each attempt saves the
+graph frontend, reports and wall-clock timing. The observed placement failure
+retains a nonzero exit status. Its timing does not qualify live image/asset
+generation. For real inputs, configure the model services and use `gensim run`:
+
 ```bash
 embodichain gensim run --config examples/gensim/run.yaml \
   --image /absolute/path/to/table.png --output outputs/gensim-run-001
@@ -89,3 +102,9 @@ The source task graph stays unbound. The bound graph and explicit deployment are
 separate artifacts. The workflow records `task_spec_verdict: not_evaluated`:
 a measured Task Program execution result is not a separate normative TaskSpec
 certificate.
+
+The standalone planning frontend does not automatically display native execution
+results. Its elapsed-time field covers semantic planning only. The scripted
+example's `process_timing.json` covers the complete measured worker lifetime;
+its `comparison.json` separates matching semantic artifacts/step spans from
+floating-point trajectory reproducibility.

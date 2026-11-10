@@ -1,5 +1,17 @@
 # Image-to-execution GenSim workflow
 
+For the fixed-input dual-UR5 table/cube reproduction, use the
+[scripted pick/place example](scripted_pick_place/README.md). It requires no live
+model services, rebuilds its inputs/deployment in each new process, and saves
+the semantic-graph frontend, execution verdict and complete worker wall time.
+Its recorded result is pickup success followed by placement verification failure.
+
+```bash
+embodichain run-example gensim/scripted_pick_place --output outputs/gensim-scripted-a
+```
+
+The live-service route below uses your photograph and configured model services.
+
 Configure the required [model services](../../embodichain/gen_sim/services/README.md),
 install the GenSim optional dependencies, and supply a real tabletop photograph:
 
