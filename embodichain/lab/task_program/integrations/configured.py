@@ -3315,6 +3315,14 @@ class _ConfiguredTaskProgramAdapterFactory:
         environment: object,
     ) -> TaskProgramEnvironmentAdapter:
         """Create a live adapter for an initialized environment."""
+        from .demo_skill import _ConfiguredDemoSkillSource
+
+        if any(
+            isinstance(item, _ConfiguredDemoSkillSource)
+            for item in self.nominal_motion_sources
+        ):
+            if getattr(environment, "num_envs", None) != 1:
+                raise ValueError("configured Demo Skills require num_envs == 1")
         adapter = self.delegate.create_adapter(environment)
         adapter._set_configured_nominal_sources(self.nominal_motion_sources)
         return adapter
@@ -3346,7 +3354,12 @@ def _decode_configured_task_program_integration(
         config.get("runtime_services", {}), robot_profile_binding=robot_profile_binding
     )
 
-    call_catalog = builtin_semantic_call_catalog()
+    call_catalog = builtin_semantic_call_catalog(
+        include_transport=any(
+            "move_held_object" in preset.skill_option_templates
+            for preset in robot_profile_binding.presets
+        )
+    )
     for lowerer_factory in services.registered_semantic_lowerers:
         call_catalog = call_catalog.with_descriptor(
             SemanticCallDescriptor(

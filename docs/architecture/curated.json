@@ -3632,7 +3632,7 @@
       "evidence": [
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
-          "symbol": "TaskProgramCompiler.compile",
+          "symbol": "TaskProgramCompiler._compile",
           "start_line": 1738,
           "end_line": 1740,
           "excerpt": "        targets = self._compile_targets(config.targets)\n        root = self._compile_node(\n            config.program,"
@@ -3650,7 +3650,7 @@
       "evidence": [
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
-          "symbol": "TaskProgramCompiler.compile",
+          "symbol": "TaskProgramCompiler._compile",
           "start_line": 1751,
           "end_line": 1756,
           "excerpt": "        return _materialize_program(\n            program_id=config.program_id,\n            instruction=config.instruction,\n            integration=integration,\n            targets=targets,\n            root=root,"

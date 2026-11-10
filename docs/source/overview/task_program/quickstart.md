@@ -108,7 +108,7 @@ Download the
 {download}`original program <../../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml>`
 and save it as **`program.yaml`** in your working directory. Change:
 
-1. `program.count` from `3` to `2`.
+1. `program.repeat.count` from `3` to `2`.
 2. The order of the two entries in `targets.drop_pose.values` to B, then A.
 3. The root `instruction` to `Move the cube to target B, then to target A.`
 
@@ -279,7 +279,7 @@ from step 3, and restore the original field before trying the next one.
 `object: missing_cube`. The actual error is:
 
 ```text
-TaskProgramValidationError: $.program.body.items[0].steps.call.object: program.body.items[0].steps.call.object: Unknown scene entity 'missing_cube'. [reference_validation_failed]
+TaskProgramValidationError: $.program.repeat.body[0].steps.pick.object: program.body.items[0].steps.call.object: Unknown scene entity 'missing_cube'. [reference_validation_failed]
 ```
 
 `items[0]` is the first segment. Restore `cube`; objects must come from the

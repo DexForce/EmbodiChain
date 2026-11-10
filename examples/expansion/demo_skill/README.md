@@ -4,6 +4,21 @@ DemoSkill 将连续子任务或完整任务保存为一个技能资产，通过 
 降低为 `ExecuteDemoSkill`，复用现有 Task Program、AtomicSkillEngine 和 Expansion Engine。
 内部阶段用于约束、来源映射和扩增授权，无需逐段映射到标准技能。
 
+## 原生搬运与持续持物
+
+生成使用简写、共享目标和 verified effects 的独立配置：
+
+```bash
+python -m embodichain run-example expansion/demo_skill/present.py -- \
+  --output /tmp/carton-present --duration 2
+python -m embodichain run-task --gym_config /tmp/carton-present/task.yaml \
+  --num_envs 1 --device cpu --headless --renderer no-render \
+  --disable_sensor --filter_dataset_saving --max_episodes 1
+```
+
+输出目录必须不存在。准备器复用官方 Panda 场景与标定，在写出前执行普通部署 preflight。
+实际执行按控制时钟逐步验证物体附着与位姿，未满足完整保持窗口不会判定成功。
+
 ## 真实数据示例
 
 本例使用已有 carton real2sim 示例的同一条 DROID 真机遥操记录、Panda + Robotiq、物理
@@ -70,7 +85,10 @@ python -m embodichain real2sim validate-demo-skill prepared-skill/demo_skill.jso
 
 ## 配置接入与扩增
 
-integration 声明 `kind: demo_skill` 的 registered lowerer，并在 `nominal_motion_sources`
+新配置在 `runtime_services.demo_skills` 中命名资产并固定 manifest、内容摘要及所需接触绑定；
+program 使用 `demo_skill: {skill, roles}`，部署自动为展开后的每次调用生成来源与指纹。
+本示例的 `mixed`、`whole` 生成器使用这条路径。旧配置仍可声明
+`kind: demo_skill` 的 registered lowerer，并在 `nominal_motion_sources`
 中使用 `provider_id: demo_skill`、`revision: '1'`、`call_id`、`call_index`、
 `program_fingerprint`、`asset_manifest` 和 `asset_sha256` 固定来源。同一资产在循环中的
 不同出现位置使用不同 call index。没有来源绑定的普通调用继续使用 native planning。
