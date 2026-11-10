@@ -198,6 +198,51 @@ def test_runtime_service_binding_rejects_changed_physical_commands(tmp_path):
         factory.validate_binding(robot, "custom_fingers")
 
 
+def test_configured_geometry_honors_corrected_limits_for_nonzero_opening(tmp_path):
+    import hashlib
+    from types import SimpleNamespace
+    import torch
+    from embodichain.data import get_data_path
+    from embodichain.robot_registry import resolve_robot_cfg
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_grasp_generator,
+    )
+
+    defaults = resolve_gripper_defaults("RobotiqArg2F85")
+    opening = {
+        name: value * 0.25
+        for name, value in defaults["joint_commands"]["grasp"].items()
+    }
+    source = Path(get_data_path(defaults["fpath"]))
+    original_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    physical = _compose(
+        tmp_path,
+        model="RobotiqArg2F85",
+        gripper_overrides={"commands": {"open": opening}},
+    )
+    values = deepcopy(physical.config["robot"])
+    cfg = resolve_robot_cfg(values.pop("class_type"), values)
+    prepare_robot_grippers(cfg)
+    factory = _decode_grasp_generator(
+        physical.embodiment_skill_profile["runtime_services"]["grasp_pose_generators"][
+            "custom_fingers"
+        ],
+        path="test",
+    )
+    factory.validate_binding(SimpleNamespace(cfg=cfg), "custom_fingers")
+    geometry = factory().collision_geometry
+    assert geometry.provenance["joint_positions"] == opening
+    assert geometry.provenance["joint_positions"]["left_inner_finger_joint"] == -0.2
+    assert (
+        geometry.provenance["files_sha256"][str(source)]
+        == original_hash
+        == defaults["source_sha256"]
+    )
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == original_hash
+    assert torch.isfinite(geometry.points).all()
+
+
 @pytest.mark.parametrize(
     "name,variant",
     [

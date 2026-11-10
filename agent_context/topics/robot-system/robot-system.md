@@ -217,8 +217,10 @@ fixed virtual TCP links may lie upstream or downstream. A stationary opposite-ar
 TCP is not a valid hand reference. The declared TCP must also remain fixed
 throughout hand actuation. Model-specific commands and TCP
 calibration come from the selected concrete hand description and explicit
-embodiment binding. `utility/gripper_geometry.py` builds collision surfaces and
-projects scalar inputs. GraspKit consumes those numerical inputs; it does not
+embodiment binding. `utility/gripper_geometry.py` resolves native joint bounds
+alongside opening commands, builds collision surfaces and projects scalar inputs.
+Geometry validation uses those effective bounds, including model corrections,
+while retaining the pinned source URDF. GraspKit consumes those numerical inputs; it does not
 import hardware Cfgs or look up hardware by model ID.
 `ordered_pad_line_world` validates the same explicit topology and reads only the
 two live pad poses in declaration order; use it for a jaw line without sampled

@@ -40,7 +40,8 @@ def build_gripper_collision_geometry(
 
     Args:
         defaults: Complete primitive gripper description, including source asset,
-            native commands and default_root_from_tcp.
+            native commands and default_root_from_tcp. Optional qpos_limits use
+            native joint names/regexes, or rows in the native eef joint order.
         point_spacing: Maximum triangle sampling edge in metres.
         root_from_tcp: Explicit runtime TCP relative to the native hand root.
         root_from_contact_frame: Explicit contact-frame calibration, if selected.
@@ -79,6 +80,20 @@ def build_gripper_collision_geometry(
         != defaults["source_sha256"]
     ):
         raise ValueError("Gripper source asset differs from its pinned description.")
+    joint_limits = defaults.get("qpos_limits")
+    if isinstance(joint_limits, Mapping):
+        from embodichain.utils.string import resolve_matching_names_values
+
+        _, names, bounds = resolve_matching_names_values(
+            dict(joint_limits), list(defaults["joint_commands"]["open"])
+        )
+        joint_limits = dict(zip(names, bounds))
+    elif joint_limits is not None:
+        names = defaults["control_parts"]["eef"]
+        bounds = np.asarray(joint_limits, dtype=float)
+        if bounds.shape != (len(names), 2):
+            raise ValueError("qpos_limits must have native hand shape (num_dofs, 2).")
+        joint_limits = dict(zip(names, bounds.tolist()))
     geometry = FixedGripperCollisionGeometry.from_urdf(
         source_path,
         root_link=defaults["root_link"],
@@ -86,6 +101,7 @@ def build_gripper_collision_geometry(
         link_from_tcp=tcp,
         collision_links=tuple(defaults["collision_links"]),
         joint_positions=dict(defaults["joint_commands"]["open"]),
+        joint_limits=joint_limits,
         grasp_from_tcp=np.linalg.inv(canonical) @ tcp,
         point_spacing=point_spacing,
         mesh_paths={

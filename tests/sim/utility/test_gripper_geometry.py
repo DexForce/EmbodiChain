@@ -138,3 +138,27 @@ def test_contact_frame_override_preserves_root_surfaces_and_runtime_tcp():
         calibrated.canonical_to_tcp_poses(candidates), candidates
     )
     assert calibrated.provenance["files_sha256"] == default.provenance["files_sha256"]
+
+
+@pytest.mark.parametrize("limits_form", ["regex", "rows"])
+def test_effective_limit_forms_resolve_to_native_geometry_joints(limits_form):
+    defaults = resolve_gripper_defaults("RobotiqArg2F85")
+    expected = defaults["qpos_limits"]
+    defaults["joint_commands"]["open"] = {
+        name: value * 0.25
+        for name, value in defaults["joint_commands"]["grasp"].items()
+    }
+    if limits_form == "rows":
+        defaults["qpos_limits"] = [
+            expected[name] for name in defaults["control_parts"]["eef"]
+        ]
+    else:
+        defaults["qpos_limits"] = {
+            "finger_joint": [0.0, 0.8],
+            "(?:left|right)_inner_finger_joint": [-0.8, 0.0],
+            "(?:left|right)_inner_knuckle_joint": [0.0, 0.8757],
+            "right_outer_knuckle_joint": [0.0, 0.81],
+        }
+    geometry = build_gripper_collision_geometry(defaults)
+    assert geometry.provenance["joint_limits"] == expected
+    assert geometry.provenance["joint_positions"] == defaults["joint_commands"]["open"]
