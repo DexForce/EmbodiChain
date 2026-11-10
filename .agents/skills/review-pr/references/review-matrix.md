@@ -10,7 +10,7 @@ and current source code when this matrix and the repository diverge.
 - [Simulation core and scene objects](#simulation-core-and-scene-objects)
 - [Gym environments, managers, functors, and randomization](#gym-environments-managers-functors-and-randomization)
 - [Task Programs and configured deployments](#task-programs-and-configured-deployments)
-- [Atomic actions, motion planning, and IK](#atomic-actions-motion-planning-and-ik)
+- [Atomic Skills, motion planning, and IK](#atomic-skills-motion-planning-and-ik)
 - [Robots, sensors, and visualization](#robots-sensors-and-visualization)
 - [Reinforcement learning and data pipelines](#reinforcement-learning-and-data-pipelines)
 - [Official tasks and configuration packages](#official-tasks-and-configuration-packages)
@@ -127,9 +127,9 @@ Evidence surfaces: language decoder/validation, compiler, semantic catalog,
 configured composition/services, Gym registration/bridge, package-data tests,
 and the `$add-task-program` read-only deployment inspector.
 
-## Atomic actions, motion planning, and IK
+## Atomic Skills, motion planning, and IK
 
-**Paths:** `embodichain/lab/sim/atomic_actions/**`, `planners/**`,
+**Paths:** `embodichain/lab/sim/atomic_skills/**`, `planners/**`,
 `solvers/**`, and grasp/workspace utilities that feed plans.
 
 Check:
@@ -156,7 +156,7 @@ Check:
 
 Evidence surfaces: typed core contracts, engine/runner, simulation adapter,
 planner/solver base class, registration/export modules, and the nearest
-`tests/sim/atomic_actions/**`, planner, solver, or toolkit test.
+`tests/sim/atomic_skills/**`, planner, solver, or toolkit test.
 
 ## Robots, sensors, and visualization
 

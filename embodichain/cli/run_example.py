@@ -58,6 +58,8 @@ def _example_path(root: Path, name: str) -> Path:
     relative = Path(name)
     if relative.parts[:1] == ("examples",):
         relative = Path(*relative.parts[1:])
+    if relative.parts[:2] == ("sim", "atomic_action"):
+        relative = Path("sim", "atomic_skill", *relative.parts[2:])
     candidate = root / relative
     if candidate.is_dir():
         candidate /= "__main__.py"
@@ -134,11 +136,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
 
-def atomic_action_cli(argv: Sequence[str] | None = None) -> None:
+def atomic_skill_cli(argv: Sequence[str] | None = None) -> None:
     """Forward the existing Atomic Skill command to its ordinary example path.
 
     Args:
         argv: Arguments following the legacy command name.
     """
     arguments = list(sys.argv[1:] if argv is None else argv)
-    main(["sim/atomic_action", *arguments])
+    main(["sim/atomic_skill", *arguments])
+
+
+# Deprecated callable entry point for integrations using the former CLI target.
+atomic_action_cli = atomic_skill_cli

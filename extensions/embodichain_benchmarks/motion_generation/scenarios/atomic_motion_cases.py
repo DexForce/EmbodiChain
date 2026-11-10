@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
     EndEffectorPoseGoal,
     JointPositionGoal,
     MotionPolicy,
@@ -176,7 +176,7 @@ class MoveEndEffectorCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         return scenario.require_engine().make_invocation(
             self.skill_id,
             EndEffectorPoseGoal(case.target_waypoints),
@@ -312,7 +312,7 @@ class MoveJointsCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         target = torch.tensor(
             case.case_parameters["target_qpos"],
             dtype=torch.float32,

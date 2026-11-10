@@ -49,11 +49,13 @@ from embodichain.lab.task_program.integrations._configured_services import (
     _RelativePlaceRoute,
 )
 from embodichain.lab.task_program.integrations.configured import (
-    _decode_action_options,
+    _decode_skill_options,
     _decode_configured_task_program_integration,
     _decode_grasp_generator,
     _decode_registered_lowerer,
     _decode_motion_policy,
+    _decode_policy_preset,
+    _decode_recovery_policy,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
@@ -68,7 +70,7 @@ from embodichain.lab.gym.utils.composition import (
 from embodichain.lab.gym.envs.task_program.registration import (
     _register_configured_task_program_integration,
 )
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
     AxisAlignAffordance,
     AxisAlignGoal,
@@ -97,12 +99,12 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.atomic_actions.goals import (
+from embodichain.lab.sim.atomic_skills.goals import (
     collect_scene_dependencies,
     resolve_pose_goal,
 )
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
@@ -417,8 +419,12 @@ def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     )
 
 
+@pytest.mark.parametrize("base_key", ["skill_timeout", "action_timeout"])
+@pytest.mark.parametrize("override_key", ["skill_timeout", "action_timeout"])
 def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     tmp_path: Path,
+    base_key: str,
+    override_key: str,
 ) -> None:
     """A relative selector patches tuning while retaining the policy contract."""
     path = _config_path("hand_over")
@@ -429,7 +435,12 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     )
     from embodichain.utils.utility import save_config
 
-    save_config(tmp_path / "policy.yaml", base_policy)
+    component_policy = deepcopy(base_policy)
+    if base_key == "action_timeout":
+        component_policy["recovery"][base_key] = component_policy["recovery"].pop(
+            "skill_timeout", 30.0
+        )
+    save_config(tmp_path / "policy.yaml", component_policy)
     save_config(tmp_path / "integration.yaml", task)
     original = (tmp_path / "policy.yaml").read_bytes()
     selection = {
@@ -445,7 +456,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
                     "dynamic_collision_mode": "off",
                 },
                 "recovery": {
-                    "action_timeout": 90.0,
+                    override_key: 90.0,
                     "goal_rotation_threshold": 0.75,
                 },
             },
@@ -461,7 +472,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     assert preset.motion_policy.velocity_limit == 0.35
     assert preset.motion_policy.acceleration_limit == 0.4
     assert preset.motion_policy.dynamic_collision_mode.value == "off"
-    assert preset.recovery_policy.action_timeout == 90.0
+    assert preset.recovery_policy.skill_timeout == 90.0
     assert preset.recovery_policy.goal_rotation_threshold == 0.75
     assert preset.recovery_policy.max_replans == 3
     assert preset.effect_assurance.value == "verified"
@@ -493,7 +504,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
             ValueError,
             "dynamic_collision_mode",
         ),
-        ({"recovery": {"action_timeout": 0.0}}, ValueError, "action_timeout"),
+        ({"recovery": {"skill_timeout": 0.0}}, ValueError, "skill_timeout"),
         (None, TypeError, "overrides must be a mapping"),
     ),
 )
@@ -749,7 +760,7 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
     registration = integration.registration
     grasp = registration.scene_binding.antipodal_grasps[0]
     preset = registration.robot_profile_binding.presets[0]
-    options = preset.action_option_templates
+    options = preset.skill_option_templates
     factories = registration.registered_semantic_lowerer_factories
 
     grasp_rotation = options["pick"].fixed_object_to_eef[:3, :3]
@@ -823,7 +834,7 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
     )
     angle = (
         registration.robot_profile_binding.presets[0]
-        .action_option_templates["simulation.pour"]
+        .skill_option_templates["simulation.pour"]
         .rotate_angle
     )
     mouth = torch.tensor([0.0, 0.0, 0.069724626839], dtype=torch.float64)
@@ -942,7 +953,7 @@ def test_pour_water_registered_lowerers_build_only_typed_goals() -> None:
         picked_object=SceneObjectRef("bottle"),
         bound=SimpleNamespace(
             preset=SimpleNamespace(
-                action_option_template=lambda semantic_id: PourOptions(
+                skill_option_template=lambda semantic_id: PourOptions(
                     rotate_angle=-torch.pi / 3
                 )
             )
@@ -1136,7 +1147,7 @@ def test_relative_place_uses_fresh_reference_pose_and_verified_grasp() -> None:
                 )
             }
         ),
-        preset=SimpleNamespace(action_option_template=lambda _semantic_id: options),
+        preset=SimpleNamespace(skill_option_template=lambda _semantic_id: options),
     )
     lowerer = _RelativePlaceLowerer(
         (
@@ -1289,13 +1300,13 @@ def test_axis_align_and_relative_place_configs_use_closed_decoders() -> None:
         },
         path="integration.runtime_services.registered_semantic_lowerers[1]",
     )
-    axis_options = _decode_action_options(
+    axis_options = _decode_skill_options(
         {
             "kind": "axis_align",
             "target_axis": [0.0, 0.0, 1.0],
             "pre_grasp_distance": 0.12,
         },
-        path="policy.action_options.simulation.axis_align",
+        path="policy.skill_options.simulation.axis_align",
     )
 
     assert axis_factory.call_id == "simulation.axis_align"
@@ -1341,7 +1352,7 @@ def test_coordinated_transport_config_decodes_closed_routes_and_options() -> Non
         },
         path="integration.runtime_services.registered_semantic_lowerers[0]",
     )
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {
             "kind": "coordinated_pickment",
             "release": True,
@@ -1349,7 +1360,7 @@ def test_coordinated_transport_config_decodes_closed_routes_and_options() -> Non
             "retreat_steps": 8,
             "grasp_seed": 17393,
         },
-        path="policy.action_options.simulation.coordinated_transport",
+        path="policy.skill_options.simulation.coordinated_transport",
     )
 
     assert factory.call_id == "simulation.coordinated_transport"
@@ -1361,7 +1372,7 @@ def test_coordinated_transport_config_decodes_closed_routes_and_options() -> Non
 
 
 def test_slide_clearance_options_decode() -> None:
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {
             "kind": "slide",
             "preshape_fraction": 0.85,
@@ -1373,7 +1384,7 @@ def test_slide_clearance_options_decode() -> None:
     assert options.preshape_fraction == 0.85
     assert options.release_retreat_distance == 0.04
     assert options.approach_along_grasp_axis is True
-    default = _decode_action_options({"kind": "slide"}, path="options")
+    default = _decode_skill_options({"kind": "slide"}, path="options")
     assert default.preshape_fraction == 0.0
     assert default.release_retreat_distance == 0.0
     assert default.approach_along_grasp_axis is False
@@ -1392,14 +1403,14 @@ def test_slide_clearance_options_reject_invalid_values(
     field: str, value: object
 ) -> None:
     with pytest.raises((ValueError, TypeError)):
-        _decode_action_options({"kind": "slide", field: value}, path="options")
+        _decode_skill_options({"kind": "slide", field: value}, path="options")
 
 
 def test_move_end_effector_options_decode_without_task_specific_fields() -> None:
-    options = _decode_action_options({"kind": "move_end_effector"}, path="options")
+    options = _decode_skill_options({"kind": "move_end_effector"}, path="options")
     assert type(options) is MoveEndEffectorOptions
     with pytest.raises(ValueError):
-        _decode_action_options(
+        _decode_skill_options(
             {"kind": "move_end_effector", "withdraw_distance": 0.1}, path="options"
         )
 
@@ -1421,9 +1432,9 @@ def test_park_lowerer_and_config_keep_joint_values_in_the_profile() -> None:
         {"kind": "park"},
         path="integration.runtime_services.registered_semantic_lowerers[0]",
     )
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {"kind": "move_joints"},
-        path="policy.action_options.simulation.park",
+        path="policy.skill_options.simulation.park",
     )
 
     assert type(lowering.goal) is JointPositionGoal
@@ -1446,13 +1457,13 @@ def test_park_lowerer_and_config_keep_joint_values_in_the_profile() -> None:
 
 def test_configured_handover_decodes_source_retreat_clearance() -> None:
     """The semantic profile may tune physical source-hand clearance."""
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {
             "kind": "hand_over",
             "retreat_distance": 0.12,
             "retreat_steps": 28,
         },
-        path="policy.action_options.hand_over",
+        path="policy.skill_options.hand_over",
     )
 
     assert type(options) is HandOverOptions
@@ -1474,9 +1485,9 @@ def test_shared_action_decoders_reject_retired_hand_policy_fields(
     key: str,
 ) -> None:
     with pytest.raises(ValueError, match=key):
-        _decode_action_options(
+        _decode_skill_options(
             {"kind": kind, key: "grasp_command"},
-            path="policy.action_options",
+            path="policy.skill_options",
         )
 
 
@@ -1558,7 +1569,7 @@ def test_coordinated_transport_config_decodes_world_displacement() -> None:
 def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
     """Configured fixed grasps must contain exactly one SE(3) transform."""
     payload = deepcopy(_tableware_integration_payload("pour_water"))
-    pick_options = payload["robot_profile"]["presets"][0]["action_options"]["pick"]
+    pick_options = payload["robot_profile"]["presets"][0]["skill_options"]["pick"]
     pick_options["fixed_object_to_eef"] = [1.0] * 15
 
     with pytest.raises(ValueError, match="exactly 16 values"):
@@ -2532,10 +2543,10 @@ def test_motion_limit_policy_rejects_nonpositive_or_nonfinite_values(
 
 def test_pour_dwell_duration_decodes() -> None:
     from embodichain.lab.task_program.integrations.configured import (
-        _decode_action_options,
+        _decode_skill_options,
     )
 
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {"kind": "pour", "dwell_duration": 0.75},
         path="options",
     )
@@ -2591,11 +2602,11 @@ def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
     value: float,
 ) -> None:
     from embodichain.lab.task_program.integrations.configured import (
-        _decode_action_options,
+        _decode_skill_options,
     )
 
     with pytest.raises(ValueError, match="dwell_duration"):
-        _decode_action_options(
+        _decode_skill_options(
             {"kind": "pour", "dwell_duration": value},
             path="options",
         )
@@ -3318,11 +3329,11 @@ def test_generic_planning_budget_decodes_without_source_recovery_factories():
     from embodichain.lab.task_program.integrations.configured import (
         _decode_recovery_policy,
     )
-    from embodichain.lab.sim.atomic_actions import PlanningBudget
+    from embodichain.lab.sim.atomic_skills import PlanningBudget
 
     config = dict(
         max_replans=0,
-        max_action_retries=0,
+        max_skill_retries=0,
         planning_budget={"wall_seconds": 0.25},
         retry_all_failed_plans=False,
     )
@@ -3489,7 +3500,7 @@ def test_final_velocity_rejection_representation_is_explicit_and_default_identit
         _decode_motion_policy,
     )
     from embodichain.lab.task_program.integrations.catalog import _canonical_value
-    from embodichain.lab.sim.atomic_actions import MotionPolicy
+    from embodichain.lab.sim.atomic_skills import MotionPolicy
 
     assert "final_velocity_rejection" not in _canonical_value(MotionPolicy())["fields"]
     selected = _decode_motion_policy(
@@ -3597,7 +3608,7 @@ def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
     from embodichain.lab.task_program.integrations.configured import (
         _decode_runtime_services,
     )
-    from embodichain.lab.sim.atomic_actions import ExecuteDemoSkill, ActionOptions
+    from embodichain.lab.sim.atomic_skills import ExecuteDemoSkill, SkillOptions
 
     artifact = build_demo_skill(
         RobotDemonstration(
@@ -3682,8 +3693,8 @@ def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
     assert factory.call_id == "task.contour"
     assert factory.target_descriptor == ExecuteDemoSkill.descriptor()
     assert (
-        type(_decode_action_options({"kind": "execute_demo_skill"}, path="options"))
-        is ActionOptions
+        type(_decode_skill_options({"kind": "execute_demo_skill"}, path="options"))
+        is SkillOptions
     )
     payload = _integration_payload("repeated_pick_place")
     payload.setdefault("runtime_services", {})["registered_semantic_lowerers"] = [
@@ -3704,3 +3715,72 @@ def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
         _decode_runtime_services(
             {"nominal_motion_sources": [{**source, "asset_sha256": "e" * 64}]}
         )
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_recovery_policy_migration_normalizes_field_names(legacy: bool) -> None:
+    retry_key = "max_action_retries" if legacy else "max_skill_retries"
+    timeout_key = "action_timeout" if legacy else "skill_timeout"
+    policy = _decode_recovery_policy(
+        {"max_replans": 1, retry_key: 4, timeout_key: 12.5}, path="recovery"
+    )
+    assert policy.max_replans == 1
+    assert policy.max_skill_retries == 4
+    assert policy.skill_timeout == 12.5
+
+
+@pytest.mark.parametrize(
+    "legacy, canonical",
+    [("max_action_retries", "max_skill_retries"), ("action_timeout", "skill_timeout")],
+)
+def test_recovery_policy_rejects_mixed_migration_names(
+    legacy: str, canonical: str
+) -> None:
+    config = {"max_replans": 1, "max_skill_retries": 0, legacy: 2, canonical: 2}
+    with pytest.raises(ValueError, match="cannot specify both"):
+        _decode_recovery_policy(config, path="recovery")
+
+
+def test_legacy_skill_options_key_decodes_without_mutating_input() -> None:
+    payload = _integration_payload("repeated_pick_place")["robot_profile"]["presets"][0]
+    payload["action_options"] = payload.pop("skill_options")
+    preset = _decode_policy_preset(payload, path="preset")
+    assert isinstance(preset.skill_option_template("pick"), PickUpOptions)
+    assert "action_options" in payload
+    assert "skill_options" not in payload
+
+
+def test_skill_options_migration_rejects_both_config_keys() -> None:
+    payload = _integration_payload("repeated_pick_place")["robot_profile"]["presets"][0]
+    payload["action_options"] = payload["skill_options"]
+    with pytest.raises(ValueError, match="cannot specify both"):
+        _decode_policy_preset(payload, path="preset")
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+def test_component_composition_normalizes_legacy_skill_options(mixed: bool) -> None:
+    path = _config_path("repeated_pick_place")
+    physical = _physical_components(path, _gym_config("repeated_pick_place"))
+    _, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    task = deepcopy(task)
+    profile = task["profile"]
+    profile["action_options"] = deepcopy(profile["skill_options"])
+    if not mixed:
+        profile.pop("skill_options")
+    kwargs = dict(
+        task=task,
+        policy=policy,
+        skill_profile=physical.embodiment_skill_profile,
+        scene=task["scene_binding"],
+    )
+    if mixed:
+        with pytest.raises(ValueError, match="cannot specify both"):
+            _compose_integration_payload(**kwargs)
+    else:
+        payload = _compose_integration_payload(**kwargs)
+        _decode_configured_task_program_integration(payload)
+        assert "skill_options" in payload["robot_profile"]["presets"][0]
+        assert "action_options" in profile
+        assert "skill_options" not in profile

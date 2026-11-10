@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="gensim",
+        target="embodichain.cli.gensim:main",
+        help="Prepare assets, generate scenes, plan tasks and run GenSim workflows.",
+    ),
+    Command(
         name="expansion",
         target="embodichain.cli.expansion:main",
         help="Preflight, collect, resume and inspect expert expansion jobs.",
@@ -109,8 +114,13 @@ COMMANDS = (
     ),
     Command(
         name="run-atomic-action",
-        target="embodichain.cli.run_example:atomic_action_cli",
-        help="Alias for run-example sim/atomic_action.",
+        target="embodichain.cli.run_example:atomic_skill_cli",
+        help="Deprecated alias for run-atomic-skill.",
+    ),
+    Command(
+        name="run-atomic-skill",
+        target="embodichain.cli.run_example:atomic_skill_cli",
+        help="Alias for run-example sim/atomic_skill.",
     ),
     Command(
         name="list-task",
