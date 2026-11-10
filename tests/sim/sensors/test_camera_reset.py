@@ -75,9 +75,7 @@ def test_reset_preserves_batch_dimension_and_unselected_views(
     camera._entities = [_View() for _ in range(3)]
     camera._num_instances = len(camera._entities)
     camera._is_destroyed = False
-    camera._ground_plane_visibility = [
-        camera.cfg.ground_plane_visible
-    ] * camera.num_instances
+    camera._ground_plane_visibility = [True] * camera.num_instances
     camera.reset(env_ids)
 
     expected = camera.cfg.extrinsics.transformation.clone()
