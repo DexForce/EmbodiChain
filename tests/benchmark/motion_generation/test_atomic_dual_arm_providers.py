@@ -1713,6 +1713,9 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
         end_link_name="fr3_hand_tcp",
     )
     expected_fk = source.forward_kinematics(qpos).get_matrix()
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg)
     chains = cfg.build_pk_serial_chain(device=CPU)
     for side in ("left", "right"):
         arm = f"{side}_arm"
