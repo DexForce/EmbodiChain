@@ -42,8 +42,10 @@ and the distinct asset/contract joint orders are owned by
 
 ## Launcher argument ownership
 
-`embodichain run-task` is the sole task execution command, dispatched to
-`embodichain.lab.scripts.run_task:cli`. The former `run-env` command and
+`embodichain run-task` is the standalone launcher for existing task deployments,
+dispatched to `embodichain.lab.scripts.run_task:cli`. The cross-engine
+[`gensim run` workflow](../gen-sim/gen-sim.md) generates and binds a deployment
+before reusing configured Gym/Task Program execution. The former `run-env` command and
 `embodichain.lab.scripts.run_env` module are removed.
 
 `add_env_launcher_args_to_parser()` composes the lightweight simulation options
