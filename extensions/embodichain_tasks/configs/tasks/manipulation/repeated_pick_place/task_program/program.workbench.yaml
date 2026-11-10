@@ -44,30 +44,20 @@ targets:
       - 0.0
       - 1.0
 program:
-  kind: repeat
-  count: 3
-  body:
-    kind: sequence
-    items:
-    - kind: segment
-      name: pick_cube
+  repeat:
+    count: 3
+    body:
+    - segment: pick_cube
       instruction: Grasp and lift the cube.
       steps:
-        kind: invoke
-        call:
-          kind: pick
+        pick:
           object: cube
-    - kind: segment
-      name: place_cube
+    - segment: place_cube
       instruction: Place the cube at the next tabletop position and release it.
       steps:
-        kind: invoke
-        call:
-          kind: place
+        place:
           object: cube
-          at:
-            kind: target_ref
-            target: drop_pose
+          at: drop_pose
       post:
       - kind: wait_stable
         entity: cube

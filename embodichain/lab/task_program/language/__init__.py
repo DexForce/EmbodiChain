@@ -46,6 +46,10 @@ from .schema import (
     PickCfg,
     PlaceCfg,
     PoseCfg,
+    PoseTargetCfg,
+    SceneRelativePoseTargetCfg,
+    MoveHeldObjectCfg,
+    HoldPostCfg,
     RegisteredSemanticCallCfg,
     RepeatCfg,
     SegmentCfg,
@@ -56,7 +60,15 @@ from .schema import (
     WaitStablePostCfg,
 )
 
+from .authoring import NormalizedTaskProgram, normalize_task_program
+
 __all__ = [
+    "NormalizedTaskProgram",
+    "normalize_task_program",
+    "PoseTargetCfg",
+    "SceneRelativePoseTargetCfg",
+    "MoveHeldObjectCfg",
+    "HoldPostCfg",
     "ArticulationJointPositionValidatorCfg",
     "BarrierCfg",
     "ConfigPath",

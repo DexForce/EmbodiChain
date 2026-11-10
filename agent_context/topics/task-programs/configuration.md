@@ -12,9 +12,24 @@ Read this when the request needs these details. [Topic overview](task-programs.m
 - one bounded program tree.
 
 Supported nodes are `SequenceCfg`, `RepeatCfg`, `SegmentCfg`, `InvokeCfg`, and
-`ParallelCfg` with an owned `BarrierCfg`. Built-in call configs are `PickCfg`,
-`PlaceCfg`, and `HandOverCfg`; `RegisteredSemanticCallCfg` is the allowlisted
-extension form.
+`ParallelCfg` with an owned `BarrierCfg`. Built-in call configs include
+`PickCfg`, `PlaceCfg`, `HandOverCfg`, and `MoveHeldObjectCfg`;
+`RegisteredSemanticCallCfg` is the allowlisted extension form. The loader's
+`language/authoring.py` expands list/action shorthand into this same bounded AST
+and keeps a separate source map for authored diagnostics. Canonical locations
+and historical fingerprints remain stable. Demo Skill aliases require the
+selected deployment catalog; raw asset paths never belong in a program call.
+
+Task-owned targets accept `pose`, repeat-local `cyclic_pose`, and `scene_relative`.
+Relative targets declare `parent` or `world_axes` and freeze at call grounding;
+compilation only resolves identities. Typed retained transport uses the existing
+Atomic goal and registered retention lifecycle, with verified assurance and a
+standard effect monitor. The legacy registered transport remains a distinct
+compatibility contract. `hold` post-policies require fresh attachment and pose
+evidence throughout an acknowledged duration window, through the normal bridge.
+The owning runtime observer supplies evidence; policy code never advances time.
+See the [authoring guide](../../../docs/source/overview/task_program/authoring.md)
+for syntax, units and target sampling rules.
 
 The program's root `instruction` owns its overall task language; each explicit
 segment may declare a finer `instruction`. The compiler freezes both levels,
@@ -122,6 +137,15 @@ simulator or adapter. Physical component checks and ordinary program loading
 remain host responsibilities; configured nominal sources retain their static
 program preflight. Private loader aliases remain available for existing internal
 callers, with the same result types and composition rules.
+
+The optional `runtime_services.demo_skills` named table is expanded during
+composition into existing registered lowerers and occurrence-bound nominal sources.
+Asset hashes, roles and held-state contracts are checked before live assembly;
+each repeat occurrence is sealed to its actual compiled index and fingerprint.
+Explicit old source bindings retain stale-identity rejection, and duplicate
+source ownership is an error. Configured Demo Skills require one physical row
+and sequential programs. Catalog planning contracts expose selected lowerer
+arguments and Demo Skill roles without constructing a simulator.
 
 Ownership is explicit rather than a generic deep merge:
 
