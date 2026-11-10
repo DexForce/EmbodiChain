@@ -173,7 +173,7 @@ sensor configuration, acquisition and history. Its ``sensor``, ``sampling``,
 adaptation kernels live under its private ``_warp`` directory. Generic physical
 evidence remains in ``lab.sim.evidence``; grasp interpretation and Task Program
 bindings remain in their owning layers. Calibrated hand opening used for release
-interpretation belongs to ``atomic_actions.grip_evidence``, not the sensor layer.
+interpretation belongs to ``atomic_skills.grip_evidence``, not the sensor layer.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact
 

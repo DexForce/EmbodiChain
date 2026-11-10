@@ -493,7 +493,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`
     resamples the returned trajectory to ``MotionGenOptions.sample_count`` -
     matching the documented contract of
-    :attr:`~embodichain.lab.sim.atomic_actions.MotionPolicy.sample_count`
+    :attr:`~embodichain.lab.sim.atomic_skills.MotionPolicy.sample_count`
     and the other planners. The resample is arc-length piecewise-linear along
     cuRobo's joint-space path, so the collision-free path is preserved; only the
     sample density changes (cuRobo's own count is derived from
@@ -923,7 +923,7 @@ class CuroboPlanner(BasePlanner):
         """Whether callers must retain this planner's raw samples exactly.
 
         Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by the
-        atomic-action motion adapter to decide whether to resample the returned
+        atomic-skill motion adapter to decide whether to resample the returned
         trajectory to the action's ``sample_interval``.
         """
         return self.cfg.preserve_plan_samples
@@ -1243,7 +1243,7 @@ class CuroboPlanner(BasePlanner):
         """Bind snapshot obstacle poses to one cuRobo planning attempt.
 
         Args:
-            options: Reusable caller options copied by the atomic-action layer.
+            options: Reusable caller options copied by the atomic-skill layer.
             obstacle_poses: Batched simulator-world poses keyed by configured
                 dynamic obstacle name.
 
@@ -2833,7 +2833,7 @@ class CuroboPlanner(BasePlanner):
 
         # cuRobo interpolation can round its first sample by a few float32
         # ulps. Preserve the requested boundary exactly at that precision:
-        # Atomic action concatenation gives a repeated start zero arrival time,
+        # Atomic Skill concatenation gives a repeated start zero arrival time,
         # so even one ulp otherwise appears to be an instantaneous joint jump.
         # Keep larger mismatches visible to callers and external validation.
         roundoff = 4 * torch.finfo(positions.dtype).eps * start.abs().clamp_min(1)

@@ -236,7 +236,7 @@ test("selection, goal highlighting, raw data and search/status/reset controls", 
   await page.keyboard.press("Backspace");
   await expect(page.locator(".task-graph-node")).toHaveCount(6);
   await expect(page.locator("#detail .sub-id")).toHaveText("step_01__call_01");
-  await expect(page.locator(".event-list")).toContainText("action_completed");
+  await expect(page.locator(".event-list")).toContainText("skill_completed");
   await page.locator(".goal-card").click();
   await expect(page.locator("#detail")).toContainText("goal_001");
   await page.locator("#search").fill("step_01__call_01");

@@ -1461,6 +1461,7 @@ def test_render_camera_group_syncs_state_before_rendering() -> None:
     lifecycle: list[str] = []
     sim = object.__new__(SimulationManager)
     sim.is_window_opened = False
+    sim._sensors = {}
     sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
     sim._world = SimpleNamespace(
         render_camera_group=lambda _group_ids: lifecycle.append("render")
@@ -1522,6 +1523,7 @@ def test_recording_and_viser_share_substep_publication() -> None:
 def _make_render_frame_sim(*, window=False, viser=False, automatic_sync=False):
     """Track published state through real manager/backend scheduling methods."""
     sim, runtime = _make_visualization_sim_manager()
+    sim._sensors = {}
     sim.sim_config.physics_cfg = NewtonPhysicsCfg(sync_to_renderer=automatic_sync)
     sim.sim_config.visualization.backend = "viser" if viser else "none"
     sim.physics = NewtonPhysicsBackend(sim)

@@ -356,7 +356,7 @@ class NativeClosingQuery(_QueryLifetime):
             target_meshes: Object-local captured collision meshes, borrowed read-only.
             target_rest_offset: Original target rest offset in metres.
             scope: Fresh preparation/observation identity.
-            policy: Owned geometric rules selected by the Atomic Action or caller.
+            policy: Owned geometric rules selected by the Atomic Skill or caller.
             collision_factory: Factory for a fresh, isolated convex query group.
             collision_metadata: Backend provenance for reports.
             report_metadata: Neutral source identifiers, never executable policy.

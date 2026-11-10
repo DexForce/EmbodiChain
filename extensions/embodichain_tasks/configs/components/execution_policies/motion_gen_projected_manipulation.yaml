@@ -15,7 +15,7 @@ tracking:
   terminal_max_abs_error: 1.0
 recovery:
   max_replans: 0
-  max_action_retries: 0
+  max_skill_retries: 0
   goal_rotation_threshold: 0.5
 workflow_recovery:
   max_recovery_attempts: 0

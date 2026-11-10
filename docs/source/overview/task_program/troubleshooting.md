@@ -106,7 +106,7 @@ or an unavailable grasp/IK solution. Preserve the failure trace from `--debug-mo
 **Repair:** restore a known working target, then change one value at a time. If
 the original deployment fails, inspect installation/assets and robot setup before
 changing the program. See {doc}`robot_profiles` and
-{doc}`/overview/sim/atomic_actions/index` for integration-level planning diagnostics.
+{doc}`/overview/sim/atomic_skills/index` for integration-level planning diagnostics.
 
 ## Motion finishes but position or stability checks fail
 

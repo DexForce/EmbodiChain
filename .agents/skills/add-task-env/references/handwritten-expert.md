@@ -71,8 +71,8 @@ normal Gym demo executor; the planner only returns segment actions.
 
 ## Atomic Skills and task-local planning
 
-Reuse the typed Atomic Action engine for reusable low-level capabilities. If a
-required Atomic Skill is missing, invoke `$add-atomic-action`. Keep task-local
+Reuse the typed Atomic Skill engine for reusable low-level capabilities. If a
+required Atomic Skill is missing, invoke `$add-atomic-skill`. Keep task-local
 goal selection and segment assembly in the task module; do not put task graphs
 inside Atomic Skills.
 

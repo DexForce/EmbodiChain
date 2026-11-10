@@ -147,7 +147,7 @@ def _aggregates(
             AlgorithmRole.PRIMARY_BASELINE,
             "ik_interpolate",
             "abc",
-            frozenset({"atomic_action"}),
+            frozenset({"atomic_skill"}),
         )
     ]
     return aggregate_results(
