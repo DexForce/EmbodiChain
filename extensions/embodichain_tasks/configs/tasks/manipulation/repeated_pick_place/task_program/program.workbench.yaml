@@ -5,8 +5,8 @@ targets:
     kind: cyclic_pose
     values:
     - position:
-      - 0.76
-      - 0.12
+      - 0.6
+      - 0.22
       - 0.95
       quaternion_xyzw:
       - 0.0
@@ -26,8 +26,8 @@ targets:
     kind: cyclic_pose
     values:
     - position:
-      - 0.76
-      - 0.12
+      - 0.6
+      - 0.22
       - 0.925
       quaternion_xyzw:
       - 0.0
@@ -57,6 +57,10 @@ program:
         call:
           kind: pick
           object: cube
+      validators:
+      - kind: object_lifted
+        object: cube
+        minimum_lift: 0.04
     - kind: segment
       name: place_cube
       instruction: Place the cube at the next tabletop position and release it.
@@ -75,4 +79,7 @@ program:
       - kind: object_near_target
         object: cube
         target: rest_pose
-        position_tolerance: 0.04
+        position_tolerance: 0.02
+      - kind: object_upright
+        object: cube
+        maximum_tilt_degrees: 15.0

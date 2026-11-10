@@ -45,6 +45,13 @@ __all__ = [
     "BrainCoRevo1Cfg",
     "SharpaWaveCfg",
     "WujiHandCfg",
+    "FrankaPandaHandCfg",
+    "DHPGI14080Cfg",
+    "CobotMagicV100GripperCfg",
+    "PikaGripperCfg",
+    "TianjiMarvinGripperCfg",
+    "RobotiqArg2F85Cfg",
+    "RobotiqArg2F140Cfg",
 ]
 
 _EXPORTS = {
@@ -67,6 +74,13 @@ _EXPORTS = {
     "BrainCoRevo1Cfg": ".brainco.revo1",
     "SharpaWaveCfg": ".sharpa.wave",
     "WujiHandCfg": ".wuji.hand",
+    "FrankaPandaHandCfg": ".franka.hand.cfg",
+    "DHPGI14080Cfg": ".dh_robotics.pgi_140_80.cfg",
+    "CobotMagicV100GripperCfg": ".agilex.cobotmagic.gripper.cfg",
+    "PikaGripperCfg": ".agilex.pika.cfg",
+    "TianjiMarvinGripperCfg": ".tianji.marvin.gripper.cfg",
+    "RobotiqArg2F85Cfg": ".robotiq.arg2f85.cfg",
+    "RobotiqArg2F140Cfg": ".robotiq.arg2f140.cfg",
 }
 
 

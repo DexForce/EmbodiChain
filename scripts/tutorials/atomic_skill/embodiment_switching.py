@@ -164,7 +164,7 @@ def main() -> None:
                 robot=robot,
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
-                gripper_model=model,
+                gripper_data=model,
                 collision_geometry=cfg.collision_geometries[part],
                 approach_direction_samples=1,
             )
