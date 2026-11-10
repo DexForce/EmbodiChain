@@ -28,10 +28,13 @@ Do not guess a solver-specific robot preset while scene ownership is unresolved.
 Explicit selection uses `dexuni`; `contact_mode="auto"` retains the native
 contact-path policy. Expert settings use the native option groups
 (`vbd_options`, `mujoco_options`, `collision_options`); unknown solver names
-and flat DexUni options are rejected. Robot presets select `newton_dexuni`
-before the MuJoCo aliases and portable fallbacks. Gradient mode requires an
-explicit `semi_implicit` solver or a direct/named provider supporting the
-requested gradient mode. Functional Scene calls additionally require its
+are rejected for mappings and native config objects, and flat DexUni options
+are rejected by native validation.
+Standalone SPH is not a supported solver family; fluid settings belong under
+[DexUni's nested SPH configuration](fluids.md). Robot presets select
+`newton_dexuni` before the MuJoCo aliases and portable fallbacks. Gradient mode
+requires an explicit `semi_implicit` solver or a direct/named provider supporting
+the requested gradient mode. Functional Scene calls additionally require its
 functional dynamics service. Python callers pass DexSim's
 `ProviderNewtonSolverCfg` with a provider class/zero-argument factory directly
 through `solver_cfg`; this path does not inspect installed metadata. DexSim
@@ -75,6 +78,8 @@ supports full-surface rigid-soft feedback in current DexSim builds. Native
 validation owns compatible contact modes and option combinations. Prescribed kinematic trajectories
 cannot respond to contact reactions. Forward solver expert options through
 `NewtonPhysicsCfg.solver_cfg`; DexSim owns their validation and dispatch.
+The current [DFSPH composition](fluids.md) remains one-way even when DexUni's
+rigid/soft coupling options are set to two-way.
 Articulation gravity compensation and passive damping are separate creation
 settings; see [articulation adapters](articulation-adapters.md).
 `async_sync`, `rigid_transform_sync_mode`, `capture_acquire_timeout` and

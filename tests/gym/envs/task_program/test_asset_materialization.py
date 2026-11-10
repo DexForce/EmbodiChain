@@ -198,7 +198,7 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
             "component": task["task_program"]["execution_policy"],
             "overrides": {
                 "motion": {"sample_count": 73, "velocity_limit": 0.15},
-                "recovery": {"action_timeout": 111.0},
+                "recovery": {"skill_timeout": 111.0},
             },
         }
         _write(source, task)
@@ -216,7 +216,7 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
     assert policy["motion"]["strategy"] == "ik_interp"
     if with_policy_overrides:
         assert policy["motion"]["velocity_limit"] == 0.15
-        assert policy["recovery"]["action_timeout"] == 111.0
+        assert policy["recovery"]["skill_timeout"] == 111.0
     assert config["physics"] == "default"
     assert config["id"] != yaml.safe_load(source.read_text())["id"]
     assert config["rigid_object"][0]["init_pos"][2] == pytest.approx(0.04)
@@ -269,7 +269,7 @@ def test_materialization_rejects_unadapted_calibration(deployment, tmp_path, inv
     integration_path = source.parent / "integration.yaml"
     integration = yaml.safe_load(integration_path.read_text())
     if invalid == "fixed_grasp":
-        integration["profile"]["action_options"]["pick"]["fixed_object_to_eef"] = [
+        integration["profile"]["skill_options"]["pick"]["fixed_object_to_eef"] = [
             1.0
         ] * 16
     elif invalid == "local_axis":

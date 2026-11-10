@@ -16,7 +16,7 @@ Choose the narrowest mode:
 |---|---|
 | Existing catalog already discovers the requested call | Change only the program/integration config; use `$add-task-program` |
 | Existing Atomic Skill should be exposed under a task/integration-owned call ID | Add a registered Semantic Call extension |
-| Required Atomic Skill does not exist | Invoke `$add-atomic-action` first |
+| Required Atomic Skill does not exist | Invoke `$add-atomic-skill` first |
 | The concept must become a stable universal language primitive like Pick/Place/HandOver | Add a built-in Semantic Call only when explicitly justified |
 
 Prefer a registered extension for new provider/task families. Do not add a new

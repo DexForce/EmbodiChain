@@ -295,6 +295,18 @@ def _run_resource_lane(
                 "nonempty resource collection returned pytest exit code 5"
             )
         narrowed = _resource_command_for_nodes(command, nodes)
+        # Native failures can leave the device unusable for subsequent scenes.
+        # Report the first failure before another test can hang, and expose the
+        # active node and Python stack if a native call stops making progress.
+        narrowed.extend(
+            (
+                "--exitfirst",
+                "--verbose",
+                "--tb=short",
+                "-o",
+                "faulthandler_timeout=120",
+            )
+        )
         narrowed.append(f"--ci-expected-collection={manifest}")
         if no_finalize_resource_lanes:
             narrowed[2] = "scripts.ci.pytest_no_finalize"

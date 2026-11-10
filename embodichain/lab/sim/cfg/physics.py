@@ -377,6 +377,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     ``solver_type`` or ``class_type`` to select the solver, then add any
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
     preserves DexSim's ``DexUniSolverCfg`` default and its scene-based dispatch.
+    Native solver config objects use the same supported solver families.
     Unset ownership selectors retain automatic scene partitioning;
     ``contact_mode='auto'`` independently selects the native contact path.
     For ``solver_type='dexuni'``, the current DexSim contract keeps expert
@@ -579,6 +580,12 @@ def _newton_solver_cfg_to_dexsim(
                 "Newton solver_cfg must be a mapping or a DexSim Newton solver "
                 "config object with a 'solver_type' attribute."
             )
+        from dexsim.engine import newton_physics
+
+        provider_cfg_type = getattr(newton_physics, "ProviderNewtonSolverCfg", None)
+        if provider_cfg_type is not None and isinstance(solver_cfg, provider_cfg_type):
+            return solver_cfg
+        _normalize_newton_solver_type(str(solver_cfg.solver_type))
         return solver_cfg
 
     solver_cfg_data = dict(solver_cfg)

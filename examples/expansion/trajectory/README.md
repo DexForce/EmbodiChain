@@ -12,7 +12,7 @@ its `--prepare-only` output directly with `embodichain run-task`.
 
 Build one self-contained browser page that compares all implemented trajectory
 augmentation routes against the same 7-DoF Franka Panda reference used by the
-official Atomic Action example:
+official Atomic Skill example:
 
 ```bash
 python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
@@ -154,7 +154,7 @@ python examples/expansion/trajectory/task_environment_augmentation_showcase.py \
   --headless
 ```
 
-The showcase uses the existing Atomic Action task scene and MotionGenerator
+The showcase uses the existing Atomic Skill task scene and MotionGenerator
 planning path. By default it builds the augmentation reference with bounded IK
 interpolation on a 40 ms command grid, while simulation continues to integrate
 at its 10 ms physics period. This avoids turning the planner's internal 2 mm

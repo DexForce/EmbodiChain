@@ -23,7 +23,7 @@ __all__: list[str] = []
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
+from embodichain.lab.sim.atomic_skills.engine import AtomicSkillEngine
 
 from embodichain.lab.task_program.semantics.calls import (
     SemanticCallCatalog,
@@ -58,14 +58,14 @@ class SemanticExecutorComponents:
     scene_registry: SceneRegistry
     robot_profile: RobotSkillProfile
     manifest: SemanticIntegrationManifest
-    engine: AtomicActionEngine
+    engine: AtomicSkillEngine
     compiler: SemanticCallCompiler
 
 
 def assemble_semantic_executor_components(
     scene_registry: SceneRegistry,
     robot_profile: RobotSkillProfile,
-    engine: AtomicActionEngine,
+    engine: AtomicSkillEngine,
     integration: TaskProgramIntegrationCfg,
     *,
     call_catalog: SemanticCallCatalog | None = None,
@@ -82,8 +82,8 @@ def assemble_semantic_executor_components(
         raise TypeError("scene_registry must be exactly SceneRegistry.")
     if type(robot_profile) is not RobotSkillProfile:
         raise TypeError("robot_profile must be exactly RobotSkillProfile.")
-    if not isinstance(engine, AtomicActionEngine):
-        raise TypeError("engine must be an AtomicActionEngine.")
+    if not isinstance(engine, AtomicSkillEngine):
+        raise TypeError("engine must be an AtomicSkillEngine.")
     if type(integration) is not TaskProgramIntegrationCfg:
         raise TypeError("integration must be exactly TaskProgramIntegrationCfg.")
     if integration.robot_profile != robot_profile.profile_id:
