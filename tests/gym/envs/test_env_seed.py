@@ -273,3 +273,37 @@ def test_episode_context_info_is_optional_without_changing_lifecycle(
     assert [row["episode"] for row in saved] == [0, 0]
     assert [row["episode"] for row in snapshot()] == [0, 1]
     assert env.episode_context.filter_recordable([0, 1]).tolist() == [0, 1]
+
+
+@pytest.mark.parametrize("recording", [False, True])
+@pytest.mark.parametrize("read_order", [(0, 1), (1, 0)])
+def test_lazy_metadata_retains_each_rows_reset_seed(recording, read_order):
+    from types import MethodType
+    from embodichain.data_pipeline.recording import stable_config_hash
+
+    env = _ResetEnv(2)
+    env.cfg.events = env.cfg.observations = env.cfg.rewards = env.cfg.dataset = None
+    env.dataset_manager = object() if recording else None
+    env.rollout_buffer = env._traj_buffer = None
+    env._demo_episode_metadata = [{}, {}]
+    env._demo_metadata_initialized = False
+    env._demo_steps = torch.zeros(2, dtype=torch.long)
+    env._initialize_episode = MethodType(EmbodiedEnv._initialize_episode, env)
+    env._new_demo_episode_metadata = MagicMock(
+        wraps=MethodType(EmbodiedEnv._new_demo_episode_metadata, env)
+    )
+    env.reset(seed=12)
+    original_hash = stable_config_hash(env.cfg)
+    env.reset(seed=35, options={"reset_ids": [0]})
+    if not recording:
+        env._new_demo_episode_metadata.assert_not_called()
+    records = {i: EmbodiedEnv.get_demo_episode_metadata(env, i) for i in read_order}
+    assert [records[i]["seed"] for i in range(2)] == [35, 12]
+    assert records[1]["config_hash"] == original_hash
+    assert records[0]["config_hash"] == stable_config_hash(env.cfg)
+    assert records[0]["episode_uuid"] != records[1]["episode_uuid"]
+    old_uuid = records[1]["episode_uuid"]
+    env.reset(options={"reset_ids": [0]})
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 1)["episode_uuid"] == old_uuid
+    records[1]["provenance"].clear()
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 1)["provenance"]

@@ -54,7 +54,7 @@ def test_motor_binds_public_names_and_holds_effort_between_solver_substeps() -> 
             for index, (name, q, qd) in enumerate([("a", 7, 6), ("b", 9, 8)])
         ]
         articulations[f"arena_{arena}/robot"] = SimpleNamespace(
-            _physics_binding=SimpleNamespace(public_joints=joints)
+            _arena_index=arena, _physics_binding=SimpleNamespace(public_joints=joints)
         )
     context = SimpleNamespace(
         result=SimpleNamespace(get_articulation=articulations.__getitem__),
@@ -87,6 +87,25 @@ def test_motor_binds_public_names_and_holds_effort_between_solver_substeps() -> 
     )
     control(context, 0, 2, 0.0025)
     torch.testing.assert_close(wp.to_torch(control.effort), torch.zeros(2, 2))
+    # Arena 0 maps to policy row 1. Preflight must not mutate captured buffers.
+    control.targets.fill_(7.0)
+    control.effort.fill_(8.0)
+    control.velocity.fill_(9.0)
+    buffers = (control.targets, control.effort, control.velocity)
+    pointers = [value.ptr for value in buffers]
+    commit = control.prepare_episode_reset((0,))
+    assert [value.numpy().tolist() for value in buffers] == [
+        [[7.0, 7.0], [7.0, 7.0]],
+        [[8.0, 8.0], [8.0, 8.0]],
+        [[9.0, 9.0], [9.0, 9.0]],
+    ]
+    for _ in range(2):
+        commit()
+        control.prepare_episode_reset(())()
+        assert [value.ptr for value in buffers] == pointers
+        assert control.targets.numpy().tolist() == [[7.0, 7.0], [1.0, -1.0]]
+        assert control.effort.numpy().tolist() == [[8.0, 8.0], [0.0, 0.0]]
+        assert control.velocity.numpy().tolist() == [[9.0, 9.0], [0.0, 0.0]]
     control.close()
     assert control.targets is None and control.exclusive_resource_claims() == ()
 

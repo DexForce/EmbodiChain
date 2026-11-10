@@ -1559,6 +1559,20 @@ class EmbodiedEnv(BaseEnv):
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
+        # Keep one shared provenance snapshot per seed epoch, even without a
+        # recorder. Individual episode dictionaries and UUIDs stay lazy.
+        seed = getattr(self.cfg, "seed", None)
+        snapshot = getattr(self, "_demo_reset_provenance", None)
+        if snapshot is None or snapshot["seed"] != seed:
+            self._recording_provenance = build_recording_provenance(self)
+            snapshot = {"seed": seed, **self._recording_provenance}
+            self._demo_reset_provenance = snapshot
+        rows = getattr(self, "_demo_episode_provenance", None)
+        if rows is None:
+            rows = self._demo_episode_provenance = [snapshot] * self.num_envs
+        metadata_ids = env_ids_to_process.cpu().tolist()
+        for env_id in metadata_ids:
+            rows[env_id] = snapshot
         episode_metadata = getattr(self, "_demo_episode_metadata", None)
         if not getattr(self, "_demo_metadata_initialized", True) and (
             self.dataset_manager is not None
@@ -1572,7 +1586,6 @@ class EmbodiedEnv(BaseEnv):
         if episode_metadata is not None and getattr(
             self, "_demo_metadata_initialized", True
         ):
-            metadata_ids = env_ids_to_process.cpu().tolist()
             if isinstance(episode_metadata, _EpisodeMetadataRows):
                 if metadata_ids:
                     episode_metadata.reset_rows(
@@ -1711,7 +1724,9 @@ class EmbodiedEnv(BaseEnv):
             "terminal_reason": "unknown",
             "segments": [],
         }
-        metadata.update(copy.deepcopy(self._recording_provenance))
+        rows = getattr(self, "_demo_episode_provenance", None)
+        provenance = rows[env_id] if rows is not None else self._recording_provenance
+        metadata.update(copy.deepcopy(provenance))
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))

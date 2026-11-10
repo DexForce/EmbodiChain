@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -67,6 +68,21 @@ def _dc_motor(
     previous_velocity[row, column] = velocity
 
 
+@wp.kernel(enable_backward=False)
+def _reset_motor_rows(
+    rows: wp.array(dtype=wp.int32),
+    initial_targets: wp.array(dtype=wp.float32),
+    targets: wp.array2d(dtype=wp.float32),
+    effort: wp.array2d(dtype=wp.float32),
+    velocity: wp.array2d(dtype=wp.float32),
+):
+    selected, column = wp.tid()
+    row = rows[selected]
+    targets[row, column] = initial_targets[column]
+    effort[row, column] = 0.0
+    velocity[row, column] = 0.0
+
+
 class _BatchedJointDCMotorControl(GraphRuntimeControl):
     """Hold DC motor effort over each existing outer physics step."""
 
@@ -76,13 +92,17 @@ class _BatchedJointDCMotorControl(GraphRuntimeControl):
         self.num_envs = len(target_paths)
         self.targets = self.effort = self.velocity = None
         self._claims = ()
+        self._arena_indices = ()
+        self._initial_targets = None
 
     def initialize(self, context: RuntimeControlContext) -> None:
         """Resolve scalar joints once in the manager-provided arena order."""
         names = self.robot["joint_names"]
-        q, qd, claims = [], [], []
+        q, qd, claims, arenas = [], [], [], []
         for path in self.target_paths:
-            articulation = context.result.get_articulation(path)._physics_binding
+            spawned = context.result.get_articulation(path)
+            arenas.append(spawned._arena_index)
+            articulation = spawned._physics_binding
             joints = {joint.name: joint for joint in articulation.public_joints}
             selected = [joints[name] for name in names]
             if any(joint.q_size != 1 or joint.qd_size != 1 for joint in selected):
@@ -104,6 +124,12 @@ class _BatchedJointDCMotorControl(GraphRuntimeControl):
             ),
             device=context.device,
         )
+        self._arena_indices = tuple(arenas)
+        self._initial_targets = wp.array(
+            self.robot["default_joint_position"],
+            dtype=wp.float32,
+            device=context.device,
+        )
         self.effort = wp.zeros_like(self.targets)
         self.velocity = wp.zeros_like(self.targets)
         self._claims = tuple(claims)
@@ -111,6 +137,41 @@ class _BatchedJointDCMotorControl(GraphRuntimeControl):
     def exclusive_resource_claims(self) -> tuple[object, ...]:
         """Reserve the driven joints through the existing control registry."""
         return self._claims
+
+    def prepare_episode_reset(
+        self, arena_indices: tuple[int, ...]
+    ) -> Callable[[], None]:
+        """Prepare an in-place reset of selected arenas without changing state.
+
+        Args:
+            arena_indices: Scene arena indices, independent of policy row order.
+
+        Returns:
+            Callback restoring targets and clearing selected motor history.
+        """
+        if self.targets is None:
+            raise RuntimeError("DC motor control is not initialized")
+        selected = set(arena_indices)
+        rows = [i for i, arena in enumerate(self._arena_indices) if arena in selected]
+        if not rows:
+            return lambda: None
+        row_indices = wp.array(rows, dtype=wp.int32, device=self.targets.device)
+
+        def reset() -> None:
+            wp.launch(
+                _reset_motor_rows,
+                dim=(len(rows), self.targets.shape[1]),
+                inputs=[
+                    row_indices,
+                    self._initial_targets,
+                    self.targets,
+                    self.effort,
+                    self.velocity,
+                ],
+                device=self.targets.device,
+            )
+
+        return reset
 
     def __call__(
         self,
@@ -153,3 +214,5 @@ class _BatchedJointDCMotorControl(GraphRuntimeControl):
         self.kp = self.kd = self.limits = self.speeds = None
         self.targets = self.effort = self.velocity = None
         self._claims = ()
+        self._arena_indices = ()
+        self._initial_targets = None
