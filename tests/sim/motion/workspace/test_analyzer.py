@@ -16,6 +16,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from types import SimpleNamespace
+
 import torch
 import pytest
 import numpy as np
@@ -30,13 +33,13 @@ from embodichain.lab.sim.motion.workspace.configs import (
 )
 
 
-# Base test class for workspace analyzer
-class BaseWorkspaceAnalyzeTest:
-    sim = None  # Define as a class attribute
-
-    def setup_simulation(self):
+@pytest.fixture(scope="module")
+def _workspace_scene() -> Iterator[SimpleNamespace]:
+    """Reuse static robot topology while each analysis has independent state."""
+    scene = SimpleNamespace(sim=None, robot=None)
+    try:
         config = SimulationManagerCfg(headless=True, device="cpu")
-        self.sim = SimulationManager(config)
+        scene.sim = SimulationManager(config)
 
         cfg_dict = {
             "uid": "CobotMagic",
@@ -75,19 +78,32 @@ class BaseWorkspaceAnalyzeTest:
             },
         }
 
-        self.robot: Robot = self.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
-        self.sim.prepare()
+        scene.robot = scene.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        scene.sim.prepare()
 
-    def teardown_method(self):
-        """Clean up resources after each test method."""
-        self.sim.destroy()
+        yield scene
+    finally:
+        if scene.sim is not None:
+            scene.sim.destroy(exit_process=False)
+        scene.robot = None
+        scene.sim = None
         SimulationManager.flush_cleanup_queue()
 
 
-class TestJointWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
-    def setup_method(self):
-        self.setup_simulation()
+class BaseWorkspaceAnalyzeTest:
+    @pytest.fixture(autouse=True)
+    def _bind_scene(self, _workspace_scene: SimpleNamespace) -> Iterator[None]:
+        self.sim = _workspace_scene.sim
+        self.robot = _workspace_scene.robot
+        try:
+            self.sim.reset_objects_state()
+            yield
+        finally:
+            self.robot = None
+            self.sim = None
 
+
+class TestJointWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
     def test_joint_workspace_analyze(self):
         from embodichain.lab.sim.motion.workspace.analyzer import (
             WorkspaceAnalyzer,
@@ -116,9 +132,6 @@ class TestJointWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
 
 
 class TestCartesianWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
-    def setup_method(self):
-        self.setup_simulation()
-
     def test_cartesian_workspace_analyze(self):
         from embodichain.lab.sim.motion.workspace.analyzer import (
             WorkspaceAnalyzer,
@@ -165,9 +178,6 @@ class TestCartesianWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
 
 
 class TestPlaneWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
-    def setup_method(self):
-        self.setup_simulation()
-
     def test_plane_workspace_analyze(self):
         from embodichain.lab.sim.motion.workspace.analyzer import (
             WorkspaceAnalyzer,
@@ -218,9 +228,6 @@ class TestPlaneWorkspaceAnalyzeTest(BaseWorkspaceAnalyzeTest):
 
 class TestWorkspaceAnalyzerComprehensive(BaseWorkspaceAnalyzeTest):
     """Comprehensive test class for testing consistency between different modes"""
-
-    def setup_method(self):
-        self.setup_simulation()
 
     def test_all_modes_consistency(self):
         """Test basic functionality and result consistency of all three modes"""

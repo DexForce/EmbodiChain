@@ -11,11 +11,11 @@ topics:
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
   keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, simulation_time, arena, DexSim, PhysicsBackendCfg,
-    DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
+    DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     UsdSourceSnapshot, read_usd_source, LinkMesh,
     PhysicalCollisionGeometry, capture_physical_collision_geometry,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
-    fixed-cadence playback, quaternion, xyzw]
+    fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, SPHSolverCfg, revolved_volume, fill_level, 粒子采样, fluid, 流体, quaternion, xyzw]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
@@ -24,6 +24,7 @@ topics:
   - embodichain/cli/_visualization.py
   - embodichain/lab/sim/__init__.py
   - embodichain/lab/sim/cfg/
+  - embodichain/compute/geometry/particles.py
   - embodichain/lab/sim/physics/
   - embodichain/lab/sim/spawn/
   - embodichain/lab/sim/material.py
@@ -39,7 +40,7 @@ topics:
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
   watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
-    embodichain/lab/sim/spawn/, embodichain/lab/sim/material.py, embodichain/lab/sim/_material_presets.py, embodichain/lab/scripts/preview_material.py, tests/lab/scripts/test_preview_material.py, embodichain/lab/sim/objects/, tests/sim/]
+    embodichain/lab/sim/spawn/, embodichain/lab/sim/material.py, embodichain/lab/sim/_material_presets.py, embodichain/lab/scripts/preview_material.py, tests/lab/scripts/test_preview_material.py, embodichain/lab/sim/objects/, embodichain/compute/geometry/particles.py, tests/compute/test_particles.py, tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
     atomic-actions, rl-learning, configclass-pattern, robot-workspace]
   status: active
@@ -503,7 +504,7 @@ topics:
   status: active
 - id: task-engine
   title: Task Engine
-  aliases: [Task Engine, task engine, 任务引擎, 任务理解, 动作语义图, 语义图可视化]
+  aliases: [Task Engine, task engine, gensim task plan, 任务引擎, 任务理解, 动作语义图, 语义图可视化]
   keywords: [TaskAgent, TaskDraft, TaskCandidateSet, InstructionIntent, TaskSpecGenerator,
     SemanticTaskGraph, validate_semantic_task_graph, validate_graph_coverage,
     render_semantic_task_graph_html, write_semantic_task_graph_html, generate_semantic_task_graph_from_image]
@@ -552,13 +553,18 @@ topics:
   status: active
 - id: gen-sim
   title: Gen Sim
-  aliases: [gen sim, GenSim model services, 模型服务解耦, Scene Engine, Asset Engine, asset-engine, SimReady Asset Pipeline, SimReady, scene generation, scene editing, scene-randomization,
+  aliases: [gen sim, gensim, GenSim model services, 模型服务解耦, Scene Engine, Asset Engine, asset-engine, SimReady Asset Pipeline, SimReady, scene generation, scene editing, scene-randomization,
     grouped scene randomization, GPU场景扩增, 批量场景扩增, 组内扩增, 组内场景扩增, intra-group augmentation, 分组场景随机化, 场景生成, 场景编辑, 生成式仿真]
   keywords: [EMBODICHAIN_MODEL_SERVICES_CONFIG, GenSimServices, GenSimServicesCfg, ServiceRegistry, model_services, generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, SceneRandomizationCfg,
     randomize_scene, prepare_scene_baseline, scene-randomization, load_layouts, preview_layouts, ingest_one_asset,
     ParserManager, SceneBlueprintPackage, analyze_image, materialize_blueprint, SessionProcessRegistry, Gradio, project_placement_evidence_binding, project_configured_placement_evidence_binding]
   paths: [topics/gen-sim/gen-sim.md]
   source_of_truth:
+  - embodichain/cli/gensim.py
+  - embodichain/gen_sim/_workflow.py
+  - embodichain/gen_sim/_run_config.py
+  - embodichain/gen_sim/_run_binding.py
+  - embodichain/gen_sim/_run_execution.py
   - embodichain/gen_sim/services/
   - embodichain/gen_sim/scene_engine/cli/start.py
   - embodichain/gen_sim/scene_engine/pipeline/generate.py
@@ -573,7 +579,7 @@ topics:
   - embodichain/gen_sim/gradio_ui/app_processes.py
   - embodichain/gen_sim/gradio_ui/app_env.py
   - embodichain/gen_sim/task_engine/evidence.py
-  watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
+  watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, embodichain/cli/gensim.py, tests/gen_sim/, tests/cli/test_gensim.py, examples/gensim/]
   related_topics: [simulation-system, data-assets, env-framework, task-engine]
   status: active
 - id: data-assets

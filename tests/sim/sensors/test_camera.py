@@ -17,6 +17,9 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -36,7 +39,7 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.sensors.stereo import PairCameraView
 from embodichain.lab.sim.objects import Articulation
-from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, DenoisingCfg, RenderCfg
 from embodichain.data import get_data_path
 from scripts.tutorials.sim.create_sensor import create_sensor as create_tutorial_sensor
 
@@ -446,12 +449,32 @@ def test_ground_visibility_missing_sdk_fails_before_allocating_camera(
 
 
 @pytest.mark.gpu
+@pytest.mark.subprocess_sim
 @pytest.mark.parametrize("renderer", ["fast-rt", "hybrid"])
 def test_parallel_camera_ground_visibility_rgb_depth_reset_and_rebuild(
-    renderer,
+    renderer: str,
 ) -> None:
+    """Qualify each native renderer in its own process, independent of DLSS."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy, sys; "
+            "runpy.run_path(sys.argv[1])['_run_camera_ground_visibility_case'](sys.argv[2])",
+            str(Path(__file__).resolve()),
+            renderer,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _run_camera_ground_visibility_case(renderer: str) -> None:
     """Mixed policies within a group and between cameras preserve one physical floor."""
-    from embodichain.lab.sim.cfg import DenoisingCfg, VisualObjectCfg
+    from dexsim.types import Renderer
+    from embodichain.lab.sim.cfg import VisualObjectCfg
     from embodichain.lab.sim.shapes import CubeCfg
 
     sim = SimulationManager(
@@ -459,13 +482,22 @@ def test_parallel_camera_ground_visibility_rgb_depth_reset_and_rebuild(
             headless=True,
             device="cpu",
             num_envs=4,
-            # Geometry and visibility qualification must not require optional DLSS/NGX.
+            # Ground filtering compares raw RGB/depth; NGX availability and
+            # reconstruction at this tiny resolution are separate contracts.
             render_cfg=RenderCfg(
-                renderer=renderer, denoising=DenoisingCfg(window="off", offscreen="off")
+                renderer=renderer,
+                denoising=DenoisingCfg(window="off", offscreen="off"),
             ),
         )
     )
     try:
+        assert (
+            sim.get_world().get_renderer_type()
+            == {
+                "fast-rt": Renderer.FASTRT,
+                "hybrid": Renderer.HYBRID,
+            }[renderer]
+        )
         sim.add_visual_object(
             VisualObjectCfg(
                 uid="under_floor",
@@ -540,7 +572,7 @@ def test_parallel_camera_ground_visibility_rgb_depth_reset_and_rebuild(
         assert cameras[1].get_capture_metadata()["ground_plane_visible"] == (False,) * 4
         assert sim._default_plane.object_desc.physics is not None
     finally:
-        sim.destroy()
+        sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
 
 
