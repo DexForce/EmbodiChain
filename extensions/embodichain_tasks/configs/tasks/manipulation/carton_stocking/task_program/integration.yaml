@@ -48,7 +48,7 @@ profile:
       primary: primary_manipulator
     place:
       primary: primary_manipulator
-  action_options:
+  skill_options:
     pick:
       kind: pick_up
       lift_height: 0.045

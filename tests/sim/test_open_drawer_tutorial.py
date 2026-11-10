@@ -168,8 +168,8 @@ def test_main_opens_native_window_after_spawn_prepare(
             if prepare_fails:
                 raise RuntimeError("prepare failed")
 
-        def open_window(self) -> None:
-            events.append("open_window")
+        def open_viewer(self) -> None:
+            events.append("open_viewer")
 
         def update(self, *, step: int) -> None:
             pass
@@ -211,6 +211,6 @@ def test_main_opens_native_window_after_spawn_prepare(
         assert events == ["create_scene", "prepare", "destroy"]
     else:
         tutorial.main()
-        assert events == ["create_scene", "prepare", "open_window", "destroy"]
+        assert events == ["create_scene", "prepare", "open_viewer", "destroy"]
     assert captured_cfg["headless"] is True
     assert captured_cfg["seed"] == 17

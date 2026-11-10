@@ -33,8 +33,8 @@ import torch
 
 from embodichain.lab.sim.scene import native_hand as capture
 from embodichain.lab.sim.objects.backends import collision as shape_decoder
-from embodichain.lab.sim.atomic_actions import (
-    ActionPlanningServices,
+from embodichain.lab.sim.atomic_skills import (
+    SkillPlanningServices,
     GraspOpeningTarget,
 )
 from embodichain.toolkits.graspkit.pg_grasp.native_contact import NativeQueryScope
@@ -68,7 +68,7 @@ def ports(tmp_path, monkeypatch):
 
 
 def _services(robot, cfg):
-    return ActionPlanningServices(
+    return SkillPlanningServices(
         NS(robot=robot, device="cpu"),
         hand_geometry_cfgs={"fixture_grasp": cfg},
     )
@@ -211,7 +211,7 @@ def test_unsupported_native_inputs_fail_before_fk(ports, change):
 def test_missing_newton_is_preflighted_before_native_capture(monkeypatch):
     failure = Mock(side_effect=ImportError("Newton unavailable"))
     monkeypatch.setattr(_collision_backends, "_require_newton", failure)
-    services = ActionPlanningServices(NS(robot=None, device="cpu"))
+    services = SkillPlanningServices(NS(robot=None, device="cpu"))
     with pytest.raises(ImportError, match="Newton"):
         with services.prepare_grasp_query(
             "missing",
@@ -237,7 +237,7 @@ def test_planning_services_close_query_when_consumer_raises(ports):
 
 def test_planning_services_require_declared_calibration_before_capture(ports):
     robot, simulation, *_ = ports
-    services = ActionPlanningServices(NS(robot=robot, device="cpu"))
+    services = SkillPlanningServices(NS(robot=robot, device="cpu"))
     with pytest.raises(KeyError, match="calibration"):
         with services.prepare_grasp_query(
             "undeclared", simulation, **_arguments(ports)
@@ -296,7 +296,7 @@ def test_native_capture_and_graspkit_respect_owner_dependencies():
             (
                 "embodichain.gen_sim",
                 "embodichain.lab.task_program",
-                "embodichain.lab.sim.atomic_actions",
+                "embodichain.lab.sim.atomic_skills",
             ),
         ),
         (
