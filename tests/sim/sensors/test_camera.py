@@ -36,7 +36,7 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.sensors.stereo import PairCameraView
 from embodichain.lab.sim.objects import Articulation
-from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, DenoisingCfg, RenderCfg
 from embodichain.data import get_data_path
 from scripts.tutorials.sim.create_sensor import create_sensor as create_tutorial_sensor
 
@@ -459,7 +459,11 @@ def test_parallel_camera_ground_visibility_rgb_depth_reset_and_rebuild(
             headless=True,
             device="cpu",
             num_envs=4,
-            render_cfg=RenderCfg(renderer=renderer),
+            # Ground filtering must work without DLSS hardware/driver support.
+            # These tiny targets exercise visibility, not image reconstruction.
+            render_cfg=RenderCfg(
+                renderer=renderer, denoising=DenoisingCfg(offscreen="off")
+            ),
         )
     )
     try:

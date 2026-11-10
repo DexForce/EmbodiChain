@@ -79,6 +79,8 @@ def _main() -> None:
     args = parser.parse_args()
     if args.repeats < 1 or any(n < 1 for n in args.sizes):
         parser.error("repeats and sizes must be positive")
+    if "cpu" not in args.devices and not torch.cuda.is_available():
+        parser.error("no usable device selected: CUDA is unavailable; select cpu")
     torch.set_num_threads(1)
     torch.manual_seed(42)
     wp.init()
