@@ -26,7 +26,8 @@ import torch
 from embodichain.lab.sim.scene.rigid_mesh import RigidMeshSnapshot, capture_rigid_mesh
 
 
-def test_native_capture_owns_unprocessed_batched_vertices_and_triangles():
+@pytest.mark.parametrize("semantic", [False, True])
+def test_native_capture_owns_unprocessed_batched_vertices_and_triangles(semantic):
     vertices = torch.tensor(
         [
             [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 0.0]],
@@ -53,6 +54,13 @@ def test_native_capture_owns_unprocessed_batched_vertices_and_triangles():
     native = SimpleNamespace(
         get_vertices=get_vertices, get_triangles=get_triangles, get_local_pose=pose
     )
+    if semantic:
+        native.get_semantic_mesh = lambda: (get_vertices(scale=True), get_triangles())
+
+        def no_visual_mesh(**kwargs):
+            raise AssertionError("Gaussian appearance has no triangle mesh")
+
+        native.get_vertices = native.get_triangles = no_visual_mesh
     simulation = SimpleNamespace(
         get_rigid_object=lambda uid: native if uid == "object" else None
     )

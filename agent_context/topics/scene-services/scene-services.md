@@ -46,12 +46,13 @@ and physical acceptance remain with their consuming subsystems.
 `pose_checks.as_rigid_matrix` only validates one input transform; it neither
 repairs it nor invokes FK/IK.
 
-`rigid_mesh.capture_rigid_mesh` snapshots scaled native input vertices and
-matching triangles as owned CPU data with the environment axis intact. It reads
-no poses, preserves duplicates/winding/order and never substitutes a hull or box
-for missing topology. Callers recapture after model/scale changes. This separate
-API leaves the lightweight mesh-envelope path unchanged and supplies
-`NativePlanarPlacement` and exact silhouette/Pour consumers.
+`rigid_mesh.capture_rigid_mesh` snapshots scaled `get_semantic_mesh()` vertices
+and matching triangles as owned CPU data with the environment axis intact.
+Independent source geometry or an explicit `semantic_shape` survives companion
+appearance replacement; legacy facades without this API use their visual mesh.
+Capture reads no poses, preserves duplicates/winding/order and never infers a
+hull or box for missing topology. Callers recapture after model/scale changes.
+This API supplies `NativePlanarPlacement` and exact silhouette/Pour consumers.
 
 `native_hand.py` captures cooked convex/box geometry and explicitly requested
 rest/contact offsets for the exact simulation-owned Robot and native rigid UIDs.
@@ -85,8 +86,8 @@ retains concavities and holes; convex-hull mode remains explicit. Acquisition
 errors remain unavailable evidence. Callers own thresholds, invocation/episode
 association, observation timing and evidence publication.
 
-`mesh_snapshot.py` captures scaled rigid visual vertices and ordered articulation
-collision-input components from explicit UID/link mappings. It reads no live
+`mesh_snapshot.py` captures scaled rigid semantic vertices and ordered
+articulation collision-input components from explicit UID/link mappings. It reads no live
 poses and keeps unavailable geometry distinct from usable components. Neutral
 planner roles are metadata: `none` does not remove a selected physical input.
 Connected nonconvex inputs remain unavailable in this capture path. The separate

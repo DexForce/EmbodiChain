@@ -137,10 +137,24 @@ def _simulation(path: Path, *, backend="newton", scale=(2.0, 2.0, 2.0)):
     return sim, vertices
 
 
-def test_capture_keeps_visual_and_input_components_owned_local_and_ordered(tmp_path):
+@pytest.mark.parametrize("semantic", [False, True])
+def test_capture_keeps_visual_and_input_components_owned_local_and_ordered(
+    tmp_path, semantic
+):
     path = tmp_path / "panels.usda"
     _usd(path)
     sim, original = _simulation(path)
+    if semantic:
+        native = sim.get_rigid_object("native_rigid")
+        native.get_semantic_mesh = lambda: (
+            original,
+            torch.empty(1, 0, 3, dtype=torch.int32),
+        )
+
+        def no_visual_mesh(**kwargs):
+            raise AssertionError("Gaussian appearance has no triangle mesh")
+
+        native.get_vertices = no_visual_mesh
     snapshot = capture_scene_meshes(
         sim,
         rigid_uids={"item": "native_rigid"},

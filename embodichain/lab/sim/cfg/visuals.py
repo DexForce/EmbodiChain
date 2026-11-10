@@ -54,7 +54,12 @@ class GaussianSplatCfg:
     sh_coefficients: np.ndarray | None = None
     """Optional basis-major SH (N,K,3) for an immutable flat-PLY variant."""
 
+    type: Literal["gaussian_splat"] = "gaussian_splat"
+    """Serialized representation tag retained by nested configuration writers."""
+
     def __post_init__(self) -> None:
+        if self.type != "gaussian_splat":
+            raise ValueError("Gaussian representation type must be 'gaussian_splat'.")
         for name in ("point_opacities", "sh_coefficients"):
             value = getattr(self, name)
             if value is None:

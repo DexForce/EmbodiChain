@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+import json
 import numpy as np
 import pytest
 import torch
@@ -29,6 +30,7 @@ from embodichain.lab.sim.cfg import (
     VisualObjectCfg,
     RigidObjectCfg,
     ArticulationCfg,
+    RobotCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.spawn._visuals import _VisualBinding
@@ -49,6 +51,7 @@ pytestmark = pytest.mark.no_sim
         {"file_path": "scene.gsq", "lod_path": "scene.dgslod"},
         {"file_path": "scene.ply", "lod_enabled": True},
         {"file_path": "scene.ply", "lod_detail_scale": float("nan")},
+        {"file_path": "scene.ply", "type": "mesh"},
     ],
 )
 def test_gaussian_resource_rejects_unsupported_contracts(kwargs):
@@ -74,6 +77,43 @@ def test_visual_config_roundtrip_and_explicit_empty_replacement():
     assert VisualObjectCfg(uid="legacy", shape=CubeCfg()).visuals is None
     link = ArticulationCfg.from_dict({"link_visuals": {"tool": data["visuals"]}})
     assert isinstance(link.link_visuals["tool"][0], VisualElementCfg)
+
+
+@pytest.mark.parametrize(
+    "cfg_type", [VisualObjectCfg, RigidObjectCfg, ArticulationCfg, RobotCfg]
+)
+def test_gaussian_visual_config_serialization_roundtrip(tmp_path, cfg_type):
+    pose = np.eye(4)
+    pose[:3, 3] = [0.1, 0.2, 0.3]
+    elements = [
+        VisualElementCfg(
+            id="scan",
+            representation=GaussianSplatCfg(
+                file_path="room.ply", color_gain=(0.7, 0.8, 0.9)
+            ),
+            local_pose=pose,
+            scale=1.5,
+        ),
+        VisualElementCfg(id="mesh", representation=CubeCfg(size=(0.2, 0.3, 0.4))),
+    ]
+    linked = issubclass(cfg_type, ArticulationCfg)
+    kwargs = {"link_visuals": {"tool": elements}} if linked else {"visuals": elements}
+    cfg = cfg_type(uid="owner", **kwargs)
+    if isinstance(cfg, RobotCfg):
+        path = tmp_path / "robot.json"
+        cfg.save_to_file(path)
+        data = json.loads(path.read_text())
+    else:
+        data = cfg.to_dict()
+    restored = cfg_type.from_dict(data)
+    actual = restored.link_visuals["tool"] if linked else restored.visuals
+    assert isinstance(actual[0].representation, GaussianSplatCfg)
+    assert actual[0].representation.file_path == "room.ply"
+    assert actual[0].representation.color_gain == (0.7, 0.8, 0.9)
+    np.testing.assert_allclose(actual[0].local_pose, pose)
+    assert actual[0].scale == 1.5
+    assert isinstance(actual[1].representation, CubeCfg)
+    assert tuple(actual[1].representation.size) == (0.2, 0.3, 0.4)
 
 
 def test_invalid_binding_transform_and_duplicate_ids_reject():

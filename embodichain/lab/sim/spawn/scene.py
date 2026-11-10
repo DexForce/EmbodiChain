@@ -240,6 +240,10 @@ class SpawnScene:
                 "cloth_object": "add_cloth_object",
             }[kind]
             with self._native_material_scope():
+                owner_name_exists = binding is not None and any(
+                    entity.name == descriptor.name
+                    for entity in self.builder.scene_desc.iter_entities()
+                )
                 try:
                     declaration.descriptor = getattr(self.builder, add_name)(descriptor)
                 except Exception:
@@ -249,7 +253,8 @@ class SpawnScene:
                             if kind == "articulation"
                             else self.builder.remove_object
                         )
-                        remove(descriptor.name)
+                        if not owner_name_exists:
+                            remove(descriptor.name)
                         facade._visual_binding = None
                     raise
         self._assets[uid] = declaration
