@@ -19,7 +19,9 @@ feature does not imply that every asset or operation exposes it here.
 | MuJoCo-Warp, CPU | Supported | No | Unsupported | CPU contact buffers are not exposed to the sensor. |
 | XPBD, CUDA | Supported | Scene-dependent | Geometry-only where available | Validate the exact joints, assets, and task. |
 | VBD, CUDA | Limited by scene | Volume/surface | Geometry-only where available | Deformable-focused path. |
-| DexUni, CUDA | Coupled articulation/deformable stepping | Volume/surface | Unsupported | No rigid-rigid or rigid-ground solve/publication on the current path. |
+| DexUni, CUDA, pure MuJoCo path | Supported | No deformables in this branch | Geometry + impulse | Rigid scene routed internally to MuJoCo. |
+| DexUni, CUDA, mixed path | Coupled articulation/deformable stepping | Volume/surface | Per-row geometry/impulse availability | Honor native quantity-validity masks; qualify required contact pairs. |
+| DexUni, CUDA, VBD-owned contacts | Scene-dependent | Volume/surface | Geometry-only | Geometry does not establish measured force. |
 | Semi-implicit, CUDA, gradients | Not stepped by `DifferentiableEnv` | Unsupported | Unsupported | Current integration is a kinematics bridge only. |
 
 The matrix is an admission guide, not a substitute for a task-level rollout.
@@ -28,12 +30,14 @@ controls can narrow support further.
 
 ## Resolve before qualifying
 
-AutoSolver is unresolved until the complete Spawn scene is finalized. Query the
-concrete value only after {meth}`SimulationManager.prepare`:
+DexUni resolves scene ownership and its internal execution path after the
+complete Spawn scene is finalized. The outer solver type remains `"dexuni"`;
+query native diagnostics after {meth}`SimulationManager.prepare`:
 
 ```python
 sim.prepare()
 print(sim.physics.solver_type)
+print(sim.spawn_result.get_solver_diagnostics())
 print(sim.device)
 ```
 
@@ -61,7 +65,7 @@ Volume soft bodies and surface cloth use `VolumeDeformableObjectCfg` and
 `SurfaceDeformableObjectCfg`. The current integration requires:
 
 - CUDA execution;
-- `auto`, `dexuni`, `xpbd`, `semi_implicit`, or `vbd` as the configured solver;
+- `dexuni`, `xpbd`, `semi_implicit`, or `vbd` as the configured solver;
 - `requires_grad=False`;
 - every deformable declaration before the first `prepare()`/scene finalization.
 

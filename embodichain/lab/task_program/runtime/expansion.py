@@ -21,9 +21,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
+    AtomicSkillEngine,
     NominalMotionSource,
     PlanTransform,
 )
@@ -44,7 +44,7 @@ class TaskProgramPlanRequest:
     workflow_call_index: int
     analysis_call_index: int
     call: SemanticCallSpec
-    invocation: ActionInvocation
+    invocation: SkillInvocation
 
     def __post_init__(self) -> None:
         if (
@@ -59,8 +59,8 @@ class TaskProgramPlanRequest:
                 raise ValueError(f"{name} must be a non-negative integer")
         if not isinstance(self.call, SemanticCallSpec):
             raise TypeError("call must be a SemanticCallSpec")
-        if not isinstance(self.invocation, ActionInvocation):
-            raise TypeError("invocation must be an ActionInvocation")
+        if not isinstance(self.invocation, SkillInvocation):
+            raise TypeError("invocation must be an SkillInvocation")
 
 
 @runtime_checkable
@@ -77,7 +77,7 @@ class TaskProgramPlanTransformFactory(Protocol):
         self,
         request: TaskProgramPlanRequest,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> PlanTransform | None:
         """Return one session-scoped transform or ``None`` for no change."""
 
@@ -90,6 +90,6 @@ class TaskProgramNominalSourceFactory(Protocol):
         self,
         request: TaskProgramPlanRequest,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> NominalMotionSource | None:
         """Return one call-scoped source or ``None`` for the native route."""

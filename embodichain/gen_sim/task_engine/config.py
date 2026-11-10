@@ -127,7 +127,7 @@ class TaskEnginePlanningCfg:
             validate_profile,
             validate_native_pick_exploration,
         )
-        from embodichain.lab.sim.atomic_actions import validate_press_extra_distance
+        from embodichain.lab.sim.atomic_skills import validate_press_extra_distance
 
         validate_profile(self.runtime_profile)
         validate_native_pick_exploration(self.native_pick_exploration)

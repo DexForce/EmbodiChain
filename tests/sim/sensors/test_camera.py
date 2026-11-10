@@ -17,6 +17,9 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -36,7 +39,7 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.sensors.stereo import PairCameraView
 from embodichain.lab.sim.objects import Articulation
-from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, DenoisingCfg, RenderCfg
 from embodichain.data import get_data_path
 from scripts.tutorials.sim.create_sensor import create_sensor as create_tutorial_sensor
 
@@ -403,3 +406,193 @@ def test_camera_detaches_all_views_before_parent_removal(stereo: bool) -> None:
     assert not camera.is_attached
     for view in views:
         view.get_node.return_value.detach_parent.assert_called_once_with()
+
+
+@pytest.mark.no_sim
+def test_ground_visibility_preflight_and_selected_reset() -> None:
+    """Invalid batches cannot partially change camera policy or enqueue writes."""
+    camera = object.__new__(Camera)
+    owner = MagicMock()
+    owner._GROUND_RENDER_CATEGORY = 1
+    camera._owner_ref = lambda: owner
+    camera._is_destroyed = False
+    camera.num_instances = 4
+    camera._entities = [MagicMock() for _ in range(4)]
+    camera._ground_plane_visibility = [True] * 4
+    camera._capture_metadata = None
+    camera.cfg = CameraCfg()
+    camera._reset_pose = MagicMock()
+    for ids in ([0, 4], [0, 0], [1.5]):
+        with pytest.raises(ValueError):
+            camera.set_ground_plane_visibility(False, ids)
+    for entity in camera._entities:
+        entity.set_excluded_render_categories.assert_not_called()
+    camera.set_ground_plane_visibility(False, torch.tensor([1, 3]))
+    assert camera._ground_plane_visibility == [True, False, True, False]
+    camera.reset([1])
+    assert camera._ground_plane_visibility == [True, True, True, False]
+    assert camera._entities[3].set_excluded_render_categories.call_args.args == (1,)
+    camera._is_destroyed = True
+    with pytest.raises(RuntimeError, match="destroyed"):
+        camera.set_ground_plane_visibility(True)
+
+
+@pytest.mark.no_sim
+def test_ground_visibility_missing_sdk_fails_before_allocating_camera(
+    monkeypatch,
+) -> None:
+    owner = MagicMock(num_envs=4)
+    owner._require_ground_plane_filtering.side_effect = RuntimeError("SDK capability")
+    with pytest.raises(RuntimeError, match="SDK capability"):
+        Camera(CameraCfg(ground_plane_visible=False), owner=owner)
+    owner.get_world.assert_not_called()
+
+
+@pytest.mark.gpu
+@pytest.mark.subprocess_sim
+@pytest.mark.parametrize("renderer", ["fast-rt", "hybrid"])
+def test_parallel_camera_ground_visibility_rgb_depth_reset_and_rebuild(
+    renderer: str,
+) -> None:
+    """Qualify each native renderer in its own process, independent of DLSS."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy, sys; "
+            "runpy.run_path(sys.argv[1])['_run_camera_ground_visibility_case'](sys.argv[2])",
+            str(Path(__file__).resolve()),
+            renderer,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _run_camera_ground_visibility_case(renderer: str) -> None:
+    """Mixed policies within a group and between cameras preserve one physical floor."""
+    from dexsim.types import Renderer
+    from embodichain.lab.sim.cfg import VisualObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=4,
+            # Ground filtering compares raw RGB/depth; NGX availability and
+            # reconstruction at this tiny resolution are separate contracts.
+            render_cfg=RenderCfg(
+                renderer=renderer,
+                denoising=DenoisingCfg(window="off", offscreen="off"),
+            ),
+        )
+    )
+    try:
+        assert (
+            sim.get_world().get_renderer_type()
+            == {
+                "fast-rt": Renderer.FASTRT,
+                "hybrid": Renderer.HYBRID,
+            }[renderer]
+        )
+        sim.add_visual_object(
+            VisualObjectCfg(
+                uid="under_floor",
+                shape=CubeCfg(size=(1, 1, 1)),
+                init_pos=(0, 0, -2),
+            )
+        )
+        cameras = [
+            sim.add_sensor(
+                CameraCfg(
+                    uid=name,
+                    width=32,
+                    height=32,
+                    intrinsics=(28, 28, 16, 16),
+                    enable_depth=True,
+                    ground_plane_visible=visible,
+                    extrinsics=CameraCfg.ExtrinsicsCfg(
+                        eye=(0, 0, 3),
+                        target=(0, 0, 0),
+                        up=(0, 1, 0),
+                    ),
+                )
+            )
+            for name, visible in (("training", False), ("debug", True))
+        ]
+        sim.prepare()
+        sim.enable_physics(False)
+
+        def capture():
+            sim.render_camera_group([camera.group_id for camera in cameras])
+            for camera in cameras:
+                camera.update(fetch_only=True)
+            return [camera.get_data()["depth"][:, 16, 16].clone() for camera in cameras]
+
+        hidden, shown = capture()
+        torch.testing.assert_close(hidden, torch.full((4,), 4.5), atol=0.04, rtol=0)
+        torch.testing.assert_close(shown, torch.full((4,), 3.0), atol=0.04, rtol=0)
+        rgb_hidden = cameras[0].get_data()["color"].clone().float()
+        rgb_shown = cameras[1].get_data()["color"].clone().float()
+        assert (rgb_hidden[..., :3] - rgb_shown[..., :3]).abs().mean() > 1.0
+        floor_desc = sim._default_plane.object_desc
+        assert floor_desc.physics is not None and floor_desc.collisions
+
+        cameras[0].set_ground_plane_visibility(True, [1, 3])
+        mixed, _ = capture()
+        torch.testing.assert_close(
+            mixed, torch.tensor([4.5, 3.0, 4.5, 3.0]), atol=0.04, rtol=0
+        )
+        metadata = cameras[0].get_capture_metadata()
+        assert metadata["ground_plane_visible"] == (False, True, False, True)
+        cameras[0].reset([1])
+        reset, _ = capture()
+        torch.testing.assert_close(
+            reset, torch.tensor([4.5, 4.5, 4.5, 3.0]), atol=0.04, rtol=0
+        )
+        assert metadata["ground_plane_visible"] == (False, True, False, True)
+
+        sim.add_visual_object(
+            VisualObjectCfg(
+                uid="rebuild_trigger",
+                shape=CubeCfg(),
+                init_pos=(5, 0, 2),
+            )
+        )
+        sim.prepare()
+        rebuilt, _ = capture()
+        torch.testing.assert_close(rebuilt, reset, atol=0.04, rtol=0)
+        sim.set_ground_plane_visibility(False)
+        globally_hidden = capture()
+        for depth in globally_hidden:
+            torch.testing.assert_close(depth, torch.full((4,), 4.5), atol=0.04, rtol=0)
+        assert cameras[1].get_capture_metadata()["ground_plane_visible"] == (False,) * 4
+        assert sim._default_plane.object_desc.physics is not None
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.no_sim
+def test_stereo_ground_exclusion_updates_both_eyes() -> None:
+    left, right = MagicMock(), MagicMock()
+    pair = PairCameraView(left, right, np.eye(4, dtype=np.float32))
+    pair.set_excluded_render_categories(1)
+    left.set_excluded_render_categories.assert_called_once_with(1)
+    right.set_excluded_render_categories.assert_called_once_with(1)
+
+
+@pytest.mark.no_sim
+def test_failed_image_read_invalidates_capture_metadata() -> None:
+    camera = object.__new__(Camera)
+    camera.cfg = CameraCfg()
+    camera._capture_metadata = {"capture_sequence": 1}
+    camera._pending_capture_metadata = {"capture_sequence": 2}
+    camera._frame_buffer = MagicMock()
+    camera._frame_buffer.get_rgb_gpu_buffer.side_effect = RuntimeError("read failed")
+    with pytest.raises(RuntimeError, match="read failed"):
+        camera.update(fetch_only=True)
+    assert camera.get_capture_metadata() is None

@@ -124,7 +124,7 @@ APPROACH_DISTANCE = 0.10
 PULL_DISTANCE = 0.16
 NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
 NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
-# Match the shared atomic-action grasp profile.  ``condim=4`` activates the
+# Match the shared atomic-skill grasp profile.  ``condim=4`` activates the
 # torsional term in MuJoCo-Warp; the rolling coefficient is retained for
 # solvers/condim=6 that support it.  Keep both coefficients on the fingers and
 # handle only; changing the world material would alter unrelated contacts.
@@ -531,22 +531,21 @@ def _tutorial_physics_cfg(
     """Build the physics configuration used by this tutorial."""
     physics_cfg = physics_cfg_for_backend(backend)
     if isinstance(physics_cfg, NewtonPhysicsCfg):
-        # Keep the same MuJoCo-Warp solver/contact profile as the atomic-action
-        # tutorial and packaged Newton task.  The finer drawer substep cadence
-        # is intentional; per-world capacities remain auto-sized by DexSim
-        # from the finalized scene.
+        # Share the DexUni articulation profile with the atomic-skill tutorials.
+        # Keep the finer drawer substep cadence and native contact ownership.
         physics_cfg.num_substeps = 20
         physics_cfg.collision_cfg = None
         physics_cfg.solver_cfg = {
-            "solver_type": "mujoco_warp",
-            "solver": "newton",
-            "integrator": "implicitfast",
-            "iterations": 20,
-            "ls_iterations": 100,
-            "cone": "elliptic",
-            "impratio": 1_000.0,
-            "use_mujoco_contacts": True,
-            "enable_multiccd": True,
+            "solver_type": "dexuni",
+            "mujoco_options": {
+                "solver": "newton",
+                "integrator": "implicitfast",
+                "iterations": 20,
+                "ls_iterations": 100,
+                "cone": "elliptic",
+                "impratio": 1_000.0,
+                "enable_multiccd": True,
+            },
         }
     return physics_cfg
 

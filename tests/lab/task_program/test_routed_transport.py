@@ -25,7 +25,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     MoveHeldObjectOptions,
     RecoveryPolicy,
     ExecutionRunnerCfg,
@@ -33,7 +33,7 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     ObjectSemantics,
 )
-from embodichain.lab.sim.atomic_actions.tracking import (
+from embodichain.lab.sim.atomic_skills.tracking import (
     TrackingPolicy,
     TimedTerminalAcceptance,
 )
@@ -97,7 +97,7 @@ def _transport_system(monkeypatch: pytest.MonkeyPatch, outcome: str) -> SimpleNa
     )
     preset = _preset(
         "safe",
-        action_option_templates={factory.call_id: MoveHeldObjectOptions()},
+        skill_option_templates={factory.call_id: MoveHeldObjectOptions()},
         effect_assurance=(
             EffectAssurance.PROJECTED
             if outcome == "projected"
@@ -113,7 +113,7 @@ def _transport_system(monkeypatch: pytest.MonkeyPatch, outcome: str) -> SimpleNa
             in_flight=None, terminal=TimedTerminalAcceptance()
         ),
         recovery_policy=RecoveryPolicy(
-            max_action_retries=0, max_replans=0, action_timeout=0.5
+            max_skill_retries=0, max_replans=0, skill_timeout=0.5
         ),
     )
     profile = _profile(preset=preset)

@@ -112,15 +112,68 @@ def test_scoop_path_follows_container_and_measured_grasp() -> None:
     torch.testing.assert_close(plan(moved_bin, tilted_grasp), moved_bin @ baseline)
 
 
-def test_ice_spawn_configs_are_separated_before_prepare(tmp_path, monkeypatch) -> None:
+@pytest.mark.gpu
+@pytest.mark.requires_sim
+@pytest.mark.slow
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_default_scoops_and_retains_ice(seed: int) -> None:
+    """Qualify the physical grasp and retained ice after the final settling step."""
+    sim = demo.initialize_simulation(
+        demo.build_parser().parse_args(["--headless", "--physics", "default"])
+    )
+    try:
+        robot = demo.create_robot(sim)
+        demo.create_container(sim)
+        padding = demo.create_padding_box(sim)
+        scoop = demo.create_scoop(sim)
+        heavy = demo.create_heave_ice(sim)
+        ice = demo.create_ice_cubes(sim)
+        sim.prepare()
+        demo.randomize_ice_positions(sim, ice, seed=seed)
+        demo.scoop_grasp(sim, robot, scoop, heavy, padding)
+        demo.scoop_ice(sim, robot, scoop)
+
+        assert scoop.get_local_pose()[0, 2] > 0.30  # Above the 22 cm bin rim.
+        relative = torch.linalg.inv(scoop.get_local_pose(to_matrix=True))[
+            :, None
+        ] @ ice.get_local_pose(to_matrix=True)
+        centers = relative[0, :, :3, 3]
+        # Bowl bounds, including one cube radius above the upper surface.
+        retained = (
+            (centers[:, 0].abs() < 0.055)
+            & (centers[:, 1] > -0.19)
+            & (centers[:, 1] < -0.04)
+            & (centers[:, 2] > -0.025)
+            & (centers[:, 2] < 0.065)
+        )
+        count = int(retained.sum())
+        print(f"seed={seed}: retained {count} ice cubes")
+        assert count > 0
+    finally:
+        sim.destroy(exit_process=False)
+        demo.SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("has_native_renderer", [False, True])
+def test_ice_spawn_configs_are_separated_before_prepare(
+    tmp_path, monkeypatch, has_native_renderer: bool
+) -> None:
     """Newton evaluates initial contacts before runtime randomization can run."""
     (tmp_path / "ice.obj").touch()
     monkeypatch.setattr(demo, "get_data_path", lambda name: str(tmp_path))
     declared = []
+    material_calls = []
 
     def add_group(*, cfg):
         declared.extend(cfg.rigid_objects.values())
-        return SimpleNamespace(set_visual_material=lambda **kwargs: None)
+        return SimpleNamespace(
+            set_visual_material=lambda **kwargs: material_calls.append("assign")
+        )
+
+    def create_visual_material(**kwargs):
+        assert has_native_renderer
+        material_calls.append("create")
+        return object()
 
     def prepare():
         positions = np.array(
@@ -138,11 +191,13 @@ def test_ice_spawn_configs_are_separated_before_prepare(tmp_path, monkeypatch) -
         assert separations.min() >= 0.030
 
     sim = SimpleNamespace(
+        has_native_renderer=has_native_renderer,
         add_rigid_object_group=add_group,
-        create_visual_material=lambda **kwargs: object(),
+        create_visual_material=create_visual_material,
         prepare=prepare,
     )
     demo.create_ice_cubes(sim)
+    assert material_calls == (["create", "assign"] if has_native_renderer else [])
 
 
 def test_newton_uses_cg_for_the_large_free_body_pile(monkeypatch) -> None:
@@ -154,4 +209,11 @@ def test_newton_uses_cg_for_the_large_free_body_pile(monkeypatch) -> None:
 
     monkeypatch.setattr(demo, "SimulationManager", manager)
     demo.initialize_simulation(demo.build_parser().parse_args(["--physics", "newton"]))
-    assert configs[0].physics_cfg.solver_cfg["solver"] == "cg"
+    assert configs[0].physics_cfg.solver_cfg["solver_type"] == "dexuni"
+    assert configs[0].physics_cfg.solver_cfg["mujoco_options"]["solver"] == "cg"
+    assert (
+        configs[0].physics_cfg.solver_cfg["vbd_options"][
+            "rigid_body_contact_buffer_size"
+        ]
+        == 256
+    )

@@ -81,3 +81,27 @@ def test_stale_graph_or_grounding_cannot_claim_complete_coverage(damage):
             ),
         )
     assert _coverage(plan)["status"] != "covered"
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "action_options",
+        "skill_options",
+        "action_invocation",
+        "skill_invocation",
+        "atomic_action",
+        "atomic_skill",
+        "AtomicAction",
+        "AtomicSkill",
+    ],
+)
+def test_semantic_graph_rejects_execution_aliases_inside_calls(field: str) -> None:
+    from embodichain.gen_sim.task_engine.semantic_graph import (
+        validate_semantic_task_graph,
+    )
+
+    graph = deepcopy(_plan().graph)
+    graph["nodes"][0]["call"]["arguments"][field] = {}
+    with pytest.raises(ValueError):
+        validate_semantic_task_graph(graph)
