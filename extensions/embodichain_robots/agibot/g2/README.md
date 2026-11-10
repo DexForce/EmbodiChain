@@ -1,10 +1,16 @@
 # AgiBot Genie G2
 
-![G2 rendered with the existing Tianji Marvin preview lighting](preview.png)
+![G2 rendered with W1-style native preview lighting](preview.png)
 
-The reproducible render uses the existing Tianji Marvin example's `rt`
-renderer and point light: intensity `60`, radius `600`, position `[0, 0, 6]`,
-with default exposure. Run:
+The reproducible render follows the DexForce W1 example's native preview
+appearance, explicitly selecting the `hybrid` renderer used on RTX GPUs.
+It uses 64 samples per pixel, OptiX offscreen denoising, default exposure and
+the shared default floor. Three point lights separate the dark head and
+chassis from the background: key at `[3, -4, 4.5]` with intensity `60`, fill
+at `[-3, -2, 3]` with intensity `30`, and rim at `[0, 3, 4]` with intensity
+`40`, each with radius `10`. The 1400×1200 camera frames the full neutral pose;
+physics is paused after scene preparation. Source mesh materials are preserved.
+Run:
 
 ```bash
 python -m embodichain_robots.agibot.g2._preview --output g2-render.png
