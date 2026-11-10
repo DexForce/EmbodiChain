@@ -1667,10 +1667,6 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
     assert Path(cfg.urdf_cfg.fpath).name == "native_panda_dual_test.urdf"
     cfg.urdf_cfg.fpath = str(tmp_path / "native_panda_dual.urdf")
     assembled_path = cfg.urdf_cfg.assemble_urdf()
-    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
-
-    cfg.fpath = assembled_path
-    prepare_robot_grippers(cfg)
     tree = ET.parse(assembled_path)
     links = [link.get("name") for link in tree.findall("link")]
     joints = {
@@ -1717,6 +1713,9 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
         end_link_name="fr3_hand_tcp",
     )
     expected_fk = source.forward_kinematics(qpos).get_matrix()
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg)
     chains = cfg.build_pk_serial_chain(device=CPU)
     for side in ("left", "right"):
         arm = f"{side}_arm"
