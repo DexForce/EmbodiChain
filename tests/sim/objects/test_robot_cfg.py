@@ -1707,9 +1707,13 @@ def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
 
-    declaration = load_config(
-        get_config_path("components/embodiments/franka_panda_robotiq85.yaml")
-    )["simulation"]
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    component = get_config_path("components/embodiments/franka_panda_robotiq85.yaml")
+    physical = resolve_gym_components(
+        {"embodiment": {"component": str(component)}}, base_dir=Path(component).parent
+    )
+    declaration = physical.config["robot"]
     cfg = _robot_cfg_from_dict(declaration)
     restored = panda.FrankaCfg.from_dict(cfg.to_dict())
     assert restored.control_parts == cfg.control_parts

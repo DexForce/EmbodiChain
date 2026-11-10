@@ -485,14 +485,14 @@ def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> No
         n_sample=32,
         force_refresh=False,
         robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur10")),
-        gripper_model=handover.HANDOVER_GRIPPER_MODEL,
+        gripper_data=handover.HANDOVER_GRIPPER_MODEL,
     )
-    assert generator.gripper_model.model_id == "robotiq_2f_140"
-    assert generator.gripper_model.max_opening_width == 0.14
-    geometry = generator.gripper_model
-    geometry.max_opening_width = 0.12
-    assert generator.gripper_model.max_opening_width == 0.14
-    assert handover.HANDOVER_GRIPPER_MODEL.max_opening_width == 0.14
+    assert generator.gripper_data["model_id"] == "robotiq_2f_140"
+    assert generator.gripper_data["max_opening_width"] == 0.14
+    geometry = generator.gripper_data
+    geometry["max_opening_width"] = 0.12
+    assert generator.gripper_data["max_opening_width"] == 0.14
+    assert handover.HANDOVER_GRIPPER_MODEL["max_opening_width"] == 0.14
     collision_geometry = generator.collision_geometry
     original_points = collision_geometry.points.clone()
     collision_geometry.points.add_(1.0)
@@ -502,7 +502,7 @@ def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> No
             n_sample=32,
             force_refresh=False,
             robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur5")),
-        ).gripper_model.model_id
+        ).gripper_data["model_id"]
         == "dh_pgi_140_80"
     )
 

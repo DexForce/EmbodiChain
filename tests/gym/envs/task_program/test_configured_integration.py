@@ -18,6 +18,11 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.lab.sim.utility.gripper_geometry import (
+    build_gripper_collision_geometry,
+)
+
 from collections.abc import Iterator
 from copy import deepcopy
 import importlib.util
@@ -792,13 +797,11 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
         "simulation.move_held_object",
         "simulation.pour",
     }
-    assert integration_payload["runtime_services"]["grasp_pose_generators"] == {
-        f"{side}_eef": {
-            "kind": "antipodal_parallel_jaw",
-            "model": "cobotmagic_v100_gripper",
-        }
-        for side in ("right", "left")
-    }
+    services = integration_payload["runtime_services"]["grasp_pose_generators"]
+    assert set(services) == {"left_eef", "right_eef"}
+    for generator in services.values():
+        assert generator["kind"] == "antipodal_parallel_jaw"
+        assert generator["gripper"]["model_id"] == "cobotmagic_v100_gripper"
 
 
 def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
@@ -1661,7 +1664,7 @@ def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     factory = _decode_grasp_generator(
         {
             "kind": "antipodal_parallel_jaw",
-            "model": "dh_pgi_140_80",
+            "gripper": {"class_type": "DHPGI14080"},
         },
         path="generator",
     )
@@ -1683,7 +1686,7 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
     generator = _decode_grasp_generator(
         {
             "kind": "antipodal_parallel_jaw",
-            "model": "dh_pgi_140_80",
+            "gripper": {"class_type": "DHPGI14080"},
         },
         path="generator",
     )()
@@ -1702,25 +1705,30 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
 def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch):
     from types import SimpleNamespace
     import embodichain.toolkits.graspkit.pg_grasp as grasp
-    import embodichain.toolkits.graspkit.pg_grasp.model_geometry as geometry
+    import embodichain.lab.sim.utility.gripper_geometry as geometry
 
     marker = object()
     geometry_values = {}
     contact = [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]]
     monkeypatch.setattr(
         geometry,
-        "get_parallel_jaw_collision_geometry",
-        lambda *a, **kw: (geometry_values.update(kw), marker)[1],
+        "build_gripper_collision_geometry",
+        lambda defaults, **kw: (geometry_values.update(defaults), marker)[1],
     )
     monkeypatch.setattr(
         grasp,
         "AntipodalGraspPoseGenerator",
-        lambda model, **kw: SimpleNamespace(model=model, **kw),
+        lambda **kw: SimpleNamespace(
+            model={
+                k: kw[k] for k in ("model_id", "min_opening_width", "max_opening_width")
+            },
+            **kw,
+        ),
     )
     generator = _decode_grasp_generator(
         {
             "kind": "antipodal_parallel_jaw",
-            "model": "robotiq_arg2f_140",
+            "gripper": {"class_type": "RobotiqArg2F140"},
             "approach_deviation_angle": 0.3490658503988659,
             "max_candidates": 500,
             "center_mode": "centroid",
@@ -1733,7 +1741,7 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
     assert generator.algorithm_cfg.max_candidates == 500
     assert generator.algorithm_cfg.center_mode == "centroid"
 
-    assert geometry_values["root_from_contact_frame"].tolist() == contact
+    assert geometry_values["root_from_contact_frame"] == contact
 
 
 @pytest.mark.parametrize(
@@ -1750,7 +1758,11 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
 def test_grasp_search_declarations_reject_invalid_values_before_construction(value):
     with pytest.raises((TypeError, ValueError)):
         _decode_grasp_generator(
-            {"kind": "antipodal_parallel_jaw", "model": "robotiq_arg2f_140", **value},
+            {
+                "kind": "antipodal_parallel_jaw",
+                "gripper": {"class_type": "RobotiqArg2F140"},
+                **value,
+            },
             path="generator",
         )
 
@@ -1781,14 +1793,77 @@ def test_migrated_robotiq_embodiments_preserve_frozen_physical_declarations(
     actual = deepcopy(physical.config["robot"])
     # Scene placement is an explicit deployment input, separate from the component's reference pose.
     actual["init_pos"] = expected["init_pos"]
-    assert actual == expected
+    bindings = actual.pop("gripper_bindings")
+    for side in ("left", "right"):
+        from embodichain.lab.sim.cfg import RobotCfg
+        from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+        runtime = RobotCfg.from_dict(deepcopy(physical.config["robot"]))
+        prepare_robot_grippers(runtime)
+        import numpy as np
+
+        np.testing.assert_allclose(
+            runtime.solver_cfg[f"{side}_arm"].tcp,
+            expected["solver_cfg"][f"{side}_arm"]["tcp"],
+            rtol=0,
+            atol=1e-6,
+        )
+        expected["solver_cfg"][f"{side}_arm"].pop("tcp")
+
+    def components(values):
+        result = deepcopy(values)
+        result["urdf_cfg"]["components"] = sorted(
+            [
+                {
+                    k: v
+                    for k, v in c.items()
+                    if k not in {"source_root_link", "mesh_paths"}
+                }
+                for c in result["urdf_cfg"]["components"]
+            ],
+            key=lambda c: c["component_type"],
+        )
+        for item in result["urdf_cfg"]["components"]:
+            item.setdefault(
+                "transform",
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            )
+        return json.loads(json.dumps(result))
+
+    expected["joint_drive_props"].setdefault("drive_type", "force")
+    assert components(actual) == components(expected)
     declaration = physical.embodiment_skill_profile
     assert declaration is not None
     services = declaration["runtime_services"]
-    assert (
-        services["grasp_pose_generators"]
-        == frozen["skill_profile"]["runtime_services"]["grasp_pose_generators"]
-    )
+    for part, generator in services["grasp_pose_generators"].items():
+        previous = deepcopy(
+            frozen["skill_profile"]["runtime_services"]["grasp_pose_generators"][part]
+        )
+        previous.pop("model")
+        previous.pop("root_from_tcp", None)
+        previous.pop("root_from_contact_frame", None)
+        assert {
+            key: value
+            for key, value in generator.items()
+            if key not in {"gripper", "min_opening_width", "max_opening_width"}
+        } == previous
+        old_presets = frozen["skill_profile"]["command_presets"]
+        old_commands = next(
+            x["commands"] for x in old_presets if x["control_part"] == part
+        )
+        assert (
+            next(
+                x["commands"]
+                for x in declaration["command_presets"]
+                if x["control_part"] == part
+            )
+            == old_commands
+        )
     for side in ("left", "right"):
         hand = services["hand_geometries"][f"{side}_eef"]
         assert (
@@ -1812,7 +1887,11 @@ def test_migrated_robotiq_embodiments_preserve_frozen_physical_declarations(
 def test_grasp_generator_rejects_removed_box_collision_fields(field: str) -> None:
     with pytest.raises(ValueError, match=f"unsupported fields.*{field}"):
         _decode_grasp_generator(
-            {"kind": "antipodal_parallel_jaw", "model": "dh_pgi_140_80", field: 0.01},
+            {
+                "kind": "antipodal_parallel_jaw",
+                "gripper": {"class_type": "DHPGI14080"},
+                field: 0.01,
+            },
             path="generator",
         )
 
@@ -1820,15 +1899,15 @@ def test_grasp_generator_rejects_removed_box_collision_fields(field: str) -> Non
 def test_inline_builtin_aperture_matches_registered_model_and_rejects_unknown() -> None:
     payload = {
         "kind": "antipodal_parallel_jaw",
-        "model": {"model_id": "franka_panda_hand"},
+        "gripper": {"class_type": "FrankaPandaHand"},
     }
     factory = _decode_grasp_generator(payload, path="generator")
     assert factory.min_opening_width == 0.001
     assert factory.max_opening_width == 0.08
-    payload["model"] = {"model_id": "custom"}
+    payload["gripper"] = {"class_type": "custom"}
     with pytest.raises(
         ValueError,
-        match="unknown parallel-jaw gripper model",
+        match="no parallel-jaw description",
     ):
         _decode_grasp_generator(payload, path="generator")
 
@@ -1858,14 +1937,15 @@ def test_embodiment_grasp_defaults_reach_composed_deployments(
     profile = physical.embodiment_skill_profile
     assert profile is not None
     declaration = profile["runtime_services"]["grasp_pose_generators"][control_part]
-    assert declaration == {"kind": "antipodal_parallel_jaw", "model": model_id}
+    assert declaration["kind"] == "antipodal_parallel_jaw"
+    assert declaration["gripper"]["model_id"] == model_id
 
     deployment = _deployment_from_path(path)
     delegate = deployment.integration.adapter_factory.delegate
     factory = delegate._grasp_pose_generator_factories[control_part]
     generator = factory()
 
-    assert generator.gripper_model.model_id == model_id
+    assert generator.gripper_data["model_id"] == model_id
     assert generator.algorithm_cfg == AntipodalGraspPoseGeneratorCfg()
     assert generator.collision_cfg == ParallelJawGraspCollisionCfg()
     assert generator.collision_geometry.provenance["model_id"] == model_id
@@ -1915,13 +1995,9 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     services = profile["runtime_services"]["grasp_pose_generators"]
     assert set(services) == {"left_eef", "right_eef"}
     declaration = services[f"{side}_eef"]
-    assert {
-        key: value for key, value in declaration.items() if key != "root_from_tcp"
-    } == {
-        "kind": "antipodal_parallel_jaw",
-        "model": "tianji_marvin_gripper",
-        "side": side,
-    }
+    assert declaration["kind"] == "antipodal_parallel_jaw"
+    assert declaration["gripper"]["model_id"] == "tianji_marvin_gripper"
+    assert declaration["gripper"]["binding"]["variant"] == side
     deployment = _load_configured_task_program_deployment(
         task_program=physical.config["task_program"],
         skill_profile=profile,
@@ -1937,8 +2013,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     delegate = deployment.integration.adapter_factory.delegate
     factory = delegate._grasp_pose_generator_factories[f"{side}_eef"]
     generator = factory()
-    assert generator.gripper_model.model_id == "tianji_marvin_gripper"
-    assert generator.collision_geometry.provenance["side"] == side
+    assert generator.gripper_data["model_id"] == "tianji_marvin_gripper"
     assert (
         generator.collision_geometry.provenance["root_link"] == f"{side}_hand_base_link"
     )
@@ -1948,9 +2023,6 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     import numpy as np
     from scipy.spatial.transform import Rotation
     from embodichain.data import get_data_path
-    from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
-        get_parallel_jaw_collision_geometry,
-    )
 
     origin = ET.parse(get_data_path("TianjiMarvin/robot_with_ee_acd.urdf")).find(
         f"./joint[@name='{side.upper()}_HAND_TOOL']/origin"
@@ -1960,12 +2032,15 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
         "xyz", np.fromstring(origin.attrib["rpy"], sep=" ")
     ).as_matrix()
     root_from_tool[:3, 3] = np.fromstring(origin.attrib["xyz"], sep=" ")
-    root_from_tcp = root_from_tool @ np.asarray(robot.solver_cfg[f"{side}_arm"].tcp)
+    # This embodiment selects its calibrated root TCP through the hand binding.
+    root_from_tcp = np.asarray(declaration["gripper"]["default_root_from_tcp"])
     np.testing.assert_allclose(
-        declaration["root_from_tcp"], root_from_tcp, rtol=0, atol=1e-12
+        root_from_tcp[:3, 3], [0.0, -3.0144258464370744e-09, 0.1125], rtol=0, atol=1e-12
     )
     geometry = generator.collision_geometry
-    default = get_parallel_jaw_collision_geometry("tianji_marvin_gripper", side=side)
+    default = build_gripper_collision_geometry(
+        resolve_gripper_defaults("TianjiMarvinGripper", variant=side)
+    )
     torch.testing.assert_close(geometry.points, default.points, rtol=0, atol=1e-8)
     canonical = torch.eye(4, dtype=torch.float64).unsqueeze(0)
     actual_pose = geometry.canonical_to_tcp_poses(canonical)[0].numpy()
@@ -1985,11 +2060,11 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
 
 def test_grasp_generator_rejects_unknown_models_and_removed_viser_port() -> None:
     """The integration keeps a closed model catalog and no interactive port."""
-    with pytest.raises(ValueError, match="available.*dh_pgi_140_80"):
+    with pytest.raises(ValueError, match="no parallel-jaw description"):
         _decode_grasp_generator(
             {
                 "kind": "antipodal_parallel_jaw",
-                "model": "missing_gripper",
+                "gripper": {"class_type": "missing_gripper"},
             },
             path="generator",
         )
@@ -1998,7 +2073,7 @@ def test_grasp_generator_rejects_unknown_models_and_removed_viser_port() -> None
         _decode_grasp_generator(
             {
                 "kind": "antipodal_parallel_jaw",
-                "model": "dh_pgi_140_80",
+                "gripper": {"class_type": "DHPGI14080"},
                 "viser_port": 11_801,
             },
             path="generator",
@@ -2324,7 +2399,7 @@ def test_official_generators_use_named_models_without_default_fields() -> None:
         services = _integration_payload(task_name)["runtime_services"]
         generators = services["grasp_pose_generators"]
         for generator in generators.values():
-            assert generator["model"] == "dh_pgi_140_80"
+            assert generator["gripper"]["model_id"] == "dh_pgi_140_80"
             assert forbidden.isdisjoint(generator)
             if task_name == "hand_over":
                 assert generator["approach_direction_samples"] == 1

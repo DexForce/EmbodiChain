@@ -514,7 +514,7 @@ def test_create_antipodal_semantics_keeps_mesh_data_on_affordance() -> None:
     )
     assert generator.algorithm_cfg.sample_count == 64
     assert generator.annotation_cfg.force_refresh is True
-    assert generator.gripper_model.model_id == "dh_pgi_140_80"
+    assert generator.gripper_data["model_id"] == "dh_pgi_140_80"
 
 
 def test_franka_tutorial_config_uses_ur5_gripper_component() -> None:
