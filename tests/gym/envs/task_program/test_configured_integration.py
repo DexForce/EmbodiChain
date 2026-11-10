@@ -3791,6 +3791,83 @@ def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
             {"nominal_motion_sources": [{**source, "asset_sha256": "e" * 64}]}
         )
 
+    # Named registration binds each expanded occurrence automatically.
+    selected_program = {
+        "program_id": task["program_id"],
+        "targets": {},
+        "program": {
+            "repeat": {
+                "count": 2,
+                "body": [{"demo_skill": {"skill": "trace", "roles": {}}}],
+            }
+        },
+    }
+    named_task = deepcopy(task)
+    named_task["runtime_services"] = {
+        "demo_skills": {
+            "trace": {
+                "call_id": declaration["call_id"],
+                "asset_manifest": "skill/demo_skill.json",
+                "asset_sha256": artifact.content_sha256,
+                "contact_sensor_uid": "contacts",
+                "tcp_contact_links": ["left_pad", "right_pad"],
+            }
+        }
+    }
+    physical = _physical_components(config_path, _gym_config("repeated_pick_place"))
+    named_profile = deepcopy(physical.embodiment_skill_profile)
+    named_profile["resources"][0]["endpoints"][0]["capabilities"].append(
+        "motion.joint_position"
+    )
+    selectors = {
+        "program": {"inline": selected_program},
+        "integration": {"inline": named_task},
+        "execution_policy": "policy.yaml",
+    }
+    deployment = load_configured_task_program_deployment(
+        task_program=selectors,
+        skill_profile=named_profile,
+        base_dir=tmp_path,
+    )
+    bound_sources = deployment.integration.adapter_factory.nominal_motion_sources
+    assert [item.call_index for item in bound_sources] == [0, 1]
+    assert all(
+        item.tcp_contact_links == ("left_pad", "right_pad") for item in bound_sources
+    )
+    assert len({item.program_fingerprint for item in bound_sources}) == 1
+    assert all(item.asset_sha256 == artifact.content_sha256 for item in bound_sources)
+    assert all(item.asset_manifest == str(manifest) for item in bound_sources)
+    catalog = deployment.integration.registration.catalog
+    assert catalog.demo_skill_calls == {"trace": declaration["call_id"]}
+    assert (
+        catalog.semantic_planning_catalog()["calls"][declaration["call_id"]]["required"]
+        == {}
+    )
+    assert "demo_skills" in named_task["runtime_services"]
+    selected_program["program"]["repeat"]["count"] = 3
+    second = load_configured_task_program_deployment(
+        task_program=selectors,
+        skill_profile=named_profile,
+        base_dir=tmp_path,
+    )
+    assert [
+        item.call_index
+        for item in second.integration.adapter_factory.nominal_motion_sources
+    ] == [0, 1, 2]
+    named_task["runtime_services"]["nominal_motion_sources"] = [
+        {
+            **source,
+            "call_index": 0,
+            "program_fingerprint": bound_sources[0].program_fingerprint,
+        }
+    ]
+    with pytest.raises(ValueError, match="both automatic and explicit"):
+        load_configured_task_program_deployment(
+            task_program=selectors,
+            skill_profile=named_profile,
+            base_dir=tmp_path,
+        )
+
 
 @pytest.mark.parametrize("legacy", [False, True])
 def test_recovery_policy_migration_normalizes_field_names(legacy: bool) -> None:
@@ -3859,3 +3936,99 @@ def test_component_composition_normalizes_legacy_skill_options(mixed: bool) -> N
         assert "skill_options" in payload["robot_profile"]["presets"][0]
         assert "action_options" in profile
         assert "skill_options" not in profile
+
+
+def test_demo_skill_can_publish_verified_attachment_without_pick_affordance() -> None:
+    from embodichain.lab.task_program.integrations.demo_skill import (
+        _DemoSkillLowererFactory,
+    )
+    from embodichain.lab.task_program.semantics import (
+        SceneEntityRegistration,
+        SceneRegistry,
+        RegisteredSemanticCall,
+    )
+    from embodichain.lab.sim.atomic_skills import SkillOptions
+
+    native = SimpleNamespace(uid="native_item")
+
+    def never_observe(**kwargs):
+        pytest.fail("lowering observed state")
+
+    scene = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                SceneObjectRef("item"),
+                state_provider=SimpleNamespace(entity=native, observe=never_observe),
+            ),
+        )
+    )
+    robot = object()
+    factory = _DemoSkillLowererFactory("a" * 64, ("item",), terminal_held_role="item")
+    lowerer = factory.create(
+        simulation=SimpleNamespace(get_rigid_object=lambda uid: native),
+        robot=robot,
+        scene_registry=scene,
+        engine=SimpleNamespace(robot=robot),
+    )
+    lowered = lowerer.lower(
+        RegisteredSemanticCall(call_id=factory.call_id, arguments={"item": "item"}),
+        context=None,
+        bound=None,
+        option_template=SkillOptions(),
+    )
+    assert lowered.goal.terminal_semantics.entity_id == "item"
+    assert lowered.registered_effect.held_objects[0].object_id == "item"
+
+
+def test_effective_catalog_uses_the_selected_handover_policy_and_resource_defaults() -> (
+    None
+):
+    deployment = _deployment_from_path(_config_path("hand_over"))
+    catalog = deployment.integration.registration.catalog
+    preset = catalog.robot_profile.presets[deployment.selection.runtime_preset]
+    metadata = catalog.semantic_planning_catalog()["calls"]["hand_over"]
+    assert metadata["available"]
+    assert (
+        metadata["required_policy"]["release_at_target"]
+        == preset.skill_option_template("hand_over").release_at_target
+    )
+    catalog.validate_call_payload(
+        {"kind": "hand_over", "object": "can", "final_target": None}
+    )
+    single = _deployment_from_path(
+        _config_path("repeated_pick_place")
+    ).integration.registration.catalog
+    single.validate_call_payload({"kind": "pick", "object": "cube", "grasp": None})
+    with pytest.raises(ValueError, match="not enabled"):
+        single.validate_call_payload({"kind": "hand_over", "object": "cube"})
+
+
+@pytest.mark.parametrize("assurance", ["projected", "verified"])
+def test_effective_transport_contract_matches_required_assurance(
+    assurance: str,
+) -> None:
+    payload = _integration_payload("repeated_pick_place")
+    preset = payload["robot_profile"]["presets"][0]
+    preset["effect_assurance"] = assurance
+    preset["skill_options"]["move_held_object"] = {"kind": "move_held_object"}
+    if assurance == "verified":
+        preset["effect_monitors"]["move_held_object"] = {
+            "monitor_id": "builtin.composite_effect",
+            "revision": "1",
+            "params": {},
+        }
+    configured = _decode_configured_task_program_integration(payload)
+    catalog = configured.registration.catalog
+    metadata = catalog.semantic_planning_catalog()["calls"]["move_held_object"]
+    assert metadata["required_effect_assurance"] == "verified"
+    assert metadata["available"] == (assurance == "verified")
+    call = {
+        "kind": "move_held_object",
+        "object": "cube",
+        "at": {"kind": "target_ref", "target": "destination"},
+    }
+    if assurance == "verified":
+        catalog.validate_call_payload(call)
+    else:
+        with pytest.raises(ValueError, match="not enabled"):
+            catalog.validate_call_payload(call)

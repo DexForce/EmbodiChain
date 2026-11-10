@@ -128,6 +128,8 @@ def _create_minimal_distributed_config():
     cfg["trainer"]["use_wandb"] = False
     cfg["trainer"]["enable_eval"] = False
     cfg["trainer"]["num_envs"] = 4
+    # This test exercises training and collectives without camera evaluation.
+    cfg["trainer"]["renderer"] = "no-render"
     cfg["algorithm"]["cfg"]["batch_size"] = 64
 
     fd, path = tempfile.mkstemp(suffix=".json")
