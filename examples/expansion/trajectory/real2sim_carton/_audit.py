@@ -31,7 +31,7 @@ from embodichain.data_pipeline.real2sim import load_prototype
 from embodichain.data_pipeline.real2sim._geometry import (
     _canonical_robot_geometry_sha256,
 )
-from embodichain.lab.sim.atomic_actions._expansion_phases import FREE_PHASES
+from embodichain.lab.sim.atomic_skills._expansion_phases import FREE_PHASES
 
 __all__: list[str] = []
 

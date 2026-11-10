@@ -120,7 +120,7 @@ def test_manifest_keeps_domain_and_is_independent_of_planner(tmp_path: Path) -> 
         domain=domain,
         track_group="pick",
         embodiment_id="franka_panda",
-        required_capabilities=frozenset({"atomic_action"}),
+        required_capabilities=frozenset({"atomic_skill"}),
     )
     path = write_case_manifest(
         tmp_path / "cases.json",
@@ -137,7 +137,7 @@ def test_manifest_keeps_domain_and_is_independent_of_planner(tmp_path: Path) -> 
     }
     assert payload["cases"][0]["track_group"] == "pick"
     assert payload["cases"][0]["embodiment_id"] == "franka_panda"
-    assert payload["cases"][0]["required_capabilities"] == ["atomic_action"]
+    assert payload["cases"][0]["required_capabilities"] == ["atomic_skill"]
     assert payload["planner_config_hashes"] == {"baseline": "abc"}
     assert payload["resolved_embodiment"]["id"] == "franka_panda"
     assert "planner_config_hash" not in payload["cases"][0]
