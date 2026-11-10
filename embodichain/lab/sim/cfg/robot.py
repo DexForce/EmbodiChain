@@ -302,7 +302,16 @@ class RobotCfg(ArticulationCfg):
                 if tracked_id is not None:
                     _visited.remove(tracked_id)
 
-        return serialize(self)
+        data = serialize(self)
+        for binding in self.gripper_bindings.values():
+            part = binding["declaration"]["motion_part"]
+            solver = (data.get("solver_cfg") or {}).get(part)
+            if isinstance(solver, dict) and binding.get("explicit_solver_tcp") is None:
+                # A hand-owned TCP is derived at assembly. Serializing either
+                # an unresolved solver default or its derived result as an
+                # override would falsely turn it into an authored calibration.
+                solver.pop("tcp", None)
+        return data
 
     def to_string(self):
         """Return config as a JSON string."""

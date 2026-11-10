@@ -711,7 +711,9 @@ def test_mounted_tcp_uses_actual_fixed_chain_and_survives_roundtrip(
     cfg = resolve_robot_cfg(values.pop("class_type"), values)
     prepare_robot_grippers(cfg)
     np.testing.assert_allclose(cfg.solver_cfg["arm"].tcp, expected, atol=1e-6)
-    restored = type(cfg).from_dict(cfg.to_dict())
+    serialized = cfg.to_dict()
+    assert serialized["solver_cfg"]["arm"]["tcp"] == cfg.solver_cfg["arm"].tcp
+    restored = type(cfg).from_dict(serialized)
     prepare_robot_grippers(restored)
     np.testing.assert_allclose(restored.solver_cfg["arm"].tcp, expected, atol=1e-6)
     # A post-selection explicit override must still reach authoritative validation.
@@ -723,6 +725,42 @@ def test_mounted_tcp_uses_actual_fixed_chain_and_survives_roundtrip(
         prepare_robot_grippers(
             merge_robot_cfg(cfg, {"solver_cfg": {"arm": {"tcp": wrong.tolist()}}})
         )
+
+
+@pytest.mark.parametrize("prepared", [False, True])
+def test_mounted_implicit_tcp_survives_preassembly_roundtrip(tmp_path, prepared):
+    import numpy as np
+    from embodichain.robot_registry import resolve_robot_cfg
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    mount, hand_tcp = np.eye(4), np.eye(4)
+    mount[2, 3], hand_tcp[2, 3] = 0.10, 0.05
+    values = deepcopy(
+        _compose(
+            tmp_path,
+            logical=False,
+            simulation={"solver_cfg": {"arm": {"end_link_name": "ee_link"}}},
+            gripper_overrides={
+                "transform": mount.tolist(),
+                "root_from_tcp": hand_tcp.tolist(),
+            },
+        ).config["robot"]
+    )
+    cfg = resolve_robot_cfg(values.pop("class_type"), values)
+    if prepared:
+        prepare_robot_grippers(cfg)
+    serialized = cfg.to_dict()
+    restored = type(cfg).from_dict(json.loads(json.dumps(serialized)))
+    prepare_robot_grippers(restored)
+    np.testing.assert_allclose(
+        restored.solver_cfg["arm"].tcp, mount @ hand_tcp, rtol=0, atol=1e-6
+    )
+    assert "tcp" not in serialized["solver_cfg"]["arm"]
+    assert "explicit_solver_tcp" not in restored.gripper_bindings["tool"]
+    prepare_robot_grippers(cfg)
+    np.testing.assert_allclose(
+        cfg.solver_cfg["arm"].tcp, restored.solver_cfg["arm"].tcp, rtol=0, atol=1e-6
+    )
 
 
 @pytest.mark.parametrize(
