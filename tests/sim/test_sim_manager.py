@@ -19,6 +19,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 import gc
 import queue
+import threading
 
 from pathlib import Path
 
@@ -450,6 +451,7 @@ def _make_sim_manager(
     sim._window_record_save_threads = []
     sim._window_record_hotkey_cfg = None
     sim._window_record_input_control = None
+    sim._window_capture_requests = queue.SimpleQueue()
     sim._window_camera_pose_hotkey_cfg = None
     sim._window_camera_pose_input_control = None
     sim._env = FakeEnv()
@@ -2960,6 +2962,19 @@ def test_capture_window_returns_none_without_an_open_window() -> None:
     assert sim.capture_window() is None
 
 
+def test_capture_window_native_failure_does_not_query_retired_camera(
+    tmp_path: Path,
+) -> None:
+    window = FakeWindow(None)
+    window.get_picture = MagicMock(side_effect=RuntimeError("Window is closed"))
+    window.get_pose_matrix = MagicMock()
+    sim = _make_sim_manager(window=window)
+
+    assert sim.capture_window(tmp_path / "closed.png") is None
+    window.get_pose_matrix.assert_not_called()
+    assert not (tmp_path / "closed.png").exists()
+
+
 def test_capture_window_hotkey_saves_one_frame_and_rejects_conflicts(
     tmp_path: Path,
 ) -> None:
@@ -2968,11 +2983,77 @@ def test_capture_window_hotkey_saves_one_frame_and_rejects_conflicts(
 
     assert sim.enable_window_capture_hotkey(save_path=tmp_path / "hotkey")
     assert len(window.input_controls) == 1
-    window.input_controls[0].on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+    sim.sync_render_state = MagicMock()
+    owner_thread = threading.get_ident()
+    get_picture = window.get_picture
+
+    def read_on_owner_thread() -> np.ndarray:
+        assert threading.get_ident() == owner_thread
+        return get_picture()
+
+    window.get_picture = MagicMock(side_effect=read_on_owner_thread)
+    callback = threading.Thread(
+        target=window.input_controls[0].on_key_down,
+        args=(dexsim.types.InputKey.SCANCODE_C.value,),
+    )
+    callback.start()
+    callback.join(timeout=1)
+    assert not callback.is_alive()
+    window.get_picture.assert_not_called()
+    assert not (tmp_path / "hotkey.png").exists()
+
+    with sim.render_frame():
+        pass
+
+    window.get_picture.assert_called_once()
     assert (tmp_path / "hotkey.png").is_file()
 
     with pytest.raises(ValueError, match="conflicts"):
         sim.enable_window_capture_hotkey(hotkey=dexsim.types.InputKey.SCANCODE_R)
+
+
+def test_capture_window_hotkey_discards_requests_from_closed_window(
+    tmp_path: Path,
+) -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.ones((2, 2, 3), dtype=np.uint8)))
+    sim.sync_render_state = MagicMock()
+    sim.capture_window = MagicMock()
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "old")
+    old_control = sim._window_capture_input_control
+    old_control.on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+
+    sim.close_window()
+    sim._world.window = FakeWindow(np.ones((2, 2, 3), dtype=np.uint8))
+    assert sim.open_window()
+    # A late native callback must not capture the replacement window either.
+    old_control.on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+    with sim.render_frame():
+        pass
+    sim.capture_window.assert_not_called()
+
+    sim._window_capture_input_control.on_key_down(
+        dexsim.types.InputKey.SCANCODE_C.value
+    )
+    with sim.render_frame():
+        pass
+    sim.capture_window.assert_called_once()
+
+
+def test_capture_window_hotkey_applies_updated_key_and_output(tmp_path: Path) -> None:
+    window = FakeWindow(np.ones((2, 2, 3), dtype=np.uint8))
+    sim = _make_sim_manager(window=window)
+    sim.sync_render_state = MagicMock()
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "old", hotkey="c")
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "new", hotkey="x")
+    assert len(window.input_controls) == 1
+
+    window.input_controls[0].on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+    window.input_controls[0].on_key_down(dexsim.types.InputKey.SCANCODE_X.value)
+    with sim.render_frame():
+        pass
+
+    assert (tmp_path / "new.png").is_file()
+    assert not (tmp_path / "old.png").exists()
 
 
 def test_start_window_record_rejects_invalid_parameters() -> None:

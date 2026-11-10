@@ -624,6 +624,9 @@ class SimulationManager:
         self._spawn_scene: SpawnScene | None = None
         self._window_record_state: _WindowRecordState | None = None
         self._window_record_save_threads: list[threading.Thread] = []
+        self._window_capture_requests: queue.SimpleQueue[
+            tuple[ObjectManipulator, Path]
+        ] = queue.SimpleQueue()
         self._visualization_runtime = None
         self._arenas: list[dexsim.environment.Arena] = []
         self._gizmos: dict[str, object] = {}
@@ -1865,6 +1868,7 @@ class SimulationManager:
                 record_dt > 0 and self.physics._requires_step_render_sync
             ):
                 self._ensure_render_state()
+            self._process_window_capture_requests()
             yield
             observations_complete = True
             if (
@@ -2202,6 +2206,7 @@ class SimulationManager:
         self._window = None
         self._window_record_input_control = None
         self._window_capture_input_control = None
+        self._window_capture_requests = queue.SimpleQueue()
         self._window_camera_pose_input_control = None
         self.is_window_opened = False
 
@@ -4575,11 +4580,7 @@ class SimulationManager:
         get_picture = getattr(self._window, "get_picture", None)
         if not callable(get_picture):
             return None
-        try:
-            frame = self._normalize_window_capture_image(get_picture())
-        except Exception as exc:
-            logger.log_warning(f"Native window frame readback failed: {exc}")
-            return None
+        frame = self._normalize_window_capture_image(get_picture())
         if frame is None:
             logger.log_warning(
                 "Native window did not provide a non-empty rendered frame."
@@ -4633,8 +4634,9 @@ class SimulationManager:
         """Capture one owned image from the current native viewer viewport.
 
         The method first consumes DexSim's native ``Windows.get_picture()``
-        frame.  If that renderer path is unavailable or returns an empty frame,
-        an offscreen camera is rendered at the current viewer pose.  The
+        frame. If the method is missing or returns an empty frame, an offscreen
+        camera is rendered at the current viewer pose. A native readback error
+        returns ``None`` without querying the possibly retired window camera. The
         fallback is needed by the DexSim 0.5.0 Hybrid and Fast-RT window
         implementations, whose swapchain does not expose a CPU buffer.
 
@@ -4654,7 +4656,11 @@ class SimulationManager:
             logger.log_warning("No simulation window available to capture.")
             return None
 
-        frame = self._capture_native_window_frame()
+        try:
+            frame = self._capture_native_window_frame()
+        except Exception as exc:
+            logger.log_warning(f"Native window frame readback failed: {exc}")
+            return None
         if frame is None:
             frame = self._capture_window_fallback_frame()
         if frame is None:
@@ -4693,7 +4699,12 @@ class SimulationManager:
         image_prefix: str = "viewer_capture",
         hotkey: object = "c",
     ) -> bool:
-        """Register a hotkey that saves one native viewer frame as a PNG.
+        """Register a hotkey that requests one native viewer frame as a PNG.
+
+        The input callback queues the request. The next :meth:`render_frame`
+        (also entered by :meth:`update`) captures it on the caller's thread,
+        since native window readback cannot block the render thread. Closing
+        the window discards its pending requests.
 
         Args:
             save_path: Optional PNG path.  If omitted, a timestamped path is
@@ -4707,7 +4718,7 @@ class SimulationManager:
         Raises:
             ValueError: If the key conflicts with an existing native control.
         """
-        key_code = self._validate_window_capture_hotkey(hotkey)
+        self._validate_window_capture_hotkey(hotkey)
         self._window_capture_hotkey_cfg = {
             "save_path": save_path,
             "image_prefix": image_prefix,
@@ -4725,12 +4736,13 @@ class SimulationManager:
         sim = self
 
         class WindowCaptureEvent(ObjectManipulator):
-            def on_key_down(self, key):
-                if key == key_code:
+            def on_key_down(self, key: int) -> None:
+                config = sim._window_capture_hotkey_cfg
+                if key == sim._resolve_window_hotkey_code(config["hotkey"]):
                     output_path = sim._build_window_capture_output(
-                        save_path, image_prefix
+                        config["save_path"], config["image_prefix"]
                     )
-                    sim.capture_window(save_path=output_path)
+                    sim._window_capture_requests.put((self, output_path))
 
         self._window_capture_input_control = WindowCaptureEvent()
         self._window.add_input_control(self._window_capture_input_control)
@@ -4738,6 +4750,19 @@ class SimulationManager:
             f"Viewer capture hotkey registered. Press {hotkey!r} to save a frame."
         )
         return True
+
+    def _process_window_capture_requests(self) -> None:
+        """Consume native-input requests outside the render-owner callback."""
+        requests = getattr(self, "_window_capture_requests", None)
+        if requests is None:
+            return
+        while True:
+            try:
+                control, output_path = requests.get_nowait()
+            except queue.Empty:
+                return
+            if control is getattr(self, "_window_capture_input_control", None):
+                self.capture_window(save_path=output_path)
 
     def _build_window_record_output(
         self, save_path: str | None, video_prefix: str

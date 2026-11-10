@@ -90,6 +90,10 @@ class WindowCaptureCfg:
     The capture hotkey is intentionally separate from the recording and camera
     pose controls.  ``c`` is reserved for this control by default and is not
     used by DexSim's built-in camera, selection, or EmbodiChain gizmo controls.
+
+    Hotkey requests are saved on the next manager render frame, including
+    frames entered by ``SimulationManager.update()``. Closing the window
+    discards pending requests.
     """
 
     enable_hotkey: bool = True
