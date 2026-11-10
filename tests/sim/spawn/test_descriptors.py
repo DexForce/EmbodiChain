@@ -1278,11 +1278,19 @@ def test_articulation_root_properties_compile_to_common_descriptor() -> None:
     assert descriptor.enable_self_collision is True
 
 
-def test_articulation_root_defaults_are_resolved_at_import_boundary() -> None:
-    descriptor = articulation_desc_from_cfg(
-        ArticulationCfg(uid="robot", fpath="robot.urdf")
-    )
-
+@pytest.mark.parametrize("cfg_type", [ArticulationCfg, RobotCfg])
+@pytest.mark.parametrize("scale", [None, (2.0, 3.0, 4.0)])
+def test_articulation_root_defaults_are_resolved_at_import_boundary(
+    cfg_type, scale
+) -> None:
+    cfg = cfg_type(uid="robot")
+    # Catalog presets can assemble a URDF after nullable source defaults were decoded.
+    cfg.fpath = "robot.urdf"
+    cfg.body_scale = scale
+    descriptor = articulation_desc_from_cfg(cfg)
+    expected_scale = (1.0, 1.0, 1.0) if scale is None else scale
+    np.testing.assert_array_equal(descriptor.body_scale, expected_scale)
+    assert cfg.body_scale == expected_scale
     assert descriptor.fixed_base is True
     assert descriptor.urdf_fix_root_link is True
     assert descriptor.enable_self_collision is False
