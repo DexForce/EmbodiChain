@@ -451,7 +451,7 @@ def test_parallel_camera_ground_visibility_rgb_depth_reset_and_rebuild(
     renderer,
 ) -> None:
     """Mixed policies within a group and between cameras preserve one physical floor."""
-    from embodichain.lab.sim.cfg import VisualObjectCfg
+    from embodichain.lab.sim.cfg import DenoisingCfg, VisualObjectCfg
     from embodichain.lab.sim.shapes import CubeCfg
 
     sim = SimulationManager(
@@ -459,7 +459,10 @@ def test_parallel_camera_ground_visibility_rgb_depth_reset_and_rebuild(
             headless=True,
             device="cpu",
             num_envs=4,
-            render_cfg=RenderCfg(renderer=renderer),
+            # Geometry and visibility qualification must not require optional DLSS/NGX.
+            render_cfg=RenderCfg(
+                renderer=renderer, denoising=DenoisingCfg(window="off", offscreen="off")
+            ),
         )
     )
     try:

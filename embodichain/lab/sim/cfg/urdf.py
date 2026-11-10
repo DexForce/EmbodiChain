@@ -108,10 +108,11 @@ class URDFCfg:
         fname: str | None = None,
         fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled",
         use_signature_check: bool = True,
-        force_assembly: bool = False,
         base_link_name: str = "base_link",
         component_prefix: list[tuple[str, str | None]] | None = None,
         name_case: dict[str, str] | None = None,
+        *,
+        force_assembly: bool = False,
     ):
         """
         Initialize URDFCfg with optional list of components and output path settings.

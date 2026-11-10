@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+
 from dataclasses import fields
 
 import dexsim
@@ -1547,3 +1548,13 @@ def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) ->
     """Malformed NRD values fail before entering the native renderer."""
     with pytest.raises(ValueError, match=field_name):
         sim_cfg.NRDCfg(**{field_name: invalid_value})
+
+
+def test_urdf_cfg_preserves_positional_constructor_with_keyword_mounting_flag():
+    from embodichain.lab.sim.cfg import URDFCfg
+
+    cfg = URDFCfg(
+        None, None, None, None, "/tmp", True, "robot_base", force_assembly=True
+    )
+    assert cfg.base_link_name == "robot_base"
+    assert cfg.force_assembly is True

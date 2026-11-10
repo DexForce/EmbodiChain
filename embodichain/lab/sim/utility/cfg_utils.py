@@ -353,6 +353,18 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                     else:
                         base_cfg.urdf_cfg.name_case.update(user_name_case)
 
+                if "component_prefix" in user_urdf_cfg:
+                    from embodichain.toolkits.urdf_assembly.name_normalizer import (
+                        NameNormalizer,
+                    )
+
+                    prefixes = {
+                        **dict(base_cfg.urdf_cfg.component_prefix),
+                        **dict(user_urdf_cfg["component_prefix"] or {}),
+                    }
+                    NameNormalizer.resolve_component_prefixes(prefixes)
+                    base_cfg.urdf_cfg.component_prefix = list(prefixes.items())
+
                 components = user_urdf_cfg.get("components", [])
                 # to_dict serializes components as a dict keyed by type;
                 # normalize to a list of dicts for merge_robot_cfg.

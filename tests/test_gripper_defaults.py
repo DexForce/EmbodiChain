@@ -81,7 +81,17 @@ assert "embodichain.data" not in sys.modules
     )
 
 
-def _compose(tmp_path, *, logical=True, model="DHPGI14080", generator_kind=None):
+def _compose(
+    tmp_path,
+    *,
+    logical=True,
+    model="DHPGI14080",
+    generator_kind=None,
+    generator_policy=None,
+    simulation=None,
+    resources=None,
+    gripper_overrides=None,
+):
     from embodichain.lab.gym.utils.composition import resolve_gym_components
 
     declaration = {
@@ -120,6 +130,14 @@ def _compose(tmp_path, *, logical=True, model="DHPGI14080", generator_kind=None)
         declaration["skill_profile"]["runtime_services"] = {
             "grasp_pose_generators": {"custom_fingers": {"kind": generator_kind}}
         }
+    if logical and generator_policy is not None:
+        declaration["skill_profile"]["runtime_services"] = {
+            "grasp_pose_generators": {"custom_fingers": generator_policy}
+        }
+    declaration["simulation"].update(simulation or {})
+    declaration["grippers"]["tool"].update(gripper_overrides or {})
+    if resources is not None:
+        declaration["skill_profile"]["resources"] = resources
     path = tmp_path / "hand.yaml"
     return resolve_gym_components(
         {"embodiment": {"component": "hand.yaml"}},
@@ -464,9 +482,9 @@ def test_generator_capabilities_are_explicit_and_do_not_grant_undeclared_endpoin
         provider, "get_gripper_defaults", lambda variant=None: deepcopy(values)
     )
     assert _compose(tmp_path, logical=False).embodiment_skill_profile is None
-    with pytest.raises(ValueError, match="generator"):
-        _compose(tmp_path)
     if supported:
+        with pytest.raises(ValueError, match="generator"):
+            _compose(tmp_path)
         selected = _compose(tmp_path, generator_kind="antipodal_parallel_jaw")
         assert (
             selected.embodiment_skill_profile["runtime_services"][
@@ -474,6 +492,18 @@ def test_generator_capabilities_are_explicit_and_do_not_grant_undeclared_endpoin
             ]["custom_fingers"]["kind"]
             == "antipodal_parallel_jaw"
         )
+    else:
+        profile = _compose(tmp_path).embodiment_skill_profile
+        assert profile["command_presets"][0]["commands"]["grasp"] == [0.024, 0.024]
+        assert profile["runtime_services"]["grasp_pose_generators"] == {}
+        assert (
+            _compose(tmp_path, generator_policy={}).embodiment_skill_profile[
+                "runtime_services"
+            ]["grasp_pose_generators"]
+            == {}
+        )
+        with pytest.raises(ValueError, match="does not declare generator"):
+            _compose(tmp_path, generator_kind="antipodal_parallel_jaw")
 
 
 def test_bound_endpoint_cannot_select_an_undeclared_generator(tmp_path):
@@ -538,6 +568,7 @@ def test_w1_pika_partial_prefixes_match_assembled_hand_names():
     values = deepcopy(physical.config["robot"])
     cfg = resolve_robot_cfg(values.pop("class_type"), values)
     prepare_robot_grippers(cfg)
+
     assert cfg.control_parts["left_eef"] == ["LEFT_FINGER1_JOINT", "LEFT_FINGER2_JOINT"]
     assert cfg.control_parts["right_eef"] == [
         "RIGHT_FINGER1_JOINT",
@@ -545,3 +576,234 @@ def test_w1_pika_partial_prefixes_match_assembled_hand_names():
     ]
     assert cfg.gripper_bindings["left_eef"]["root_link"] == "left_gripper_root_link"
     assert cfg.gripper_bindings["right_eef"]["root_link"] == "right_gripper_root_link"
+
+
+@pytest.mark.parametrize("second_preset", [None, "alternate"])
+def test_shared_hand_endpoints_reuse_generated_presets_and_service(
+    tmp_path, second_preset
+):
+    endpoint = {
+        "endpoint_id": "grasp",
+        "control_part": "custom_fingers",
+        "capabilities": ["interaction.grasp"],
+        "gripper": "tool",
+    }
+    alias = deepcopy(endpoint)
+    if second_preset is not None:
+        alias["command_preset"] = second_preset
+    physical = _compose(
+        tmp_path,
+        generator_kind="antipodal_parallel_jaw",
+        resources=[
+            {"resource_id": "primary", "endpoints": [endpoint]},
+            {"resource_id": "alias", "endpoints": [alias]},
+        ],
+    )
+    profile = physical.embodiment_skill_profile
+    assert len(profile["command_presets"]) == (1 if second_preset is None else 2)
+    generators = profile["runtime_services"]["grasp_pose_generators"]
+    assert list(generators) == ["custom_fingers"]
+    assert generators["custom_fingers"]["kind"] == "antipodal_parallel_jaw"
+    for resource in profile["resources"]:
+        assert "gripper" not in resource["endpoints"][0]
+    # Authored duplicates still violate binding ownership.
+    from embodichain.lab.gym.utils._gripper_composition import _expand_grippers
+
+    with pytest.raises(ValueError, match="duplicates explicit command preset"):
+        _expand_grippers(
+            {},
+            {
+                "command_presets": [{"preset_id": "gripper.tool"}],
+                "resources": [{"endpoints": [endpoint]}],
+            },
+            {
+                "tool": {
+                    "class_type": "DHPGI14080",
+                    "mode": "mounted",
+                    "component_type": "hand",
+                    "motion_part": "arm",
+                    "control_part": "custom_fingers",
+                }
+            },
+        )
+
+
+def test_mounted_explicit_nulls_preserve_source_ownership(tmp_path):
+    physical = _compose(
+        tmp_path,
+        logical=False,
+        simulation={"joint_drive_props": {"stiffness": None}, "solver_cfg": None},
+    )
+    robot = physical.config["robot"]
+    assert robot["joint_drive_props"]["stiffness"] is None
+    assert robot["solver_cfg"] is None
+    assert robot["joint_drive_props"]["damping"]["gripper_finger1_joint_1"] == 100.0
+
+
+def test_authored_limit_regex_prevents_duplicate_hand_defaults(tmp_path):
+    from embodichain.robot_registry import resolve_robot_cfg
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    rule = "(?:left|right)_inner_finger_joint"
+    physical = _compose(
+        tmp_path,
+        logical=False,
+        model="RobotiqArg2F85",
+        simulation={"qpos_limits": {rule: [-0.8, 0.0]}},
+    )
+    values = deepcopy(physical.config["robot"])
+    assert values["qpos_limits"] == {rule: [-0.8, 0.0]}
+    cfg = resolve_robot_cfg(values.pop("class_type"), values)
+    prepare_robot_grippers(cfg)
+
+
+def test_reordered_open_command_preserves_native_startup_order():
+    from embodichain.robot_registry import resolve_robot_cfg
+
+    defaults = resolve_gripper_defaults("RobotiqArg2F85")
+    commands = deepcopy(defaults["joint_commands"])
+    commands["open"] = dict(reversed(list(commands["grasp"].items())))
+    cfg = resolve_robot_cfg("RobotiqArg2F85", {"joint_commands": commands})
+    assert cfg.init_qpos == [
+        commands["grasp"][name] for name in defaults["control_parts"]["eef"]
+    ]
+    assert cfg.init_qpos != list(commands["open"].values())
+    explicit = [0.0] * len(cfg.init_qpos)
+    assert (
+        resolve_robot_cfg(
+            "RobotiqArg2F85", {"joint_commands": commands, "init_qpos": explicit}
+        ).init_qpos
+        == explicit
+    )
+
+
+@pytest.mark.parametrize("end_at_root", [True, False])
+def test_mounted_tcp_uses_actual_fixed_chain_and_survives_roundtrip(
+    tmp_path, end_at_root
+):
+    import numpy as np
+    from embodichain.robot_registry import resolve_robot_cfg
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    mount, tcp = np.eye(4), np.eye(4)
+    mount[2, 3], tcp[2, 3] = 0.10, 0.05
+    end = "gripper_base_link_1" if end_at_root else "ee_link"
+    expected = tcp.copy()
+    if not end_at_root:
+        expected = mount @ tcp
+    values = deepcopy(
+        _compose(
+            tmp_path,
+            logical=False,
+            simulation={
+                "solver_cfg": {"arm": {"end_link_name": end, "tcp": expected.tolist()}}
+            },
+            gripper_overrides={
+                "transform": mount.tolist(),
+                "root_from_tcp": tcp.tolist(),
+            },
+        ).config["robot"]
+    )
+    cfg = resolve_robot_cfg(values.pop("class_type"), values)
+    prepare_robot_grippers(cfg)
+    np.testing.assert_allclose(cfg.solver_cfg["arm"].tcp, expected, atol=1e-6)
+    restored = type(cfg).from_dict(cfg.to_dict())
+    prepare_robot_grippers(restored)
+    np.testing.assert_allclose(restored.solver_cfg["arm"].tcp, expected, atol=1e-6)
+    # A post-selection explicit override must still reach authoritative validation.
+    from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+    wrong = expected.copy()
+    wrong[2, 3] += 0.02
+    with pytest.raises(ValueError, match="TCP disagrees"):
+        prepare_robot_grippers(
+            merge_robot_cfg(cfg, {"solver_cfg": {"arm": {"tcp": wrong.tolist()}}})
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation", ["remove", "add", "parent", "multiplier", "offset"]
+)
+def test_actual_mimic_topology_must_match_source(tmp_path, mutation):
+    import xml.etree.ElementTree as ET
+    from embodichain.robot_registry import resolve_robot_cfg
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    values = deepcopy(_compose(tmp_path, logical=False).config["robot"])
+    values["solver_cfg"] = {}
+    cfg = resolve_robot_cfg(values.pop("class_type"), values)
+    prepare_robot_grippers(cfg)
+    original = Path(cfg.fpath)
+    document = ET.parse(original)
+    for mesh in document.findall(".//mesh"):
+        mesh.set("filename", str((original.parent / mesh.get("filename")).resolve()))
+    follower = document.find("./joint[@name='gripper_finger2_joint_1']")
+    mimic = follower.find("mimic")
+    if mutation == "remove":
+        follower.remove(mimic)
+    elif mutation == "add":
+        document.find("./joint[@name='gripper_finger1_joint_1']").append(
+            deepcopy(mimic)
+        )
+    else:
+        mimic.set(
+            {"parent": "joint"}.get(mutation, mutation),
+            (
+                "gripper_finger2_joint_1"
+                if mutation == "parent"
+                else "0.001" if mutation == "offset" else "0.5"
+            ),
+        )
+        if mutation in {"multiplier", "offset"}:
+            # Match the altered relation so command consistency alone cannot
+            # hide a mismatch against the pinned source topology.
+            for command in cfg.gripper_bindings["tool"]["defaults"][
+                "joint_commands"
+            ].values():
+                leader = command["gripper_finger1_joint_1"]
+                command["gripper_finger2_joint_1"] = leader * (
+                    0.5 if mutation == "multiplier" else 1.0
+                ) + (0.001 if mutation == "offset" else 0.0)
+    cfg.fpath = str(tmp_path / "tampered.urdf")
+    document.write(cfg.fpath)
+    with pytest.raises(ValueError, match="mimic"):
+        prepare_robot_grippers(cfg)
+
+
+@pytest.mark.parametrize("prefix", ["tool_", "gripper_"])
+def test_dual_hand_names_controls_limits_and_drives_follow_assembler(tmp_path, prefix):
+    import numpy as np
+    import xml.etree.ElementTree as ET
+    from embodichain.robot_registry import resolve_robot_cfg
+    from embodichain.lab.sim.robots.dual_arm import build_dual_arm_cfg
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    values = deepcopy(
+        _compose(
+            tmp_path,
+            logical=False,
+            simulation={
+                "urdf_cfg": {"component_prefix": [("hand", prefix)]},
+                "joint_drive_props": {"stiffness": {f"{prefix}.*joint_1": 321.0}},
+                "qpos_limits": {f"{prefix}.*joint_1": [0.0, 0.04]},
+            },
+        ).config["robot"]
+    )
+    base = resolve_robot_cfg(values.pop("class_type"), values)
+    dual = build_dual_arm_cfg(base, {"left": np.eye(4), "right": np.eye(4)})
+    prepare_robot_grippers(dual)
+    names = {j.get("name") for j in ET.parse(dual.fpath).findall("joint")}
+    for side in ("left", "right"):
+        expected = [
+            f"{side}_gripper_finger1_joint_1",
+            f"{side}_gripper_finger2_joint_1",
+        ]
+        assert dual.control_parts[f"{side}_custom_fingers"] == expected
+        assert set(expected) <= names
+        assert (
+            list(dual.gripper_bindings[f"{side}_tool"]["joint_names"].values())
+            == expected
+        )
+        for name in expected:
+            assert dual.qpos_limits[name] == [0.0, 0.04]
+            assert dual.joint_drive_props.stiffness[name] == 321.0

@@ -302,6 +302,9 @@ def test_component_ur5_policy_tcp_is_inverse_of_the_component_solver_tcp():
 
     values = dict(resolution.simulation)
     cfg = resolve_robot_cfg(values.pop("class_type"), values)
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg)
     runtime_tcp = torch.tensor(cfg.solver_cfg["arm"].tcp)
     candidate = next(spec for spec in suite.planners if spec.id == "nmg")
     policy_tcp = torch.tensor(candidate.config["runtime_tcp_from_policy_tcp"])

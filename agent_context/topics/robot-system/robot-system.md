@@ -67,9 +67,13 @@ Parallel-jaw model values live beside their assets in `embodichain_robots`.
 catalog without importing Cfg implementations or resolving assets. Embodiment
 `grippers` selects a mounted component or an existing hand and explicitly binds
 motion/control parts. Only endpoints naming that binding receive presets and
-grasp services; names never imply capabilities. Assembly checks actual geometry,
+grasp services; names never imply capabilities. Shared endpoints reuse generated
+hand services. Empty generator support retains command presets for fixed-pose
+calls without supplying a sampler. Assembly checks actual geometry,
 command ordering, mimics and fixed references before applying the hand-derived
-solver TCP. See [binding and TCP ownership](../../../docs/source/resources/robot/parallel_jaw_grippers.md).
+solver TCP. Mounted TCP checks require the actual solver-end-to-hand fixed chain;
+the mount transform alone does not identify that frame relationship.
+See [binding and TCP ownership](../../../docs/source/resources/robot/parallel_jaw_grippers.md).
 Observed aperture mapping does not substitute a full-close actuator command for
 measured linkage positions. See [Real2Sim motion](../data-pipeline/real2sim.md)
 for coupled contact prediction and transfer qualification.

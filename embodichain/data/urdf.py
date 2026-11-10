@@ -92,7 +92,10 @@ def materialize_urdf_subtree(
         mesh.set("filename", str(Path(target).resolve(strict=True)))
     output = ET.tostring(result, encoding="utf-8", xml_declaration=True)
     source_hash = hashlib.sha256(content).hexdigest()
-    digest = hashlib.sha256(b"relative-mesh-paths/v1" + output).hexdigest()
+    # The immutable report describes the complete source, even when an edit
+    # outside this subtree leaves the derivative bytes unchanged.
+    identity = json.dumps([str(source), source_hash], ensure_ascii=False).encode()
+    digest = hashlib.sha256(b"relative-mesh-paths/v2" + identity + output).hexdigest()
     from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
     folder = Path(EMBODICHAIN_DEFAULT_DATA_ROOT) / "derived" / "urdf" / digest

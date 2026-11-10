@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections import deque
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 import xml.etree.ElementTree as ET
@@ -209,6 +210,27 @@ def prepare_robot_grippers(cfg: RobotCfg) -> None:
                     raise ValueError(
                         "Actual gripper joint topology disagrees with its model."
                     )
+            source_mimic, actual_mimic = a.find("mimic"), b.find("mimic")
+            if (source_mimic is None) != (actual_mimic is None):
+                raise ValueError(
+                    "Actual gripper mimic topology disagrees with its model."
+                )
+            if source_mimic is not None:
+                parent = normalizer.component_name(
+                    "joint", source_mimic.get("joint"), prefix
+                )
+                if actual_mimic.get("joint") != parent or any(
+                    not np.isclose(
+                        float(source_mimic.get(key, default)),
+                        float(actual_mimic.get(key, default)),
+                        rtol=0,
+                        atol=1e-9,
+                    )
+                    for key, default in (("multiplier", "1"), ("offset", "0"))
+                ):
+                    raise ValueError(
+                        "Actual gripper mimic topology disagrees with its model."
+                    )
             axis_a = (
                 a.find("axis").get("xyz", "1 0 0")
                 if a.find("axis") is not None
@@ -366,14 +388,6 @@ def _apply_gripper_tcp_defaults(cfg: RobotCfg, solver_overrides: object = None) 
         solver = (cfg.solver_cfg or {}).get(declaration["motion_part"])
         if solver is None or not hasattr(solver, "end_link_name"):
             continue
-        if declaration["mode"] == "mounted":
-            end_from_root = np.asarray(declaration.get("transform", np.eye(4)))
-        elif solver.end_link_name == binding.get("reference_link"):
-            end_from_root = np.linalg.inv(np.asarray(defaults["root_from_reference"]))
-        else:
-            # Custom end links require the actual fixed-chain check at assembly.
-            continue
-        tcp = end_from_root @ np.asarray(defaults["default_root_from_tcp"])
         explicit = binding.get("explicit_solver_tcp")
         if isinstance(solver_overrides, dict):
             provided = solver_overrides.get(declaration["motion_part"])
@@ -381,6 +395,20 @@ def _apply_gripper_tcp_defaults(cfg: RobotCfg, solver_overrides: object = None) 
                 explicit = provided["tcp"]
             elif provided is not None and getattr(provided, "tcp", None) is not None:
                 explicit = provided.tcp
+        if explicit is not None:
+            binding["explicit_solver_tcp"] = deepcopy(explicit)
+        if declaration["mode"] == "mounted":
+            if solver.end_link_name != binding["root_link"]:
+                # The mounting link need not be the solver end. Resolve that
+                # relationship from the assembled fixed chain, not the mount alone.
+                continue
+            end_from_root = np.eye(4)
+        elif solver.end_link_name == binding.get("reference_link"):
+            end_from_root = np.linalg.inv(np.asarray(defaults["root_from_reference"]))
+        else:
+            # Custom end links require the actual fixed-chain check at assembly.
+            continue
+        tcp = end_from_root @ np.asarray(defaults["default_root_from_tcp"])
         if explicit is not None and not np.allclose(explicit, tcp, rtol=0, atol=1e-6):
             raise ValueError("Explicit solver TCP disagrees with the selected gripper.")
         solver.tcp = tcp.tolist()

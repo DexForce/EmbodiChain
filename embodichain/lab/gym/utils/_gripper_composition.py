@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 import math
+import re
 
 from embodichain.robot_registry import resolve_gripper_defaults
 from embodichain.robot_registry import _validate_gripper_transform
@@ -129,15 +130,13 @@ def _expand_grippers(
             )
         controls[part] = [mapped[n] for n in selected]
         if mode == "mounted":
-            import re
-
             drives = simulation.setdefault("joint_drive_props", {})
             for field, default in defaults["joint_drive_props"].items():
                 if field == "drive_type":
                     drives.setdefault(field, default)
                     continue
                 explicit = drives.get(field)
-                if explicit is not None and not isinstance(explicit, Mapping):
+                if field in drives and not isinstance(explicit, Mapping):
                     continue
                 values = drives.setdefault(field, {})
                 for native, actual in mapped.items():
@@ -165,7 +164,10 @@ def _expand_grippers(
             limits = simulation.setdefault("qpos_limits", {})
             if isinstance(limits, dict):
                 for native, value in defaults["limit_overrides"].items():
-                    limits.setdefault(mapped[native], deepcopy(value))
+                    if not any(
+                        re.fullmatch(pattern, mapped[native]) for pattern in limits
+                    ):
+                        limits[mapped[native]] = deepcopy(value)
         for command, values in raw.get("commands", {}).items():
             if (
                 not isinstance(values, Mapping)
@@ -216,7 +218,7 @@ def _expand_grippers(
             ),
         }
         explicit_tcp = (
-            simulation.get("solver_cfg", {}).get(raw["motion_part"], {}).get("tcp")
+            (simulation.get("solver_cfg") or {}).get(raw["motion_part"], {}).get("tcp")
         )
         if explicit_tcp is not None:
             bindings[instance]["explicit_solver_tcp"] = _validate_gripper_transform(
@@ -230,6 +232,10 @@ def _expand_grippers(
     presets = profile.setdefault("command_presets", [])
     services = profile.setdefault("runtime_services", {})
     generators = services.setdefault("grasp_pose_generators", {})
+    authored_presets = {preset["preset_id"] for preset in presets}
+    policies = deepcopy(generators)
+    generated_presets = {}
+    generated_parts = set()
     for resource in profile.get("resources", []):
         for endpoint in resource.get("endpoints", []):
             instance = endpoint.pop("gripper", None)
@@ -246,22 +252,30 @@ def _expand_grippers(
                     "Gripper references require an explicit matching grasp endpoint."
                 )
             preset_id = endpoint.setdefault("command_preset", f"gripper.{instance}")
-            if any(x["preset_id"] == preset_id for x in presets):
+            if preset_id in authored_presets or (
+                preset_id in generated_presets
+                and generated_presets[preset_id] != instance
+            ):
                 raise ValueError(
                     f"Gripper {instance!r} duplicates explicit command preset {preset_id!r}."
                 )
             defaults = binding["defaults"]
-            presets.append(
-                {
-                    "preset_id": preset_id,
-                    "control_part": part,
-                    "commands": {
-                        key: [value[n] for n in binding["control_joint_names"]]
-                        for key, value in defaults["joint_commands"].items()
-                    },
-                }
-            )
-            policy = generators.pop(part, {})
+            if preset_id not in generated_presets:
+                presets.append(
+                    {
+                        "preset_id": preset_id,
+                        "control_part": part,
+                        "commands": {
+                            key: [value[n] for n in binding["control_joint_names"]]
+                            for key, value in defaults["joint_commands"].items()
+                        },
+                    }
+                )
+                generated_presets[preset_id] = instance
+            if part in generated_parts:
+                continue
+            generated_parts.add(part)
+            policy = policies.get(part, {})
             if set(policy) - {
                 "kind",
                 "sample_count",
@@ -279,6 +293,9 @@ def _expand_grippers(
                     "A bound gripper owns generator physical data; only policy fields may be repeated."
                 )
             supported = defaults["grasp_generators"]
+            if not supported and not policy:
+                generators.pop(part, None)
+                continue
             selected_kind = policy.get("kind")
             if selected_kind is None:
                 if len(supported) != 1:

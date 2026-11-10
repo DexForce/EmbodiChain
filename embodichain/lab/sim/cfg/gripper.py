@@ -136,7 +136,9 @@ class ParallelJawGripperCfg(RobotCfg):
         self.control_parts = deepcopy(defaults["control_parts"])
         self.solver_cfg = {}
         self.qpos_limits = deepcopy(defaults["qpos_limits"])
-        self.init_qpos = list(self.joint_commands["open"].values())
+        self.init_qpos = [
+            self.joint_commands["open"][name] for name in self.control_parts["eef"]
+        ]
         self.init_pos = [0.0, 0.0, 0.3]
         self.root_props = ArticulationRootPropertiesCfg(fixed_base=True)
         self.joint_drive_props = JointDrivePropertiesCfg(
