@@ -79,6 +79,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
     orientation_link_name: str | None = None
     imu_offset: tuple[float, float, float] | None = None
     explicit_pd_effort_control = False
+    _default_action_clip: float | None = 1.0
 
     def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs) -> None:
         rewards = (
@@ -108,7 +109,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
                     "preserve_order": True,
                     "offset": self.velocity_task_config.default_joint_position,
                     "scale": self.velocity_task_config.action_scale,
-                    "clip": None,
+                    "clip": self._default_action_clip,
                 }
                 for name, value in mapping.items():
                     term_cfg.params.setdefault(name, value)

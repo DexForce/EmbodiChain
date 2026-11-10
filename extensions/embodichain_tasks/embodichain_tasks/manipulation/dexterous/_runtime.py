@@ -678,7 +678,7 @@ class DexSimManipulationEnv:
         if self.task_id in ("M1", "M2"):
             obs, reward, terminated, metrics = self.task.step(state, actions)
             self.elapsed_steps += 1
-            truncated = self.elapsed_steps >= 500
+            truncated = (self.elapsed_steps >= 500) & ~terminated
         else:
             obs, reward, terminated, truncated, metrics = self.task.after_step(
                 state, actions
