@@ -23,9 +23,9 @@ tracking:
 
 recovery:
   # Composite transfers retain native timing and can exceed 30 seconds.
-  action_timeout: 120.0
+  skill_timeout: 120.0
   max_replans: 3
-  max_action_retries: 0
+  max_skill_retries: 0
   goal_rotation_threshold: 0.5
 
 workflow_recovery:

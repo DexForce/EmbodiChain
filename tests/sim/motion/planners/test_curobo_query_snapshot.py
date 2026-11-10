@@ -39,7 +39,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
 )
 from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
 from embodichain.lab.sim.motion.planners.utils import PlanState, MoveType
-from embodichain.lab.sim.atomic_actions.trajectory_ops import to_full_robot_trajectory
+from embodichain.lab.sim.atomic_skills.trajectory_ops import to_full_robot_trajectory
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc, RigidBodyShape
 from embodichain.lab.sim.scene.collision_sources import snapshot_collision_sources
 from embodichain.utils.math import matrix_from_quat, quat_wxyz_to_xyzw

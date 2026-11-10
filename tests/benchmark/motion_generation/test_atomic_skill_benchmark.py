@@ -35,14 +35,14 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillBinding,
+    SkillInvocation,
     ArticulationAffordanceGeometry,
     JointPositionGoal,
     MotionPolicy,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory, TimedTrajectory
 from embodichain.lab.sim.motion.planners import ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix
@@ -1220,7 +1220,7 @@ def test_contact_benchmarks_use_attributed_ik_interpolation(skill_id: str) -> No
     assert benchmark_motion_attribution(skill_id) == expected
     assert AtomicSkillScenario().trial_metadata(
         replace(_atomic_case(), skill_id=skill_id)
-    ) == {**expected, "timing_scope": "atomic_action_compile", "timing_is_solved": True}
+    ) == {**expected, "timing_scope": "atomic_skill_compile", "timing_is_solved": True}
 
 
 def test_noncontact_benchmarks_retain_selected_planner_attribution() -> None:
@@ -1292,10 +1292,10 @@ def test_atomic_scenario_supports_existing_adapter_options_hooks(
 
     adapter = Mock()
     adapter.atomic_plan_options = clock_options if clock_aware else legacy_options
-    invocation = ActionInvocation(
+    invocation = SkillInvocation(
         skill_id="move_joints",
         goal=JointPositionGoal(torch.zeros(1, 7)),
-        binding=Mock(spec=ActionBinding),
+        binding=Mock(spec=SkillBinding),
         motion_policy=MotionPolicy(strategy="motion_gen"),
     )
     provider = Mock(samples_grasps=False)
@@ -1607,7 +1607,7 @@ def _compiled_replay_batch(
     return CompiledTrajectory(
         plan_success=torch.tensor(plan_success, dtype=torch.bool),
         trajectory=trajectory,
-        action_plans=(),
+        skill_plans=(),
         projected_context=Mock(),
     )
 
@@ -1776,7 +1776,7 @@ def test_atomic_primary_success_and_execution_efficiency_aggregate():
             algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
             adapter="curobo",
             config_hash="abc",
-            capabilities=frozenset({"eef_waypoint", "atomic_action"}),
+            capabilities=frozenset({"eef_waypoint", "atomic_skill"}),
             supported_robots=("franka_pgi",),
         )
     ]
@@ -1845,7 +1845,7 @@ def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
             algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
             adapter="curobo",
             config_hash="abc",
-            capabilities=frozenset({"eef_waypoint", "atomic_action"}),
+            capabilities=frozenset({"eef_waypoint", "atomic_skill"}),
             supported_robots=("franka_pgi",),
         )
     ]
@@ -1974,7 +1974,7 @@ def test_runner_preserves_preplan_attribution_after_planner_error(tmp_path):
         algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
         adapter="curobo",
         config_hash="abc",
-        capabilities=frozenset({"eef_waypoint", "atomic_action"}),
+        capabilities=frozenset({"eef_waypoint", "atomic_skill"}),
     )
 
     runner._run_plan_call(
@@ -2274,7 +2274,7 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     }
     compiled = replace(
         _compiled_replay_batch([True, True]),
-        action_plans=(
+        skill_plans=(
             SimpleNamespace(
                 skill_id="pick_up",
                 diagnostics=SimpleNamespace(
@@ -2298,7 +2298,7 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     assert result.outcomes[1].failure_code == "object_not_lifted"
     assert result.outcomes[1].failure_stage == "lift"
     assert result.metadata["packed_motion_groups"] == [
-        {"action_index": 0, "skill_id": "pick_up", **batch_trace}
+        {"skill_index": 0, "skill_id": "pick_up", **batch_trace}
     ]
     assert result.outcomes[0].stages[0].measurements["height_m"] == pytest.approx(0.1)
     if not motion_ok:

@@ -88,7 +88,7 @@ two-finger parallel-jaw grippers.
 The generator owns the gripper model, algorithm, collision, and annotation
 configuration. Target-local mesh vertices and triangles are supplied to each
 call. This separation lets a handwritten environment call the service directly
-and lets an ``AtomicActionEngine`` install the same instance under
+and lets an ``AtomicSkillEngine`` install the same instance under
 ``grasp_pose_generators={"hand": generator}``. Scene affordances do not own a
 live generator or robot-specific parameters.
 
