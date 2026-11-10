@@ -163,13 +163,14 @@ when the requested COM orientation changes.
 | Preparation, topology changes, reset, cleanup, controls | [Lifecycle](lifecycle.md); manager and `spawn/scene.py` |
 | Backend/device selection, source overlays, collision/mass policy | [Physics configuration](physics-configuration.md); `cfg/`, `spawn/descriptors.py` |
 | Joint state order, drive lowering, mimic coupling, native adaptation | [Articulation and batch adapters](articulation-adapters.md); `objects/backends/`, `objects/articulation.py` |
+| Initial-fill fluid configuration, state and rendering | [Fluids](fluids.md); `cfg/fluid.py`, `objects/fluid.py` |
 | Volume/surface state, topology and kinematic nodes | [Deformables](deformables.md); `cfg/deformable.py`, `objects/deformable/` |
 | Camera synchronization, native window/offscreen denoising, startup readiness | [Rendering and diagnostics](rendering.md); manager, `cfg/simulation.py`, `_startup_summary.py` |
 | Robot definition, control parts, robot presets | [Robot system](../robot-system/robot-system.md) |
 | Camera attachment resolution or contact sensors | [Sensor system](../sensor-system/sensor-system.md) |
 | Browser export or native gizmos | [Visualization](../sim-visualization/sim-visualization.md), [native gizmos](../sim-visualization/native-gizmos.md) |
 | Solvers, planners, workspace, augmentation | [IK](../ik-solvers/ik-solvers.md), [motion](../motion-planning/motion-planning.md), [workspace](../robot-workspace/robot-workspace.md) |
-| Semantic geometry and action execution | [Atomic Actions](../atomic-actions/atomic-actions.md), [Task Programs](../task-programs/task-programs.md) |
+| Semantic geometry and action execution | [Atomic Skills](../atomic-actions/atomic-actions.md), [Task Programs](../task-programs/task-programs.md) |
 
 `motion/__init__.py` and workspace analyzer exports remain lazy: Robot imports
 solver/workspace types while planners resolve robots through the manager.

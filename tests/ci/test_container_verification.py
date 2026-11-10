@@ -40,7 +40,8 @@ def test_qualification_requires_installed_code_and_resources(
     spec.loader.exec_module(module)
 
     # A small installed distribution isolates the packaging contract from the
-    # heavyweight SDK. Inherited site packages provide pytest, not the payload.
+    # heavyweight SDK. Expose pytest's dependencies explicitly: a nested venv
+    # does not inherit the invoking venv's site packages through this flag.
     environment = tmp_path / "runtime"
     venv.EnvBuilder(with_pip=False, system_site_packages=True).create(environment)
     site = (
@@ -49,6 +50,13 @@ def test_qualification_requires_installed_code_and_resources(
         / f"python{sys.version_info.major}.{sys.version_info.minor}"
         / "site-packages"
     )
+    dependency_roots = {
+        str(Path(importlib.util.find_spec(name).origin).parent.parent)
+        for name in ("pytest", "pluggy", "packaging", "iniconfig", "pygments")
+    }
+    (site / "pytest-runtime.pth").write_text("\n".join(sorted(dependency_roots)) + "\n")
+    # Qualification tests its explicit payload and collector, not host plugins.
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     metadata = site / "embodichain-0.0.0.dist-info"
     metadata.mkdir()
     (metadata / "METADATA").write_text("Name: embodichain\nVersion: 0.0.0\n")

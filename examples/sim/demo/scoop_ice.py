@@ -81,9 +81,12 @@ def initialize_simulation(args):
     """
     physics_cfg = physics_cfg_for_backend(args.physics)
     if args.physics == "newton":
-        # Hundreds of free bodies make dense Newton Hessian factorization
-        # expensive. CG avoids that factorization while retaining contacts.
-        physics_cfg.solver_cfg = {"solver_type": "mujoco_warp", "solver": "cg"}
+        physics_cfg.solver_cfg = {
+            "solver_type": "dexuni",
+            "mujoco_options": {"solver": "cg"},
+            # Dense ice contacts exceed VBD's default per-body capacity of 64.
+            "vbd_options": {"rigid_body_contact_buffer_size": 256},
+        }
     config = SimulationManagerCfg(
         headless=True,
         device=args.device,
@@ -354,16 +357,19 @@ def create_ice_cubes(sim: SimulationManager):
 
     # Set visual material for ice cubes.
     # Explicit optical parameters select ice scattering in OfflineRT.
-    ice_mat = sim.create_visual_material(
-        cfg=VisualMaterialCfg(
-            base_color=[1.0, 1.0, 1.0, 1.0],
-            ior=1.31,
-            roughness=0.2,
-            parameters={"transmission": 1.0},
+    ice_mat = None
+    if sim.has_native_renderer:
+        ice_mat = sim.create_visual_material(
+            cfg=VisualMaterialCfg(
+                base_color=[1.0, 1.0, 1.0, 1.0],
+                ior=1.31,
+                roughness=0.2,
+                parameters={"transmission": 1.0},
+            )
         )
-    )
     sim.prepare()
-    ice_cubes.set_visual_material(mat=ice_mat)
+    if ice_mat is not None:
+        ice_cubes.set_visual_material(mat=ice_mat)
 
     return ice_cubes
 

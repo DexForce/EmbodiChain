@@ -25,7 +25,7 @@ import pytest
 import torch
 
 from embodichain.compute.trajectory.limits import joint_velocity_validity
-from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+from embodichain.lab.sim.atomic_skills.policies import MotionPolicy
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenOptions,

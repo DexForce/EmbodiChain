@@ -23,7 +23,7 @@ import math
 from typing import TypeAlias
 import torch
 
-from embodichain.lab.sim.atomic_actions import SceneEntityPose
+from embodichain.lab.sim.atomic_skills import SceneEntityPose
 from embodichain.lab.task_program.semantics import SemanticPose
 
 __all__ = [

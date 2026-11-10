@@ -16,6 +16,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from embodichain.lab.sim.cfg.fluid import FluidObjectCfg
+from embodichain.lab.sim.objects.fluid import FluidObject
+
 import os
 import gc
 import sys
@@ -613,6 +617,7 @@ class SimulationManager:
         self._gizmos: dict[str, object] = {}
         self._markers: dict[str, _AxisMarkerGroup] = {}
         self._constraints: dict[str, RigidConstraint] = {}
+        self._fluid_objects: dict[str, FluidObject] = {}
         self._visual_materials: dict[str, VisualMaterial] = {}
         self._texture_cache: dict[str, torch.Tensor | list[torch.Tensor]] = {}
 
@@ -1002,6 +1007,7 @@ class SimulationManager:
         uid_list.extend(list(self._rigid_objects.keys()))
         uid_list.extend(list(self._rigid_object_groups.keys()))
         uid_list.extend(list(self._deformable_objects.keys()))
+        uid_list.extend(list(self._fluid_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
 
@@ -1070,6 +1076,7 @@ class SimulationManager:
             getattr(self, "_rigid_objects", {}),
             getattr(self, "_rigid_object_groups", {}),
             getattr(self, "_deformable_objects", {}),
+            getattr(self, "_fluid_objects", {}),
             getattr(self, "_articulations", {}),
             getattr(self, "_robots", {}),
             getattr(self, "_sensors", {}),
@@ -1527,26 +1534,31 @@ class SimulationManager:
     def register_particle_contact_material_schedule(
         self,
         keyframes: Mapping[str, Sequence[Sequence[float]]],
+        *,
+        uid: str | None = None,
     ) -> None:
         """Register time-varying Newton particle contact properties.
 
         Supported tracks are ``dynamic_friction``, ``stiffness``, and
-        ``damping``. Values apply scene-wide to particle-versus-rigid contacts
-        and are sampled piecewise-constantly in simulation time.
+        ``damping``. Values are sampled piecewise-constantly in simulation
+        time. Supply ``uid`` for a DexUni cloth/soft-body material; otherwise
+        register the legacy scene-wide control for other Newton solvers.
 
         .. attention::
-            Register this control before :meth:`prepare`. This host-side
-            control requires direct Newton stepping and therefore disables
-            CUDA Graph replay for the finalized simulation.
+            Register before :meth:`prepare`. Targeted DexUni controls support
+            CUDA Graph replay. The legacy scene-wide host control requires
+            direct Newton stepping and disables graph replay.
 
         Args:
             keyframes: Particle contact-property tracks containing ``(time,
                 value)`` pairs.
+            uid: Optional declared deformable UID for DexUni object materials.
 
         Raises:
             RuntimeError: If the backend is not Newton or the scene is already
                 finalized.
             ValueError: If the keyframes are invalid.
+            KeyError: If ``uid`` is not a declared deformable.
         """
         if not self.is_newton_backend:
             raise RuntimeError(
@@ -1558,6 +1570,31 @@ class SimulationManager:
                 "Particle contact material schedules must be registered before "
                 "SimulationManager.prepare()."
             )
+
+        if uid is not None:
+            if uid not in self._deformable_objects:
+                raise KeyError(f"Deformable object {uid!r} is not declared.")
+            arena_names = scene.arena_names
+            if len(arena_names) != self.num_envs:
+                raise RuntimeError(
+                    "Spawn arena count does not match SimulationManager.num_envs."
+                )
+            from dexsim.engine import newton_physics
+
+            control_type = getattr(
+                newton_physics, "DexUniParticleContactMaterialSchedule", None
+            )
+            if control_type is None:
+                raise RuntimeError(
+                    "Targeted particle materials require a supporting DexSim build."
+                )
+            controls = tuple(
+                control_type(keyframes, target=f"{arena_name}/{uid}")
+                for arena_name in arena_names
+            )
+            for control in controls:
+                scene.builder.add_runtime_control(control)
+            return
 
         from dexsim.engine.newton_physics import ParticleContactMaterialSchedule
 
@@ -1723,6 +1760,71 @@ class SimulationManager:
         )
         for control in controls:
             scene.builder.add_runtime_control(control)
+
+    def add_runtime_control(
+        self,
+        control: Any | Callable[[str, int], Any],
+    ) -> tuple[Any, ...]:
+        """Register DexSim Newton runtime controls before :meth:`prepare`.
+
+        Use this for controls that have no dedicated ``register_*`` method,
+        such as ``RealtimeJointTargetControl``, ``PinnedParticleControl`` or
+        ``IndexedConveyorControl`` from ``dexsim.engine.newton_physics``.
+
+        Pass either one control instance, which is registered once for the
+        whole scene, or a factory called as ``factory(arena_name, env_index)``
+        for every environment. Controls address entities by Spawn path, which
+        is ``f"{arena_name}/{uid}"`` for an object declared with ``uid``.
+
+        Args:
+            control: A ``RuntimeControl`` instance, or a per-environment
+                factory returning one.
+
+        Returns:
+            The registered controls, in environment order for a factory.
+            Keep them to drive live controls such as joint targets.
+
+        Raises:
+            RuntimeError: If the backend is not Newton, the Spawn scene is
+                already finalized, or its arena count is inconsistent.
+            TypeError: If a control is not a ``RuntimeControl``.
+        """
+        from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+
+        if not self.is_newton_backend:
+            raise RuntimeError("Runtime controls require the Newton backend.")
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Runtime controls must be registered before "
+                "SimulationManager.prepare()."
+            )
+        if isinstance(control, RuntimeControl):
+            controls: tuple[Any, ...] = (control,)
+        elif callable(control):
+            arena_names = scene.arena_names
+            if len(arena_names) != self.num_envs:
+                raise RuntimeError(
+                    "Spawn arena count does not match SimulationManager.num_envs: "
+                    f"{len(arena_names)} != {self.num_envs}."
+                )
+            controls = tuple(
+                control(arena_name, env_index)
+                for env_index, arena_name in enumerate(arena_names)
+            )
+        else:
+            raise TypeError(
+                "control must be a RuntimeControl or a factory returning one."
+            )
+        for item in controls:
+            if not isinstance(item, RuntimeControl):
+                raise TypeError(
+                    "Runtime control factories must return RuntimeControl "
+                    f"instances; got {type(item).__name__}."
+                )
+        for item in controls:
+            scene.builder.add_runtime_control(item)
+        return controls
 
     def prepare(self) -> None:
         """Materialize declarations, bind state, and restore camera parents."""
@@ -1926,7 +2028,17 @@ class SimulationManager:
         if group_ids or self.is_window_opened:
             self._ensure_render_state()
         if group_ids:
+            cameras = [
+                sensor
+                for sensor in self._sensors.values()
+                if isinstance(sensor, Camera) and sensor.group_id in group_ids
+            ]
+            for sensor in cameras:
+                sensor._capture_metadata = None
+                sensor._pending_capture_metadata = None
             self._world.render_camera_group(group_ids)
+            for sensor in cameras:
+                sensor._snapshot_render_metadata()
         self._log_scene_summary()
 
     def update(
@@ -2199,6 +2311,23 @@ class SimulationManager:
         if intensity is not None:
             self._env.set_env_light_intensity(intensity)
 
+    # Reserved for the manager-owned shared ground Mesh. Arena IDs are unrelated.
+    _GROUND_RENDER_CATEGORY = 1
+
+    def _require_ground_plane_filtering(self) -> None:
+        from dexsim.spawn import ObjectDesc
+
+        if not (
+            hasattr(ObjectDesc, "render_categories")
+            and callable(
+                getattr(dexsim.render.Camera, "set_excluded_render_categories", None)
+            )
+        ):
+            raise RuntimeError(
+                "Per-camera ground visibility requires a DexSim build with "
+                "ObjectDesc.render_categories and Camera.set_excluded_render_categories"
+            )
+
     def _declare_spawn_default_plane(self) -> None:
         """Declare the global ground in the World's Spawn scene."""
 
@@ -2246,6 +2375,9 @@ class SimulationManager:
             physics=RigidBodyPhysicsDesc.static(),
             per_env=False,
         )
+
+        if hasattr(descriptor, "render_categories"):
+            descriptor.render_categories = self._GROUND_RENDER_CATEGORY
 
         self._spawn_scene.declare(
             "rigid_object",
@@ -2350,6 +2482,7 @@ class SimulationManager:
         | VisualObject
         | RigidObjectGroup
         | DeformableObject
+        | FluidObject
         | Articulation
         | None
     ):
@@ -2378,6 +2511,8 @@ class SimulationManager:
             return self._rigid_object_groups[uid]
         if uid in self._deformable_objects:
             return self._deformable_objects[uid]
+        if uid in self._fluid_objects:
+            return self._fluid_objects[uid]
         if uid in self._articulations:
             return self._articulations[uid]
 
@@ -2855,10 +2990,156 @@ class SimulationManager:
             self.prepare()
         return [item[3] for item in declarations]
 
+    def add_fluid_object(self, cfg: FluidObjectCfg) -> FluidObject:
+        """Declare a fixed-count Newton DFSPH fluid.
+
+        Args:
+            cfg: Fluid source, initial state, physical and render properties.
+
+        Returns:
+            A facade bound in place by ``prepare()``.
+        """
+        from dexsim.spawn import FluidDesc, FluidRenderMode, FluidMeshSurfaceRenderDesc
+        from embodichain.lab.sim.spawn.descriptors import _pose_from_cfg
+
+        if self.physics.name != "newton" or self.device.type != "cuda":
+            raise NotImplementedError("Fluid objects require Newton on CUDA.")
+        if (
+            getattr(self, "_active_newton_solver_type", None) != "dexuni"
+            or self.sim_config.physics_cfg.requires_grad
+        ):
+            raise NotImplementedError(
+                "Fluid objects require non-differentiable DexUni."
+            )
+        if not getattr(self.physics, "supports_dexuni_fluids", False):
+            raise NotImplementedError(
+                "Fluid objects require a DexSim build supporting DexUniSolverCfg.sph_cfg."
+            )
+        if getattr(self, "_deformable_objects", {}):
+            raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
+        if self.num_envs != 1 and not getattr(
+            self.physics, "supports_fluid_worlds", False
+        ):
+            raise NotImplementedError(
+                "Batch fluids require a DexSim SPH build with world isolation and selected-world reset."
+            )
+        if self.spawn_result is not None:
+            raise NotImplementedError("Declare fluids before prepare().")
+        if not isinstance(cfg, FluidObjectCfg):
+            raise TypeError("Expected FluidObjectCfg.")
+        cfg = cfg.copy()
+        cfg.validate()
+        cfg.__post_init__()
+        if (
+            self.sim_config.render_cfg.renderer == "hybrid"
+            or SimulationManager._get_process_renderer() == "hybrid"
+        ):
+            raise NotImplementedError(
+                "Newton fluid rendering requires renderer='fast-rt' or 'rt'. "
+                "Hybrid does not publish the OptiX liquid geometry to its Vulkan primary surface. "
+                "Use renderer='no-render' for physics-only runs. "
+                "Select FastRT or OfflineRT before creating the first World; "
+                "start a new process if Hybrid is already initialized."
+            )
+        if cfg.render.mode == "none" and self.has_native_renderer:
+            raise NotImplementedError(
+                "Fluid mode='none' currently requires renderer='no-render'."
+            )
+        if not cfg.uid or cfg.uid in self.asset_uids:
+            raise ValueError(
+                "Fluid uid must be nonempty and unique across scene assets."
+            )
+        for other in self._fluid_objects.values():
+            if (cfg.density, cfg.particle_spacing) != (
+                other.cfg.density,
+                other.cfg.particle_spacing,
+            ):
+                raise ValueError("All fluids must share density and particle_spacing.")
+        configured = self.sim_config.physics_cfg.solver_cfg
+        configured = (
+            configured.get("sph_cfg")
+            if isinstance(configured, Mapping)
+            else getattr(configured, "sph_cfg", None)
+        )
+        from dexsim.engine.newton_physics import SPHSolverCfg
+
+        defaults = SPHSolverCfg()
+        for key, value in (
+            ("rest_density", cfg.density),
+            ("particle_diameter", cfg.particle_spacing),
+        ):
+            existing = (
+                configured.get(key)
+                if isinstance(configured, Mapping)
+                else getattr(configured, key, None)
+            )
+            if (
+                existing is not None
+                and not np.isclose(existing, getattr(defaults, key), rtol=1e-7, atol=0)
+                and not np.isclose(existing, value, rtol=1e-7, atol=0)
+            ):
+                raise ValueError(
+                    f"Fluid {key} conflicts with solver_cfg.sph_cfg.{key}."
+                )
+        points = cfg.spawn.sample(cfg.particle_spacing)
+        pose = _pose_from_cfg(cfg)
+        if cfg.spawn.reference_uid is not None:
+            reference = self._rigid_objects.get(cfg.spawn.reference_uid)
+            if reference is None:
+                raise ValueError(
+                    "Fluid reference_uid must name an already declared rigid object."
+                )
+            pose = _pose_from_cfg(reference.cfg) @ pose
+        mesh_surface = FluidMeshSurfaceRenderDesc(**cfg.render.mesh_surface)
+        material = None
+        if self.has_native_renderer and cfg.render.material is not None:
+            material_cfg = cfg.render.material.copy()
+            material_cfg.uid = f"{cfg.uid}_fluid_material"
+            material = self.create_visual_material(material_cfg).inst.mat
+        descriptor = FluidDesc(
+            name=cfg.uid,
+            positions=points,
+            pose=pose,
+            density=cfg.density,
+            particle_spacing=cfg.particle_spacing,
+            particle_radius=cfg.particle_radius,
+            render_radius=cfg.render.render_radius,
+            render_mode=FluidRenderMode(
+                "particles" if cfg.render.mode == "none" else cfg.render.mode
+            ),
+            mesh_surface=mesh_surface,
+            render_material=material,
+            per_env=True,
+        )
+        fluid = FluidObject(cfg, self.device)
+        fluid._initialize_spawn_source(
+            points, pose[:3, :3], on_write=self._invalidate_fluid_state
+        )
+        self._spawn_scene.declare("fluid_object", cfg.uid, descriptor, facade=fluid)
+        self._fluid_objects[cfg.uid] = fluid
+        self.notify_visualization_topology_changed()
+        return fluid
+
+    def _invalidate_fluid_state(self, env_ids: Sequence[int] | None = None) -> None:
+        self.physics.invalidate_fluid_state(env_ids=env_ids)
+        if self._render_state_published is not None:
+            self._render_state_published = False
+
+    def get_fluid_object(self, uid: str) -> FluidObject | None:
+        """Return the fluid registered under ``uid``, or None."""
+        return self._fluid_objects.get(uid)
+
+    def get_fluid_diagnostics(self, uid: str) -> dict[str, object]:
+        """Return detached diagnostics for a prepared fluid without stepping."""
+        fluid = self._fluid_objects[uid]
+        if fluid.is_declared:
+            raise RuntimeError("Fluid diagnostics require prepare().")
+        return self.physics.fluid_diagnostics(fluid)
+
     def add_deformable_object(self, cfg: DeformableObjectCfg) -> DeformableObject:
         """Declare a volume or surface deformable in the scene.
 
-        Deformables are DexSim 0.5 typed particle sets owned by the Newton
+        Deformables are DexSim typed particle sets owned by the Newton
         Spawn scene. The Default backend is intentionally unsupported.
 
         Args:
@@ -2892,6 +3173,8 @@ class SimulationManager:
                 "Newton deformable particle sets currently require a CUDA device."
             )
         solver_type = self._active_newton_solver_type
+        if solver_type == "dexuni" and getattr(self, "_fluid_objects", {}):
+            raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
         supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
         if solver_type not in supported_solvers:
             raise NotImplementedError(
@@ -4029,8 +4312,8 @@ class SimulationManager:
             sensor_factory, ContactSensor
         ):
             self.prepare()
-            # ``solver_type='auto'`` is resolved while preparing the Spawn
-            # scene, so the early capability check above is not sufficient.
+            # DexUni resolves its contact path while preparing the Spawn scene,
+            # so the early capability check above is not sufficient.
             if not self.physics.supports_contact_sensor:
                 raise NotImplementedError(
                     f"ContactSensor is not supported by the {self.physics.name} "
@@ -4990,6 +5273,9 @@ class SimulationManager:
         for uid, rigid_obj_group in self._rigid_object_groups.items():
             if uid not in excluded_uids:
                 rigid_obj_group.reset(env_ids)
+        for uid, fluid_obj in self._fluid_objects.items():
+            if uid not in excluded_uids:
+                fluid_obj.reset(env_ids)
         for uid, deformable_obj in self._deformable_objects.items():
             if uid not in excluded_uids:
                 deformable_obj.reset(env_ids)
@@ -5175,6 +5461,7 @@ class SimulationManager:
                 "_rigid_objects",
                 "_rigid_object_groups",
                 "_deformable_objects",
+                "_fluid_objects",
                 "_articulations",
                 "_robots",
             ):
@@ -5237,6 +5524,7 @@ class SimulationManager:
         _sever_wrapper_refs("_constraints")
         _sever_wrapper_refs("_rigid_object_groups")
         _sever_wrapper_refs("_deformable_objects")
+        _sever_wrapper_refs("_fluid_objects")
         _sever_wrapper_refs("_articulations")
         _sever_wrapper_refs("_robots")
         _sever_wrapper_refs("_sensors")

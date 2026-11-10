@@ -113,7 +113,10 @@ _FORBIDDEN_FIELDS = frozenset(
     {
         "atomic_action",
         "atomic_actions",
+        "atomic_skill",
+        "atomic_skills",
         "atomicaction",
+        "atomicskill",
         "coordinates",
         "bbox",
         "bboxes",
@@ -903,7 +906,7 @@ def _instruction_prompt(instruction: str) -> str:
         "or '刀叉' names two distinct objects. When both share one action and "
         "target, use quantifier=count with count=2 or emit separate steps; "
         "preserve every explicitly named member. "
-        "Emit no AtomicAction, category label, affordance, coordinates, poses, "
+        "Emit no AtomicSkill, category label, affordance, coordinates, poses, "
         "paths, or reasoning. Encode explicit ordering with depends_on; same-action set "
         "members may remain independent. Use empty strings and 'none' for "
         "inapplicable required fields. A request to retract the transfer arm "

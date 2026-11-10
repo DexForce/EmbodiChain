@@ -32,7 +32,7 @@ The core ``embodichain`` framework includes these top-level packages:
 
 ``lab``
     The simulation laboratory: the ``sim`` core (scene, objects, sensors, IK
-    solvers, planners, atomic actions), the ``gym`` environment framework,
+    solvers, planners, atomic skills), the ``gym`` environment framework,
     real-device controllers (``devices``), and browser ``visualization``.
 
 ``toolkits``
