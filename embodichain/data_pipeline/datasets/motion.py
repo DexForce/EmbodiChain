@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
+import hashlib
+import json
 import math
 
 import numpy as np
@@ -38,6 +40,10 @@ class MotionLibrary:
     (rotation matrix), ``q`` (joint position), ``v`` / ``w`` (world root-origin
     linear/angular velocity) and ``qd`` (joint velocity). Queries return owned
     tensors; future offsets hold both clip endpoints and never cross clips.
+
+    Attributes:
+        content_digest: Versioned identity of the selected float32 motion data,
+            clip layout, timing and joint order, cached at construction.
 
     Args:
         qpos: Packed ``[root XYZ, quaternion, joint positions]`` array.
@@ -108,6 +114,27 @@ class MotionLibrary:
             "w": qvel[:, 3:6],
             "qd": qvel[:, 6:],
         }
+        # Hash selected float32 source states once on the CPU, before device
+        # upload. Lengths and joint order give the byte stream its interpretation.
+        digest = hashlib.sha256()
+        digest.update(
+            json.dumps(
+                {
+                    "version": 1,
+                    "dtype": "<f4",
+                    "names": self.names,
+                    "joint_names": self.joint_names,
+                    "lengths": lengths_array.tolist(),
+                    "fps": self.fps,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        for name, values in columns.items():
+            digest.update(name.encode("ascii"))
+            digest.update(memoryview(np.ascontiguousarray(values, dtype="<f4")))
+        self.content_digest = "motion-v1:" + digest.hexdigest()
         self._states = {
             k: torch.tensor(v, device=self.device, dtype=torch.float32)
             for k, v in columns.items()

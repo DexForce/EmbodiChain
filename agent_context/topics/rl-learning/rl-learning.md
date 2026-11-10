@@ -252,6 +252,8 @@ statistics unchanged. Actor collection and backward keep critic parameters and
 statistics fixed while preserving derivatives through critic inputs. Statistics
 include weighted current states and valid bootstrap successors absent from the
 next current-state row; complete-rollout post-terminal suffixes are excluded.
+Critic minibatches contain only positive-weight samples. Empty valid sets leave
+critic parameters and optimizer state unchanged, including Adam momentum.
 
 ## Invariants
 

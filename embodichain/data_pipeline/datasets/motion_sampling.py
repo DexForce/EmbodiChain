@@ -151,6 +151,7 @@ class MotionStartSampler:
             "config": self.cfg.to_dict(),
             "names": self.motion.names,
             "lengths": self.motion.lengths.cpu().tolist(),
+            "content_digest": self.motion.content_digest,
             "scores": self.scores.clone(),
             "visits": self.visits.clone(),
             "past": self.past.clone(),
@@ -162,8 +163,9 @@ class MotionStartSampler:
             state["config"] != self.cfg.to_dict()
             or tuple(state["names"]) != self.motion.names
             or state["lengths"] != self.motion.lengths.cpu().tolist()
+            or state.get("content_digest") != self.motion.content_digest
         ):
-            raise ValueError("Motion sampler checkpoint layout differs.")
+            raise ValueError("Motion sampler checkpoint layout or content differs.")
         for key in ("scores", "visits", "past"):
             value = state[key]
             if (

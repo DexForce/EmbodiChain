@@ -140,3 +140,46 @@ def test_motion_start_sampling_merges_duplicate_returns_and_restores_distributio
     second = restored.sample(100, torch.Generator().manual_seed(7))
     torch.testing.assert_close(first, second, rtol=0, atol=0)
     assert set(first.tolist()) <= {0, 1, 3}
+
+
+@pytest.mark.parametrize("change", ["qpos", "qvel", "missing_identity"])
+def test_sampler_rejects_changed_motion_before_mutating_state(tmp_path, change):
+    from copy import deepcopy
+    from embodichain.data_pipeline.datasets.motion_sampling import (
+        MotionStartSampler,
+        MotionStartSamplerCfg,
+    )
+
+    path = tmp_path / "motions.npz"
+    qpos, qvel = data()
+
+    def load():
+        np.savez(path, qpos=qpos, qvel=qvel, lengths=[3, 2], names=["a", "b"], fps=50)
+        return MotionLibrary.from_npz(
+            path, ["hinge"], quaternion_order="xyzw", clips=["b"]
+        )
+
+    original = load()
+    source = MotionStartSampler(original, MotionStartSamplerCfg())
+    source.update(torch.tensor([0]), torch.tensor([0.7]))
+    saved = source.state_dict()
+    compatible = MotionStartSampler(load(), source.cfg)
+    compatible.load_state_dict(saved)
+    torch.testing.assert_close(compatible.scores, source.scores, rtol=0, atol=0)
+    # Unselected content has no effect on the selected library identity.
+    qpos[0, 7] += 0.5
+    assert load().content_digest == original.content_digest
+    if change == "qpos":
+        qpos[3, 7] += 0.5
+    elif change == "qvel":
+        qvel[3, 6] += 0.5
+    else:
+        saved.pop("content_digest")
+    restored = MotionStartSampler(load(), source.cfg)
+    before = deepcopy(restored.state_dict())
+    with pytest.raises(ValueError, match="content differs"):
+        restored.load_state_dict(saved)
+    for name in ("scores", "visits", "past"):
+        torch.testing.assert_close(
+            getattr(restored, name), before[name], rtol=0, atol=0
+        )

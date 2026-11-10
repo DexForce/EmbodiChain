@@ -405,3 +405,69 @@ def test_critic_statistics_exclude_invalid_states_and_include_bootstrap(
     torch.testing.assert_close(
         samples[0].flatten(), torch.tensor(expected, dtype=torch.float64)
     )
+
+
+@pytest.mark.parametrize("boundary", ["terminated", "invalid"])
+def test_critic_minibatches_exclude_zero_weight_rows(boundary):
+    # The same single valid transition must produce the same Adam state even
+    # when a complete rollout includes two more unusable states.
+    results = []
+    for horizon in (1, 3):
+        p = policy()
+        algo = algorithm(p)
+        algo.cfg.critic_minibatches = 3
+        rollout = DifferentiableCollector(
+            LinearEnv(boundary="terminated", soft=False), p, p.device
+        ).collect(horizon, deterministic=True)
+        if boundary == "invalid":
+            rollout = replace(
+                rollout,
+                transitions=tuple(
+                    replace(
+                        step,
+                        valid=torch.tensor([i == 0]),
+                        next_valid=torch.tensor([False]),
+                    )
+                    for i, step in enumerate(rollout.transitions)
+                ),
+            )
+        algo.begin_update()
+        algo.accumulate_complete_rollout(rollout)
+        metrics = algo.finish_update()
+        assert metrics["critic_updates"] == 1
+        results.append((p.critic.state_dict(), algo.critic_optimizer.state_dict()))
+    torch.testing.assert_close(results[0], results[1], rtol=0, atol=0)
+
+
+def test_all_zero_critic_weights_preserve_existing_adam_momentum():
+    from copy import deepcopy
+
+    p = policy()
+    algo = algorithm(p)
+    algo.cfg.critic_minibatches = 3
+    for invalid in (False, True):
+        rollout = DifferentiableCollector(LinearEnv(), p, p.device).collect(
+            3, deterministic=True
+        )
+        if invalid:
+            rollout = replace(
+                rollout,
+                transitions=tuple(
+                    replace(
+                        step,
+                        valid=torch.tensor([False]),
+                        next_valid=torch.tensor([False]),
+                    )
+                    for step in rollout.transitions
+                ),
+            )
+        algo.begin_update()
+        algo.accumulate_complete_rollout(rollout)
+        metrics = algo.finish_update()
+        current = (p.critic.state_dict(), algo.critic_optimizer.state_dict())
+        if invalid:
+            assert metrics["critic_updates"] == 0
+            torch.testing.assert_close(current, previous, rtol=0, atol=0)
+        else:
+            assert metrics["critic_updates"] == 3
+            previous = deepcopy(current)

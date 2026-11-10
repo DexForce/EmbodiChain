@@ -392,9 +392,14 @@ class APGActorCritic(APG):
                 ]
             )
         weights = torch.cat([batch.weights.flatten() for batch in self._critic_batches])
+        # Empty-weight rows must not create Adam steps: momentum can update
+        # parameters even when the current minibatch gradient is zero.
+        target_mean, weight_mean = float(targets.mean()), float(weights.mean())
+        active = weights > 0
+        inputs, targets, weights = inputs[active], targets[active], weights[active]
         totals = inputs.new_zeros(3)
         updates = 0
-        for _ in range(self.cfg.critic_epochs):
+        for _ in range(self.cfg.critic_epochs if inputs.shape[0] else 0):
             indices = torch.randperm(inputs.shape[0], device=inputs.device)
             for batch in indices.tensor_split(
                 min(self.cfg.critic_minibatches, inputs.shape[0])
@@ -425,8 +430,8 @@ class APGActorCritic(APG):
             critic_grad_norm=float(totals[1]) / max(updates, 1),
             critic_updates=float(updates),
             critic_skipped_updates=float(totals[2]),
-            critic_target_mean=float(targets.mean()),
-            critic_weight_mean=float(weights.mean()),
+            critic_target_mean=target_mean,
+            critic_weight_mean=weight_mean,
         )
         self._critic_batches = []
         metrics["critic_seconds"] = time.perf_counter() - critic_started

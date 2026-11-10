@@ -66,3 +66,45 @@ def test_recipe_validation_rejects_unsupported_algorithm_names(name):
     }
     with pytest.raises(ValueError, match="requires algorithm.name='apg_actor_critic'"):
         validate_recipe(config)
+
+
+@pytest.mark.parametrize("saved_digest", ["motion-v1:old", None])
+def test_motion_checkpoint_mismatch_precedes_learning_state_restore(
+    tmp_path, monkeypatch, saved_digest
+):
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import torch
+
+    example = Path(__file__).resolve().parents[2] / "examples/learning/motion_tracking"
+    monkeypatch.syspath_prepend(str(example))
+    from examples.learning.motion_tracking.train import MotionTraining
+
+    config = {
+        "trainer": {"learning_env": {"name": "MotionTrackingModelRL", "cfg": {}}},
+        "policy": {"name": "motion_tracking", "cfg": {}},
+        "algorithm": {"name": "apg_actor_critic", "cfg": {}},
+        "workflow": {},
+    }
+    workflow = object.__new__(MotionTraining)
+    workflow.env = SimpleNamespace(device=torch.device("cpu"), start_sampler=Mock())
+    workflow.config = config
+    workflow.identity = {"motion": {"content_digest": "motion-v1:current"}}
+    workflow.schedule = Mock()
+    workflow.policy, workflow.learner, workflow.algorithm = Mock(), Mock(), Mock()
+    saved_motion = {} if saved_digest is None else {"content_digest": saved_digest}
+    path = tmp_path / "checkpoint.pt"
+    torch.save(
+        {"schema": 1, "config": config, "identity": {"motion": saved_motion}}, path
+    )
+    with pytest.raises(ValueError, match="task identity differs"):
+        workflow.restore(path)
+    for owner in (
+        workflow.policy,
+        workflow.learner,
+        workflow.algorithm,
+        workflow.schedule,
+        workflow.env.start_sampler,
+    ):
+        assert owner.mock_calls == []

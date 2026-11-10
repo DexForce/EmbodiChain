@@ -321,6 +321,7 @@ class MotionTraining:
                 "names": self.env.motion.names,
                 "lengths": self.env.motion.lengths.cpu().tolist(),
                 "fps": self.env.motion.fps,
+                "content_digest": self.env.motion.content_digest,
             },
             "training": recipe_identity(self.config),
             "wm": self.model.cfg.to_dict(),
