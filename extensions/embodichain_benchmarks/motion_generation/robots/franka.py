@@ -46,7 +46,7 @@ class FrankaPgiProvider(RobotProvider):
     """Build the benchmark-owned Franka + PGI assembly used by the Atomic Skill suites.
 
     The suites were authored with the base rotated 180 degrees, as in the
-    atomic-action tutorial scenes, so the provider keeps that rotation; suite
+    atomic-skill tutorial scenes, so the provider keeps that rotation; suite
     overrides apply on top.
     """
 

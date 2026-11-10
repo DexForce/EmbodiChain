@@ -22,7 +22,7 @@ import numpy as np
 import torch
 
 from embodichain.data_pipeline.real2sim import load_demo_skill
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     DemoSkillMotionProvider,
     DemoSkillObservation,
     JointPositionTarget,

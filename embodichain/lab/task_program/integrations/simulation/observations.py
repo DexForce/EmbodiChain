@@ -943,7 +943,7 @@ class SimulationStateObservationCollector(_SimulationObservationCollector):
         from embodichain.lab.task_program.semantics.evidence import (
             EffectEvidenceCollector,
         )
-        from embodichain.lab.sim.atomic_actions.grip_evidence import (
+        from embodichain.lab.sim.atomic_skills.grip_evidence import (
             GripEvidenceObservationPort,
         )
 

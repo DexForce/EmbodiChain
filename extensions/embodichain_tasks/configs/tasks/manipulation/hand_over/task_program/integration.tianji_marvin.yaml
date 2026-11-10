@@ -26,7 +26,7 @@ profile:
     hand_over:
       source: left
       destination: right
-  action_options:
+  skill_options:
     hand_over:
       kind: hand_over
       pre_grasp_distance: 0.08

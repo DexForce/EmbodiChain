@@ -16,7 +16,7 @@
 
 """Show nine task-space trajectories on parallel PickUp -> Place scenes.
 
-This showcase reuses the existing Atomic Action task scene and runs the nominal
+This showcase reuses the existing Atomic Skill task scene and runs the nominal
 plan plus eight endpoint-preserving task-space deformations through nine parallel
 simulation arenas. It writes joint/tool-path plots and ``place_auto_play.mp4``
 to a caller-selected directory. It demonstrates physical task execution and
@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Directory for variant plots and replay output.",
     )
     args, forwarded = parser.parse_known_args(argv)
-    from examples.sim.atomic_action import place
+    from examples.sim.atomic_skill import place
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     forwarded = list(forwarded)

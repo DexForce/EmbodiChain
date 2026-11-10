@@ -1,7 +1,7 @@
 # DemoSkill：从专家示教构建任务专属技能
 
 DemoSkill 将连续子任务或完整任务保存为一个技能资产，通过 registered Semantic Call
-降低为 `ExecuteDemoSkill`，复用现有 Task Program、AtomicActionEngine 和 Expansion Engine。
+降低为 `ExecuteDemoSkill`，复用现有 Task Program、AtomicSkillEngine 和 Expansion Engine。
 内部阶段用于约束、来源映射和扩增授权，无需逐段映射到标准技能。
 
 ## 真实数据示例
