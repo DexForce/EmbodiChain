@@ -2551,8 +2551,10 @@ class SimulationManager:
             Light: The created light instance.
 
         Raises:
+            RuntimeError: If the World has no native renderer.
             ValueError: If ``cfg.light_type`` is not supported.
         """
+        self._require_native_renderer("Light creation")
         if cfg.uid is None:
             uid = "light"
             cfg.uid = uid

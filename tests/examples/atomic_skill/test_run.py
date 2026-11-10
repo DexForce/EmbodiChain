@@ -538,7 +538,10 @@ def test_sample_omitted_device_preserves_backend_default(
 
     def create_sim(cfg):
         captured["cfg"] = cfg
-        return SimpleNamespace(add_light=lambda cfg: None)
+        return SimpleNamespace(
+            add_light=lambda cfg: None,
+            has_native_renderer=cfg.render_cfg.renderer != "no-render",
+        )
 
     monkeypatch.setattr(support, "SimulationManager", create_sim)
     args = launcher._create_parser().parse_args(
@@ -667,7 +670,10 @@ def test_sample_solver_overrides_preserve_configured_host_fields(monkeypatch) ->
 
     def create_sim(cfg):
         captured["cfg"] = cfg
-        return SimpleNamespace(add_light=lambda cfg: None)
+        return SimpleNamespace(
+            add_light=lambda cfg: None,
+            has_native_renderer=cfg.render_cfg.renderer != "no-render",
+        )
 
     monkeypatch.setattr(support, "SimulationManager", create_sim)
     args = SimpleNamespace(
