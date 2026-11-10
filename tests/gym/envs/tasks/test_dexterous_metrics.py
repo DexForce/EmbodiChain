@@ -153,3 +153,36 @@ def test_continuous_rotation_has_metrics_without_invented_binary_success(
     result = evaluate_episodes(policy=_Policy(), env=env, num_episodes=2, device="cpu")
     assert math.isnan(result["eval/success_rate"])
     assert math.isfinite(result["eval/metrics/rotation"])
+
+
+@pytest.mark.parametrize("task_id", ["M1", "M2"])
+def test_failure_at_time_limit_does_not_bootstrap(env_factory, task_id):
+    from tensordict import TensorDict
+    from embodichain.learning.rl.algo.common import compute_gae
+
+    env = env_factory(task_id)
+    env.elapsed_steps.fill_(499)
+    env.task.step = lambda state, actions: (
+        torch.zeros(2, 1),
+        torch.ones(2),
+        torch.tensor([True, False]),
+        {},
+    )
+    _, reward, terminated, truncated, _ = env.step(torch.zeros(2, 1))
+    assert terminated.tolist() == [True, False]
+    assert truncated.tolist() == [False, True]
+    rollout = TensorDict(
+        {
+            "value": torch.full((2, 2), 10.0),
+            "reward": torch.stack((reward, torch.zeros(2)), dim=1),
+            "done": torch.stack(
+                (terminated | truncated, torch.zeros(2, dtype=torch.bool)), dim=1
+            ),
+            "truncated": torch.stack(
+                (truncated, torch.zeros(2, dtype=torch.bool)), dim=1
+            ),
+        },
+        batch_size=[2, 2],
+    )
+    _, returns = compute_gae(rollout, gamma=0.9, gae_lambda=0.95)
+    torch.testing.assert_close(returns[:, 0], torch.tensor([1.0, 10.0]))

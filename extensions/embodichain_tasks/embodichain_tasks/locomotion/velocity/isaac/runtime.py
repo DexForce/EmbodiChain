@@ -59,6 +59,7 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
     rays and Newton rasterization for collision.
     """
 
+    _default_action_clip = None
     state_type = IsaacVelocityState
     compute_rewards_fn = staticmethod(compute_rewards)
     compute_termination_fn = staticmethod(compute_termination)
