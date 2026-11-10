@@ -1,8 +1,6 @@
 # Published container images
 
-> Historical qualification below includes Python 3.10 results from an earlier
-> dependency profile. This checkout requires Python 3.11 or newer;
-> the main CI uses Python 3.12.
+> This checkout requires Python 3.11 or newer; the main CI uses Python 3.12.
 > The current Docker locks select DexSim 0.6.0rc1; the published image digests
 > and qualification runs below describe the earlier DexSim 0.5.1rc1 images.
 
@@ -63,8 +61,8 @@ and traced ONNX CUDA checks also passed.
 
 Fresh installation exposed incompatible OpenCV Python/native files from the two
 variants required by DexSim and LeRobot. Both now select 4.12.0.88 on Python
-3.10/3.11 and 4.13.0.92 on Python 3.12. The normal CPU resolver succeeds for all
-three SDK matrix versions; qualification also checks the imported `cv2` version.
+3.11 and 4.13.0.92 on Python 3.12. The normal CPU resolver succeeds for both
+supported SDK matrix versions; qualification also checks the imported `cv2` version.
 
 DexSim SHA256 pins were checked against the published index and all **1,926
 payload files in each wheel** matched the previously qualified installation.
@@ -93,8 +91,8 @@ succeeded after both CI workflows passed at implementation commit
   respectively. Formatting, API coverage, documentation tests, the Sphinx build
   and the final test gate passed.
 - [SDK compatibility](https://github.com/DexForce/EmbodiChain/actions/runs/41471747895):
-  all seven jobs passed, including 141 SDK cases each on Python 3.10, 3.11 and
-  3.12, all three offline-tool jobs and the standalone exporter.
+  all seven jobs passed, including 141 SDK cases each on Python 3.11 and 3.12,
+  offline-tool jobs and the standalone exporter.
 
 Promotion copied the existing manifests without rebuilding the images. Their
 bundled wheel and source labels remain at `c42e8a0b0857`; the CI runs above
@@ -113,5 +111,5 @@ GitHub secret was deleted and its absence verified, and local Docker login
 credentials were deleted.
 
 The PR's main, dataset and documentation workflows now use the formal internal
-tag and retain explicit `py311` activation. The SDK matrix continues selecting
-Python 3.10/3.11/3.12 independently.
+tag and retain explicit `py311` activation. The current SDK matrix selects
+Python 3.11 and 3.12 independently.

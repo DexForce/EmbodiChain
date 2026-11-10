@@ -106,6 +106,17 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
         / f"python{sys.version_info.major}.{sys.version_info.minor}"
         / "site-packages"
     )
+    # A venv created from another venv only inherits the base interpreter's
+    # packages. Append the invoking runtime's installed dependencies as plain
+    # paths, without executing its editable-install hooks.
+    runtime_sites = [
+        path
+        for path in sys.path
+        if path and Path(path).name in {"site-packages", "dist-packages"}
+    ]
+    (site / "runtime-dependencies.pth").write_text(
+        "\n".join(dict.fromkeys(runtime_sites)) + "\n"
+    )
     # Remove inherited editable paths for this consumer, while retaining installed dependencies.
     (site / "sitecustomize.py").write_text(
         "import sys\nfrom pathlib import Path\nsys.meta_path=[x for x in sys.meta_path if '__editable__' not in str(x)]\nsys.path=[x for x in sys.path if x and 'EmbodiChain' not in str(Path(x))]\n"

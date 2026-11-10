@@ -125,7 +125,7 @@ def test_heading_check_keeps_legacy_profiles_and_rejects_vertical_heading() -> N
 def test_semantic_release_target_includes_solver_error_in_yaw_acceptance() -> None:
     from types import SimpleNamespace
     import torch
-    from embodichain.lab.sim.atomic_actions.primitives.place import PlaceGoal
+    from embodichain.lab.sim.atomic_skills.primitives.place import PlaceGoal
     from embodichain.lab.task_program.integrations.simulation.real2sim_collision import (
         _semantic_release_pose,
     )

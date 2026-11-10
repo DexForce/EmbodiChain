@@ -1,16 +1,17 @@
-# Atomic Skills (`atomic_actions`)
+# Atomic Skills (`atomic_skills`)
 
 ## Scope
 
-Atomic Skill is the capability term; `AtomicAction` is its implementation
-base type. The typed planning and execution framework lives in
-`embodichain/lab/sim/atomic_actions/`. It owns action goals, resource binding,
+Atomic Skill is the canonical capability term and `AtomicSkill` is its
+implementation base type. Atomic denotes the registration/invocation unit; a skill
+may contain multiple phases, replans and retries. The typed planning and execution framework lives in
+`embodichain/lab/sim/atomic_skills/`. It owns skill goals, resource binding,
 planning, transport-neutral commands, execution sessions, recovery, tracking,
 and effect-verification requests.
 
 There are two supported caller paths:
 
-1. Atomic Skills: direct callers construct `ActionInvocation` values.
+1. Atomic Skills: direct callers construct `SkillInvocation` values.
 2. Task Program: task-level semantic programs are validated, grounded, and
    lowered internally to Atomic Skills.
 
@@ -22,13 +23,13 @@ execution facade.
 
 ```text
 Direct Python caller                    Task Program
-ActionInvocation                       semantic program
+SkillInvocation                       semantic program
           |                                  |
           |                       validate + ground + lower
           +------------------+---------------+
                              |
                              v
-                    AtomicActionEngine
+                    AtomicSkillEngine
                   resolve -> plan -> start
                              |
                              v
@@ -106,15 +107,15 @@ with accepted rows retained independently and selected offsets in diagnostics.
 Held-object transport and Pour keep the binding's configured grasp command; a
 contact-blocked measured aperture does not retain closing effort.
 
-Optional `hand_geometry_cfgs` enter through `AtomicActionEngine` and its existing
-`ActionPlanningServices`. `hand_geometry_cfg(target_id)` returns an independent
+Optional `hand_geometry_cfgs` enter through `AtomicSkillEngine` and its existing
+`SkillPlanningServices`. `hand_geometry_cfg(target_id)` returns an independent
 Lab configuration and fails for undeclared targets; it never infers a model or
 captures geometry. Consumers retain declared pad-link order and replace closing
 commands with the current resolved endpoint commands, including invocation
 overrides. [Robot geometry ownership](../robot-system/robot-system.md#sampled-hand-geometry)
 defines the capture boundary. Task Program declarations do not enter Atomic APIs.
 
-`ActionPlanningServices.prepare_grasp_query()` resolves the declared hand
+`SkillPlanningServices.prepare_grasp_query()` resolves the declared hand
 calibration by target ID and binds Scene capture to GraspKit's typed geometric
 policy and the existing isolated Newton backend. The opt-in context manager
 closes all query resources on normal exit, failure or cancellation. Opening
@@ -170,7 +171,7 @@ algorithms. Contact decisions retain the query owner's conservative interval
 semantics; threshold ambiguity remains unavailable. Scene keeps
 native geometry capture, including the caller-selected sampling grid. The source
 adapter owns only policy mapping, provenance and query cleanup; ordinary
-`ActionPlanningServices.prepare_grasp_query` retains Newton and shared defaults.
+`SkillPlanningServices.prepare_grasp_query` retains Newton and shared defaults.
 `grasp_geometry.GraspOpeningTarget` is the single value definition, re-exported
 with the same identity from the existing Atomic/runtime imports. No concrete
 skill or alternate registry is installed by these query builders.
@@ -179,9 +180,9 @@ skill or alternate registry is installed by these query builders.
 
 | Concern | Source of truth |
 |---|---|
-| Core action and goal contracts | `atomic_actions/core.py`, `goals.py`, `affordance.py` |
-| Affordance sampling values and deterministic branch selection | `atomic_actions/affordance_sampling.py` |
-| Articulation affordance geometry adapter | `atomic_actions/articulation_geometry.py` |
+| Core action and goal contracts | `atomic_skills/core.py`, `goals.py`, `affordance.py` |
+| Affordance sampling values and deterministic branch selection | `atomic_skills/affordance_sampling.py` |
+| Articulation affordance geometry adapter | `atomic_skills/articulation_geometry.py` |
 | Invocation, binding, and policies | `invocation.py`, `bindings.py`, `policies.py`, `control.py` |
 | Robot/task/scene state | `state.py`, `scene.py` |
 | Runtime physical evidence | `evidence.py`, `scene.py`, `runner.py` |
@@ -205,7 +206,7 @@ Sample Newton contact overlays are local to the selected scene and gripper;
 they are not world defaults or a guarantee of open-loop physical success.
 Author contact dimensions and material settings before `prepare()`, never by
 rewriting captured solver arrays. The current values live in
-`examples/sim/atomic_action/support.py` and the selected physical components.
+`examples/sim/atomic_skill/support.py` and the selected physical components.
 
 ## Semantic integration boundary
 
@@ -229,17 +230,17 @@ Every `SkillPolicyPreset` selects explicit effect authority:
 
 Projected assurance is not physical task success.
 
-Use `/add-atomic-action` to extend goals, planners, registration and focused tests.
+Use `/add-atomic-skill` to extend goals, planners, registration and focused tests.
 Keep planning side-effect-free; actions do not own task sequencing or simulator stepping.
 
 ## Direct-simulation example
 
-`embodichain run-example sim/atomic_action --skill` selects a fixed sample scene;
-`run-atomic-action` remains a compatibility alias. The generic launcher in
+`embodichain run-example sim/atomic_skill --skill` selects a fixed sample scene;
+`run-atomic-skill` remains a compatibility alias. The generic launcher in
 `embodichain/cli/run_example.py` resolves scripts directly from the ordinary
 `examples/` tree and forwards arguments through `_example_runner.py`.
 
-The example lives in `examples/sim/atomic_action/` and is shipped as ordinary
+The example lives in `examples/sim/atomic_skill/` and is shipped as ordinary
 distribution data with the rest of that tree. Its `__main__.py` owns
 typed configuration and validated selection; `host.py` owns compilation,
 expansion and output. Scene modules own physical setup and local defaults.
@@ -249,13 +250,13 @@ examples such as coordinated manipulation and observed recovery run by file path
 (PickUp→Place), `dual_arm.py` (HandOver), and `embodiment_switching.py`
 (robot/tool configuration reuse). They reuse example setup while explaining
 typed application composition. The switching walkthrough owns its CLI matrix;
-`examples/sim/atomic_action/embodiments.py` owns its fixtures and measured playback
+`examples/sim/atomic_skill/embodiments.py` owns its fixtures and measured playback
 checks and recording cameras. Its task recipes remain hardware-independent;
 swapping embodiments requires compatible resources and a physically feasible scene. The
-[switching tutorial README](../../../scripts/tutorials/atomic_action/README.md)
+[switching tutorial README](../../../scripts/tutorials/atomic_skill/README.md)
 owns its eight-combination matrix and links the checked-in MP4 previews under
-`docs/source/_static/atomic_actions/embodiment_switching/`. Read the
-[example README](../../../examples/sim/atomic_action/README.md)
+`docs/source/_static/atomic_skills/embodiment_switching/`. Read the
+[example README](../../../examples/sim/atomic_skill/README.md)
 for supported combinations, fixture calibration, playback and output artifacts.
 
 `--variants N` requests N executions including the reference and creates N
@@ -266,7 +267,7 @@ example-owned full poses forwarded to single/dual-arm solvers.
 
 The engine's optional `plan_transform` runs before concatenation and projected
 state propagation. The example and Task Program share
-`atomic_actions/_plan_expansion.py`, using `ActionPlanTemplateAdapter` and
+`atomic_skills/_plan_expansion.py`, using `SkillPlanTemplateAdapter` and
 `motion.expansion` to rebuild commands, velocities and phase metadata together.
 Core simulation and Task Program code do not depend on example modules.
 Built-in phase permissions may only narrow; editable joints come from explicit
@@ -286,8 +287,8 @@ operators and host ownership boundary.
 
 | Change | Owning location |
 |---|---|
-| Goal/options or action behavior | matching file under `atomic_actions/primitives/` plus `goals.py` when shared |
-| Articulation-link sampling or affordance geometry metadata | `atomic_actions/articulation_geometry.py`; keep `objects/articulation.py` limited to meshes, FK, and topology |
+| Goal/options or action behavior | matching file under `atomic_skills/primitives/` plus `goals.py` when shared |
+| Articulation-link sampling or affordance geometry metadata | `atomic_skills/articulation_geometry.py`; keep `objects/articulation.py` limited to meshes, FK, and topology |
 | Engine catalog or lifecycle | `engine.py` |
 | Session transitions or recovery | `execution.py` |
 | Verification value contracts | `verification.py` |
@@ -301,7 +302,7 @@ operators and host ownership boundary.
 ## Focused validation
 
 ```bash
-pytest -q tests/sim/atomic_actions
+pytest -q tests/sim/atomic_skills
 pytest -q tests/lab/task_program/semantics
 pytest -q tests/lab/task_program
 python docs/scripts/check_api_docs.py

@@ -37,7 +37,7 @@ from embodichain.toolkits.graspkit.pg_grasp.native_contact import (
     NativeRigidRestScene,
     NativeRigidObstacle,
 )
-from embodichain.lab.sim.atomic_actions import GraspOpeningTarget
+from embodichain.lab.sim.atomic_skills import GraspOpeningTarget
 
 from ._native_hand_fixture import (
     exercise,
@@ -152,7 +152,7 @@ def test_rigid_scene_prefix_uses_original_pair_rest_and_query_order(
 def test_opening_scope_and_owned_grounding_are_explicit(newton_available, tensor_poses):
     pose = torch.eye(4, dtype=torch.float64) if tensor_poses else np.eye(4)
     identity = {"place_id": "planned-place", "labels": ["owned"]}
-    from embodichain.lab.sim.atomic_actions import runtime, grasp_geometry
+    from embodichain.lab.sim.atomic_skills import runtime, grasp_geometry
 
     assert (
         GraspOpeningTarget
