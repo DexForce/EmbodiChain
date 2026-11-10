@@ -25,7 +25,7 @@ import sys
 from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
-from setup import get_package_dir, get_packages
+from setup import get_package_data, get_package_dir, get_packages
 
 
 def test_w1_script_resolves_core_and_robots_without_editable_install(
@@ -88,15 +88,8 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         {
             "packages": packages,
             "package_dir": get_package_dir(),
-            "package_data": {
-                "": ["profile.json"],
-                "embodichain_robots": ["README.md", "**/README.md"],
-                "embodichain_robots.agibot.g2": [
-                    "g2.urdf",
-                    "source.lock.json",
-                    "LICENSE",
-                ],
-            },
+            "package_data": get_package_data(),
+            "include_package_data": False,
             "script_name": "setup.py",
         }
     )
@@ -115,6 +108,8 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "embodichain_robots/agibot/g2/g2.urdf",
         "embodichain_robots/agibot/g2/source.lock.json",
         "embodichain_robots/agibot/g2/LICENSE",
+        "embodichain_robots/agibot/g2/preview.png",
+        "embodichain_robots/agibot/g2/preview.render.json",
         "embodichain_robots/_locomotion.py",
         "embodichain_robots/locomotion_profiles.py",
         "embodichain_robots/franka/assets.py",
