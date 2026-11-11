@@ -63,7 +63,13 @@ def _resolve_paths(
         "fine_tune": "directory",
     }
     if operation == "eval":
-        inputs["model"] = "directory"
+        inputs.update(model="directory", teacher_dataset="directory")
+        if isinstance(config.get("policy"), dict):
+            policy = dict(config["policy"])
+            for name in ("checkpoint", "config"):
+                if name in policy:
+                    policy[name] = str(_path(policy[name], base))
+            config["policy"] = policy
     if operation == "generate":
         inputs.pop("resume")  # generation resume is a Boolean, not a checkpoint.
     for name, kind in inputs.items():
@@ -91,6 +97,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     prepare.add_argument("--resource-root", type=Path)
     prepare.add_argument("--assets-only", action="store_true")
     prepare.add_argument("--local-files-only", action="store_true")
+    policy = subparsers.add_parser(
+        "train-policy", help="Train an APG policy through a matching Scene export."
+    )
+    policy.add_argument("--config", type=Path, required=True)
     for name, help_text in (
         ("generate", "Generate committed teacher trajectory shards."),
         ("train", "Train, fine-tune or resume a NeRD model."),
@@ -181,6 +191,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             else _resource_root()
         )
         os.environ["EMBODICHAIN_NERD_RESOURCE_ROOT"] = str(resource_root)
+        if args.operation == "train-policy":
+            from ._support import _ant_env, _cartpole_env
+            from embodichain.learning.rl.train import train_from_config
+
+            result = train_from_config(str(args.config.expanduser().resolve()))
+            print(json.dumps(result, indent=2, allow_nan=False))
+            return
         if args.operation == "prepare":
             from ._resources import prepare_resources
 
@@ -323,8 +340,12 @@ def main(argv: Sequence[str] | None = None) -> None:
                     from examples.learning.nerd._support._workflow import run_eval
 
                     result = run_eval(config)
+                elif mode == "rollout":
+                    from ._support._scene import evaluate_rollouts
+
+                    result = evaluate_rollouts(config)
                 else:
-                    raise ValueError("This workflow supports offline evaluation only")
+                    raise ValueError(f"Unsupported evaluation mode: {mode}")
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.exit(2, f"{error}\n")
     print(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False))

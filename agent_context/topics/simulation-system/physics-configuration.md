@@ -30,8 +30,8 @@ contact-path policy. Expert settings use the native option groups
 (`vbd_options`, `mujoco_options`, `collision_options`); unknown solver names
 are rejected for mappings and native config objects, and flat DexUni options
 are rejected by native validation.
-Standalone SPH is not a supported solver family; fluid settings belong under
-[DexUni's nested SPH configuration](fluids.md). Robot presets select
+Fluid scenes select DexUni and configure their numerical settings through
+[its nested fluid options](fluids.md). Robot presets select
 `newton_dexuni` before the MuJoCo aliases and portable fallbacks. Gradient mode
 requires an explicit `semi_implicit` solver or a direct/named provider supporting
 the requested gradient mode. Functional Scene calls additionally require its
@@ -40,7 +40,9 @@ functional dynamics service. Python callers pass DexSim's
 through `solver_cfg`; this path does not inspect installed metadata. DexSim
 creates fresh instances per model build. Installed `dexsim.newton_solvers`
 names pass through to DexSim's `RegisteredNewtonSolverCfg`; unregistered names
-remain errors. Read exact solver options/defaults in `cfg/physics.py` and the
+remain errors. Named-provider mapping settings belong under `options`; see
+[neural dynamics](../neural-dynamics/neural-dynamics.md#scene-solver-integration)
+for the NeRD consumer. Read exact solver options/defaults in `cfg/physics.py` and the
 installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
 `mesh_bvh_constructor` selects the mesh and heightfield query acceleration

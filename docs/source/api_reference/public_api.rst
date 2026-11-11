@@ -1861,6 +1861,40 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.sim.diff.dynamics
+---------------------------------
+
+Functional trajectories advance through SimulationManager and Scene APIs. Detaching state creates an explicit rollout boundary without aliasing live simulation buffers.
+
+.. currentmodule:: embodichain.lab.sim.diff.dynamics
+
+.. autosummary::
+   :nosignatures:
+
+   FunctionalDynamics
+   detach_dynamics_state
+
+.. autoclass:: embodichain.lab.sim.diff.dynamics.FunctionalDynamics
+   :members:
+
+.. autofunction:: embodichain.lab.sim.diff.dynamics.detach_dynamics_state
+
+embodichain.lab.sim.diff.kinematics
+-----------------------------------
+
+Native Newton FK with first-order Torch gradients for joint coordinates and
+velocities. Each call owns its Warp state and output storage independently of
+live simulation buffers; no concrete model or solver extension is loaded.
+
+.. currentmodule:: embodichain.lab.sim.diff.kinematics
+
+.. autosummary::
+   :nosignatures:
+
+   differentiable_fk
+
+.. autofunction:: embodichain.lab.sim.diff.kinematics.differentiable_fk
+
 embodichain.lab.sim.cfg.fluid
 -----------------------------
 
@@ -3156,6 +3190,22 @@ autograd. It does not advance the Newton dynamics solver.
 
    NewtonStepFunc
    tape_context
+
+
+Registered solver dynamics share the public differentiable facade with explicit state-detach boundaries.
+
+.. currentmodule:: embodichain.lab.sim.diff
+
+.. autosummary::
+   :nosignatures:
+
+   FunctionalDynamics
+   detach_dynamics_state
+
+.. autoclass:: embodichain.lab.sim.diff.FunctionalDynamics
+   :members:
+
+.. autofunction:: embodichain.lab.sim.diff.detach_dynamics_state
 
 embodichain.lab.sim.diff.bridge
 -------------------------------
@@ -4538,6 +4588,25 @@ embodichain.toolkits.urdf_assembly.urdf_assembly_manager
 .. autosummary::
 
    URDFAssemblyManager
+
+embodichain_solvers.physics.nerd.provider
+-----------------------------------------
+
+The named NeRD provider binds portable model exports to the ordered Scene physics domain. It requires a DexSim build exposing named solver providers and the functional dynamics service.
+
+.. currentmodule:: embodichain_solvers.physics.nerd.provider
+
+.. autosummary::
+   :nosignatures:
+
+   NeRDProvider
+   NeuralRobotDynamicSolver
+
+.. autoclass:: embodichain_solvers.physics.nerd.provider.NeRDProvider
+   :members:
+
+.. autoclass:: embodichain_solvers.physics.nerd.provider.NeuralRobotDynamicSolver
+   :members:
 
 embodichain_tasks.classic_control.cart_pole
 --------------------------------------------

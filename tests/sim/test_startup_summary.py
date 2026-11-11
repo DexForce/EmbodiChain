@@ -259,6 +259,9 @@ def test_world_config_receives_startup_switch_before_construction(monkeypatch):
     sim = object.__new__(SimulationManager)
     sim._material_cache_dir = "/tmp/test-material-cache"
     sim.physics = SimpleNamespace(configure_world=lambda *_: None)
+    monkeypatch.setattr(
+        SimulationManager, "_get_process_renderer", staticmethod(lambda: None)
+    )
     cfg = SimulationManagerCfg(render_cfg=RenderCfg(renderer="hybrid"))
     assert sim._convert_sim_config(cfg).log_startup_info is False
     cfg.dexsim_startup_info = True

@@ -189,12 +189,22 @@ def generate_dataset(config: Mapping[str, Any]) -> dict[str, Any]:
         Actual committed trajectory/transition counts, rejected candidate count,
         rejection evidence path and elapsed wall time.
     """
-    cfg = DynamicsGenerationCfg(**dict(config))
+    settings = dict(config)
+    collector = settings.pop("collector", "newton")
+    if collector == "newton":
+        teacher_type = _NewtonTeacher
+    elif collector == "scene":
+        from ._scene import DynamicsSimulation
+
+        teacher_type = DynamicsSimulation
+    else:
+        raise ValueError("collector must be newton or scene")
+    cfg = DynamicsGenerationCfg(**settings)
     cfg.validate()
     output = Path(cfg.output_dir)
     progress_path = output / "generation-progress.json"
     started = time.perf_counter()
-    with _NewtonTeacher(
+    with teacher_type(
         cfg.robot,
         device=cfg.device,
         num_envs=cfg.num_envs,

@@ -13,11 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Differentiable Newton kinematics for EmbodiChain.
+"""Differentiable Newton kinematics and registered solver dynamics.
 
 Bridges task-defined Warp kinematics into PyTorch autograd and exposes a
 :class:`tape_context` manager for advanced users composing their own kernels.
-The package does not advance the Newton dynamics solver.
+``FunctionalDynamics`` advances a registered solver through the public Scene
+functional interface; the kinematics bridge retains its separate contract.
 """
 
 from __future__ import annotations
@@ -26,8 +27,11 @@ from .bridge import (
     NewtonStepFunc,
     tape_context,
 )
+from .dynamics import FunctionalDynamics, detach_dynamics_state
 
 __all__ = [
     "NewtonStepFunc",
     "tape_context",
+    "FunctionalDynamics",
+    "detach_dynamics_state",
 ]

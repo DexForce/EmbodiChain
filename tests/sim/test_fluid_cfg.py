@@ -45,16 +45,14 @@ def test_fluid_round_trip_keeps_native_render_options():
     assert cfg.render.mesh_surface["iso_density"] == 0.57
 
 
-def test_native_sph_and_yaml_mapping_use_same_solver():
-    from dexsim.engine.newton_physics import DexUniSolverCfg, SPHSolverCfg
+def test_native_dexuni_and_yaml_mapping_use_same_fluid_options():
+    from dexsim.engine.newton_physics import DexUniSolverCfg
 
     if "sph_cfg" not in getattr(DexUniSolverCfg, "__dataclass_fields__", {}):
         pytest.skip("This DexSim build does not compose SPH through DexUni.")
 
-    source = SPHSolverCfg(sph_method="dfsph", viscosity=0.0006)
-    native = NewtonPhysicsCfg(solver_cfg=DexUniSolverCfg(sph_cfg=source)).to_dexsim_cfg(
-        0
-    )
+    source = DexUniSolverCfg(sph_cfg={"sph_method": "dfsph", "viscosity": 0.0006})
+    native = NewtonPhysicsCfg(solver_cfg=source).to_dexsim_cfg(0)
     mapping = NewtonPhysicsCfg(
         solver_cfg={
             "solver_type": "dexuni",
@@ -63,22 +61,8 @@ def test_native_sph_and_yaml_mapping_use_same_solver():
     ).to_dexsim_cfg(0)
     assert type(native.solver_cfg) is DexUniSolverCfg
     assert type(mapping.solver_cfg) is DexUniSolverCfg
-    assert native.solver_cfg.sph_cfg == source
-    assert mapping.solver_cfg.sph_cfg == source
-
-
-@pytest.mark.parametrize("as_mapping", [False, True])
-def test_direct_sph_solver_config_uses_registered_sdk_contract(as_mapping):
-    from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg, SPHSolverCfg
-
-    solver_cfg = {"solver_type": "sph"} if as_mapping else SPHSolverCfg()
-    resolved = NewtonPhysicsCfg(solver_cfg=solver_cfg).to_dexsim_cfg(0).solver_cfg
-    assert resolved.solver_type == "sph"
-    if as_mapping:
-        assert isinstance(resolved, RegisteredNewtonSolverCfg)
-        assert resolved.options == {}
-    else:
-        assert resolved == solver_cfg
+    assert native.solver_cfg.sph_cfg == source.sph_cfg
+    assert mapping.solver_cfg.sph_cfg == source.sph_cfg
 
 
 @pytest.mark.parametrize("kind", ["box", "sphere", "cylinder"])
@@ -186,7 +170,7 @@ def test_dexuni_nested_sph_density_conflict_is_rejected(monkeypatch):
     manager._spawn_scene.declare.assert_not_called()
 
 
-@pytest.mark.parametrize("solver,capability", [("sph", True), ("dexuni", False)])
+@pytest.mark.parametrize("solver,capability", [("vbd", True), ("dexuni", False)])
 def test_fluid_requires_a_dexuni_build_with_sph_support(solver, capability):
     from embodichain.lab.sim import SimulationManager
 
@@ -446,18 +430,22 @@ def test_solver_defaults_allow_fluid_owned_density_and_spacing(
 ):
     from dataclasses import asdict
     from unittest.mock import Mock
-    from dexsim.engine.newton_physics import DexUniSolverCfg, SPHSolverCfg
+    from dexsim.engine.newton_physics import DexUniSolverCfg
     from embodichain.lab.sim import SimulationManager
 
-    sph = SPHSolverCfg(sph_method="dfsph")
+    import dexsim.engine.newton_physics as native
+
+    # The public SDK needs only DexUni; its nested settings stay SDK-owned.
+    monkeypatch.delattr(native, "SPHSolverCfg", raising=False)
+    fluid_options = DexUniSolverCfg(sph_cfg={"sph_method": "dfsph"}).sph_cfg
     if representation == "native":
         if "sph_cfg" not in getattr(DexUniSolverCfg, "__dataclass_fields__", {}):
             pytest.skip("This DexSim build does not compose SPH through DexUni.")
-        solver = DexUniSolverCfg(sph_cfg=sph)
+        solver = DexUniSolverCfg(sph_cfg=fluid_options)
     elif representation == "mapping":
         solver = {"solver_type": "dexuni", "sph_cfg": {"sph_method": "dfsph"}}
     else:
-        solver = {"solver_type": "dexuni", "sph_cfg": asdict(sph)}
+        solver = {"solver_type": "dexuni", "sph_cfg": asdict(fluid_options)}
     manager = _fluid_manager_for_renderer("no-render")
     manager.sim_config.physics_cfg.solver_cfg = solver
     monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
@@ -476,9 +464,12 @@ def test_solver_defaults_allow_fluid_owned_density_and_spacing(
     assert descriptor.density == density
     assert descriptor.particle_spacing == spacing
     if representation != "mapping":
-        values = asdict(sph) if representation == "native" else solver["sph_cfg"]
-        assert values["rest_density"] == SPHSolverCfg().rest_density
-        assert values["particle_diameter"] == SPHSolverCfg().particle_diameter
+        values = (
+            asdict(fluid_options) if representation == "native" else solver["sph_cfg"]
+        )
+        defaults = DexUniSolverCfg(sph_cfg={"sph_method": "dfsph"}).sph_cfg
+        assert values["rest_density"] == defaults.rest_density
+        assert values["particle_diameter"] == defaults.particle_diameter
 
 
 @pytest.mark.parametrize("representation", ["native", "mapping"])
@@ -488,21 +479,25 @@ def test_solver_nondefault_physical_values_must_match_fluid(
 ):
     from dataclasses import asdict
     from unittest.mock import Mock
-    from dexsim.engine.newton_physics import DexUniSolverCfg, SPHSolverCfg
+    from dexsim.engine.newton_physics import DexUniSolverCfg
     from embodichain.lab.sim import SimulationManager
 
     density, spacing = 800.0, 0.003
-    sph = SPHSolverCfg(
-        sph_method="dfsph", rest_density=density, particle_diameter=spacing
-    )
+    fluid_options = DexUniSolverCfg(
+        sph_cfg={
+            "sph_method": "dfsph",
+            "rest_density": density,
+            "particle_diameter": spacing,
+        }
+    ).sph_cfg
     if conflict is not None:
-        setattr(sph, conflict, 1200.0 if conflict == "rest_density" else 0.02)
+        setattr(fluid_options, conflict, 1200.0 if conflict == "rest_density" else 0.02)
     if representation == "mapping":
-        solver = {"solver_type": "dexuni", "sph_cfg": asdict(sph)}
+        solver = {"solver_type": "dexuni", "sph_cfg": asdict(fluid_options)}
     else:
         if "sph_cfg" not in getattr(DexUniSolverCfg, "__dataclass_fields__", {}):
             pytest.skip("This DexSim build does not compose SPH through DexUni.")
-        solver = DexUniSolverCfg(sph_cfg=sph)
+        solver = DexUniSolverCfg(sph_cfg=fluid_options)
     manager = _fluid_manager_for_renderer("no-render")
     manager.sim_config.physics_cfg.solver_cfg = solver
     monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)

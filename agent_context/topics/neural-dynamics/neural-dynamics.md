@@ -36,9 +36,48 @@ trainer for controlled comparisons and its legacy checkpoint contract.
 
 The extension imports neither examples nor simulation. Generation uses Newton's
 built-in Featherstone/MuJoCo solvers directly without a DexSim custom solver or
-Scene API. Native learned-solver deployment and functional Gym integration are
-separate consumers. There are no NeRD-specific core `compute/dynamics`,
+Scene API. Native learned-solver deployment and functional Gym integration use the
+Scene consumer described below. There are no NeRD-specific core `compute/dynamics`,
 `data_pipeline/dynamics`, `learning/dynamics` modules or core `dynamics` command.
+
+## Scene solver integration
+
+`embodichain_solvers.physics.nerd.provider` registers `nerd` through
+`dexsim.newton_solvers` and adapts the shared model/codec to native stepping and
+the SDK's complete functional dynamics service. Its private `_binding.py`
+verifies ordered joints, contact slots, timestep, gravity and the recorded
+physical signature. This extension ships in the same wheel; core simulation
+never imports concrete model or solver implementations. The
+[solver extension](../../../extensions/embodichain_solvers/README.md) owns this
+boundary. The generic first-order Newton FK gradient bridge remains in core
+`lab/sim/diff/kinematics.py`.
+The project-pinned DexSim 0.6 APIs provide named providers and functional
+Scene services; ordinary built-in solvers retain the mainline DexUni
+configuration contract.
+
+`lab/sim/diff/dynamics.py` owns the solver facade; the shared
+`lab/gym/envs/differentiable_env.py::DifferentiableEnv` hosts it with explicit
+`step_mode="dynamics"`. The NeRD tasks select that mode in their constructors.
+The default remains pure Warp kinematics. Mode hooks, state ownership and reset
+policies belong to [differentiable environments](../differentiable-env/differentiable-env.md).
+Collector, trainer and Actor-Critic ownership remain in
+[RL learning](../rl-learning/rl-learning.md).
+
+The NeRD showcase owns Scene-specific consumers in `_support/_scene.py`, asset
+descriptors in `_scene_assets.py`, and Cartpole/Ant Gym factories in
+`_cartpole_env.py` and `_ant_env.py`. `generate` keeps its SDK-free default;
+`collector: scene` selects the Scene teacher while reusing the same sampling,
+committed progress and shard writer. Scene and direct-Newton signatures are
+separate domains and cannot be relabeled. `eval` with `mode: rollout` performs
+matched live evaluation; `train-policy` loads the showcase factories for APG.
+The configurations remain under the example, outside the official task catalog.
+
+Solver-specific tests live in `tests/solvers/physics/nerd`; generic gradient
+tests live in `tests/sim/diff`
+and `tests/gym/envs/test_differentiable_dynamics_env.py`; Scene collection and
+APG integration use the showcase. SDK-dependent tests use the pinned Newton
+provider and Scene interfaces. Published artifacts and historical results retain
+their recorded runtime identity; a source migration does not requalify accuracy.
 
 ## RigidFormer author model
 

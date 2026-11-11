@@ -73,12 +73,55 @@ embodichain run-example learning/nerd prepare --robot cartpole --resource-root .
 embodichain run-example learning/nerd generate --robot cartpole --resource-root ./outputs/nerd-resources --device cpu --output-dir ./outputs/nerd/cartpole/generated
 ```
 
-Collection uses Newton's built-in analytical solver without a custom DexSim
+Default collection uses Newton's built-in analytical solver without a custom DexSim
 solver or Scene initialization. Its direct-builder physical identity differs
 from the published Scene-generated dataset. Preserve recorded asset, solver,
 version and normalizer identities when comparing models. Continuing collection
 requires a matching collector source; readable legacy manifests do not imply
 cross-version collection resume.
+
+## Scene dynamics and policy learning
+
+Scene collection, live rollouts and differentiable Gym factories use the
+project-pinned `dexsim_engine==0.6.0rc1` APIs for named Newton providers and
+the functional dynamics service. The built-in analytical workflow above remains
+available independently.
+
+The `dynamics.generate.scene.*.yaml` presets explicitly select `collector: scene`.
+They share sampling, committed progress and HDF5 storage with the direct teacher,
+while recording their own Scene physics signature. For example:
+
+```bash
+embodichain run-example learning/nerd generate --config examples/learning/nerd/configs/cartpole/dynamics.generate.scene.smoke.yaml
+embodichain run-example learning/nerd train --config examples/learning/nerd/configs/cartpole/dynamics.train.smoke.yaml
+embodichain run-example learning/nerd export --checkpoint outputs/dynamics/cartpole/smoke/train/best.pt --output outputs/dynamics/cartpole/smoke/export
+embodichain run-example learning/nerd eval --config examples/learning/nerd/configs/cartpole/dynamics.rollout.smoke.yaml
+```
+
+Use a fresh collection/output directory and train against that same Scene data.
+Direct-builder and Scene datasets cannot be interchanged by editing metadata.
+The `dynamics.rollout.pretrained.yaml` presets reconstruct the published export's
+recorded physical domain; a matching robot name alone does not qualify a model.
+
+`_support/_cartpole_env.py` and `_ant_env.py` provide the example's Gym factories.
+Set `trainer.learning_env.cfg.checkpoint` in `agents/apg.nerd.yaml` to a matching
+Scene export, then run:
+
+```bash
+embodichain run-example learning/nerd train-policy --config examples/learning/nerd/configs/cartpole/agents/apg.nerd.yaml
+```
+
+Both task factories inherit `DifferentiableEnv` and explicitly select
+`step_mode="dynamics"`; its default pure-kinematic Warp mode remains available
+for other tasks. The mode does not change the configured solver.
+
+The provider in `embodichain_solvers.physics.nerd.provider` shares one transition
+between native and functional stepping. Generic differentiable simulation APIs
+remain in core; the model/codec stay in `embodichain_models.dynamics.nerd`.
+Functional trajectories retain their own physical/history tensors; publishing
+detached live state does not overwrite tensors needed by backward. Finish
+backward before resetting terminal rows or updating model parameters, and use
+`detach_state()` for an explicit policy-rollout boundary.
 
 [Reference experiments](research/README.md) and the
 [frozen acceptance protocol](research/acceptance.md) own research restrictions,

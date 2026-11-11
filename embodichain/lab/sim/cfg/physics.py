@@ -378,7 +378,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
 
     A mapping is converted to the matching DexSim Newton solver config. Include
     ``solver_type`` or ``class_type`` to select the solver, then add any
-    parameters accepted by that DexSim solver config. If omitted, EmbodiChain
+    parameters accepted by that DexSim solver config. Registered providers use
+    their entry-point name and an ``options`` mapping. If omitted, EmbodiChain
     preserves DexSim's ``DexUniSolverCfg`` default and its scene-based dispatch.
     Native solver config objects use the same supported solver families.
     Unset ownership selectors retain automatic scene partitioning;
@@ -578,7 +579,22 @@ def _newton_solver_cfg_to_dexsim(
     if solver_cfg is None:
         return None
 
+    from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
     if not isinstance(solver_cfg, Mapping):
+        if isinstance(solver_cfg, RegisteredNewtonSolverCfg):
+            name = _normalize_newton_solver_type(str(solver_cfg.solver_type))
+            if name in solver_cfg_map:
+                if {"solver_type", "class_type"}.intersection(solver_cfg.options):
+                    raise ValueError(
+                        "Builtin solver options cannot override the registered name."
+                    )
+                return _newton_solver_cfg_to_dexsim(
+                    {"solver_type": name, **dict(solver_cfg.options)}, solver_cfg_map
+                )
+            return RegisteredNewtonSolverCfg(
+                solver_type=name, options=dict(solver_cfg.options)
+            )
         if not hasattr(solver_cfg, "solver_type"):
             logger.log_error(
                 "Newton solver_cfg must be a mapping or a DexSim Newton solver "
@@ -600,9 +616,16 @@ def _newton_solver_cfg_to_dexsim(
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
     if normalized_solver_type not in solver_cfg_map:
-        from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
-
-        return RegisteredNewtonSolverCfg(normalized_solver_type, solver_cfg_data)
+        unexpected = set(solver_cfg_data) - {"options"}
+        if unexpected:
+            raise ValueError(
+                "Registered solver settings belong in options; unexpected fields: "
+                f"{sorted(unexpected)}."
+            )
+        return RegisteredNewtonSolverCfg(
+            solver_type=normalized_solver_type,
+            options=solver_cfg_data.get("options", {}),
+        )
     solver_cfg_type = solver_cfg_map[normalized_solver_type]
     return solver_cfg_type(**solver_cfg_data)
 

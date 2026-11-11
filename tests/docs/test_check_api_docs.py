@@ -65,6 +65,17 @@ def _file_snapshot(root: Path) -> dict[Path, bytes]:
     }
 
 
+def test_default_package_roots_cover_bundled_extensions() -> None:
+    """Moving exports into a bundled extension must not bypass API coverage."""
+    roots = {root.module: root.path for root in _checker.DEFAULT_PACKAGE_ROOTS}
+    for project in (_REPO_ROOT / "extensions").glob("embodichain_*"):
+        if not project.is_dir():
+            continue
+        nested = project / project.name
+        expected = nested if (nested / "__init__.py").is_file() else project
+        assert roots[project.name] == expected
+
+
 def test_discover_public_modules_uses_static_all(tmp_path: Path) -> None:
     package_path = tmp_path / "sample"
     _write(package_path / "__init__.py", '__all__ = ["Alpha", "helper"]\n')
