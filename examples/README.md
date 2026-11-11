@@ -101,6 +101,16 @@ recovery and portability diagnostics keep their evidence separate from expert da
 
 ## Newton cable runtime
 
+The [create-cable tutorial](../scripts/tutorials/sim/create_cable.py) creates a
+procedural cable with one fixed segment, steps it under gravity, reads world
+segment state and restores the episode creation state. Run it with the native
+viewer or with two headless environments:
+
+```bash
+python scripts/tutorials/sim/create_cable.py
+python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
+```
+
 The cable examples use CUDA and DexSim `0.6.0rc1` (engine commit
 `1b968250ada2b06b210bc7aa08ef219769f01217`). The DexForce package index
 provides Linux x86_64 wheels for Python 3.11 and 3.12. To install the pinned

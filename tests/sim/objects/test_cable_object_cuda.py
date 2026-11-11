@@ -53,8 +53,8 @@ pytestmark = [
 ]
 
 
-def _volume_import() -> UsdImportCfg:
-    path = Path(__file__).resolve().parents[2] / "fixtures/usd/volume_particle.usda"
+def _volume_import(tmp_path: Path) -> UsdImportCfg:
+    path = tmp_path / "volume_particle.usda"
     return UsdImportCfg(name="volume", source=UsdSourceCfg(file_path=str(path)))
 
 
@@ -116,7 +116,7 @@ class _CableObjectCUDAScenario:
         with pytest.raises(NotImplementedError, match="same arena"):
             self.sim.add_fluid_object(FluidObjectCfg(uid="water"))
         with pytest.raises(NotImplementedError, match="(?i)cable"):
-            self.sim.add_usd(_volume_import())
+            self.sim.add_usd(_volume_import(tmp_path))
         assert "water" not in self.sim.asset_uids
         assert cable.data is None and cable.num_instances == 2
         assert self.sim.get_asset("wire") is cable
@@ -207,7 +207,7 @@ class _CableObjectCUDAScenario:
         del self.sim
 
     def test_imported_particles_survive_rejected_cable(self, tmp_path: Path) -> None:
-        imported = self.sim.add_usd(_volume_import())
+        imported = self.sim.add_usd(_volume_import(tmp_path))
         soft = imported["/World/Soft"]
         with pytest.raises(NotImplementedError, match="(?i)cable"):
             self.sim.add_cable_object(
@@ -437,14 +437,18 @@ def _assert_cable_case_in_subprocess(case_name: str, tmp_path: Path) -> None:
 class TestCableObjectCUDA:
     """NoRender cable lifecycle coverage, with a fresh native process per case."""
 
-    def test_replicated_state_force_and_cleanup(self, tmp_path: Path) -> None:
+    def test_replicated_state_force_and_cleanup(
+        self, volume_particle_usd: Path
+    ) -> None:
         _assert_cable_case_in_subprocess(
-            "test_replicated_state_force_and_cleanup", tmp_path
+            "test_replicated_state_force_and_cleanup", volume_particle_usd.parent
         )
 
-    def test_imported_particles_survive_rejected_cable(self, tmp_path: Path) -> None:
+    def test_imported_particles_survive_rejected_cable(
+        self, volume_particle_usd: Path
+    ) -> None:
         _assert_cable_case_in_subprocess(
-            "test_imported_particles_survive_rejected_cable", tmp_path
+            "test_imported_particles_survive_rejected_cable", volume_particle_usd.parent
         )
 
     @pytest.mark.usefixtures("requires_dexuni_two_way")

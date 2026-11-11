@@ -342,11 +342,10 @@ def _usd_import_manager() -> SimulationManager:
     return sim
 
 
-def _write_cable_usd(tmp_path: Path, *, include_particles: bool = False) -> Path:
-    particle_source = (
-        Path(__file__).resolve().parents[2] / "fixtures/usd/volume_particle.usda"
+def _write_cable_usd(tmp_path: Path, *, particle_source: Path | None = None) -> Path:
+    source = (
+        particle_source.read_text() if particle_source is not None else "#usda 1.0\n"
     )
-    source = particle_source.read_text() if include_particles else "#usda 1.0\n"
     path = tmp_path / "cables.usda"
     path.write_text(source + """
 def BasisCurves "Cable" (
@@ -365,7 +364,7 @@ def BasisCurves "Cable" (
 @pytest.mark.parametrize("cable_first", [True, False])
 @pytest.mark.parametrize("cable_source", ["typed", "usd"])
 def test_usd_particles_and_cables_reject_mix_before_scene_mutation(
-    tmp_path: Path, cable_first: bool, cable_source: str
+    tmp_path: Path, volume_particle_usd: Path, cable_first: bool, cable_source: str
 ) -> None:
     from dexsim.spawn import SoftBodyDesc
     from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
@@ -374,8 +373,9 @@ def test_usd_particles_and_cables_reject_mix_before_scene_mutation(
     sim = _usd_import_manager()
     scene = sim._spawn_scene
     builder = scene.builder
-    source = Path(__file__).resolve().parents[2] / "fixtures/usd/volume_particle.usda"
-    recipe = UsdImportCfg(name="volume", source=UsdSourceCfg(file_path=str(source)))
+    recipe = UsdImportCfg(
+        name="volume", source=UsdSourceCfg(file_path=str(volume_particle_usd))
+    )
     cable_cfg = _cfg()
     cable_cfg.visual_material = VisualMaterialCfg(
         uid="cable_material", base_color=[1, 0, 0, 1]
@@ -429,11 +429,12 @@ def test_usd_particles_and_cables_reject_mix_before_scene_mutation(
 
 def test_one_usd_import_rejects_cables_and_particles_before_scene_mutation(
     tmp_path: Path,
+    volume_particle_usd: Path,
 ) -> None:
     from dexsim.kit.usd import parse_usd
     from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
 
-    source = _write_cable_usd(tmp_path, include_particles=True)
+    source = _write_cable_usd(tmp_path, particle_source=volume_particle_usd)
     parsed = parse_usd(str(source))
     assert len(parsed.cables) == len(parsed.particle_sets) == 1
     sim = _usd_import_manager()
