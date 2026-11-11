@@ -2774,6 +2774,15 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     segments = {segment.name: segment.waypoint_count for segment in slower.segments}
     assert segments["pour"] >= 9
     assert segments["return"] >= 8
+    slower_arm = _joint_trajectory(slower).positions[:, :, :ARM_DOF]
+    pour_end = segments["pour"] - 1
+    return_start = segments["pour"] + segments["dwell"]
+    return_end = return_start + segments["return"] - 1
+    assert not torch.allclose(slower_arm[:, pour_end // 2], slower_arm[:, pour_end])
+    assert not torch.allclose(
+        slower_arm[:, (return_start + return_end) // 2],
+        slower_arm[:, return_end],
+    )
 
 
 def test_pour_reads_held_state_from_the_bound_logical_resource() -> None:

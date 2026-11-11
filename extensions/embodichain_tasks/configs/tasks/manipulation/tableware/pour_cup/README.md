@@ -28,8 +28,8 @@ python -m embodichain.lab.scripts.run_fluid_task_program \
 部署的接触参数。程序的 `wait_stable` 负责放回后的稳定检查，在线运行器默认不再
 附加额外等待。
 
-倾倒和回正各至少运行 3 秒；`simulation.pour` 的 `rotation_duration` 仅调整这两段，
-不改变抓杯与移杯的控制频率。四路运行的平均接水量提高，但仍有可见飞溅。
+倾倒和回正各至少运行 4 秒；`simulation.pour` 的 `rotation_duration` 在原规划轨迹
+较短时拉伸整段运动，不再用终点保持帧凑时长。它不改变抓杯与移杯的控制频率。
 
 流体专用的 `franka_panda_fast_fluid` 组件将仿真夹指最大驱动力设为 160，接触
 动摩擦系数设为 3.0，以在更高加速度下保持抓取；这组任务参数不代表实机标定。

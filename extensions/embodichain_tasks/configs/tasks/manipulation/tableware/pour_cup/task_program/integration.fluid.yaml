@@ -63,7 +63,7 @@ profile:
     simulation.pour:
       kind: pour
       rotate_angle: 1.3962634015954636
-      rotation_duration: 3.0
+      rotation_duration: 4.0
     place:
       kind: place
       hand_interp_steps: 10
