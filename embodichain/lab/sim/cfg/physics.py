@@ -590,10 +590,12 @@ def _newton_solver_cfg_to_dexsim(
             )
         from dexsim.engine import newton_physics
 
-        if str(solver_cfg.solver_type).lower() == "sph":
-            _normalize_newton_solver_type("sph")
         provider_cfg_type = getattr(newton_physics, "ProviderNewtonSolverCfg", None)
-        if provider_cfg_type is not None and isinstance(solver_cfg, provider_cfg_type):
+        if (
+            provider_cfg_type is not None
+            and isinstance(solver_cfg, provider_cfg_type)
+            and str(solver_cfg.solver_type) == "provider"
+        ):
             return solver_cfg
         _normalize_newton_solver_type(str(solver_cfg.solver_type))
         return solver_cfg

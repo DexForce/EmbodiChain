@@ -76,6 +76,15 @@ def test_direct_sph_solver_config_is_rejected(as_mapping):
         NewtonPhysicsCfg(solver_cfg=solver_cfg).to_dexsim_cfg(0)
 
 
+def test_direct_provider_cannot_advertise_standalone_sph():
+    from dexsim.engine.newton_physics import ProviderNewtonSolverCfg
+
+    provider = ProviderNewtonSolverCfg(provider_factory=lambda: object())
+    provider.solver_type = "sph"
+    with pytest.raises(RuntimeError, match="Unsupported Newton solver type 'sph'"):
+        NewtonPhysicsCfg(solver_cfg=provider).to_dexsim_cfg(0)
+
+
 @pytest.mark.parametrize("kind", ["box", "sphere", "cylinder"])
 def test_lattice_is_deterministic_and_inside_volume(kind):
     points = sample_volume_particles(
