@@ -35,6 +35,7 @@ from ..motion.workspace.cfg import RobotWorkspaceCfg
 from .articulation import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
+    _mimic_compliance_from_dict,
     _raise_removed_articulation_cfg_fields,
     link_attrs_from_dict,
 )
@@ -149,6 +150,8 @@ class RobotCfg(ArticulationCfg):
                 cfg.source = _usd_source_from_value(value)
             elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
+            elif key == "mimic_compliance":
+                cfg.mimic_compliance = _mimic_compliance_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_physics_from_dict(value)
             elif hasattr(cfg, key):
