@@ -54,6 +54,10 @@ class FluidTrajectoryRecorder:
         self, env: object, env_ids: Sequence[int], *, reset: bool = False
     ) -> None:
         """Capture selected rows, including the reset frame when requested."""
+        if self._published:
+            raise RuntimeError(
+                "A finalized fluid trajectory cannot capture more frames."
+            )
         ids = tuple(int(index) for index in env_ids)
         if not ids:
             return

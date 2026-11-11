@@ -180,4 +180,9 @@ def test_selected_row_reset_restarts_only_its_particle_stream(tmp_path: Path):
     sidecar = recorder.finish(tmp_path / "trajectory.pt", [1, 1])
 
     assert len(sidecar["manifests"]) == 2
+    recorder.commit()
+    manifest = tmp_path / sidecar["manifests"][0]
+    with pytest.raises(RuntimeError, match="finalized"):
+        recorder.capture(env, [0], reset=True)
+    assert manifest.is_file()
     recorder.abort()
