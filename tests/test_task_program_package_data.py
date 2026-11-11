@@ -38,6 +38,7 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = (
+    Path("tasks/manipulation/drawer_sorting/task_program/program.yaml"),
     Path("tasks/manipulation/carton_stocking/task_program/program.yaml"),
     Path("tasks/manipulation/hand_over/task_program/program.bar.yaml"),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"),
@@ -56,6 +57,11 @@ _PROGRAMS = (
     ),
 )
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/drawer_sorting/task.ur5.yaml"): (
+        "drawer_sorting",
+        "task_program_drawer_sorting",
+        "ur5_dh_pgi_140_80_full_closure",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml"): (
         "repeated_tabletop_cube_pick_place",
         "repeated_pick_place_tabletop",
@@ -270,6 +276,18 @@ _RESOURCE_PATHS = frozenset(
         ),
         Path("components/execution_policies/real2sim_verified.yaml"),
         *_DUAL_ARM_RESOURCES,
+        Path("components/embodiments/ur5_dh_pgi_140_80_full_closure.yaml"),
+        *(
+            Path("tasks/manipulation/drawer_sorting") / name
+            for name in (
+                "env.yaml",
+                "catalog.yaml",
+                "README.md",
+                "assets/bedside_cabinet.urdf",
+                "task_program/integration.yaml",
+                "task_program/execution_policy.yaml",
+            )
+        ),
         *_PROGRAMS,
         *_DEPLOYMENTS,
         *(
@@ -425,6 +443,7 @@ def test_setup_stages_all_official_task_programs(
         "**/*.json",
         "**/*.yaml",
         "**/*.yml",
+        "**/*.urdf",
         "**/README.md",
     ]
     expected_outputs = {

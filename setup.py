@@ -228,6 +228,7 @@ def main():
                 "**/*.json",
                 "**/*.yaml",
                 "**/*.yml",
+                "**/*.urdf",
                 "**/README.md",
             ],
         },

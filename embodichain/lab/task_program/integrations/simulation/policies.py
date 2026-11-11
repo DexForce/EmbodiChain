@@ -64,6 +64,7 @@ from .stability import (
     SimulationStabilityConditionCfg,
     SimulationJointStabilityConditionCfg,
 )
+from embodichain.lab.task_program.semantics.scene import SceneLinkRef
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.atomic_skills.state import PlanningContext
@@ -301,6 +302,13 @@ class SimulationSegmentPolicyPort:
                         "Joint stability requires its exact bound articulation and joint."
                     )
                 self._joint_conditions[name] = (art, art.joint_names.index(cfg.joint))
+        self._reference_links = {
+            binding.entity_id: (
+                self._articulations[binding.articulation_id],
+                binding.native_link_name,
+            )
+            for binding in scene_binding.links
+        }
         self._post_policy_results: dict[int, dict[str, object]] = {}
         self._post_policy_success: dict[int, torch.Tensor] = {}
         self._validator_results: dict[int, dict[str, object]] = {}
@@ -1051,7 +1059,12 @@ class SimulationSegmentPolicyPort:
         self._validate_segment_membership(segment, validator, kind="validator")
         if type(validator) is CompiledObjectStateValidator:
             for ref in (validator.object, validator.reference):
-                if ref is not None and ref.entity_id not in self._objects:
+                bindings = (
+                    self._reference_links
+                    if type(ref) is SceneLinkRef
+                    else self._objects
+                )
+                if ref is not None and ref.entity_id not in bindings:
                     raise KeyError(
                         f"Canonical validator object {ref.entity_id!r} has no explicit object binding."
                     )
@@ -1264,11 +1277,28 @@ class SimulationSegmentPolicyPort:
             }
         elif validator.cfg.kind == "object_relative_position":
             assert validator.reference is not None
-            reference = self._read_pose(
-                self._objects[validator.reference.entity_id],
-                entity_id=validator.reference.entity_id,
-                require_finite=False,
-            ).to(device=pose.device, dtype=pose.dtype)
+            if type(validator.reference) is SceneLinkRef:
+                articulation, native_name = self._reference_links[
+                    validator.reference.entity_id
+                ]
+                reference = articulation.get_link_pose(
+                    native_name,
+                    env_ids=self._row_indices.detach().cpu().tolist(),
+                    to_matrix=True,
+                )
+                if (
+                    not isinstance(reference, torch.Tensor)
+                    or not reference.is_floating_point()
+                    or reference.shape != pose.shape
+                ):
+                    raise ValueError("Reference link pose must have shape (B, 4, 4).")
+            else:
+                reference = self._read_pose(
+                    self._objects[validator.reference.entity_id],
+                    entity_id=validator.reference.entity_id,
+                    require_finite=False,
+                )
+            reference = reference.to(device=pose.device, dtype=pose.dtype)
             accepted &= torch.isfinite(reference).all(dim=(1, 2))
             offset = pose.new_tensor(validator.cfg.position_offset)
             displacement = pose[:, :3, 3] - reference[:, :3, 3]

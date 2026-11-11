@@ -480,7 +480,7 @@ class CompiledObjectStateValidator:
         cfg: Typed measured-object validator configuration to snapshot.
         object: Canonical object reference resolved during static compilation.
         source_path: Validator location in the original program configuration.
-        reference: Canonical reference object, required only for relative
+        reference: Canonical reference object or link, required only for relative
             position validation.
     """
 
@@ -492,7 +492,7 @@ class CompiledObjectStateValidator:
     )
     object: SceneObjectRef
     source_path: ConfigPath
-    reference: SceneObjectRef | None = None
+    reference: SceneObjectRef | SceneLinkRef | None = None
 
     def __post_init__(self) -> None:
         """Snapshot the exact configuration and canonical object references."""
@@ -531,8 +531,10 @@ class CompiledObjectStateValidator:
             **{name: getattr(self.cfg, name) for name in fields},
         )
         if type(cfg) is ObjectRelativePositionValidatorCfg:
-            if type(self.reference) is not SceneObjectRef:
-                raise TypeError("reference must be exactly SceneObjectRef.")
+            if type(self.reference) not in (SceneObjectRef, SceneLinkRef):
+                raise TypeError(
+                    "reference must be exactly SceneObjectRef or SceneLinkRef."
+                )
             object.__setattr__(self, "reference", _copy_scene_ref(self.reference))
         elif self.reference is not None:
             raise ValueError("Only relative-position validators accept reference.")
@@ -832,7 +834,7 @@ class _ObjectStateValidatorTemplate:
         | ObjectUprightValidatorCfg
     )
     object: SceneObjectRef
-    reference: SceneObjectRef | None
+    reference: SceneObjectRef | SceneLinkRef | None
     source_path: ConfigPath
 
 
@@ -1957,7 +1959,7 @@ class TaskProgramCompiler:
                     if type(cfg) is ObjectRelativePositionValidatorCfg:
                         reference_ref = self._resolve_scene(
                             cfg.reference,
-                            expected_types=(SceneObjectRef,),
+                            expected_types=(SceneObjectRef, SceneLinkRef),
                             path=(*validator_path, "reference"),
                         )
                     validators.append(

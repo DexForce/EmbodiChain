@@ -1,0 +1,12 @@
+task_key: drawer_sorting
+title: Drawer Sorting
+summary: Open a cabinet drawer, store four everyday objects, and close the loaded
+  drawer.
+tags:
+- manipulation
+- long_horizon
+- task_program
+default_deployment: ur5
+deployments:
+  ur5:
+    config: task.ur5.yaml
