@@ -301,6 +301,9 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     on CUDA unless the caller explicitly supplies another device.
     """
 
+    mesh_bvh_constructor: Literal["sah", "median", "lbvh", "cubql"] | None = None
+    """Mesh and heightfield query BVH constructor. ``None`` keeps the SDK default."""
+
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step.
 
@@ -509,6 +512,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "capture_acquire_timeout": self.capture_acquire_timeout,
             "capture_wait_log_interval": self.capture_wait_log_interval,
         }
+        if self.mesh_bvh_constructor is not None:
+            newton_cfg_args["mesh_bvh_constructor"] = self.mesh_bvh_constructor
         if solver_cfg is not None:
             newton_cfg_args["solver_cfg"] = solver_cfg
 
