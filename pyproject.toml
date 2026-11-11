@@ -71,6 +71,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+trajectory-annotation = [
+  "av>=15.1,<18",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+]
 geometry = [
   # Optional mesh inputs for pure numerical geometry; no simulation/FCL backend.
   "trimesh>=4.9",
