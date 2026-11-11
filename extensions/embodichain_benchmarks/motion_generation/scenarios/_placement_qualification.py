@@ -26,7 +26,7 @@ from shapely import intersects_xy, set_precision
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
-from ._placement_geometry import PAN_BASIN_LOCAL_Z_MAX
+from ._placement_geometry import PAN_BASIN_LOCAL_Y_MAX, _pan_handle_axis
 
 __all__: list[str] = []
 
@@ -34,6 +34,7 @@ _SAMPLE_SPACING_M = 0.005
 _BARYCENTRIC_EPS = 1e-9
 # One picometre resolves overlay roundoff without adding a physical margin.
 _PROJECTION_GRID_M = 1e-12
+_FLOOR_PLANE_TOLERANCE_M = 0.002
 
 
 def _projection(triangles: np.ndarray):
@@ -76,6 +77,9 @@ def _placement_input_geometry(
     support_triangles: torch.Tensor,
     placing_targets: torch.Tensor,
     support_targets: torch.Tensor,
+    *,
+    pan_frame: str = "authored_z_up",
+    maximum_support_gap_m: float | None = None,
 ) -> dict[str, object]:
     """Audit complete XY containment and sampled vertical gaps; never select rows.
 
@@ -83,7 +87,18 @@ def _placement_input_geometry(
     frozen target transforms are copied to CPU once. The projected triangle
     unions retain holes and overhangs; neither object-origin nor AABB inclusion
     substitutes for footprint coverage. Heights are finite-sample evidence only.
+    ``pan_frame`` selects the authored OBJ or native GLB handle axis.
+    ``maximum_support_gap_m`` requires a nearby interior-floor witness when
+    qualifying settled geometry, rather than a collision-free target proposal.
+    All sampled gaps must still be nonnegative. Curved object undersides can
+    have larger gaps away from their supporting point.
+    Interior-floor samples lie within 2 mm of the pan's center floor plane.
     """
+    axis = _pan_handle_axis(pan_frame)
+    if maximum_support_gap_m is not None and (
+        not np.isfinite(maximum_support_gap_m) or maximum_support_gap_m < 0
+    ):
+        raise ValueError("Maximum support gap must be finite and nonnegative.")
     meshes = {}
     arrays = []
     for name, vertices, triangles in (
@@ -106,7 +121,7 @@ def _placement_input_geometry(
             "triangles_int64_le_sha256": hashlib.sha256(f.tobytes()).hexdigest(),
         }
     (bread, bread_faces), (pan, pan_faces) = arrays
-    basin_faces = pan_faces[(pan[pan_faces, 2] <= PAN_BASIN_LOCAL_Z_MAX).all(axis=1)]
+    basin_faces = pan_faces[(pan[pan_faces, axis] <= PAN_BASIN_LOCAL_Y_MAX).all(axis=1)]
     if not len(basin_faces):
         raise ValueError(
             "Placement input geometry has no triangles within the basin mask."
@@ -151,11 +166,36 @@ def _placement_input_geometry(
         finite = np.isfinite(bottom) & np.isfinite(top)
         gaps = bottom[finite] - top[finite]
         minimum = float(gaps.min()) if len(gaps) else None
+        maximum = float(gaps.max()) if len(gaps) else None
+        floor_gap = None
+        if maximum_support_gap_m is not None:
+            # Locate the interior floor independently of rim contacts. Follow
+            # the pan's declared up axis so a tilted floor remains one plane.
+            center = basin.representative_point()
+            center_xy = np.array([[center.x, center.y]])
+            center_z = _ray_heights(center_xy, basin_triangles, upper=True)[0]
+            normal = pan_pose[:3, 2 if axis == 1 else 1]
+            if np.isfinite(center_z) and abs(normal[2]) > 1e-6:
+                offsets = np.column_stack((samples[finite], top[finite])) - np.array(
+                    [center.x, center.y, center_z]
+                )
+                on_floor = np.abs(offsets @ normal) <= _FLOOR_PLANE_TOLERANCE_M
+                if on_floor.any():
+                    floor_gap = float(gaps[on_floor].min())
         rows.append(
             {
                 "env_index": row,
                 "qualified": bool(
-                    covered and finite.all() and minimum is not None and minimum >= 0
+                    covered
+                    and finite.all()
+                    and minimum is not None
+                    and minimum >= 0
+                    and (
+                        maximum_support_gap_m is None
+                        or (
+                            floor_gap is not None and floor_gap <= maximum_support_gap_m
+                        )
+                    )
                 ),
                 "footprint_covered": bool(covered),
                 "footprint_area_m2": float(footprint.area),
@@ -168,6 +208,8 @@ def _placement_input_geometry(
                 "sample_count": len(samples),
                 "samples_without_surface": int((~finite).sum()),
                 "minimum_sampled_vertical_gap_m": minimum,
+                "maximum_sampled_vertical_gap_m": maximum,
+                "minimum_sampled_floor_gap_m": floor_gap,
                 "negative_gap_samples": int((gaps < 0).sum()),
                 "placing_target_pose": bread_pose.tolist(),
                 "support_target_pose": pan_pose.tolist(),
@@ -177,13 +219,17 @@ def _placement_input_geometry(
         "method": "scaled_mesh_projected_triangle_union_and_vertical_rays",
         "scope": "complete_xy_footprint_and_sampled_height_only_not_continuous_3d_collision_or_physical_success",
         "frame": "arena",
+        "pan_mesh_frame": pan_frame,
         "meshes": meshes,
-        "basin_local_z_max_m": PAN_BASIN_LOCAL_Z_MAX,
+        (
+            "basin_local_y_max_m" if axis == 1 else "basin_local_z_max_m"
+        ): PAN_BASIN_LOCAL_Y_MAX,
         "basin_triangle_count": len(basin_faces),
         "sample_spacing_m": _SAMPLE_SPACING_M,
         "coverage_precision_grid_m": _PROJECTION_GRID_M,
         "samples": "all_mesh_vertices_xy_plus_footprint_boundary_and_interior_grid",
         "ray_barycentric_epsilon": _BARYCENTRIC_EPS,
         "minimum_gap_threshold_m": 0.0,
+        "maximum_gap_threshold_m": maximum_support_gap_m,
         "rows": rows,
     }

@@ -94,3 +94,20 @@ separately records manufacturer affiliation, model matching, asset production,
 archive distribution, modifications and license status. Missing upstream or
 license evidence stays explicitly unverified. The Python implementation's
 Apache header is not an asset license statement.
+
+## Standalone hand configuration
+
+`PikaGripperCfg` is a `ParallelJawGripperCfg` registered as `PikaGripper`.
+It exposes the native finger joints in `eef`, including source mimic followers,
+and declares no arm IK solver or serial FK chain. Simulation drive values are
+presets rather than manufacturer actuator specifications.
+
+```python
+from embodichain_robots import PikaGripperCfg
+
+cfg = PikaGripperCfg.from_dict({})
+```
+
+The same model-owned pure data supplies mounted or existing embodiment bindings.
+See [parallel-jaw binding and TCP resolution](../parallel_jaw_grippers.md) for
+command ownership, static metadata access, source verification and migration.

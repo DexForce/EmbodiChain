@@ -7,89 +7,9 @@ simulation:
   uid: DexforceW1V030Pika
   urdf_cfg:
     fname: DexforceW1V030_pika
-    components:
-    - component_type: left_hand
-      urdf_path: PikaGripper/PikaGripper.urdf
-      transform:
-      - - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 1.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
-    - component_type: right_hand
-      urdf_path: PikaGripper/PikaGripper.urdf
-      transform:
-      - - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 1.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
-  control_parts:
-    left_eef:
-    - LEFT_FINGER1_JOINT
-    - LEFT_FINGER2_JOINT
-    right_eef:
-    - RIGHT_FINGER1_JOINT
-    - RIGHT_FINGER2_JOINT
-  solver_cfg:
-    left_arm:
-      tcp:
-      - - 0.0
-        - 1.0
-        - 0.0
-        - 0.00064
-      - - -1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.16
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
-    right_arm:
-      tcp:
-      - - 0.0
-        - 1.0
-        - 0.0
-        - 0.00064
-      - - -1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.16
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
+    name_case:
+      joint: upper
+      link: lower
   init_pos:
   - 0.25
   - 0.0
@@ -239,6 +159,7 @@ skill_profile:
       capabilities:
       - interaction.grasp
       command_preset: left_parallel_gripper
+      gripper: left_eef
   - resource_id: right
     endpoints:
     - endpoint_id: motion
@@ -252,6 +173,7 @@ skill_profile:
       capabilities:
       - interaction.grasp
       command_preset: right_parallel_gripper
+      gripper: right_eef
   - resource_id: primary_manipulator
     members:
     - right
@@ -282,33 +204,13 @@ skill_profile:
       capabilities:
       - interaction.grasp
       command_preset: left_parallel_gripper
-  command_presets:
-  - preset_id: left_parallel_gripper
-    control_part: left_eef
-    commands:
-      open:
-      - 0.05
-      - 0.05
-      grasp:
-      - 0.0
-      - 0.0
-  - preset_id: right_parallel_gripper
-    control_part: right_eef
-    commands:
-      open:
-      - 0.05
-      - 0.05
-      grasp:
-      - 0.0
-      - 0.0
+  command_presets: []
   runtime_services:
     grasp_pose_generators:
       left_eef:
         kind: antipodal_parallel_jaw
-        model: pika_gripper
       right_eef:
         kind: antipodal_parallel_jaw
-        model: pika_gripper
     control_part_evidence:
       kind: joint_position_constraint
       control_parts:
@@ -318,3 +220,50 @@ skill_profile:
       - 0.05
       - 0.05
       minimum_displacement: 0.004
+grippers:
+  left_eef:
+    class_type: PikaGripper
+    mode: mounted
+    motion_part: left_arm
+    control_part: left_eef
+    component_type: left_hand
+    transform:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  right_eef:
+    class_type: PikaGripper
+    mode: mounted
+    motion_part: right_arm
+    control_part: right_eef
+    component_type: right_hand
+    transform:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0

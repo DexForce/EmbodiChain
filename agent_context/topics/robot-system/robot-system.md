@@ -5,6 +5,7 @@
 | Change or question | Start here |
 |---|---|
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
+| Pure parallel-jaw defaults, mounted/existing bindings and standalone hand configs | `embodichain/robot_registry.py` → `resolve_gripper_defaults`; `embodichain/lab/gym/utils/_gripper_composition.py`; `embodichain/lab/sim/cfg/gripper.py` |
 | Explicit hand geometry capture and lazy paired grasp ownership | `embodichain/lab/sim/utility/grasp_geometry.py` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
 | Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
@@ -60,6 +61,20 @@ omission preserves existing construction behavior. See
 Robotiq embodiment explicitly adds its tool asset and all linkage followers.
 Its flange mount/TCP must match the source calibration; an
 existing similarly named Franka/FR3 or Panda-Hand configuration is not equivalent.
+Parallel-jaw model values live beside their assets in `embodichain_robots`.
+`ParallelJawGripperCfg` exposes flat physical fields, native commands and explicit
+`grasp_generators` support declarations; there is no separate model Cfg.
+`resolve_gripper_defaults` reads the same pure data through the existing robot
+catalog without importing Cfg implementations or resolving assets. Embodiment
+`grippers` selects a mounted component or an existing hand and explicitly binds
+motion/control parts. Only endpoints naming that binding receive presets and
+grasp services; names never imply capabilities. Shared endpoints reuse generated
+hand services. Empty generator support retains command presets for fixed-pose
+calls without supplying a sampler. Assembly checks actual geometry,
+command ordering, mimics and fixed references before applying the hand-derived
+solver TCP. Mounted TCP checks require the actual solver-end-to-hand fixed chain;
+the mount transform alone does not identify that frame relationship.
+See [binding and TCP ownership](../../../docs/source/resources/robot/parallel_jaw_grippers.md).
 Observed aperture mapping does not substitute a full-close actuator command for
 measured linkage positions. See [Real2Sim motion](../data-pipeline/real2sim.md)
 for coupled contact prediction and transfer qualification.
@@ -202,7 +217,12 @@ The hand root and solver end link must connect through fixed URDF joints;
 fixed virtual TCP links may lie upstream or downstream. A stationary opposite-arm
 TCP is not a valid hand reference. The declared TCP must also remain fixed
 throughout hand actuation. Model-specific commands and TCP
-calibration remain in concrete robot/embodiment configuration.
+calibration come from the selected concrete hand description and explicit
+embodiment binding. `utility/gripper_geometry.py` resolves native joint bounds
+alongside opening commands, builds collision surfaces and projects scalar inputs.
+Geometry validation uses those effective bounds, including model corrections,
+while retaining the pinned source URDF. GraspKit consumes those numerical inputs; it does not
+import hardware Cfgs or look up hardware by model ID.
 `ordered_pad_line_world` validates the same explicit topology and reads only the
 two live pad poses in declaration order; use it for a jaw line without sampled
 FK or surface capture. This order is distinct from the sampled surfaces' TCP-X order.
@@ -214,8 +234,6 @@ a second robot registry or infer topology from model/control-part names.
 Retain that provider with its owning Robot/environment adapter across bridge,
 engine and episode resets while the model, calibration and commands are unchanged.
 Single-arm facade calls never trigger capture. A different Robot needs its own
-providers; model names are not cache identities. GraspKit receives explicit
-
 providers; model names are not cache identities. The provider's `clear_cache()`
 releases asset-query state without reading the Robot or recapturing its hand
 geometry; it does not replace rebuilding after calibration/command changes.

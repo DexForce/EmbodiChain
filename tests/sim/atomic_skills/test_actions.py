@@ -114,10 +114,7 @@ from embodichain.lab.sim.motion.planners import (
     TrapezoidalPlanOptions,
     TrapezoidalPlanner,
 )
-from embodichain.toolkits.graspkit import (
-    ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-)
+from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 from embodichain.lab.sim.motion.planners.base_planner import CollisionWorldInfo
 from embodichain.lab.sim.motion.planners import (
@@ -183,7 +180,18 @@ class _StubGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     """Deterministic planning-service double used by atomic-skill tests."""
 
     def __init__(self) -> None:
-        super().__init__(ParallelJawGripperModelCfg(model_id="test_parallel_jaw"))
+        super().__init__(
+            **{
+                key: (
+                    {
+                        "model_id": "test_parallel_jaw",
+                        "min_opening_width": 0.001,
+                        "max_opening_width": 0.1,
+                    }
+                )[key]
+                for key in ("model_id", "min_opening_width", "max_opening_width")
+            }
+        )
 
     def get_valid_grasp_poses(
         self,
@@ -1624,9 +1632,9 @@ def test_refined_grasp_calibration_preserves_eef_and_canonical_geometry(
         def __init__(self):
             ParallelJawGraspPoseGenerator.__init__(
                 self,
-                ParallelJawGripperModelCfg(
-                    model_id="calibrated_fixture", max_opening_width=0.05
-                ),
+                model_id="calibrated_fixture",
+                max_opening_width=0.05,
+                min_opening_width=0.001,
             )
 
             if physical_geometry:
@@ -7913,6 +7921,63 @@ def test_coordinated_pick_returns_full_dof_plan_and_omits_empty_hold(
         for previous, current in zip(plan.segments, plan.segments[1:])
     )
     assert plan.segments[-1].stop == plan.commands.frame_count
+
+
+@pytest.mark.parametrize("difference", ["tcp", "surfaces", "unknown_provider"])
+def test_coordinated_pick_rejects_unequal_physical_paired_queries(
+    monkeypatch, difference
+):
+    """Equal model labels and widths cannot authorize reusing the left hand TCP."""
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGenerator,
+        FixedGripperCollisionGeometry,
+    )
+
+    def sampler(right):
+        tcp = torch.eye(4)
+        points = torch.zeros(1, 3)
+        if right and difference == "tcp":
+            tcp[0, 3] = 0.1
+        if right and difference == "surfaces":
+            points[0, 0] = 0.1
+        return AntipodalGraspPoseGenerator(
+            model_id="identical_label",
+            min_opening_width=0.001,
+            max_opening_width=0.1,
+            collision_geometry=FixedGripperCollisionGeometry(
+                points, {"grasp_from_tcp": tcp.tolist()}
+            ),
+        )
+
+    left, right = (
+        (_StubGraspPoseGenerator(), _StubGraspPoseGenerator())
+        if difference == "unknown_provider"
+        else (sampler(False), sampler(True))
+    )
+    assert left.gripper_data == right.gripper_data
+    left.get_dual_arm_valid_grasp_poses = Mock()
+    action = _bind_action(_dual_motion_generator(), CoordinatedPickment())
+    monkeypatch.setattr(
+        action.planning_services,
+        "grasp_pose_generator",
+        Mock(side_effect=[left, right]),
+    )
+    with pytest.raises(ValueError, match="geometry and TCP mappings"):
+        action._resolve_dual_arm_grasp_poses(
+            ObjectSemantics(
+                affordance=AntipodalAffordance(), geometry={}, entity_id="object"
+            ),
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            CoordinatedPickmentOptions(),
+            "left_hand",
+            "right_hand",
+            torch.zeros(NUM_ENVS, ARM_DOF),
+            torch.zeros(NUM_ENVS, ARM_DOF),
+            "left_arm",
+            "right_arm",
+        )
+    left.get_dual_arm_valid_grasp_poses.assert_not_called()
 
 
 def test_coordinated_pick_rejects_link_scoped_grasp_mesh() -> None:

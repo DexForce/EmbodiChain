@@ -443,6 +443,20 @@ def _resolve_task_program_components(
         runtime_services = _owned_mapping(
             integration["runtime_services"], path="integration.runtime_services"
         )
+        if "demo_skills" in runtime_services:
+            from embodichain.data._references import _resolve_data_reference
+
+            runtime_services["demo_skills"] = _owned_mapping(
+                runtime_services["demo_skills"], path="runtime_services.demo_skills"
+            )
+            for alias, entry in runtime_services["demo_skills"].items():
+                if not isinstance(entry, dict) or "asset_manifest" not in entry:
+                    raise ValueError(f"Demo Skill {alias!r} requires asset_manifest")
+                entry["asset_manifest"] = str(
+                    _resolve_data_reference(
+                        entry["asset_manifest"], base_dir=integration_base
+                    )
+                )
         if "registered_semantic_lowerers" in runtime_services:
             for lowerer in runtime_services["registered_semantic_lowerers"]:
                 if isinstance(lowerer, dict) and lowerer.get("kind") == "demo_skill":
@@ -615,6 +629,9 @@ def _load_configured_task_program_deployment(
         task_program,
         base_dir=selected_base_dir,
     )
+    from .demo_skill import _prepare_named_demo_skills, _bind_named_demo_sources
+
+    named_demo_sources = _prepare_named_demo_skills(task)
     selected_skill_profile = _mapping(
         skill_profile,
         path="embodiment component.skill_profile",
@@ -665,7 +682,11 @@ def _load_configured_task_program_deployment(
         ),
     )
     factory = cast(_ConfiguredTaskProgramAdapterFactory, integration.adapter_factory)
-    if factory.nominal_motion_sources or isinstance(program_path, Mapping):
+    if (
+        factory.nominal_motion_sources
+        or named_demo_sources
+        or isinstance(program_path, Mapping)
+    ):
         from .nominal import _ConfiguredTaskProgramNominalSources
 
         catalog = integration.registration.catalog
@@ -677,6 +698,44 @@ def _load_configured_task_program_deployment(
                 "configured nominal sources require the integration's program_id"
             )
         compiled = catalog.preflight(program)
+        if named_demo_sources:
+            from dataclasses import replace
+
+            factory = replace(
+                factory,
+                nominal_motion_sources=_bind_named_demo_sources(
+                    compiled, named_demo_sources, factory.nominal_motion_sources
+                ),
+            )
+            from dataclasses import asdict
+            import hashlib
+            import json
+
+            source_identity = [
+                {
+                    key: value
+                    for key, value in asdict(item).items()
+                    if key not in {"asset_manifest", "prototype_manifest"}
+                }
+                for item in factory.nominal_motion_sources
+            ]
+            fingerprint = hashlib.sha256(
+                json.dumps(
+                    {
+                        "integration": integration.integration_fingerprint,
+                        "nominal_motion_sources": source_identity,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode()
+            ).hexdigest()
+            factory = replace(factory, integration_fingerprint=fingerprint)
+            integration = replace(
+                integration,
+                adapter_factory=factory,
+                integration_fingerprint=fingerprint,
+            )
         if factory.nominal_motion_sources:
             _ConfiguredTaskProgramNominalSources(
                 compiled, factory.nominal_motion_sources
