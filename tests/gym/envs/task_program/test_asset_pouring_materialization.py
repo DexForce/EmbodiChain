@@ -377,7 +377,11 @@ def test_pouring_preserves_schema_default_position_tolerance(pouring, tmp_path):
 
     source, requirements = pouring
     program_path = source.parent / "program.yaml"
-    program = yaml.safe_load(program_path.read_text())
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    program = normalize_task_program(
+        yaml.safe_load(program_path.read_text())
+    ).declaration
     for segment in program["program"]["items"]:
         for validator in segment.get("validators", []):
             if validator["kind"] == "object_near_target":

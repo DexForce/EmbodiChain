@@ -46,6 +46,7 @@ def main() -> None:
     parser.add_argument(
         "--output", type=Path, default=Path("outputs/camera_ground_visibility")
     )
+    add_viser_args_to_parser(parser)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     sim = SimulationManager(

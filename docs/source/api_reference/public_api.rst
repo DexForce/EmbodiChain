@@ -1,5 +1,7 @@
 Public API Supplement
-==============
+==============   :no-index:
+
+
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -31,6 +33,17 @@ Offline job preflight, run, resume and verified inspection commands.
 .. autosummary::
 
    main
+
+embodichain.compute.geometry.particles
+--------------------------------------
+
+Deterministic lattice sampling for primitive, revolved and closed mesh fill volumes.
+
+.. autosummary::
+
+   embodichain.compute.geometry.particles.sample_volume_particles
+
+.. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
 
 embodichain.compute.geometry.shading
 ------------------------------------
@@ -1821,6 +1834,23 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.sim.cfg.fluid
+-----------------------------
+
+Fixed-count fluid sources, physical properties and native particle or surface display.
+
+.. autosummary::
+
+   embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+   embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+   embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
 embodichain.lab.sim.motion.expansion.session_coverage
 -----------------------------------------------------
 
@@ -1858,6 +1888,20 @@ separate checker does not own those attachments.
    CuroboPayload
    CuroboQuerySnapshot
    curobo_motion_generator
+
+embodichain.lab.sim.objects.fluid
+---------------------------------
+
+Scene-owned fluid state snapshots, explicit writes and initial-state restoration.
+
+.. autosummary::
+
+   embodichain.lab.sim.objects.fluid.FluidObject
+   embodichain.lab.sim.objects.fluid.FluidObjectData
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObject
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObjectData
 
 embodichain.lab.sim.scene.collision_sources
 -------------------------------------------
@@ -4018,6 +4062,7 @@ embodichain.lab.visualization.protocol
    JointControlSpec
    JointControlState
    MeshGeometry
+   MeshMarkerOverlay
    PickCommand
    PointCloudOverlay
    SceneFrame
@@ -4030,6 +4075,39 @@ embodichain.lab.visualization.protocol
    estimate_frame_bytes
    estimate_manifest_bytes
    pose_to_position_wxyz
+
+embodichain.lab.visualization.markers
+------------------------------------
+
+Render-only marker groups share validated geometry and instance state between
+native simulation windows and browser visualization.
+
+.. currentmodule:: embodichain.lab.visualization.markers
+
+.. autosummary::
+
+   MarkerGroupCfg
+   MarkerPrototypeCfg
+   MarkerGroup
+
+embodichain.lab.visualization.markers.cfg
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.cfg
+
+.. autosummary::
+
+   MarkerPrototypeCfg
+   MarkerGroupCfg
+
+embodichain.lab.visualization.markers.group
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.group
+
+.. autosummary::
+
+   MarkerGroup
 
 embodichain.lab.visualization.runtime
 -------------------------------------
@@ -4298,20 +4376,27 @@ embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
    GripperCollisionCfg
    GripperCollisionChecker
 
-embodichain.toolkits.graspkit.pg_grasp.model_geometry
+embodichain.lab.sim.utility.gripper_geometry
 ---------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+Resolve source geometry and project numerical generator inputs at the Sim boundary.
+
+.. currentmodule:: embodichain.lab.sim.utility.gripper_geometry
 
 .. autosummary::
    :nosignatures:
 
-   get_parallel_jaw_collision_geometry
+   build_gripper_collision_geometry
+   grasp_generator_parameters
 
-embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. autofunction:: build_gripper_collision_geometry
+
+.. autofunction:: grasp_generator_parameters
+
+embodichain.lab.scripts.annotate_grasp
 ----------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. currentmodule:: embodichain.lab.scripts.annotate_grasp
 
 .. autosummary::
 
@@ -5336,4 +5421,241 @@ native listener binds all IPv4 interfaces and lives until World teardown.
    :members:
 
 .. autoclass:: embodichain.lab.visualization.cfg.DexSimWebCfg
+   :no-index:
+
+
+Parallel-jaw hand configuration and composition
+----------------------------------------------
+
+Concrete hand configs own physical values. The lightweight catalog resolver
+returns detached declarations; collision surfaces and runtime TCP validation
+are constructed only by their explicit asset/runtime consumers.
+
+embodichain.data.urdf
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.data.urdf
+
+.. autosummary::
+   :nosignatures:
+
+   materialize_urdf_subtree
+
+.. autofunction:: materialize_urdf_subtree
+
+embodichain.lab.sim.cfg.gripper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.cfg.gripper
+
+.. autosummary::
+   :nosignatures:
+
+   ParallelJawGripperCfg
+
+.. autoclass:: ParallelJawGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain.lab.sim.utility.gripper_binding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.utility.gripper_binding
+
+.. autosummary::
+   :nosignatures:
+
+   prepare_robot_grippers
+
+.. autofunction:: prepare_robot_grippers
+
+embodichain.robot_registry
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.robot_registry
+
+.. autosummary::
+   :nosignatures:
+
+   resolve_gripper_defaults
+
+.. autofunction:: resolve_gripper_defaults
+
+embodichain_robots
+~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots
+
+.. autosummary::
+   :nosignatures:
+
+   FrankaPandaHandCfg
+   DHPGI14080Cfg
+   CobotMagicV100GripperCfg
+   PikaGripperCfg
+   TianjiMarvinGripperCfg
+   RobotiqArg2F85Cfg
+   RobotiqArg2F140Cfg
+
+.. autoclass:: FrankaPandaHandCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: DHPGI14080Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: CobotMagicV100GripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: PikaGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: TianjiMarvinGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: RobotiqArg2F85Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: RobotiqArg2F140Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.agilex.cobotmagic.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.agilex.cobotmagic.gripper.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   CobotMagicV100GripperCfg
+
+.. autoclass:: CobotMagicV100GripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.agilex.pika.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.agilex.pika.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   PikaGripperCfg
+
+.. autoclass:: PikaGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.dh_robotics.pgi_140_80.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.dh_robotics.pgi_140_80.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   DHPGI14080Cfg
+
+.. autoclass:: DHPGI14080Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.franka.hand.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.franka.hand.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   FrankaPandaHandCfg
+
+.. autoclass:: FrankaPandaHandCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.robotiq.arg2f140.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.robotiq.arg2f140.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   RobotiqArg2F140Cfg
+
+.. autoclass:: RobotiqArg2F140Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.robotiq.arg2f85.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.robotiq.arg2f85.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   RobotiqArg2F85Cfg
+
+.. autoclass:: RobotiqArg2F85Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.tianji.marvin.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.tianji.marvin.gripper.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   TianjiMarvinGripperCfg
+
+.. autoclass:: TianjiMarvinGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+URDF mounting and name normalization
+-----------------------------------
+
+Single-component standalone hands can request an explicit fixed mounting root.
+Physical and semantic bindings share the assembler's native naming policy.
+
+.. currentmodule:: embodichain.lab.sim.cfg.urdf
+
+.. autosummary::
+   :nosignatures:
+
+   URDFCfg
+
+.. autoclass:: URDFCfg
+   :members:
+   :no-index:
+
+.. currentmodule:: embodichain.toolkits.urdf_assembly.name_normalizer
+
+.. autosummary::
+   :nosignatures:
+
+   NameNormalizer
+
+.. autoclass:: NameNormalizer
+   :members:
+
+
+embodichain.lab.sim.cfg parallel-jaw facade
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.cfg
+
+.. autoclass:: ParallelJawGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :no-index:

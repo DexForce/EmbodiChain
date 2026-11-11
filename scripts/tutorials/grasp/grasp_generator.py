@@ -55,6 +55,7 @@ import numpy as np
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.compute.trajectory import interpolate_with_distance
@@ -256,9 +257,9 @@ if __name__ == "__main__":
 
     # Construct one standalone generator. The same instance can also be passed
     # to AtomicSkillEngine(grasp_pose_generators={"hand": grasp_generator}).
-    gripper_model, collision_geometry = mounted_gripper_geometry(robot.cfg)
+    gripper_data, collision_geometry = mounted_gripper_geometry(robot.cfg)
     grasp_generator = AntipodalGraspPoseGenerator(
-        gripper_model,
+        **grasp_generator_parameters(gripper_data),
         collision_geometry=collision_geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=10_000,

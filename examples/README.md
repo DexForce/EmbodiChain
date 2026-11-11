@@ -73,6 +73,13 @@ compares an authored installation with task-conditioned joint layout/deployment
 search in an offline 3D viewer. It replays measured successful episodes, exposes
 failed candidates and keeps independent region validation separate.
 
+The [GenSim workflow configuration](gensim/README.md) runs image task planning,
+scene generation, native binding and configured Task Program execution through
+`embodichain gensim run`.
+The [scripted GenSim reproduction](gensim/scripted_pick_place/README.md) rebuilds
+fixed table/cube inputs and executes the same binding/deployment workflow,
+preserving the measured pickup/placement verdict, graph frontend and wall time.
+
 The [differentiable retiming showcase](learning/differentiable_toppra/README.md)
 compares a stopped duration objective with autograd optimization of free path
 nodes. Its CPU browser preview displays gradients, finite-difference checks and

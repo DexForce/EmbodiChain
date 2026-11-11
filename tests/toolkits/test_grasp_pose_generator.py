@@ -21,6 +21,8 @@ in a simulated environment using the SimulationManager and grasp planning utilit
 
 from __future__ import annotations
 
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
+
 import argparse
 import numpy as np
 import time
@@ -214,9 +216,9 @@ def test_grasp_pose_generator():
         sim.prepare()
 
         # get mug grasp pose
-        gripper_model, collision_geometry = mounted_gripper_geometry(robot.cfg)
+        gripper_data, collision_geometry = mounted_gripper_geometry(robot.cfg)
         grasp_generator = AntipodalGraspPoseGenerator(
-            gripper_model,
+            **grasp_generator_parameters(gripper_data),
             collision_geometry=collision_geometry,
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
                 sample_count=10_000,

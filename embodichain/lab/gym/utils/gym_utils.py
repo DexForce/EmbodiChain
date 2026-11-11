@@ -787,11 +787,30 @@ def config_to_cfg(
             _load_configured_task_program_deployment,
         )
 
+        program_selectors = deepcopy(config["task_program"])
+        if task_program_path_override is not None:
+            if not isinstance(task_program_path_override, (str, os.PathLike)):
+                raise TypeError("task_program_path must be a string or path.")
+            program_selectors["program"] = str(
+                Path(task_program_path_override).expanduser().resolve()
+            )
         deployment = _load_configured_task_program_deployment(
-            task_program=config["task_program"],
+            task_program=program_selectors,
             skill_profile=component_resolution.embodiment_skill_profile,
             base_dir=base_dir,
         )
+        from embodichain.lab.task_program.integrations.demo_skill import (
+            _ConfiguredDemoSkillSource,
+        )
+
+        if (
+            any(
+                isinstance(source, _ConfiguredDemoSkillSource)
+                for source in deployment.integration.adapter_factory.nominal_motion_sources
+            )
+            and config.get("num_envs", 1) != 1
+        ):
+            raise ValueError("configured Demo Skills require num_envs == 1")
         _validate_scene_binding_targets(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,

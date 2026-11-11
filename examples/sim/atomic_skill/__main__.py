@@ -155,8 +155,8 @@ def _resolve_sample(args: argparse.Namespace) -> AtomicSkillRunCfg:
         not math.isfinite(cfg.arena_space) or cfg.arena_space <= 0
     ):
         raise ValueError("--arena-space must be finite and positive")
-    if not cfg.device:
-        raise ValueError("--device must be a nonempty device string")
+    if cfg.device is not None and not cfg.device:
+        raise ValueError("--device must be a nonempty device string when specified")
     if not 0 <= cfg.seed < 2**32:
         raise ValueError("--seed must be in [0, 2**32)")
     if args.output_dir is not None:

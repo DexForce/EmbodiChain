@@ -44,7 +44,7 @@ and launcher-guide links, not the tested program, deployment or physics policy.
 | Checked/save | Four segments, 188 frames, 7.52 s; two settling checks and two 3 cm position checks passed; one episode saved. |
 | Repeat checked/save with the ordinary CLI | One episode, 188 frames; both position/stability checks passed again without the capture harness. |
 | Dataset reader | `preview_lerobot_data` reads the episode, task/subtask language and four segment ranges; consistency check passes. |
-| Unknown object | `reference_validation_failed` at `$.program.body.items[0].steps.call.object`; exit 1 before environment construction. |
+| Unknown object | `reference_validation_failed` at `$.program.repeat.body[0].steps.pick.object`; exit 1 before environment construction. |
 | Unsupported field | `unknown_field` at `$.program.speed`; exit 1 before environment construction. |
 
 In the first checked run, the Place segments each took 54 steps including

@@ -19,6 +19,10 @@
 from __future__ import annotations
 
 ROBOT_ASSETS = {
+    "YamI2rt": {
+        "class_path": "embodichain_robots.i2rt.yam.assets:YamI2rt",
+        "category": "robot",
+    },
     "UnitreeGo1Locomotion": {
         "class_path": "embodichain_robots.unitree.go1.assets:UnitreeGo1Locomotion",
         "category": "robot",

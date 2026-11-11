@@ -32,14 +32,12 @@ __all__ = [
     "ConvexCollisionCheckerCfg",
     "GraspAnnotationCfg",
     "FixedGripperCollisionGeometry",
-    "get_parallel_jaw_collision_geometry",
     "GripperCollisionCfg",
     "GripperCollisionChecker",
     "GraspPoseGenerator",
     "GraspRegionSelector",
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGraspCollisionCfg",
-    "ParallelJawGripperModelCfg",
 ]
 
 
@@ -48,8 +46,6 @@ __all__ = [
 _EXPORT_MODULES = {
     "GraspPoseGenerator": "..pose_generator",
     "ParallelJawGraspPoseGenerator": "..pose_generator",
-    "ParallelJawGripperModelCfg": "..pose_generator",
-    "get_parallel_jaw_gripper_model": "..pose_generator",
     "AntipodalSamplerCfg": ".antipodal_sampler",
     "AntipodalSampler": ".antipodal_sampler",
     "ConvexCollisionCheckerCfg": ".collision_checker",
@@ -57,7 +53,6 @@ _EXPORT_MODULES = {
     "GripperCollisionCfg": ".gripper_collision_checker",
     "GripperCollisionChecker": ".gripper_collision_checker",
     "FixedGripperCollisionGeometry": ".fixed_geometry",
-    "get_parallel_jaw_collision_geometry": ".model_geometry",
     "AntipodalGraspPoseGenerator": ".pose_generator",
     "AntipodalGraspPoseGeneratorCfg": ".pose_generator",
     "GraspRegionSelector": ".pose_generator",

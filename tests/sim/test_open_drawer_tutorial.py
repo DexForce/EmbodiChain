@@ -115,7 +115,7 @@ def test_create_scene_configures_newton_grasp_material_only_for_newton(
         assert drawer_cfg.link_attrs is None
 
 
-def test_tutorial_newton_physics_cfg_uses_shared_mujoco_warp_profile() -> None:
+def test_tutorial_newton_physics_cfg_uses_shared_dexuni_profile() -> None:
     tutorial = _load_tutorial_module()
 
     cfg = tutorial._tutorial_physics_cfg("newton")
@@ -123,15 +123,16 @@ def test_tutorial_newton_physics_cfg_uses_shared_mujoco_warp_profile() -> None:
     assert cfg.num_substeps == 20
     assert cfg.collision_cfg is None
     assert cfg.solver_cfg == {
-        "solver_type": "mujoco_warp",
-        "solver": "newton",
-        "integrator": "implicitfast",
-        "iterations": 20,
-        "ls_iterations": 100,
-        "cone": "elliptic",
-        "impratio": 1_000.0,
-        "use_mujoco_contacts": True,
-        "enable_multiccd": True,
+        "solver_type": "dexuni",
+        "mujoco_options": {
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1_000.0,
+            "enable_multiccd": True,
+        },
     }
 
 

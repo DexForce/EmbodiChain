@@ -23,20 +23,11 @@ import time
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.visualization import (
-    VisualizationCfg,
-    add_viser_args_to_parser,
-    visualization_cfg_from_args,
-)
-from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
-    _add_articulations,
-    load_scene_export_into_sim,
-    load_scene_usd_into_sim,
-    load_usd_stage_into_sim,
-)
+from embodichain.cli._visualization import add_viser_args_to_parser
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.visualization import VisualizationCfg
     from embodichain.lab.scripts.preview_joint_control import (
         ArticulationPreviewController,
     )
@@ -71,6 +62,14 @@ def preview_scene_export(
         advance_physics: Whether preview frames also integrate physics. Disable
             this for playback that directly restores object poses.
     """
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.visualization import VisualizationCfg
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+        load_scene_export_into_sim,
+        load_scene_usd_into_sim,
+        load_usd_stage_into_sim,
+    )
+
     if usd_file is not None and output_root is not None:
         raise ValueError("Specify either output_root or usd_file, not both.")
     if usd_file is None and output_root is None:
@@ -191,14 +190,25 @@ def _setup_viser_joint_control(
     return controller
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(
+    argv: Sequence[str] | None = None, *, prog: str = "embodichain preview-scene"
+) -> None:
+    """Preview a selected scene using the canonical or legacy CLI.
+
+    Args:
+        argv: Arguments after the selected command name.
+        prog: Display name supplied by the unified GenSim dispatcher.
+    """
     parser = argparse.ArgumentParser(
-        prog="embodichain preview-scene",
+        prog=prog,
         description="Preview a Scene Engine scene export in EmbodiChain simulation.",
     )
     source_group = parser.add_mutually_exclusive_group(required=True)
     source_group.add_argument(
+        "--scene",
+        "--output-root",
         "--output_root",
+        dest="output_root",
         type=Path,
         help="Scene Engine output root containing scene_export/.",
     )
@@ -230,6 +240,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     add_viser_args_to_parser(parser)
     args = parser.parse_args(argv)
+    from embodichain.lab.visualization import visualization_cfg_from_args
+
     preview_scene_export(
         output_root=args.output_root,
         usd_file=args.usd_file,
