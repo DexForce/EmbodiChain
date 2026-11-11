@@ -110,6 +110,8 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "embodichain_robots/agibot/g2/LICENSE",
         "embodichain_robots/agibot/g2/preview.png",
         "embodichain_robots/agibot/g2/preview.render.json",
+        "embodichain_robots/i2rt/yam/cfg.py",
+        "embodichain_robots/i2rt/yam/assets.py",
         "embodichain_robots/_locomotion.py",
         "embodichain_robots/locomotion_profiles.py",
         "embodichain_robots/franka/assets.py",

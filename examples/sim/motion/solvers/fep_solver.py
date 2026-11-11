@@ -128,7 +128,7 @@ def main() -> None:
         actual_color = (255, 140, 30)
         actual_rgba = np.array((*actual_color, 255), dtype=np.float32) / 255
         actual_cloud = None
-        if not args.viser:
+        if not args.viser and sim.has_native_renderer:
             points = circle_world.reshape(-1, 3)
             sim.visualize_point_cloud(
                 points,

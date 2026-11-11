@@ -32,7 +32,6 @@ sensor:
       eye: [0.35368482807598, 0.014695524383058989, 1.4517046071614774]
       target: [0.8586357573287919, 0, 0.5232553674540066]
       up: [0.9306678549330372, -0.0005600064212467153, 0.3658647703553347]
-
 skill_profile:
   contract_id: single_arm_parallel_gripper
   profile_id: cobotmagic
@@ -50,6 +49,7 @@ skill_profile:
           capabilities:
             - interaction.grasp
           command_preset: right_parallel_jaw_commands
+          gripper: right_eef
     - resource_id: secondary_manipulator
       endpoints:
         - endpoint_id: motion
@@ -63,22 +63,24 @@ skill_profile:
           capabilities:
             - interaction.grasp
           command_preset: left_parallel_jaw_commands
-  command_presets:
-    - preset_id: right_parallel_jaw_commands
-      control_part: right_eef
-      commands:
-        open: [0.05, 0.05]
-        grasp: [0.0, 0.0]
-    - preset_id: left_parallel_jaw_commands
-      control_part: left_eef
-      commands:
-        open: [0.05, 0.05]
-        grasp: [0.0, 0.0]
+          gripper: left_eef
+  command_presets: []
   runtime_services:
     grasp_pose_generators:
       right_eef:
         kind: antipodal_parallel_jaw
-        model: cobotmagic_v100_gripper
       left_eef:
         kind: antipodal_parallel_jaw
-        model: cobotmagic_v100_gripper
+grippers:
+  right_eef:
+    class_type: CobotMagicV100Gripper
+    mode: existing
+    motion_part: right_arm
+    control_part: right_eef
+    component_type: right_arm
+  left_eef:
+    class_type: CobotMagicV100Gripper
+    mode: existing
+    motion_part: left_arm
+    control_part: left_eef
+    component_type: left_arm

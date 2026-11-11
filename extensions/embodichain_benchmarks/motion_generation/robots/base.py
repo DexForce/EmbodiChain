@@ -153,7 +153,7 @@ class EmbodimentRobotProvider(RobotProvider):
             }
 
     def build_cfg(self) -> "RobotCfg":
-        """Return a fresh component-owned robot configuration, including its TCP."""
+        """Return a fresh config; bound tool TCPs finalize during robot assembly."""
         return deepcopy(self._cfg)
 
     def configure_track(self, track: "TrackCfg") -> None:
