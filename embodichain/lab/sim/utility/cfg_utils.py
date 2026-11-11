@@ -338,7 +338,7 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge urdf components
             user_urdf_cfg = override_cfg_dict.get("urdf_cfg")
             if isinstance(user_urdf_cfg, dict):
-                for output_field in ("fname", "fpath_prefix"):
+                for output_field in ("fname", "fpath_prefix", "force_assembly"):
                     if output_field in user_urdf_cfg:
                         setattr(
                             base_cfg.urdf_cfg,
@@ -353,6 +353,18 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                     else:
                         base_cfg.urdf_cfg.name_case.update(user_name_case)
 
+                if "component_prefix" in user_urdf_cfg:
+                    from embodichain.toolkits.urdf_assembly.name_normalizer import (
+                        NameNormalizer,
+                    )
+
+                    prefixes = {
+                        **dict(base_cfg.urdf_cfg.component_prefix),
+                        **dict(user_urdf_cfg["component_prefix"] or {}),
+                    }
+                    NameNormalizer.resolve_component_prefixes(prefixes)
+                    base_cfg.urdf_cfg.component_prefix = list(prefixes.items())
+
                 components = user_urdf_cfg.get("components", [])
                 # to_dict serializes components as a dict keyed by type;
                 # normalize to a list of dicts for merge_robot_cfg.
@@ -365,6 +377,11 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                         component_type=component.get("component_type"),
                         urdf_path=component.get("urdf_path"),
                         transform=component.get("transform"),
+                        **{
+                            k: v
+                            for k, v in component.items()
+                            if k not in {"component_type", "urdf_path", "transform"}
+                        },
                     )
             else:
                 logger.log_warning(
@@ -378,4 +395,8 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             if hasattr(robot_cfg, key):
                 setattr(base_cfg, key, getattr(robot_cfg, key))
 
+    if base_cfg.gripper_bindings:
+        from .gripper_binding import _apply_gripper_tcp_defaults
+
+        _apply_gripper_tcp_defaults(base_cfg, override_cfg_dict.get("solver_cfg"))
     return base_cfg

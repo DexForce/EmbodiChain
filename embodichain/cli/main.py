@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="gensim",
+        target="embodichain.cli.gensim:main",
+        help="Prepare assets, generate scenes, plan tasks and run GenSim workflows.",
+    ),
+    Command(
         name="expansion",
         target="embodichain.cli.expansion:main",
         help="Preflight, collect, resume and inspect expert expansion jobs.",
@@ -159,7 +164,7 @@ COMMANDS = (
     ),
     Command(
         name="annotate-grasp",
-        target="embodichain.toolkits.graspkit.scripts.annotate_grasp:cli",
+        target="embodichain.lab.scripts.annotate_grasp:cli",
         help="Interactively annotate a grasp region on a mesh.",
     ),
     Command(

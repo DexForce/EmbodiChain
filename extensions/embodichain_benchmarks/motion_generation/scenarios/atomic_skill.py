@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+
+
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -42,11 +45,7 @@ from embodichain.lab.sim.atomic_skills import (
 )
 from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from embodichain.toolkits.graspkit import (
-    GraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
-)
+from embodichain.toolkits.graspkit import GraspPoseGenerator
 from embodichain.utils.math import pose_inv
 
 from ..atomic_skill import AtomicSkillCaseProvider, create_atomic_skill_provider
@@ -143,7 +142,7 @@ class AtomicSkillScenario(ScenarioProvider):
         del suite
         return resolve_atomic_batch_sizes(track)
 
-    def grasp_model(self) -> ParallelJawGripperModelCfg | None:
+    def grasp_model(self) -> dict[str, object] | None:
         """Resolve the track's mounted-hand geometry for preparation and replay.
 
         Returns:
@@ -158,7 +157,7 @@ class AtomicSkillScenario(ScenarioProvider):
             return None
         if not isinstance(model_id, str) or not model_id:
             raise ValueError("track.config.grasp_model must be a non-empty model id.")
-        return get_parallel_jaw_gripper_model(model_id)
+        return resolve_gripper_defaults(model_id)
 
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
         """Bind flange-mounted hand geometry to this fixture's solver TCP.
@@ -169,7 +168,7 @@ class AtomicSkillScenario(ScenarioProvider):
         no flange-relative offset is applied to it.
         """
         model = self.grasp_model()
-        if model is not None and model.model_id not in {
+        if model is not None and model["model_id"] not in {
             "dh_pgi_140_80",
             "robotiq_arg2f_140",
         }:
@@ -539,7 +538,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 {
                     count: parallel_jaw_sampler(
                         count,
-                        gripper_model=self.grasp_model(),
+                        gripper_data=self.grasp_model(),
                         root_from_tcp=self.grasp_root_from_tcp(),
                     )
                     for count in sorted(sampling_counts)
@@ -1561,7 +1560,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 n_sample=n_sample,
                 force_refresh=False,
                 max_candidates=max_candidates,
-                gripper_model=self.grasp_model(),
+                gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
                 **(
                     {"approach_alignment_angle": math.radians(alignment_max_angle_deg)}
@@ -1842,7 +1841,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 n_sample=n_sample,
                 force_refresh=False,
                 max_candidates=max_candidates,
-                gripper_model=self.grasp_model(),
+                gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
             )
             candidates, costs = generator.get_valid_grasp_poses(

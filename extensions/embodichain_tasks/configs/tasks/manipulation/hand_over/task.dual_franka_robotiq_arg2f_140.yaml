@@ -1,0 +1,16 @@
+id: HandOver-DualFrankaRobotiq140-v1
+environment:
+  component: envs/dual_franka_robotiq140.default.yaml
+task_program:
+  program: task_program/program.upright_can.yaml
+  integration: task_program/integration.robotiq140.yaml
+  execution_policy:
+    component: ../../../components/execution_policies/motion_gen_verified.yaml
+    overrides:
+      motion:
+        sample_count: 280
+embodiment:
+  component: ../../../components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml
+collection:
+  target_episodes: 1
+device: cpu
