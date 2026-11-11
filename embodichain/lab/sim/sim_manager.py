@@ -1909,6 +1909,9 @@ class SimulationManager:
 
     def _ensure_render_state(self, *, wait: bool = True) -> None:
         """Share state publication and, when needed, completion within a frame."""
+        # Native fluid staging can discard updates when both copy slots are
+        # occupied. Complete each publication before reusing those slots.
+        wait = wait or bool(getattr(self, "_fluid_objects", {}))
         if getattr(self, "_render_state_published", None) is True:
             if wait and not getattr(self, "_render_updates_flushed", False):
                 self._flush_native_render_updates()
@@ -1932,8 +1935,9 @@ class SimulationManager:
         Render camera observations inside this context. On exit, due recording
         and Viser frames consume the same state. An open native window is a
         consumer even when automatic Newton synchronization is disabled. Window
-        publication does not wait for native render completion; camera reads
-        and due captures wait when they consume that publication.
+        publication does not wait for native render completion unless the scene
+        contains fluids with bounded native staging. Camera reads and due
+        captures wait when they consume that publication.
 
         .. attention::
             Complete physics steps, resets and direct state writes before
@@ -1953,14 +1957,13 @@ class SimulationManager:
         self._render_updates_flushed = False
         record_dt = self._pending_record_dt
         self._pending_record_dt = 0.0
-        observations_complete = False
+        frame_complete = False
         try:
             if self.is_window_opened or (
                 record_dt > 0 and self.physics._requires_step_render_sync
             ):
                 self._ensure_render_state(wait=False)
             yield
-            observations_complete = True
             if (
                 self._window_record_state is not None
                 and self._window_record_state.capture_from_sim_update
@@ -1970,6 +1973,7 @@ class SimulationManager:
                     self._step_window_record_from_sim_update(
                         self._window_record_state, record_dt
                     )
+            frame_complete = True
             if self.sim_config.visualization.backend == "viser":
                 with self.profiler.section("visualization_capture"):
                     self.capture_visualization_safely(
@@ -1977,7 +1981,7 @@ class SimulationManager:
                         capture_camera_images=capture_camera_images,
                     )
         finally:
-            if not observations_complete:
+            if not frame_complete:
                 self._pending_record_dt += record_dt
             # A nested frame may contain an explicit publication after a state
             # edit. Never restore an outer frame's obsolete publication flag.
@@ -4865,17 +4869,17 @@ class SimulationManager:
         if state.task_status != TASK_RETURN.TASK_LOOP:
             return state.task_status
 
-        state.accumulated_sim_time += physics_dt
-        if state.accumulated_sim_time + 1e-9 < state.time_step:
+        accumulated_sim_time = state.accumulated_sim_time + physics_dt
+        if accumulated_sim_time + 1e-9 < state.time_step:
+            state.accumulated_sim_time = accumulated_sim_time
             return state.task_status
 
-        state.accumulated_sim_time = max(
-            0.0, state.accumulated_sim_time - state.time_step
-        )
         # Publish from the simulation thread only when a frame is due. The
         # render-thread recorder must not wait on its own render publication.
         self._ensure_render_state()
-        return self._capture_window_record_frame(state)
+        status = self._capture_window_record_frame(state)
+        state.accumulated_sim_time = max(0.0, accumulated_sim_time - state.time_step)
+        return status
 
     def _save_window_record_worker(
         self,

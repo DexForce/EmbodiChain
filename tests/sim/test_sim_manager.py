@@ -1634,6 +1634,61 @@ def test_window_camera_wait_failure_retries_without_republishing() -> None:
     assert sim._world._flush_render_updates.call_count == 2
 
 
+def test_fluid_window_publication_completes_before_reusing_native_staging() -> None:
+    sim, _, state, _, rendered = _make_render_frame_sim(window=True)
+    sim._fluid_objects = {"water": object()}
+    pending = []
+    visible = []
+
+    def stage(_result):
+        # Native fluid staging drops an update when both copy slots are busy.
+        if len(pending) < 2:
+            pending.append(state["value"])
+
+    def complete():
+        if pending:
+            visible[:] = [pending[-1]]
+            pending.clear()
+        return 0
+
+    sim.physics.sync_render_state = stage
+    sim._world._flush_render_updates = complete
+    sim._world.render_camera_group = lambda _: rendered.append(visible[-1])
+    sim.update(0.01, 3, render_final_step=False)
+    with sim.render_frame():
+        sim.render_camera_group([1])
+    assert rendered == [3]
+
+
+@pytest.mark.parametrize("prior_steps", [0, 2])
+def test_window_record_wait_failure_preserves_due_frame_for_retry(
+    prior_steps: int,
+) -> None:
+    sim, _, state, _, _ = _make_render_frame_sim(window=True)
+    sim._window_record_state = _WindowRecordState(
+        time_step=(prior_steps + 1) * 0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    recorded = []
+    sim._capture_window_record_frame = lambda _: recorded.append(state["published"])
+    sim.update(0.01, prior_steps)
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    sim.update(0.01, 1, render_final_step=False)
+    with pytest.raises(RuntimeError, match="Native render-state publication failed"):
+        with sim.render_frame():
+            pass
+    assert recorded == []
+    with sim.render_frame():
+        pass
+    assert recorded == [prior_steps + 1]
+    assert sim._pending_record_dt == 0
+    assert sim._window_record_state.accumulated_sim_time == 0
+
+
 @pytest.mark.parametrize("camera", [False, True])
 @pytest.mark.parametrize("record", [False, True])
 @pytest.mark.parametrize("viser", [False, True])
