@@ -434,7 +434,7 @@ class NewtonJointDrivePropertiesCfg(JointDrivePropertiesCfg):
 
 @configclass
 class MimicComplianceCfg:
-    """Default (PhysX) compliance for the followers of one mimic master.
+    """DexSim Default compliance for the followers of one mimic master.
 
     Both parameters must be finite and nonnegative. Use zero for both
     parameters to request hard coupling. The source multiplier and offset
@@ -550,7 +550,7 @@ class ArticulationCfg(ObjectBaseCfg):
     mimic_compliance: dict[str, MimicComplianceCfg] | None = field(
         default=None, kw_only=True
     )
-    """Default (PhysX) compliance settings keyed by exact mimic master names.
+    """DexSim Default compliance settings keyed by exact mimic master names.
 
     During scene preparation, the settings apply to all replicas and are
     reapplied after topology changes. They apply in both asset physics modes.

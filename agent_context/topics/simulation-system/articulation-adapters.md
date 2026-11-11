@@ -97,7 +97,7 @@ principal axes between two writes.
 
 ## Mimic coupling
 
-On Default (PhysX), `ArticulationCfg.mimic_compliance` maps exact mimic master
+On DexSim Default, `ArticulationCfg.mimic_compliance` maps exact mimic master
 names to natural-frequency and damping-ratio settings. The articulation
 preparation hook applies them to all replicas on each topology revision,
 before Default Direct GPU initialization. The public

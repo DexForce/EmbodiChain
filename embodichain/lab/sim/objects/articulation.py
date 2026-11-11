@@ -1470,7 +1470,7 @@ class Articulation(BatchEntity):
         joint_names: str | Sequence[str],
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set the compliance of the selected mimic masters on Default (PhysX).
+        """Set the compliance of the selected mimic masters on DexSim Default.
 
         Zero for both parameters requests hard coupling. Each master's authored
         follower multipliers and offsets are preserved. Call after scene

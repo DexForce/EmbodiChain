@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Native Default (PhysX) mimic compliance writes."""
+"""Native DexSim Default mimic compliance writes."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def require_mimic_compliance_backend(backend: str) -> None:
     """Require a backend that exposes native compliance parameters."""
     if backend != "dexsim":
         raise NotImplementedError(
-            f"Mimic compliance requires the Default (PhysX) backend. "
+            f"Mimic compliance requires the DexSim Default backend. "
             f"Backend {backend!r} does not support natural frequency and damping ratio."
         )
 

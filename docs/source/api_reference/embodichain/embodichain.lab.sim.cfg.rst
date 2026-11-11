@@ -203,7 +203,7 @@ passive and effort target modes. In dictionaries, select this subtype with
 ``joint_drive_props.backend="newton"``. Both settings require Newton.
 
 ``ArticulationCfg.mimic_compliance`` maps exact mimic master joint names to
-Default (PhysX) compliance settings. The following robot configuration
+DexSim Default compliance settings. The following robot configuration
 requests hard coupling for every follower of ``right_gripper``.
 
 .. code-block:: yaml
