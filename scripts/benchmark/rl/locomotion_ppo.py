@@ -90,9 +90,11 @@ def _check_backend(env: Any, name: str) -> Any:
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
         backend = get_newton_backend(sim._world)
+        mujoco_solver = backend.mujoco_solver
         if (
-            backend.solver.use_mujoco_cpu
-            or not backend.solver.mjw_data.qpos.device.is_cuda
+            mujoco_solver is None
+            or mujoco_solver.use_mujoco_cpu
+            or not mujoco_solver.mjw_data.qpos.device.is_cuda
         ):
             raise RuntimeError("Newton/MJWarp is not using CUDA")
         return backend
@@ -250,9 +252,13 @@ def _run(args: argparse.Namespace, result: dict) -> None:
     env_config = yaml.safe_load(Path(config["trainer"]["gym_config"]).read_text())
     env_config["num_envs"] = args.envs
     if args.backend == "newton":
-        env_config["physics_config"]["solver_cfg"][
-            "iterations"
-        ] = args.solver_iterations
+        solver_cfg = env_config["physics_config"]["solver_cfg"]
+        mujoco_options = (
+            solver_cfg.setdefault("mujoco_options", {})
+            if solver_cfg.get("solver_type") == "dexuni"
+            else solver_cfg
+        )
+        mujoco_options["iterations"] = args.solver_iterations
     env_path = args.output / "env.yaml"
     env_path.write_text(yaml.safe_dump(env_config, sort_keys=False))
     config["trainer"]["gym_config"] = str(env_path.resolve())
@@ -313,7 +319,7 @@ def _run(args: argparse.Namespace, result: dict) -> None:
             if not all(math.isfinite(float(value)) for value in losses.values()):
                 raise RuntimeError("Nonfinite PPO loss")
             if backend is not None and bool(
-                backend.solver.mjw_data.overflow.numpy().any()
+                backend.mujoco_solver.mjw_data.overflow.numpy().any()
             ):
                 raise RuntimeError("MJWarp capacity or solver iteration limit reached")
             result["updates"].append(
