@@ -16,8 +16,8 @@
 
 """
 This script demonstrates how to import USD files into the scene.
-Currently, it supports importing USD files as rigid objects or articulations.
-Multiple arenas are not supported when importing USD files.
+Scene imports retain source-authored entity types and replicate through the
+simulation manager's arena configuration.
 """
 
 from __future__ import annotations
@@ -41,6 +41,8 @@ if __name__ == "__main__":
     _cli_args = build_parser().parse_args()
 
 
+import numpy as np
+
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
@@ -48,9 +50,11 @@ from embodichain.lab.sim.cfg import (
     RenderCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
+    UsdImportCfg,
+    UsdSourceCfg,
     physics_cfg_for_backend,
 )
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import (
     RigidObject,
     RigidObjectCfg,
@@ -106,13 +110,14 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     sugar_box_path = get_data_path("SugarBox/sugar_box_usd/sugar_box.usda")
     print(f"Loading USD file from: {sugar_box_path}")
-    sugar_box: RigidObject = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="sugar_box",
-            shape=MeshCfg(fpath=sugar_box_path),
-            body_type="dynamic",
-            init_pos=[0.2, 0.2, 1.0],
-            asset_physics_mode="preserve",
+    scene_pose = np.eye(4, dtype=np.float32)
+    scene_pose[:3, 3] = (0.2, 0.2, 1.0)
+    sugar_box = sim.add_usd(
+        UsdImportCfg(
+            name="sugar_box",
+            source=UsdSourceCfg(file_path=sugar_box_path),
+            namespace="sugar_box",
+            pose=scene_pose,
         )
     )
 

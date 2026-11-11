@@ -128,10 +128,6 @@ from embodichain.lab.task_program.semantics import (
     WorkflowRecoveryPolicy,
     builtin_semantic_call_catalog,
 )
-from embodichain.toolkits.graspkit import (
-    ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
-)
 
 if TYPE_CHECKING:
     from .environment import TaskProgramEnvironmentAdapter
@@ -2209,49 +2205,6 @@ def _decode_robot_profile(value: object) -> SimulationRobotSkillProfileBinding:
     )
 
 
-def _decode_parallel_jaw_gripper_model(
-    value: object,
-    *,
-    path: str,
-) -> ParallelJawGripperModelCfg:
-    """Resolve a registered aperture model, with optional inline bounds."""
-    if type(value) is str:
-        try:
-            return get_parallel_jaw_gripper_model(value)
-        except ValueError as exc:
-            raise ValueError(f"{path}: {exc}") from exc
-    model = _mapping(
-        value,
-        path=path,
-        required=frozenset({"model_id"}),
-        optional=frozenset({"min_opening_width", "max_opening_width"}),
-    )
-    model_id = _identifier(model["model_id"], path=f"{path}.model_id")
-    try:
-        defaults = get_parallel_jaw_gripper_model(model_id)
-    except ValueError as exc:
-        raise ValueError(f"{path}: {exc}") from exc
-    minimum = _real(
-        model.get("min_opening_width", defaults.min_opening_width),
-        path=f"{path}.min_opening_width",
-        minimum=0.0,
-        strict_minimum=True,
-    )
-    maximum = _real(
-        model.get("max_opening_width", defaults.max_opening_width),
-        path=f"{path}.max_opening_width",
-        minimum=0.0,
-        strict_minimum=True,
-    )
-    if minimum >= maximum:
-        raise ValueError(
-            f"{path}.min_opening_width must be less than {path}.max_opening_width."
-        )
-    return ParallelJawGripperModelCfg(
-        model_id=model_id, min_opening_width=minimum, max_opening_width=maximum
-    )
-
-
 def _geometry_pose(value: object, *, path: str) -> tuple[float, ...]:
     """Freeze and validate one explicit rigid geometry/TCP transform."""
     import numpy as np
@@ -2280,13 +2233,19 @@ def _decode_grasp_generator(
     value: object, *, path: str
 ) -> _AntipodalGraspPoseGeneratorFactory:
     """Decode explicit physical geometry; removed box fields are rejected."""
+    if isinstance(value, Mapping) and "model" in value:
+        raise ValueError(
+            f"{path}.model was removed; select embodiment.grippers and endpoint.gripper, or supply an explicit gripper description."
+        )
     config = _mapping(
         value,
         path=path,
-        required=frozenset({"kind", "model"}),
+        required=frozenset({"kind", "gripper"}),
         optional=frozenset(
             {
                 "sample_count",
+                "min_opening_width",
+                "max_opening_width",
                 "approach_direction_samples",
                 "approach_deviation_angle",
                 "max_candidates",
@@ -2294,7 +2253,6 @@ def _decode_grasp_generator(
                 "filter_ground_collision",
                 "force_refresh",
                 "point_spacing",
-                "side",
                 "root_from_tcp",
                 "root_from_contact_frame",
             }
@@ -2305,36 +2263,70 @@ def _decode_grasp_generator(
         raise ValueError(
             f"Unsupported {path}.kind {kind!r}; supported kinds are ['antipodal_parallel_jaw']."
         )
-    model = _decode_parallel_jaw_gripper_model(config["model"], path=f"{path}.model")
-    side = (
-        _identifier(config["side"], path=f"{path}.side") if "side" in config else None
-    )
-    root_from_tcp = (
-        _geometry_pose(config["root_from_tcp"], path=f"{path}.root_from_tcp")
-        if "root_from_tcp" in config
-        else None
-    )
-    if model.model_id == "tianji_marvin_gripper":
-        if side not in ("left", "right"):
-            raise ValueError(
-                f"{path}: Marvin geometry requires explicit left/right side."
+    import json
+    from copy import deepcopy
+    from embodichain.robot_registry import resolve_gripper_defaults
+    from embodichain.robot_registry import _validate_gripper_transform
+
+    selected = config["gripper"]
+    if isinstance(selected, Mapping) and "class_type" in selected:
+        selection = _mapping(
+            selected,
+            path=f"{path}.gripper",
+            required=frozenset({"class_type"}),
+            optional=frozenset({"variant"}),
+        )
+        defaults = resolve_gripper_defaults(
+            selection["class_type"], variant=selection.get("variant")
+        )
+    elif isinstance(selected, Mapping):
+        defaults = deepcopy(dict(selected))
+    else:
+        raise ValueError(
+            f"{path}.gripper must select a catalog class or complete physical description; model strings are removed."
+        )
+    for field in ("min_opening_width", "max_opening_width"):
+        if field in config:
+            defaults[field] = _real(
+                config[field], path=f"{path}.{field}", minimum=0, strict_minimum=True
             )
-    elif side is not None:
-        raise ValueError(f"{path}: side is only supported by Marvin geometry.")
+    from embodichain.robot_registry import _validate_gripper_description
+
+    defaults = _validate_gripper_description(defaults)
+    if kind not in defaults["grasp_generators"]:
+        raise ValueError(
+            f"{path}: selected gripper does not declare generator {kind!r}."
+        )
+    root_from_tcp = None
+    if "root_from_tcp" in config:
+        root_from_tcp = _geometry_pose(
+            config["root_from_tcp"], path=f"{path}.root_from_tcp"
+        )
+        defaults["default_root_from_tcp"] = [
+            list(root_from_tcp[i : i + 4]) for i in range(0, 16, 4)
+        ]
+    if "root_from_contact_frame" in config:
+        contact = _geometry_pose(
+            config["root_from_contact_frame"], path=f"{path}.root_from_contact_frame"
+        )
+        defaults["root_from_contact_frame"] = [
+            list(contact[i : i + 4]) for i in range(0, 16, 4)
+        ]
+    _validate_gripper_transform(defaults["default_root_from_tcp"])
     center_mode = config.get("center_mode")
     if "center_mode" in config and center_mode not in ("bounds", "centroid"):
         raise ValueError(f"{path}.center_mode must be 'bounds' or 'centroid'.")
     return _AntipodalGraspPoseGeneratorFactory(
-        model_id=model.model_id,
-        min_opening_width=model.min_opening_width,
-        max_opening_width=model.max_opening_width,
+        model_id=defaults["model_id"],
+        gripper_json=json.dumps(defaults, sort_keys=True, allow_nan=False),
+        min_opening_width=defaults["min_opening_width"],
+        max_opening_width=defaults["max_opening_width"],
         point_spacing=_real(
             config.get("point_spacing", 0.012),
             path=f"{path}.point_spacing",
             minimum=0,
             strict_minimum=True,
         ),
-        side=side,
         root_from_tcp=root_from_tcp,
         root_from_contact_frame=(
             _geometry_pose(
@@ -3323,6 +3315,14 @@ class _ConfiguredTaskProgramAdapterFactory:
         environment: object,
     ) -> TaskProgramEnvironmentAdapter:
         """Create a live adapter for an initialized environment."""
+        from .demo_skill import _ConfiguredDemoSkillSource
+
+        if any(
+            isinstance(item, _ConfiguredDemoSkillSource)
+            for item in self.nominal_motion_sources
+        ):
+            if getattr(environment, "num_envs", None) != 1:
+                raise ValueError("configured Demo Skills require num_envs == 1")
         adapter = self.delegate.create_adapter(environment)
         adapter._set_configured_nominal_sources(self.nominal_motion_sources)
         return adapter
@@ -3354,7 +3354,12 @@ def _decode_configured_task_program_integration(
         config.get("runtime_services", {}), robot_profile_binding=robot_profile_binding
     )
 
-    call_catalog = builtin_semantic_call_catalog()
+    call_catalog = builtin_semantic_call_catalog(
+        include_transport=any(
+            "move_held_object" in preset.skill_option_templates
+            for preset in robot_profile_binding.presets
+        )
+    )
     for lowerer_factory in services.registered_semantic_lowerers:
         call_catalog = call_catalog.with_descriptor(
             SemanticCallDescriptor(

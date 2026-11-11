@@ -210,8 +210,8 @@ class _ConfiguredTaskProgramNominalSources:
                     if isinstance(call, Place)
                     else (
                         "move_held_object"
-                        if isinstance(call, RegisteredSemanticCall)
-                        and call.call_id == "simulation.move_held_object"
+                        if call.semantic_id
+                        in {"move_held_object", "simulation.move_held_object"}
                         else None
                     )
                 )

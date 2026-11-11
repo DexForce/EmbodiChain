@@ -115,7 +115,13 @@ def test_exported_usd_texture_matches_native_gltf(
     texture_files = []
     reference = exported = camera = item = None
     try:
-        imported = sim.add_usd("whole_scene", str(usd_path))
+        from embodichain.lab.sim.cfg import UsdImportCfg
+
+        imported = sim.add_usd(
+            UsdImportCfg(
+                name="whole_scene", source=UsdSourceCfg(file_path=str(usd_path))
+            )
+        )
         reference = sim.add_visual_object(
             VisualObjectCfg(
                 uid="gltf_reference",
@@ -181,7 +187,7 @@ def test_exported_usd_texture_matches_native_gltf(
         assert np.abs(actual - expected)[foreground].mean() < 4.0
     finally:
         sim.destroy(exit_process=False)
-        imported.clear()
+        imported = None
         reference = exported = camera = item = None
         SimulationManager.flush_cleanup_queue()
     assert all(not path.exists() for path in texture_files)

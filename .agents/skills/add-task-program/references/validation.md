@@ -11,7 +11,9 @@ python .agents/skills/add-task-program/scripts/inspect_deployment.py \
 ```
 
 Pass multiple deployments to check embodiment variants in one run. Add
-`--json` for machine-readable output.
+`--json --explain` for normalized declarations, authored paths, effective argument
+contracts, resource selections and source bindings. Demo Skill deployments
+require one environment and configured nominal sources require sequential flow.
 
 The inspector:
 

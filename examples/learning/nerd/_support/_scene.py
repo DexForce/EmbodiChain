@@ -48,6 +48,7 @@ from embodichain_models.dynamics.nerd.data import (
 )
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 from embodichain.lab.sim.physics.solvers._nerd_binding import NeRDBinding
 from ._generation import _sample, _positive_integer, _sha256, _write_json
@@ -192,6 +193,7 @@ class DynamicsSimulation:
             enable_ground_plane=robot == "ant" and physics_profile == "native",
             enable_entity_gizmo=False,
             render_cfg=RenderCfg(renderer="no-render"),
+            visualization=VisualizationCfg(backend="none"),
             startup_summary="off",
             physics_cfg=NewtonPhysicsCfg(
                 device=device,

@@ -136,12 +136,16 @@ def test_detach_state_stops_prior_control_gradient_without_reset(
 def test_max_episode_steps_truncate_and_reset(manager, monkeypatch) -> None:
     env = make_env(manager, monkeypatch, steps=1)
     env.max_episode_steps = 1
-    obs, reward, terminated, truncated, _ = env.step(
-        torch.ones(2, 1, requires_grad=True)
-    )
+    action = torch.ones(2, 1, requires_grad=True)
+    obs, reward, terminated, truncated, info = env.step(action)
     assert truncated.tolist() == [True, True] and not terminated.any()
     assert not obs.any() and env._elapsed_steps.tolist() == [0, 0]
-    reward.sum().backward()
+    terminal = info["terminal_observation"]
+    torch.testing.assert_close(terminal, torch.full((2, 1), 0.2))
+    assert terminal.requires_grad
+    # A terminal linear value plus q^2 reward has derivative 0.2 + 2*0.2*0.2.
+    (reward.sum() + terminal.sum()).backward()
+    torch.testing.assert_close(action.grad, torch.full((2, 1), 0.28))
 
 
 def test_configuration_rejects_nonfunctional_paths_before_scene_creation() -> None:

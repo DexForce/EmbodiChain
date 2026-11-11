@@ -10,6 +10,7 @@ embodichain.learning
       models
       rl
       sl
+      dynamics
 
 Reinforcement Learning
 ----------------------
@@ -93,3 +94,21 @@ optimizer updates and committed-update recovery through ``learning.sl``.
    :maxdepth: 1
 
    embodichain.learning.sl
+
+Online dynamics and policy learning
+-----------------------------------
+
+``OnlineModelBasedSchedule`` separates physical prefill, model-only warmup and
+fractional online update credit. Model callbacks finish before a policy callback
+collects and differentiates its trajectory. The schedule checkpoints counters;
+its caller checkpoints models, optimizers, random streams and sampling state.
+
+.. currentmodule:: embodichain.learning.dynamics
+
+.. autosummary::
+
+   OnlineModelBasedScheduleCfg
+   OnlineModelBasedSchedule
+
+.. automodule:: embodichain.learning.dynamics.schedule
+   :members:

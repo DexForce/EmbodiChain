@@ -185,6 +185,34 @@ the exact repository and revision used for evaluation.
 
 .. autofunction:: download_pretrained_policy
 
+embodichain.data.assets.scene_assets
+------------------------------------
+
+Download scene bundles through the shared asset registry. The four SimReady
+rooms retain their original GLB visuals and separate static USD floor collision.
+For example, ``get_data_path("WoodLab/wood_lab/wood_lab.usda")`` resolves the
+portable USD entry; keep its sibling ``visual`` and ``collision`` directories.
+The new bundles use the shared download lock, verify the archive MD5 and
+respect the configured download host, with the official Hub as fallback.
+
+.. currentmodule:: embodichain.data.assets.scene_assets
+
+.. autosummary::
+
+   SceneData
+   EmptyRoom
+   WoodLab
+   IndustrialWorkshop
+   DemoStudio
+   CleanLab
+
+.. autoclass:: SceneData
+.. autoclass:: EmptyRoom
+.. autoclass:: WoodLab
+.. autoclass:: IndustrialWorkshop
+.. autoclass:: DemoStudio
+.. autoclass:: CleanLab
+
 embodichain.data.assets.solver_assets
 -------------------------------------
 
@@ -2749,6 +2777,7 @@ embodichain.lab.sim
    VisualMaterialInst
    ReuseSegmentState
    BatchEntity
+   UsdImportResult
    SimulationManager
    SimulationManagerCfg
    SIM_CACHE_DIR
@@ -3789,6 +3818,7 @@ embodichain.lab.sim.spawn.descriptors
    configure_articulation_desc
    rigid_desc_from_cfg
    visual_desc_from_cfg
+   cable_desc_from_cfg
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -3820,6 +3850,23 @@ embodichain.lab.sim.spawn.usd
    articulation_desc_from_usd
    rigid_desc_from_usd
    visual_desc_from_usd
+
+embodichain.lab.sim.spawn.usd_result
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.usd_result
+
+USD import results retain stable source keys for declared facades and logical
+resource UIDs. A unique source keeps its prim path as its key. If one prim emits
+several resources, keys append ``#0``, ``#1``, and so on in parser order;
+``resource_source_paths`` maps each key back to its exact source prim path.
+The UID, type and source-path maps use the same keys, independently of namespace
+and runtime UID changes. Results share the manager's ``prepare()`` lifecycle and
+do not own another object registry or native-resource lifetime.
+
+.. autosummary::
+
+   UsdImportResult
 
 embodichain.lab.sim.utility.dynamic_pybind
 ----------------------------------------
@@ -4129,6 +4176,7 @@ embodichain.lab.visualization.protocol
    JointControlSpec
    JointControlState
    MeshGeometry
+   MeshMarkerOverlay
    PickCommand
    PointCloudOverlay
    SceneFrame
@@ -4141,6 +4189,39 @@ embodichain.lab.visualization.protocol
    estimate_frame_bytes
    estimate_manifest_bytes
    pose_to_position_wxyz
+
+embodichain.lab.visualization.markers
+------------------------------------
+
+Render-only marker groups share validated geometry and instance state between
+native simulation windows and browser visualization.
+
+.. currentmodule:: embodichain.lab.visualization.markers
+
+.. autosummary::
+
+   MarkerGroupCfg
+   MarkerPrototypeCfg
+   MarkerGroup
+
+embodichain.lab.visualization.markers.cfg
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.cfg
+
+.. autosummary::
+
+   MarkerPrototypeCfg
+   MarkerGroupCfg
+
+embodichain.lab.visualization.markers.group
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.group
+
+.. autosummary::
+
+   MarkerGroup
 
 embodichain.lab.visualization.runtime
 -------------------------------------
@@ -4180,6 +4261,21 @@ embodichain.learning.rl.algo.apg
    APGCfg
    complete_discounted_return
    segmented_discounted_return
+
+embodichain.learning.rl.algo.apg_actor_critic
+-------------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.algo.apg_actor_critic
+
+Short differentiable trajectories use terminal values for actor optimization
+and detached lambda returns for critic regression. Actor and critic optimizers
+retain separate state in checkpoints.
+
+.. autosummary::
+
+   APGActorCritic
+   APGActorCriticCfg
+   differentiable_lambda_returns
 
 embodichain.learning.rl.algo.base
 ---------------------------------
@@ -4409,20 +4505,27 @@ embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
    GripperCollisionCfg
    GripperCollisionChecker
 
-embodichain.toolkits.graspkit.pg_grasp.model_geometry
+embodichain.lab.sim.utility.gripper_geometry
 ---------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+Resolve source geometry and project numerical generator inputs at the Sim boundary.
+
+.. currentmodule:: embodichain.lab.sim.utility.gripper_geometry
 
 .. autosummary::
    :nosignatures:
 
-   get_parallel_jaw_collision_geometry
+   build_gripper_collision_geometry
+   grasp_generator_parameters
 
-embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. autofunction:: build_gripper_collision_geometry
+
+.. autofunction:: grasp_generator_parameters
+
+embodichain.lab.scripts.annotate_grasp
 ----------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. currentmodule:: embodichain.lab.scripts.annotate_grasp
 
 .. autosummary::
 
@@ -4534,6 +4637,25 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+embodichain_tasks.locomotion.managers.actions
+----------------------------------------------
+
+The reference position action combines a policy output with the next motion
+frame using the task's per-joint reference weights, then applies encoder bias.
+
+.. automodule:: embodichain_tasks.locomotion.managers.actions
+   :members:
+
+embodichain_tasks.locomotion.tracking.g1_motion
+-----------------------------------------------
+
+The G1 motion task connects reference data and differentiable tracking
+calculations to the simulator Gym loop. It owns frame progress, history,
+reference-state resets and terminal snapshots before automatic row resets.
+
+.. automodule:: embodichain_tasks.locomotion.tracking.g1_motion
+   :members:
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
@@ -5435,3 +5557,240 @@ lowering still validates calibrated scene and route bindings.
 .. autofunction:: semantic_planning_catalog
 
 .. autofunction:: validate_semantic_call_payload
+
+
+Parallel-jaw hand configuration and composition
+----------------------------------------------
+
+Concrete hand configs own physical values. The lightweight catalog resolver
+returns detached declarations; collision surfaces and runtime TCP validation
+are constructed only by their explicit asset/runtime consumers.
+
+embodichain.data.urdf
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.data.urdf
+
+.. autosummary::
+   :nosignatures:
+
+   materialize_urdf_subtree
+
+.. autofunction:: materialize_urdf_subtree
+
+embodichain.lab.sim.cfg.gripper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.cfg.gripper
+
+.. autosummary::
+   :nosignatures:
+
+   ParallelJawGripperCfg
+
+.. autoclass:: ParallelJawGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain.lab.sim.utility.gripper_binding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.utility.gripper_binding
+
+.. autosummary::
+   :nosignatures:
+
+   prepare_robot_grippers
+
+.. autofunction:: prepare_robot_grippers
+
+embodichain.robot_registry
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.robot_registry
+
+.. autosummary::
+   :nosignatures:
+
+   resolve_gripper_defaults
+
+.. autofunction:: resolve_gripper_defaults
+
+embodichain_robots
+~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots
+
+.. autosummary::
+   :nosignatures:
+
+   FrankaPandaHandCfg
+   DHPGI14080Cfg
+   CobotMagicV100GripperCfg
+   PikaGripperCfg
+   TianjiMarvinGripperCfg
+   RobotiqArg2F85Cfg
+   RobotiqArg2F140Cfg
+
+.. autoclass:: FrankaPandaHandCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: DHPGI14080Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: CobotMagicV100GripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: PikaGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: TianjiMarvinGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: RobotiqArg2F85Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: RobotiqArg2F140Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.agilex.cobotmagic.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.agilex.cobotmagic.gripper.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   CobotMagicV100GripperCfg
+
+.. autoclass:: CobotMagicV100GripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.agilex.pika.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.agilex.pika.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   PikaGripperCfg
+
+.. autoclass:: PikaGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.dh_robotics.pgi_140_80.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.dh_robotics.pgi_140_80.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   DHPGI14080Cfg
+
+.. autoclass:: DHPGI14080Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.franka.hand.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.franka.hand.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   FrankaPandaHandCfg
+
+.. autoclass:: FrankaPandaHandCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.robotiq.arg2f140.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.robotiq.arg2f140.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   RobotiqArg2F140Cfg
+
+.. autoclass:: RobotiqArg2F140Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.robotiq.arg2f85.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.robotiq.arg2f85.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   RobotiqArg2F85Cfg
+
+.. autoclass:: RobotiqArg2F85Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.tianji.marvin.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.tianji.marvin.gripper.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   TianjiMarvinGripperCfg
+
+.. autoclass:: TianjiMarvinGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+URDF mounting and name normalization
+-----------------------------------
+
+Single-component standalone hands can request an explicit fixed mounting root.
+Physical and semantic bindings share the assembler's native naming policy.
+
+.. currentmodule:: embodichain.lab.sim.cfg.urdf
+
+.. autosummary::
+   :nosignatures:
+
+   URDFCfg
+
+.. autoclass:: URDFCfg
+   :members:
+   :no-index:
+
+.. currentmodule:: embodichain.toolkits.urdf_assembly.name_normalizer
+
+.. autosummary::
+   :nosignatures:
+
+   NameNormalizer
+
+.. autoclass:: NameNormalizer
+   :members:
+
+
+embodichain.lab.sim.cfg parallel-jaw facade
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.cfg
+
+.. autoclass:: ParallelJawGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :no-index:

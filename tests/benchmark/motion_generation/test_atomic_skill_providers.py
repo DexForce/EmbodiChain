@@ -1156,7 +1156,7 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
 
 
 def test_door_pour_align_push_suite_declares_the_four_skills() -> None:
-    suite = load_suite("atomic_franka_pgi_door_pour_align_push")
+    suite = load_suite("atomic_franka_robotiq_door_pour_align_push")
     track = suite.enabled_tracks()[0]
 
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo", "toppra"]
@@ -1488,7 +1488,7 @@ def test_object_rotation_providers_screen_every_pose_row(
     for index, call in enumerate(references):
         torch.testing.assert_close(call[2], case.start_qpos + index * 0.01)
     generator_factory.assert_called_once_with(
-        gripper_model=None,
+        gripper_data=None,
         root_from_tcp=robot.cfg.solver_cfg["arm"].tcp,
         n_sample=321,
         force_refresh=False,

@@ -345,8 +345,8 @@ class _AntipodalGraspPoseGeneratorFactory:
     model_id: str
     min_opening_width: float
     max_opening_width: float
+    gripper_json: str
     point_spacing: float = 0.012
-    side: str | None = None
     root_from_tcp: tuple[float, ...] | None = None
     root_from_contact_frame: tuple[float, ...] | None = None
     sample_count: int | None = None
@@ -357,17 +357,62 @@ class _AntipodalGraspPoseGeneratorFactory:
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
+    def validate_binding(self, robot: object, target_id: str) -> None:
+        """Reject a static service snapshot bound to different physical hardware."""
+        import json
+
+        expected = json.loads(self.gripper_json)
+        declaration = expected.get("binding")
+        if declaration is None:
+            return
+        bindings = getattr(getattr(robot, "cfg", None), "gripper_bindings", {})
+        selected = bindings.get(declaration["instance"])
+        if selected is None or selected["declaration"]["control_part"] != target_id:
+            raise ValueError(
+                "Configured grasp service has no matching actual gripper binding."
+            )
+        actual = selected["defaults"]
+        expected_binding = {
+            key: value for key, value in declaration.items() if key != "instance"
+        }
+        if json.dumps(selected["declaration"], sort_keys=True) != json.dumps(
+            expected_binding, sort_keys=True
+        ):
+            raise ValueError(
+                "Configured grasp service disagrees with the actual hand installation."
+            )
+        for key in ("fpath", "joint_commands", "default_root_from_tcp", "mesh_paths"):
+            if json.dumps(actual.get(key, {}), sort_keys=True) != json.dumps(
+                expected.get(key, {}), sort_keys=True
+            ):
+                raise ValueError(
+                    f"Configured grasp service disagrees with actual gripper {key}."
+                )
+
+        def physical_model(values):
+            return {
+                key: value
+                for key, value in values.items()
+                if key not in {"min_opening_width", "max_opening_width"}
+            }
+
+        if json.dumps(physical_model(actual), sort_keys=True) != json.dumps(
+            physical_model(expected), sort_keys=True
+        ):
+            raise ValueError(
+                "Configured grasp calibration or geometry disagrees with the actual gripper."
+            )
+
     def __call__(self) -> GraspPoseGenerator:
         """Create a fresh configured antipodal grasp-pose generator."""
-        from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
         from embodichain.toolkits.graspkit.pg_grasp import (
             AntipodalGraspPoseGenerator,
             AntipodalGraspPoseGeneratorCfg,
             GraspAnnotationCfg,
             ParallelJawGraspCollisionCfg,
         )
-        from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
-            get_parallel_jaw_collision_geometry,
+        from embodichain.lab.sim.utility.gripper_geometry import (
+            build_gripper_collision_geometry,
         )
         import numpy as np
 
@@ -391,27 +436,16 @@ class _AntipodalGraspPoseGeneratorFactory:
         if self.force_refresh is not None:
             annotation_kwargs["force_refresh"] = self.force_refresh
 
-        geometry_kwargs = {}
-        if self.root_from_contact_frame is not None:
-            geometry_kwargs["root_from_contact_frame"] = np.asarray(
-                self.root_from_contact_frame
-            ).reshape(4, 4)
+        import json
+
+        defaults = json.loads(self.gripper_json)
         return AntipodalGraspPoseGenerator(
-            ParallelJawGripperModelCfg(
-                model_id=self.model_id,
-                min_opening_width=self.min_opening_width,
-                max_opening_width=self.max_opening_width,
-            ),
-            collision_geometry=get_parallel_jaw_collision_geometry(
-                self.model_id,
+            model_id=defaults["model_id"],
+            min_opening_width=defaults["min_opening_width"],
+            max_opening_width=defaults["max_opening_width"],
+            collision_geometry=build_gripper_collision_geometry(
+                defaults,
                 point_spacing=self.point_spacing,
-                side=self.side,
-                root_from_tcp=(
-                    None
-                    if self.root_from_tcp is None
-                    else np.asarray(self.root_from_tcp).reshape(4, 4)
-                ),
-                **geometry_kwargs,
             ),
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm_kwargs),
             collision_cfg=ParallelJawGraspCollisionCfg(**collision_kwargs),

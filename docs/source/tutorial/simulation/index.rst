@@ -18,6 +18,7 @@ pages are ordered as a progressive learning path.
    ../robot
    ../sensor
    ../solver
+   ../simple_newton_solver
    ../motion_gen
    ../trajectory_planning
    ../robot_workspace

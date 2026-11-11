@@ -48,14 +48,18 @@ the SDK's complete functional dynamics service. `_nerd_binding.py` verifies
 ordered joints, contact slots, timestep, gravity and the recorded physical
 signature. `_kinematics.py` owns the first-order Torch/Warp FK bridge.
 The project-pinned DexSim 0.6 APIs provide named providers and functional
-Scene services;
-ordinary built-in solvers retain the mainline DexUni configuration contract.
+Scene services; ordinary built-in solvers retain the mainline DexUni
+configuration contract.
 
 `lab/sim/diff/dynamics.py` and
 `lab/gym/envs/differentiable_dynamics_env.py` own independent functional state,
 parameter forwarding, selective reset and explicit detach boundaries. Published
 native state/history is detached; backward storage remains owned by the
-functional trajectory. Reset selected rows only after terminal reward backward.
+functional trajectory. Automatic selected-row resets preserve terminal reward
+and observation graphs. `info["terminal_observation"]` retains the full pre-reset
+batch for value bootstrap through `DifferentiableEnvProtocol`; finish backward
+before changing model parameters. Collector, trainer and Actor-Critic ownership
+remain in [RL learning](../rl-learning/rl-learning.md).
 The existing kinematic `DifferentiableEnv` retains its separate callback path.
 
 The NeRD showcase owns Scene-specific consumers in `_support/_scene.py`, asset
@@ -69,8 +73,9 @@ The configurations remain under the example, outside the official task catalog.
 
 Core solver/gradient tests live in `tests/sim/physics/solvers`, `tests/sim/diff`
 and `tests/gym/envs/test_differentiable_dynamics_env.py`; Scene collection and
-APG integration use the showcase. SDK-dependent tests use the pinned Newton provider and Scene interfaces. Published artifacts and historical results retain their
-recorded runtime identity; a source migration does not requalify accuracy.
+APG integration use the showcase. SDK-dependent tests use the pinned Newton
+provider and Scene interfaces. Published artifacts and historical results retain
+their recorded runtime identity; a source migration does not requalify accuracy.
 
 ## RigidFormer author model
 

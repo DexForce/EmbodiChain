@@ -57,7 +57,9 @@ def test_registered_task_and_yaml_ownership(robot: str, title: str) -> None:
     assert agent["algorithm"]["name"] == "apg"
 
 
-def _check_task_and_trainer(tmp_path: Path, robot: str, title: str) -> None:
+def _check_task_and_trainer(
+    tmp_path: Path, robot: str, title: str, algorithm: str
+) -> None:
     importlib.import_module(f"examples.learning.nerd._support._{robot}_env")
     from examples.learning.nerd._support._scene import DynamicsSimulation
     from embodichain.learning.rl.train import train_from_config
@@ -135,6 +137,17 @@ def _check_task_and_trainer(tmp_path: Path, robot: str, title: str) -> None:
         "activation": "tanh",
         "last_activation": "tanh",
     }
+    if algorithm == "apg_actor_critic":
+        cfg["policy"]["name"] = "actor_critic"
+        cfg["policy"]["critic"] = {
+            "type": "mlp",
+            "network_cfg": {"hidden_sizes": [8], "activation": "tanh"},
+        }
+        cfg["algorithm"]["name"] = algorithm
+        cfg["algorithm"]["cfg"].update(critic_epochs=1, critic_minibatches=1)
+        # Every step truncates, requiring the new collector to bootstrap from
+        # the differentiable pre-reset observation rather than the fresh state.
+        cfg["trainer"]["learning_env"]["cfg"]["max_episode_steps"] = 1
     path = tmp_path / "apg.json"
     path.write_text(json.dumps(cfg))
     os.chdir(tmp_path)
@@ -142,14 +155,26 @@ def _check_task_and_trainer(tmp_path: Path, robot: str, title: str) -> None:
     assert result is not None
     assert result["global_step"] == 4
     assert list((tmp_path / "outputs").rglob("*.pt"))
+    assert result["last_train_metrics"]["train/skipped_update"] == 0
+    if algorithm == "apg_actor_critic":
+        assert result["last_train_metrics"]["train/critic_updates"] == 1
+        saved = torch.load(result["latest_checkpoint_path"], weights_only=True)
+        assert saved["critic_optimizer"]["state"]
 
 
 @pytest.mark.subprocess_sim
-@pytest.mark.parametrize("robot,title", [("cartpole", "Cartpole"), ("ant", "Ant")])
+@pytest.mark.parametrize(
+    "robot,title,algorithm",
+    [
+        ("cartpole", "Cartpole", "apg"),
+        ("ant", "Ant", "apg"),
+        ("cartpole", "Cartpole", "apg_actor_critic"),
+    ],
+)
 def test_actual_registered_task_and_one_apg_update(
-    tmp_path: Path, robot: str, title: str
+    tmp_path: Path, robot: str, title: str, algorithm: str
 ) -> None:
-    code = "import importlib.util,sys;from pathlib import Path;s=importlib.util.spec_from_file_location('neural_task_test',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m._check_task_and_trainer(Path(sys.argv[2]),sys.argv[3],sys.argv[4])"
+    code = "import importlib.util,sys;from pathlib import Path;s=importlib.util.spec_from_file_location('neural_task_test',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m._check_task_and_trainer(Path(sys.argv[2]),sys.argv[3],sys.argv[4],sys.argv[5])"
     subprocess.run(
         [
             sys.executable,
@@ -159,6 +184,7 @@ def test_actual_registered_task_and_one_apg_update(
             str(tmp_path),
             robot,
             title,
+            algorithm,
         ],
         check=True,
         env={

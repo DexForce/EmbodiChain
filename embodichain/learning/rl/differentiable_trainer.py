@@ -34,8 +34,8 @@ from embodichain.learning.rl.collector import (
 )
 from embodichain.learning.rl.env import (
     DifferentiableRolloutSpec,
-    DifferentiableVecEnv,
-    ScheduledDifferentiableVecEnv,
+    DifferentiableEnvProtocol,
+    ScheduledDifferentiableEnvProtocol,
 )
 from embodichain.learning.rl.evaluation import evaluate_episodes
 from embodichain.learning.rl.policies import Policy
@@ -80,11 +80,11 @@ class DifferentiableTrainer:
     def __init__(
         self,
         cfg: DifferentiableTrainerCfg,
-        env: DifferentiableVecEnv,
+        env: DifferentiableEnvProtocol,
         policy: Policy,
         algorithm: APG,
         writer: SummaryWriter | None = None,
-        eval_env: DifferentiableVecEnv | None = None,
+        eval_env: DifferentiableEnvProtocol | None = None,
         observation_normalizer: RunningObservationNormalizer | None = None,
     ) -> None:
         if cfg.segment_length <= 0:
@@ -193,7 +193,7 @@ class DifferentiableTrainer:
             raise ValueError("total_updates cannot be negative.")
 
         scheduled = self.cfg.rollout_mode == "complete" and isinstance(
-            self.env, ScheduledDifferentiableVecEnv
+            self.env, ScheduledDifferentiableEnvProtocol
         )
         if total_updates is not None:
             estimated_updates = total_updates
@@ -235,39 +235,13 @@ class DifferentiableTrainer:
             if total_updates is not None
             else self.global_step < total_timesteps
         ):
-            self.algorithm._check_schedule_horizon(1)
-            if self.cfg.rollout_mode == "complete":
-                collected_steps, metrics = self._complete_rollout_update()
-            else:
-                update_steps = self.update_horizon
-                if total_timesteps is not None:
-                    remaining_vector_steps = math.ceil(
-                        (total_timesteps - self.global_step) / self.env.num_envs
-                    )
-                    update_steps = min(self.update_horizon, remaining_vector_steps)
-                collected_steps, metrics = self._segmented_update(update_steps)
-
-            self.global_step += collected_steps * self.env.num_envs
-            self.num_updates += 1
-            elapsed = max(time.time() - self.start_time, 1e-6)
-            entry = {
-                "global_step": float(self.global_step),
-                "num_updates": float(self.num_updates),
-                "charts/SPS": float((self.global_step - self._start_step) / elapsed),
-                "charts/episode_reward_avg_100": (
-                    float(sum(self.ret_window) / len(self.ret_window))
-                    if self.ret_window
-                    else float("nan")
-                ),
-                "charts/episode_length_avg_100": (
-                    float(sum(self.len_window) / len(self.len_window))
-                    if self.len_window
-                    else float("nan")
-                ),
-                **{f"train/{key}": value for key, value in metrics.items()},
-            }
-            self.train_history.append(entry)
-            self._log(metrics)
+            update_steps = self.update_horizon
+            if total_timesteps is not None:
+                remaining_vector_steps = math.ceil(
+                    (total_timesteps - self.global_step) / self.env.num_envs
+                )
+                update_steps = min(self.update_horizon, remaining_vector_steps)
+            self.update_once(num_steps=update_steps)
 
             saved_best = False
             if (
@@ -290,6 +264,52 @@ class DifferentiableTrainer:
 
         return self.get_summary()
 
+    def update_once(self, *, num_steps: int | None = None) -> dict[str, float]:
+        """Collect and optimize one update, recording counters and training metrics.
+
+        A model-learning workflow can call this method between real-data
+        collection and supervised fitting. Evaluation and scheduled checkpoints
+        are managed by :meth:`train` or by the surrounding workflow.
+
+        Args:
+            num_steps: Vector steps for segmented mode; defaults to update_horizon.
+                Complete mode obtains its horizon from the rollout schedule.
+
+        Returns:
+            Actor and critic optimization metrics for this update.
+        """
+        self.algorithm._check_schedule_horizon(1)
+        self.policy.train()
+        if self.cfg.rollout_mode == "complete":
+            collected_steps, metrics = self._complete_rollout_update()
+        else:
+            steps = self.update_horizon if num_steps is None else num_steps
+            if steps <= 0:
+                raise ValueError("num_steps must be positive.")
+            collected_steps, metrics = self._segmented_update(steps)
+        self.global_step += collected_steps * self.env.num_envs
+        self.num_updates += 1
+        elapsed = max(time.time() - self.start_time, 1e-6)
+        entry = {
+            "global_step": float(self.global_step),
+            "num_updates": float(self.num_updates),
+            "charts/SPS": float((self.global_step - self._start_step) / elapsed),
+            "charts/episode_reward_avg_100": (
+                float(sum(self.ret_window) / len(self.ret_window))
+                if self.ret_window
+                else float("nan")
+            ),
+            "charts/episode_length_avg_100": (
+                float(sum(self.len_window) / len(self.len_window))
+                if self.len_window
+                else float("nan")
+            ),
+            **{f"train/{key}": value for key, value in metrics.items()},
+        }
+        self.train_history.append(entry)
+        self._log(metrics)
+        return metrics
+
     def _segmented_update(self, update_steps: int) -> tuple[int, dict[str, float]]:
         """Run one backward-compatible TBPTT optimizer update."""
         collected_steps = 0
@@ -300,15 +320,18 @@ class DifferentiableTrainer:
                     self.cfg.segment_length,
                     update_steps - collected_steps,
                 )
-                rollout = self.collector.collect(
-                    segment_steps,
-                    deterministic=self.cfg.deterministic_actions,
-                    on_step_callback=self._on_step,
-                )
+                with self.algorithm.rollout_context():
+                    rollout = self.collector.collect(
+                        segment_steps,
+                        deterministic=self.cfg.deterministic_actions,
+                        on_step_callback=self._on_step,
+                    )
                 self.algorithm.accumulate_segment(rollout)
                 self._update_observation_normalizer(rollout)
                 self.collector.detach_state()
                 collected_steps += rollout.num_steps
+                # Retire snapshots before the next collection or critic update.
+                del rollout
             return collected_steps, self.algorithm.finish_update()
         except Exception:
             self.algorithm.cancel_update()
@@ -325,11 +348,12 @@ class DifferentiableTrainer:
                 spec = self._prepare_complete_rollout()
                 seed = self.cfg.rollout_seed if self._rollout_index == 0 else None
                 self.collector.reset(seed=seed)
-                rollout = self.collector.collect(
-                    spec.num_steps,
-                    deterministic=self.cfg.deterministic_actions,
-                    on_step_callback=self._on_step,
-                )
+                with self.algorithm.rollout_context():
+                    rollout = self.collector.collect(
+                        spec.num_steps,
+                        deterministic=self.cfg.deterministic_actions,
+                        on_step_callback=self._on_step,
+                    )
                 self.algorithm.accumulate_complete_rollout(
                     rollout,
                     objective_scale=spec.objective_scale,
@@ -338,6 +362,8 @@ class DifferentiableTrainer:
                 self._update_observation_normalizer(rollout)
                 self.collector.detach_state()
                 collected_steps += rollout.num_steps
+                # Retire snapshots before the next collection or critic update.
+                del rollout
                 for key, value in spec.metadata.items():
                     metadata.setdefault(str(key), []).append(float(value))
                 self._rollout_index += 1
@@ -350,7 +376,7 @@ class DifferentiableTrainer:
         return collected_steps, metrics
 
     def _prepare_complete_rollout(self) -> DifferentiableRolloutSpec:
-        if isinstance(self.env, ScheduledDifferentiableVecEnv):
+        if isinstance(self.env, ScheduledDifferentiableEnvProtocol):
             return self.env.prepare_differentiable_rollout(self._rollout_index)
         return DifferentiableRolloutSpec(num_steps=self.update_horizon)
 

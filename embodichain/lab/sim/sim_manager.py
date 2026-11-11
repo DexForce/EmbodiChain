@@ -77,6 +77,7 @@ from dexsim.models import MeshObject
 from dexsim.render import LightType, Windows
 
 from embodichain.lab.sim.objects import (
+    CableObject,
     RigidObject,
     VisualObject,
     RigidObjectGroup,
@@ -99,6 +100,7 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
 from embodichain.lab.sim.cfg import (
+    CableObjectCfg,
     RenderCfg,
     PhysicsBackendCfg,
     GPUMemoryCfg,
@@ -112,6 +114,7 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     VisualObjectCfg,
     UsdSourceCfg,
+    UsdImportCfg,
     DeformableObjectCfg,
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
@@ -125,6 +128,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.physics import make_physics_backend
 from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.spawn.descriptors import (
+    cable_desc_from_cfg,
     articulation_desc_from_cfg,
     configure_articulation_desc,
     rigid_desc_from_cfg,
@@ -137,11 +141,14 @@ from embodichain.lab.sim.spawn.usd import (
     rigid_desc_from_usd,
     visual_desc_from_usd,
 )
+from embodichain.lab.sim.spawn.usd_result import UsdImportResult
 from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.lab.sim.material import _material_desc_from_cfg
 from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
+from embodichain.lab.visualization.markers import MarkerGroup, MarkerGroupCfg
+from embodichain.lab.visualization.markers._native import NativeMarkerRenderer
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import (
     look_at_to_pose,
@@ -151,7 +158,12 @@ from embodichain.utils.math import (
 )
 
 if TYPE_CHECKING:
-    from dexsim.spawn import ArticulationDesc, ObjectDesc
+    from dexsim.spawn import (
+        ArticulationDesc,
+        ObjectDesc,
+        GeometryDesc,
+        NewtonCollisionDesc,
+    )
     from dexsim.engine import PhysicsScene
     from dexsim.scene import Scene
     from dexsim.interaction import EntityGizmoConfig, EntityGizmoManipulator
@@ -160,6 +172,7 @@ if TYPE_CHECKING:
         RuntimeStats,
         SceneManifest,
         SceneOverlays,
+        MeshMarkerOverlay,
         VisualizationRuntime,
     )
 
@@ -732,9 +745,15 @@ class SimulationManager:
         self._picker_gizmo: tuple[str, str | None] | None = None
 
         self._visual_objects: dict[str, VisualObject] = {}
+
+        # marker management
+        self._marker_groups: dict[str, MarkerGroup] = {}
+        self._native_markers: NativeMarkerRenderer | None = None
+
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._deformable_objects: Dict[str, DeformableObject] = dict()
+        self._cable_objects: dict[str, CableObject] = {}
         self._articulations: Dict[str, Articulation] = dict()
         self._robots: Dict[str, Robot] = dict()
 
@@ -1020,6 +1039,7 @@ class SimulationManager:
         uid_list.extend(list(self._rigid_object_groups.keys()))
         uid_list.extend(list(self._deformable_objects.keys()))
         uid_list.extend(list(self._fluid_objects.keys()))
+        uid_list.extend(getattr(self, "_cable_objects", {}))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
 
@@ -1089,6 +1109,7 @@ class SimulationManager:
             getattr(self, "_rigid_object_groups", {}),
             getattr(self, "_deformable_objects", {}),
             getattr(self, "_fluid_objects", {}),
+            getattr(self, "_cable_objects", {}),
             getattr(self, "_articulations", {}),
             getattr(self, "_robots", {}),
             getattr(self, "_sensors", {}),
@@ -1364,6 +1385,24 @@ class SimulationManager:
         from embodichain.data.assets import SimResources
 
         self._default_resources = SimResources()
+
+    def _register_joint_dc_motor_control(
+        self, uid: str, robot_parameters: dict[str, Any]
+    ) -> Any:
+        """Install one batched explicit motor before scene preparation."""
+        if not self.is_newton_backend:
+            raise RuntimeError("Graph joint motors require the Newton backend.")
+        if uid not in self._robots and uid not in self._articulations:
+            raise KeyError(f"Robot or articulation {uid!r} is not declared.")
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError("Joint motors must be registered before prepare().")
+        from embodichain.lab.sim._joint_motor import _BatchedJointDCMotorControl
+
+        paths = tuple(f"{arena}/{uid}" for arena in scene.arena_names)
+        control = _BatchedJointDCMotorControl(robot_parameters, paths)
+        scene.builder.add_runtime_control(control)
+        return control
 
     def register_kinematic_joint_trajectory(
         self,
@@ -1850,14 +1889,15 @@ class SimulationManager:
             or scene.builder.has_pending_changes
         ):
             if result is not None:
-                # These native cameras are owned outside Spawn. Detach them
-                # before a rebuild removes their articulation render parents.
+                # Clear configured parent paths before rebuilding native links;
+                # semantic parent resolution is retried after facade binding.
                 for sensor in self._sensors.values():
                     if (
                         isinstance(sensor, Camera)
                         and sensor.cfg.extrinsics.parent is not None
                     ):
                         sensor._detach_from_parent_nodes()
+            self.physics._prepare_scene_build()
             result = scene.commit()
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
@@ -1884,6 +1924,7 @@ class SimulationManager:
             self._attach_parented_cameras()
             self._camera_attachment_topology_revision = topology_revision
         self._ready_spawn_topology_revision = topology_revision
+        self._refresh_marker_attachments()
 
     def _prepare_spawn_runtime(self, result: Scene) -> None:
         """Prepare backend runtime buffers for one Spawn topology revision."""
@@ -1978,10 +2019,12 @@ class SimulationManager:
         """Publish current physics state to render resources without stepping.
 
         Use this after direct state writes, such as an environment reset, and
-        before reading cameras or publishing a visualization frame.
+        before reading cameras or publishing a visualization frame. Native
+        render uploads, including marker edits, complete before this returns.
 
         Raises:
-            RuntimeError: If the Spawn scene has not been prepared.
+            RuntimeError: If the Spawn scene has not been prepared or native
+                render publication fails.
         """
         result = self.spawn_result
         if result is None:
@@ -1989,6 +2032,11 @@ class SimulationManager:
                 "Render-state synchronization requires a prepared Spawn scene."
             )
         self.physics.sync_render_state(result)
+        self._refresh_marker_attachments()
+        if self.has_native_renderer:
+            status = self._world._flush_render_updates()
+            if status < 0:
+                raise RuntimeError(f"Native render-state publication failed: {status}.")
         if getattr(self, "_render_state_published", None) is not None:
             self._render_state_published = True
 
@@ -2095,10 +2143,11 @@ class SimulationManager:
                             self.physics._step(physics_dt)
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
+                    self._pending_record_dt += physics_dt
                     if after_substep is not None:
                         with self.profiler.section("after_substep"):
                             after_substep(physics_dt)
-                    self._pending_record_dt += physics_dt
+                    self._refresh_marker_attachments()
                     if render_final_step or i < step - 1:
                         with self.render_frame(capture_camera_images=i == step - 1):
                             pass
@@ -2502,6 +2551,7 @@ class SimulationManager:
             physics=RigidBodyPhysicsDesc.static(),
             per_env=False,
         )
+        self._spawn_default_plane_descriptor = descriptor
 
         if hasattr(descriptor, "render_categories"):
             descriptor.render_categories = self._GROUND_RENDER_CATEGORY
@@ -2520,6 +2570,54 @@ class SimulationManager:
         self._default_plane = plane
         if self.has_native_renderer:
             plane.set_visible(self._spawn_default_plane_visibility)
+
+    def configure_ground_plane_collision(
+        self,
+        *,
+        enabled: bool = True,
+        newton: NewtonCollisionDesc | None = None,
+        geometry: GeometryDesc | None = None,
+    ) -> None:
+        """Configure ground collision before preparing scene physics.
+
+        Args:
+            enabled: Whether the default plane participates in collision.
+            newton: Optional DexSim NewtonCollisionDesc for the plane.
+            geometry: Optional DexSim GeometryDesc replacing the global ground
+                geometry for both collision and rendering.
+
+        Raises:
+            RuntimeError: The scene physics has already been prepared.
+        """
+        if self.spawn_result is not None:
+            raise RuntimeError("Ground collision must be configured before prepare().")
+        if geometry is not None:
+            from dataclasses import fields
+            from dexsim.spawn import GeometryDesc
+
+            for field in fields(GeometryDesc):
+                value = getattr(geometry, field.name)
+                setattr(
+                    self._spawn_default_plane_descriptor.collisions[0],
+                    field.name,
+                    value,
+                )
+                setattr(
+                    self._spawn_default_plane_descriptor.renders[0], field.name, value
+                )
+        collision = self._spawn_default_plane_descriptor.collisions[0]
+        collision.enable_collision = enabled
+        if newton is not None:
+            collision.newton = newton
+        # Default materializes the ground during declaration. Redeclaring also
+        # updates its native collision and render geometry before prepare().
+        self._spawn_scene.remove("default_plane")
+        self._spawn_scene.declare(
+            "rigid_object", "default_plane", self._spawn_default_plane_descriptor
+        )
+        handles = self._spawn_scene.handles("default_plane")
+        if handles:
+            self._bind_default_plane(handles[0])
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
@@ -2610,13 +2708,14 @@ class SimulationManager:
         | RigidObjectGroup
         | DeformableObject
         | FluidObject
+        | CableObject
         | Articulation
         | None
     ):
         """Get an asset by its UID.
 
-        The asset can be a light, sensor, robot, visual object, rigid object, deformable, or
-        articulation.
+        The asset can be a light, sensor, robot, visual object, rigid object, deformable,
+        fluid, cable, or articulation.
 
         Args:
             uid (str): The UID of the asset.
@@ -2640,6 +2739,8 @@ class SimulationManager:
             return self._deformable_objects[uid]
         if uid in self._fluid_objects:
             return self._fluid_objects[uid]
+        if uid in getattr(self, "_cable_objects", {}):
+            return self._cable_objects[uid]
         if uid in self._articulations:
             return self._articulations[uid]
 
@@ -2678,8 +2779,10 @@ class SimulationManager:
             Light: The created light instance.
 
         Raises:
+            RuntimeError: If the World has no native renderer.
             ValueError: If ``cfg.light_type`` is not supported.
         """
+        self._require_native_renderer("Light creation")
         if cfg.uid is None:
             uid = "light"
             cfg.uid = uid
@@ -2708,19 +2811,25 @@ class SimulationManager:
                 f"(width={cfg.rect_width}, height={cfg.rect_height})."
             )
 
-        if cfg.light_type in self._GLOBAL_LIGHT_TYPES:
-            batch_lights = Light(
-                cfg=cfg,
-                entities=[self._env.create_light(uid, light_type)],
-            )
-        else:
-            batch_lights = Light(
-                cfg=cfg,
-                entities=[
-                    arena.create_light(f"{uid}_{index}", light_type)
-                    for index, arena in enumerate(self._arenas)
-                ],
-            )
+        from dexsim.spawn import LightDesc
+
+        scene = self._spawn_scene.builder.result
+        global_light = cfg.light_type in self._GLOBAL_LIGHT_TYPES
+        arena_names = ("default",) if global_light else self._spawn_scene.arena_names
+        handles = scene.add_lights(
+            [
+                LightDesc(
+                    name=uid if global_light else f"{uid}_{i}", light_type=light_type
+                )
+                for i in range(len(arena_names))
+            ],
+            arena_names=arena_names,
+        )
+        try:
+            batch_lights = Light(cfg=cfg, entities=handles, scene=scene)
+        except Exception:
+            scene.remove_lights(handles)
+            raise
 
         self._lights[uid] = batch_lights
         self.notify_visualization_topology_changed()
@@ -2750,206 +2859,94 @@ class SimulationManager:
 
     def add_usd(
         self,
-        name: str,
-        file_path: str,
+        cfg: UsdImportCfg | str | None = None,
+        file_path: str | None = None,
         *,
+        name: str | None = None,
         pose: np.ndarray | None = None,
         robot_cfgs: dict[str, RobotCfg] | None = None,
-    ) -> dict[str, VisualObject | RigidObject | Articulation | Robot]:
-        """Declare the supported entities in a USD scene.
+        usd: UsdSourceCfg | None = None,
+        asset_cfgs: (
+            dict[str, RigidObjectCfg | ArticulationCfg | dict[str, Any]] | None
+        ) = None,
+    ) -> (
+        UsdImportResult
+        | dict[
+            str, VisualObject | RigidObject | Articulation | Robot | DeformableObject
+        ]
+    ):
+        """Declare a USD import through a validated configuration recipe.
 
-        The returned facades are keyed by their USD prim paths. They remain in
-        declared state until :meth:`prepare` finalizes the shared Spawn scene,
-        then bind in place to the resulting DexSim handles.
-
-        Objects without physics or collision geometry become VisualObjects.
-        Conflicting render-only names receive a ``name_`` prefix; dictionary
-        keys retain their original USD prim paths. Other UID conflicts fail
-        before native declarations.
-
-        USD does not identify which articulations should expose EmbodiChain's
-        robot interface. Pass those explicitly through ``robot_cfgs``; all
-        other articulation descriptions become :class:`Articulation` objects.
+        The returned mapping uses source resource keys; unique sources retain
+        their prim paths. See :class:`UsdImportResult` for derived resource keys.
+        Facades bind in place at ``prepare()``. Source selection, overrides and supported facade
+        types are checked before native declaration. Backend materialization is
+        validated at ``prepare()``;
+        native creation failures do not promise rollback.
 
         Args:
-            name: Name passed to DexSim's USD scene parser.
-            file_path: USD, USDA, USDC, or USDZ file path.
-            pose: Optional scene-root transform.
-            robot_cfgs: Robot configurations keyed by USD prim path. These
-                provide robot-side metadata while physics remains authored by
-                the USD scene.
+            cfg: Complete USD import recipe. A string retains the legacy name argument.
+            file_path: Legacy source path; use ``cfg.source.file_path``.
+            name: Legacy keyword spelling of the import name.
+            pose: Legacy scene transform; use ``cfg.pose``.
+            robot_cfgs: Legacy robot metadata; use ``cfg.robot_cfgs``.
+            usd: Legacy source options; use ``cfg.source`` and ``cfg.namespace``.
+            asset_cfgs: Legacy per-asset overrides; use ``cfg.asset_cfgs``.
 
         Returns:
-            Supported EmbodiChain facades keyed by USD prim path.
-
-        Raises:
-            RuntimeError: If called after the Spawn scene was finalized.
+            Source-path mapping of declared facades and imported resource UIDs.
+            Legacy argument forms retain the mutable asset dictionary result.
         """
+        from .cfg.usd import _normalize_usd_import
+        from .spawn.usd_import import _compile_usd_import
+
         if self.spawn_result is not None:
             raise RuntimeError(
                 "add_usd() must be called before SimulationManager.prepare()."
             )
-
-        from dexsim.spawn import ArticulationDesc, MeshObjectDesc
-
-        from dexsim.kit.usd import parse_usd
-
-        source = parse_usd(file_path, root_name=name)
-        occupied = set(self.asset_uids)
-        for descriptor in (
-            *getattr(self._spawn_scene.builder, "mesh_objects", ()),
-            *getattr(self._spawn_scene.builder, "scene_entities", ()),
-        ):
-            occupied.add(descriptor.name)
-        # Exported scenes can contain a visual ground named like our global
-        # physical ground. Keep both and retain the original USD path as the key.
-        for descriptor in source.mesh_objects:
-            if (
-                descriptor.name in occupied
-                and descriptor.physics is None
-                and not descriptor.collisions
-            ):
-                descriptor.name = f"{name}_{descriptor.name}"
-        for collection in (
-            "mesh_objects",
-            "articulations",
-            "particle_sets",
-            "cameras",
-            "lights",
-            "cables",
-            "records",
-        ):
-            for descriptor in getattr(source, collection, ()):
-                if descriptor.name in occupied:
-                    raise ValueError(
-                        f"USD asset UID already exists: {descriptor.name!r}."
-                    )
-                occupied.add(descriptor.name)
-                if pose is not None and hasattr(descriptor, "pose"):
-                    descriptor.pose = (
-                        np.asarray(pose, dtype=np.float32).reshape(4, 4)
-                        @ descriptor.pose
-                    )
-        source.materials = self._spawn_scene._resolve_materials(source.materials)
-        descriptors = self._spawn_scene.builder.add_scene(source, per_env=True)
-        assets: dict[str, VisualObject | RigidObject | Articulation | Robot] = {}
-        robot_cfgs = robot_cfgs or {}
-
-        for descriptor in descriptors:
-            source_path = (
-                descriptor.usd.prim_path
-                if descriptor.usd is not None and descriptor.usd.prim_path
-                else descriptor.name
+        legacy_result = not isinstance(cfg, UsdImportCfg)
+        recipe = _normalize_usd_import(
+            cfg,
+            file_path=file_path,
+            name=name,
+            pose=pose,
+            robot_cfgs=robot_cfgs,
+            usd=usd,
+            asset_cfgs=asset_cfgs,
+        )
+        plan = _compile_usd_import(self, recipe)
+        plan.source.materials = self._spawn_scene._resolve_materials(
+            plan.source.materials
+        )
+        added = self._spawn_scene.builder.add_scene(plan.source, per_env=True)
+        added_by_name = {item.name: item for item in added}
+        assets = {}
+        for source_path, kind, descriptor, facade in plan.declarations:
+            self._spawn_scene.track(
+                kind, descriptor.name, added_by_name[descriptor.name], facade=facade
             )
-
-            if type(descriptor) is MeshObjectDesc:
-                if descriptor.physics is None and not descriptor.collisions:
-                    cfg = VisualObjectCfg(
-                        uid=descriptor.name,
-                        source=UsdSourceCfg(
-                            file_path=file_path,
-                            source_prim_path=(
-                                descriptor.usd.prim_path
-                                if descriptor.usd is not None
-                                else None
-                            ),
-                        ),
-                        init_local_pose=descriptor.pose.copy(),
-                        body_scale=tuple(
-                            float(value) for value in descriptor.body_scale
-                        ),
-                    )
-                    facade = VisualObject(cfg=cfg, device=self.device)
-                    self._spawn_scene.track(
-                        "visual_object", descriptor.name, descriptor, facade=facade
-                    )
-                    self._visual_objects[descriptor.name] = facade
-                    assets[source_path] = facade
-                    continue
-                body_type = "static"
-                if descriptor.physics is not None:
-                    body_type = {
-                        ActorType.DYNAMIC: "dynamic",
-                        ActorType.KINEMATIC: "kinematic",
-                        ActorType.STATIC: "static",
-                    }[descriptor.physics.actor_type]
-                cfg = RigidObjectCfg(
-                    uid=descriptor.name,
-                    source=UsdSourceCfg(
-                        file_path=file_path,
-                        source_prim_path=(
-                            descriptor.usd.prim_path
-                            if descriptor.usd is not None
-                            else None
-                        ),
-                    ),
-                    init_local_pose=descriptor.pose.copy(),
-                    body_type=body_type,
-                    body_scale=tuple(float(value) for value in descriptor.body_scale),
-                    asset_physics_mode="preserve",
-                )
-                facade = RigidObject(
-                    cfg=cfg,
-                    device=self.device,
-                )
-
-                self._spawn_scene.track(
-                    "rigid_object",
-                    descriptor.name,
-                    descriptor,
-                    facade=facade,
-                )
-                self._rigid_objects[descriptor.name] = facade
-                assets[source_path] = facade
-                continue
-
-            if isinstance(descriptor, ArticulationDesc):
-                robot_cfg = robot_cfgs.get(source_path)
-                facade_type: type[Articulation] = (
-                    Robot if robot_cfg is not None else Articulation
-                )
-                cfg = (
-                    deepcopy(robot_cfg)
-                    if robot_cfg is not None
-                    else ArticulationCfg(uid=descriptor.name)
-                )
-                cfg.uid = descriptor.name
-                cfg.fpath = None
-                cfg.source = UsdSourceCfg(
-                    file_path=file_path,
-                    source_prim_path=(
-                        descriptor.usd.prim_path if descriptor.usd is not None else None
-                    ),
-                )
-                cfg.init_local_pose = descriptor.pose.copy()
-                cfg.asset_physics_mode = "preserve"
-                if robot_cfg is None:
-                    cfg.root_props = ArticulationRootPropertiesCfg()
-                else:
-                    cfg.root_props = cfg.root_props.copy()
-                cfg.root_props.fixed_base = bool(descriptor.fixed_base)
-                cfg.root_props.self_collision_enabled = descriptor.enable_self_collision
-                cfg.body_scale = tuple(float(value) for value in descriptor.body_scale)
-                cfg.build_pk_chain = False
-                facade = facade_type(
-                    cfg=cfg,
-                    device=self.device,
-                )
-
-                self._spawn_scene.track(
-                    "articulation",
-                    descriptor.name,
-                    descriptor,
-                    facade=facade,
-                )
-                registry = (
-                    self._robots if robot_cfg is not None else self._articulations
-                )
-                registry[descriptor.name] = facade
-                assets[source_path] = facade
-
+            registry = {
+                "visual_object": self._visual_objects,
+                "rigid_object": self._rigid_objects,
+                "articulation": (
+                    self._robots if isinstance(facade, Robot) else self._articulations
+                ),
+                "soft_object": self._deformable_objects,
+                "cloth_object": self._deformable_objects,
+            }[kind]
+            registry[descriptor.name] = facade
+            assets[source_path] = facade
+        for sensor_cfg in plan.mounted_sensors:
+            self.add_sensor(sensor_cfg)
         self.notify_visualization_topology_changed()
-        return assets
+        result = UsdImportResult(
+            assets,
+            resource_uids=plan.resource_uids,
+            resource_types=plan.resource_types,
+            constraint_uids=plan.constraint_uids,
+            resource_source_paths=plan.resource_source_paths,
+        )
+        return dict(result) if legacy_result else result
 
     def add_visual_object(self, cfg: VisualObjectCfg) -> VisualObject:
         """Declare a render-only mesh or primitive, without physics or colliders.
@@ -2961,6 +2958,7 @@ class SimulationManager:
         Returns:
             The declared facade, bound after ``prepare()``.
         """
+        cfg = deepcopy(cfg)
         if cfg.uid is None or cfg.uid in self.asset_uids:
             raise ValueError("Visual object requires a unique, nonempty UID.")
         path = _asset_file_path(cfg)
@@ -2970,10 +2968,9 @@ class SimulationManager:
             descriptor, materials = visual_desc_from_cfg(cfg)
         visual = VisualObject(cfg, self.device)
         was_materialized = self.spawn_result is not None
-        self._spawn_scene.builder.materials.update(
-            self._spawn_scene._resolve_materials(materials)
+        self._spawn_scene.declare(
+            "visual_object", cfg.uid, descriptor, facade=visual, materials=materials
         )
-        self._spawn_scene.declare("visual_object", cfg.uid, descriptor, facade=visual)
         self._visual_objects[cfg.uid] = visual
         self.notify_visualization_topology_changed()
         if was_materialized:
@@ -3002,16 +2999,22 @@ class SimulationManager:
     def add_rigid_object(
         self,
         cfg: RigidObjectCfg,
+        *,
+        validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> RigidObject:
         """Add a rigid object to the scene.
 
         Args:
             cfg (RigidObjectCfg): Configuration for the rigid object.
+            validate_resolved: Optional check of the source-resolved config,
+                run before declaring the object in Spawn.
 
         Returns:
             RigidObject: The added rigid object instance handle.
         """
-        return self._declare_rigid_object(cfg, replace=False)
+        return self._declare_rigid_object(
+            cfg, replace=False, validate_resolved=validate_resolved
+        )
 
     def add_rigid_object_descriptor(self, descriptor: ObjectDesc) -> RigidObject:
         """Declare procedural rigid geometry through the existing Spawn owner.
@@ -3099,15 +3102,25 @@ class SimulationManager:
         return self._declare_rigid_objects(cfgs, replace=True)
 
     def _declare_rigid_object(
-        self, cfg: RigidObjectCfg, *, replace: bool
+        self,
+        cfg: RigidObjectCfg,
+        *,
+        replace: bool,
+        validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> RigidObject:
-        return self._declare_rigid_objects([cfg], replace=replace)[0]
+        return self._declare_rigid_objects(
+            [cfg], replace=replace, validate_resolved=validate_resolved
+        )[0]
 
     def _declare_rigid_objects(
-        self, cfgs: Sequence[RigidObjectCfg], *, replace: bool
+        self,
+        cfgs: Sequence[RigidObjectCfg],
+        *,
+        replace: bool,
+        validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> list[RigidObject]:
         """Translate the complete batch before changing the scene."""
-        cfgs = list(cfgs)
+        cfgs = [deepcopy(cfg) for cfg in cfgs]
         if not cfgs:
             return []
         seen: set[str] = set()
@@ -3138,14 +3151,19 @@ class SimulationManager:
                     per_env=True,
                     newton_solver_type=self._active_newton_solver_type,
                 )
+            if validate_resolved is not None:
+                validate_resolved(cfg)
             rigid_obj = RigidObject(cfg=cfg, device=self.device)
             declarations.append((cfg.uid, descriptor, materials, rigid_obj))
 
+        for uid, _, _, _ in declarations:
+            if replace:
+                self._spawn_scene._require_removable(uid)
+            else:
+                self._spawn_scene._preflight_declaration("rigid_object", uid)
+        self._spawn_scene._register_material_batches(item[2] for item in declarations)
         was_materialized = self.spawn_result is not None
         for uid, descriptor, materials, rigid_obj in declarations:
-            self._spawn_scene.builder.materials.update(
-                self._spawn_scene._resolve_materials(materials)
-            )
             if replace:
                 self._spawn_scene.remove(uid)
             self._spawn_scene.declare("rigid_object", uid, descriptor, facade=rigid_obj)
@@ -3246,6 +3264,7 @@ class SimulationManager:
                 raise ValueError(
                     f"Fluid {key} conflicts with solver_cfg.sph_cfg.{key}."
                 )
+        self._spawn_scene._preflight_declaration("fluid_object", cfg.uid)
         points = cfg.spawn.sample(cfg.particle_spacing)
         pose = _pose_from_cfg(cfg)
         if cfg.spawn.reference_uid is not None:
@@ -3301,6 +3320,70 @@ class SimulationManager:
             raise RuntimeError("Fluid diagnostics require prepare().")
         return self.physics.fluid_diagnostics(fluid)
 
+    def add_cable_object(self, cfg: CableObjectCfg) -> CableObject:
+        """Declare a cable before ``prepare()`` using DexSim's public Spawn API.
+
+        Args:
+            cfg: Typed cable geometry, four-mode material and visual configuration.
+
+        Returns:
+            A declared facade whose data becomes available after ``prepare()``.
+
+        Raises:
+            NotImplementedError: Backend/device/solver/gradient mode is unsupported,
+                or the physical scene has already been finalized.
+            ValueError: Required configuration or the asset UID is invalid.
+        """
+        if not isinstance(cfg, CableObjectCfg):
+            raise TypeError("Cable objects require CableObjectCfg.")
+        if not self.physics.supports_cables:
+            raise NotImplementedError("Cable objects require the Newton backend.")
+        if self.device.type != "cuda":
+            raise NotImplementedError("Cable objects require a CUDA device.")
+        if self._active_newton_solver_type != "dexuni":
+            raise NotImplementedError(
+                "Cable objects require the DexUni solver (solver_type='dexuni')."
+            )
+        if self.sim_config.physics_cfg.requires_grad:
+            raise NotImplementedError(
+                "Cable objects do not support requires_grad=True."
+            )
+        if self.spawn_result is not None:
+            raise NotImplementedError(
+                "Declare cable objects before scene finalization."
+            )
+        descriptor, materials = cable_desc_from_cfg(cfg, per_env=True)
+        if descriptor.name in self.asset_uids or descriptor.name in self._spawn_scene:
+            raise ValueError(
+                f"Scene asset uid is already declared: {descriptor.name!r}."
+            )
+        cable = CableObject(cfg, device=self.device)
+        self._spawn_scene.declare(
+            "cable_object",
+            descriptor.name,
+            descriptor,
+            facade=cable,
+            materials=materials,
+        )
+        self._cable_objects[descriptor.name] = cable
+        self.notify_visualization_topology_changed()
+        return cable
+
+    def get_cable_object(self, uid: str) -> CableObject | None:
+        """Return a cable by simulation UID, or None when absent.
+
+        Args:
+            uid: Declared cable simulation UID.
+
+        Returns:
+            The existing facade, including before it is Spawn-bound.
+        """
+        return getattr(self, "_cable_objects", {}).get(uid)
+
+    def get_cable_object_uid_list(self) -> list[str]:
+        """Return cable UIDs in declaration order."""
+        return list(getattr(self, "_cable_objects", {}))
+
     def add_deformable_object(self, cfg: DeformableObjectCfg) -> DeformableObject:
         """Declare a volume or surface deformable in the scene.
 
@@ -3318,6 +3401,7 @@ class SimulationManager:
                 the requested deformable type.
             ValueError: If the discriminator or UID is invalid.
         """
+        cfg = deepcopy(cfg)
         deformable_type = cfg.deformable_type
         if deformable_type == "volume":
             supported = self.physics.supports_volume_deformables
@@ -3382,10 +3466,12 @@ class SimulationManager:
                 f"A {deformable_type} deformable requires "
                 f"{config_cls.__name__}, got {type(cfg).__name__}."
             )
-        descriptor, materials = descriptor_factory(cfg, per_env=True)
-        self._spawn_scene.builder.materials.update(
-            self._spawn_scene._resolve_materials(materials)
-        )
+        if cfg.source is not None:
+            from .spawn.usd import _deformable_desc_from_usd
+
+            descriptor, materials = _deformable_desc_from_usd(cfg)
+        else:
+            descriptor, materials = descriptor_factory(cfg, per_env=True)
         deformable = object_cls(
             cfg,
             device=self.device,
@@ -3395,6 +3481,7 @@ class SimulationManager:
             uid,
             descriptor,
             facade=deformable,
+            materials=materials,
         )
         self._deformable_objects[uid] = deformable
         self.notify_visualization_topology_changed()
@@ -3693,7 +3780,9 @@ class SimulationManager:
             "dynamic": ActorType.DYNAMIC,
             "kinematic": ActorType.KINEMATIC,
         }[cfg.body_type]
+        self._spawn_scene._preflight_declaration("rigid_object_group", uid)
         descriptors = []
+        material_batches = []
         for index, member in enumerate(cfg.rigid_objects.values()):
             member_cfg = deepcopy(member)
             member_cfg.uid = f"{uid}__member_{index}"
@@ -3716,9 +3805,8 @@ class SimulationManager:
                     f"Rigid object group member {index} has no rigid-body physics."
                 )
             descriptor.physics.actor_type = actor_type
-            self._spawn_scene.builder.materials.update(
-                self._spawn_scene._resolve_materials(materials)
-            )
+            self._spawn_scene._require_available_uid(descriptor.name)
+            material_batches.append(materials)
             descriptors.append(descriptor)
 
         group = RigidObjectGroup(
@@ -3727,6 +3815,7 @@ class SimulationManager:
         )
 
         was_materialized = self.spawn_result is not None
+        self._spawn_scene._register_material_batches(material_batches)
         self._spawn_scene.declare(
             "rigid_object_group",
             uid,
@@ -3909,6 +3998,12 @@ class SimulationManager:
                 newton_solver_type=self._active_newton_solver_type,
             )
 
+        if cfg.gripper_bindings:
+            from embodichain.lab.sim.utility.gripper_binding import (
+                prepare_robot_grippers,
+            )
+
+            prepare_robot_grippers(cfg)
         uid = cfg.uid
         source_path = _asset_file_path(cfg)
         if source_path is None:
@@ -3979,14 +4074,13 @@ class SimulationManager:
         backend materializes it. Runtime Batch data is created at the shared
         prepare boundary.
         """
+        cfg = deepcopy(cfg)
+        materials = {}
         if _is_usd_path(_asset_file_path(cfg)):
             descriptor, materials = articulation_desc_from_usd(
                 cfg,
                 per_env=True,
                 newton_solver_type=self._active_newton_solver_type,
-            )
-            self._spawn_scene.builder.materials.update(
-                self._spawn_scene._resolve_materials(materials)
             )
         else:
             descriptor = articulation_desc_from_cfg(
@@ -3997,6 +4091,8 @@ class SimulationManager:
         if cfg.uid is None:
             cfg.uid = descriptor.name
 
+        cfg.root_props.fixed_base = bool(descriptor.fixed_base)
+        cfg.root_props.self_collision_enabled = descriptor.enable_self_collision
         facade = facade_type(
             cfg=cfg,
             device=self.device,
@@ -4007,6 +4103,7 @@ class SimulationManager:
             descriptor.name,
             descriptor,
             facade=facade,
+            materials=materials,
             configure_source=partial(
                 configure_articulation_desc,
                 cfg=cfg,
@@ -4447,7 +4544,7 @@ class SimulationManager:
     def add_sensor(self, sensor_cfg: SensorCfg) -> BaseSensor:
         """Create a sensor on the pre-created simulation Arenas.
 
-        Cameras keep EmbodiChain's native CameraGroup implementation. A camera
+        Cameras use Scene-owned native batches and shared CameraGroups. A camera
         attached to an articulation link is created immediately and attached
         after the physical Spawn scene is prepared. Contact sensors are created
         after preparation and query contacts through the backend-neutral Spawn
@@ -4597,8 +4694,7 @@ class SimulationManager:
     def remove_asset(self, uid: str) -> bool:
         """Remove an asset by its UID.
 
-        Native render lights are not removed by this method. Sensors and
-        Spawn-owned physical assets are supported. Removing a robot also
+        Scene-owned lights, sensors and physical assets are supported. Removing a robot also
         destroys its automatically initialized mounted cameras.
 
         Args:
@@ -4614,12 +4710,19 @@ class SimulationManager:
             self.notify_visualization_topology_changed()
             return True
 
+        if uid in self._lights:
+            self._lights[uid].destroy()
+            del self._lights[uid]
+            self.notify_visualization_topology_changed()
+            return True
+
         scene = self._spawn_scene
         if uid not in scene:
             return False
         if uid == "default_plane":
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
+        scene._require_removable(uid)
         robot = self._robots.get(uid)
         if robot is not None and robot.cfg.enable_sensor:
             for sensor_cfg in robot.cfg.sensors:
@@ -4631,6 +4734,8 @@ class SimulationManager:
                 ):
                     self.remove_asset(sensor_cfg.uid)
 
+        for group in tuple(getattr(self, "_marker_groups", {}).values()):
+            group._detach_parent(uid)
         was_materialized = scene.builder.is_finalized
         scene.remove(uid)
         visual = getattr(self, "_visual_objects", {}).get(uid)
@@ -4653,10 +4758,166 @@ class SimulationManager:
         self._rigid_objects.pop(uid, None)
         self._rigid_object_groups.pop(uid, None)
         self._deformable_objects.pop(uid, None)
+        getattr(self, "_cable_objects", {}).pop(uid, None)
         self._articulations.pop(uid, None)
         self._robots.pop(uid, None)
         self.notify_visualization_topology_changed()
         return True
+
+    def add_marker_group(self, cfg: MarkerGroupCfg) -> MarkerGroup:
+        """Create an empty render-only marker group with a stable unique name.
+
+        Args:
+            cfg: Prototypes and environment/world coordinate scope. Environment
+                groups use all ``num_envs`` environments by default. Use
+                ``group.update(...)`` to populate instances. Viser groups do
+                not allocate native geometry. Native groups require DexSim's
+                ``RenderBody`` and ``MaterialInst`` overlay properties.
+
+        Returns:
+            Mutable marker group owned by this simulation manager.
+
+        Raises:
+            ValueError: If the name is in use or configuration is invalid.
+            RuntimeError: If the native engine lacks debug overlay support.
+        """
+        if cfg.name in self._marker_groups or cfg.name in self._markers:
+            raise ValueError(f"Marker {cfg.name!r} already exists.")
+        cfg.validate()
+        group = MarkerGroup(
+            cfg,
+            num_envs=self.num_envs,
+            origins=self.arena_offsets if cfg.scope == "env" else None,
+            pose_resolver=self._resolve_marker_parent_poses,
+            on_change=self._publish_marker_group,
+            on_remove=self._remove_marker_group,
+        )
+        if (
+            self.sim_config.visualization.backend != "viser"
+            and self._native_markers is None
+            and self.has_native_renderer
+        ):
+            self._native_markers = NativeMarkerRenderer(
+                self._spawn_scene.builder.result,
+                # The 0.6.0rc1 OptiX offscreen compositor drops raster overlays.
+                use_scene_for_overlays=self.sim_config.render_cfg.renderer
+                in {"fast-rt", "rt"},
+            )
+        self._marker_groups[group.name] = group
+        return group
+
+    def _resolve_marker_parent_poses(
+        self, parent: str, link_name: str | None, env_ids: list[int]
+    ) -> object:
+        """Read live domain poses without retaining native nodes or preparing Spawn."""
+        asset = None
+        articulated = False
+        for registry_name in ("_rigid_objects", "_robots", "_articulations"):
+            registry = getattr(self, registry_name, {})
+            if parent in registry:
+                asset = registry[parent]
+                articulated = registry_name != "_rigid_objects"
+                break
+        if asset is None:
+            raise KeyError(
+                f"Marker parent {parent!r} is not a registered rigid object, robot or articulation."
+            )
+        if self.spawn_result is None or not asset.is_spawn_bound:
+            raise RuntimeError(
+                f"Marker parent {parent!r} requires a prepared and bound scene; call prepare() explicitly."
+            )
+        if link_name is not None:
+            if not articulated:
+                raise ValueError("link_name requires a robot or articulation parent.")
+            if link_name not in asset.link_names:
+                raise ValueError(f"Marker parent {parent!r} has no link {link_name!r}.")
+            return asset.get_link_pose(link_name, env_ids=env_ids)
+        return asset.get_local_pose()[env_ids]
+
+    def _refresh_marker_attachments(self) -> None:
+        """Refresh native overlays; browser capture keeps the host's cadence."""
+        for group in tuple(getattr(self, "_marker_groups", {}).values()):
+            try:
+                group._refresh_attachments(on_change=self._publish_native_marker_group)
+            except Exception as error:
+                # Automatic visual refresh must not interrupt physics/accounting.
+                # Group publication rolls back, allowing a later host sync to retry.
+                logger.log_warning(
+                    f"Marker attachment refresh failed for {group.name!r}: {error!r}"
+                )
+
+    def get_marker_group(self, name: str) -> MarkerGroup:
+        """Return a registered marker group.
+
+        Args:
+            name: Stable group name.
+
+        Returns:
+            The existing group; unknown names raise ``KeyError``.
+        """
+        return self._marker_groups[name]
+
+    def get_marker_overlays(self) -> tuple[MeshMarkerOverlay, ...]:
+        """Capture detached group geometry and world poses for visualization.
+
+        Returns:
+            Complete marker mesh snapshots without stepping physics.
+        """
+        return tuple(
+            mesh
+            for group in getattr(self, "_marker_groups", {}).values()
+            for mesh in group.snapshot()
+        )
+
+    def _publish_native_marker_group(self, group: MarkerGroup) -> None:
+        if self._native_markers is not None:
+            self._native_markers.publish(group.name, group.snapshot())
+
+    def _publish_marker_group(self, group: MarkerGroup) -> None:
+        self._publish_native_marker_group(group)
+        self._capture_marker_groups(raise_errors=True)
+
+    def _remove_marker_group(self, group: MarkerGroup) -> None:
+        if self._native_markers is not None:
+            self._native_markers.remove(group.name)
+        self._marker_groups.pop(group.name, None)
+        self._capture_marker_groups()
+
+    def _capture_marker_groups(self, *, raise_errors: bool = False) -> None:
+        # Marker publication must not prepare pending declarations or synchronize
+        # an unprepared physics scene. Use only the already-published manifest;
+        # a dirty topology is refreshed by the next explicit host capture/update.
+        # Unpublished substeps belong to render_frame(), after every observer
+        # and attachment refresh; a marker edit must not force an early frame.
+        runtime = self._visualization_runtime
+        if (
+            runtime is None
+            or getattr(self, "_pending_record_dt", 0.0) > 0
+            or self._visualization_error_reported
+            or self._visualization_manifest_topology_revision
+            != self._visualization_topology_revision
+        ):
+            return
+        try:
+            runtime.capture(
+                sim_step=self._visualization_sim_step,
+                sim_time=self._visualization_sim_time,
+                overlays=self._visualization_overlays,
+                force=True,
+                capture_camera_images=False,
+            )
+        except Exception as error:
+            logger.log_warning(f"Viser marker update failed: {error!r}")
+            self._visualization_error_reported = True
+            if raise_errors:
+                raise
+
+    def clear_markers(self) -> None:
+        """Remove all new marker groups and legacy axes from this simulation."""
+        for group in tuple(getattr(self, "_marker_groups", {}).values()):
+            group.remove()
+        for name in tuple(self._markers):
+            self.remove_marker(name)
 
     def draw_marker(
         self,
@@ -4717,11 +4978,13 @@ class SimulationManager:
             )
             return False
 
-        original_name = cfg.name
+        original_name = (
+            f"{cfg.name}_{cfg.arena_index}" if cfg.arena_index >= 0 else cfg.name
+        )
         name = original_name
         count = 0
 
-        while name in self._markers:
+        while name in self._markers or name in getattr(self, "_marker_groups", {}):
             count += 1
             name = f"{original_name}_{count}"
         if count > 0:
@@ -4733,9 +4996,6 @@ class SimulationManager:
         if marker_num == 0:
             logger.log_warning(f"No marker poses provided.")
             return None
-
-        if cfg.arena_index >= 0:
-            name = f"{name}_{cfg.arena_index}"
 
         env = self.get_env(cfg.arena_index)
 
@@ -4784,6 +5044,9 @@ class SimulationManager:
         Returns:
             bool: True if the marker was removed successfully, False otherwise.
         """
+        if name in getattr(self, "_marker_groups", {}):
+            self._marker_groups[name].remove()
+            return True
         if name not in self._markers:
             logger.log_warning(f"Marker {name} not found.")
             return False
@@ -5415,6 +5678,11 @@ class SimulationManager:
     ) -> None:
         """Reset the state of the simulated assets given the environment IDs and excluded UIDs.
 
+        Cable scenes restore creation state for every physical asset in selected
+        environments through one engine episode reset, including targets, loads
+        and supported controls. Physical exclusions are unsupported in this path;
+        runtime property/topology edits are not restored. Global time is kept.
+
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
             excluded_uids (Sequence[str] | None): List of asset UIDs to exclude from resetting. If None, reset all assets.
@@ -5423,6 +5691,21 @@ class SimulationManager:
         """
         excluded_uids = set(excluded_uids) if excluded_uids is not None else set()
         excluded_sensor_uids = set(excluded_sensor_uids or ())
+        reset_ids = self.physics._reset_scene_state(env_ids, excluded_uids)
+        if reset_ids is not None:
+            # Physical assets and solver history were reset atomically by the
+            # backend; render-only assets and sensors remain manager-owned.
+            if reset_ids:
+                for uid, visual in getattr(self, "_visual_objects", {}).items():
+                    if uid not in excluded_uids and visual.is_spawn_bound:
+                        visual.reset(reset_ids)
+                for uid, light in self._lights.items():
+                    if uid not in excluded_uids:
+                        light.reset(reset_ids)
+                for uid, sensor in self._sensors.items():
+                    if uid not in excluded_uids and uid not in excluded_sensor_uids:
+                        sensor.reset(reset_ids)
+            return
         articulation_uids = tuple(self._robots) + tuple(self._articulations)
         reset_articulation_uids = tuple(
             uid for uid in articulation_uids if uid not in excluded_uids
@@ -5562,7 +5845,10 @@ class SimulationManager:
         import dexsim
         import gc
 
-        # Force garbage collection to break cycle references
+        if dexsim.get_world_num() == 0:
+            return
+
+        # Live Worlds may still be held by cycles; release them before polling.
         gc.collect()
 
         import time
@@ -5618,6 +5904,12 @@ class SimulationManager:
 
     def _deferred_destroy(self) -> None:
         """Destroy all simulated assets and release resources."""
+        # Release caller-retained group callbacks and native meshes before arenas.
+        for group in tuple(getattr(self, "_marker_groups", {}).values()):
+            group.remove()
+        if getattr(self, "_native_markers", None) is not None:
+            self._native_markers.close()
+            self._native_markers = None
         # Clean up all gizmos before destroying the simulation
         for uid in list(self._gizmos.keys()):
             self.disable_gizmo(uid)
@@ -5654,6 +5946,9 @@ class SimulationManager:
                     f"{error!r}"
                 )
 
+        for light in getattr(self, "_lights", {}).values():
+            light.destroy()
+
         if self._spawn_scene is not None:
             # Release result-scoped batches/facades before closing the
             # Scene and, finally, the World that owns native resources.
@@ -5663,6 +5958,7 @@ class SimulationManager:
                 "_rigid_object_groups",
                 "_deformable_objects",
                 "_fluid_objects",
+                "_cable_objects",
                 "_articulations",
                 "_robots",
             ):
@@ -5726,6 +6022,7 @@ class SimulationManager:
         _sever_wrapper_refs("_rigid_object_groups")
         _sever_wrapper_refs("_deformable_objects")
         _sever_wrapper_refs("_fluid_objects")
+        _sever_wrapper_refs("_cable_objects")
         _sever_wrapper_refs("_articulations")
         _sever_wrapper_refs("_robots")
         _sever_wrapper_refs("_sensors")
@@ -5736,9 +6033,8 @@ class SimulationManager:
         self._world = None
         self._default_plane = None
 
-        # Try to break ANY possible frame cycle
-        gc.collect()
-
+        # Clear all remaining Python owners before the post-World collection.
+        # Collecting both here and after these clears scans the same live heap.
         self._visual_materials.clear()
         self._texture_cache.clear()
         self._arenas.clear()
@@ -5749,11 +6045,8 @@ class SimulationManager:
         if SimulationManager._instances.get(self.instance_id) is self:
             SimulationManager.reset(self.instance_id)
 
-        # Forcefully drop underlying C++ object wrappers
-        self._env = None
-        self._world = None
-
-        gc.collect()
+        # The queue performs the post-World collection after destruction-task
+        # locals unwind. Keep the pre-Scene collection for child destructors.
 
     @staticmethod
     def flush_cleanup_queue() -> None:

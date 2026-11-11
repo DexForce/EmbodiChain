@@ -261,7 +261,7 @@ def test_explicit_visual_usd_selection_imports_only_appearance(tmp_path):
 
 
 def test_add_usd_classifies_visuals_without_promoting_collision_only_objects(tmp_path):
-    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.spawn.scene import SpawnScene
     from dexsim.kit.usd import parse_usd
     from unittest.mock import patch
@@ -274,6 +274,7 @@ def test_add_usd_classifies_visuals_without_promoting_collision_only_objects(tmp
     collision_only.physics = None
     assert collision_only.collisions
     manager = object.__new__(SimulationManager)
+    manager.sim_config = SimulationManagerCfg()
     manager.device = torch.device("cpu")
     for key in (
         "_visual_objects",
@@ -300,6 +301,7 @@ def test_add_usd_classifies_visuals_without_promoting_collision_only_objects(tmp
     manager.notify_visualization_topology_changed = MagicMock()
     with patch("dexsim.kit.usd.parse_usd", return_value=source):
         assets = manager.add_usd("scene", str(path))
+    assert isinstance(assets, dict)
     assert isinstance(assets["/World/Visual"], VisualObject)
     assert isinstance(assets["/World/Physical"], RigidObject)
     assert manager.get_asset("scene_default_plane") is assets["/World/Visual"]

@@ -28,6 +28,7 @@ from embodichain.lab.gym.envs.differentiable_dynamics_env import (
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg
+from embodichain.lab.visualization import VisualizationCfg
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects.articulation import Articulation
 from examples.learning.nerd._support._scene_assets import (
@@ -173,7 +174,7 @@ def make_cartpole_dynamics_env(
         seed: Optional initial RNG seed; explicit reset seeds take precedence.
 
     Returns:
-        A registered task implementing the DifferentiableVecEnv protocol.
+        A registered task implementing the DifferentiableEnvProtocol.
     """
     physics = NewtonPhysicsCfg(
         device=device,
@@ -193,6 +194,7 @@ def make_cartpole_dynamics_env(
         enable_entity_gizmo=False,
         robot_ik_gizmo=None,
         render_cfg=RenderCfg(renderer="no-render"),
+        visualization=VisualizationCfg(backend="none"),
         startup_summary="off",
         physics_cfg=physics,
     )

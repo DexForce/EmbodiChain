@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import torch
 import pytest
 
@@ -28,12 +30,15 @@ from embodichain_robots import CobotMagicCfg
 
 
 # Base test class for OPWSolver
-class BaseSolverTest:
-    sim = None  # Define as a class attribute
-
-    def setup_simulation(self, device):
-        config = SimulationManagerCfg(headless=True, device=device)
-        self.sim = SimulationManager(config)
+@pytest.fixture(scope="class")
+def _opw_scene(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Share robot topology per device and restore state before each case."""
+    owner = request.cls
+    sim = None
+    robot = None
+    try:
+        config = SimulationManagerCfg(headless=True, device=owner._device)
+        sim = SimulationManager(config)
 
         cfg_dict = {
             "uid": "CobotMagic",
@@ -85,8 +90,27 @@ class BaseSolverTest:
             },
         }
 
-        self.robot: Robot = self.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
-        self.sim.prepare()
+        robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        sim.prepare()
+
+        owner.sim = sim
+        owner.robot = robot
+        yield
+    finally:
+        if sim is not None:
+            sim.destroy(exit_process=False)
+        owner.robot = None
+        owner.sim = None
+        robot = None
+        sim = None
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.usefixtures("_opw_scene")
+class BaseSolverTest:
+
+    def setup_method(self) -> None:
+        self.sim.reset_objects_state()
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_ik(self, arm_name: str) -> None:
@@ -121,20 +145,13 @@ class BaseSolverTest:
         )
         assert torch.allclose(target_path, reconstructed, atol=5e-3, rtol=5e-3)
 
-    def teardown_method(self):
-        """Clean up resources after each test method."""
-        self.sim.destroy()
-        SimulationManager.flush_cleanup_queue()
-
 
 class TestOPWSolver(BaseSolverTest):
-    def setup_method(self):
-        self.setup_simulation("cpu")
+    _device = "cpu"
 
 
 class TestOPWSolverCUDA(BaseSolverTest):
-    def setup_method(self):
-        self.setup_simulation("cuda")
+    _device = "cuda"
 
 
 if __name__ == "__main__":

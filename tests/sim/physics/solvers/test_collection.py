@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 import importlib.util
+from importlib import metadata as importlib_metadata
 import json
 import os
 from pathlib import Path
@@ -291,7 +292,9 @@ def _check_pipeline(tmp_path: Path, robot: str) -> None:
     assert len(report["error_vs_time"]) == 3
     assert report["teacher_origin"]["kind"] == "current_newton"
     assert report["runtime_identity"]["device"] == "cpu"
-    assert report["runtime_identity"]["versions"]["torch"] == torch.__version__
+    assert report["runtime_identity"]["versions"][
+        "torch"
+    ] == importlib_metadata.version("torch")
     assert len(report["runtime_identity"]["source_sha256"]["nerd.py"]) == 64
     assert len(report["selected_teacher_sha256"]) == 64
     # Same immutable teacher trajectories have the same selected-content digest

@@ -48,7 +48,7 @@ class DualArmProvider(RobotProvider):
     the tutorial construction parameters, so each coordinated skill suite can
     reuse its robot. ``gripper_type: panda_hand`` selects the complete native
     Franka hand and TCP; ``robotiq_2f_140`` selects the six-joint Robotiq hand
-    and its calibrated TCP. Omission retains the mounted PGI fixture.
+    and its calibrated TCP. Franka defaults to Robotiq; other arms retain PGI.
     ``robot.config.tcp_z`` overrides both explicitly selected Robotiq TCPs
     while preserving their mounting rotations.
     """
@@ -60,7 +60,9 @@ class DualArmProvider(RobotProvider):
         config = dict(self.spec.config)
         robot_type = str(config.get("robot_type", "ur5"))
         solver = str(config.get("solver", "ur"))
-        gripper = config.get("gripper_type")
+        gripper = config.get(
+            "gripper_type", "robotiq_2f_140" if robot_type == "franka" else None
+        )
         if solver not in {"ur", "pytorch"}:
             raise ValueError("robot.config.solver must be 'ur' or 'pytorch'.")
         return create_dual_tutorial_robot_cfg(
