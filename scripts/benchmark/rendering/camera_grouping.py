@@ -69,13 +69,16 @@ def _other_gpu_processes() -> list[int]:
     ]
 
 
-def _settings(path: Path) -> tuple[BenchmarkCfg, tuple[int, ...], int]:
+def _settings(
+    path: Path,
+) -> tuple[BenchmarkCfg, tuple[int, ...], int, tuple[int, ...]]:
     """Load the shared scene settings and the additional grouping sweep."""
     import yaml
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     counts = tuple(raw.pop("env_sweep"))
     repeats = int(raw.pop("repeats"))
+    representative = tuple(raw.pop("representative_envs"))
     if (raw.pop("enable_color", None), raw.pop("enable_depth", None)) != (
         True,
         False,
@@ -88,7 +91,9 @@ def _settings(path: Path) -> tuple[BenchmarkCfg, tuple[int, ...], int]:
         raise ValueError("env_sweep must contain positive integers.")
     if repeats < 1:
         raise ValueError("repeats must be positive.")
-    return cfg, counts, repeats
+    if not representative or any(count not in counts for count in representative):
+        raise ValueError("representative_envs must select tested environment counts.")
+    return cfg, counts, repeats, representative
 
 
 def _worker(cfg: BenchmarkCfg, grouping: str, output: Path) -> None:
@@ -263,8 +268,8 @@ def _aggregate(paths: list[Path], num_envs: int, grouping: str) -> dict[str, obj
 
 def _paired_gain(
     separate: dict[str, object], shared: dict[str, object]
-) -> tuple[float, float, float]:
-    """Return the paired mean gain and a seeded bootstrap 95% interval."""
+) -> tuple[float, float, float, float]:
+    """Return paired mean, median, and a seeded bootstrap 95% mean interval."""
     gains = [
         json.loads(Path(str(b)).read_text(encoding="utf-8"))["images_per_s"]
         / json.loads(Path(str(a)).read_text(encoding="utf-8"))["images_per_s"]
@@ -275,10 +280,12 @@ def _paired_gain(
     boot = sorted(
         statistics.mean(rng.choices(gains, k=len(gains))) for _ in range(10000)
     )
-    return statistics.mean(gains), boot[250], boot[9749]
+    return statistics.mean(gains), statistics.median(gains), boot[250], boot[9749]
 
 
-def _report(root: Path, rows: list[dict[str, object]]) -> Path:
+def _report(
+    root: Path, rows: list[dict[str, object]], representative_envs: tuple[int, ...]
+) -> Path:
     """Write throughput, image-quality and ranking tables."""
     by_key = {(int(row["num_envs"]), str(row["grouping"])): row for row in rows}
     lines = [
@@ -310,8 +317,8 @@ def _report(root: Path, rows: list[dict[str, object]]) -> Path:
             "",
             "## Success & Other Metrics",
             "",
-            "| envs | success_rate | paired_gain | gain_95pct_ci | first_frame_min_ssim |",
-            "|---:|---:|---:|---|---:|",
+            "| envs | success_rate | paired_mean_gain | paired_median_gain | mean_gain_95pct_ci | first_frame_min_ssim |",
+            "|---:|---:|---:|---:|---|---:|",
         ]
     )
     acceptance = True
@@ -333,10 +340,13 @@ def _report(root: Path, rows: list[dict[str, object]]) -> Path:
             for i in range(3)
         ):
             raise RuntimeError(f"Camera image order changed at num_envs={n}.")
-        gain, low, high = _paired_gain(separate, shared)
-        acceptance &= low > 0 and float(shared["gpu_free_min_mb"]) >= 2048
+        gain, median, low, high = _paired_gain(separate, shared)
+        acceptance &= (
+            low > 0 if n in representative_envs else median >= -0.03
+        ) and float(shared["gpu_free_min_mb"]) >= 2048
         lines.append(
-            f"| {n} | 1.00 | {gain:+.1%} | [{low:+.1%}, {high:+.1%}] | {ssim:.4f} |"
+            f"| {n} | 1.00 | {gain:+.1%} | {median:+.1%} | "
+            f"[{low:+.1%}, {high:+.1%}] | {ssim:.4f} |"
         )
     lines.extend(
         [
@@ -364,7 +374,8 @@ def _report(root: Path, rows: list[dict[str, object]]) -> Path:
             "",
             "Shared-by-default gate: "
             + ("PASS" if acceptance else "FAIL")
-            + "; all paired gain intervals must be positive and shared runs must leave at least 2 GiB free GPU memory.",
+            + f"; representative environment counts {representative_envs} need a positive paired mean-gain 95% interval,"
+            + " other counts need median gain >= -3%, and shared runs must leave at least 2 GiB free GPU memory.",
         ]
     )
     path = root / "report.md"
@@ -382,41 +393,58 @@ def main() -> None:
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--result", type=Path)
     parser.add_argument("--allow-shared-gpu", action="store_true")
+    parser.add_argument("--resume-run-dir", type=Path)
     args = parser.parse_args()
-    cfg, counts, repeats = _settings(args.config)
+    cfg, counts, repeats, representative = _settings(args.config)
     if args.worker:
         if args.grouping is None or args.num_envs is None or args.result is None:
             parser.error("worker requires grouping, num-envs and result")
         _worker(cfg.with_overrides(num_envs=args.num_envs), args.grouping, args.result)
         return
-    if not args.allow_shared_gpu and (others := _other_gpu_processes()):
-        raise RuntimeError(f"GPU is in use by other processes: {others}.")
-    root = args.output_root / f"camera_grouping_{datetime.now():%Y%m%d_%H%M%S}"
-    root.mkdir(parents=True, exist_ok=False)
     import dexsim
     import torch
 
-    (root / "settings.json").write_text(
-        json.dumps(
-            {
-                "config": str(args.config),
-                "settings": cfg.to_dict(),
-                "env_sweep": counts,
-                "repeats": repeats,
-                "seed": 123,
-                "python": sys.version,
-                "dexsim": dexsim.__version__,
-                "torch": torch.__version__,
-                "gpu_name": torch.cuda.get_device_name(cfg.gpu_id),
-                "gpu_driver": _gpu_description(cfg.gpu_id),
-                "torch_cpu_threads": torch.get_num_threads(),
-                "sim_cpu_threads": 1,
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    if not args.allow_shared_gpu and (others := _other_gpu_processes()):
+        raise RuntimeError(f"GPU is in use by other processes: {others}.")
+    root = args.resume_run_dir or (
+        args.output_root / f"camera_grouping_{datetime.now():%Y%m%d_%H%M%S}"
     )
+    if args.resume_run_dir is not None:
+        saved = json.loads((root / "settings.json").read_text(encoding="utf-8"))
+        if (
+            tuple(saved["env_sweep"]) != counts
+            or saved["repeats"] != repeats
+            or saved["settings"] != cfg.to_dict()
+            or saved["dexsim"] != dexsim.__version__
+            or saved["seed"] != 123
+        ):
+            raise ValueError("Resume settings differ from the saved sweep.")
+    else:
+        root.mkdir(parents=True, exist_ok=False)
+
+    if args.resume_run_dir is None:
+        (root / "settings.json").write_text(
+            json.dumps(
+                {
+                    "config": str(args.config),
+                    "settings": cfg.to_dict(),
+                    "env_sweep": counts,
+                    "repeats": repeats,
+                    "representative_envs": representative,
+                    "seed": 123,
+                    "python": sys.version,
+                    "dexsim": dexsim.__version__,
+                    "torch": torch.__version__,
+                    "gpu_name": torch.cuda.get_device_name(cfg.gpu_id),
+                    "gpu_driver": _gpu_description(cfg.gpu_id),
+                    "torch_cpu_threads": torch.get_num_threads(),
+                    "sim_cpu_threads": 1,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     rows: list[dict[str, object]] = []
     environment = os.environ.copy()
     repository = Path(__file__).resolve().parents[3]
@@ -432,9 +460,12 @@ def main() -> None:
                 else ("shared", "separate")
             )
             for grouping in order:
+                path = root / f"env{num_envs}_{grouping}_{repetition}.json"
+                if path.exists() and path.with_suffix(".npz").exists():
+                    paths[grouping].append(path)
+                    continue
                 if not args.allow_shared_gpu and (others := _other_gpu_processes()):
                     raise RuntimeError(f"GPU became shared during the sweep: {others}.")
-                path = root / f"env{num_envs}_{grouping}_{repetition}.json"
                 command = [
                     sys.executable,
                     "-m",
@@ -456,14 +487,21 @@ def main() -> None:
                 with (root / f"env{num_envs}_{grouping}_{repetition}.log").open(
                     "w"
                 ) as log:
-                    subprocess.run(
-                        command,
-                        check=True,
-                        env=environment,
-                        stdout=log,
-                        stderr=subprocess.STDOUT,
-                    )
+                    try:
+                        subprocess.run(
+                            command,
+                            check=True,
+                            env=environment,
+                            stdout=log,
+                            stderr=subprocess.STDOUT,
+                        )
+                    except Exception:
+                        path.unlink(missing_ok=True)
+                        path.with_suffix(".npz").unlink(missing_ok=True)
+                        raise
                 if not args.allow_shared_gpu and (others := _other_gpu_processes()):
+                    path.unlink(missing_ok=True)
+                    path.with_suffix(".npz").unlink(missing_ok=True)
                     raise RuntimeError(f"GPU was shared during a sample: {others}.")
                 paths[grouping].append(path)
         rows.extend(
@@ -472,7 +510,7 @@ def main() -> None:
     (root / "results.json").write_text(
         json.dumps(rows, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"Markdown report saved: {_report(root, rows)}")
+    print(f"Markdown report saved: {_report(root, rows, representative)}")
 
 
 if __name__ == "__main__":

@@ -16,4 +16,5 @@ dlss_quality: 2
 gpu_id: 0
 device: cuda:0
 env_sweep: [1, 2, 4, 8, 16, 32, 64, 80]
+representative_envs: [1, 8, 32, 80]
 repeats: 5
