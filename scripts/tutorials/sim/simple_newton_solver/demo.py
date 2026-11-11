@@ -22,6 +22,7 @@ import json
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 from dexsim.engine.newton_physics import ProviderNewtonSolverCfg
 
@@ -30,8 +31,10 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     CollisionPropertiesCfg,
     NewtonPhysicsCfg,
+    RenderCfg,
     RigidBodyPhysicsCfg,
 )
+from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.visualization import VisualizationCfg, ViserServerCfg
 from solver import SimpleSolverProvider
 
@@ -76,10 +79,46 @@ def _save_preview(
     plt.close(figure)
 
 
+def _capture_rgb(sim: SimulationManager, camera: Camera) -> np.ndarray:
+    """Read the two native offscreen views through EmbodiChain's camera API."""
+    sim.render_camera_group([camera.group_id])
+    camera.update(fetch_only=True)
+    return camera.get_data()["color"][..., :3].cpu().numpy().copy()
+
+
+def _save_offscreen_preview(before: np.ndarray, after: np.ndarray, path: Path) -> None:
+    """Save initial and replayed RGB frames for both environments."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    height, width = before.shape[1:3]
+    image = Image.new("RGB", (2 * width, 2 * height))
+    for row, frames in enumerate((before, after)):
+        for env_id in range(2):
+            image.paste(Image.fromarray(frames[env_id]), (env_id * width, row * height))
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 18)
+    except OSError:
+        font = ImageFont.load_default()
+    for row, phase in enumerate(("Initial", "After 30 steps")):
+        for env_id in range(2):
+            x, y = env_id * width, row * height
+            draw.rectangle((x, y, x + width - 1, y + 32), fill="white")
+            draw.text(
+                (x + 10, y + 5),
+                f"{phase} - environment {env_id}",
+                fill="black",
+                font=font,
+            )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path)
+
+
 def run(
     device: str,
     preview_path: Path | None = None,
     *,
+    render_path: Path | None = None,
     viser: bool = False,
     viser_port: int = 8080,
     viser_seconds: float = 30.0,
@@ -89,6 +128,7 @@ def run(
         raise ValueError("viser_seconds must be non-negative")
     config = SimulationManagerCfg(
         headless=True,
+        render_cfg=RenderCfg(renderer="fast-rt" if render_path is not None else "auto"),
         visualization=VisualizationCfg(
             backend="viser" if viser else "none",
             env_ids=[0, 1],
@@ -111,7 +151,7 @@ def run(
             ),
         ),
     )
-    sim = SimulationManager(config, requires_native_renderer=False)
+    sim = SimulationManager(config, requires_native_renderer=render_path is not None)
     try:
         slider = sim.add_articulation(
             ArticulationCfg(
@@ -124,6 +164,22 @@ def run(
             )
         )
         sim.prepare()
+        camera = None
+        if render_path is not None:
+            camera = sim.add_sensor(
+                CameraCfg(
+                    uid="slider_preview",
+                    width=640,
+                    height=480,
+                    intrinsics=(600, 600, 320, 240),
+                    extrinsics=CameraCfg.ExtrinsicsCfg(
+                        eye=(0.7, -0.8, 0.55),
+                        target=(0.25, 0.0, 0.2),
+                        up=(0.0, 0.0, 1.0),
+                    ),
+                    enable_color=True,
+                )
+            )
         if viser:
             manifest = sim.refresh_visualization()
             if not any(node.kind == "articulation_link" for node in manifest.nodes):
@@ -189,20 +245,27 @@ def run(
         }
         if preview_path is not None:
             result["preview_path"] = str(preview_path)
-        if viser:
-            # Replay in the live EmbodiChain scene so the browser shows motion,
-            # while the numerical and gradient checks above remain independent.
+        if viser or render_path is not None:
+            # Replay in the live EmbodiChain scene for Viser and/or native RGB.
+            # The numerical and gradient checks above remain independent.
             slider.reset()
             slider.set_qf(force.detach().reshape(2, 1))
+            initial_rgb = _capture_rgb(sim, camera) if camera is not None else None
             for _ in range(30):
                 sim.update(step=1)
-                sim.capture_visualization(force=True)
-                time.sleep(0.05)
+                if viser:
+                    sim.capture_visualization(force=True)
+                    time.sleep(0.05)
+            result["visualized_position"] = slider.get_qpos().flatten().tolist()
+            if camera is not None:
+                final_rgb = _capture_rgb(sim, camera)
+                _save_offscreen_preview(initial_rgb, final_rgb, render_path)
+                result["render_path"] = str(render_path)
+        if viser:
             result["viser_url"] = f"http://127.0.0.1:{viser_port}"
             result["visualized_links"] = sum(
                 node.kind == "articulation_link" for node in manifest.nodes
             )
-            result["visualized_position"] = slider.get_qpos().flatten().tolist()
             print(f"Viser preview: {result['viser_url']}", flush=True)
             time.sleep(viser_seconds)
         return result
@@ -215,6 +278,11 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu", help="cpu or cuda:0")
     parser.add_argument(
         "--preview-path", type=Path, help="save the rollout and reset plot as PNG"
+    )
+    parser.add_argument(
+        "--render-path",
+        type=Path,
+        help="save EmbodiChain offscreen RGB before and after replay",
     )
     parser.add_argument(
         "--viser", action="store_true", help="replay in EmbodiChain Viser"
@@ -233,6 +301,7 @@ if __name__ == "__main__":
                 run(
                     args.device,
                     args.preview_path,
+                    render_path=args.render_path,
                     viser=args.viser,
                     viser_port=args.viser_port,
                     viser_seconds=args.viser_seconds,

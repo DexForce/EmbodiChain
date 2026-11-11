@@ -36,6 +36,20 @@ printing JSON. A successful CPU run reports approximately:
 The optional PNG plots the two slider trajectories. Its dashed final segment
 shows that resetting ``arena_0`` returns only the first slider to zero.
 
+For an image rendered by EmbodiChain's native offscreen camera, run:
+
+.. code-block:: bash
+
+   python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
+       --render-path simple_newton_offscreen.png
+
+The resulting PNG has environment 0 and 1 in the left and right columns, with
+initial and after-30-step views in the top and bottom rows. The script reserves
+FastRT before constructing the World, creates a ``CameraCfg`` in each arena,
+renders through ``SimulationManager.render_camera_group()``, and reads the RGB
+frames from ``Camera.get_data()``. This needs a working native GPU renderer even
+when the solver runs on the CPU.
+
 To inspect the actual EmbodiChain scene in Viser, run:
 
 .. code-block:: bash

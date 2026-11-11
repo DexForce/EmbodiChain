@@ -31,6 +31,8 @@ python scripts/tutorials/sim/simple_newton_solver/demo.py --device cuda:0
 python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
     --preview-path simple_newton_solver_preview.png
 python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
+    --render-path simple_newton_offscreen.png
+python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
     --viser --viser-seconds 60
 ```
 
@@ -44,6 +46,13 @@ success. The two slider positions after publication are about `0.02087 m` and
 `0.03131 m`; resetting the first arena leaves the second at `0.03131 m`.
 Pass `--preview-path` to save a PNG with the measured functional trajectory and
 the selected-arena reset. The plot is generated only when this option is used.
+
+Pass `--render-path` to save **actual EmbodiChain offscreen RGB**, with the two
+environments as columns and initial/after-30-step views as rows. This reserves
+the native FastRT renderer before World construction, then uses `CameraCfg`,
+`SimulationManager.render_camera_group()` and `Camera.get_data()["color"]`.
+The physics and gradient checks remain the same. Native camera rendering needs
+a working GPU renderer even when Newton physics runs on the CPU.
 
 Pass `--viser` to see the actual EmbodiChain scene at `http://127.0.0.1:8080`.
 The script exports both slider links, replays 30 native simulation steps, and
