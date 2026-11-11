@@ -18,11 +18,16 @@ After installation, continue with the [Quick Start Tutorial](../tutorial/index.r
 |-----------|-------------|
 | **OS** | Linux x86_64 (Ubuntu 20.04+ recommended) |
 | **GPU** | NVIDIA GPU with compute capability 7.0+ |
-| **NVIDIA driver** | ≥ 535 (tested on driver branches up to 595.x) |
+| **NVIDIA driver** | ≥ 580.00 (tested on driver branches up to 595.x) |
 | **CUDA** | 12.x (aligned with the Docker image and `dexsim_engine` wheels) |
 | **Vulkan** | Host ICD/layer files for GPU rendering (see Docker notes) |
 | **Python** | Core / GenSim: 3.11 or 3.12; isolated Blender worker: 3.11 |
 | **Display** (optional) | X11 `DISPLAY` for interactive viewer windows |
+
+The current DLSS integration uses SDK and Super Resolution (SR) **310.7.0**
+and the OVRTX-aligned Ray Reconstruction (RR) runtime **310.7.128**. These
+versions require an NVIDIA driver **≥ 580.00** for both local and Docker
+installations. For Docker, this requirement applies to the host driver.
 
 > [!IMPORTANT]
 > GenSim runs in the main EmbodiChain environment, while Blender operations can
@@ -119,7 +124,7 @@ source-development instructions to update the selected environment.
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/engine/install/) with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-- NVIDIA driver ≥ 535 on the host
+- NVIDIA driver ≥ 580.00 on the host (required by the current DLSS integration)
 - For **GUI** runs: working X11 forwarding (`DISPLAY`, `~/.Xauthority`, `/tmp/.X11-unix`)
 - For **headless** servers: no display required; use `--headless` in tutorial scripts
 
@@ -336,9 +341,9 @@ pytest --pyargs curobo.tests
 ```
 
 The dependency is installed from NVIDIA's source repository and pinned to the
-cuRobo V2 `v0.8.0` release. cuRobo has additional platform requirements:
-Linux, upstream Python 3.10--3.13, a supported NVIDIA GPU with
-at least 4 GB VRAM, and a driver that supports CUDA 12 or newer. See
+cuRobo V2 `v0.8.0` release. cuRobo has stricter requirements than the core
+EmbodiChain installation: Linux, a supported NVIDIA GPU with at least 4 GB
+VRAM, and a driver that supports CUDA 12 or newer. See
 [NVIDIA's official installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
 for the current compatibility requirements, and see
 [cuRobo V2 Planner](../overview/sim/motion/planners/curobo_planner.md) for EmbodiChain

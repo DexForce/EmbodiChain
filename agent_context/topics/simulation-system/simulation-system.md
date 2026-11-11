@@ -66,6 +66,17 @@ to Spawn, not per-object collision-group calculations. Backend differences
 belong in physics hooks/capabilities or object adapters, not task-side native
 access. Contact sensors use the finalized Scene's `ContactQuery` boundary.
 
+Camera and light resources also belong to that existing Scene. Its lightweight
+prepared-Arena phase permits creation before physical finalization. Light
+property setters/reset and multi-field randomization use native property batches;
+global sun/direction lights remain single instances. Manager-created light
+getters retain owned CPU snapshots. Render-batch selections
+are refreshed on topology revision, and unsupported falloff retains only its
+legacy compatibility path; mesh binding preserves scalar sharing/conflict
+behavior. Standalone camera/light pose methods retain their
+per-instance native implementations. See [sensor lifecycle](../sensor-system/lifecycle.md)
+for camera attachment and shared-target release ordering.
+
 `spawn.source_geometry` owns `UsdSourceSnapshot`, `read_usd_source` and
 `LinkMesh` for Object source adapters and static Scene consumers. Reads use fresh
 anonymous USD layers and recheck captured bytes. Explicit snapshots can be

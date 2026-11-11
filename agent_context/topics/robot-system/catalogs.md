@@ -37,9 +37,14 @@ from being grouped. Never infer these fields from paths or control-group names.
 `Franka` resolves the bare-arm `FrankaCfg` in `franka/cfg.py`. `arm_model`
 selects `fr3` (default) or `panda`; both expose seven joints in `arm`, no finger
 group, and a flange TCP. `FrankaPanda` remains a legacy selector for the
-historical FR3 arm (`robot_type: panda`), now also bare. Native-hand and Robotiq
-embodiments add the hand URDF, group, drives, inertia/contact calibration and
-solver TCP through ordinary RobotCfg overrides, exactly as UR assemblies do.
+historical FR3 arm (`robot_type: panda`), now also bare. Native-hand and Robotiq embodiments select concrete hand Cfg defaults through
+explicit `grippers` bindings. The binding supplies the URDF/control group and
+commands, while deployment physics remains an explicit ordinary override.
+The hand-local TCP and mounting transform determine the effective solver TCP;
+a repeated explicit solver TCP must agree. `existing` binds an integrated hand
+without appending another asset. Robot catalog entries with `description_path`
+expose pure model data through `resolve_gripper_defaults`; complete standalone
+Cfg construction and runtime geometry remain separate.
 The native hand is a pinned subtree derivative of the integrated FR3 asset;
 model-owned asset generation retains the original file and a derivation report.
 Bare dual-arm selection has fourteen arm joints. Tool-equipped benchmark

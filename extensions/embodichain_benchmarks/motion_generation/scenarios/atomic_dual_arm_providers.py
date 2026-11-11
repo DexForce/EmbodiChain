@@ -27,6 +27,11 @@ without a fixed seed are frozen from the same reference compile.
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.lab.sim.utility.gripper_geometry import (
+    build_gripper_collision_geometry,
+)
+
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -1096,7 +1101,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
         grasp_parts = [values["grasp"] for values in parts.values()]
         sampler = parallel_jaw_sampler(
             int(config.get("grasp_sample_count", 10_000)),
-            gripper_model=scenario.grasp_model(),
+            gripper_data=scenario.grasp_model(),
             root_from_tcp=scenario.grasp_root_from_tcp(),
             grasp_depth_offset_m=float(parameters["grasp_depth_offset_m"]),
         )
@@ -1333,7 +1338,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
         }
         sampler = parallel_jaw_sampler(
             int(parameters["grasp_sample_count"]),
-            gripper_model=scenario.grasp_model(),
+            gripper_data=scenario.grasp_model(),
             root_from_tcp=scenario.grasp_root_from_tcp(),
         )
         semantics = _antipodal_semantics(handle)
@@ -1706,13 +1711,10 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
             placing, support, placing_pose, support_pose, config, seed=seed
         )
         from .._atomic_fixtures import TUTORIAL_PARALLEL_JAW_MODEL
-        from embodichain.toolkits.graspkit.pg_grasp import (
-            get_parallel_jaw_collision_geometry,
-        )
 
         grasp_model = scenario.grasp_model() or TUTORIAL_PARALLEL_JAW_MODEL
-        hand_geometry = get_parallel_jaw_collision_geometry(
-            grasp_model.model_id,
+        hand_geometry = build_gripper_collision_geometry(
+            resolve_gripper_defaults(grasp_model["catalog_id"]),
             point_spacing=0.012,
             root_from_tcp=scenario.grasp_root_from_tcp(),
         )

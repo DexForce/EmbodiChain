@@ -309,6 +309,24 @@ def pytest_runtest_setup(item):
         _initialize_sim_engine(item.config.getoption("--renderer"))
 
 
+def _clear_test_exception() -> None:
+    """Release reported failures before test-owned scene finalizers run."""
+    import sys
+
+    sys.last_traceback = None
+    sys.last_value = None
+    sys.last_type = None
+    if hasattr(sys, "last_exc"):
+        sys.last_exc = None
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_teardown(item: pytest.Item) -> None:
+    """Do not let a prior failure pin native owners through user cleanup."""
+    if _requires_real_sim(item) or item.get_closest_marker("gpu") is not None:
+        _clear_test_exception()
+
+
 @pytest.fixture(autouse=True, scope="function")
 def wait_scene_destruction_after_test(request):
     """Ensure C++ engine scenes are fully destructed globally after each test exits."""
@@ -318,15 +336,8 @@ def wait_scene_destruction_after_test(request):
 
     yield
 
-    # [Improvement - delayed destruction]: top-level dequeue and traceback cleanup.
-    # Pytest retains Tracebacks on failure; breaking the exception stack ensures
-    # that local variables of temporary objects on the stack can be garbage collected.
-    import sys
-    import gc
-
-    sys.last_traceback = None
-    sys.last_value = None
-    sys.last_type = None
+    # Also release exceptions recorded by an earlier teardown callback.
+    _clear_test_exception()
 
     # [Core fix]: drain the cleanup queue to consume SimManager and related objects
     from embodichain.lab.sim.sim_manager import SimulationManager

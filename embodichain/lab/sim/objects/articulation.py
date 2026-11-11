@@ -1102,6 +1102,8 @@ class Articulation(BatchEntity):
 
     def _project_mimic_qpos(self, qpos: torch.Tensor) -> torch.Tensor:
         """Return qpos with every mimic child projected from its parent."""
+        if not self.mimic_ids:
+            return qpos
         return _project_mimic_positions(
             qpos,
             self.mimic_ids,

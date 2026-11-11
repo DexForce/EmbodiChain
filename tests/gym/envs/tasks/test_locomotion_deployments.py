@@ -476,6 +476,15 @@ def _verify_no_render_backend(
     startup_started: float | None = None,
 ) -> int:
     """Reuse process startup while retaining fresh topology and per-case results."""
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
+
+    # Use the CLI bootstrap so editable namespace packages execute their manager
+    # registration before the first deployment is decoded.
+    discover_task_packages()
+    execute_init_hooks()
     results: list[dict[str, object]] = []
     for index, task in enumerate(tasks):
         # A native stall must retain the original per-deployment time budget.

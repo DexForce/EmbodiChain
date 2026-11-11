@@ -542,6 +542,19 @@ def test_flush_cleanup_queue_waits_after_running_pending_destroy(
     wait_scene_destruction.assert_called_once_with()
 
 
+@pytest.mark.parametrize("worlds", [0, 1])
+def test_wait_scene_destruction_collects_only_when_worlds_remain(
+    monkeypatch: pytest.MonkeyPatch, worlds: int
+) -> None:
+    """An empty World set needs no GC; cyclic live Worlds still get collected."""
+    counts = iter([worlds, 0])
+    monkeypatch.setattr(dexsim, "get_world_num", lambda: next(counts))
+    collect = MagicMock()
+    monkeypatch.setattr(gc, "collect", collect)
+    SimulationManager.wait_scene_destruction()
+    assert collect.call_count == worlds
+
+
 def test_flush_cleanup_queue_preserves_other_live_managers(monkeypatch):
     cleanup_queue = queue.Queue()
     cleanup_queue.put(MagicMock())
@@ -2062,8 +2075,19 @@ def test_robot_sensor_preflight_precedes_resource_allocation(invalid: str) -> No
 
 @pytest.mark.gpu
 @pytest.mark.requires_sim
-@pytest.mark.parametrize("backend", ["default", "newton", "newton_cable"])
-def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) -> None:
+@pytest.mark.parametrize(
+    "backend,stereo",
+    [
+        ("default", False),
+        ("default", True),
+        ("newton", False),
+        ("newton", True),
+        ("newton_cable", False),
+    ],
+)
+def test_robot_mounted_camera_backend_lifecycle(
+    tmp_path: Path, backend: str, stereo: bool
+) -> None:
     """Mounted cameras follow state writes and survive physical topology rebuilds."""
     urdf_path = tmp_path / "camera_robot.urdf"
     urdf_path.write_text("""<robot name="camera_robot">
@@ -2102,7 +2126,7 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
         )
     )
     try:
-        camera_cfg = CameraCfg(
+        camera_cfg = (StereoCameraCfg if stereo else CameraCfg)(
             uid="mounted",
             width=32,
             height=24,
@@ -2519,6 +2543,10 @@ def test_add_camera_uses_owning_manager_render_context(
         num_envs=len(arenas), render_cfg=RenderCfg(renderer="hybrid")
     )
     sim.device = torch.device("cpu")
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(result=object(), is_finalized=False),
+        arena_names=("arena_0", "arena_1"),
+    )
     sim._world = world
     sim._arenas = arenas
     sim._sensors = {}

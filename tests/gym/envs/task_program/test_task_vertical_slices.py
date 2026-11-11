@@ -481,6 +481,9 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
             },
         )
     )
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    payload = normalize_task_program(payload).declaration
     payload["program"]["count"] = 4
 
     config = _decode_deployed_program(

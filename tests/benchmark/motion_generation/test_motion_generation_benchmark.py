@@ -1789,7 +1789,7 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
         n_sample=321,
         force_refresh=False,
         max_candidates=8,
-        gripper_model=None,
+        gripper_data=None,
         root_from_tcp=tcp,
     )
     call = generator.get_valid_grasp_poses.call_args.kwargs

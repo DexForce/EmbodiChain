@@ -218,7 +218,16 @@ def _configure_newton_mimic_compliance(
     from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
     backend = get_newton_backend(result.world)
+    if (
+        backend is None
+        or backend.solver_type not in {"mujoco_warp", "dexuni"}
+        or backend.cfg.requires_grad
+        or (backend.model is not None and backend.model.requires_grad)
+    ):
+        return False
     solver = backend.mujoco_solver
+    if solver is None:
+        return False
 
     relation_names = [
         (state_joint_names[child_id], state_joint_names[parent_id])
