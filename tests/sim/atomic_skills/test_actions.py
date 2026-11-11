@@ -2756,6 +2756,25 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     assert plan.expected_effects.is_empty
     assert context.task is task
 
+    slower = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pour",
+            goal=PourGoal(),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(
+                sample_count=10,
+                velocity_limit=100.0,
+                acceleration_limit=1000.0,
+            ),
+            skill_options=PourOptions(rotation_duration=8.0 / 60.0),
+        ),
+        context,
+    )
+    segments = {segment.name: segment.waypoint_count for segment in slower.segments}
+    assert segments["pour"] >= 9
+    assert segments["return"] >= 8
+
 
 def test_pour_reads_held_state_from_the_bound_logical_resource() -> None:
     """Profile resource IDs need not match native motion control-part names."""
@@ -2906,6 +2925,8 @@ def test_pour_options_validate_rotation_and_dwell_duration() -> None:
         PourOptions(rotate_angle=float("nan"))
     with pytest.raises(ValueError, match="dwell_duration"):
         PourOptions(dwell_duration=-0.1)
+    with pytest.raises(ValueError, match="rotation_duration"):
+        PourOptions(rotation_duration=0.0)
     with pytest.raises(ValueError, match="max_mouth_height"):
         PourOptions(mouth_height=0.2, max_mouth_height=0.1)
     with pytest.raises(ValueError, match="max_rotation_step"):
@@ -2913,8 +2934,10 @@ def test_pour_options_validate_rotation_and_dwell_duration() -> None:
 
 
 @pytest.mark.parametrize("inverted_receiver", [False, True])
+@pytest.mark.parametrize("rotation_duration", [None, 2.0])
 def test_targeted_pour_keeps_mouth_over_receiver_and_body_above_rim(
     inverted_receiver: bool,
+    rotation_duration: float | None,
 ) -> None:
     """Two opposite approach directions share one compensated mouth path."""
     generator = _motion_generator()
@@ -2983,12 +3006,24 @@ def test_targeted_pour_keeps_mouth_over_receiver_and_body_above_rim(
             goal=PourGoal(PourTarget(SceneEntityPose("target"), mouth, 0.04, 0.01)),
             binding=_binding(action),
             motion_policy=MotionPolicy(sample_count=80),
-            skill_options=PourOptions(rotate_angle=math.pi / 3),
+            skill_options=PourOptions(
+                rotate_angle=math.pi / 3,
+                rotation_duration=rotation_duration,
+            ),
         ),
         context,
     )
     assert plan.plan_success.tolist() == [True, not inverted_receiver]
     assert plan.scene_dependencies == ("target",)
+    if rotation_duration is not None:
+        requested = math.ceil(rotation_duration / CONTROL_DT) + 1
+        assert (
+            sum(
+                call.kwargs["options"].sample_count >= requested
+                for call in generator.generate.call_args_list
+            )
+            >= 2
+        )
     poses = torch.stack(sampled_poses, dim=1) @ torch.linalg.inv(attachment[:, None])
     mouths = (poses @ mouth)[:, :, :3, 3]
     pouring = poses[:, :, 2, 2] < math.cos(math.radians(50))

@@ -23,10 +23,13 @@ python -m embodichain.lab.scripts.run_fluid_task_program \
 
 任务的执行节奏由
 [`trajectory_open_loop_fluid_pour.yaml`](../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml)
-配置。轨迹最少采样 80 点，任务级规划加速度预算为 2.0 rad/s²；规划器仍遵守
+配置。轨迹最少采样 80 点，任务级规划加速度预算为 1.5 rad/s²；规划器仍遵守
 机器人原有的关节速度上限。流体部署使用独立的加速夹爪组件，不改变普通 Newton
 部署的接触参数。程序的 `wait_stable` 负责放回后的稳定检查，在线运行器默认不再
 附加额外等待。
+
+倾倒和回正各至少运行 3 秒；`simulation.pour` 的 `rotation_duration` 仅调整这两段，
+不改变抓杯与移杯的控制频率。四路运行的平均接水量提高，但仍有可见飞溅。
 
 流体专用的 `franka_panda_fast_fluid` 组件将仿真夹指最大驱动力设为 160，接触
 动摩擦系数设为 3.0，以在更高加速度下保持抓取；这组任务参数不代表实机标定。

@@ -167,6 +167,9 @@ class PourOptions(SkillOptions):
     dwell_duration: float = 0.5
     """Minimum time to remain at the poured orientation, in seconds."""
 
+    rotation_duration: float | None = None
+    """Minimum time for each outward and return rotation, in seconds."""
+
     mouth_height: float = 0.08
     """Preferred mouth height above the receiver opening plane, in metres."""
 
@@ -187,6 +190,12 @@ class PourOptions(SkillOptions):
             raise ValueError("rotate_angle must be finite.")
         if not math.isfinite(self.dwell_duration) or self.dwell_duration < 0.0:
             raise ValueError("dwell_duration must be finite and non-negative.")
+        if self.rotation_duration is not None and (
+            isinstance(self.rotation_duration, bool)
+            or not math.isfinite(self.rotation_duration)
+            or self.rotation_duration <= 0.0
+        ):
+            raise ValueError("rotation_duration must be finite and positive.")
         for name in (
             "mouth_height",
             "max_mouth_height",
@@ -334,6 +343,10 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
         control_dt = context.require_control_dt()
         minimum_pour = max(2, request.motion_policy.sample_count // 2)
         minimum_return = max(2, request.motion_policy.sample_count - minimum_pour)
+        if options.rotation_duration is not None:
+            rotation_waypoints = math.ceil(options.rotation_duration / control_dt) + 1
+            minimum_pour = max(minimum_pour, rotation_waypoints)
+            minimum_return = max(minimum_return, rotation_waypoints)
         pour_arm, return_arm = split_joint_trajectory_at_pose(
             result.positions,
             poured_eef_pose,
@@ -421,6 +434,11 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
         axis = torch.linalg.cross(normal, direction)
         if fractions is None:
             count = max(2, math.ceil(options.rotate_angle / options.max_rotation_step))
+            if options.rotation_duration is not None:
+                count = max(
+                    count,
+                    math.ceil(options.rotation_duration / context.require_control_dt()),
+                )
             fractions = torch.linspace(0, 1, count + 1, device=self.device)
         else:
             count = fractions.numel() - 1

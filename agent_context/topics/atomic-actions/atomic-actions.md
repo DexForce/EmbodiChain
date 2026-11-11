@@ -144,7 +144,9 @@ fixed-centre target. Neither option establishes path or physical feasibility.
 opening and source-mouth geometry. The action derives the tilt direction,
 source-body clearance and mouth-compensated approach/tilt/return path from the
 held transform. Omission retains the original local-axis rotation mode.
-Geometry belongs to the goal/integration; motion timing, IK and collision
+Geometry belongs to the goal/integration. `PourOptions.rotation_duration`
+optionally sets a minimum simulated duration for each tilt and return leg on
+the control grid; strategy, control period, joint motion limits, IK and collision
 checks remain with the selected planning policy. Validate executed mouth
 alignment and height throughout tilted motion with host observations, rather
 than treating an accepted final pose as evidence of pouring.
