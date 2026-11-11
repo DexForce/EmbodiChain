@@ -31,10 +31,31 @@ contact-path policy. Expert settings use the native option groups
 are rejected for mappings and native config objects, and flat DexUni options
 are rejected by native validation.
 Standalone SPH is not a supported solver family; fluid settings belong under
-[DexUni's nested SPH configuration](fluids.md). Gradient mode requires an explicit
-`semi_implicit` solver. Read exact solver options/defaults in
-`cfg/physics.py` and the installed DexSim config types; do not substitute a
+[DexUni's nested SPH configuration](fluids.md). Robot presets select
+`newton_dexuni` before the MuJoCo aliases and portable fallbacks. Gradient mode
+requires an explicit `semi_implicit` solver or a direct/named provider supporting
+the requested gradient mode. Functional Scene calls additionally require its
+functional dynamics service. Python callers pass DexSim's
+`ProviderNewtonSolverCfg` with a provider class/zero-argument factory directly
+through `solver_cfg`; this path does not inspect installed metadata. DexSim
+creates fresh instances per model build. Installed `dexsim.newton_solvers`
+names pass through to DexSim's `RegisteredNewtonSolverCfg`; unregistered names
+remain errors. Read exact solver options/defaults in `cfg/physics.py` and the
+installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
+
+The spring-slider provider lives only in
+`scripts/tutorials/sim/simple_newton_solver/`; see its
+[tutorial](../../../docs/source/tutorial/simple_newton_solver.rst) for functional
+Scene stepping. It is not a packaged solver or registered entry point.
+
+Articulation initialization also calls `reset(clear_dynamics=False)` without a
+later coordinated clear. Preserve its position hold targets and mimic target
+propagation when the solver accepts them. Query the finalized public
+`Scene.dynamics_capabilities().supported_control_fields`; only an explicit
+exclusion of `joint_target_q` suppresses that command. Released SDKs predating
+extensions retain their unrestricted target behavior. Extension SDKs missing
+the query require an upgrade instead of guessing support from solver names.
 
 `collision_cfg` owns the external Newton contact pipeline. Its
 `update_interval=None` updates at the first local solver substep; positive `k`
