@@ -4,6 +4,7 @@ summary: Move a cube between two locations using a repeated Task Program.
 tags:
 - pick_place
 - single_arm
+- dual_arm
 - task_program
 default_deployment: franka
 deployments:
@@ -23,3 +24,7 @@ deployments:
     config: task.dual_ur10_robotiq_arg2f_140.yaml
   dual_franka_robotiq_arg2f_140:
     config: task.dual_franka_robotiq_arg2f_140.yaml
+  dual_ur10_robotiq_arg2f_140_gensim:
+    config: task.dual_ur10_robotiq_arg2f_140_gensim.yaml
+  dual_franka_robotiq_arg2f_140_gensim:
+    config: task.dual_franka_robotiq_arg2f_140_gensim.yaml
