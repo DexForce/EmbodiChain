@@ -118,6 +118,15 @@ def _feature_policy_objective_at(
     return segmented_discounted_return(rollout, gamma=0.95).mean().detach().item()
 
 
+def test_newton_model_preserves_zero_gravity_for_all_worlds() -> None:
+    env = _make_env()
+    gravity = torch.as_tensor(env._model.gravity.numpy())
+
+    assert env._model.world_count == env.num_envs
+    assert gravity.shape == (env.num_envs + 1, 3)
+    assert torch.equal(gravity, torch.zeros_like(gravity))
+
+
 def test_newton_env_satisfies_contract_and_fk_matches_analytical_pose() -> None:
     env = _make_env()
     observation, _ = env.reset(seed=3)

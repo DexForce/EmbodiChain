@@ -23,7 +23,7 @@ from tensordict import TensorDict
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 
 import threading
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -228,6 +228,25 @@ def test_controller_action_refreshes_executed_qpos_snapshot() -> None:
     torch.testing.assert_close(env._last_action_manager_qpos, torch.ones(2, 3))
 
 
+@pytest.mark.parametrize("expert_recording", [False, True])
+def test_action_snapshot_requires_a_recorder(expert_recording: bool) -> None:
+    """Training processes actions without reading an unused qpos snapshot."""
+    env = _controller_action_env()
+    env.dataset_manager = None
+    env.rollout_buffer = object() if expert_recording else None
+    env._rollout_buffer_mode = "expert"
+    env.action_manager._processed_qpos.return_value = torch.ones(2, 3)
+
+    env._preprocess_action(torch.ones(2, 3))
+
+    env.action_manager.process_action.assert_called_once()
+    assert env.action_manager._processed_qpos.call_count == int(expert_recording)
+    if expert_recording:
+        torch.testing.assert_close(env._last_action_manager_qpos, torch.ones(2, 3))
+    else:
+        assert env._last_action_manager_qpos is None
+
+
 def test_policy_history_snapshots_manager_owned_flat_action() -> None:
     """Dataset history captures manager state after validation and owns it."""
     env = _controller_action_env()
@@ -253,6 +272,30 @@ def test_controller_action_does_not_append_policy_history() -> None:
     env._preprocess_action(ControllerAction(torch.ones(2, 3)))
 
     assert env.get_raw_action_history(0).shape == (0, 0)
+
+
+def test_action_histories_allocate_on_first_recorded_sample() -> None:
+    """Disabled recording stays empty; first samples retain owned snapshots."""
+    env = _controller_action_env()
+    env._raw_action_history = None
+    env._expert_controller_qpos_history = None
+    env._record_raw_actions = False
+    action = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    env._record_raw_action(action)
+    env._record_expert_controller_qpos(None, torch.tensor([1]))
+    assert env._raw_action_history is None
+    assert env._expert_controller_qpos_history is None
+    assert env.get_raw_action_history(0).shape == (0, 0)
+    assert env.get_expert_controller_qpos_history(1).shape == (0, 3)
+
+    env._record_raw_actions = True
+    env._record_raw_action(action)
+    env._record_expert_controller_qpos(action, torch.tensor([1]))
+    expected = action.clone()
+    action.fill_(99)
+    torch.testing.assert_close(env.get_raw_action_history(0), expected[0:1])
+    torch.testing.assert_close(env.get_expert_controller_qpos_history(1), expected[1:2])
+    assert env.get_expert_controller_qpos_history(0).shape == (0, 3)
 
 
 def test_policy_recorder_rejects_controller_action_before_execution() -> None:
@@ -1749,19 +1792,42 @@ def test_legacy_metadata_reports_consistent_episode_success() -> None:
     assert metadata["segments"][0]["instruction"] == task_instruction
 
 
-@pytest.mark.parametrize("seed", (None, 0, 4101))
-def test_demo_metadata_exposes_the_effective_environment_seed(seed: int | None) -> None:
-    """Recorded metadata carries the effective environment seed for provenance."""
+@pytest.mark.parametrize("seed", (None, 0, 12))
+@pytest.mark.parametrize("recorder", ("rollout", "trajectory"))
+def test_demo_metadata_exposes_the_effective_environment_seed(
+    seed: int | None, recorder: str
+) -> None:
+    """Finalizing an episode retains its seed after the next reset reseeds."""
     env = _RolloutWriterStub()
-    env.cfg = SimpleNamespace(seed=seed)
-    env._demo_episode_metadata = [
-        EmbodiedEnv._new_demo_episode_metadata(env, row) for row in range(env.num_envs)
-    ]
-
+    env.cfg = SimpleNamespace(
+        seed=seed, events=None, observations=None, rewards=None, dataset=None
+    )
+    env.dataset_manager = None
+    if recorder == "trajectory":
+        env._traj_buffer = env.rollout_buffer
+        env.rollout_buffer = None
+        env._demo_steps = env.rollout_steps.clone()
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{} for _ in range(env.num_envs)]
+    env._new_demo_episode_metadata = MethodType(
+        EmbodiedEnv._new_demo_episode_metadata, env
+    )
+    EmbodiedEnv._initialize_episode(env)
+    env.cfg.seed = 35
     metadata = EmbodiedEnv.get_demo_episode_metadata(env, 1)
-
     assert metadata["seed"] == seed
     assert metadata["env_id"] == 1
+    EmbodiedEnv._initialize_episode(env, [1])
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 1)["seed"] == 35
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 0)["seed"] == seed
+
+    env.rollout_buffer = None
+    env._traj_buffer = None
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{} for _ in range(env.num_envs)]
+    env._new_demo_episode_metadata = Mock(side_effect=AssertionError("unused metadata"))
+    EmbodiedEnv._initialize_episode(env)
+    assert not env._demo_metadata_initialized
 
 
 def test_explicit_segment_instructions_are_preserved() -> None:

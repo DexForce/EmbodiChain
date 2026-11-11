@@ -152,3 +152,7 @@ evidence window.
 it returns the highest accepted contact or NaN for an unavailable row. It does
 not create a physical window or choose a Task Program verdict. Geometric world
 mesh envelopes are numerical Compute inputs, independent of this contact proof.
+Normal-force-only consumers can use `ContactSensor._reduce_normal_impulses()`
+to reduce packed contact impulses directly into a task-owned snapshot. It
+retains dropped-contact accounting and does not replace the row-buffer/history
+path used by consumers requiring per-contact information.
